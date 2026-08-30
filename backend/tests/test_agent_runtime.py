@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from backend.agents import (
     AgentConfig,
     AgentEventType,
+    LiteLLMAgentRuntime,
     MockAgentRuntime,
     ScopedToolDefinition,
     ToolParameter,
@@ -150,5 +151,63 @@ def test_agent_api_streams_graph_derived_tools_and_live_revocation(
             run_events = _receive_run_events(websocket, accepted.json()["run_id"])
             message = next(item for item in run_events if item["type"] == "agent_message")
             assert message["payload"]["available_tools"] == []
+    finally:
+        services.close()
+
+
+def test_litellm_connection_settings_are_runtime_only(data_root: Path) -> None:
+    settings = Settings.for_data_root(data_root)
+
+    async def completion(**kwargs: Any) -> Any:
+        del kwargs
+        return {"choices": [{"message": {"content": "ok", "tool_calls": []}}]}
+
+    runtime = LiteLLMAgentRuntime(
+        MutableCapabilityProvider(), completion=completion
+    )
+    services = create_services(settings, agent_runtime=runtime)
+    application = create_app(settings, services=services)
+    try:
+        with TestClient(application) as client:
+            response = client.put(
+                "/api/settings/llm",
+                json={
+                    "base_url": "http://127.0.0.1:1234/v1",
+                    "api_key": "session-secret",
+                },
+            )
+            assert response.status_code == 200
+            assert response.json() == {"configured": True}
+            assert runtime._completion_kwargs == {
+                "api_base": "http://127.0.0.1:1234/v1",
+                "api_key": "session-secret",
+            }
+            assert "session-secret" not in response.text
+    finally:
+        services.close()
+
+
+def test_litellm_settings_activate_runtime_from_mock(
+    data_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings.for_data_root(data_root)
+
+    async def completion(**kwargs: Any) -> Any:
+        del kwargs
+        return {"choices": [{"message": {"content": "ok", "tool_calls": []}}]}
+
+    monkeypatch.setattr("backend.agents.litellm._load_completion", lambda: completion)
+    services = create_services(
+        settings,
+        agent_runtime=MockAgentRuntime(MutableCapabilityProvider()),
+    )
+    application = create_app(settings, services=services)
+    try:
+        with TestClient(application) as client:
+            agent = client.post("/api/nodes", json={"type": "agent", "name": "Atlas"}).json()
+            response = client.put("/api/settings/llm", json={"api_key": "key"})
+            assert response.status_code == 200
+            assert isinstance(services.agent_runtime, LiteLLMAgentRuntime)
+            assert client.get(f"/api/agents/{agent['id']}").status_code == 200
     finally:
         services.close()

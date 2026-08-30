@@ -6,11 +6,12 @@ from typing import Any, Literal
 
 from .base import AgentCapabilityProvider, AgentRuntime
 from .google_adk import GoogleAdkAgentRuntime
+from .litellm import LiteLLMAgentRuntime
 from .mock import MockAgentRuntime
 from .models import AgentConfigurationError
 
 
-AgentRuntimeKind = Literal["google-adk", "mock"]
+AgentRuntimeKind = Literal["google-adk", "litellm", "mock"]
 
 
 def create_agent_runtime(
@@ -26,10 +27,11 @@ def create_agent_runtime(
 
     if kind == "google-adk":
         return GoogleAdkAgentRuntime(capability_provider, **kwargs)
+    if kind == "litellm":
+        return LiteLLMAgentRuntime(capability_provider, **kwargs)
     if kind == "mock":
         if kwargs:
             unknown = ", ".join(sorted(kwargs))
             raise AgentConfigurationError(f"mock runtime options are invalid: {unknown}")
         return MockAgentRuntime(capability_provider)
     raise AgentConfigurationError(f"unknown agent runtime: {kind!r}")
-

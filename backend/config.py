@@ -32,9 +32,9 @@ class Settings:
     def from_environment(cls) -> "Settings":
         root = _default_data_root().resolve()
         runtime = os.environ.get("OPEN_AGENT_WORLD_AGENT_RUNTIME")
-        if runtime not in {None, "google-adk", "mock"}:
+        if runtime not in {None, "google-adk", "litellm", "mock"}:
             raise ValueError(
-                "OPEN_AGENT_WORLD_AGENT_RUNTIME must be 'google-adk' or 'mock' when set"
+                "OPEN_AGENT_WORLD_AGENT_RUNTIME must be 'google-adk', 'litellm', or 'mock' when set"
             )
         sandbox_runtime = os.environ.get("OPEN_AGENT_WORLD_SANDBOX_RUNTIME")
         if sandbox_runtime is None and os.name == "nt":

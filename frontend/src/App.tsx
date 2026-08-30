@@ -6,6 +6,7 @@ import { ComponentPalette } from "./palette/ComponentPalette";
 import { ActivityPanel } from "./shell/ActivityPanel";
 import { EmptyWorld } from "./shell/EmptyWorld";
 import { RuntimeConnection } from "./shell/RuntimeConnection";
+import { SettingsPanel } from "./shell/SettingsPanel";
 import { ToastStack } from "./shell/ToastStack";
 import { TopBar } from "./shell/TopBar";
 import { useWorldStore } from "./state/worldStore";
@@ -33,6 +34,7 @@ export function App() {
         <ConnectionDialog />
         <ToastStack />
         <RuntimeConnection />
+        <SettingsPanel />
       </main>
     </ReactFlowProvider>
   );

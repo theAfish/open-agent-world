@@ -2,7 +2,7 @@
 
 Open Agent World is a Windows-first spatial environment for agents, managed resources, and isolated workplaces. Cards are persisted world objects. Edges are live permissions: changing the graph changes what an Agent or Sandbox can do.
 
-This repository is a proof of concept built with React, TypeScript, Vite, React Flow, Zustand, FastAPI, Pydantic, SQLite, WebSockets, Google ADK, and Windows-native AppContainer/Job Object isolation. It does not use Docker or WSL.
+This repository is a proof of concept built with React, TypeScript, Vite, React Flow, Zustand, FastAPI, Pydantic, SQLite, WebSockets, Google ADK, LiteLLM, and Windows-native AppContainer/Job Object isolation. It does not use Docker or WSL.
 
 ## Run locally
 
@@ -25,10 +25,30 @@ Then open <http://127.0.0.1:5173/>. The API listens on <http://127.0.0.1:8000/>.
 The mock Agent runtime is selected explicitly by `dev.ps1`; it is useful for testing the real capability broker without a model credential. To run actual Google ADK agents:
 
 ```powershell
-./scripts/setup.ps1 -WithAdk
+./scripts/setup.ps1
 $env:GOOGLE_API_KEY = "your-key"
 ./scripts/dev.ps1 -AgentRuntime google-adk
 ```
+
+To run agents through LiteLLM, install the optional dependency and select a
+provider-qualified model. LiteLLM reads provider credentials from the usual
+environment variables, so for OpenAI or an OpenAI-compatible endpoint:
+
+```powershell
+./scripts/setup.ps1
+$env:OPENAI_API_KEY = "your-key"
+# Optional for a self-hosted OpenAI-compatible server:
+# $env:OPENAI_API_BASE = "http://127.0.0.1:1234/v1"
+./scripts/dev.ps1 -AgentRuntime litellm
+```
+
+Set an Agent card's model to values such as `openai/gpt-4o-mini`,
+`anthropic/claude-3-5-sonnet`, or `openai/local-model`. The LiteLLM runtime
+supports tool calling and re-checks every call against the current world
+permissions. You can also open the gear button in the top bar to edit the
+Base URL, API key, and model list; the Agent card model selector uses that
+list. Base URL and model names persist in the browser, while the API key is
+kept only for the current browser session and backend process.
 
 Google Vertex AI credentials supported by ADK can be used instead by setting `GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, and `GOOGLE_CLOUD_LOCATION` before starting the application. These values remain in the Agent trust zone and are never inherited by Sandbox processes.
 
@@ -40,7 +60,7 @@ Application data defaults to `%LOCALAPPDATA%/OpenAgentWorld`. Override it before
 - Agent, Text, Image, and Sandbox card systems with persisted position, size, configuration, resources, and relationships.
 - Backend-authoritative edge validation and capability derivation with immediate permission revocation.
 - Managed UTF-8 text read/replace/patch operations and image import/inspection; resources never retain arbitrary host paths.
-- Scoped Google ADK tools rebuilt for every run, with authorization checked again at tool invocation.
+- Scoped Google ADK and LiteLLM tools rebuilt for every run, with authorization checked again at tool invocation.
 - Windows AppContainer process identity, NTFS ACL grants, a minimal environment, network-denied capability set, and Job Object containment behind `SandboxBackend`.
 - Typed runtime activity over WebSocket without exposing hidden model reasoning.
 - 2048-unit chunk indexing, viewport prefetch, distant-card unloading, and a developer stress generator.
@@ -77,7 +97,7 @@ backend/
   world/            authoritative cards, edges, and chunk index
   capabilities/     permission derivation and guarded operations
   resources/        managed text/image storage
-  agents/           AgentRuntime and Google ADK adapter
+  agents/           AgentRuntime, Google ADK, and LiteLLM adapters
   sandbox/          SandboxBackend and Windows native boundary
   events/           typed WebSocket activity
   persistence/      SQLite schema and transaction boundary

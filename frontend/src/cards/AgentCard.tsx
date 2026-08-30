@@ -11,6 +11,7 @@ export function AgentCardBody({ card }: { card: WorldCard }) {
   const updateCard = useWorldStore((state) => state.updateCard);
   const runAgent = useWorldStore((state) => state.runAgent);
   const stopAgent = useWorldStore((state) => state.stopAgent);
+  const modelSettings = useWorldStore((state) => state.modelSettings);
   const [instruction, setInstruction] = useState(String(card.config.system_instruction ?? ""));
   const [model, setModel] = useState(String(card.config.model ?? "gemini-3.7-flash"));
   const [prompt, setPrompt] = useState(String(card.config.prompt ?? ""));
@@ -31,6 +32,7 @@ export function AgentCardBody({ card }: { card: WorldCard }) {
   const output = Array.isArray(card.config.output)
     ? card.config.output.map(String)
     : [];
+  const modelOptions = [...new Set([model, ...modelSettings.models].filter(Boolean))];
 
   if (!card.expanded) {
     return (
@@ -40,7 +42,7 @@ export function AgentCardBody({ card }: { card: WorldCard }) {
           <i /><i /><i />
         </div>
         <div className="compact-metrics">
-          <div><span>Model</span><strong>{model.replace("gemini-", "")}</strong></div>
+          <div><span>Model</span><strong>{model}</strong></div>
           <div><span>Capabilities</span><strong>{capabilities.length}</strong></div>
           <div><span>Activity</span><strong>{card.status === "running" ? "Live" : "Quiet"}</strong></div>
         </div>
@@ -61,9 +63,7 @@ export function AgentCardBody({ card }: { card: WorldCard }) {
               void updateCard(card.id, { config: { model: value } });
             }}
           >
-            <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
-            <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
-            <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite</option>
+            {modelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
           </select>
         </label>
         <div className="live-readout">

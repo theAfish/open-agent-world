@@ -1,4 +1,4 @@
-"""Small runtime-internal state helpers shared by ADK and explicit mock."""
+"""Small runtime-internal state helpers shared by all agent runtimes."""
 
 from __future__ import annotations
 
@@ -49,4 +49,3 @@ def validate_agent_config(config: AgentConfig) -> None:
         raise AgentConfigurationError("agent model must be non-empty and bounded")
     if not config.system_instruction.strip():
         raise AgentConfigurationError("system instruction must not be empty")
-

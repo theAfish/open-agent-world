@@ -28,7 +28,7 @@ class AgentCapabilityProvider(Protocol):
 
 
 class AgentRuntime(ABC):
-    """Internal runtime boundary; no ADK objects cross this interface."""
+    """Internal runtime boundary; provider SDK objects never cross it."""
 
     @abstractmethod
     async def create_agent(self, config: AgentConfig) -> AgentInfo:
@@ -53,4 +53,3 @@ class AgentRuntime(ABC):
     @abstractmethod
     async def get_agent(self, agent_id: str) -> AgentInfo:
         pass
-

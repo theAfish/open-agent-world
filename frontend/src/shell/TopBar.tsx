@@ -1,4 +1,4 @@
-import { Activity, Moon, RefreshCw, Sun, Wifi, WifiOff } from "lucide-react";
+import { Activity, Moon, RefreshCw, Settings2, Sun, Wifi, WifiOff } from "lucide-react";
 import { useWorldStore } from "../state/worldStore";
 
 export function TopBar() {
@@ -9,6 +9,7 @@ export function TopBar() {
   const theme = useWorldStore((state) => state.theme);
   const toggleTheme = useWorldStore((state) => state.toggleTheme);
   const toggleActivity = useWorldStore((state) => state.toggleActivity);
+  const toggleSettings = useWorldStore((state) => state.toggleSettings);
   const refreshWorld = useWorldStore((state) => state.refreshWorld);
   const live = socketState === "live";
 
@@ -26,6 +27,15 @@ export function TopBar() {
       </div>
 
       <div className="top-actions">
+        <button
+          type="button"
+          className="top-icon-button"
+          onClick={toggleSettings}
+          aria-label="Open model settings"
+          title="Model settings"
+        >
+          <Settings2 size={17} />
+        </button>
         <button
           type="button"
           className={`connection-status connection-status--${syncState}`}

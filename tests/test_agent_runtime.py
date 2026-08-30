@@ -12,13 +12,14 @@ from backend.agents import (
     AgentEventType,
     AgentStatus,
     GoogleAdkAgentRuntime,
+    LiteLLMAgentRuntime,
     MockAgentRuntime,
     ScopedToolDefinition,
     ToolParameter,
     create_agent_runtime,
 )
 from backend.agents.google_adk import _AdkBindings
-from backend.agents.tools import build_scoped_tool_callables
+from backend.agents.tools import build_scoped_tool_callables, build_scoped_tool_schemas
 
 
 class CapabilityProvider:
@@ -67,6 +68,14 @@ class ScopedToolTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(AgentConfigurationError):
             build_scoped_tool_callables(provider, "agent-a", duplicate)
 
+    async def test_litellm_schema_preserves_scoped_tool_shape(self) -> None:
+        provider = CapabilityProvider()
+        schema = build_scoped_tool_schemas(provider.definitions)[0]
+        self.assertEqual(schema["type"], "function")
+        self.assertEqual(schema["function"]["name"], "read_notes")
+        self.assertEqual(schema["function"]["parameters"]["properties"]["line"]["type"], "integer")
+        self.assertEqual(schema["function"]["parameters"]["required"], [])
+
 
 class MockAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -103,6 +112,62 @@ class MockAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(AgentDependencyError):
                 create_agent_runtime("google-adk", self.provider)
+
+
+class LiteLLMRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_openai_style_tool_loop_rechecks_scoped_capability(self) -> None:
+        provider = CapabilityProvider()
+        responses = iter(
+            [
+                SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(
+                                content=None,
+                                tool_calls=[
+                                    SimpleNamespace(
+                                        id="call-1",
+                                        function=SimpleNamespace(
+                                            name="read_notes", arguments='{"line": 2}'
+                                        ),
+                                    )
+                                ],
+                            )
+                        )
+                    ]
+                ),
+                SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(content="Answer", tool_calls=[])
+                        )
+                    ]
+                ),
+            ]
+        )
+
+        async def completion(**kwargs):
+            self.assertEqual(kwargs["model"], "openai/gpt-4o-mini")
+            return next(responses)
+
+        runtime = LiteLLMAgentRuntime(provider, completion=completion)
+        await runtime.create_agent(
+            AgentConfig("agent-a", "Agent", model="openai/gpt-4o-mini")
+        )
+        events = [event async for event in runtime.run("agent-a", "read the notes")]
+
+        self.assertEqual(
+            [event.type for event in events if event.type == AgentEventType.MESSAGE],
+            [AgentEventType.MESSAGE],
+        )
+        self.assertEqual(events[-2].type, AgentEventType.COMPLETED)
+        self.assertEqual(provider.invocations[0][2], {"line": 2})
+
+    async def test_factory_selects_litellm(self) -> None:
+        runtime = create_agent_runtime(
+            "litellm", CapabilityProvider(), completion=lambda **_: None
+        )
+        self.assertIsInstance(runtime, LiteLLMAgentRuntime)
 
 
 class FakeSessionService:
@@ -225,4 +290,3 @@ class GoogleAdkBoundaryTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

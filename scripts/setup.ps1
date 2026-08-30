@@ -1,17 +1,16 @@
 [CmdletBinding()]
-param(
-    [switch]$WithAdk
-)
+param()
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 
 Push-Location $projectRoot
 try {
-    $uvArguments = @("sync", "--project", "backend", "--dev")
-    if ($WithAdk) {
-        $uvArguments += @("--extra", "adk")
-    }
+    $uvArguments = @(
+        "sync", "--project", "backend", "--dev",
+        "--extra", "adk",
+        "--extra", "litellm"
+    )
     & uv @uvArguments
     if ($LASTEXITCODE -ne 0) { throw "Python environment setup failed." }
 

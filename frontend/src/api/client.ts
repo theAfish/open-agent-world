@@ -290,6 +290,13 @@ export const worldApi = {
     });
   },
 
+  configureLlm(settings: { base_url: string; api_key: string }): Promise<Record<string, unknown>> {
+    return request<Record<string, unknown>>("/settings/llm", {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    });
+  },
+
   startSandbox(nodeId: string): Promise<Record<string, unknown>> {
     return request<Record<string, unknown>>(`/sandboxes/${encodeURIComponent(nodeId)}/start`, {
       method: "POST",

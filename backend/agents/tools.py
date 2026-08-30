@@ -1,4 +1,4 @@
-"""Construction of ADK-compatible callables from scoped capabilities."""
+"""Construction of runtime tool definitions from scoped capabilities."""
 
 from __future__ import annotations
 
@@ -42,6 +42,71 @@ def build_scoped_tool_callables(
         capability_ids.add(definition.capability_id)
         callables.append(_build_callable(provider, agent_id, definition))
     return callables
+
+
+def build_scoped_tool_schemas(
+    definitions: Sequence[ScopedToolDefinition],
+) -> list[dict[str, Any]]:
+    """Build OpenAI/LiteLLM function-tool schemas from scoped capabilities.
+
+    The same validation rules are used for ADK callables and Chat Completions
+    tools, so switching runtimes cannot bypass the capability boundary.
+    """
+
+    names: set[str] = set()
+    capability_ids: set[str] = set()
+    schemas: list[dict[str, Any]] = []
+    for definition in definitions:
+        _validate_definition(definition)
+        if definition.name in names:
+            raise AgentConfigurationError(f"duplicate tool name: {definition.name}")
+        if definition.capability_id in capability_ids:
+            raise AgentConfigurationError(
+                f"duplicate capability id: {definition.capability_id}"
+            )
+        names.add(definition.name)
+        capability_ids.add(definition.capability_id)
+        properties = {
+            parameter.name: {
+                "type": _json_schema_type(parameter.python_type),
+                "description": parameter.description.strip() or "Tool argument.",
+            }
+            for parameter in definition.parameters
+        }
+        schemas.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": definition.name,
+                    "description": definition.description.strip(),
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": [
+                            parameter.name
+                            for parameter in definition.parameters
+                            if parameter.required
+                        ],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        )
+    return schemas
+
+
+def _json_schema_type(python_type: type[Any]) -> str:
+    if python_type is bool:
+        return "boolean"
+    if python_type is int:
+        return "integer"
+    if python_type is float:
+        return "number"
+    if python_type is list:
+        return "array"
+    if python_type is dict:
+        return "object"
+    return "string"
 
 
 def _build_callable(
@@ -118,4 +183,3 @@ def _docstring(definition: ScopedToolDefinition) -> str:
         description = parameter.description.strip() or "Tool argument."
         lines.append(f"    {parameter.name}: {description}")
     return "\n".join(lines)
-

@@ -20,6 +20,15 @@ class AgentRunRequest(BaseModel):
     prompt: Annotated[str, Field(min_length=1, max_length=100_000)]
 
 
+class LlmSettingsRequest(BaseModel):
+    """Runtime-only connection overrides; never returned by the API."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_url: Annotated[str, Field(max_length=2_048)] = ""
+    api_key: Annotated[str, Field(max_length=4_096)] = ""
+
+
 class SandboxExecuteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -74,6 +83,17 @@ async def stop_agent(
     services: ApplicationServices = Depends(get_services),
 ) -> dict[str, object]:
     return await services.stop_agent(agent_id)
+
+
+@router.put("/settings/llm")
+async def configure_llm(
+    request: LlmSettingsRequest,
+    services: ApplicationServices = Depends(get_services),
+) -> dict[str, bool]:
+    return await services.configure_llm_connection(
+        base_url=request.base_url.strip() or None,
+        api_key=request.api_key or None,
+    )
 
 
 @router.get("/sandboxes/{sandbox_id}")

@@ -14,6 +14,12 @@ import type {
 import { getViewportChunkKeys, viewportCenterToWorld } from "./chunks";
 import { buildCardDraft, expandedPatch, makeStressCards, mergeCardPatch } from "./helpers";
 import { validateConnection, type RelationshipOption } from "./relationships";
+import {
+  normalizeModelList,
+  persistModelSettings,
+  readModelSettings,
+  type ModelSettings,
+} from "./modelSettings";
 
 export type SyncState = "loading" | "online" | "syncing" | "offline";
 export type SocketState = "connecting" | "live" | "closed";
@@ -75,6 +81,8 @@ interface WorldState {
   pendingConnection?: PendingConnection;
   events: RuntimeEvent[];
   activityOpen: boolean;
+  settingsOpen: boolean;
+  modelSettings: ModelSettings;
   paletteCollapsed: boolean;
   theme: "light" | "dark";
   toasts: ToastMessage[];
@@ -108,6 +116,8 @@ interface WorldState {
   setSocketState: (state: SocketState) => void;
   toggleActivity: () => void;
   setActivityOpen: (open: boolean) => void;
+  toggleSettings: () => void;
+  saveModelSettings: (settings: ModelSettings) => Promise<boolean>;
   togglePalette: () => void;
   toggleTheme: () => void;
   generateStressWorld: (count?: number) => void;
@@ -130,6 +140,8 @@ export const useWorldStore = create<WorldState>((set, get) => ({
   socketState: "connecting",
   events: [],
   activityOpen: false,
+  settingsOpen: false,
+  modelSettings: readModelSettings(),
   paletteCollapsed: false,
   theme: preferredTheme(),
   toasts: [],
@@ -229,9 +241,16 @@ export const useWorldStore = create<WorldState>((set, get) => ({
       return undefined;
     }
     const finalPosition = position ?? viewportCenterToWorld(get().viewport);
+    const draft = buildCardDraft(type, finalPosition);
+    const configuredDraft = type === "agent" && get().modelSettings.models[0]
+      ? {
+          ...draft,
+          config: { ...draft.config, model: get().modelSettings.models[0] },
+        }
+      : draft;
     set({ syncState: "syncing" });
     try {
-      const card = await worldApi.createNode(buildCardDraft(type, finalPosition));
+      const card = await worldApi.createNode(configuredDraft);
       set((state) => ({
         cards: mergeCards(state.cards, [card]),
         syncState: "online",
@@ -660,6 +679,44 @@ export const useWorldStore = create<WorldState>((set, get) => ({
   setSocketState: (socketState) => set({ socketState }),
   toggleActivity: () => set((state) => ({ activityOpen: !state.activityOpen })),
   setActivityOpen: (activityOpen) => set({ activityOpen }),
+  toggleSettings: () => set((state) => ({ settingsOpen: !state.settingsOpen })),
+
+  saveModelSettings: async (settings) => {
+    const normalized: ModelSettings = {
+      baseUrl: settings.baseUrl.trim(),
+      apiKey: settings.apiKey,
+      models: normalizeModelList(settings.models),
+    };
+    if (normalized.models.length === 0) {
+      get().pushToast({
+        tone: "error",
+        title: "Add at least one model",
+        detail: "Agent cards need a model to call.",
+      });
+      return false;
+    }
+    set({ modelSettings: normalized });
+    persistModelSettings(normalized);
+    try {
+      await worldApi.configureLlm({
+        base_url: normalized.baseUrl,
+        api_key: normalized.apiKey,
+      });
+      get().pushToast({
+        tone: "success",
+        title: "Model settings saved",
+        detail: "New Agent runs will use this LiteLLM connection.",
+      });
+      return true;
+    } catch (error) {
+      get().pushToast({
+        tone: "error",
+        title: "Connection was not applied",
+        detail: apiErrorMessage(error),
+      });
+      return false;
+    }
+  },
   togglePalette: () => set((state) => ({ paletteCollapsed: !state.paletteCollapsed })),
 
   toggleTheme: () => {

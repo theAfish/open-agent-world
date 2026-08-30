@@ -7,7 +7,7 @@ from pathlib import PureWindowsPath
 from typing import Any
 
 from backend.agents import AgentConfig as RuntimeAgentConfig
-from backend.agents import AgentEvent, AgentRuntime, create_agent_runtime
+from backend.agents import AgentEvent, AgentRuntime, LiteLLMAgentRuntime, create_agent_runtime
 from backend.capabilities.broker import CapabilityBroker
 from backend.config import Settings
 from backend.errors import NotFoundError, RuntimeUnavailableError
@@ -68,6 +68,7 @@ class ApplicationServices:
     agent_runtime: AgentRuntime | None = None
     sandbox_backend: SandboxBackend | None = None
     _agent_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
+    _runtime_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def startup(self) -> None:
         for card in self.world.list_cards():
@@ -399,6 +400,51 @@ class ApplicationServices:
             raise RuntimeUnavailableError("agent runtime is not configured")
         return await self.agent_runtime.get_agent(agent_id)
 
+    async def configure_llm_connection(
+        self, *, base_url: str | None, api_key: str | None
+    ) -> dict[str, bool]:
+        async with self._runtime_lock:
+            if isinstance(self.agent_runtime, LiteLLMAgentRuntime):
+                self.agent_runtime.configure_connection(
+                    api_base=base_url, api_key=api_key
+                )
+                return {"configured": True}
+
+            if any(not task.done() for task in self._agent_tasks.values()):
+                raise RuntimeUnavailableError(
+                    "cannot switch to the litellm runtime while an agent is running"
+                )
+
+            # The settings panel is also allowed to activate LiteLLM when the
+            # app was started with the default mock runtime. Build and fully
+            # initialize the replacement before changing the live reference.
+            from backend.capabilities.provider import WorldAgentCapabilityProvider
+
+            replacement = LiteLLMAgentRuntime(
+                WorldAgentCapabilityProvider(self)
+            )
+            replacement.configure_connection(api_base=base_url, api_key=api_key)
+            created: list[str] = []
+            try:
+                for card in self.world.list_cards():
+                    if card.type is CardType.AGENT:
+                        await replacement.create_agent(self._runtime_agent_config(card))
+                        created.append(card.id)
+            except BaseException:
+                for agent_id in created:
+                    with suppress(Exception):
+                        await replacement.delete_agent(agent_id)
+                raise
+
+            old_runtime = self.agent_runtime
+            if old_runtime is not None:
+                for card in self.world.list_cards():
+                    if card.type is CardType.AGENT:
+                        with suppress(Exception):
+                            await old_runtime.stop(card.id)
+            self.agent_runtime = replacement
+            return {"configured": True}
+
     async def start_sandbox(self, sandbox_id: str) -> Any:
         self._require_card_type(sandbox_id, CardType.SANDBOX)
         backend = self._require_sandbox_backend()
@@ -655,11 +701,7 @@ def create_services(
         from backend.capabilities.provider import WorldAgentCapabilityProvider
 
         provider = WorldAgentCapabilityProvider(services)
-        options = (
-            {"app_name": "open-agent-world"}
-            if settings.agent_runtime == "google-adk"
-            else {}
-        )
+        options = {"app_name": "open-agent-world"} if settings.agent_runtime == "google-adk" else {}
         services.agent_runtime = create_agent_runtime(
             settings.agent_runtime, provider, **options
         )

@@ -1,4 +1,4 @@
-"""ADK-neutral agent runtime and capability models."""
+"""Provider-neutral agent runtime and capability models."""
 
 from __future__ import annotations
 
@@ -91,4 +91,3 @@ class AgentConfigurationError(AgentRuntimeError, ValueError):
 
 class AgentDependencyError(AgentRuntimeError):
     pass
-

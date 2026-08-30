@@ -656,6 +656,24 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .permission-options label small { color: var(--ink-faint); font-size: 8px; line-height: 1.4; }
 .connection-dialog > footer { display: flex; justify-content: flex-end; gap: 7px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 
+/* Model settings */
+.settings-dialog { width: min(560px, 100%); max-height: min(720px, calc(100vh - 40px)); overflow: auto; padding: 15px; border: 1px solid var(--line-strong); border-radius: 20px; background: var(--surface-solid); box-shadow: 18px 24px 60px var(--shadow-deep), inset 1px 1px 0 var(--highlight); animation: dialogIn 180ms ease-out; }
+.settings-dialog > header { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; }
+.settings-dialog header > div:nth-child(2) { display: grid; gap: 2px; }
+.settings-dialog header span { color: var(--ink-faint); font-size: 8px; text-transform: uppercase; letter-spacing: 0.1em; }
+.settings-dialog h2 { margin: 0; font-size: 15px; font-weight: 660; }
+.settings-form { display: grid; gap: 13px; margin-top: 18px; }
+.settings-form .field-label > span { display: flex; align-items: center; gap: 5px; }
+.settings-form input,
+.settings-form textarea { width: 100%; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--surface-soft) 78%, transparent); box-shadow: inset 2px 2px 5px color-mix(in srgb, var(--shadow) 50%, transparent), inset -1px -1px 2px var(--highlight); }
+.settings-form input { height: 34px; padding: 0 9px; font-size: 10px; }
+.settings-form textarea { min-height: 120px; padding: 8px 9px; font: 10px/1.55 "Cascadia Code", Consolas, monospace; resize: vertical; }
+.settings-form input:focus,
+.settings-form textarea:focus { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); outline: none; }
+.settings-form small { color: var(--ink-faint); font-size: 8px; line-height: 1.4; }
+.settings-form code { color: var(--accent-strong); font: 8px "Cascadia Code", Consolas, monospace; }
+.settings-dialog > footer { display: flex; justify-content: flex-end; gap: 7px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+
 /* Toasts */
 .toast-stack { position: fixed; z-index: 100; right: 20px; top: 91px; width: min(350px, calc(100vw - 40px)); display: grid; gap: 7px; pointer-events: none; }
 .toast { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: 9px; padding: 10px; border: 1px solid var(--line); border-radius: 13px; background: color-mix(in srgb, var(--surface) 96%, transparent); box-shadow: var(--panel-shadow); backdrop-filter: blur(16px); pointer-events: auto; animation: toastIn 180ms ease-out; }

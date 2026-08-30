@@ -11,6 +11,7 @@ dependencies = [
 
 [project.optional-dependencies]
 adk = ["google-adk>=2.8,<3"]
+litellm = ["litellm>=1.74,<2"]
 
 [dependency-groups]
 dev = [
