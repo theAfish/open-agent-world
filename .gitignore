@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+
+# Local application state and secrets
+.env
+.env.*
+!.env.example
+.open-agent-world/
+data/
+logs/
+
+# Editors and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
