@@ -24,6 +24,11 @@ class Relationship(StrEnum):
     MOUNT_READ_WRITE = "mount_read_write"
 
 
+class EdgeDirection(StrEnum):
+    FORWARD = "forward"
+    BIDIRECTIONAL = "bidirectional"
+
+
 class AgentStatus(StrEnum):
     IDLE = "idle"
     RUNNING = "running"
@@ -168,12 +173,20 @@ class EdgeCreate(BaseModel):
     source: str = Field(min_length=1)
     target: str = Field(min_length=1)
     relationship: Relationship
+    direction: EdgeDirection = EdgeDirection.FORWARD
 
 
 class EdgePatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    relationship: Relationship
+    relationship: Relationship | None = None
+    direction: EdgeDirection | None = None
+
+    @model_validator(mode="after")
+    def require_change(self) -> "EdgePatch":
+        if self.relationship is None and self.direction is None:
+            raise ValueError("at least one edge field must be provided")
+        return self
 
 
 class Edge(BaseModel):
@@ -183,6 +196,7 @@ class Edge(BaseModel):
     source: str
     target: str
     relationship: Relationship
+    direction: EdgeDirection
     created_at: datetime
     updated_at: datetime
     revision: int

@@ -25,7 +25,7 @@ describe("semantic relationship rules", () => {
     expect(validateConnection("s", "a", "sandbox", "agent").valid).toBe(false);
     expect(
       validateConnection("a", "t", "agent", "text", [
-        { id: "e", source: "a", target: "t", relationship: "read" },
+        { id: "e", source: "a", target: "t", relationship: "read", direction: "forward" },
       ]).valid,
     ).toBe(false);
     expect(validateConnection("a", "t", "agent", "text").valid).toBe(true);

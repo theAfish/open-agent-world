@@ -22,10 +22,15 @@ export function AgentCardBody({ card }: { card: WorldCard }) {
 
   const capabilities = useMemo(
     () => edges
-      .filter((edge) => edge.source === card.id)
+      .filter((edge) =>
+        edge.source === card.id
+        || (edge.target === card.id && edge.direction === "bidirectional"),
+      )
       .map((edge) => ({
         edge,
-        target: cards.find((item) => item.id === edge.target),
+        target: cards.find((item) => item.id === (
+          edge.source === card.id ? edge.target : edge.source
+        )),
       })),
     [card.id, cards, edges],
   );

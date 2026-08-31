@@ -38,6 +38,7 @@ from backend.world.models import (
     CardType,
     Edge,
     EdgeCreate,
+    EdgeDirection,
     EdgePatch,
     Relationship,
     WorldSnapshot,
@@ -248,6 +249,9 @@ class ApplicationServices:
         source = self.world.get_card(request.source)
         target = self.world.get_card(request.target)
         self.world._assert_valid_relationship(source.type, target.type, request.relationship)
+        self.world._assert_valid_direction(
+            source.type, target.type, request.relationship, request.direction
+        )
         mounted = False
         if self._is_mount(source.type, target.type, request.relationship):
             mounted = await self._attach_mount_values(
@@ -265,11 +269,15 @@ class ApplicationServices:
 
     async def update_edge(self, edge_id: str, request: EdgePatch) -> Edge:
         old = self.world.get_edge(edge_id)
+        previously_affected = self._affected_agents(old)
         source = self.world.get_card(old.source)
         target = self.world.get_card(old.target)
-        self.world._assert_valid_relationship(source.type, target.type, request.relationship)
-        if self._is_mount(source.type, target.type, request.relationship):
-            await self._attach_mount_values(old.source, old.target, request.relationship)
+        relationship = request.relationship or old.relationship
+        direction = request.direction or old.direction
+        self.world._assert_valid_relationship(source.type, target.type, relationship)
+        self.world._assert_valid_direction(source.type, target.type, relationship, direction)
+        if self._is_mount(source.type, target.type, relationship):
+            await self._attach_mount_values(old.source, old.target, relationship)
         try:
             edge = self.world.update_edge(edge_id, request)
         except BaseException:
@@ -277,7 +285,13 @@ class ApplicationServices:
                 with suppress(Exception):
                     await self._attach_mount_values(old.source, old.target, old.relationship)
             raise
-        await self._publish_edge_change(EventType.EDGE_UPDATED, edge)
+        await self._publish_edge_change(
+            EventType.EDGE_UPDATED,
+            edge,
+            affected_agents=sorted(
+                set(previously_affected) | set(self._affected_agents(edge))
+            ),
+        )
         return edge
 
     async def delete_edge(self, edge_id: str) -> Edge:
@@ -566,6 +580,13 @@ class ApplicationServices:
     def _affected_agents(self, edge: Edge) -> list[str]:
         source = self.world.maybe_get_card(edge.source)
         if source is not None and source.type is CardType.AGENT:
+            target = self.world.maybe_get_card(edge.target)
+            if (
+                edge.direction is EdgeDirection.BIDIRECTIONAL
+                and target is not None
+                and target.type is CardType.AGENT
+            ):
+                return sorted([source.id, target.id])
             return [source.id]
         target = self.world.maybe_get_card(edge.target)
         if target is not None and target.type is CardType.SANDBOX:

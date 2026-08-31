@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { apiErrorMessage, normalizeCard, resourceContentUrl, worldApi, type CardCreateInput } from "../api/client";
 import type {
   CardType,
+  EdgeDirection,
   FlowViewportState,
   Relationship,
   RuntimeEvent,
@@ -188,10 +189,12 @@ interface WorldState {
   deleteCards: (ids: string[]) => Promise<void>;
   requestConnection: (source?: string | null, target?: string | null) => void;
   closeConnectionDialog: () => void;
-  createConnection: (relationship: Relationship) => Promise<void>;
+  createConnection: (relationship: Relationship, direction?: EdgeDirection) => Promise<void>;
   selectEdge: (id?: string) => void;
   selectCards: (ids: string[]) => void;
-  updateSelectedEdge: (relationship: Relationship) => Promise<void>;
+  updateSelectedEdge: (
+    patch: Relationship | { relationship?: Relationship; direction?: EdgeDirection },
+  ) => Promise<void>;
   deleteSelectedEdge: () => Promise<void>;
   loadText: (id: string) => Promise<void>;
   saveText: (id: string, content: string) => Promise<boolean>;
@@ -508,7 +511,7 @@ export const useWorldStore = create<WorldState>((set, get) => ({
 
   closeConnectionDialog: () => set({ pendingConnection: undefined }),
 
-  createConnection: async (relationship) => {
+  createConnection: async (relationship, direction = "forward") => {
     const pending = get().pendingConnection;
     if (!pending) return;
     set({ syncState: "syncing" });
@@ -517,6 +520,7 @@ export const useWorldStore = create<WorldState>((set, get) => ({
         source: pending.source,
         target: pending.target,
         relationship,
+        direction,
       });
       set((state) => ({
         edges: mergeEdges(state.edges, [edge]),
@@ -549,13 +553,16 @@ export const useWorldStore = create<WorldState>((set, get) => ({
   selectEdge: (id) => set({ selectedEdgeId: id }),
   selectCards: (ids) => set({ selectedCardIds: [...new Set(ids)] }),
 
-  updateSelectedEdge: async (relationship) => {
+  updateSelectedEdge: async (patch) => {
     const id = get().selectedEdgeId;
     if (!id) return;
     const previous = get().edges.find((edge) => edge.id === id);
     if (!previous) return;
     try {
-      const edge = await worldApi.updateEdge(id, relationship);
+      const edge = await worldApi.updateEdge(
+        id,
+        typeof patch === "string" ? { relationship: patch } : patch,
+      );
       set((state) => ({
         edges: state.edges.map((item) => (item.id === id ? edge : item)),
         undoStack: appendHistory(state.undoStack, {
@@ -990,7 +997,10 @@ export const useWorldStore = create<WorldState>((set, get) => ({
           break;
         }
         case "edge-updated": {
-          const edge = await worldApi.updateEdge(operation.before.id, operation.before.relationship);
+          const edge = await worldApi.updateEdge(operation.before.id, {
+            relationship: operation.before.relationship,
+            direction: operation.before.direction,
+          });
           set((state) => ({
             edges: state.edges.map((item) => item.id === edge.id ? edge : item),
           }));
@@ -1060,7 +1070,10 @@ export const useWorldStore = create<WorldState>((set, get) => ({
           }));
           break;
         case "edge-updated": {
-          const edge = await worldApi.updateEdge(operation.after.id, operation.after.relationship);
+          const edge = await worldApi.updateEdge(operation.after.id, {
+            relationship: operation.after.relationship,
+            direction: operation.after.direction,
+          });
           set((state) => ({
             edges: state.edges.map((item) => item.id === edge.id ? edge : item),
           }));

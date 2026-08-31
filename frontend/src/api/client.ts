@@ -2,6 +2,7 @@ import type {
   CardConfig,
   CardStatus,
   CardType,
+  EdgeDirection,
   Relationship,
   RuntimeEvent,
   WorldCard,
@@ -139,6 +140,7 @@ export function normalizeEdge(input: unknown): WorldEdge {
     source: String(source.source ?? source.source_id),
     target: String(source.target ?? source.target_id),
     relationship: normalizeRelationship(source.relationship ?? source.permission),
+    direction: source.direction === "bidirectional" ? "bidirectional" : "forward",
     created_at: typeof source.created_at === "string" ? source.created_at : undefined,
     updated_at: typeof source.updated_at === "string" ? source.updated_at : undefined,
   };
@@ -264,6 +266,7 @@ export const worldApi = {
     source: string;
     target: string;
     relationship: Relationship;
+    direction?: EdgeDirection;
   }): Promise<WorldEdge> {
     const body = await request<unknown>("/edges", {
       method: "POST",
@@ -272,10 +275,13 @@ export const worldApi = {
     return normalizeEdge(unwrap(body, "edge"));
   },
 
-  async updateEdge(id: string, relationship: Relationship): Promise<WorldEdge> {
+  async updateEdge(
+    id: string,
+    patch: { relationship?: Relationship; direction?: EdgeDirection },
+  ): Promise<WorldEdge> {
     const body = await request<unknown>(`/edges/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ relationship }),
+      body: JSON.stringify(patch),
     });
     return normalizeEdge(unwrap(body, "edge"));
   },

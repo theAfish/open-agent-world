@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS edges (
     source_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
     target_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
     relationship TEXT NOT NULL,
+    direction TEXT NOT NULL DEFAULT 'forward' CHECK (direction IN ('forward', 'bidirectional')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     revision INTEGER NOT NULL DEFAULT 1,
@@ -100,6 +101,13 @@ class Database:
             self._connection.execute("PRAGMA synchronous = NORMAL")
         with self._lock:
             self._connection.executescript(SCHEMA)
+            edge_columns = {
+                row["name"] for row in self._connection.execute("PRAGMA table_info(edges)")
+            }
+            if "direction" not in edge_columns:
+                self._connection.execute(
+                    "ALTER TABLE edges ADD COLUMN direction TEXT NOT NULL DEFAULT 'forward'"
+                )
 
     @contextmanager
     def transaction(self, *, immediate: bool = False) -> Iterator[sqlite3.Connection]:

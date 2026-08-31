@@ -13,6 +13,8 @@ export type Relationship =
   | "mount_read_only"
   | "mount_read_write";
 
+export type EdgeDirection = "forward" | "bidirectional";
+
 export interface WorldPosition {
   x: number;
   y: number;
@@ -67,6 +69,7 @@ export interface WorldEdge {
   source: string;
   target: string;
   relationship: Relationship;
+  direction: EdgeDirection;
   created_at?: string;
   updated_at?: string;
 }

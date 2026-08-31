@@ -8,7 +8,7 @@ from backend.capabilities.models import Capability, CapabilityKind, CapabilitySe
 from backend.errors import PermissionDeniedError, ResourceValidationError
 from backend.resources.manager import ManagedResourceStore
 from backend.resources.models import ResourceRecord, TextDocument, TextEdit
-from backend.world.models import Card, CardType, Relationship
+from backend.world.models import Card, CardType, EdgeDirection, Relationship
 from backend.world.store import WorldStore
 
 
@@ -33,10 +33,20 @@ class CapabilityBroker:
     def derive(self, agent_id: str) -> CapabilitySet:
         agent = self._require_type(agent_id, CardType.AGENT)
         capabilities: list[Capability] = []
-        for edge in self.world.list_edges_from(agent_id):
-            target = self.world.get_card(edge.target)
+        directed_edges = [(edge, edge.target) for edge in self.world.list_edges_from(agent_id)]
+        directed_edges.extend(
+            (edge, edge.source)
+            for edge in self.world.list_edges_to(agent_id)
+            if edge.direction is EdgeDirection.BIDIRECTIONAL
+        )
+        communication_targets: set[str] = set()
+        for edge, target_id in directed_edges:
+            target = self.world.get_card(target_id)
             suffix = _tool_suffix(target)
             if target.type is CardType.AGENT and edge.relationship is Relationship.COMMUNICATE:
+                if target.id in communication_targets:
+                    continue
+                communication_targets.add(target.id)
                 capabilities.append(
                     Capability(
                         id=f"{CapabilityKind.AGENT_COMMUNICATE.value}:{target.id}",
@@ -136,7 +146,14 @@ class CapabilityBroker:
         self._require_type(agent_id, CardType.AGENT)
         self._require_type(target_agent_id, CardType.AGENT)
         edge = self.world.find_edge(agent_id, target_agent_id)
-        if edge is None or edge.relationship is not Relationship.COMMUNICATE:
+        reverse = self.world.find_edge(target_agent_id, agent_id)
+        allowed = edge is not None and edge.relationship is Relationship.COMMUNICATE
+        allowed = allowed or (
+            reverse is not None
+            and reverse.relationship is Relationship.COMMUNICATE
+            and reverse.direction is EdgeDirection.BIDIRECTIONAL
+        )
+        if not allowed:
             raise PermissionDeniedError(
                 f"agent {agent_id!r} cannot communicate with agent {target_agent_id!r}"
             )

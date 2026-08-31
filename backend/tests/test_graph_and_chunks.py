@@ -39,6 +39,17 @@ def test_invalid_graph_relationships_are_rejected(client: TestClient) -> None:
     )
     assert communication.status_code == 201
 
+    invalid_bidirectional = client.post(
+        "/api/edges",
+        json={
+            "source": agent["id"],
+            "target": image["id"],
+            "relationship": "view",
+            "direction": "bidirectional",
+        },
+    )
+    assert invalid_bidirectional.status_code == 422
+
     valid = client.post(
         "/api/edges",
         json={"source": agent["id"], "target": text["id"], "relationship": "read"},

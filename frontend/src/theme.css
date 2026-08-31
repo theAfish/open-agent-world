@@ -662,6 +662,10 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .permission-options label > span:last-child { display: grid; gap: 3px; }
 .permission-options label strong { font-size: 10px; }
 .permission-options label small { color: var(--ink-faint); font-size: 8px; line-height: 1.4; }
+.direction-options { grid-template-columns: 1fr 1fr; margin-top: 12px; }
+.direction-options legend { grid-column: 1 / -1; }
+.direction-options label { min-height: 50px; }
+.edge-direction-control { display: flex; align-items: center; gap: 4px; color: var(--accent); }
 .connection-dialog > footer { display: flex; justify-content: flex-end; gap: 7px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 
 /* Backend connection failure */

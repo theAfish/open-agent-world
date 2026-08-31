@@ -92,7 +92,7 @@ export function WorldCanvas() {
         source: edge.source,
         target: edge.target,
         type: "semantic",
-        data: { relationship: edge.relationship },
+        data: { relationship: edge.relationship, direction: edge.direction },
         selected: edge.id === selectedEdgeId,
         markerEnd: {
           type: MarkerType.ArrowClosed,
@@ -100,6 +100,12 @@ export function WorldCanvas() {
           height: 14,
           color: "var(--edge-arrow)",
         },
+        markerStart: edge.direction === "bidirectional" ? {
+          type: MarkerType.ArrowClosed,
+          width: 14,
+          height: 14,
+          color: "var(--edge-arrow)",
+        } : undefined,
         interactionWidth: 24,
       })),
     [edges, selectedEdgeId, visibleNodeIds],

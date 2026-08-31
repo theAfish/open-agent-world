@@ -33,7 +33,7 @@ A card stores identity, type, world position, size, expansion state, configurati
 
 The backend rejects reversed, unsupported, duplicate, and self-referential edges. Scoped capabilities are generated from valid edges; there is no global “resource by ID” tool exposed to an agent.
 
-An Agent-to-Agent `communicate` edge is directed. It exposes one target-scoped messaging tool to the source Agent; invoking it starts the target Agent with the message and returns its final response. The permission is re-checked at invocation time like every other graph-derived capability.
+An Agent-to-Agent `communicate` edge has a persisted direction. A `forward` edge exposes one target-scoped messaging tool to the source Agent, while a `bidirectional` edge exposes the corresponding scoped tool to both Agents. Invoking either tool starts the other Agent with the message and returns its final response. The permission and direction are re-checked at invocation time like every other graph-derived capability.
 
 ## Direct interaction flow
 

@@ -16,6 +16,8 @@ export interface BoundaryAnchor extends Point {
 export interface RelationshipPath {
   path: string;
   markerPath: string;
+  bidirectionalMarkerPath: string;
+  markerSource: Point;
   markerTarget: Point;
   labelX: number;
   labelY: number;
@@ -24,8 +26,8 @@ export interface RelationshipPath {
 }
 
 const EPSILON = 1e-6;
-// Keep the arrowhead clear of the visible endpoint dot at the target boundary.
-const TARGET_MARKER_OFFSET = 12;
+// Keep arrowheads clear of the visible endpoint dots at both boundaries.
+const MARKER_OFFSET = 12;
 
 function roundedRectSignedDistance(
   x: number,
@@ -136,8 +138,16 @@ export function relationshipPath(
     y: target.y + target.normalY * controlDistance,
   };
   const markerTarget = {
-    x: target.x + target.normalX * TARGET_MARKER_OFFSET,
-    y: target.y + target.normalY * TARGET_MARKER_OFFSET,
+    x: target.x + target.normalX * MARKER_OFFSET,
+    y: target.y + target.normalY * MARKER_OFFSET,
+  };
+  const markerSource = {
+    x: source.x + source.normalX * MARKER_OFFSET,
+    y: source.y + source.normalY * MARKER_OFFSET,
+  };
+  const markerSourceControl = {
+    x: markerSource.x + source.normalX * controlDistance,
+    y: markerSource.y + source.normalY * controlDistance,
   };
   const markerTargetControl = {
     x: markerTarget.x + target.normalX * controlDistance,
@@ -147,6 +157,8 @@ export function relationshipPath(
   return {
     path: `M ${source.x},${source.y} C ${sourceControl.x},${sourceControl.y} ${targetControl.x},${targetControl.y} ${target.x},${target.y}`,
     markerPath: `M ${source.x},${source.y} C ${sourceControl.x},${sourceControl.y} ${markerTargetControl.x},${markerTargetControl.y} ${markerTarget.x},${markerTarget.y}`,
+    bidirectionalMarkerPath: `M ${markerSource.x},${markerSource.y} C ${markerSourceControl.x},${markerSourceControl.y} ${markerTargetControl.x},${markerTargetControl.y} ${markerTarget.x},${markerTarget.y}`,
+    markerSource,
     markerTarget,
     labelX: cubicPoint(source.x, sourceControl.x, targetControl.x, target.x, 0.5),
     labelY: cubicPoint(source.y, sourceControl.y, targetControl.y, target.y, 0.5),

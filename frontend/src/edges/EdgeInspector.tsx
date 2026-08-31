@@ -1,7 +1,7 @@
-import { ArrowRight, ShieldOff, X } from "lucide-react";
+import { ArrowLeftRight, ArrowRight, ShieldOff, X } from "lucide-react";
 import { getRelationshipOptions, getRelationshipOption } from "../state/relationships";
 import { useWorldStore } from "../state/worldStore";
-import type { Relationship } from "../types/world";
+import type { EdgeDirection, Relationship } from "../types/world";
 
 export function EdgeInspector() {
   const selectedId = useWorldStore((state) => state.selectedEdgeId);
@@ -27,13 +27,29 @@ export function EdgeInspector() {
           <span className="sr-only">Permission</span>
           <select
             value={edge.relationship}
-            onChange={(event) => void updateSelectedEdge(event.target.value as Relationship)}
+            onChange={(event) => void updateSelectedEdge({ relationship: event.target.value as Relationship })}
           >
             {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
       ) : (
         <span className="edge-inspector-permission">{getRelationshipOption(edge.relationship).label}</span>
+      )}
+      {source.type === "agent" && target.type === "agent" && edge.relationship === "communicate" && (
+        <label className="edge-direction-control">
+          {edge.direction === "bidirectional"
+            ? <ArrowLeftRight size={13} aria-hidden="true" />
+            : <ArrowRight size={13} aria-hidden="true" />}
+          <span className="sr-only">Direction</span>
+          <select
+            aria-label="Communication direction"
+            value={edge.direction}
+            onChange={(event) => void updateSelectedEdge({ direction: event.target.value as EdgeDirection })}
+          >
+            <option value="forward">One-way</option>
+            <option value="bidirectional">Two-way</option>
+          </select>
+        </label>
       )}
       <button type="button" className="revoke-button" onClick={() => void deleteSelectedEdge()}>
         <ShieldOff size={14} /> Revoke

@@ -20,6 +20,7 @@ from backend.world.models import (
     CardType,
     Edge,
     EdgeCreate,
+    EdgeDirection,
     EdgePatch,
     ImageConfig,
     Relationship,
@@ -247,17 +248,24 @@ class WorldStore:
                     CardType(target_row["type"]),
                     request.relationship,
                 )
+                self._assert_valid_direction(
+                    CardType(source_row["type"]),
+                    CardType(target_row["type"]),
+                    request.relationship,
+                    request.direction,
+                )
                 connection.execute(
                     """
                     INSERT INTO edges (
-                        id, source_id, target_id, relationship, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        id, source_id, target_id, relationship, direction, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         edge_id,
                         request.source,
                         request.target,
                         request.relationship.value,
+                        request.direction.value,
                         now,
                         now,
                     ),
@@ -335,18 +343,26 @@ class WorldStore:
             ).fetchone()
             if row is None:
                 raise NotFoundError(f"edge {edge_id!r} does not exist")
+            relationship = request.relationship or Relationship(row["relationship"])
+            direction = request.direction or EdgeDirection(row["direction"])
             self._assert_valid_relationship(
                 CardType(row["source_type"]),
                 CardType(row["target_type"]),
-                request.relationship,
+                relationship,
+            )
+            self._assert_valid_direction(
+                CardType(row["source_type"]),
+                CardType(row["target_type"]),
+                relationship,
+                direction,
             )
             connection.execute(
                 """
                 UPDATE edges
-                SET relationship = ?, updated_at = ?, revision = revision + 1
+                SET relationship = ?, direction = ?, updated_at = ?, revision = revision + 1
                 WHERE id = ?
                 """,
-                (request.relationship.value, now, edge_id),
+                (relationship.value, direction.value, now, edge_id),
             )
         return self.get_edge(edge_id)
 
@@ -386,6 +402,22 @@ class WorldStore:
             )
 
     @staticmethod
+    def _assert_valid_direction(
+        source_type: CardType,
+        target_type: CardType,
+        relationship: Relationship,
+        direction: EdgeDirection,
+    ) -> None:
+        if direction is EdgeDirection.BIDIRECTIONAL and not (
+            source_type is CardType.AGENT
+            and target_type is CardType.AGENT
+            and relationship is Relationship.COMMUNICATE
+        ):
+            raise GraphValidationError(
+                "bidirectional edges are only valid for agent communication"
+            )
+
+    @staticmethod
     def _card_from_row(row: sqlite3.Row) -> Card:
         card_type = CardType(row["type"])
         config = json.loads(row["config_json"])
@@ -418,6 +450,7 @@ class WorldStore:
             source=row["source_id"],
             target=row["target_id"],
             relationship=Relationship(row["relationship"]),
+            direction=EdgeDirection(row["direction"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             revision=row["revision"],

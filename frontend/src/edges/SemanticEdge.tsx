@@ -6,11 +6,12 @@ import {
   type EdgeProps,
 } from "@xyflow/react";
 import { getRelationshipOption } from "../state/relationships";
-import type { Relationship } from "../types/world";
+import type { EdgeDirection, Relationship } from "../types/world";
 import { relationshipPath, type NodeRect } from "./geometry";
 
 export interface SemanticEdgeData extends Record<string, unknown> {
   relationship: Relationship;
+  direction: EdgeDirection;
 }
 
 export type CanvasEdge = Edge<SemanticEdgeData, "semantic">;
@@ -24,6 +25,7 @@ export function SemanticEdge({
   targetX,
   targetY,
   markerEnd,
+  markerStart,
   selected,
   data,
 }: EdgeProps<CanvasEdge>) {
@@ -40,14 +42,16 @@ export function SemanticEdge({
     nodeRect(targetNode, targetX, targetY),
   );
   const relationship = data?.relationship ?? "read";
+  const bidirectional = data?.direction === "bidirectional";
   const option = getRelationshipOption(relationship);
 
   return (
     <>
       <BaseEdge
         id={id}
-        path={geometry.markerPath}
+        path={bidirectional ? geometry.bidirectionalMarkerPath : geometry.markerPath}
         markerEnd={markerEnd}
+        markerStart={markerStart}
         className={`semantic-edge-path ${selected ? "is-selected" : ""}`}
         data-edge-id={id}
         data-source-id={source}

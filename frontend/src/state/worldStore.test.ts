@@ -38,6 +38,7 @@ describe("authoritative world synchronization", () => {
       source: agent.id,
       target: text.id,
       relationship: "read",
+      direction: "forward",
     };
     useWorldStore.setState({ cards: [card("stale", "sandbox")] });
     vi.spyOn(worldApi, "getWorld").mockResolvedValue({
@@ -61,6 +62,7 @@ describe("authoritative world synchronization", () => {
       source: agent.id,
       target: text.id,
       relationship: "read",
+      direction: "forward",
     };
     useWorldStore.setState({
       cards: [agent, text],
@@ -97,6 +99,7 @@ describe("authoritative world synchronization", () => {
       source: agent.id,
       target: text.id,
       relationship: "read",
+      direction: "forward",
     };
     useWorldStore.setState({
       cards: [agent, text],

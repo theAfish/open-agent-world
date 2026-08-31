@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.agents import MockAgentRuntime
 from backend.capabilities.provider import WorldAgentCapabilityProvider
+from backend.errors import PermissionDeniedError
 from backend.tests.conftest import create_node
 
 
@@ -108,6 +110,47 @@ def test_agent_communication_is_a_scoped_live_capability(client: TestClient) -> 
     assert client.get(f"/api/agents/{source['id']}/capabilities").json()[
         "capabilities"
     ] == []
+
+
+def test_agent_communication_can_be_made_bidirectional(client: TestClient) -> None:
+    source = create_node(client, "agent", name="Coordinator")
+    target = create_node(client, "agent", name="Researcher")
+    edge = client.post(
+        "/api/edges",
+        json={
+            "source": source["id"],
+            "target": target["id"],
+            "relationship": "communicate",
+            "direction": "bidirectional",
+        },
+    )
+    assert edge.status_code == 201
+    assert edge.json()["direction"] == "bidirectional"
+
+    source_targets = {
+        item["target_id"]
+        for item in client.get(f"/api/agents/{source['id']}/capabilities").json()["capabilities"]
+    }
+    target_targets = {
+        item["target_id"]
+        for item in client.get(f"/api/agents/{target['id']}/capabilities").json()["capabilities"]
+    }
+    assert source_targets == {target["id"]}
+    assert target_targets == {source["id"]}
+    client.app.state.services.capabilities.require_agent_communicate(
+        target["id"], source["id"]
+    )
+
+    updated = client.patch(
+        f"/api/edges/{edge.json()['id']}", json={"direction": "forward"}
+    )
+    assert updated.status_code == 200
+    assert updated.json()["direction"] == "forward"
+    assert client.get(f"/api/agents/{target['id']}/capabilities").json()["capabilities"] == []
+    with pytest.raises(PermissionDeniedError):
+        client.app.state.services.capabilities.require_agent_communicate(
+            target["id"], source["id"]
+        )
 
 
 def test_sandbox_attachment_permissions_are_live(client: TestClient) -> None:

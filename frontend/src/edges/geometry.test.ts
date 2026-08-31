@@ -34,13 +34,18 @@ describe("relationship edge geometry", () => {
     expect(Number.isFinite(geometry.labelY)).toBe(true);
   });
 
-  it("places the target arrow outside the endpoint dot", () => {
+  it("places both arrows equally clear of their endpoint dots", () => {
     const geometry = relationshipPath(rect, { x: 450, y: 100, width: 180, height: 120 });
 
+    expect(geometry.markerSource.x).toBeCloseTo(312, 6);
+    expect(geometry.markerSource.y).toBeCloseTo(160, 6);
+    expect(geometry.source.x).toBeCloseTo(300, 6);
+    expect(geometry.source.y).toBeCloseTo(160, 6);
     expect(geometry.markerTarget.x).toBeCloseTo(438, 6);
     expect(geometry.markerTarget.y).toBeCloseTo(160, 6);
     expect(geometry.target.x).toBeCloseTo(450, 6);
     expect(geometry.target.y).toBeCloseTo(160, 6);
     expect(geometry.target).toMatchObject({ normalX: -1, normalY: 0 });
+    expect(geometry.bidirectionalMarkerPath).not.toBe(geometry.markerPath);
   });
 });

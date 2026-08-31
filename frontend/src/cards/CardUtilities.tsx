@@ -1,4 +1,4 @@
-import { ArrowRight, Link2Off } from "lucide-react";
+import { ArrowLeftRight, ArrowRight, Link2Off } from "lucide-react";
 import { getRelationshipOption } from "../state/relationships";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
@@ -26,11 +26,15 @@ export function RelationshipList({ card, empty = "No capabilities connected yet.
         return (
           <li key={edge.id}>
             <span title={other?.name ?? otherId}>{other?.name ?? "Unknown object"}</span>
-            <ArrowRight
-              size={12}
-              className={outgoing ? undefined : "is-reversed"}
-              aria-hidden="true"
-            />
+            {edge.direction === "bidirectional" ? (
+              <ArrowLeftRight size={12} aria-hidden="true" />
+            ) : (
+              <ArrowRight
+                size={12}
+                className={outgoing ? undefined : "is-reversed"}
+                aria-hidden="true"
+              />
+            )}
             <small>{getRelationshipOption(edge.relationship).shortLabel}</small>
           </li>
         );
