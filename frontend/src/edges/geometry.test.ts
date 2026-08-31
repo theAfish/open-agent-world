@@ -27,9 +27,20 @@ describe("relationship edge geometry", () => {
   it("builds a curve whose endpoint tangents follow the boundary normals", () => {
     const geometry = relationshipPath(rect, { x: 450, y: 80, width: 180, height: 150 });
     expect(geometry.path).toContain(" C ");
+    expect(geometry.markerPath).toContain(" C ");
     expect(geometry.source.normalX).toBeGreaterThan(0);
     expect(geometry.target.normalX).toBeLessThan(0);
     expect(Number.isFinite(geometry.labelX)).toBe(true);
     expect(Number.isFinite(geometry.labelY)).toBe(true);
+  });
+
+  it("places the target arrow outside the endpoint dot", () => {
+    const geometry = relationshipPath(rect, { x: 450, y: 100, width: 180, height: 120 });
+
+    expect(geometry.markerTarget.x).toBeCloseTo(438, 6);
+    expect(geometry.markerTarget.y).toBeCloseTo(160, 6);
+    expect(geometry.target.x).toBeCloseTo(450, 6);
+    expect(geometry.target.y).toBeCloseTo(160, 6);
+    expect(geometry.target).toMatchObject({ normalX: -1, normalY: 0 });
   });
 });

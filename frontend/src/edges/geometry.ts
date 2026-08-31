@@ -15,6 +15,8 @@ export interface BoundaryAnchor extends Point {
 
 export interface RelationshipPath {
   path: string;
+  markerPath: string;
+  markerTarget: Point;
   labelX: number;
   labelY: number;
   source: BoundaryAnchor;
@@ -22,6 +24,8 @@ export interface RelationshipPath {
 }
 
 const EPSILON = 1e-6;
+// Keep the arrowhead clear of the visible endpoint dot at the target boundary.
+const TARGET_MARKER_OFFSET = 12;
 
 function roundedRectSignedDistance(
   x: number,
@@ -131,9 +135,19 @@ export function relationshipPath(
     x: target.x + target.normalX * controlDistance,
     y: target.y + target.normalY * controlDistance,
   };
+  const markerTarget = {
+    x: target.x + target.normalX * TARGET_MARKER_OFFSET,
+    y: target.y + target.normalY * TARGET_MARKER_OFFSET,
+  };
+  const markerTargetControl = {
+    x: markerTarget.x + target.normalX * controlDistance,
+    y: markerTarget.y + target.normalY * controlDistance,
+  };
 
   return {
     path: `M ${source.x},${source.y} C ${sourceControl.x},${sourceControl.y} ${targetControl.x},${targetControl.y} ${target.x},${target.y}`,
+    markerPath: `M ${source.x},${source.y} C ${sourceControl.x},${sourceControl.y} ${markerTargetControl.x},${markerTargetControl.y} ${markerTarget.x},${markerTarget.y}`,
+    markerTarget,
     labelX: cubicPoint(source.x, sourceControl.x, targetControl.x, target.x, 0.5),
     labelY: cubicPoint(source.y, sourceControl.y, targetControl.y, target.y, 0.5),
     source,

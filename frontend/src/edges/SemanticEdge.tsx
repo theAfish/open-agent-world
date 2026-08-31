@@ -46,7 +46,7 @@ export function SemanticEdge({
     <>
       <BaseEdge
         id={id}
-        path={geometry.path}
+        path={geometry.markerPath}
         markerEnd={markerEnd}
         className={`semantic-edge-path ${selected ? "is-selected" : ""}`}
         data-edge-id={id}
