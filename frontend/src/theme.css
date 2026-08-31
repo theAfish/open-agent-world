@@ -28,8 +28,8 @@
   --danger: #a45d56;
   --danger-soft: rgba(164, 93, 86, 0.12);
   --warning: #9b774d;
-  --grid-dot: rgba(52, 65, 59, 0.18);
-  --contour: rgba(64, 78, 71, 0.075);
+  --grid-dot: rgba(52, 65, 59, 0.23);
+  --contour: rgba(64, 78, 71, 0.105);
   --edge: #6e7b74;
   --edge-arrow: #6e7b74;
   --minimap-mask: rgba(224, 229, 222, 0.7);
@@ -65,8 +65,8 @@
   --danger: #d48178;
   --danger-soft: rgba(212, 129, 120, 0.12);
   --warning: #c7a06d;
-  --grid-dot: rgba(212, 225, 217, 0.14);
-  --contour: rgba(207, 221, 213, 0.055);
+  --grid-dot: rgba(212, 225, 217, 0.19);
+  --contour: rgba(207, 221, 213, 0.08);
   --edge: #87978e;
   --edge-arrow: #87978e;
   --minimap-mask: rgba(21, 28, 25, 0.74);
@@ -132,49 +132,29 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .world-canvas .react-flow__pane:active { cursor: grabbing; }
 
 /* Terrain */
-.contour-viewport {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
 .contour-world {
   position: absolute;
   width: 4200px;
   height: 3100px;
   left: -1600px;
   top: -1200px;
-  transform-origin: 0 0;
-  transform: translate(var(--terrain-x), var(--terrain-y)) scale(var(--terrain-scale));
-  opacity: clamp(0.45, calc(var(--terrain-scale) * 0.75), 0.92);
+  z-index: 0;
+  opacity: 0.84;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.world-canvas .react-flow__viewport-portal {
+  z-index: -1;
+  pointer-events: none;
 }
 
 .contour {
-  position: absolute;
-  display: block;
-  border: 1px solid var(--contour);
-  border-radius: 48% 52% 59% 41% / 55% 43% 57% 45%;
-  transform: rotate(var(--rotation, 0deg));
+  fill: none;
+  stroke: var(--contour);
+  stroke-width: 1.35;
+  vector-effect: non-scaling-stroke;
 }
-
-.contour::before,
-.contour::after {
-  content: "";
-  position: absolute;
-  border: 1px solid var(--contour);
-  border-radius: 55% 45% 47% 53% / 45% 58% 42% 55%;
-}
-
-.contour::before { inset: 70px 92px 64px 76px; transform: rotate(4deg); }
-.contour::after { inset: 145px 176px 128px 158px; transform: rotate(-7deg); }
-.contour-a { width: 950px; height: 660px; left: 210px; top: 280px; --rotation: -8deg; }
-.contour-b { width: 1180px; height: 820px; left: 1160px; top: 190px; --rotation: 14deg; }
-.contour-c { width: 780px; height: 1120px; left: 2460px; top: 450px; --rotation: 24deg; }
-.contour-d { width: 1260px; height: 760px; left: 420px; top: 1570px; --rotation: 8deg; }
-.contour-e { width: 1040px; height: 720px; left: 1820px; top: 1740px; --rotation: -17deg; }
-.contour-f { width: 620px; height: 500px; left: 3180px; top: 1280px; --rotation: 31deg; }
 
 /* Global controls */
 .icon-button,

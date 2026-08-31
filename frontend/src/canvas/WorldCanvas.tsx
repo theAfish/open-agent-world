@@ -9,6 +9,7 @@ import {
   useReactFlow,
   type Connection,
   type OnNodeDrag,
+  type OnInit,
   type OnMove,
   type Viewport,
 } from "@xyflow/react";
@@ -24,6 +25,7 @@ import { ContourLayer } from "./ContourLayer";
 
 const nodeTypes = { worldCard: WorldCardNode };
 const edgeTypes = { semantic: SemanticEdge };
+const defaultViewport: Viewport = { x: 0, y: 0, zoom: 0.92 };
 
 const minimapColors: Record<CardType, string> = {
   agent: "#7b8c64",
@@ -59,8 +61,7 @@ export function WorldCanvas() {
   const requestConnection = useWorldStore((state) => state.requestConnection);
   const selectEdge = useWorldStore((state) => state.selectEdge);
   const deleteSelectedEdge = useWorldStore((state) => state.deleteSelectedEdge);
-  const { screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
-  const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
+  const { getViewport, screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
 
   const renderCards = useMemo(
     () => filterCardsToChunks([...cards, ...stressCards], activeChunkKeys),
@@ -102,18 +103,19 @@ export function WorldCanvas() {
 
   const commitViewport = useCallback((next: Viewport) => {
     const size = dimensions();
-    setViewport(next);
     setViewportState({ ...next, ...size });
   }, [dimensions, setViewportState]);
 
-  const onMove: OnMove = useCallback((_event, next) => setViewport(next), []);
   const onMoveEnd: OnMove = useCallback((_event, next) => commitViewport(next), [commitViewport]);
+  const onInit: OnInit<CanvasNode, CanvasEdge> = useCallback((instance) => {
+    commitViewport(instance.getViewport());
+  }, [commitViewport]);
 
   useEffect(() => {
-    const onResize = () => commitViewport(viewport);
+    const onResize = () => commitViewport(getViewport());
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [commitViewport, viewport]);
+  }, [commitViewport, getViewport]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -155,7 +157,6 @@ export function WorldCanvas() {
         event.dataTransfer.dropEffect = "copy";
       }}
     >
-      <ContourLayer viewport={viewport} />
       <ReactFlow<CanvasNode, CanvasEdge>
         nodes={nodes}
         edges={flowEdges}
@@ -164,14 +165,14 @@ export function WorldCanvas() {
         onNodesChange={onNodesChange}
         onNodeDragStop={onNodeDragStop}
         onConnect={onConnect}
-        onMove={onMove}
+        onInit={onInit}
         onMoveEnd={onMoveEnd}
         onEdgeClick={(_event, edge) => selectEdge(edge.id)}
         onPaneClick={() => selectEdge(undefined)}
         minZoom={0.12}
         maxZoom={2.2}
-        defaultViewport={{ x: 0, y: 0, zoom: 0.92 }}
-        panOnScroll
+        defaultViewport={defaultViewport}
+        panOnScroll={false}
         selectionOnDrag={false}
         onlyRenderVisibleElements
         deleteKeyCode={null}
@@ -181,6 +182,7 @@ export function WorldCanvas() {
         proOptions={{ hideAttribution: true }}
         aria-label="Open Agent World spatial canvas"
       >
+        <ContourLayer />
         <Background
           variant={BackgroundVariant.Dots}
           gap={24}
