@@ -28,10 +28,10 @@ const edgeTypes = { semantic: SemanticEdge };
 const defaultViewport: Viewport = { x: 0, y: 0, zoom: 0.92 };
 
 const minimapColors: Record<CardType, string> = {
-  agent: "#7b8c64",
-  text: "#839a91",
-  image: "#a18a74",
-  sandbox: "#758493",
+  agent: "#75736c",
+  text: "#7c7267",
+  image: "#8a7560",
+  sandbox: "#696c66",
 };
 
 function nodeFromCard(card: ReturnType<typeof useWorldStore.getState>["cards"][number]): CanvasNode {
