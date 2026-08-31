@@ -11,7 +11,7 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
     "openai/gpt-4o-mini",
     "openai/gpt-4.1-mini",
     "anthropic/claude-3-5-sonnet",
-    "openai/local-model",
+    "gemini-3.7-flash",
   ],
 };
 
@@ -59,6 +59,6 @@ export function persistModelSettings(settings: ModelSettings): void {
       window.sessionStorage.removeItem(SESSION_API_KEY);
     }
   } catch {
-    // Settings still remain available in Zustand for this session.
+    // Settings remain available in Zustand for this browser session.
   }
 }

@@ -60,7 +60,9 @@ export function AgentCardBody({ card }: { card: WorldCard }) {
             onChange={(event) => {
               const value = event.target.value;
               setModel(value);
-              void updateCard(card.id, { config: { model: value } });
+              if (value !== card.config.model) {
+                void updateCard(card.id, { config: { model: value } });
+              }
             }}
           >
             {modelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -68,7 +70,7 @@ export function AgentCardBody({ card }: { card: WorldCard }) {
         </label>
         <div className="live-readout">
           <Radio size={13} aria-hidden="true" />
-          <span>{card.status}</span>
+          <span title="Google ADK selects the model adapter automatically.">ADK · {card.status}</span>
         </div>
       </div>
 

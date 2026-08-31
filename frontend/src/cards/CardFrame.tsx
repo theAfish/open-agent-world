@@ -46,11 +46,7 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
   const canSource = card.type !== "sandbox";
   const canTarget = card.type !== "agent";
 
-  const handleDelete = () => {
-    if (window.confirm(`Remove ${card.name} and all of its relationships?`)) {
-      void deleteCard(card.id);
-    }
-  };
+  const handleDelete = () => void deleteCard(card.id);
 
   return (
     <article
@@ -109,7 +105,7 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
               className="icon-button icon-button--danger"
               onClick={handleDelete}
               aria-label={`Remove ${card.name}`}
-              title="Remove object"
+              title="Remove object (Ctrl+Z to undo)"
             >
               <Trash2 size={14} />
             </button>

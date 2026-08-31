@@ -117,3 +117,22 @@ def test_image_can_be_imported_into_an_existing_empty_card(client: TestClient) -
         },
     )
     assert duplicate.status_code == 409
+
+
+def test_standard_lossy_webp_is_accepted(client: TestClient) -> None:
+    image = create_node(client, "image", config={"filename": "placeholder.webp"})
+    webp = (
+        b"RIFF" + b"\x00" * 4 + b"WEBPVP8 " + b"\x00" * 4
+        + b"\x00" * 3 + b"\x9d\x01\x2a" + struct.pack("<HH", 7, 5)
+    )
+    imported = client.post(
+        f"/api/resources/{image['id']}/image",
+        json={
+            "filename": "loaded.webp",
+            "media_type": "image/webp",
+            "data_base64": base64.b64encode(webp).decode("ascii"),
+        },
+    )
+    assert imported.status_code == 201
+    assert imported.json()["width"] == 7
+    assert imported.json()["height"] == 5

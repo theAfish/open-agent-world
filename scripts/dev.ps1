@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("mock", "google-adk", "litellm")]
-    [string]$AgentRuntime = "mock"
+    [ValidateSet("google-adk", "mock")]
+    [string]$AgentRuntime = "google-adk"
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,6 +77,26 @@ function Get-BackendListener {
     }
 }
 
+function Wait-BackendListener {
+    param(
+        [System.Diagnostics.Process]$Backend,
+        [int]$TimeoutMilliseconds = 10000
+    )
+
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $listener = Get-BackendListener
+        if ($null -ne $listener) {
+            return $listener
+        }
+        if ($Backend.HasExited) {
+            return $null
+        }
+        Start-Sleep -Milliseconds 200
+    }
+    return $null
+}
+
 function Read-BackendState {
     if (-not (Test-Path -LiteralPath $backendStatePath)) {
         return $null
@@ -94,7 +114,8 @@ $env:OPEN_AGENT_WORLD_AGENT_RUNTIME = $AgentRuntime
 $backendOut = Join-Path $runtimeDirectory "backend.out.log"
 $backendError = Join-Path $runtimeDirectory "backend.err.log"
 $backendArguments = @(
-    "run", "--project", "backend", "uvicorn", "backend.main:app",
+    "run", "--project", "backend", "--extra", "adk", "--extra", "litellm",
+    "uvicorn", "backend.main:app",
     "--host", "127.0.0.1", "--port", "8000"
 )
 
@@ -130,13 +151,17 @@ try {
         -WindowStyle Hidden `
         -PassThru
 
-    Start-Sleep -Milliseconds 700
-    if ($backend.HasExited) {
+    $listener = Wait-BackendListener -Backend $backend
+    if ($null -eq $listener) {
         $detail = Get-Content -Raw $backendError -ErrorAction SilentlyContinue
-        throw "The backend did not start. $detail"
+        if (-not $detail) {
+            $detail = Get-Content -Raw $backendOut -ErrorAction SilentlyContinue
+        }
+        Stop-RecordedProcessTree (Get-ProcessRecord $backend.Id)
+        $backend = $null
+        throw "The backend did not become available on http://127.0.0.1:8000 within 10 seconds. $detail"
     }
 
-    $listener = Get-BackendListener
     $backendState = [pscustomobject]@{
         root = Get-ProcessRecord $backend.Id
         listener = if ($null -ne $listener) { Get-ProcessRecord $listener.OwningProcess } else { $null }

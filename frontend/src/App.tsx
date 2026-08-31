@@ -4,6 +4,7 @@ import { WorldCanvas } from "./canvas/WorldCanvas";
 import { ConnectionDialog } from "./edges/ConnectionDialog";
 import { ComponentPalette } from "./palette/ComponentPalette";
 import { ActivityPanel } from "./shell/ActivityPanel";
+import { BackendUnavailableNotice } from "./shell/BackendUnavailableNotice";
 import { EmptyWorld } from "./shell/EmptyWorld";
 import { RuntimeConnection } from "./shell/RuntimeConnection";
 import { SettingsPanel } from "./shell/SettingsPanel";
@@ -28,6 +29,7 @@ export function App() {
       <main className="world-shell">
         <WorldCanvas />
         <TopBar />
+        <BackendUnavailableNotice />
         <ComponentPalette />
         <EmptyWorld />
         <ActivityPanel />

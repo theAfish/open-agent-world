@@ -21,7 +21,7 @@ class AgentRunRequest(BaseModel):
 
 
 class LlmSettingsRequest(BaseModel):
-    """Runtime-only connection overrides; never returned by the API."""
+    """Runtime-only connection overrides for ADK's LiteLLM model adapter."""
 
     model_config = ConfigDict(extra="forbid")
 

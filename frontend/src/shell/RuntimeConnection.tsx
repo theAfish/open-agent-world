@@ -6,6 +6,7 @@ export function RuntimeConnection() {
   const ingestEvent = useWorldStore((state) => state.ingestEvent);
   const setSocketState = useWorldStore((state) => state.setSocketState);
   const refreshWorld = useWorldStore((state) => state.refreshWorld);
+  const restoreModelConnection = useWorldStore((state) => state.restoreModelConnection);
 
   useEffect(() => {
     let active = true;
@@ -21,6 +22,7 @@ export function RuntimeConnection() {
         attempts = 0;
         setSocketState("live");
         void refreshWorld();
+        void restoreModelConnection();
       });
       socket.addEventListener("message", (event) => {
         try {
@@ -46,7 +48,7 @@ export function RuntimeConnection() {
       if (retryTimer) window.clearTimeout(retryTimer);
       socket?.close();
     };
-  }, [ingestEvent, refreshWorld, setSocketState]);
+  }, [ingestEvent, refreshWorld, restoreModelConnection, setSocketState]);
 
   return null;
 }

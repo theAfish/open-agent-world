@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { apiErrorMessage, normalizeCard, resourceContentUrl, worldApi } from "../api/client";
+import { apiErrorMessage, normalizeCard, resourceContentUrl, worldApi, type CardCreateInput } from "../api/client";
 import type {
   CardType,
   FlowViewportState,
@@ -14,6 +14,7 @@ import type {
 import { getViewportChunkKeys, viewportCenterToWorld } from "./chunks";
 import { buildCardDraft, expandedPatch, makeStressCards, mergeCardPatch } from "./helpers";
 import { validateConnection, type RelationshipOption } from "./relationships";
+import { describeRuntimeError } from "./runtimeErrors";
 import {
   normalizeModelList,
   persistModelSettings,
@@ -28,6 +29,88 @@ export interface PendingConnection {
   source: string;
   target: string;
   options: RelationshipOption[];
+}
+
+type RestorableCard = WorldCard & {
+  restoreContent?: string;
+  restoreImageData?: string;
+  restoreImageMediaType?: string;
+};
+
+export type WorldHistoryOperation =
+  | { id: number; label: string; kind: "card-created"; cards: RestorableCard[] }
+  | { id: number; label: string; kind: "cards-deleted"; cards: RestorableCard[]; edges: WorldEdge[] }
+  | { id: number; label: string; kind: "card-updated"; before: WorldCard; after: WorldCard }
+  | { id: number; label: string; kind: "edge-created"; edge: WorldEdge }
+  | { id: number; label: string; kind: "edge-deleted"; edge: WorldEdge }
+  | { id: number; label: string; kind: "edge-updated"; before: WorldEdge; after: WorldEdge };
+
+const HISTORY_LIMIT = 20;
+const RESOURCE_HISTORY_LIMIT_BYTES = 4 * 1024 * 1024;
+
+function copyCard(card: WorldCard): RestorableCard {
+  return {
+    ...card,
+    position: { ...card.position },
+    size: { ...card.size },
+    config: { ...card.config },
+  };
+}
+
+function copyEdge(edge: WorldEdge): WorldEdge {
+  return { ...edge };
+}
+
+function cardRestorePatch(card: WorldCard): Partial<Omit<WorldCard, "id" | "type">> {
+  return {
+    name: card.name,
+    position: { ...card.position },
+    size: { ...card.size },
+    expanded: card.expanded,
+    status: card.status,
+    config: { ...card.config },
+  };
+}
+
+function restoreCardInput(card: RestorableCard): CardCreateInput {
+  return {
+    ...copyCard(card),
+    ...(card.restoreContent !== undefined ? { content: card.restoreContent } : {}),
+    ...(card.restoreImageData !== undefined
+      ? { data_base64: card.restoreImageData, media_type: card.restoreImageMediaType }
+      : {}),
+  };
+}
+
+async function snapshotCardForHistory(card: WorldCard): Promise<RestorableCard> {
+  const snapshot = copyCard(card);
+  try {
+    if (card.type === "text") {
+      const content = await worldApi.getTextContent(card.id);
+      if (new TextEncoder().encode(content).byteLength <= RESOURCE_HISTORY_LIMIT_BYTES) {
+        snapshot.restoreContent = content;
+      }
+    }
+    if (
+      card.type === "image"
+      && Number(card.config.revision ?? 0) > 0
+      && Number(card.config.bytes ?? 0) <= RESOURCE_HISTORY_LIMIT_BYTES
+    ) {
+      const image = await worldApi.getImageRestoreData(card.id);
+      snapshot.restoreImageData = image.data_base64;
+      snapshot.restoreImageMediaType = image.media_type;
+    }
+  } catch {
+    // A stale resource must not prevent removal; its card configuration is still restorable.
+  }
+  return snapshot;
+}
+
+function appendHistory(
+  history: WorldHistoryOperation[],
+  operation: WorldHistoryOperation,
+): WorldHistoryOperation[] {
+  return [...history, operation].slice(-HISTORY_LIMIT);
 }
 
 const INITIAL_VIEWPORT: FlowViewportState = {
@@ -78,6 +161,7 @@ interface WorldState {
   syncError?: string;
   socketState: SocketState;
   selectedEdgeId?: string;
+  selectedCardIds: string[];
   pendingConnection?: PendingConnection;
   events: RuntimeEvent[];
   activityOpen: boolean;
@@ -86,6 +170,9 @@ interface WorldState {
   paletteCollapsed: boolean;
   theme: "light" | "dark";
   toasts: ToastMessage[];
+  undoStack: WorldHistoryOperation[];
+  redoStack: WorldHistoryOperation[];
+  historyBusy: boolean;
 
   initialize: () => Promise<void>;
   refreshWorld: () => Promise<void>;
@@ -98,10 +185,12 @@ interface WorldState {
   ) => Promise<void>;
   toggleCardExpanded: (id: string) => Promise<void>;
   deleteCard: (id: string) => Promise<void>;
+  deleteCards: (ids: string[]) => Promise<void>;
   requestConnection: (source?: string | null, target?: string | null) => void;
   closeConnectionDialog: () => void;
   createConnection: (relationship: Relationship) => Promise<void>;
   selectEdge: (id?: string) => void;
+  selectCards: (ids: string[]) => void;
   updateSelectedEdge: (relationship: Relationship) => Promise<void>;
   deleteSelectedEdge: () => Promise<void>;
   loadText: (id: string) => Promise<void>;
@@ -118,15 +207,19 @@ interface WorldState {
   setActivityOpen: (open: boolean) => void;
   toggleSettings: () => void;
   saveModelSettings: (settings: ModelSettings) => Promise<boolean>;
+  restoreModelConnection: () => Promise<void>;
   togglePalette: () => void;
   toggleTheme: () => void;
   generateStressWorld: (count?: number) => void;
   clearStressWorld: () => void;
   pushToast: (message: Omit<ToastMessage, "id">) => void;
   dismissToast: (id: string) => void;
+  undo: () => Promise<void>;
+  redo: () => Promise<void>;
 }
 
 let toastSequence = 0;
+let historySequence = 0;
 
 export const useWorldStore = create<WorldState>((set, get) => ({
   cards: [],
@@ -138,6 +231,7 @@ export const useWorldStore = create<WorldState>((set, get) => ({
   viewport: INITIAL_VIEWPORT,
   syncState: "loading",
   socketState: "connecting",
+  selectedCardIds: [],
   events: [],
   activityOpen: false,
   settingsOpen: false,
@@ -145,6 +239,9 @@ export const useWorldStore = create<WorldState>((set, get) => ({
   paletteCollapsed: false,
   theme: preferredTheme(),
   toasts: [],
+  undoStack: [],
+  redoStack: [],
+  historyBusy: false,
 
   initialize: async () => {
     const keys = get().activeChunkKeys;
@@ -158,6 +255,7 @@ export const useWorldStore = create<WorldState>((set, get) => ({
         syncState: "online",
         syncError: undefined,
       });
+      await get().restoreModelConnection();
     } catch (error) {
       const message = apiErrorMessage(error);
       set({ syncState: "offline", syncError: message });
@@ -243,10 +341,7 @@ export const useWorldStore = create<WorldState>((set, get) => ({
     const finalPosition = position ?? viewportCenterToWorld(get().viewport);
     const draft = buildCardDraft(type, finalPosition);
     const configuredDraft = type === "agent" && get().modelSettings.models[0]
-      ? {
-          ...draft,
-          config: { ...draft.config, model: get().modelSettings.models[0] },
-        }
+      ? { ...draft, config: { ...draft.config, model: get().modelSettings.models[0] } }
       : draft;
     set({ syncState: "syncing" });
     try {
@@ -254,6 +349,13 @@ export const useWorldStore = create<WorldState>((set, get) => ({
       set((state) => ({
         cards: mergeCards(state.cards, [card]),
         syncState: "online",
+        undoStack: appendHistory(state.undoStack, {
+            id: ++historySequence,
+            label: `Place ${card.name}`,
+            kind: "card-created",
+            cards: [copyCard(card)],
+          }),
+        redoStack: [],
       }));
       get().pushToast({
         tone: "success",
@@ -272,10 +374,19 @@ export const useWorldStore = create<WorldState>((set, get) => ({
     const current = get().cards.find((card) => card.id === id) ?? get().stressCards.find((card) => card.id === id);
     if (!current) return;
     if (current.ephemeral) {
+      const optimistic = mergeCardPatch(current, patch);
       set((state) => ({
         stressCards: state.stressCards.map((card) =>
-          card.id === id ? mergeCardPatch(card, patch) : card,
+          card.id === id ? optimistic : card,
         ),
+        undoStack: appendHistory(state.undoStack, {
+            id: ++historySequence,
+            label: `Edit ${optimistic.name}`,
+            kind: "card-updated",
+            before: copyCard(current),
+            after: copyCard(optimistic),
+          }),
+        redoStack: [],
       }));
       return;
     }
@@ -290,6 +401,14 @@ export const useWorldStore = create<WorldState>((set, get) => ({
       set((state) => ({
         cards: state.cards.map((card) => (card.id === id ? authoritative : card)),
         syncState: "online",
+        undoStack: appendHistory(state.undoStack, {
+            id: ++historySequence,
+            label: `Edit ${authoritative.name}`,
+            kind: "card-updated",
+            before: copyCard(current),
+            after: copyCard(authoritative),
+          }),
+        redoStack: [],
       }));
     } catch (error) {
       set((state) => ({
@@ -305,19 +424,57 @@ export const useWorldStore = create<WorldState>((set, get) => ({
     if (card) await get().updateCard(id, expandedPatch(card));
   },
 
-  deleteCard: async (id) => {
-    const card = get().cards.find((item) => item.id === id);
-    if (!card) return;
-    try {
-      await worldApi.deleteNode(id);
-      set((state) => ({
-        cards: state.cards.filter((item) => item.id !== id),
-        edges: state.edges.filter((edge) => edge.source !== id && edge.target !== id),
-      }));
-      get().pushToast({ tone: "neutral", title: `${card.name} removed` });
-    } catch (error) {
-      get().pushToast({ tone: "error", title: "Object was not removed", detail: apiErrorMessage(error) });
+  deleteCard: async (id) => get().deleteCards([id]),
+
+  deleteCards: async (ids) => {
+    const requested = new Set(ids);
+    const cards = [...get().cards, ...get().stressCards].filter((card) => requested.has(card.id));
+    if (cards.length === 0) return;
+
+    const snapshots = new Map<string, RestorableCard>();
+    await Promise.all(cards.map(async (card) => snapshots.set(card.id, await snapshotCardForHistory(card))));
+
+    const removed: WorldCard[] = [];
+    for (const card of cards) {
+      try {
+        if (!card.ephemeral) await worldApi.deleteNode(card.id);
+        removed.push(card);
+      } catch (error) {
+        get().pushToast({
+          tone: "error",
+          title: `${card.name} was not removed`,
+          detail: apiErrorMessage(error),
+        });
+      }
     }
+    if (removed.length === 0) return;
+
+    const removedIds = new Set(removed.map((card) => card.id));
+    const attachedEdges = get().edges.filter(
+      (edge) => removedIds.has(edge.source) || removedIds.has(edge.target),
+    );
+    set((state) => ({
+      cards: state.cards.filter((card) => !removedIds.has(card.id)),
+      stressCards: state.stressCards.filter((card) => !removedIds.has(card.id)),
+      edges: state.edges.filter((edge) => !removedIds.has(edge.source) && !removedIds.has(edge.target)),
+      selectedCardIds: state.selectedCardIds.filter((id) => !removedIds.has(id)),
+      selectedEdgeId: attachedEdges.some((edge) => edge.id === state.selectedEdgeId)
+        ? undefined
+        : state.selectedEdgeId,
+      undoStack: appendHistory(state.undoStack, {
+          id: ++historySequence,
+          label: removed.length === 1 ? `Remove ${removed[0].name}` : `Remove ${removed.length} cards`,
+          kind: "cards-deleted",
+          cards: removed.map((card) => snapshots.get(card.id) ?? copyCard(card)),
+          edges: attachedEdges.map(copyEdge),
+        }),
+      redoStack: [],
+    }));
+    get().pushToast({
+      tone: "neutral",
+      title: removed.length === 1 ? `${removed[0].name} removed` : `${removed.length} cards removed`,
+      detail: "Press Ctrl+Z to restore.",
+    });
   },
 
   requestConnection: (source, target) => {
@@ -366,6 +523,13 @@ export const useWorldStore = create<WorldState>((set, get) => ({
         pendingConnection: undefined,
         selectedEdgeId: edge.id,
         syncState: "online",
+        undoStack: appendHistory(state.undoStack, {
+            id: ++historySequence,
+            label: "Create relationship",
+            kind: "edge-created",
+            edge: copyEdge(edge),
+          }),
+        redoStack: [],
       }));
       get().pushToast({
         tone: "success",
@@ -383,14 +547,25 @@ export const useWorldStore = create<WorldState>((set, get) => ({
   },
 
   selectEdge: (id) => set({ selectedEdgeId: id }),
+  selectCards: (ids) => set({ selectedCardIds: [...new Set(ids)] }),
 
   updateSelectedEdge: async (relationship) => {
     const id = get().selectedEdgeId;
     if (!id) return;
+    const previous = get().edges.find((edge) => edge.id === id);
+    if (!previous) return;
     try {
       const edge = await worldApi.updateEdge(id, relationship);
       set((state) => ({
         edges: state.edges.map((item) => (item.id === id ? edge : item)),
+        undoStack: appendHistory(state.undoStack, {
+            id: ++historySequence,
+            label: "Edit relationship",
+            kind: "edge-updated",
+            before: copyEdge(previous),
+            after: copyEdge(edge),
+          }),
+        redoStack: [],
       }));
       get().pushToast({ tone: "success", title: "Permission updated" });
     } catch (error) {
@@ -401,11 +576,20 @@ export const useWorldStore = create<WorldState>((set, get) => ({
   deleteSelectedEdge: async () => {
     const id = get().selectedEdgeId;
     if (!id) return;
+    const edge = get().edges.find((item) => item.id === id);
+    if (!edge) return;
     try {
       await worldApi.deleteEdge(id);
       set((state) => ({
         edges: state.edges.filter((edge) => edge.id !== id),
         selectedEdgeId: undefined,
+        undoStack: appendHistory(state.undoStack, {
+            id: ++historySequence,
+            label: "Remove relationship",
+            kind: "edge-deleted",
+            edge: copyEdge(edge),
+          }),
+        redoStack: [],
       }));
       get().pushToast({
         tone: "neutral",
@@ -630,8 +814,12 @@ export const useWorldStore = create<WorldState>((set, get) => ({
     const nodeId = event.node_id ?? event.agent_id ?? event.sandbox_id ?? event.resource_id;
     const normalizedType = event.type.replace(/[.\s-]/g, "_").toLowerCase();
     const outputText = String(
-      event.payload.text ?? event.payload.output ?? event.message ?? "",
+      event.payload.error ?? event.payload.text ?? event.payload.output ?? event.message ?? "",
     );
+    if (normalizedType.includes("runtime_error")) {
+      const model = String(get().cards.find((card) => card.id === nodeId)?.config.model ?? "configured model");
+      get().pushToast({ tone: "error", ...describeRuntimeError(outputText, model) });
+    }
     set((state) => ({
       events: [event, ...state.events].slice(0, 160),
       cards: nodeId
@@ -650,7 +838,8 @@ export const useWorldStore = create<WorldState>((set, get) => ({
               normalizedType.includes("stderr") ||
               normalizedType.includes("tool_") ||
               normalizedType.includes("command_") ||
-              normalizedType.includes("agent_");
+              normalizedType.includes("agent_") ||
+              normalizedType.includes("error");
             const existing = Array.isArray(card.config.output) ? card.config.output : [];
             const output = shouldAppend && outputText
               ? [...existing, `${normalizedType.includes("stderr") ? "! " : ""}${outputText}`].slice(-100)
@@ -688,33 +877,32 @@ export const useWorldStore = create<WorldState>((set, get) => ({
       models: normalizeModelList(settings.models),
     };
     if (normalized.models.length === 0) {
-      get().pushToast({
-        tone: "error",
-        title: "Add at least one model",
-        detail: "Agent cards need a model to call.",
-      });
+      get().pushToast({ tone: "error", title: "Add at least one model", detail: "Agent cards need a model to call." });
       return false;
     }
-    set({ modelSettings: normalized });
-    persistModelSettings(normalized);
     try {
-      await worldApi.configureLlm({
-        base_url: normalized.baseUrl,
-        api_key: normalized.apiKey,
-      });
-      get().pushToast({
-        tone: "success",
-        title: "Model settings saved",
-        detail: "New Agent runs will use this LiteLLM connection.",
-      });
+      await worldApi.configureLlm({ base_url: normalized.baseUrl, api_key: normalized.apiKey });
+      set({ modelSettings: normalized });
+      persistModelSettings(normalized);
+      get().pushToast({ tone: "success", title: "ADK model connection saved", detail: "New Agent runs use this connection when ADK selects LiteLLM." });
       return true;
+    } catch (error) {
+      get().pushToast({ tone: "error", title: "Model connection was not applied", detail: apiErrorMessage(error) });
+      return false;
+    }
+  },
+
+  restoreModelConnection: async () => {
+    const settings = get().modelSettings;
+    if (!settings.baseUrl && !settings.apiKey) return;
+    try {
+      await worldApi.configureLlm({ base_url: settings.baseUrl, api_key: settings.apiKey });
     } catch (error) {
       get().pushToast({
         tone: "error",
-        title: "Connection was not applied",
+        title: "Model connection was not restored",
         detail: apiErrorMessage(error),
       });
-      return false;
     }
   },
   togglePalette: () => set((state) => ({ paletteCollapsed: !state.paletteCollapsed })),
@@ -747,4 +935,147 @@ export const useWorldStore = create<WorldState>((set, get) => ({
   dismissToast: (id) => set((state) => ({
     toasts: state.toasts.filter((toast) => toast.id !== id),
   })),
+
+  undo: async () => {
+    const operation = get().undoStack.at(-1);
+    if (!operation || get().historyBusy) return;
+    set({ historyBusy: true });
+    try {
+      switch (operation.kind) {
+        case "card-created": {
+          for (const card of operation.cards) if (!card.ephemeral) await worldApi.deleteNode(card.id);
+          const ids = new Set(operation.cards.map((card) => card.id));
+          set((state) => ({
+            cards: state.cards.filter((card) => !ids.has(card.id)),
+            stressCards: state.stressCards.filter((card) => !ids.has(card.id)),
+            edges: state.edges.filter((edge) => !ids.has(edge.source) && !ids.has(edge.target)),
+            selectedCardIds: state.selectedCardIds.filter((id) => !ids.has(id)),
+          }));
+          break;
+        }
+        case "cards-deleted": {
+          const restored: WorldCard[] = [];
+          for (const card of operation.cards) {
+            restored.push(card.ephemeral ? copyCard(card) : await worldApi.createNode(restoreCardInput(card)));
+          }
+          const restoredEdges: WorldEdge[] = [];
+          for (const edge of operation.edges) restoredEdges.push(await worldApi.createEdge(copyEdge(edge)));
+          set((state) => ({
+            cards: mergeCards(state.cards, restored.filter((card) => !card.ephemeral)),
+            stressCards: mergeCards(state.stressCards, restored.filter((card) => card.ephemeral)),
+            edges: mergeEdges(state.edges, restoredEdges),
+          }));
+          break;
+        }
+        case "card-updated": {
+          const restored = operation.before.ephemeral
+            ? copyCard(operation.before)
+            : await worldApi.updateNode(operation.before.id, cardRestorePatch(operation.before));
+          set((state) => ({
+            cards: state.cards.map((card) => card.id === restored.id ? restored : card),
+            stressCards: state.stressCards.map((card) => card.id === restored.id ? restored : card),
+          }));
+          break;
+        }
+        case "edge-created":
+          await worldApi.deleteEdge(operation.edge.id);
+          set((state) => ({
+            edges: state.edges.filter((edge) => edge.id !== operation.edge.id),
+            selectedEdgeId: state.selectedEdgeId === operation.edge.id ? undefined : state.selectedEdgeId,
+          }));
+          break;
+        case "edge-deleted": {
+          const edge = await worldApi.createEdge(copyEdge(operation.edge));
+          set((state) => ({ edges: mergeEdges(state.edges, [edge]) }));
+          break;
+        }
+        case "edge-updated": {
+          const edge = await worldApi.updateEdge(operation.before.id, operation.before.relationship);
+          set((state) => ({
+            edges: state.edges.map((item) => item.id === edge.id ? edge : item),
+          }));
+          break;
+        }
+      }
+      set((state) => ({
+        undoStack: state.undoStack.slice(0, -1),
+        redoStack: [...state.redoStack, operation],
+      }));
+      get().pushToast({ tone: "neutral", title: `${operation.label} undone` });
+    } catch (error) {
+      get().pushToast({ tone: "error", title: "Undo could not be completed", detail: apiErrorMessage(error) });
+    } finally {
+      set({ historyBusy: false });
+    }
+  },
+
+  redo: async () => {
+    const operation = get().redoStack.at(-1);
+    if (!operation || get().historyBusy) return;
+    set({ historyBusy: true });
+    try {
+      switch (operation.kind) {
+        case "card-created": {
+          const restored: WorldCard[] = [];
+          for (const card of operation.cards) {
+            restored.push(card.ephemeral ? copyCard(card) : await worldApi.createNode(restoreCardInput(card)));
+          }
+          set((state) => ({
+            cards: mergeCards(state.cards, restored.filter((card) => !card.ephemeral)),
+            stressCards: mergeCards(state.stressCards, restored.filter((card) => card.ephemeral)),
+          }));
+          break;
+        }
+        case "cards-deleted": {
+          for (const card of operation.cards) if (!card.ephemeral) await worldApi.deleteNode(card.id);
+          const ids = new Set(operation.cards.map((card) => card.id));
+          set((state) => ({
+            cards: state.cards.filter((card) => !ids.has(card.id)),
+            stressCards: state.stressCards.filter((card) => !ids.has(card.id)),
+            edges: state.edges.filter((edge) => !ids.has(edge.source) && !ids.has(edge.target)),
+            selectedCardIds: state.selectedCardIds.filter((id) => !ids.has(id)),
+          }));
+          break;
+        }
+        case "card-updated": {
+          const restored = operation.after.ephemeral
+            ? copyCard(operation.after)
+            : await worldApi.updateNode(operation.after.id, cardRestorePatch(operation.after));
+          set((state) => ({
+            cards: state.cards.map((card) => card.id === restored.id ? restored : card),
+            stressCards: state.stressCards.map((card) => card.id === restored.id ? restored : card),
+          }));
+          break;
+        }
+        case "edge-created": {
+          const edge = await worldApi.createEdge(copyEdge(operation.edge));
+          set((state) => ({ edges: mergeEdges(state.edges, [edge]) }));
+          break;
+        }
+        case "edge-deleted":
+          await worldApi.deleteEdge(operation.edge.id);
+          set((state) => ({
+            edges: state.edges.filter((edge) => edge.id !== operation.edge.id),
+            selectedEdgeId: state.selectedEdgeId === operation.edge.id ? undefined : state.selectedEdgeId,
+          }));
+          break;
+        case "edge-updated": {
+          const edge = await worldApi.updateEdge(operation.after.id, operation.after.relationship);
+          set((state) => ({
+            edges: state.edges.map((item) => item.id === edge.id ? edge : item),
+          }));
+          break;
+        }
+      }
+      set((state) => ({
+        redoStack: state.redoStack.slice(0, -1),
+        undoStack: appendHistory(state.undoStack, operation),
+      }));
+      get().pushToast({ tone: "neutral", title: `${operation.label} redone` });
+    } catch (error) {
+      get().pushToast({ tone: "error", title: "Redo could not be completed", detail: apiErrorMessage(error) });
+    } finally {
+      set({ historyBusy: false });
+    }
+  },
 }));

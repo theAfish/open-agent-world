@@ -11,6 +11,7 @@ import {
   type OnNodeDrag,
   type OnInit,
   type OnMove,
+  type OnSelectionChangeParams,
   type Viewport,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -55,12 +56,17 @@ export function WorldCanvas() {
   const edges = useWorldStore((state) => state.edges);
   const activeChunkKeys = useWorldStore((state) => state.activeChunkKeys);
   const selectedEdgeId = useWorldStore((state) => state.selectedEdgeId);
+  const selectedCardIds = useWorldStore((state) => state.selectedCardIds);
   const setViewportState = useWorldStore((state) => state.setViewport);
   const updateCard = useWorldStore((state) => state.updateCard);
   const createCard = useWorldStore((state) => state.createCard);
   const requestConnection = useWorldStore((state) => state.requestConnection);
   const selectEdge = useWorldStore((state) => state.selectEdge);
   const deleteSelectedEdge = useWorldStore((state) => state.deleteSelectedEdge);
+  const deleteCards = useWorldStore((state) => state.deleteCards);
+  const selectCards = useWorldStore((state) => state.selectCards);
+  const undo = useWorldStore((state) => state.undo);
+  const redo = useWorldStore((state) => state.redo);
   const { getViewport, screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
 
   const renderCards = useMemo(
@@ -119,17 +125,36 @@ export function WorldCanvas() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.key === "Delete" || event.key === "Backspace") && selectedEdgeId) {
-        const target = event.target as HTMLElement | null;
-        if (target?.matches("input, textarea, select, [contenteditable='true']")) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.matches("input, textarea, select, [contenteditable='true']")) return;
+      const modifier = event.ctrlKey || event.metaKey;
+      if (modifier && event.key.toLowerCase() === "z") {
         event.preventDefault();
-        void deleteSelectedEdge();
+        if (event.shiftKey) void redo();
+        else void undo();
+        return;
+      }
+      if (modifier && event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        void redo();
+        return;
+      }
+      if (event.key === "Delete" || event.key === "Backspace") {
+        if (selectedCardIds.length > 0) {
+          event.preventDefault();
+          void deleteCards(selectedCardIds);
+          return;
+        }
+        if (selectedEdgeId) {
+          event.preventDefault();
+          void deleteSelectedEdge();
+        }
       }
       if (event.key === "Escape" && selectedEdgeId) selectEdge(undefined);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [deleteSelectedEdge, selectEdge, selectedEdgeId]);
+  }, [deleteCards, deleteSelectedEdge, redo, selectEdge, selectedCardIds, selectedEdgeId, undo]);
 
   const onNodeDragStop: OnNodeDrag<CanvasNode> = useCallback((_event, node) => {
     void updateCard(node.id, { position: node.position });
@@ -138,6 +163,10 @@ export function WorldCanvas() {
   const onConnect = useCallback((connection: Connection) => {
     requestConnection(connection.source, connection.target);
   }, [requestConnection]);
+
+  const onSelectionChange = useCallback(({ nodes: selectedNodes }: OnSelectionChangeParams<CanvasNode, CanvasEdge>) => {
+    selectCards(selectedNodes.map((node) => node.id));
+  }, [selectCards]);
 
   const onDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -168,7 +197,11 @@ export function WorldCanvas() {
         onInit={onInit}
         onMoveEnd={onMoveEnd}
         onEdgeClick={(_event, edge) => selectEdge(edge.id)}
-        onPaneClick={() => selectEdge(undefined)}
+        onSelectionChange={onSelectionChange}
+        onPaneClick={() => {
+          selectEdge(undefined);
+          selectCards([]);
+        }}
         minZoom={0.12}
         maxZoom={2.2}
         defaultViewport={defaultViewport}

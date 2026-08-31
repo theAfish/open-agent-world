@@ -47,10 +47,10 @@ def build_scoped_tool_callables(
 def build_scoped_tool_schemas(
     definitions: Sequence[ScopedToolDefinition],
 ) -> list[dict[str, Any]]:
-    """Build OpenAI/LiteLLM function-tool schemas from scoped capabilities.
+    """Build JSON function-tool schemas from scoped capabilities.
 
     The same validation rules are used for ADK callables and Chat Completions
-    tools, so switching runtimes cannot bypass the capability boundary.
+    tools, so alternate representations cannot bypass the capability boundary.
     """
 
     names: set[str] = set()

@@ -183,6 +183,10 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 
 .icon-button:hover,
 .top-icon-button:hover { color: var(--ink); border-color: var(--line-strong); transform: translateY(-1px); }
+.icon-button:disabled,
+.top-icon-button:disabled { cursor: not-allowed; opacity: 0.42; }
+.icon-button:disabled:hover,
+.top-icon-button:disabled:hover { color: var(--ink-soft); border-color: var(--line); transform: none; }
 .icon-button--danger:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 38%, transparent); }
 
 .primary-button,
@@ -456,6 +460,7 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .command-form > label { color: var(--ink-faint); font-size: 8px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.1em; }
 .field-label textarea,
 .field-row select,
+.field-row input,
 .command-form input,
 .card-section select {
   width: 100%;
@@ -468,10 +473,12 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .field-label textarea { padding: 8px 9px; font-size: 10px; line-height: 1.5; resize: vertical; min-height: 54px; }
 .field-label textarea:focus,
 .field-row select:focus,
+.field-row input:focus,
 .command-form input:focus { border-color: color-mix(in srgb, var(--card-kind) 45%, var(--line)); outline: none; }
 .field-row { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 10px; }
 .field-row label { display: grid; gap: 5px; }
-.field-row select { height: 32px; padding: 0 28px 0 9px; font-size: 10px; }
+.field-row select,
+.field-row input { height: 32px; padding: 0 9px; font-size: 10px; }
 .live-readout { height: 32px; display: flex; align-items: center; gap: 5px; padding: 0 9px; color: var(--accent-strong); border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); border-radius: 10px; background: var(--accent-soft); font-size: 8px; text-transform: uppercase; letter-spacing: 0.06em; }
 
 .card-section { display: grid; gap: 6px; padding: 9px 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
@@ -643,7 +650,15 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .permission-options label small { color: var(--ink-faint); font-size: 8px; line-height: 1.4; }
 .connection-dialog > footer { display: flex; justify-content: flex-end; gap: 7px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 
-/* Model settings */
+/* Backend connection failure */
+.backend-unavailable { position: fixed; z-index: 90; top: 85px; left: 50%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; width: min(590px, calc(100vw - 40px)); padding: 10px 12px; color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--line)); border-radius: 13px; background: color-mix(in srgb, var(--surface-solid) 94%, var(--danger-soft)); box-shadow: var(--panel-shadow); transform: translateX(-50%); }
+.backend-unavailable > div { min-width: 0; display: grid; gap: 2px; }
+.backend-unavailable strong { font-size: 9px; }
+.backend-unavailable p, .backend-unavailable small { margin: 0; color: var(--ink-soft); font-size: 8px; line-height: 1.4; }
+.backend-unavailable code { font-family: "Cascadia Code", Consolas, monospace; }
+.backend-unavailable > button { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 38%, var(--line)); border-radius: 8px; background: var(--surface-raised); font-size: 8px; cursor: pointer; }
+
+/* ADK model connection settings */
 .settings-dialog { width: min(560px, 100%); max-height: min(720px, calc(100vh - 40px)); overflow: auto; padding: 15px; border: 1px solid var(--line-strong); border-radius: 20px; background: var(--surface-solid); box-shadow: 18px 24px 60px var(--shadow-deep), inset 1px 1px 0 var(--highlight); animation: dialogIn 180ms ease-out; }
 .settings-dialog > header { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; }
 .settings-dialog header > div:nth-child(2) { display: grid; gap: 2px; }
@@ -651,14 +666,11 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .settings-dialog h2 { margin: 0; font-size: 15px; font-weight: 660; }
 .settings-form { display: grid; gap: 13px; margin-top: 18px; }
 .settings-form .field-label > span { display: flex; align-items: center; gap: 5px; }
-.settings-form input,
-.settings-form textarea { width: 100%; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--surface-soft) 78%, transparent); box-shadow: inset 2px 2px 5px color-mix(in srgb, var(--shadow) 50%, transparent), inset -1px -1px 2px var(--highlight); }
+.settings-form input, .settings-form textarea { width: 100%; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--surface-soft) 78%, transparent); box-shadow: inset 2px 2px 5px color-mix(in srgb, var(--shadow) 50%, transparent), inset -1px -1px 2px var(--highlight); }
 .settings-form input { height: 34px; padding: 0 9px; font-size: 10px; }
 .settings-form textarea { min-height: 120px; padding: 8px 9px; font: 10px/1.55 "Cascadia Code", Consolas, monospace; resize: vertical; }
-.settings-form input:focus,
-.settings-form textarea:focus { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); outline: none; }
+.settings-form input:focus, .settings-form textarea:focus { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); outline: none; }
 .settings-form small { color: var(--ink-faint); font-size: 8px; line-height: 1.4; }
-.settings-form code { color: var(--accent-strong); font: 8px "Cascadia Code", Consolas, monospace; }
 .settings-dialog > footer { display: flex; justify-content: flex-end; gap: 7px; margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
 
 /* Toasts */

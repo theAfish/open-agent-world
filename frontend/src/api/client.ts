@@ -9,6 +9,12 @@ import type {
   WorldSnapshot,
 } from "../types/world";
 
+export type CardCreateInput = (Omit<WorldCard, "id"> | WorldCard) & {
+  content?: string;
+  data_base64?: string;
+  media_type?: string;
+};
+
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, "") ?? "/api";
 
 export class ApiError extends Error {
@@ -24,6 +30,32 @@ export class ApiError extends Error {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function errorMessage(detail: unknown, status: number): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => asRecord(item).msg)
+      .filter((message): message is string => typeof message === "string");
+    if (messages.length > 0) return messages.join("; ");
+  }
+  return `Request failed with status ${status}.`;
+}
+
+const IMAGE_TYPE_BY_EXTENSION: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+};
+
+function imageMediaType(file: File): string {
+  const declared = file.type.toLowerCase().split(";", 1)[0];
+  if (Object.values(IMAGE_TYPE_BY_EXTENSION).includes(declared)) return declared;
+  const extension = file.name.toLowerCase().split(".").pop() ?? "";
+  return IMAGE_TYPE_BY_EXTENSION[extension] ?? (declared || "application/octet-stream");
 }
 
 function asNumber(value: unknown, fallback: number): number {
@@ -141,7 +173,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const errorRecord = asRecord(bodyRecord.error);
     const detail = errorRecord.message ?? bodyRecord.detail ?? body;
     throw new ApiError(
-      typeof detail === "string" ? detail : `Request failed with status ${response.status}.`,
+      errorMessage(detail, response.status),
       response.status,
       detail,
     );
@@ -170,14 +202,19 @@ export const worldApi = {
     };
   },
 
-  async createNode(node: Omit<WorldCard, "id">): Promise<WorldCard> {
+  async createNode(node: CardCreateInput): Promise<WorldCard> {
     const payload = {
+      ...("id" in node ? { id: node.id } : {}),
       type: node.type,
       name: node.name,
       position: node.position,
       size: node.size,
       expanded: node.expanded,
+      status: node.status,
       config: node.config,
+      content: node.content,
+      data_base64: node.data_base64,
+      media_type: node.media_type,
     };
     const body = await request<unknown>("/nodes", {
       method: "POST",
@@ -201,7 +238,28 @@ export const worldApi = {
     return request<void>(`/nodes/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
+  async getTextContent(nodeId: string): Promise<string> {
+    const response = await fetch(resourceContentUrl(nodeId));
+    if (!response.ok) throw new ApiError("The text resource could not be read.", response.status);
+    return response.text();
+  },
+
+  async getImageRestoreData(nodeId: string): Promise<{ data_base64: string; media_type: string }> {
+    const response = await fetch(resourceContentUrl(nodeId));
+    if (!response.ok) throw new ApiError("The image resource could not be read.", response.status);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    let binary = "";
+    for (let index = 0; index < bytes.length; index += 8192) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + 8192));
+    }
+    return {
+      data_base64: btoa(binary),
+      media_type: response.headers.get("content-type") ?? "application/octet-stream",
+    };
+  },
+
   async createEdge(input: {
+    id?: string;
     source: string;
     target: string;
     relationship: Relationship;
@@ -270,7 +328,7 @@ export const worldApi = {
       method: "POST",
       body: JSON.stringify({
         filename: file.name,
-        mime_type: file.type || "application/octet-stream",
+        media_type: imageMediaType(file),
         data_base64: dataUrl.slice(dataUrl.indexOf(",") + 1),
       }),
     });

@@ -508,7 +508,15 @@ class ManagedResourceStore:
                 width = 1 + int.from_bytes(data[24:27], "little")
                 height = 1 + int.from_bytes(data[27:30], "little")
                 return "image/webp", width, height
-            raise ResourceValidationError("only extended WebP images are supported")
+            if data[12:16] == b"VP8 " and data[23:26] == b"\x9d\x01\x2a":
+                width = int.from_bytes(data[26:28], "little") & 0x3FFF
+                height = int.from_bytes(data[28:30], "little") & 0x3FFF
+                if width and height:
+                    return "image/webp", width, height
+            if data[12:16] == b"VP8L" and len(data) >= 25 and data[20] == 0x2F:
+                width = 1 + data[21] + ((data[22] & 0x3F) << 8)
+                height = 1 + (data[22] >> 6) + (data[23] << 2) + ((data[24] & 0x0F) << 10)
+                return "image/webp", width, height
         if data.startswith(b"\xff\xd8"):
             index = 2
             while index + 9 < len(data):

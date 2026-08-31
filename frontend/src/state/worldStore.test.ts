@@ -20,9 +20,13 @@ describe("authoritative world synchronization", () => {
       syncState: "online",
       socketState: "closed",
       selectedEdgeId: undefined,
+      selectedCardIds: [],
       pendingConnection: undefined,
       events: [],
       toasts: [],
+      undoStack: [],
+      redoStack: [],
+      historyBusy: false,
     });
   });
 
@@ -83,6 +87,45 @@ describe("authoritative world synchronization", () => {
     await useWorldStore.getState().deleteSelectedEdge();
     expect(useWorldStore.getState().edges).toEqual([]);
     expect(useWorldStore.getState().selectedEdgeId).toBeUndefined();
+  });
+
+  it("restores a deleted card and its relationships, then can delete it again", async () => {
+    const agent = card("agent", "agent");
+    const text = card("text", "text");
+    const edge: WorldEdge = {
+      id: "edge",
+      source: agent.id,
+      target: text.id,
+      relationship: "read",
+    };
+    useWorldStore.setState({
+      cards: [agent, text],
+      edges: [edge],
+      selectedCardIds: [text.id],
+    });
+    const deleteNode = vi.spyOn(worldApi, "deleteNode").mockResolvedValue(undefined);
+    const createNode = vi.spyOn(worldApi, "createNode").mockResolvedValue(text);
+    const createEdge = vi.spyOn(worldApi, "createEdge").mockResolvedValue(edge);
+    vi.spyOn(worldApi, "getTextContent").mockResolvedValue("remembered text");
+
+    await useWorldStore.getState().deleteCards([text.id]);
+    expect(useWorldStore.getState().cards).toEqual([agent]);
+    expect(useWorldStore.getState().edges).toEqual([]);
+    expect(useWorldStore.getState().undoStack.at(-1)?.kind).toBe("cards-deleted");
+
+    await useWorldStore.getState().undo();
+    expect(createNode).toHaveBeenCalledWith(expect.objectContaining({
+      id: text.id,
+      content: "remembered text",
+    }));
+    expect(createEdge).toHaveBeenCalledWith(edge);
+    expect(useWorldStore.getState().cards.map((item) => item.id)).toEqual([agent.id, text.id]);
+    expect(useWorldStore.getState().edges).toEqual([edge]);
+
+    await useWorldStore.getState().redo();
+    expect(deleteNode).toHaveBeenCalledTimes(2);
+    expect(useWorldStore.getState().cards).toEqual([agent]);
+    expect(useWorldStore.getState().edges).toEqual([]);
   });
 
   it("returns a completed Sandbox command to ready state without a live socket", async () => {

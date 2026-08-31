@@ -74,6 +74,21 @@ class GoogleAdkAgentRuntime(AgentRuntime):
         self._sessions = self._adk.InMemorySessionService()
         self._records: dict[str, AgentRecord] = {}
         self._records_lock = asyncio.Lock()
+        self._litellm_connection: dict[str, str] = {}
+
+    def configure_litellm_connection(
+        self, *, api_base: str | None = None, api_key: str | None = None
+    ) -> None:
+        """Keep ADK LiteLLM connection overrides in runtime memory only."""
+
+        if api_base:
+            self._litellm_connection["api_base"] = api_base
+        else:
+            self._litellm_connection.pop("api_base", None)
+        if api_key:
+            self._litellm_connection["api_key"] = api_key
+        else:
+            self._litellm_connection.pop("api_key", None)
 
     async def create_agent(self, config: AgentConfig) -> AgentInfo:
         validate_agent_config(config)
@@ -138,7 +153,7 @@ class GoogleAdkAgentRuntime(AgentRuntime):
             agent = self._adk.Agent(
                 name=self._adk_agent_name(agent_id),
                 description=record.config.name,
-                model=record.config.model,
+                model=self._adk_model(record.config.model),
                 instruction=record.config.system_instruction,
                 tools=tools,
             )
@@ -181,13 +196,14 @@ class GoogleAdkAgentRuntime(AgentRuntime):
             yield AgentEvent(agent_id, run_id, AgentEventType.STOPPED, {})
             yield self._status_event(record, run_id)
         except Exception as exc:
+            error_message = _runtime_error_message(exc)
             async with record.lock:
                 record.status = AgentStatus.ERROR
-                record.last_error = str(exc)
+                record.last_error = error_message
                 record.active_run_id = None
                 record.active_task = None
             yield AgentEvent(
-                agent_id, run_id, AgentEventType.ERROR, {"error": str(exc)}
+                agent_id, run_id, AgentEventType.ERROR, {"error": error_message}
             )
             yield self._status_event(record, run_id)
             raise
@@ -258,6 +274,19 @@ class GoogleAdkAgentRuntime(AgentRuntime):
             except KeyError as exc:
                 raise AgentNotFoundError(f"agent not found: {agent_id}") from exc
 
+    def _adk_model(self, configured_model: str) -> Any:
+        """Return a configured LiteLlm object only when ADK selects that adapter."""
+
+        if not self._litellm_connection:
+            return configured_model
+        from google.adk.models import LLMRegistry
+        from google.adk.models.lite_llm import LiteLlm
+
+        resolved = LLMRegistry.new_llm(configured_model)
+        if isinstance(resolved, LiteLlm):
+            return LiteLlm(configured_model, **self._litellm_connection)
+        return configured_model
+
     @staticmethod
     def _status_event(record: AgentRecord, run_id: str) -> AgentEvent:
         return AgentEvent(
@@ -299,4 +328,30 @@ def _json_safe(value: Any, *, max_length: int = 8192) -> Any:
     if isinstance(value, (list, tuple)):
         return [_json_safe(item, max_length=max_length) for item in value[:100]]
     return repr(value)[:max_length]
+
+
+def _runtime_error_message(error: BaseException) -> str:
+    """Expose the most actionable provider failure, not ADK's wrapper error."""
+
+    pending = [error]
+    seen: set[int] = set()
+    messages: list[str] = []
+    while pending:
+        current = pending.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        message = str(current).strip()
+        if message:
+            messages.append(message)
+            if "missing credentials" in message.lower() or "api_key" in message.lower():
+                return message
+        for nested in (
+            current.__cause__,
+            current.__context__,
+            getattr(current, "error", None),
+        ):
+            if isinstance(nested, BaseException):
+                pending.append(nested)
+    return messages[0] if messages else type(error).__name__
 
