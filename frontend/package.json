@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit -p tsconfig.app.json && vite build",
-    "test": "vitest run"
+    "test": "vitest run src",
+    "test:e2e": "node scripts/run-e2e.mjs"
   },
   "dependencies": {
     "@xyflow/react": "^12.8.5",
@@ -16,6 +17,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@types/react": "^18.3.18",

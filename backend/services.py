@@ -399,6 +399,27 @@ class ApplicationServices:
             raise RuntimeUnavailableError("agent runtime is not configured")
         return await self.agent_runtime.get_agent(agent_id)
 
+    async def communicate_with_agent(
+        self, source_agent_id: str, target_agent_id: str, message: str
+    ) -> dict[str, str]:
+        source = self._require_card_type(source_agent_id, CardType.AGENT)
+        target = self._require_card_type(target_agent_id, CardType.AGENT)
+        self.capabilities.require_agent_communicate(source_agent_id, target_agent_id)
+        if self.agent_runtime is None:
+            raise RuntimeUnavailableError("agent runtime is not configured")
+        prompt = f"Message from {source.name}:\n\n{message.strip()}"
+        final_text = ""
+        async for event in self.agent_runtime.run(target_agent_id, prompt):
+            await self._publish_agent_event(event)
+            text = event.payload.get("text")
+            if isinstance(text, str):
+                final_text = text
+        return {
+            "agent_id": target.id,
+            "agent_name": target.name,
+            "response": final_text,
+        }
+
     async def configure_llm_connection(
         self, *, base_url: str | None, api_key: str | None
     ) -> dict[str, bool]:

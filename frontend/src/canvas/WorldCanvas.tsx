@@ -1,6 +1,7 @@
 import {
   Background,
   BackgroundVariant,
+  ConnectionMode,
   Controls,
   MarkerType,
   MiniMap,
@@ -18,8 +19,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WorldCardNode } from "../cards/CardFrame";
 import type { CanvasNode, CanvasNodeData } from "../cards/types";
 import { EdgeInspector } from "../edges/EdgeInspector";
+import { RelationshipConnectionLine } from "../edges/RelationshipConnectionLine";
 import { SemanticEdge, type CanvasEdge } from "../edges/SemanticEdge";
 import { filterCardsToChunks } from "../state/chunks";
+import { validateConnection } from "../state/relationships";
 import { useWorldStore } from "../state/worldStore";
 import type { CardType } from "../types/world";
 import { ContourLayer } from "./ContourLayer";
@@ -164,6 +167,18 @@ export function WorldCanvas() {
     requestConnection(connection.source, connection.target);
   }, [requestConnection]);
 
+  const isValidConnection = useCallback((connection: Connection | CanvasEdge) => {
+    const source = renderCards.find((card) => card.id === connection.source);
+    const target = renderCards.find((card) => card.id === connection.target);
+    return validateConnection(
+      connection.source,
+      connection.target,
+      source?.type,
+      target?.type,
+      edges,
+    ).valid;
+  }, [edges, renderCards]);
+
   const onSelectionChange = useCallback(({ nodes: selectedNodes }: OnSelectionChangeParams<CanvasNode, CanvasEdge>) => {
     selectCards(selectedNodes.map((node) => node.id));
   }, [selectCards]);
@@ -180,6 +195,7 @@ export function WorldCanvas() {
     <div
       ref={wrapper}
       className="world-canvas"
+      data-testid="world-canvas"
       onDrop={onDrop}
       onDragOver={(event) => {
         event.preventDefault();
@@ -194,6 +210,9 @@ export function WorldCanvas() {
         onNodesChange={onNodesChange}
         onNodeDragStop={onNodeDragStop}
         onConnect={onConnect}
+        isValidConnection={isValidConnection}
+        connectionMode={ConnectionMode.Loose}
+        connectionLineComponent={RelationshipConnectionLine}
         onInit={onInit}
         onMoveEnd={onMoveEnd}
         onEdgeClick={(_event, edge) => selectEdge(edge.id)}

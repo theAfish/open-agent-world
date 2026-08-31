@@ -36,7 +36,26 @@ class CapabilityBroker:
         for edge in self.world.list_edges_from(agent_id):
             target = self.world.get_card(edge.target)
             suffix = _tool_suffix(target)
-            if target.type is CardType.TEXT and edge.relationship in {
+            if target.type is CardType.AGENT and edge.relationship is Relationship.COMMUNICATE:
+                capabilities.append(
+                    Capability(
+                        id=f"{CapabilityKind.AGENT_COMMUNICATE.value}:{target.id}",
+                        tool_name=f"message_agent_{suffix}",
+                        kind=CapabilityKind.AGENT_COMMUNICATE,
+                        agent_id=agent.id,
+                        target_id=target.id,
+                        target_type=target.type,
+                        target_name=target.name,
+                        description=f"Send a message to agent {target.name!r} and receive its response.",
+                        input_schema={
+                            "type": "object",
+                            "properties": {"message": {"type": "string"}},
+                            "required": ["message"],
+                            "additionalProperties": False,
+                        },
+                    )
+                )
+            elif target.type is CardType.TEXT and edge.relationship in {
                 Relationship.READ,
                 Relationship.READ_EDIT,
             }:
@@ -112,6 +131,15 @@ class CapabilityBroker:
                     )
                 )
         return CapabilitySet(agent_id=agent.id, capabilities=capabilities)
+
+    def require_agent_communicate(self, agent_id: str, target_agent_id: str) -> None:
+        self._require_type(agent_id, CardType.AGENT)
+        self._require_type(target_agent_id, CardType.AGENT)
+        edge = self.world.find_edge(agent_id, target_agent_id)
+        if edge is None or edge.relationship is not Relationship.COMMUNICATE:
+            raise PermissionDeniedError(
+                f"agent {agent_id!r} cannot communicate with agent {target_agent_id!r}"
+            )
 
     def require_text_read(self, agent_id: str, resource_id: str) -> None:
         self._require_type(agent_id, CardType.AGENT)
@@ -232,8 +260,20 @@ class CapabilityBroker:
 
     def invoke_structured_tool(
         self, agent_id: str, tool_name: str, arguments: dict[str, Any]
-    ) -> TextDocument | tuple[ResourceRecord, Path] | tuple[str, list[str]]:
+    ) -> TextDocument | tuple[ResourceRecord, Path] | tuple[str, list[str]] | tuple[str, str]:
         capability = self.capability_for_tool(agent_id, tool_name)
+        if capability.kind is CapabilityKind.AGENT_COMMUNICATE:
+            message = arguments.get("message")
+            if (
+                set(arguments) != {"message"}
+                or not isinstance(message, str)
+                or not message.strip()
+            ):
+                raise ResourceValidationError(
+                    "agent communication tool requires one non-empty message"
+                )
+            self.require_agent_communicate(agent_id, capability.target_id)
+            return capability.target_id, message
         if capability.kind is CapabilityKind.TEXT_READ:
             if arguments:
                 raise ResourceValidationError("text read tool takes no arguments")

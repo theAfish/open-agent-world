@@ -15,6 +15,7 @@ class CardType(StrEnum):
 
 
 class Relationship(StrEnum):
+    COMMUNICATE = "communicate"
     READ = "read"
     READ_EDIT = "read_edit"
     VIEW = "view"

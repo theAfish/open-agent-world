@@ -3,6 +3,9 @@ import { getRelationshipOptions, validateConnection } from "./relationships";
 
 describe("semantic relationship rules", () => {
   it("offers only the closed permission set for each direction", () => {
+    expect(getRelationshipOptions("agent", "agent").map((item) => item.value)).toEqual([
+      "communicate",
+    ]);
     expect(getRelationshipOptions("agent", "text").map((item) => item.value)).toEqual([
       "read",
       "read_edit",

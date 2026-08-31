@@ -43,8 +43,6 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
   const deleteCard = useWorldStore((state) => state.deleteCard);
   const Icon = ICONS[card.type];
   const Body = BODIES[card.type];
-  const canSource = card.type !== "sandbox";
-  const canTarget = card.type !== "agent";
 
   const handleDelete = () => void deleteCard(card.id);
 
@@ -53,15 +51,25 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
       className={`world-card world-card--${card.type} ${card.expanded ? "is-expanded" : ""} ${selected ? "is-selected" : ""} ${card.status === "running" ? "is-running" : ""} ${card.status === "error" ? "is-error" : ""} ${card.ephemeral ? "is-ephemeral" : ""}`}
       aria-label={`${CARD_TYPE_LABELS[card.type]} ${card.name}`}
       data-card-id={card.id}
+      data-card-type={card.type}
+      data-card-expanded={card.expanded ? "true" : "false"}
     >
-      {canTarget ? (
+      {!card.ephemeral ? ([
+        [Position.Top, "top"],
+        [Position.Right, "right"],
+        [Position.Bottom, "bottom"],
+        [Position.Left, "left"],
+      ] as const).map(([position, side]) => (
         <Handle
-          type="target"
-          position={Position.Left}
-          className="semantic-handle semantic-handle--target"
-          aria-label={`Connect a capability into ${card.name}`}
+          key={side}
+          id={`boundary-${side}`}
+          type="source"
+          position={position}
+          className={`semantic-handle semantic-handle--${side}`}
+          data-connection-side={side}
+          aria-label={`Start a relationship from the ${side} edge of ${card.name}`}
         />
-      ) : null}
+      )) : null}
 
       <header className="card-header">
         <div className="card-kind-icon" aria-hidden="true">
@@ -123,14 +131,6 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
         </div>
       </footer>
 
-      {canSource ? (
-        <Handle
-          type="source"
-          position={Position.Right}
-          className="semantic-handle semantic-handle--source"
-          aria-label={`Connect a capability from ${card.name}`}
-        />
-      ) : null}
     </article>
   );
 }

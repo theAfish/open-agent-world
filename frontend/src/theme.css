@@ -404,17 +404,24 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .card-expand-button { height: 27px; display: flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-soft); background: var(--surface-soft); font-size: 8px; font-weight: 670; text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; }
 
 .semantic-handle {
-  width: 11px !important;
-  height: 11px !important;
-  border: 2px solid var(--surface-raised) !important;
-  border-radius: 50% !important;
-  background: var(--card-kind) !important;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--card-kind) 70%, transparent), 0 2px 6px var(--shadow-deep);
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  z-index: 12;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  transform: none !important;
+  transition: background 120ms ease, box-shadow 120ms ease;
+  cursor: crosshair;
 }
-.semantic-handle:hover { transform: scale(1.35); box-shadow: 0 0 0 5px color-mix(in srgb, var(--card-kind) 14%, transparent); }
-.semantic-handle--target { left: -6px !important; }
-.semantic-handle--source { right: -6px !important; }
+.semantic-handle:hover,
+.semantic-handle.connectingfrom { background: color-mix(in srgb, var(--card-kind) 28%, transparent) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--card-kind) 10%, transparent); }
+.semantic-handle--top,
+.semantic-handle--bottom { left: 12px !important; width: calc(100% - 24px) !important; height: 12px !important; }
+.semantic-handle--top { top: -6px !important; }
+.semantic-handle--bottom { top: auto !important; bottom: -6px !important; }
+.semantic-handle--left,
+.semantic-handle--right { top: 12px !important; width: 12px !important; height: calc(100% - 24px) !important; }
+.semantic-handle--left { left: -6px !important; }
+.semantic-handle--right { left: auto !important; right: -6px !important; }
 
 /* Compact card visuals */
 .compact-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; margin-top: 8px; }
@@ -560,9 +567,16 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .semantic-edge-path { stroke: var(--edge); stroke-width: 1.4; opacity: 0.72; transition: stroke-width 150ms ease, opacity 150ms ease, stroke 150ms ease; }
 .react-flow__edge:hover .semantic-edge-path,
 .semantic-edge-path.is-selected { stroke: var(--accent); stroke-width: 2.2; opacity: 1; }
+.semantic-edge-endpoint { fill: var(--surface-raised); stroke: var(--edge); stroke-width: 2; pointer-events: none; transition: fill 150ms ease, stroke 150ms ease, r 150ms ease; }
+.react-flow__edge:hover .semantic-edge-endpoint,
+.react-flow__edge.selected .semantic-edge-endpoint { fill: var(--accent); stroke: var(--surface-raised); r: 5.25px; }
 .semantic-edge-label { position: absolute; display: flex; align-items: center; gap: 5px; padding: 4px 7px; color: var(--ink-soft); border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--surface) 93%, transparent); box-shadow: 0 3px 8px var(--shadow); font-size: 8px; font-weight: 650; white-space: nowrap; pointer-events: none; }
 .semantic-edge-label > span { width: 5px; height: 5px; border-radius: 50%; background: var(--edge); }
 .semantic-edge-label.is-selected { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.semantic-connection-path { fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-dasharray: 5 4; opacity: 0.9; }
+.semantic-connection circle { fill: var(--accent); }
+.semantic-connection.is-invalid .semantic-connection-path { stroke: var(--danger); opacity: 0.62; }
+.semantic-connection.is-invalid circle { fill: var(--danger); }
 
 .world-controls.react-flow__controls { right: 20px; bottom: 21px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--panel-shadow); }
 .world-controls .react-flow__controls-button { width: 32px; height: 31px; color: var(--ink-soft); border-bottom-color: var(--line); background: var(--chrome); }

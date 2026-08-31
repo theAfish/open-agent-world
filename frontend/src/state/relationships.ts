@@ -8,6 +8,12 @@ export interface RelationshipOption {
 }
 
 const RELATIONSHIP_OPTIONS: Record<Relationship, RelationshipOption> = {
+  communicate: {
+    value: "communicate",
+    label: "Communicate",
+    shortLabel: "message",
+    description: "The agent can send a scoped message to this agent and receive its response.",
+  },
   read: {
     value: "read",
     label: "Read",
@@ -48,6 +54,7 @@ const RELATIONSHIP_OPTIONS: Record<Relationship, RelationshipOption> = {
 
 const VALID_RELATIONSHIPS: Partial<Record<CardType, Partial<Record<CardType, Relationship[]>>>> = {
   agent: {
+    agent: ["communicate"],
     text: ["read", "read_edit"],
     image: ["view"],
     sandbox: ["execute"],

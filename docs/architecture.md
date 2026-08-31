@@ -24,6 +24,7 @@ A card stores identity, type, world position, size, expansion state, configurati
 
 | Source | Target | Relationships |
 | --- | --- | --- |
+| Agent | Agent | `communicate` |
 | Agent | Text | `read`, `read_edit` |
 | Agent | Image | `view` |
 | Agent | Sandbox | `execute` |
@@ -31,6 +32,8 @@ A card stores identity, type, world position, size, expansion state, configurati
 | Image | Sandbox | `mount_read_only` |
 
 The backend rejects reversed, unsupported, duplicate, and self-referential edges. Scoped capabilities are generated from valid edges; there is no global “resource by ID” tool exposed to an agent.
+
+An Agent-to-Agent `communicate` edge is directed. It exposes one target-scoped messaging tool to the source Agent; invoking it starts the target Agent with the message and returns its final response. The permission is re-checked at invocation time like every other graph-derived capability.
 
 ## Direct interaction flow
 

@@ -9,6 +9,7 @@ from backend.world.models import CardType
 
 
 class CapabilityKind(StrEnum):
+    AGENT_COMMUNICATE = "agent.communicate"
     TEXT_READ = "text.read"
     TEXT_EDIT = "text.edit"
     IMAGE_VIEW = "image.view"

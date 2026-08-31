@@ -24,7 +24,13 @@ class WorldAgentCapabilityProvider:
         definitions: list[ScopedToolDefinition] = []
         for capability in self.services.capabilities.derive(agent_id).capabilities:
             parameters: tuple[ToolParameter, ...] = ()
-            if capability.kind is CapabilityKind.TEXT_EDIT:
+            if capability.kind is CapabilityKind.AGENT_COMMUNICATE:
+                parameters = (
+                    ToolParameter(
+                        "message", str, "Message or question for the connected agent."
+                    ),
+                )
+            elif capability.kind is CapabilityKind.TEXT_EDIT:
                 parameters = (
                     ToolParameter(
                         "content", str, "Complete replacement text for this resource."
@@ -58,6 +64,18 @@ class WorldAgentCapabilityProvider:
             agent_id, capability_id
         )
         values = dict(arguments)
+        if capability.kind is CapabilityKind.AGENT_COMMUNICATE:
+            if (
+                set(values) != {"message"}
+                or not isinstance(values["message"], str)
+                or not values["message"].strip()
+            ):
+                raise ResourceValidationError(
+                    "agent communication capability requires one non-empty message"
+                )
+            return await self.services.communicate_with_agent(
+                agent_id, capability.target_id, values["message"]
+            )
         if capability.kind is CapabilityKind.TEXT_READ:
             if values:
                 raise ResourceValidationError("text read capability takes no arguments")

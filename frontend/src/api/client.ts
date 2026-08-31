@@ -79,6 +79,7 @@ function normalizeRelationship(value: unknown): Relationship {
   };
   const normalized = aliases[String(value)] ?? value;
   if (
+    normalized === "communicate" ||
     normalized === "read" ||
     normalized === "read_edit" ||
     normalized === "view" ||

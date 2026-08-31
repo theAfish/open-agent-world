@@ -948,7 +948,6 @@ Do not implement during this POC:
 
 * plugin marketplace;
 * arbitrary third-party Cards;
-* Agent-to-Agent communication;
 * subagent creation;
 * autonomous Card generation;
 * persistent long-term Agent memory;

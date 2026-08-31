@@ -5,6 +5,7 @@ export type SandboxStatus = "stopped" | "ready" | "running" | "error";
 export type CardStatus = AgentStatus | SandboxStatus | "available" | "modified";
 
 export type Relationship =
+  | "communicate"
   | "read"
   | "read_edit"
   | "view"

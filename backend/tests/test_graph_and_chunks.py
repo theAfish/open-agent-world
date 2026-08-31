@@ -7,6 +7,7 @@ from backend.tests.conftest import create_node
 
 def test_invalid_graph_relationships_are_rejected(client: TestClient) -> None:
     agent = create_node(client, "agent")
+    other_agent = create_node(client, "agent")
     text = create_node(client, "text")
     image = create_node(client, "image")
     sandbox = create_node(client, "sandbox")
@@ -27,6 +28,16 @@ def test_invalid_graph_relationships_are_rejected(client: TestClient) -> None:
         },
     )
     assert writable_image.status_code == 422
+
+    communication = client.post(
+        "/api/edges",
+        json={
+            "source": agent["id"],
+            "target": other_agent["id"],
+            "relationship": "communicate",
+        },
+    )
+    assert communication.status_code == 201
 
     valid = client.post(
         "/api/edges",

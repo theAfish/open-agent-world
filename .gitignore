@@ -9,6 +9,8 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
 
 # Local application state and secrets
 .env

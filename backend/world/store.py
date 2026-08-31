@@ -32,6 +32,7 @@ from backend.world.models import (
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$")
 
 _RELATIONSHIPS: dict[tuple[CardType, CardType], frozenset[Relationship]] = {
+    (CardType.AGENT, CardType.AGENT): frozenset({Relationship.COMMUNICATE}),
     (CardType.AGENT, CardType.TEXT): frozenset(
         {Relationship.READ, Relationship.READ_EDIT}
     ),

@@ -64,6 +64,14 @@ uv run --project backend python -m backend.scripts.http_acceptance_smoke
 
 It creates and cleans up a four-card world, exercises direct Text/Image capabilities, runs the mock Agent boundary, edits a mounted Text resource inside a real AppContainer, and verifies edge revocation.
 
+For a real-browser canvas interaction check, run:
+
+```powershell
+npm --prefix frontend run test:e2e
+```
+
+The Playwright check uses the installed Chrome, starts isolated mock-runtime backend and frontend servers, creates disposable Agent cards, drags a relationship from one card boundary to another, and verifies the persisted curve and both visible boundary endpoints. Stable `data-card-*`, `data-connection-side`, and `data-edge-*` attributes are also available to local accessibility and automation tools.
+
 ## Project map
 
 ```text
