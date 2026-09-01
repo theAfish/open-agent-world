@@ -348,9 +348,6 @@ export function WorldCanvas() {
       </ReactFlow>
       <EdgeInspector />
       <NodeWorkspace />
-      <div className="chunk-readout" aria-label={`${activeChunkKeys.length} nearby chunks active`}>
-        <span aria-hidden="true" /> {activeChunkKeys.length} chunks live · {renderCards.length} cards mounted
-      </div>
     </div>
   );
 }

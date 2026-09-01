@@ -1,38 +1,66 @@
 import {
   Bot,
   Boxes,
-  ChevronLeft,
-  ChevronRight,
   FileText,
-  FlaskConical,
   Image as ImageIcon,
+  Layers3,
   Plus,
-  Trash2,
   Workflow,
   type LucideIcon,
 } from "lucide-react";
-import type { DragEvent } from "react";
+import { useState, type DragEvent } from "react";
 import { useWorldStore } from "../state/worldStore";
 import { CARD_TYPE_LABELS, type CardType } from "../types/world";
 
-const ITEMS: Array<{
+type DeckId = "agents" | "objects" | "fields";
+
+interface DeckCard {
   type: CardType;
   icon: LucideIcon;
   detail: string;
-}> = [
-  { type: "agent", icon: Bot, detail: "Reasoning worker" },
-  { type: "text", icon: FileText, detail: "Managed text" },
-  { type: "image", icon: ImageIcon, detail: "Visual resource" },
-  { type: "sandbox", icon: Workflow, detail: "Secure workplace" },
+}
+
+interface CardDeck {
+  id: DeckId;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+  cards: DeckCard[];
+}
+
+// Keeping deck definitions separate makes this tray ready for user-defined
+// groupings and additional card types later.
+const DECKS: CardDeck[] = [
+  {
+    id: "agents",
+    label: "Agents",
+    description: "Workers and collaborators",
+    icon: Bot,
+    cards: [{ type: "agent", icon: Bot, detail: "Reasoning worker" }],
+  },
+  {
+    id: "objects",
+    label: "Objects",
+    description: "Knowledge and resources",
+    icon: Boxes,
+    cards: [
+      { type: "text", icon: FileText, detail: "Managed knowledge" },
+      { type: "image", icon: ImageIcon, detail: "Visual resource" },
+    ],
+  },
+  {
+    id: "fields",
+    label: "Fields",
+    description: "Sandboxes and workspaces",
+    icon: Workflow,
+    cards: [{ type: "sandbox", icon: Workflow, detail: "Secure work field" }],
+  },
 ];
 
 export function ComponentPalette() {
-  const collapsed = useWorldStore((state) => state.paletteCollapsed);
-  const toggle = useWorldStore((state) => state.togglePalette);
   const createCard = useWorldStore((state) => state.createCard);
-  const stressCount = useWorldStore((state) => state.stressCards.length);
-  const generateStress = useWorldStore((state) => state.generateStressWorld);
-  const clearStress = useWorldStore((state) => state.clearStressWorld);
+  const [activeDeckId, setActiveDeckId] = useState<DeckId>("agents");
+  const activeDeck = DECKS.find((deck) => deck.id === activeDeckId) ?? DECKS[0];
 
   const beginDrag = (event: DragEvent<HTMLButtonElement>, type: CardType) => {
     event.dataTransfer.setData("application/open-agent-card", type);
@@ -40,49 +68,55 @@ export function ComponentPalette() {
   };
 
   return (
-    <aside className={`component-palette ${collapsed ? "is-collapsed" : ""}`} aria-label="World object palette">
-      <header>
-        <div className="palette-title">
-          <div className="palette-mark"><Boxes size={17} /></div>
-          {!collapsed ? <div><span>Object library</span><strong>Place into world</strong></div> : null}
-        </div>
-        <button type="button" className="icon-button" onClick={toggle} aria-label={collapsed ? "Expand object palette" : "Collapse object palette"}>
-          {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-        </button>
-      </header>
-
-      <div className="palette-items">
-        {ITEMS.map(({ type, icon: Icon, detail }) => (
-          <button
-            type="button"
-            key={type}
-            className={`palette-item palette-item--${type}`}
-            draggable
-            onDragStart={(event) => beginDrag(event, type)}
-            onClick={() => void createCard(type)}
-            aria-label={`Create ${CARD_TYPE_LABELS[type]}`}
-            title={collapsed ? `Create ${CARD_TYPE_LABELS[type]}` : "Drag to position, or click to place at center"}
-          >
-            <span className="palette-item-icon"><Icon size={18} /></span>
-            {!collapsed ? (
-              <span className="palette-item-copy"><strong>{CARD_TYPE_LABELS[type]}</strong><small>{detail}</small></span>
-            ) : null}
-            {!collapsed ? <Plus size={14} className="palette-plus" /> : null}
-          </button>
-        ))}
+    <aside className="component-palette" aria-label="Card deck library">
+      <div className="deck-tabs" role="tablist" aria-label="Card decks">
+        {DECKS.map((deck) => {
+          const DeckIcon = deck.icon;
+          const selected = activeDeck.id === deck.id;
+          return (
+            <button
+              type="button"
+              key={deck.id}
+              className={selected ? "is-active" : ""}
+              role="tab"
+              aria-selected={selected}
+              aria-controls="active-card-deck"
+              onClick={() => setActiveDeckId(deck.id)}
+              title={deck.description}
+            >
+              <DeckIcon size={15} />
+              <span>{deck.label}</span>
+              <small>{deck.cards.length}</small>
+            </button>
+          );
+        })}
       </div>
 
-      {!collapsed ? (
-        <section className="developer-tools">
-          <div className="developer-heading"><FlaskConical size={13} /><span>Scale probe</span></div>
-          <p>Populate distant chunks with lightweight local cards.</p>
-          {stressCount === 0 ? (
-            <button type="button" onClick={() => generateStress(1500)}>Generate 1,500 cards</button>
-          ) : (
-            <button type="button" onClick={clearStress}><Trash2 size={13} /> Clear {stressCount.toLocaleString()}</button>
-          )}
-        </section>
-      ) : null}
+      <div className="deck-stage" id="active-card-deck" role="tabpanel">
+        <div className="deck-caption">
+          <span><Layers3 size={13} /> {activeDeck.label} deck</span>
+          <small>{activeDeck.description}</small>
+        </div>
+        <div className="palette-items">
+          {activeDeck.cards.map(({ type, icon: Icon, detail }) => (
+            <button
+              type="button"
+              key={type}
+              className={`palette-item palette-item--${type}`}
+              draggable
+              onDragStart={(event) => beginDrag(event, type)}
+              onClick={() => void createCard(type)}
+              aria-label={`Create ${CARD_TYPE_LABELS[type]}`}
+              title="Drag to position, or click to draw at the center"
+            >
+              <span className="palette-card-corner"><Icon size={15} /></span>
+              <span className="palette-item-icon"><Icon size={25} /></span>
+              <span className="palette-item-copy"><strong>{CARD_TYPE_LABELS[type]}</strong><small>{detail}</small></span>
+              <span className="palette-draw"><Plus size={12} /> Draw</span>
+            </button>
+          ))}
+        </div>
+      </div>
     </aside>
   );
 }

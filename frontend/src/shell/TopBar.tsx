@@ -17,29 +17,36 @@ export function TopBar() {
   const undo = useWorldStore((state) => state.undo);
   const redo = useWorldStore((state) => state.redo);
   const live = socketState === "live";
+  const syncLabel = syncState === "online"
+    ? "Synced"
+    : syncState === "syncing" || syncState === "loading"
+      ? "Syncing"
+      : "Offline";
 
   return (
-    <header className="top-bar">
-      <div className="world-identity">
-        <div className="world-mark" aria-hidden="true"><span /><i /><i /></div>
-        <div><strong>Open Agent World</strong><span>Terrain 01 · local world</span></div>
-      </div>
-
-      <div className="topology-summary" aria-label={`${cards.length} objects and ${edges.length} relationships`}>
-        <span><strong>{cards.length}</strong> objects</span>
-        <i />
-        <span><strong>{edges.length}</strong> relationships</span>
+    <aside className="top-bar" aria-label="World status and controls">
+      <div className="world-status">
+        <button
+          type="button"
+          className={`connection-status connection-status--${syncState}`}
+          onClick={() => void refreshWorld()}
+          title="Refresh authoritative world state"
+        >
+          {syncState === "syncing" || syncState === "loading"
+            ? <RefreshCw size={13} className="is-spinning" />
+            : syncState === "offline" ? <WifiOff size={13} /> : <Wifi size={13} />}
+          <span>{syncLabel}</span>
+        </button>
+        <div className="topology-summary" aria-label={`${cards.length} cards and ${edges.length} relationships`}>
+          <span><strong>{cards.length}</strong> cards</span>
+          <i />
+          <span><strong>{edges.length}</strong> links</span>
+        </div>
       </div>
 
       <div className="top-actions">
-        <button
-          type="button"
-          className="top-icon-button"
-          onClick={toggleSettings}
-          aria-label="Open ADK model settings"
-          title="ADK model settings"
-        >
-          <Settings2 size={17} />
+        <button type="button" className="top-icon-button" onClick={toggleSettings} aria-label="Open ADK model settings" title="ADK model settings">
+          <Settings2 size={16} />
         </button>
         <button
           type="button"
@@ -49,7 +56,7 @@ export function TopBar() {
           aria-label="Undo last canvas action"
           title={undoStack.at(-1) ? `Undo: ${undoStack.at(-1)?.label} (Ctrl+Z)` : "Nothing to undo"}
         >
-          <Undo2 size={17} />
+          <Undo2 size={16} />
         </button>
         <button
           type="button"
@@ -59,18 +66,7 @@ export function TopBar() {
           aria-label="Redo last canvas action"
           title={redoStack.at(-1) ? `Redo: ${redoStack.at(-1)?.label} (Ctrl+Y)` : "Nothing to redo"}
         >
-          <Redo2 size={17} />
-        </button>
-        <button
-          type="button"
-          className={`connection-status connection-status--${syncState}`}
-          onClick={() => void refreshWorld()}
-          title="Refresh authoritative world state"
-        >
-          {syncState === "syncing" || syncState === "loading"
-            ? <RefreshCw size={14} className="is-spinning" />
-            : syncState === "offline" ? <WifiOff size={14} /> : <Wifi size={14} />}
-          <span>{syncState === "online" ? "World synced" : syncState}</span>
+          <Redo2 size={16} />
         </button>
         <button
           type="button"
@@ -79,7 +75,7 @@ export function TopBar() {
           aria-label={`Open runtime activity; event stream ${live ? "live" : "disconnected"}`}
           title={`Runtime stream: ${socketState}`}
         >
-          <Activity size={17} />
+          <Activity size={16} />
         </button>
         <button
           type="button"
@@ -88,9 +84,9 @@ export function TopBar() {
           aria-label={`Use ${theme === "light" ? "dark" : "light"} theme`}
           title={`Use ${theme === "light" ? "dark" : "light"} theme`}
         >
-          {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
+          {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
         </button>
       </div>
-    </header>
+    </aside>
   );
 }
