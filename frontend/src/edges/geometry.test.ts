@@ -34,6 +34,13 @@ describe("relationship edge geometry", () => {
     expect(Number.isFinite(geometry.labelY)).toBe(true);
   });
 
+  it("uses a true circular boundary for compact square nodes", () => {
+    const circle = { x: 100, y: 80, width: 96, height: 96 };
+    const anchor = roundedRectAnchor(circle, { x: 400, y: 300 }, 48);
+    expect(Math.hypot(anchor.x - 148, anchor.y - 128)).toBeCloseTo(48, 5);
+    expect(Math.hypot(anchor.normalX, anchor.normalY)).toBeCloseTo(1, 6);
+  });
+
   it("places both arrows equally clear of their endpoint dots", () => {
     const geometry = relationshipPath(rect, { x: 450, y: 100, width: 180, height: 120 });
 

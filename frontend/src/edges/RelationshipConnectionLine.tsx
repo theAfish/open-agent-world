@@ -11,6 +11,12 @@ function nodeRect(node: ConnectionLineComponentProps<CanvasNode>["fromNode"]): N
   };
 }
 
+function cornerRadius(node: ConnectionLineComponentProps<CanvasNode>["fromNode"]): number {
+  if (node.data.surfaceLevel === "node") return 48;
+  if (node.data.surfaceLevel === "preview") return 30;
+  return 24;
+}
+
 export function RelationshipConnectionLine({
   fromNode,
   toNode,
@@ -19,8 +25,13 @@ export function RelationshipConnectionLine({
   connectionStatus,
 }: ConnectionLineComponentProps<CanvasNode>) {
   const path = toNode
-    ? relationshipPath(nodeRect(fromNode), nodeRect(toNode)).path
-    : relationshipPathToPoint(nodeRect(fromNode), { x: toX, y: toY });
+    ? relationshipPath(
+      nodeRect(fromNode),
+      nodeRect(toNode),
+      cornerRadius(fromNode),
+      cornerRadius(toNode),
+    ).path
+    : relationshipPathToPoint(nodeRect(fromNode), { x: toX, y: toY }, cornerRadius(fromNode));
   return (
     <g className={`semantic-connection ${connectionStatus ? `is-${connectionStatus}` : ""}`}>
       <path d={path} className="semantic-connection-path" />

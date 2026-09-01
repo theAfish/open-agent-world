@@ -2,6 +2,7 @@ import { ImagePlus, UploadCloud } from "lucide-react";
 import { useId, useState } from "react";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
+import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { RelationshipList } from "./CardUtilities";
 
 function formatBytes(bytes: unknown): string {
@@ -11,7 +12,7 @@ function formatBytes(bytes: unknown): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function ImageCardBody({ card }: { card: WorldCard }) {
+export function ImageCardBody({ card }: { card: WorldCard; level: NodeSurfaceLevel }) {
   const inputId = useId();
   const uploadImage = useWorldStore((state) => state.uploadImage);
   const [uploading, setUploading] = useState(false);
@@ -35,20 +36,6 @@ export function ImageCardBody({ card }: { card: WorldCard }) {
       <small>Awaiting image</small>
     </div>
   );
-
-  if (!card.expanded) {
-    return (
-      <>
-        <div className="image-preview-compact">{preview}</div>
-        <div className="compact-meta">
-          <span title={filename}>{filename}</span>
-          <span>{card.config.image_width && card.config.image_height
-            ? `${card.config.image_width} × ${card.config.image_height}`
-            : "unresolved"}</span>
-        </div>
-      </>
-    );
-  }
 
   return (
     <div className="expanded-stack nodrag nopan">

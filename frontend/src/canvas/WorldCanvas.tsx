@@ -15,8 +15,9 @@ import {
   type OnSelectionChangeParams,
   type Viewport,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { WorldCardNode } from "../cards/CardFrame";
+import { NodeWorkspace } from "../cards/NodeWorkspace";
 import type { CanvasNode, CanvasNodeData } from "../cards/types";
 import { EdgeInspector } from "../edges/EdgeInspector";
 import { RelationshipConnectionLine } from "../edges/RelationshipConnectionLine";
@@ -24,8 +25,10 @@ import { SemanticEdge, type CanvasEdge } from "../edges/SemanticEdge";
 import { filterCardsToChunks } from "../state/chunks";
 import { validateConnection } from "../state/relationships";
 import { useWorldStore } from "../state/worldStore";
+import { NODE_SURFACE_SIZE, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
 import type { CardType } from "../types/world";
 import { ContourLayer } from "./ContourLayer";
+import { displacedPosition, nodePositionFromSurfacePosition, positionSurfaceAtNodeCenter } from "./nodeDisplacement";
 
 const nodeTypes = { worldCard: WorldCardNode };
 const edgeTypes = { semantic: SemanticEdge };
@@ -38,17 +41,27 @@ const minimapColors: Record<CardType, string> = {
   sandbox: "#696c66",
 };
 
-function nodeFromCard(card: ReturnType<typeof useWorldStore.getState>["cards"][number]): CanvasNode {
+function nodeFromCard(
+  card: ReturnType<typeof useWorldStore.getState>["cards"][number],
+  activeNodeId: string | undefined,
+  activeLevel: NodeSurfaceLevel,
+  inspectorNodeIds: readonly string[],
+  inspectors: readonly ReturnType<typeof useWorldStore.getState>["cards"][number][],
+): CanvasNode {
+  const surfaceLevel = surfaceLevelForNode(card.id, activeNodeId, activeLevel, inspectorNodeIds);
+  const visualLevel = surfaceLevel === "workspace" ? "inspector" : surfaceLevel;
+  const size = NODE_SURFACE_SIZE[visualLevel];
+  const displaced = displacedPosition(card, inspectors);
   return {
     id: card.id,
     type: "worldCard",
-    position: card.position,
-    data: { card },
-    style: { width: card.size.width },
-    draggable: true,
+    position: positionSurfaceAtNodeCenter(displaced.position, surfaceLevel),
+    data: { card, surfaceLevel, displaced: displaced.displaced },
+    style: { width: size.width, height: size.height },
+    draggable: (visualLevel === "node" || visualLevel === "preview") && !displaced.displaced,
     selectable: true,
     connectable: !card.ephemeral,
-    zIndex: card.expanded ? 10 : 1,
+    zIndex: visualLevel === "inspector" ? 20 : visualLevel === "preview" ? 12 : 1,
   };
 }
 
@@ -60,6 +73,13 @@ export function WorldCanvas() {
   const activeChunkKeys = useWorldStore((state) => state.activeChunkKeys);
   const selectedEdgeId = useWorldStore((state) => state.selectedEdgeId);
   const selectedCardIds = useWorldStore((state) => state.selectedCardIds);
+  const activeSurfaceNodeId = useNodeSurfaceStore((state) => state.activeNodeId);
+  const activeSurfaceLevel = useNodeSurfaceStore((state) => state.level);
+  const inspectorNodeIds = useNodeSurfaceStore((state) => state.inspectorNodeIds);
+  const closeWorkspace = useNodeSurfaceStore((state) => state.closeWorkspace);
+  const dismissSurface = useNodeSurfaceStore((state) => state.dismiss);
+  const beginConnection = useNodeSurfaceStore((state) => state.beginConnection);
+  const endConnection = useNodeSurfaceStore((state) => state.endConnection);
   const setViewportState = useWorldStore((state) => state.setViewport);
   const updateCard = useWorldStore((state) => state.updateCard);
   const createCard = useWorldStore((state) => state.createCard);
@@ -76,12 +96,65 @@ export function WorldCanvas() {
     () => filterCardsToChunks([...cards, ...stressCards], activeChunkKeys),
     [activeChunkKeys, cards, stressCards],
   );
-  const mappedNodes = useMemo(() => renderCards.map(nodeFromCard), [renderCards]);
+  const inspectorCards = useMemo(
+    () => renderCards.filter((card) => inspectorNodeIds.includes(card.id)),
+    [inspectorNodeIds, renderCards],
+  );
+  const mappedNodes = useMemo(
+    () => renderCards.map((card) => nodeFromCard(
+      card,
+      activeSurfaceNodeId,
+      activeSurfaceLevel,
+      inspectorNodeIds,
+      inspectorCards,
+    )),
+    [activeSurfaceLevel, activeSurfaceNodeId, inspectorCards, inspectorNodeIds, renderCards],
+  );
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(mappedNodes);
+  const nodesRef = useRef(nodes);
+  const positionAnimation = useRef<number>();
 
   useEffect(() => {
-    setNodes(mappedNodes);
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  useEffect(() => {
+    if (positionAnimation.current) cancelAnimationFrame(positionAnimation.current);
+    const currentById = new Map(nodesRef.current.map((node) => [node.id, node]));
+    const starts = mappedNodes.map((node) => currentById.get(node.id)?.position ?? node.position);
+    const moving = mappedNodes.some((node, index) => (
+      Math.abs(node.position.x - starts[index].x) > 0.1
+      || Math.abs(node.position.y - starts[index].y) > 0.1
+    ));
+    if (!moving) {
+      setNodes(mappedNodes);
+      return;
+    }
+
+    const startedAt = performance.now();
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / 380);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setNodes(mappedNodes.map((node, index) => ({
+        ...node,
+        position: {
+          x: starts[index].x + (node.position.x - starts[index].x) * eased,
+          y: starts[index].y + (node.position.y - starts[index].y) * eased,
+        },
+      })));
+      if (progress < 1) positionAnimation.current = requestAnimationFrame(tick);
+    };
+    positionAnimation.current = requestAnimationFrame(tick);
+    return () => {
+      if (positionAnimation.current) cancelAnimationFrame(positionAnimation.current);
+    };
   }, [mappedNodes, setNodes]);
+
+  useEffect(() => {
+    if (activeSurfaceNodeId && !renderCards.some((card) => card.id === activeSurfaceNodeId)) {
+      dismissSurface(activeSurfaceNodeId);
+    }
+  }, [activeSurfaceNodeId, dismissSurface, renderCards]);
 
   const visibleNodeIds = useMemo(() => new Set(renderCards.map((card) => card.id)), [renderCards]);
   const flowEdges = useMemo<CanvasEdge[]>(
@@ -151,6 +224,7 @@ export function WorldCanvas() {
       if (event.key === "Delete" || event.key === "Backspace") {
         if (selectedCardIds.length > 0) {
           event.preventDefault();
+          selectedCardIds.forEach((id) => dismissSurface(id));
           void deleteCards(selectedCardIds);
           return;
         }
@@ -159,14 +233,19 @@ export function WorldCanvas() {
           void deleteSelectedEdge();
         }
       }
-      if (event.key === "Escape" && selectedEdgeId) selectEdge(undefined);
+      if (event.key === "Escape") {
+        if (activeSurfaceLevel === "workspace") closeWorkspace();
+        else if (selectedEdgeId) selectEdge(undefined);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [deleteCards, deleteSelectedEdge, redo, selectEdge, selectedCardIds, selectedEdgeId, undo]);
+  }, [activeSurfaceLevel, activeSurfaceNodeId, closeWorkspace, deleteCards, deleteSelectedEdge, dismissSurface, redo, selectEdge, selectedCardIds, selectedEdgeId, undo]);
 
   const onNodeDragStop: OnNodeDrag<CanvasNode> = useCallback((_event, node) => {
-    void updateCard(node.id, { position: node.position });
+    void updateCard(node.id, {
+      position: nodePositionFromSurfacePosition(node.position, node.data.surfaceLevel),
+    });
   }, [updateCard]);
 
   const onConnect = useCallback((connection: Connection) => {
@@ -216,6 +295,10 @@ export function WorldCanvas() {
         onNodesChange={onNodesChange}
         onNodeDragStop={onNodeDragStop}
         onConnect={onConnect}
+        onConnectStart={(_event, params) => {
+          if (params.nodeId) beginConnection(params.nodeId);
+        }}
+        onConnectEnd={endConnection}
         isValidConnection={isValidConnection}
         connectionMode={ConnectionMode.Loose}
         connectionLineComponent={RelationshipConnectionLine}
@@ -264,6 +347,7 @@ export function WorldCanvas() {
         />
       </ReactFlow>
       <EdgeInspector />
+      <NodeWorkspace />
       <div className="chunk-readout" aria-label={`${activeChunkKeys.length} nearby chunks active`}>
         <span aria-hidden="true" /> {activeChunkKeys.length} chunks live · {renderCards.length} cards mounted
       </div>

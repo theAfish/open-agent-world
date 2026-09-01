@@ -6,6 +6,7 @@ import {
   type EdgeProps,
 } from "@xyflow/react";
 import { getRelationshipOption } from "../state/relationships";
+import type { CanvasNodeData } from "../cards/types";
 import type { EdgeDirection, Relationship } from "../types/world";
 import { relationshipPath, type NodeRect } from "./geometry";
 
@@ -15,6 +16,13 @@ export interface SemanticEdgeData extends Record<string, unknown> {
 }
 
 export type CanvasEdge = Edge<SemanticEdgeData, "semantic">;
+
+function nodeCornerRadius(node: ReturnType<typeof useInternalNode>): number {
+  const level = (node?.data as CanvasNodeData | undefined)?.surfaceLevel;
+  if (level === "node") return 48;
+  if (level === "preview") return 30;
+  return 24;
+}
 
 export function SemanticEdge({
   id,
@@ -40,6 +48,8 @@ export function SemanticEdge({
   const geometry = relationshipPath(
     nodeRect(sourceNode, sourceX, sourceY),
     nodeRect(targetNode, targetX, targetY),
+    nodeCornerRadius(sourceNode),
+    nodeCornerRadius(targetNode),
   );
   const relationship = data?.relationship ?? "read";
   const bidirectional = data?.direction === "bidirectional";

@@ -115,7 +115,8 @@ function cubicPoint(a: number, b: number, c: number, d: number, t: number): numb
 export function relationshipPath(
   sourceRect: NodeRect,
   targetRect: NodeRect,
-  cornerRadius = 22,
+  sourceCornerRadius = 22,
+  targetCornerRadius = sourceCornerRadius,
 ): RelationshipPath {
   const sourceCenter = {
     x: sourceRect.x + sourceRect.width / 2,
@@ -125,8 +126,8 @@ export function relationshipPath(
     x: targetRect.x + targetRect.width / 2,
     y: targetRect.y + targetRect.height / 2,
   };
-  const source = roundedRectAnchor(sourceRect, targetCenter, cornerRadius);
-  const target = roundedRectAnchor(targetRect, sourceCenter, cornerRadius);
+  const source = roundedRectAnchor(sourceRect, targetCenter, sourceCornerRadius);
+  const target = roundedRectAnchor(targetRect, sourceCenter, targetCornerRadius);
   const endpointDistance = Math.hypot(target.x - source.x, target.y - source.y);
   const controlDistance = Math.max(42, Math.min(180, endpointDistance * 0.32));
   const sourceControl = {

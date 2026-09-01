@@ -2,14 +2,10 @@ import { Check, FileClock, Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useWorldStore } from "../state/worldStore";
 import type { ModificationRecord, WorldCard } from "../types/world";
+import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { RelationshipList } from "./CardUtilities";
 
-function textPreview(content: string): string {
-  const normalized = content.replace(/\s+/g, " ").trim();
-  return normalized || "This managed text resource is empty.";
-}
-
-export function TextCardBody({ card }: { card: WorldCard }) {
+export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurfaceLevel }) {
   const loadText = useWorldStore((state) => state.loadText);
   const saveText = useWorldStore((state) => state.saveText);
   const [content, setContent] = useState(String(card.config.content ?? ""));
@@ -22,32 +18,16 @@ export function TextCardBody({ card }: { card: WorldCard }) {
   }, [card.config.content]);
 
   useEffect(() => {
-    if (card.expanded && !card.ephemeral && !loaded.current) {
+    if ((level === "inspector" || level === "workspace") && !card.ephemeral && !loaded.current) {
       loaded.current = true;
       void loadText(card.id);
     }
-  }, [card.ephemeral, card.expanded, card.id, loadText]);
+  }, [card.ephemeral, card.id, level, loadText]);
 
   const history = Array.isArray(card.config.history)
     ? (card.config.history as ModificationRecord[])
     : [];
   const filename = String(card.config.filename ?? `${card.name}.txt`);
-
-  if (!card.expanded) {
-    return (
-      <>
-        <div className="text-preview">
-          <span className="text-gutter">01<br />02<br />03</span>
-          <p>{textPreview(String(card.config.preview ?? card.config.content ?? ""))}</p>
-        </div>
-        <div className="compact-meta">
-          <span>{filename}</span>
-          <span>r{Number(card.config.revision ?? 0)}</span>
-          <span>{String(card.config.content ?? "").length} chars</span>
-        </div>
-      </>
-    );
-  }
 
   const performSave = async () => {
     setSaveState("saving");

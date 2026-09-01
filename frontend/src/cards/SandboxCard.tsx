@@ -1,10 +1,11 @@
-import { CircleStop, Play, ShieldCheck, TerminalSquare } from "lucide-react";
+import { CircleStop, Play, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
+import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { InstrumentOutput, RelationshipList } from "./CardUtilities";
 
-export function SandboxCardBody({ card }: { card: WorldCard }) {
+export function SandboxCardBody({ card }: { card: WorldCard; level: NodeSurfaceLevel }) {
   const edges = useWorldStore((state) => state.edges);
   const cards = useWorldStore((state) => state.cards);
   const startSandbox = useWorldStore((state) => state.startSandbox);
@@ -21,22 +22,6 @@ export function SandboxCardBody({ card }: { card: WorldCard }) {
   );
   const output = Array.isArray(card.config.output) ? card.config.output.map(String) : [];
   const activeCommand = String(card.config.active_command ?? "");
-
-  if (!card.expanded) {
-    return (
-      <>
-        <div className="sandbox-visual" aria-hidden="true">
-          <div className="sandbox-grid"><i /><i /><i /><i /><i /><i /></div>
-          <div className="sandbox-pulse"><TerminalSquare size={18} /></div>
-        </div>
-        <div className="compact-metrics">
-          <div><span>Agents</span><strong>{agents.length}</strong></div>
-          <div><span>Resources</span><strong>{attached.length}</strong></div>
-          <div><span>Network</span><strong>Denied</strong></div>
-        </div>
-      </>
-    );
-  }
 
   const ready = card.status === "ready" || card.status === "running";
 

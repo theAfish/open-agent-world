@@ -1,11 +1,13 @@
-import { CircleStop, Play, Radio, Sparkles } from "lucide-react";
+import { CircleStop, Play, Radio } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { getRelationshipOption } from "../state/relationships";
+import { useNodeSurfaceStore } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
+import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { InstrumentOutput } from "./CardUtilities";
 
-export function AgentCardBody({ card }: { card: WorldCard }) {
+export function AgentCardBody({ card }: { card: WorldCard; level: NodeSurfaceLevel }) {
   const edges = useWorldStore((state) => state.edges);
   const cards = useWorldStore((state) => state.cards);
   const updateCard = useWorldStore((state) => state.updateCard);
@@ -14,11 +16,11 @@ export function AgentCardBody({ card }: { card: WorldCard }) {
   const modelSettings = useWorldStore((state) => state.modelSettings);
   const [instruction, setInstruction] = useState(String(card.config.system_instruction ?? ""));
   const [model, setModel] = useState(String(card.config.model ?? "gemini-3.7-flash"));
-  const [prompt, setPrompt] = useState(String(card.config.prompt ?? ""));
+  const prompt = useNodeSurfaceStore((state) => state.drafts[card.id] ?? String(card.config.prompt ?? ""));
+  const setDraft = useNodeSurfaceStore((state) => state.setDraft);
 
   useEffect(() => setInstruction(String(card.config.system_instruction ?? "")), [card.config.system_instruction]);
   useEffect(() => setModel(String(card.config.model ?? "gemini-3.7-flash")), [card.config.model]);
-  useEffect(() => setPrompt(String(card.config.prompt ?? "")), [card.config.prompt]);
 
   const capabilities = useMemo(
     () => edges
@@ -38,22 +40,6 @@ export function AgentCardBody({ card }: { card: WorldCard }) {
     ? card.config.output.map(String)
     : [];
   const modelOptions = [...new Set([model, ...modelSettings.models].filter(Boolean))];
-
-  if (!card.expanded) {
-    return (
-      <>
-        <div className="agent-orbit" aria-hidden="true">
-          <span className="agent-core"><Sparkles size={18} /></span>
-          <i /><i /><i />
-        </div>
-        <div className="compact-metrics">
-          <div><span>Model</span><strong>{model}</strong></div>
-          <div><span>Capabilities</span><strong>{capabilities.length}</strong></div>
-          <div><span>Activity</span><strong>{card.status === "running" ? "Live" : "Quiet"}</strong></div>
-        </div>
-      </>
-    );
-  }
 
   return (
     <div className="expanded-stack nodrag nopan">
@@ -113,7 +99,7 @@ export function AgentCardBody({ card }: { card: WorldCard }) {
           value={prompt}
           rows={2}
           placeholder="Ask Atlas to work with its connected objects…"
-          onChange={(event) => setPrompt(event.target.value)}
+          onChange={(event) => setDraft(card.id, event.target.value)}
           onKeyDown={(event) => {
             if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && prompt.trim()) {
               void runAgent(card.id, prompt.trim());

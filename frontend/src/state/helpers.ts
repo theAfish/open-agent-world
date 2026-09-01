@@ -1,6 +1,5 @@
 import {
   COMPACT_CARD_SIZES,
-  EXPANDED_CARD_SIZES,
   type CardConfig,
   type CardStatus,
   type CardType,
@@ -69,14 +68,6 @@ export function mergeCardPatch(
     position: patch.position ? { ...card.position, ...patch.position } : card.position,
     size: patch.size ? { ...card.size, ...patch.size } : card.size,
     config: patch.config ? { ...card.config, ...patch.config } : card.config,
-  };
-}
-
-export function expandedPatch(card: WorldCard): Pick<WorldCard, "expanded" | "size"> {
-  const expanded = !card.expanded;
-  return {
-    expanded,
-    size: expanded ? EXPANDED_CARD_SIZES[card.type] : COMPACT_CARD_SIZES[card.type],
   };
 }
 

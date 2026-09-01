@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCardDraft, expandedPatch, makeStressCards } from "./helpers";
-import { EXPANDED_CARD_SIZES } from "../types/world";
+import { buildCardDraft, makeStressCards } from "./helpers";
 
 describe("card state helpers", () => {
   it("creates all four concrete card drafts", () => {
@@ -13,9 +12,7 @@ describe("card state helpers", () => {
     expect(buildCardDraft("agent", { x: 0, y: 0 }).config.model).toBe("gemini-3.7-flash");
   });
 
-  it("expands in place and generates a deterministic virtualized stress world", () => {
-    const card = { id: "a", ...buildCardDraft("agent", { x: 5, y: 7 }) };
-    expect(expandedPatch(card)).toEqual({ expanded: true, size: EXPANDED_CARD_SIZES.agent });
+  it("generates a deterministic virtualized stress world", () => {
     const first = makeStressCards(1_500, 4);
     const second = makeStressCards(1_500, 4);
     expect(first).toHaveLength(1_500);
@@ -23,4 +20,3 @@ describe("card state helpers", () => {
     expect(first.every((item) => item.ephemeral)).toBe(true);
   });
 });
-

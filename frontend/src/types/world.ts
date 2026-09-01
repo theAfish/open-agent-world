@@ -56,6 +56,7 @@ export interface WorldCard {
   name: string;
   position: WorldPosition;
   size: WorldSize;
+  /** Legacy transport field; transient UI expansion is owned by nodeSurfaces. */
   expanded: boolean;
   status: CardStatus;
   config: CardConfig;
@@ -121,15 +122,8 @@ export const CARD_TYPE_LABELS: Record<CardType, string> = {
 };
 
 export const COMPACT_CARD_SIZES: Record<CardType, WorldSize> = {
-  agent: { width: 272, height: 178 },
-  text: { width: 272, height: 196 },
-  image: { width: 248, height: 226 },
-  sandbox: { width: 286, height: 190 },
-};
-
-export const EXPANDED_CARD_SIZES: Record<CardType, WorldSize> = {
-  agent: { width: 438, height: 570 },
-  text: { width: 438, height: 570 },
-  image: { width: 420, height: 520 },
-  sandbox: { width: 466, height: 560 },
+  agent: { width: 96, height: 96 },
+  text: { width: 96, height: 96 },
+  image: { width: 96, height: 96 },
+  sandbox: { width: 96, height: 96 },
 };

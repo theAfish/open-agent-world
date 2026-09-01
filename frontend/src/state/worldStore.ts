@@ -13,7 +13,7 @@ import type {
   WorldSnapshot,
 } from "../types/world";
 import { getViewportChunkKeys, viewportCenterToWorld } from "./chunks";
-import { buildCardDraft, expandedPatch, makeStressCards, mergeCardPatch } from "./helpers";
+import { buildCardDraft, makeStressCards, mergeCardPatch } from "./helpers";
 import { validateConnection, type RelationshipOption } from "./relationships";
 import { describeRuntimeError } from "./runtimeErrors";
 import {
@@ -184,7 +184,6 @@ interface WorldState {
     id: string,
     patch: Partial<Omit<WorldCard, "id" | "type">>,
   ) => Promise<void>;
-  toggleCardExpanded: (id: string) => Promise<void>;
   deleteCard: (id: string) => Promise<void>;
   deleteCards: (ids: string[]) => Promise<void>;
   requestConnection: (source?: string | null, target?: string | null) => void;
@@ -420,11 +419,6 @@ export const useWorldStore = create<WorldState>((set, get) => ({
       }));
       get().pushToast({ tone: "error", title: "Change was not saved", detail: apiErrorMessage(error) });
     }
-  },
-
-  toggleCardExpanded: async (id) => {
-    const card = get().cards.find((item) => item.id === id) ?? get().stressCards.find((item) => item.id === id);
-    if (card) await get().updateCard(id, expandedPatch(card));
   },
 
   deleteCard: async (id) => get().deleteCards([id]),
