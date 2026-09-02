@@ -181,3 +181,34 @@ test("a preview stays open while the pointer uses its outer hover buffer", async
     await request.delete(`/api/nodes/${card.id}`);
   }
 });
+
+test("a detail card uses the same boundary-following connection hint", async ({ page, request }) => {
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const card = await createCard(
+    request,
+    `e2e-detail-${suffix}`,
+    "agent",
+    "E2E Detail Hint",
+    { x: 510, y: 280 },
+  );
+
+  try {
+    await page.goto("/");
+    const surface = page.locator(`[data-card-id="${card.id}"]`);
+    const hoverHint = surface.locator("[data-connection-hover-hint]");
+    await expect(surface).toBeVisible();
+    await surface.click();
+    await expect(surface).toHaveAttribute("data-surface-level", "inspector");
+
+    await page.waitForTimeout(350);
+    const inspectorBox = await surface.boundingBox();
+    if (!inspectorBox) throw new Error("Detail card geometry is unavailable");
+    await page.mouse.move(inspectorBox.x + inspectorBox.width - 3, inspectorBox.y + inspectorBox.height / 2);
+    await expect(surface).toHaveAttribute("data-connection-hot", "true");
+    const hintBox = await hoverHint.boundingBox();
+    if (!hintBox) throw new Error("Detail connection hint geometry is unavailable");
+    expect(Math.abs(hintBox.x + hintBox.width / 2 - (inspectorBox.x + inspectorBox.width))).toBeLessThan(2);
+  } finally {
+    await request.delete(`/api/nodes/${card.id}`);
+  }
+});

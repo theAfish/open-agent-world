@@ -109,7 +109,7 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
-    if (card.ephemeral || connectingNodeId === card.id || visualLevel === "inspector") return;
+    if (card.ephemeral || connectingNodeId === card.id) return;
     const element = cardRef.current;
     if (!element) return;
     const bounds = element.getBoundingClientRect();
@@ -119,10 +119,11 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
       x: (event.clientX - bounds.left) * scaleX,
       y: (event.clientY - bounds.top) * scaleY,
     };
+    const cornerRadius = Number.parseFloat(window.getComputedStyle(element).borderTopLeftRadius) || 0;
     const anchor = roundedRectAnchor(
       { x: 0, y: 0, width: element.offsetWidth, height: element.offsetHeight },
       pointer,
-      visualLevel === "node" ? 48 : 30,
+      cornerRadius,
     );
     if (Math.hypot(pointer.x - anchor.x, pointer.y - anchor.y) > 20 * Math.max(scaleX, scaleY)) {
       element.removeAttribute("data-connection-hot");
