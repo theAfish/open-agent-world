@@ -599,7 +599,7 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .chunk-readout { position: absolute; z-index: 6; left: 252px; bottom: 22px; display: flex; align-items: center; gap: 6px; padding: 6px 9px; color: var(--ink-faint); border: 1px solid var(--line); border-radius: 9px; background: color-mix(in srgb, var(--surface) 82%, transparent); backdrop-filter: blur(8px); font-size: 8px; letter-spacing: 0.04em; pointer-events: none; }
 .chunk-readout > span { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 
-.edge-inspector { position: absolute; z-index: 22; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 11px; border: 1px solid var(--line-strong); border-radius: 14px; background: color-mix(in srgb, var(--surface) 94%, transparent); box-shadow: var(--panel-shadow); backdrop-filter: blur(14px); }
+.edge-inspector { position: absolute; z-index: 22; left: 50%; top: 112px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 11px; border: 1px solid var(--line-strong); border-radius: 14px; background: color-mix(in srgb, var(--surface) 94%, transparent); box-shadow: var(--panel-shadow); backdrop-filter: blur(14px); }
 .edge-inspector-route { max-width: 240px; display: flex; align-items: center; gap: 6px; color: var(--ink-soft); font-size: 9px; }
 .edge-inspector-route span { max-width: 105px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edge-inspector-route svg { flex: 0 0 auto; color: var(--accent); }
@@ -739,7 +739,7 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   .chunk-readout { left: 10px; bottom: 69px; }
   .world-controls.react-flow__controls { right: 10px; bottom: 68px; }
   .world-minimap.react-flow__minimap { display: none; }
-  .edge-inspector { bottom: 70px; max-width: calc(100vw - 20px); }
+  .edge-inspector { top: 78px; bottom: auto; max-width: calc(100vw - 20px); }
   .activity-panel { top: 78px; right: 10px; bottom: 65px; width: min(326px, calc(100vw - 20px)); }
   .toast-stack { top: 78px; right: 10px; width: min(350px, calc(100vw - 20px)); }
   .empty-world { top: 45%; }
@@ -1448,8 +1448,8 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .deck-empty small { font-size: 8px; }
 
 .chunk-readout { display: none; }
-.edge-inspector { bottom: 68px; transition: bottom 260ms cubic-bezier(0.22, 1, 0.36, 1); }
-.world-shell:has(.component-palette:is(:hover, :focus-within)) .edge-inspector { bottom: 206px; }
+.edge-inspector { top: 68px; bottom: auto; transition: top 260ms cubic-bezier(0.22, 1, 0.36, 1); }
+.world-shell:has(.component-palette:is(:hover, :focus-within)) .edge-inspector { top: 206px; }
 .backend-unavailable { top: 18px; }
 .activity-panel { top: 20px; }
 .toast-stack { top: 20px; }
@@ -1466,7 +1466,7 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   }
   .top-bar { top: auto; right: auto; bottom: 62px; left: 10px; transition: bottom 260ms cubic-bezier(0.22, 1, 0.36, 1); }
   .world-controls.react-flow__controls { right: 10px; bottom: 62px; transition: bottom 260ms cubic-bezier(0.22, 1, 0.36, 1); }
-  .edge-inspector { bottom: 62px; }
+  .edge-inspector { top: 62px; bottom: auto; }
   .world-shell:has(.component-palette:is(:hover, :focus-within)) .top-bar,
   .world-shell:has(.component-palette:is(:hover, :focus-within)) .world-controls.react-flow__controls,
   .world-shell:has(.component-palette:is(:hover, :focus-within)) .edge-inspector { bottom: 202px; }
