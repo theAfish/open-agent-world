@@ -13,7 +13,7 @@ export function BackendUnavailableNotice() {
       <ServerOff size={17} aria-hidden="true" />
       <div>
         <strong>Local backend unavailable</strong>
-        <p>Cannot reach <code>127.0.0.1:8000</code>. Start <code>./scripts/dev.ps1</code> in a terminal, then retry.</p>
+        <p>Cannot reach the local backend. Start <code>./scripts/dev.ps1</code> in a terminal, then retry.</p>
         {syncError ? <small>{syncError}</small> : null}
       </div>
       <button type="button" onClick={() => void refreshWorld()} title="Retry backend connection">

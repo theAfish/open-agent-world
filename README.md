@@ -21,7 +21,6 @@ $env:GOOGLE_API_KEY = "your-key"
 ./scripts/dev.ps1
 ```
 
-Then open <http://127.0.0.1:5173/>. The API listens on <http://127.0.0.1:8000/>.
 
 All user-facing Agents run through Google ADK. The Agent card selects a model, never an execution backend: native ADK model names such as `gemini-3.7-flash` use ADK's built-in provider support, while provider-qualified names such as `openai/...` or `anthropic/...` are automatically resolved by ADK's LiteLLM model adapter.
 
