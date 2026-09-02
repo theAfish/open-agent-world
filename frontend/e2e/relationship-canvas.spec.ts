@@ -139,3 +139,45 @@ test("a reverse Text-to-Agent drag uses the allowed Agent-to-Text direction", as
     await request.delete(`/api/nodes/${agent.id}`);
   }
 });
+
+test("a preview stays open while the pointer uses its outer hover buffer", async ({ page, request }) => {
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const card = await createCard(
+    request,
+    `e2e-preview-${suffix}`,
+    "agent",
+    "E2E Hover Buffer",
+    { x: 510, y: 280 },
+  );
+
+  try {
+    await page.goto("/");
+    const surface = page.locator(`[data-card-id="${card.id}"]`);
+    const hoverHint = surface.locator("[data-connection-hover-hint]");
+    await expect(surface).toBeVisible();
+    await expect(surface).not.toHaveAttribute("data-connection-hot", "true");
+    await surface.hover();
+    await expect(surface).toHaveAttribute("data-surface-level", "preview");
+    await expect(surface.locator("[data-preview-hover-buffer]")).toBeVisible();
+
+    await page.waitForTimeout(350);
+    const previewBox = await surface.boundingBox();
+    if (!previewBox) throw new Error("Preview card geometry is unavailable");
+    await page.mouse.move(previewBox.x + previewBox.width - 3, previewBox.y + previewBox.height / 2);
+    await expect(surface).toHaveAttribute("data-connection-hot", "true");
+    const hintBox = await hoverHint.boundingBox();
+    if (!hintBox) throw new Error("Connection hover hint geometry is unavailable");
+    expect(Math.abs(hintBox.x + hintBox.width / 2 - (previewBox.x + previewBox.width))).toBeLessThan(2);
+    await page.mouse.move(previewBox.x + previewBox.width / 2, previewBox.y + previewBox.height / 2);
+    await expect(surface).not.toHaveAttribute("data-connection-hot", "true");
+
+    await page.mouse.move(previewBox.x + previewBox.width + 14, previewBox.y + previewBox.height / 2);
+    await page.waitForTimeout(320);
+    await expect(surface).toHaveAttribute("data-surface-level", "preview");
+
+    await page.mouse.move(previewBox.x + previewBox.width + 36, previewBox.y + previewBox.height / 2);
+    await expect(surface).toHaveAttribute("data-surface-level", "node", { timeout: 1000 });
+  } finally {
+    await request.delete(`/api/nodes/${card.id}`);
+  }
+});
