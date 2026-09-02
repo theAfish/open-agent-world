@@ -1,17 +1,10 @@
-export type CardType = "agent" | "text" | "image" | "sandbox";
+export type CardType = string;
 
 export type AgentStatus = "idle" | "running" | "waiting" | "error";
 export type SandboxStatus = "stopped" | "ready" | "running" | "error";
-export type CardStatus = AgentStatus | SandboxStatus | "available" | "modified";
+export type CardStatus = AgentStatus | SandboxStatus | "available" | "modified" | string;
 
-export type Relationship =
-  | "communicate"
-  | "read"
-  | "read_edit"
-  | "view"
-  | "execute"
-  | "mount_read_only"
-  | "mount_read_write";
+export type Relationship = string;
 
 export type EdgeDirection = "forward" | "bidirectional";
 
@@ -87,6 +80,44 @@ export interface WorldSnapshot {
   chunks: Array<WorldChunk | string | [number, number]>;
 }
 
+export interface NodeTypeCatalogItem {
+  id: CardType;
+  label: string;
+  description: string;
+  icon: string;
+  color: string;
+  deck_id: string;
+  deck_label: string;
+  deck_icon: string;
+  default_name: string;
+  default_size: WorldSize;
+  default_status: CardStatus;
+  traits: string[];
+  surfaces: {
+    preview: boolean;
+    inspector: boolean;
+    workspace: boolean;
+  };
+  default_config: CardConfig;
+}
+
+export interface RelationshipCatalogItem {
+  id: Relationship;
+  label: string;
+  short_label: string;
+  description: string;
+  source_types: CardType[];
+  target_types: CardType[];
+  source_traits: string[];
+  target_traits: string[];
+  directions: EdgeDirection[];
+}
+
+export interface PluginCatalog {
+  node_types: NodeTypeCatalogItem[];
+  relationships: RelationshipCatalogItem[];
+}
+
 export interface RuntimeEvent {
   id: string;
   type: string;
@@ -113,17 +144,3 @@ export interface ToastMessage {
   title: string;
   detail?: string;
 }
-
-export const CARD_TYPE_LABELS: Record<CardType, string> = {
-  agent: "Agent",
-  text: "Text file",
-  image: "Image file",
-  sandbox: "Sandbox",
-};
-
-export const COMPACT_CARD_SIZES: Record<CardType, WorldSize> = {
-  agent: { width: 96, height: 96 },
-  text: { width: 96, height: 96 },
-  image: { width: 96, height: 96 },
-  sandbox: { width: 96, height: 96 },
-};

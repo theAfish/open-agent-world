@@ -6,6 +6,7 @@ import type { WorldCard } from "../types/world";
 export function RelationshipList({ card, empty = "No capabilities connected yet." }: { card: WorldCard; empty?: string }) {
   const edges = useWorldStore((state) => state.edges);
   const cards = useWorldStore((state) => state.cards);
+  const catalog = useWorldStore((state) => state.catalog);
   const relationships = edges.filter((edge) => edge.source === card.id || edge.target === card.id);
 
   if (relationships.length === 0) {
@@ -35,7 +36,7 @@ export function RelationshipList({ card, empty = "No capabilities connected yet.
                 aria-hidden="true"
               />
             )}
-            <small>{getRelationshipOption(edge.relationship).shortLabel}</small>
+            <small>{getRelationshipOption(catalog, edge.relationship).shortLabel}</small>
           </li>
         );
       })}

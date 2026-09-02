@@ -6,6 +6,7 @@ from typing import Any
 
 from backend.capabilities.models import Capability, CapabilityKind, CapabilitySet
 from backend.errors import PermissionDeniedError, ResourceValidationError
+from backend.plugins import PluginRegistry
 from backend.resources.manager import ManagedResourceStore
 from backend.resources.models import ResourceRecord, TextDocument, TextEdit
 from backend.world.models import Card, CardType, EdgeDirection, Relationship
@@ -26,9 +27,15 @@ class CapabilityBroker:
     effect immediately.
     """
 
-    def __init__(self, world: WorldStore, resources: ManagedResourceStore) -> None:
+    def __init__(
+        self,
+        world: WorldStore,
+        resources: ManagedResourceStore,
+        plugins: PluginRegistry,
+    ) -> None:
         self.world = world
         self.resources = resources
+        self.plugins = plugins
 
     def derive(self, agent_id: str) -> CapabilitySet:
         agent = self._require_type(agent_id, CardType.AGENT)
@@ -37,107 +44,29 @@ class CapabilityBroker:
         directed_edges.extend(
             (edge, edge.source)
             for edge in self.world.list_edges_to(agent_id)
-            if edge.direction is EdgeDirection.BIDIRECTIONAL
+            if edge.direction == EdgeDirection.BIDIRECTIONAL
         )
-        communication_targets: set[str] = set()
+        capability_ids: set[str] = set()
         for edge, target_id in directed_edges:
             target = self.world.get_card(target_id)
             suffix = _tool_suffix(target)
-            if target.type is CardType.AGENT and edge.relationship is Relationship.COMMUNICATE:
-                if target.id in communication_targets:
+            relationship = self.plugins.relationship(edge.relationship)
+            for grant in relationship.capabilities:
+                capability_id = f"{grant.kind}:{target.id}"
+                if capability_id in capability_ids:
                     continue
-                communication_targets.add(target.id)
+                capability_ids.add(capability_id)
                 capabilities.append(
                     Capability(
-                        id=f"{CapabilityKind.AGENT_COMMUNICATE.value}:{target.id}",
-                        tool_name=f"message_agent_{suffix}",
-                        kind=CapabilityKind.AGENT_COMMUNICATE,
+                        id=capability_id,
+                        tool_name=f"{grant.tool_prefix}_{suffix}",
+                        kind=grant.kind,
                         agent_id=agent.id,
                         target_id=target.id,
                         target_type=target.type,
                         target_name=target.name,
-                        description=f"Send a message to agent {target.name!r} and receive its response.",
-                        input_schema={
-                            "type": "object",
-                            "properties": {"message": {"type": "string"}},
-                            "required": ["message"],
-                            "additionalProperties": False,
-                        },
-                    )
-                )
-            elif target.type is CardType.TEXT and edge.relationship in {
-                Relationship.READ,
-                Relationship.READ_EDIT,
-            }:
-                capabilities.append(
-                    Capability(
-                        id=f"{CapabilityKind.TEXT_READ.value}:{target.id}",
-                        tool_name=f"read_text_{suffix}",
-                        kind=CapabilityKind.TEXT_READ,
-                        agent_id=agent.id,
-                        target_id=target.id,
-                        target_type=target.type,
-                        target_name=target.name,
-                        description=f"Read the managed text resource {target.name!r}.",
-                        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
-                    )
-                )
-                if edge.relationship is Relationship.READ_EDIT:
-                    capabilities.append(
-                        Capability(
-                            id=f"{CapabilityKind.TEXT_EDIT.value}:{target.id}",
-                            tool_name=f"replace_text_{suffix}",
-                            kind=CapabilityKind.TEXT_EDIT,
-                            agent_id=agent.id,
-                            target_id=target.id,
-                            target_type=target.type,
-                            target_name=target.name,
-                            description=f"Replace the contents of {target.name!r}.",
-                            input_schema={
-                                "type": "object",
-                                "properties": {"content": {"type": "string"}},
-                                "required": ["content"],
-                                "additionalProperties": False,
-                            },
-                        )
-                    )
-            elif target.type is CardType.IMAGE and edge.relationship is Relationship.VIEW:
-                capabilities.append(
-                    Capability(
-                        id=f"{CapabilityKind.IMAGE_VIEW.value}:{target.id}",
-                        tool_name=f"view_image_{suffix}",
-                        kind=CapabilityKind.IMAGE_VIEW,
-                        agent_id=agent.id,
-                        target_id=target.id,
-                        target_type=target.type,
-                        target_name=target.name,
-                        description=f"Inspect the managed image {target.name!r}.",
-                        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
-                    )
-                )
-            elif target.type is CardType.SANDBOX and edge.relationship is Relationship.EXECUTE:
-                capabilities.append(
-                    Capability(
-                        id=f"{CapabilityKind.SANDBOX_EXECUTE.value}:{target.id}",
-                        tool_name=f"execute_in_{suffix}",
-                        kind=CapabilityKind.SANDBOX_EXECUTE,
-                        agent_id=agent.id,
-                        target_id=target.id,
-                        target_type=target.type,
-                        target_name=target.name,
-                        description=f"Execute an argv command in sandbox {target.name!r}.",
-                        input_schema={
-                            "type": "object",
-                            "properties": {
-                                "argv": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "minItems": 1,
-                                }
-                            },
-                            "required": ["argv"],
-                            "additionalProperties": False,
-                        },
+                        description=grant.description.format(target_name=target.name),
+                        input_schema=dict(grant.input_schema),
                     )
                 )
         return CapabilitySet(agent_id=agent.id, capabilities=capabilities)
@@ -147,11 +76,11 @@ class CapabilityBroker:
         self._require_type(target_agent_id, CardType.AGENT)
         edge = self.world.find_edge(agent_id, target_agent_id)
         reverse = self.world.find_edge(target_agent_id, agent_id)
-        allowed = edge is not None and edge.relationship is Relationship.COMMUNICATE
+        allowed = edge is not None and edge.relationship == Relationship.COMMUNICATE
         allowed = allowed or (
             reverse is not None
-            and reverse.relationship is Relationship.COMMUNICATE
-            and reverse.direction is EdgeDirection.BIDIRECTIONAL
+            and reverse.relationship == Relationship.COMMUNICATE
+            and reverse.direction == EdgeDirection.BIDIRECTIONAL
         )
         if not allowed:
             raise PermissionDeniedError(
@@ -174,7 +103,7 @@ class CapabilityBroker:
         self._require_type(agent_id, CardType.AGENT)
         self._require_type(resource_id, CardType.TEXT)
         edge = self.world.find_edge(agent_id, resource_id)
-        if edge is None or edge.relationship is not Relationship.READ_EDIT:
+        if edge is None or edge.relationship != Relationship.READ_EDIT:
             raise PermissionDeniedError(
                 f"agent {agent_id!r} has no edit capability for text {resource_id!r}"
             )
@@ -183,7 +112,7 @@ class CapabilityBroker:
         self._require_type(agent_id, CardType.AGENT)
         self._require_type(resource_id, CardType.IMAGE)
         edge = self.world.find_edge(agent_id, resource_id)
-        if edge is None or edge.relationship is not Relationship.VIEW:
+        if edge is None or edge.relationship != Relationship.VIEW:
             raise PermissionDeniedError(
                 f"agent {agent_id!r} has no view capability for image {resource_id!r}"
             )
@@ -192,7 +121,7 @@ class CapabilityBroker:
         self._require_type(agent_id, CardType.AGENT)
         self._require_type(sandbox_id, CardType.SANDBOX)
         edge = self.world.find_edge(agent_id, sandbox_id)
-        if edge is None or edge.relationship is not Relationship.EXECUTE:
+        if edge is None or edge.relationship != Relationship.EXECUTE:
             raise PermissionDeniedError(
                 f"agent {agent_id!r} cannot execute in sandbox {sandbox_id!r}"
             )
@@ -213,7 +142,7 @@ class CapabilityBroker:
             raise PermissionDeniedError(
                 f"sandbox {sandbox_id!r} has no {action} access to resource {resource_id!r}"
             )
-        if write and resource.type is CardType.IMAGE:
+        if write and resource.type == CardType.IMAGE:
             raise PermissionDeniedError("image resources are always read-only")
 
     def read_text(self, agent_id: str, resource_id: str) -> TextDocument:
@@ -279,7 +208,7 @@ class CapabilityBroker:
         self, agent_id: str, tool_name: str, arguments: dict[str, Any]
     ) -> TextDocument | tuple[ResourceRecord, Path] | tuple[str, list[str]] | tuple[str, str]:
         capability = self.capability_for_tool(agent_id, tool_name)
-        if capability.kind is CapabilityKind.AGENT_COMMUNICATE:
+        if capability.kind == CapabilityKind.AGENT_COMMUNICATE:
             message = arguments.get("message")
             if (
                 set(arguments) != {"message"}
@@ -291,19 +220,19 @@ class CapabilityBroker:
                 )
             self.require_agent_communicate(agent_id, capability.target_id)
             return capability.target_id, message
-        if capability.kind is CapabilityKind.TEXT_READ:
+        if capability.kind == CapabilityKind.TEXT_READ:
             if arguments:
                 raise ResourceValidationError("text read tool takes no arguments")
             return self.read_text(agent_id, capability.target_id)
-        if capability.kind is CapabilityKind.TEXT_EDIT:
+        if capability.kind == CapabilityKind.TEXT_EDIT:
             if set(arguments) != {"content"} or not isinstance(arguments["content"], str):
                 raise ResourceValidationError("text edit tool requires one string content argument")
             return self.replace_text(agent_id, capability.target_id, arguments["content"])
-        if capability.kind is CapabilityKind.IMAGE_VIEW:
+        if capability.kind == CapabilityKind.IMAGE_VIEW:
             if arguments:
                 raise ResourceValidationError("image view tool takes no arguments")
             return self.view_image(agent_id, capability.target_id)
-        if capability.kind is CapabilityKind.SANDBOX_EXECUTE:
+        if capability.kind == CapabilityKind.SANDBOX_EXECUTE:
             argv = arguments.get("argv")
             if set(arguments) != {"argv"} or not isinstance(argv, list) or not argv or not all(
                 isinstance(value, str) and value for value in argv
@@ -315,10 +244,10 @@ class CapabilityBroker:
             return capability.target_id, argv
         raise AssertionError(f"unhandled capability kind {capability.kind}")
 
-    def _require_type(self, card_id: str, expected: CardType) -> Card:
+    def _require_type(self, card_id: str, expected: str) -> Card:
         card = self.world.get_card(card_id)
-        if card.type is not expected:
+        if card.type != expected:
             raise ResourceValidationError(
-                f"card {card_id!r} is {card.type.value!r}, expected {expected.value!r}"
+                f"card {card_id!r} is {card.type!r}, expected {expected!r}"
             )
         return card

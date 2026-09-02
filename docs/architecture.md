@@ -6,9 +6,10 @@ Open Agent World is a spatial capability system. The graph is not a workflow dia
 
 ```text
 React work surface
-  |  REST snapshots/mutations + typed WebSocket events
+  |  REST catalog/snapshots/mutations + typed WebSocket events
   v
 FastAPI application
+  |-- Plugin registry (node, relationship, and capability definitions)
   |-- World repository (SQLite is authoritative)
   |-- Capability broker (derives permissions from current edges)
   |-- Managed resources (never arbitrary host paths)
@@ -20,7 +21,7 @@ The frontend may request a mutation, but it cannot grant a capability. Every pro
 
 ## World model
 
-A card stores identity, type, world position, size, expansion state, configuration, timestamps, and a revision. An edge stores a source, target, and one relationship selected from a closed set.
+A card stores identity, namespaced type, world position, size, expansion state, configuration, timestamps, and a revision. An edge stores a source, target, and one registered semantic relationship. Built-in definitions are registered through the same API exposed to trusted Python plugins.
 
 | Source | Target | Relationships |
 | --- | --- | --- |
@@ -31,7 +32,9 @@ A card stores identity, type, world position, size, expansion state, configurati
 | Text | Sandbox | `mount_read_only`, `mount_read_write` |
 | Image | Sandbox | `mount_read_only` |
 
-The backend rejects reversed, unsupported, duplicate, and self-referential edges. Scoped capabilities are generated from valid edges; there is no global “resource by ID” tool exposed to an agent.
+`PluginRegistry` is the single rule authority. It publishes serializable UI metadata at `GET /api/catalog`, while configuration models and executable capability handlers stay in the trusted backend. Endpoint rules can match exact node types and/or declared traits. A connection gesture is unordered: when only its reverse orientation matches, the frontend and backend normalize it to the relationship's canonical source and target.
+
+The backend rejects unsupported, duplicate, and self-referential edges. Scoped capabilities are generated from registered capability grants; there is no global “resource by ID” tool exposed to an agent.
 
 An Agent-to-Agent `communicate` edge has a persisted direction. A `forward` edge exposes one target-scoped messaging tool to the source Agent, while a `bidirectional` edge exposes the corresponding scoped tool to both Agents. Invoking either tool starts the other Agent with the message and returns its final response. The permission and direction are re-checked at invocation time like every other graph-derived capability.
 

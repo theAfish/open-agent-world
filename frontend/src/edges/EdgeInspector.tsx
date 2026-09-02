@@ -5,6 +5,7 @@ import type { EdgeDirection, Relationship } from "../types/world";
 
 export function EdgeInspector() {
   const selectedId = useWorldStore((state) => state.selectedEdgeId);
+  const catalog = useWorldStore((state) => state.catalog);
   const edge = useWorldStore((state) => state.edges.find((item) => item.id === selectedId));
   const source = useWorldStore((state) => state.cards.find((card) => card.id === edge?.source));
   const target = useWorldStore((state) => state.cards.find((card) => card.id === edge?.target));
@@ -13,7 +14,8 @@ export function EdgeInspector() {
   const deleteSelectedEdge = useWorldStore((state) => state.deleteSelectedEdge);
 
   if (!edge || !source || !target) return null;
-  const options = getRelationshipOptions(source.type, target.type);
+  const options = getRelationshipOptions(catalog, source.type, target.type);
+  const activeOption = getRelationshipOption(catalog, edge.relationship);
 
   return (
     <aside className="edge-inspector" aria-label="Selected relationship">
@@ -27,22 +29,31 @@ export function EdgeInspector() {
           <span className="sr-only">Permission</span>
           <select
             value={edge.relationship}
-            onChange={(event) => void updateSelectedEdge({ relationship: event.target.value as Relationship })}
+            onChange={(event) => {
+              const relationship = event.target.value as Relationship;
+              const selectedOption = options.find((option) => option.value === relationship);
+              void updateSelectedEdge({
+                relationship,
+                ...(selectedOption?.directions.includes(edge.direction)
+                  ? {}
+                  : { direction: "forward" }),
+              });
+            }}
           >
             {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>
       ) : (
-        <span className="edge-inspector-permission">{getRelationshipOption(edge.relationship).label}</span>
+        <span className="edge-inspector-permission">{activeOption.label}</span>
       )}
-      {source.type === "agent" && target.type === "agent" && edge.relationship === "communicate" && (
+      {activeOption.directions.includes("bidirectional") && (
         <label className="edge-direction-control">
           {edge.direction === "bidirectional"
             ? <ArrowLeftRight size={13} aria-hidden="true" />
             : <ArrowRight size={13} aria-hidden="true" />}
           <span className="sr-only">Direction</span>
           <select
-            aria-label="Communication direction"
+            aria-label="Relationship direction"
             value={edge.direction}
             onChange={(event) => void updateSelectedEdge({ direction: event.target.value as EdgeDirection })}
           >

@@ -5,9 +5,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.world.models import CardType
-
-
 class CapabilityKind(StrEnum):
     AGENT_COMMUNICATE = "agent.communicate"
     TEXT_READ = "text.read"
@@ -21,10 +18,10 @@ class Capability(BaseModel):
 
     id: str
     tool_name: str
-    kind: CapabilityKind
+    kind: str
     agent_id: str
     target_id: str
-    target_type: CardType
+    target_type: str
     target_name: str
     description: str
     input_schema: dict[str, Any] = Field(default_factory=dict)

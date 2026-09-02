@@ -16,8 +16,9 @@ def test_invalid_graph_relationships_are_rejected(client: TestClient) -> None:
         "/api/edges",
         json={"source": text["id"], "target": agent["id"], "relationship": "read"},
     )
-    assert reversed_edge.status_code == 422
-    assert reversed_edge.json()["error"]["code"] == "invalid_relationship"
+    assert reversed_edge.status_code == 201
+    assert reversed_edge.json()["source"] == agent["id"]
+    assert reversed_edge.json()["target"] == text["id"]
 
     writable_image = client.post(
         "/api/edges",
@@ -52,15 +53,15 @@ def test_invalid_graph_relationships_are_rejected(client: TestClient) -> None:
 
     valid = client.post(
         "/api/edges",
-        json={"source": agent["id"], "target": text["id"], "relationship": "read"},
+        json={"source": agent["id"], "target": image["id"], "relationship": "view"},
     )
     assert valid.status_code == 201
     duplicate = client.post(
         "/api/edges",
         json={
             "source": agent["id"],
-            "target": text["id"],
-            "relationship": "read_edit",
+            "target": image["id"],
+            "relationship": "view",
         },
     )
     assert duplicate.status_code == 409

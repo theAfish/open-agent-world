@@ -1,20 +1,21 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Bot, ExternalLink, FileText, Image as ImageIcon, Trash2, Workflow, X, type LucideIcon } from "lucide-react";
-import { memo, type ComponentType, useEffect, useRef } from "react";
-import { NODE_SURFACE_SUPPORT, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
+import { Bot, ExternalLink, FileText, Image as ImageIcon, Puzzle, Trash2, Workflow, X, type LucideIcon } from "lucide-react";
+import { memo, type ComponentType, type CSSProperties, useEffect, useRef } from "react";
+import { nodeSurfaceSupport, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
-import { CARD_TYPE_LABELS, type CardType, type WorldCard } from "../types/world";
+import { type CardType, type WorldCard } from "../types/world";
 import { AgentCardBody } from "./AgentCard";
 import { ImageCardBody } from "./ImageCard";
 import { NodePreview } from "./NodePreview";
 import { SandboxCardBody } from "./SandboxCard";
 import { TextCardBody } from "./TextCard";
+import { RelationshipList } from "./CardUtilities";
 import type { CanvasNode } from "./types";
 
 const HOVER_INTENT_MS = 180;
 const HOVER_LEAVE_GRACE_MS = 140;
 
-const ICONS: Record<CardType, LucideIcon> = {
+const ICONS: Partial<Record<CardType, LucideIcon>> = {
   agent: Bot,
   text: FileText,
   image: ImageIcon,
@@ -23,12 +24,34 @@ const ICONS: Record<CardType, LucideIcon> = {
 
 interface BodyProps { card: WorldCard; level: NodeSurfaceLevel }
 
-const BODIES: Record<CardType, ComponentType<BodyProps>> = {
+const BODIES: Partial<Record<CardType, ComponentType<BodyProps>>> = {
   agent: AgentCardBody,
   text: TextCardBody,
   image: ImageCardBody,
   sandbox: SandboxCardBody,
 };
+
+function GenericCardBody({ card }: BodyProps) {
+  const entries = Object.entries(card.config).filter(([, value]) => (
+    typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+  ));
+  return (
+    <div className="expanded-stack nodrag nopan">
+      <section className="card-section">
+        <div className="section-heading"><span>Plugin configuration</span><small>catalog-driven</small></div>
+        {entries.length > 0 ? (
+          <dl className="plugin-config-list">
+            {entries.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}
+          </dl>
+        ) : <div className="mini-empty"><span>No public configuration fields.</span></div>}
+      </section>
+      <section className="card-section">
+        <div className="section-heading"><span>Relationships</span><small>backend-authoritative</small></div>
+        <RelationshipList card={card} />
+      </section>
+    </div>
+  );
+}
 
 function statusLabel(status: WorldCard["status"]): string {
   return status.replaceAll("_", " ");
@@ -36,6 +59,7 @@ function statusLabel(status: WorldCard["status"]): string {
 
 function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
   const card = data.card;
+  const catalog = useWorldStore((state) => state.catalog);
   const activeNodeId = useNodeSurfaceStore((state) => state.activeNodeId);
   const activeLevel = useNodeSurfaceStore((state) => state.level);
   const inspectorNodeIds = useNodeSurfaceStore((state) => state.inspectorNodeIds);
@@ -51,9 +75,11 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
   const leaveTimer = useRef<ReturnType<typeof setTimeout>>();
   const level = surfaceLevelForNode(card.id, activeNodeId, activeLevel, inspectorNodeIds);
   const visualLevel = level === "workspace" ? "inspector" : level;
-  const Icon = ICONS[card.type];
-  const Body = BODIES[card.type];
-  const support = NODE_SURFACE_SUPPORT[card.type];
+  const definition = catalog.node_types.find((item) => item.id === card.type);
+  const label = definition?.label ?? card.type;
+  const Icon = ICONS[card.type] ?? Puzzle;
+  const Body = BODIES[card.type] ?? GenericCardBody;
+  const support = nodeSurfaceSupport(card.type, catalog);
 
   const clearTimers = () => {
     if (enterTimer.current) clearTimeout(enterTimer.current);
@@ -77,7 +103,8 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
   return (
     <article
       className={`world-card node-surface world-card--${card.type} is-${visualLevel} ${selected ? "is-selected" : ""} ${card.status === "running" ? "is-running" : ""} ${card.status === "error" ? "is-error" : ""} ${card.ephemeral ? "is-ephemeral" : ""}`}
-      aria-label={`${CARD_TYPE_LABELS[card.type]} ${card.name}`}
+      style={{ "--card-kind": definition?.color } as CSSProperties}
+      aria-label={`${label} ${card.name}`}
       data-card-id={card.id}
       data-card-type={card.type}
       data-card-expanded={visualLevel === "inspector" ? "true" : "false"}
@@ -100,10 +127,10 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
       <header className="card-header node-surface-header">
         <div className="card-kind-icon" aria-hidden="true"><Icon size={18} strokeWidth={1.7} /></div>
         <div className="card-title-group">
-          <span className="card-eyebrow">{CARD_TYPE_LABELS[card.type]}</span>
+          <span className="card-eyebrow">{label}</span>
           <h2 title={card.name}>{card.name}</h2>
           <input className="card-name-input nodrag nopan" defaultValue={card.name}
-            aria-label={`${CARD_TYPE_LABELS[card.type]} name`}
+            aria-label={`${label} name`}
             onBlur={(event) => {
               const name = event.currentTarget.value.trim();
               if (name && name !== card.name) void updateCard(card.id, { name });

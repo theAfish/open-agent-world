@@ -11,9 +11,9 @@ import {
   X,
 } from "lucide-react";
 import { useMemo } from "react";
-import { NODE_SURFACE_SUPPORT, useNodeSurfaceStore } from "../state/nodeSurfaces";
+import { nodeSurfaceSupport, useNodeSurfaceStore } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
-import { CARD_TYPE_LABELS, type WorldCard } from "../types/world";
+import type { WorldCard } from "../types/world";
 
 interface WorkspaceWindowProps {
   card: WorldCard;
@@ -21,6 +21,7 @@ interface WorkspaceWindowProps {
 }
 
 function WorkspaceWindow({ card, children }: WorkspaceWindowProps) {
+  const catalog = useWorldStore((state) => state.catalog);
   const closeWorkspace = useNodeSurfaceStore((state) => state.closeWorkspace);
   const maximized = useNodeSurfaceStore((state) => Boolean(state.maximizedWorkspaces[card.id]));
   const toggleMaximized = useNodeSurfaceStore((state) => state.toggleWorkspaceMaximized);
@@ -37,7 +38,7 @@ function WorkspaceWindow({ card, children }: WorkspaceWindowProps) {
         <header className="workspace-titlebar">
           <div className="workspace-app-mark"><Bot size={16} /></div>
           <div>
-            <span>{CARD_TYPE_LABELS[card.type]} workspace</span>
+            <span>{catalog.node_types.find((item) => item.id === card.type)?.label ?? card.type} workspace</span>
             <strong>{card.name}</strong>
           </div>
           <div className="workspace-window-actions">
@@ -61,6 +62,7 @@ function WorkspaceWindow({ card, children }: WorkspaceWindowProps) {
 }
 
 function AgentWorkspace({ card }: { card: WorldCard }) {
+  const catalog = useWorldStore((state) => state.catalog);
   const edges = useWorldStore((state) => state.edges);
   const cards = useWorldStore((state) => state.cards);
   const runAgent = useWorldStore((state) => state.runAgent);
@@ -131,7 +133,7 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
           {context.length > 0 ? context.map((item) => (
             <div className="workspace-context-item" key={item.id}>
               <span>{item.type.slice(0, 1).toUpperCase()}</span>
-              <div><strong>{item.name}</strong><small>{CARD_TYPE_LABELS[item.type]}</small></div>
+              <div><strong>{item.name}</strong><small>{catalog.node_types.find((definition) => definition.id === item.type)?.label ?? item.type}</small></div>
             </div>
           )) : <p>No connected context yet.</p>}
         </section>
@@ -155,12 +157,18 @@ export function NodeWorkspace() {
     state.cards.find((item) => item.id === activeNodeId)
     ?? state.stressCards.find((item) => item.id === activeNodeId)
   ));
+  const catalog = useWorldStore((state) => state.catalog);
 
-  if (level !== "workspace" || !card || !NODE_SURFACE_SUPPORT[card.type].workspace) return null;
+  if (level !== "workspace" || !card || !nodeSurfaceSupport(card.type, catalog).workspace) return null;
 
   return (
     <WorkspaceWindow card={card}>
-      {card.type === "agent" ? <AgentWorkspace card={card} /> : null}
+      {card.type === "agent" ? <AgentWorkspace card={card} /> : (
+        <div className="workspace-welcome">
+          <strong>{card.name}</strong>
+          <p>This plugin node exposes a workspace surface. Its frontend module can replace this generic view.</p>
+        </div>
+      )}
     </WorkspaceWindow>
   );
 }

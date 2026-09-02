@@ -9,6 +9,7 @@ import { InstrumentOutput } from "./CardUtilities";
 
 export function AgentCardBody({ card }: { card: WorldCard; level: NodeSurfaceLevel }) {
   const edges = useWorldStore((state) => state.edges);
+  const catalog = useWorldStore((state) => state.catalog);
   const cards = useWorldStore((state) => state.cards);
   const updateCard = useWorldStore((state) => state.updateCard);
   const runAgent = useWorldStore((state) => state.runAgent);
@@ -86,8 +87,8 @@ export function AgentCardBody({ card }: { card: WorldCard; level: NodeSurfaceLev
         </div>
         <div className="capability-chips">
           {capabilities.length > 0 ? capabilities.map(({ edge, target }) => (
-            <span key={edge.id} title={getRelationshipOption(edge.relationship).description}>
-              {target?.name ?? edge.target} · {getRelationshipOption(edge.relationship).shortLabel}
+            <span key={edge.id} title={getRelationshipOption(catalog, edge.relationship).description}>
+              {target?.name ?? edge.target} · {getRelationshipOption(catalog, edge.relationship).shortLabel}
             </span>
           )) : <em>Connect a resource or sandbox to grant a scoped tool.</em>}
         </div>

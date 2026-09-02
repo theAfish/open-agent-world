@@ -40,6 +40,7 @@ Application data defaults to `%LOCALAPPDATA%/OpenAgentWorld`. Override it before
 
 - Infinite pan/zoom surface with dot and contour terrain, semantic edges, drag/drop palette, in-place card expansion, selection, and light/dark tokens.
 - Agent, Text, Image, and Sandbox card systems with persisted position, size, configuration, resources, and relationships.
+- Registry-driven plugin node types, relationships, scoped capability handlers, and a backend-authoritative canvas catalog. See [plugin development](docs/plugins.md).
 - Backend-authoritative edge validation and capability derivation with immediate permission revocation.
 - Managed UTF-8 text read/replace/patch operations and image import/inspection; resources never retain arbitrary host paths.
 - Scoped Google ADK tools rebuilt for every run, with authorization checked again at tool invocation.
@@ -97,4 +98,4 @@ See [architecture](docs/architecture.md) and [sandbox security contract](docs/se
 
 ## POC boundary
 
-This is a local experimental environment, not a production multi-user service. It intentionally omits accounts, cloud execution, third-party plugin cards, multiplayer collaboration, and arbitrary host filesystem access. Sandbox security is fail-closed, but the code should still be reviewed before using it with hostile workloads.
+This is a local experimental environment, not a production multi-user service. It includes a trusted backend plugin registration foundation, but intentionally omits accounts, a plugin marketplace or isolation boundary for plugin code, cloud execution, multiplayer collaboration, and arbitrary host filesystem access. Sandbox security is fail-closed, but the code should still be reviewed before using it with hostile workloads.

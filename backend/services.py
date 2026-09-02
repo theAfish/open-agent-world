@@ -14,6 +14,7 @@ from backend.errors import NotFoundError, RuntimeUnavailableError
 from backend.events.hub import EventHub
 from backend.events.models import EventType
 from backend.persistence.database import Database
+from backend.plugins import PluginRegistry, load_plugin_registry
 from backend.resources.manager import ManagedResourceStore
 from backend.resources.models import (
     ImageImport,
@@ -66,18 +67,19 @@ class ApplicationServices:
     resources: ManagedResourceStore
     capabilities: CapabilityBroker
     events: EventHub
+    plugins: PluginRegistry
     agent_runtime: AgentRuntime | None = None
     sandbox_backend: SandboxBackend | None = None
     _agent_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
 
     async def startup(self) -> None:
         for card in self.world.list_cards():
-            if card.type is CardType.AGENT:
+            if card.type == CardType.AGENT:
                 if self.agent_runtime is not None:
                     await self.agent_runtime.create_agent(self._runtime_agent_config(card))
                 if card.status != "idle":
                     self.world.update_card(card.id, CardPatch(status="idle"))
-            elif card.type is CardType.SANDBOX and self.sandbox_backend is not None:
+            elif card.type == CardType.SANDBOX and self.sandbox_backend is not None:
                 await self._ensure_sandbox(card.id)
                 info = await self.sandbox_backend.get(card.id)
                 if card.status != info.state.value:
@@ -86,7 +88,7 @@ class ApplicationServices:
     async def shutdown(self) -> None:
         if self.agent_runtime is not None:
             for card in self.world.list_cards():
-                if card.type is CardType.AGENT:
+                if card.type == CardType.AGENT:
                     with suppress(Exception):
                         await self.agent_runtime.stop(card.id)
         tasks = tuple(self._agent_tasks.values())
@@ -97,7 +99,7 @@ class ApplicationServices:
         self._agent_tasks.clear()
         if self.sandbox_backend is not None:
             for card in self.world.list_cards():
-                if card.type is CardType.SANDBOX:
+                if card.type == CardType.SANDBOX:
                     with suppress(SandboxNotFoundError):
                         await self.sandbox_backend.terminate(card.id)
 
@@ -126,7 +128,7 @@ class ApplicationServices:
         runtime_created = False
         sandbox_created = False
         try:
-            if card.type is CardType.TEXT:
+            if card.type == CardType.TEXT:
                 filename = str(card.config.get("filename", "untitled.txt"))
                 initial_content = request.content
                 if initial_content is None:
@@ -135,15 +137,15 @@ class ApplicationServices:
                         configured_content if isinstance(configured_content, str) else ""
                     )
                 self.resources.create_text(card.id, filename, initial_content)
-            elif card.type is CardType.IMAGE and request.data_base64 is not None:
+            elif card.type == CardType.IMAGE and request.data_base64 is not None:
                 filename = str(card.config.get("filename", "image.png"))
                 self.resources.create_image(
                     card.id, filename, request.media_type or "", request.data_base64
                 )
-            elif card.type is CardType.AGENT and self.agent_runtime is not None:
+            elif card.type == CardType.AGENT and self.agent_runtime is not None:
                 await self.agent_runtime.create_agent(self._runtime_agent_config(card))
                 runtime_created = True
-            elif card.type is CardType.SANDBOX and self.sandbox_backend is not None:
+            elif card.type == CardType.SANDBOX and self.sandbox_backend is not None:
                 await self.sandbox_backend.create(card.id)
                 sandbox_created = True
         except BaseException:
@@ -170,7 +172,7 @@ class ApplicationServices:
     async def update_card(self, card_id: str, request: CardPatch) -> Card:
         current = self.world.get_card(card_id)
         if (
-            current.type is CardType.AGENT
+            current.type == CardType.AGENT
             and self.agent_runtime is not None
             and (request.name is not None or request.config is not None)
         ):
@@ -208,9 +210,9 @@ class ApplicationServices:
                     Relationship.MOUNT_READ_WRITE,
                 }:
                     await self._detach_mount(edge, ignore_missing=True)
-        if card.type is CardType.AGENT and self.agent_runtime is not None:
+        if card.type == CardType.AGENT and self.agent_runtime is not None:
             await self.agent_runtime.delete_agent(card.id)
-        if card.type is CardType.SANDBOX and self.sandbox_backend is not None:
+        if card.type == CardType.SANDBOX and self.sandbox_backend is not None:
             try:
                 await self.sandbox_backend.destroy(card.id)
             except SandboxNotFoundError:
@@ -246,6 +248,7 @@ class ApplicationServices:
         )
 
     async def create_edge(self, request: EdgeCreate) -> Edge:
+        request = self.world.normalize_edge_request(request)
         source = self.world.get_card(request.source)
         target = self.world.get_card(request.target)
         self.world._assert_valid_relationship(source.type, target.type, request.relationship)
@@ -342,7 +345,7 @@ class ApplicationServices:
             card_id, request.filename, request.media_type, request.data_base64
         )
         for edge in self.world.list_edges_from(card_id):
-            if edge.relationship is Relationship.MOUNT_READ_ONLY:
+            if edge.relationship == Relationship.MOUNT_READ_ONLY:
                 await self._attach_mount(edge)
         await self.events.publish(
             EventType.RESOURCE_MODIFIED,
@@ -485,8 +488,8 @@ class ApplicationServices:
         for edge in self.world.list_edges_to(sandbox_id):
             source = self.world.get_card(edge.source)
             if (
-                source.type is CardType.TEXT
-                and edge.relationship is Relationship.MOUNT_READ_WRITE
+                source.type == CardType.TEXT
+                and edge.relationship == Relationship.MOUNT_READ_WRITE
             ):
                 document = self.resources.refresh_text_if_changed(
                     source.id, actor_id=sandbox_id
@@ -579,21 +582,21 @@ class ApplicationServices:
 
     def _affected_agents(self, edge: Edge) -> list[str]:
         source = self.world.maybe_get_card(edge.source)
-        if source is not None and source.type is CardType.AGENT:
+        if source is not None and source.type == CardType.AGENT:
             target = self.world.maybe_get_card(edge.target)
             if (
                 edge.direction is EdgeDirection.BIDIRECTIONAL
                 and target is not None
-                and target.type is CardType.AGENT
+                and target.type == CardType.AGENT
             ):
                 return sorted([source.id, target.id])
             return [source.id]
         target = self.world.maybe_get_card(edge.target)
-        if target is not None and target.type is CardType.SANDBOX:
+        if target is not None and target.type == CardType.SANDBOX:
             return sorted(
                 candidate.source
                 for candidate in self.world.list_edges_to(target.id)
-                if candidate.relationship is Relationship.EXECUTE
+                if candidate.relationship == Relationship.EXECUTE
             )
         return []
 
@@ -612,7 +615,7 @@ class ApplicationServices:
         _, source = self.resources.read_bytes(resource_id)
         access = (
             ResourceAccess.READ_WRITE
-            if relationship is Relationship.MOUNT_READ_WRITE
+            if relationship == Relationship.MOUNT_READ_WRITE
             else ResourceAccess.READ_ONLY
         )
         relative = str(PureWindowsPath("resources", record.filename))
@@ -646,19 +649,19 @@ class ApplicationServices:
             )
         return self.sandbox_backend
 
-    def _require_card_type(self, card_id: str, expected: CardType) -> Card:
+    def _require_card_type(self, card_id: str, expected: str) -> Card:
         card = self.world.get_card(card_id)
-        if card.type is not expected:
-            raise NotFoundError(f"{expected.value} card {card_id!r} does not exist")
+        if card.type != expected:
+            raise NotFoundError(f"{expected} card {card_id!r} does not exist")
         return card
 
     @staticmethod
     def _is_mount(
-        source_type: CardType, target_type: CardType, relationship: Relationship
+        source_type: str, target_type: str, relationship: str
     ) -> bool:
         return (
             source_type in {CardType.TEXT, CardType.IMAGE}
-            and target_type is CardType.SANDBOX
+            and target_type == CardType.SANDBOX
             and relationship
             in {Relationship.MOUNT_READ_ONLY, Relationship.MOUNT_READ_WRITE}
         )
@@ -681,14 +684,16 @@ def create_services(
     *,
     agent_runtime: AgentRuntime | None = None,
     sandbox_backend: SandboxBackend | None = None,
+    plugins: PluginRegistry | None = None,
 ) -> ApplicationServices:
     settings.data_root.mkdir(parents=True, exist_ok=True)
     for directory in ("projects", "assets", "sandboxes", "database", "logs"):
         (settings.data_root / directory).mkdir(parents=True, exist_ok=True)
     database = Database(settings.database_path)
-    world = WorldStore(database, chunk_size=settings.chunk_size)
+    plugin_registry = plugins or load_plugin_registry()
+    world = WorldStore(database, plugin_registry, chunk_size=settings.chunk_size)
     resources = ManagedResourceStore(database, settings.data_root)
-    capabilities = CapabilityBroker(world, resources)
+    capabilities = CapabilityBroker(world, resources, plugin_registry)
     events = EventHub(queue_size=settings.event_queue_size)
     services = ApplicationServices(
         settings=settings,
@@ -697,6 +702,7 @@ def create_services(
         resources=resources,
         capabilities=capabilities,
         events=events,
+        plugins=plugin_registry,
         agent_runtime=agent_runtime,
         sandbox_backend=sandbox_backend,
     )

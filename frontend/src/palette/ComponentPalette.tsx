@@ -7,6 +7,7 @@ import {
   Image as ImageIcon,
   Layers3,
   Plus,
+  Puzzle,
   Sparkles,
   Star,
   Trash2,
@@ -17,11 +18,12 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type DragEvent, type FormEvent } from "react";
 import { useWorldStore } from "../state/worldStore";
-import { CARD_TYPE_LABELS, type CardType } from "../types/world";
+import type { CardType, PluginCatalog } from "../types/world";
 
 interface DeckCard {
   type: CardType;
   icon: LucideIcon;
+  label: string;
   detail: string;
 }
 
@@ -43,13 +45,6 @@ interface CardDeck extends StoredDeck {
 const DECKS_KEY = "open-agent-world.decks.v2";
 const LEGACY_CUSTOM_DECKS_KEY = "open-agent-world.custom-decks.v1";
 
-const CARD_CATALOG: Record<CardType, DeckCard> = {
-  agent: { type: "agent", icon: Bot, detail: "Reasoning worker" },
-  text: { type: "text", icon: FileText, detail: "Managed knowledge" },
-  image: { type: "image", icon: ImageIcon, detail: "Visual resource" },
-  sandbox: { type: "sandbox", icon: Workflow, detail: "Secure work field" },
-};
-
 const DECK_ICONS: Record<DeckIconKey, LucideIcon> = {
   bot: Bot,
   boxes: Boxes,
@@ -61,21 +56,15 @@ const DECK_ICONS: Record<DeckIconKey, LucideIcon> = {
   zap: Zap,
 };
 
-const DEFAULT_DECKS: StoredDeck[] = [
-  { id: "agents", label: "Agents", icon: "bot", cardTypes: ["agent"] },
-  { id: "objects", label: "Objects", icon: "boxes", cardTypes: ["text", "image"] },
-  { id: "fields", label: "Fields", icon: "workflow", cardTypes: ["sandbox"] },
-];
-
-const DEFAULT_HOME: Record<CardType, string> = {
-  agent: "agents",
-  text: "objects",
-  image: "objects",
-  sandbox: "fields",
+const NODE_ICONS: Record<string, LucideIcon> = {
+  bot: Bot,
+  "file-text": FileText,
+  image: ImageIcon,
+  workflow: Workflow,
 };
 
 const isCardType = (value: unknown): value is CardType => (
-  value === "agent" || value === "text" || value === "image" || value === "sandbox"
+  typeof value === "string" && value.length > 0
 );
 
 const isDeckIcon = (value: unknown): value is DeckIconKey => (
@@ -83,20 +72,43 @@ const isDeckIcon = (value: unknown): value is DeckIconKey => (
   || value === "layers" || value === "sparkles" || value === "star" || value === "zap"
 );
 
-function normalizeDecks(candidates: StoredDeck[]): StoredDeck[] {
-  const decks = candidates.map((deck) => ({ ...deck, cardTypes: [] as CardType[] }));
+function defaultDecks(catalog: PluginCatalog): StoredDeck[] {
+  const decks = new Map<string, StoredDeck>();
+  catalog.node_types.forEach((definition) => {
+    const current = decks.get(definition.deck_id);
+    if (current) current.cardTypes.push(definition.id);
+    else decks.set(definition.deck_id, {
+      id: definition.deck_id,
+      label: definition.deck_label,
+      icon: isDeckIcon(definition.deck_icon) ? definition.deck_icon : "folder",
+      cardTypes: [definition.id],
+      custom: false,
+    });
+  });
+  return [...decks.values()];
+}
+
+function normalizeDecks(candidates: StoredDeck[], catalog: PluginCatalog): StoredDeck[] {
+  const defaults = defaultDecks(catalog);
+  const merged = [
+    ...defaults.filter((deck) => !candidates.some((candidate) => candidate.id === deck.id)),
+    ...candidates,
+  ];
+  const validTypes = new Set(catalog.node_types.map((definition) => definition.id));
+  const defaultHome = new Map(catalog.node_types.map((definition) => [definition.id, definition.deck_id]));
+  const decks = merged.map((deck) => ({ ...deck, cardTypes: [] as CardType[] }));
   const claimed = new Set<CardType>();
-  candidates.forEach((candidate, index) => {
+  merged.forEach((candidate, index) => {
     candidate.cardTypes.forEach((type) => {
-      if (!claimed.has(type)) {
+      if (validTypes.has(type) && !claimed.has(type)) {
         decks[index].cardTypes.push(type);
         claimed.add(type);
       }
     });
   });
-  (Object.keys(CARD_CATALOG) as CardType[]).forEach((type) => {
+  validTypes.forEach((type) => {
     if (claimed.has(type)) return;
-    const home = decks.find((deck) => deck.id === DEFAULT_HOME[type]) ?? decks[0];
+    const home = decks.find((deck) => deck.id === defaultHome.get(type)) ?? decks[0];
     home?.cardTypes.push(type);
   });
   return decks;
@@ -117,7 +129,7 @@ function parseStoredDecks(value: string | null): StoredDeck[] {
         label: candidate.label,
         icon: isDeckIcon(candidate.icon) ? candidate.icon : "folder",
         cardTypes,
-        custom: candidate.custom ?? !DEFAULT_DECKS.some((item) => item.id === candidate.id),
+        custom: candidate.custom ?? candidate.id.startsWith("custom-"),
       }];
     });
   } catch {
@@ -125,16 +137,16 @@ function parseStoredDecks(value: string | null): StoredDeck[] {
   }
 }
 
-function loadDecks(): StoredDeck[] {
-  if (typeof window === "undefined") return DEFAULT_DECKS;
+function loadDecks(catalog: PluginCatalog): StoredDeck[] {
+  const defaults = defaultDecks(catalog);
+  if (typeof window === "undefined") return defaults;
   const stored = parseStoredDecks(window.localStorage.getItem(DECKS_KEY));
   if (stored.length > 0) {
-    const missingDefaults = DEFAULT_DECKS.filter((deck) => !stored.some((item) => item.id === deck.id));
-    return normalizeDecks([...missingDefaults, ...stored]);
+    return normalizeDecks(stored, catalog);
   }
 
   const legacy = parseStoredDecks(window.localStorage.getItem(LEGACY_CUSTOM_DECKS_KEY));
-  const migrated = DEFAULT_DECKS.map((deck) => ({ ...deck, cardTypes: [...deck.cardTypes] }));
+  const migrated = defaults.map((deck) => ({ ...deck, cardTypes: [...deck.cardTypes] }));
   legacy.forEach((legacyDeck) => {
     legacyDeck.cardTypes.forEach((type) => {
       migrated.forEach((deck) => {
@@ -143,32 +155,49 @@ function loadDecks(): StoredDeck[] {
     });
     migrated.push({ ...legacyDeck, icon: legacyDeck.icon ?? "folder", custom: true });
   });
-  return normalizeDecks(migrated);
+  return normalizeDecks(migrated, catalog);
 }
 
-function materializeDeck(deck: StoredDeck): CardDeck {
+function materializeDeck(deck: StoredDeck, catalog: PluginCatalog): CardDeck {
   return {
     ...deck,
     iconComponent: DECK_ICONS[deck.icon],
-    cards: deck.cardTypes.map((type) => CARD_CATALOG[type]),
+    cards: deck.cardTypes.flatMap((type): DeckCard[] => {
+      const definition = catalog.node_types.find((item) => item.id === type);
+      return definition ? [{
+        type,
+        icon: NODE_ICONS[definition.icon] ?? Puzzle,
+        label: definition.label,
+        detail: definition.description,
+      }] : [];
+    }),
   };
 }
 
 export function ComponentPalette() {
   const createCard = useWorldStore((state) => state.createCard);
-  const [storedDecks, setStoredDecks] = useState<StoredDeck[]>(loadDecks);
+  const catalog = useWorldStore((state) => state.catalog);
+  const [storedDecks, setStoredDecks] = useState<StoredDeck[]>([]);
   const [activeDeckId, setActiveDeckId] = useState("agents");
   const [editingDeck, setEditingDeck] = useState(false);
   const [deckName, setDeckName] = useState("");
   const [deckIcon, setDeckIcon] = useState<DeckIconKey>("folder");
   const [iconMenuOpen, setIconMenuOpen] = useState(false);
   const [dragOverDeckId, setDragOverDeckId] = useState<string>();
-  const decks = storedDecks.map(materializeDeck);
+  const decks = storedDecks.map((deck) => materializeDeck(deck, catalog));
   const activeDeck = decks.find((deck) => deck.id === activeDeckId) ?? decks[0];
 
   useEffect(() => {
+    if (catalog.node_types.length === 0) return;
+    setStoredDecks((current) => current.length > 0
+      ? normalizeDecks(current, catalog)
+      : loadDecks(catalog));
+  }, [catalog]);
+
+  useEffect(() => {
+    if (catalog.node_types.length === 0) return;
     window.localStorage.setItem(DECKS_KEY, JSON.stringify(storedDecks));
-  }, [storedDecks]);
+  }, [catalog.node_types.length, storedDecks]);
 
   const beginDrag = (event: DragEvent<HTMLButtonElement>, type: CardType) => {
     event.dataTransfer.setData("application/open-agent-card", type);
@@ -217,7 +246,8 @@ export function ComponentPalette() {
       const removed = current.find((deck) => deck.id === activeDeck.id);
       const restoredByDeck = new Map<string, CardType[]>();
       removed?.cardTypes.forEach((type) => {
-        restoredByDeck.set(DEFAULT_HOME[type], [...(restoredByDeck.get(DEFAULT_HOME[type]) ?? []), type]);
+        const home = catalog.node_types.find((definition) => definition.id === type)?.deck_id;
+        if (home) restoredByDeck.set(home, [...(restoredByDeck.get(home) ?? []), type]);
       });
       return current
         .filter((deck) => deck.id !== activeDeck.id)
@@ -356,7 +386,7 @@ export function ComponentPalette() {
             </div>
             {activeDeck?.cards.length ? (
               <div className={`palette-items ${activeDeck.cards.length > 2 ? "has-many" : ""}`}>
-                {activeDeck.cards.map(({ type, icon: Icon, detail }) => (
+                {activeDeck.cards.map(({ type, icon: Icon, label, detail }) => (
                   <button
                     type="button"
                     key={type}
@@ -364,12 +394,12 @@ export function ComponentPalette() {
                     draggable
                     onDragStart={(event) => beginDrag(event, type)}
                     onClick={() => void createCard(type)}
-                    aria-label={`Create ${CARD_TYPE_LABELS[type]}`}
+                    aria-label={`Create ${label}`}
                     title="Drag to the canvas to create, or onto a deck tab to move"
                   >
                     <span className="palette-card-corner"><Icon size={15} /></span>
                     <span className="palette-item-icon"><Icon size={25} /></span>
-                    <span className="palette-item-copy"><strong>{CARD_TYPE_LABELS[type]}</strong><small>{detail}</small></span>
+                    <span className="palette-item-copy"><strong>{label}</strong><small>{detail}</small></span>
                     <span className="palette-draw"><Plus size={12} /> Draw</span>
                   </button>
                 ))}

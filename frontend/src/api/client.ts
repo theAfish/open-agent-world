@@ -3,6 +3,7 @@ import type {
   CardStatus,
   CardType,
   EdgeDirection,
+  PluginCatalog,
   Relationship,
   RuntimeEvent,
   WorldCard,
@@ -66,9 +67,7 @@ function asNumber(value: unknown, fallback: number): number {
 function normalizeCardType(value: unknown): CardType {
   if (value === "text_file" || value === "text-resource") return "text";
   if (value === "image_file" || value === "image-resource") return "image";
-  if (value === "agent" || value === "text" || value === "image" || value === "sandbox") {
-    return value;
-  }
+  if (typeof value === "string" && value.trim()) return value;
   throw new ApiError(`Unknown world object type: ${String(value)}`, 500, value);
 }
 
@@ -79,17 +78,7 @@ function normalizeRelationship(value: unknown): Relationship {
     read_write: "mount_read_write",
   };
   const normalized = aliases[String(value)] ?? value;
-  if (
-    normalized === "communicate" ||
-    normalized === "read" ||
-    normalized === "read_edit" ||
-    normalized === "view" ||
-    normalized === "execute" ||
-    normalized === "mount_read_only" ||
-    normalized === "mount_read_write"
-  ) {
-    return normalized;
-  }
+  if (typeof normalized === "string" && normalized.trim()) return normalized;
   throw new ApiError(`Unknown relationship: ${String(value)}`, 500, value);
 }
 
@@ -190,6 +179,10 @@ function unwrap<T>(input: unknown, key: string): T {
 }
 
 export const worldApi = {
+  async getCatalog(): Promise<PluginCatalog> {
+    return request<PluginCatalog>("/catalog");
+  },
+
   async getWorld(chunks?: string[]): Promise<WorldSnapshot> {
     const query = chunks?.length
       ? `?chunks=${encodeURIComponent(chunks.join(","))}`

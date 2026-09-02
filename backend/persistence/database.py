@@ -10,7 +10,7 @@ from typing import Iterator
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cards (
     id TEXT PRIMARY KEY,
-    type TEXT NOT NULL CHECK (type IN ('agent', 'text', 'image', 'sandbox')),
+    type TEXT NOT NULL,
     name TEXT NOT NULL,
     x REAL NOT NULL,
     y REAL NOT NULL,
@@ -101,6 +101,7 @@ class Database:
             self._connection.execute("PRAGMA synchronous = NORMAL")
         with self._lock:
             self._connection.executescript(SCHEMA)
+            self._migrate_open_card_types()
             edge_columns = {
                 row["name"] for row in self._connection.execute("PRAGMA table_info(edges)")
             }
@@ -108,6 +109,54 @@ class Database:
                 self._connection.execute(
                     "ALTER TABLE edges ADD COLUMN direction TEXT NOT NULL DEFAULT 'forward'"
                 )
+
+    def _migrate_open_card_types(self) -> None:
+        row = self._connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'cards'"
+        ).fetchone()
+        schema = "" if row is None else str(row["sql"] or "")
+        if "CHECK (type IN" not in schema:
+            return
+
+        # Plugin node identifiers are registry-validated strings. Older POC
+        # databases constrained this column to the four built-in node types.
+        self._connection.execute("PRAGMA foreign_keys = OFF")
+        try:
+            self._connection.executescript(
+                """
+                BEGIN IMMEDIATE;
+                CREATE TABLE cards_open_types (
+                    id TEXT PRIMARY KEY,
+                    type TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    x REAL NOT NULL,
+                    y REAL NOT NULL,
+                    width REAL NOT NULL CHECK (width > 0),
+                    height REAL NOT NULL CHECK (height > 0),
+                    expanded INTEGER NOT NULL DEFAULT 0 CHECK (expanded IN (0, 1)),
+                    config_json TEXT NOT NULL,
+                    chunk_x INTEGER NOT NULL,
+                    chunk_y INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    revision INTEGER NOT NULL DEFAULT 1
+                );
+                INSERT INTO cards_open_types
+                SELECT id, type, name, x, y, width, height, expanded, config_json,
+                       chunk_x, chunk_y, created_at, updated_at, revision
+                FROM cards;
+                DROP TABLE cards;
+                ALTER TABLE cards_open_types RENAME TO cards;
+                CREATE INDEX cards_chunk_idx ON cards (chunk_x, chunk_y);
+                COMMIT;
+                """
+            )
+        except BaseException:
+            if self._connection.in_transaction:
+                self._connection.rollback()
+            raise
+        finally:
+            self._connection.execute("PRAGMA foreign_keys = ON")
 
     @contextmanager
     def transaction(self, *, immediate: bool = False) -> Iterator[sqlite3.Connection]:

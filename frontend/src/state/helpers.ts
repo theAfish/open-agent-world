@@ -1,8 +1,8 @@
 import {
-  COMPACT_CARD_SIZES,
   type CardConfig,
   type CardStatus,
   type CardType,
+  type NodeTypeCatalogItem,
   type WorldCard,
   type WorldPosition,
 } from "../types/world";
@@ -46,15 +46,22 @@ const DEFAULT_STATUS: Record<CardType, CardStatus> = {
   sandbox: "stopped",
 };
 
-export function buildCardDraft(type: CardType, position: WorldPosition): Omit<WorldCard, "id"> {
+export function buildCardDraft(
+  type: CardType,
+  position: WorldPosition,
+  definition?: NodeTypeCatalogItem,
+): Omit<WorldCard, "id"> {
   return {
     type,
-    name: DEFAULT_NAME[type],
+    name: definition?.default_name ?? DEFAULT_NAME[type] ?? `New ${type}`,
     position,
-    size: COMPACT_CARD_SIZES[type],
+    size: { width: 96, height: 96 },
     expanded: false,
-    status: DEFAULT_STATUS[type],
-    config: { ...DEFAULT_CONFIG[type] },
+    status: definition?.default_status ?? DEFAULT_STATUS[type] ?? "available",
+    config: {
+      ...(definition?.default_config ?? {}),
+      ...(DEFAULT_CONFIG[type] ?? {}),
+    },
   };
 }
 

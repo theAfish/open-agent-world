@@ -10,6 +10,7 @@ function compactText(value: unknown, fallback: string): string {
 
 export function NodePreview({ card }: { card: WorldCard }) {
   const edges = useWorldStore((state) => state.edges);
+  const catalog = useWorldStore((state) => state.catalog);
   const connectionCount = useMemo(
     () => edges.filter((edge) => edge.source === card.id || edge.target === card.id).length,
     [card.id, edges],
@@ -57,12 +58,23 @@ export function NodePreview({ card }: { card: WorldCard }) {
     );
   }
 
-  return (
+  if (card.type === "sandbox") return (
     <div className="node-preview-summary">
       <p>{card.status === "stopped" ? "Secure execution environment is stopped." : "Contained execution environment is available."}</p>
       <div className="node-preview-metadata">
         <span><Workflow size={12} /> {connectionCount} connections</span>
         <span><ShieldCheck size={12} /> Network denied</span>
+      </div>
+    </div>
+  );
+
+  const definition = catalog.node_types.find((item) => item.id === card.type);
+  return (
+    <div className="node-preview-summary">
+      <p>{compactText(card.config.summary ?? card.config.description, definition?.description ?? "Plugin-defined world object.")}</p>
+      <div className="node-preview-metadata">
+        <span>{definition?.label ?? card.type}</span>
+        <span>{connectionCount} connections</span>
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { worldApi } from "../api/client";
 import type { WorldCard, WorldEdge } from "../types/world";
 import { buildCardDraft } from "./helpers";
+import { TEST_CATALOG } from "./catalog.fixture";
 import { useWorldStore } from "./worldStore";
 
 function card(id: string, type: WorldCard["type"]): WorldCard {
@@ -11,8 +12,10 @@ function card(id: string, type: WorldCard["type"]): WorldCard {
 describe("authoritative world synchronization", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(worldApi, "getCatalog").mockResolvedValue(TEST_CATALOG);
     useWorldStore.setState({
       cards: [],
+      catalog: TEST_CATALOG,
       edges: [],
       stressCards: [],
       loadedChunkKeys: [],
@@ -89,6 +92,38 @@ describe("authoritative world synchronization", () => {
     await useWorldStore.getState().deleteSelectedEdge();
     expect(useWorldStore.getState().edges).toEqual([]);
     expect(useWorldStore.getState().selectedEdgeId).toBeUndefined();
+  });
+
+  it("stores a reverse drag in the relationship's allowed direction", async () => {
+    const agent = card("agent", "agent");
+    const sandbox = card("sandbox", "sandbox");
+    const edge: WorldEdge = {
+      id: "edge",
+      source: agent.id,
+      target: sandbox.id,
+      relationship: "execute",
+      direction: "forward",
+    };
+    useWorldStore.setState({ cards: [agent, sandbox] });
+
+    useWorldStore.getState().requestConnection(sandbox.id, agent.id);
+
+    expect(useWorldStore.getState().pendingConnection).toMatchObject({
+      source: agent.id,
+      target: sandbox.id,
+    });
+    expect(
+      useWorldStore.getState().pendingConnection?.options.map((option) => option.value),
+    ).toEqual(["execute"]);
+
+    const createEdge = vi.spyOn(worldApi, "createEdge").mockResolvedValue(edge);
+    await useWorldStore.getState().createConnection("execute");
+    expect(createEdge).toHaveBeenCalledWith({
+      source: agent.id,
+      target: sandbox.id,
+      relationship: "execute",
+      direction: "forward",
+    });
   });
 
   it("restores a deleted card and its relationships, then can delete it again", async () => {

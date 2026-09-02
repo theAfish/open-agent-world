@@ -6,6 +6,7 @@ import type { EdgeDirection, Relationship } from "../types/world";
 export function ConnectionDialog() {
   const pending = useWorldStore((state) => state.pendingConnection);
   const cards = useWorldStore((state) => state.cards);
+  const catalog = useWorldStore((state) => state.catalog);
   const close = useWorldStore((state) => state.closeConnectionDialog);
   const create = useWorldStore((state) => state.createConnection);
   const [selected, setSelected] = useState<Relationship | undefined>();
@@ -30,7 +31,8 @@ export function ConnectionDialog() {
   if (!pending) return null;
   const source = cards.find((card) => card.id === pending.source);
   const target = cards.find((card) => card.id === pending.target);
-  const canBeBidirectional = source?.type === "agent" && target?.type === "agent";
+  const selectedOption = pending.options.find((option) => option.value === selected);
+  const canBeBidirectional = selectedOption?.directions.includes("bidirectional") ?? false;
 
   return (
     <div
@@ -58,11 +60,11 @@ export function ConnectionDialog() {
         </header>
 
         <div className="connection-route" aria-label={`${source?.name} connects to ${target?.name}`}>
-          <div><small>{source?.type}</small><strong>{source?.name ?? pending.source}</strong></div>
+          <div><small>{catalog.node_types.find((item) => item.id === source?.type)?.label ?? source?.type}</small><strong>{source?.name ?? pending.source}</strong></div>
           {direction === "bidirectional"
             ? <ArrowLeftRight size={18} aria-hidden="true" />
             : <ArrowRight size={18} aria-hidden="true" />}
-          <div><small>{target?.type}</small><strong>{target?.name ?? pending.target}</strong></div>
+          <div><small>{catalog.node_types.find((item) => item.id === target?.type)?.label ?? target?.type}</small><strong>{target?.name ?? pending.target}</strong></div>
         </div>
 
         <fieldset className="permission-options">
@@ -74,7 +76,10 @@ export function ConnectionDialog() {
                 name="relationship"
                 value={option.value}
                 checked={selected === option.value}
-                onChange={() => setSelected(option.value)}
+                onChange={() => {
+                  setSelected(option.value);
+                  if (!option.directions.includes("bidirectional")) setDirection("forward");
+                }}
               />
               <span className="radio-indicator" aria-hidden="true" />
               <span><strong>{option.label}</strong><small>{option.description}</small></span>

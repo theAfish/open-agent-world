@@ -6,6 +6,7 @@ import {
   type EdgeProps,
 } from "@xyflow/react";
 import { getRelationshipOption } from "../state/relationships";
+import { useWorldStore } from "../state/worldStore";
 import type { CanvasNodeData } from "../cards/types";
 import type { EdgeDirection, Relationship } from "../types/world";
 import { relationshipPath, type NodeRect } from "./geometry";
@@ -37,6 +38,7 @@ export function SemanticEdge({
   selected,
   data,
 }: EdgeProps<CanvasEdge>) {
+  const catalog = useWorldStore((state) => state.catalog);
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
   const nodeRect = (node: typeof sourceNode, fallbackX: number, fallbackY: number): NodeRect => ({
@@ -53,7 +55,7 @@ export function SemanticEdge({
   );
   const relationship = data?.relationship ?? "read";
   const bidirectional = data?.direction === "bidirectional";
-  const option = getRelationshipOption(relationship);
+  const option = getRelationshipOption(catalog, relationship);
 
   return (
     <>

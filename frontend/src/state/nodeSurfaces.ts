@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CardType } from "../types/world";
+import type { CardType, PluginCatalog } from "../types/world";
 
 export type NodeSurfaceLevel = "node" | "preview" | "inspector" | "workspace";
 
@@ -15,6 +15,21 @@ export const NODE_SURFACE_SUPPORT: Record<CardType, NodeSurfaceSupport> = {
   image: { preview: true, inspector: true, workspace: false },
   sandbox: { preview: true, inspector: true, workspace: false },
 };
+
+const GENERIC_SURFACE_SUPPORT: NodeSurfaceSupport = {
+  preview: true,
+  inspector: true,
+  workspace: false,
+};
+
+export function nodeSurfaceSupport(
+  type: CardType,
+  catalog?: PluginCatalog,
+): NodeSurfaceSupport {
+  return catalog?.node_types.find((definition) => definition.id === type)?.surfaces
+    ?? NODE_SURFACE_SUPPORT[type]
+    ?? GENERIC_SURFACE_SUPPORT;
+}
 
 export const NODE_SURFACE_SIZE = {
   node: { width: 96, height: 96 },

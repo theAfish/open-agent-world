@@ -23,6 +23,7 @@ import { EdgeInspector } from "../edges/EdgeInspector";
 import { RelationshipConnectionLine } from "../edges/RelationshipConnectionLine";
 import { SemanticEdge, type CanvasEdge } from "../edges/SemanticEdge";
 import { filterCardsToChunks } from "../state/chunks";
+import { getNodeType } from "../state/catalog";
 import { validateConnection } from "../state/relationships";
 import { useWorldStore } from "../state/worldStore";
 import { NODE_SURFACE_SIZE, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
@@ -33,13 +34,6 @@ import { displacedPosition, nodePositionFromSurfacePosition, positionSurfaceAtNo
 const nodeTypes = { worldCard: WorldCardNode };
 const edgeTypes = { semantic: SemanticEdge };
 const defaultViewport: Viewport = { x: 0, y: 0, zoom: 0.92 };
-
-const minimapColors: Record<CardType, string> = {
-  agent: "#75736c",
-  text: "#7c7267",
-  image: "#8a7560",
-  sandbox: "#696c66",
-};
 
 function nodeFromCard(
   card: ReturnType<typeof useWorldStore.getState>["cards"][number],
@@ -68,6 +62,7 @@ function nodeFromCard(
 export function WorldCanvas() {
   const wrapper = useRef<HTMLDivElement>(null);
   const cards = useWorldStore((state) => state.cards);
+  const catalog = useWorldStore((state) => state.catalog);
   const stressCards = useWorldStore((state) => state.stressCards);
   const edges = useWorldStore((state) => state.edges);
   const activeChunkKeys = useWorldStore((state) => state.activeChunkKeys);
@@ -256,13 +251,14 @@ export function WorldCanvas() {
     const source = renderCards.find((card) => card.id === connection.source);
     const target = renderCards.find((card) => card.id === connection.target);
     return validateConnection(
+      catalog,
       connection.source,
       connection.target,
       source?.type,
       target?.type,
       edges,
     ).valid;
-  }, [edges, renderCards]);
+  }, [catalog, edges, renderCards]);
 
   const onSelectionChange = useCallback(({ nodes: selectedNodes }: OnSelectionChangeParams<CanvasNode, CanvasEdge>) => {
     selectCards(selectedNodes.map((node) => node.id));
@@ -271,10 +267,10 @@ export function WorldCanvas() {
   const onDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     const type = event.dataTransfer.getData("application/open-agent-card") as CardType;
-    if (!(type === "agent" || type === "text" || type === "image" || type === "sandbox")) return;
+    if (!getNodeType(catalog, type)) return;
     const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
     void createCard(type, position);
-  }, [createCard, screenToFlowPosition]);
+  }, [catalog, createCard, screenToFlowPosition]);
 
   return (
     <div
@@ -332,7 +328,9 @@ export function WorldCanvas() {
         />
         <MiniMap
           className="world-minimap"
-          nodeColor={(node) => minimapColors[(node.data as CanvasNodeData).card.type]}
+          nodeColor={(node) => (
+            getNodeType(catalog, (node.data as CanvasNodeData).card.type)?.color ?? "#75736c"
+          )}
           nodeStrokeWidth={0}
           maskColor="var(--minimap-mask)"
           pannable

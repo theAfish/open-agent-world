@@ -4,14 +4,15 @@ interface CreatedCard {
   id: string;
 }
 
-async function createAgent(
+async function createCard(
   request: APIRequestContext,
   id: string,
+  type: "agent" | "text",
   name: string,
   position: { x: number; y: number },
 ): Promise<CreatedCard> {
   const response = await request.post("/api/nodes", {
-    data: { id, type: "agent", name, position },
+    data: { id, type, name, position },
   });
   expect(response.status()).toBe(201);
   return response.json() as Promise<CreatedCard>;
@@ -42,15 +43,17 @@ test("an Agent relationship can be dragged between boundaries and exposes real e
   request,
 }) => {
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-  const source = await createAgent(
+  const source = await createCard(
     request,
     `e2e-source-${suffix}`,
+    "agent",
     "E2E Coordinator",
     { x: 310, y: 150 },
   );
-  const target = await createAgent(
+  const target = await createCard(
     request,
     `e2e-target-${suffix}`,
+    "agent",
     "E2E Researcher",
     { x: 820, y: 420 },
   );
@@ -86,5 +89,53 @@ test("an Agent relationship can be dragged between boundaries and exposes real e
   } finally {
     await request.delete(`/api/nodes/${source.id}`);
     await request.delete(`/api/nodes/${target.id}`);
+  }
+});
+
+test("a reverse Text-to-Agent drag uses the allowed Agent-to-Text direction", async ({
+  page,
+  request,
+}) => {
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const text = await createCard(
+    request,
+    `e2e-text-${suffix}`,
+    "text",
+    "E2E Text",
+    { x: 310, y: 150 },
+  );
+  const agent = await createCard(
+    request,
+    `e2e-agent-${suffix}`,
+    "agent",
+    "E2E Agent",
+    { x: 820, y: 420 },
+  );
+
+  try {
+    await page.goto("/");
+    const textCard = page.locator(`[data-card-id="${text.id}"]`);
+    const agentCard = page.locator(`[data-card-id="${agent.id}"]`);
+    await expect(textCard).toBeVisible();
+    await expect(agentCard).toBeVisible();
+
+    const start = await handleCenter(textCard, "right");
+    const end = await handleCenter(agentCard, "left");
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 14 });
+    await page.mouse.up();
+
+    const dialog = page.getByRole("dialog", { name: "Choose a capability" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("E2E Agent connects to E2E Text")).toBeVisible();
+    await expect(dialog.getByText("Read", { exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: "Grant capability" }).click();
+
+    const edgeSelector = `[data-source-id="${agent.id}"][data-target-id="${text.id}"]`;
+    await expect(page.locator(`path.semantic-edge-path${edgeSelector}`)).toHaveCount(1);
+  } finally {
+    await request.delete(`/api/nodes/${text.id}`);
+    await request.delete(`/api/nodes/${agent.id}`);
   }
 });

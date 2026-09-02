@@ -4,6 +4,7 @@ import type {
   CardType,
   EdgeDirection,
   FlowViewportState,
+  PluginCatalog,
   Relationship,
   RuntimeEvent,
   ToastMessage,
@@ -13,6 +14,7 @@ import type {
   WorldSnapshot,
 } from "../types/world";
 import { getViewportChunkKeys, viewportCenterToWorld } from "./chunks";
+import { EMPTY_CATALOG, getNodeType } from "./catalog";
 import { buildCardDraft, makeStressCards, mergeCardPatch } from "./helpers";
 import { validateConnection, type RelationshipOption } from "./relationships";
 import { describeRuntimeError } from "./runtimeErrors";
@@ -152,6 +154,7 @@ function chunkKeysFromSnapshot(snapshot: WorldSnapshot): string[] {
 
 interface WorldState {
   cards: WorldCard[];
+  catalog: PluginCatalog;
   edges: WorldEdge[];
   stressCards: WorldCard[];
   activeChunkKeys: string[];
@@ -225,6 +228,7 @@ let historySequence = 0;
 
 export const useWorldStore = create<WorldState>((set, get) => ({
   cards: [],
+  catalog: EMPTY_CATALOG,
   edges: [],
   stressCards: [],
   activeChunkKeys: getViewportChunkKeys(INITIAL_VIEWPORT),
@@ -249,8 +253,12 @@ export const useWorldStore = create<WorldState>((set, get) => ({
     const keys = get().activeChunkKeys;
     set({ syncState: "loading", syncError: undefined });
     try {
-      const snapshot = await worldApi.getWorld(keys);
+      const [catalog, snapshot] = await Promise.all([
+        worldApi.getCatalog(),
+        worldApi.getWorld(keys),
+      ]);
       set({
+        catalog,
         cards: snapshot.nodes,
         edges: snapshot.edges,
         loadedChunkKeys: [...new Set([...keys, ...chunkKeysFromSnapshot(snapshot)])],
@@ -340,8 +348,17 @@ export const useWorldStore = create<WorldState>((set, get) => ({
       });
       return undefined;
     }
+    const definition = getNodeType(get().catalog, type);
+    if (!definition) {
+      get().pushToast({
+        tone: "error",
+        title: "Unknown plugin node type",
+        detail: `The backend catalog does not define ${type}.`,
+      });
+      return undefined;
+    }
     const finalPosition = position ?? viewportCenterToWorld(get().viewport);
-    const draft = buildCardDraft(type, finalPosition);
+    const draft = buildCardDraft(type, finalPosition, definition);
     const configuredDraft = type === "agent" && get().modelSettings.models[0]
       ? { ...draft, config: { ...draft.config, model: get().modelSettings.models[0] } }
       : draft;
@@ -486,13 +503,14 @@ export const useWorldStore = create<WorldState>((set, get) => ({
       return;
     }
     const validation = validateConnection(
+      get().catalog,
       source,
       target,
       sourceCard?.type,
       targetCard?.type,
       get().edges,
     );
-    if (!validation.valid || !source || !target) {
+    if (!validation.valid || !validation.source || !validation.target) {
       get().pushToast({
         tone: "error",
         title: "That relationship is not valid",
@@ -500,7 +518,13 @@ export const useWorldStore = create<WorldState>((set, get) => ({
       });
       return;
     }
-    set({ pendingConnection: { source, target, options: validation.options } });
+    set({
+      pendingConnection: {
+        source: validation.source,
+        target: validation.target,
+        options: validation.options,
+      },
+    });
   },
 
   closeConnectionDialog: () => set({ pendingConnection: undefined }),

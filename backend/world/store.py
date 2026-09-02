@@ -8,66 +8,22 @@ from datetime import UTC, datetime
 from typing import Any, Iterable
 from uuid import uuid4
 
-from pydantic import ValidationError
-
 from backend.errors import ConflictError, GraphValidationError, NotFoundError
+from backend.plugins.registry import PluginRegistry
 from backend.persistence.database import Database
 from backend.world.models import (
-    AgentConfig,
     Card,
     CardCreate,
     CardPatch,
-    CardType,
     Edge,
     EdgeCreate,
     EdgeDirection,
     EdgePatch,
-    ImageConfig,
-    Relationship,
-    SandboxConfig,
     Size,
-    TextConfig,
 )
 
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$")
-
-_RELATIONSHIPS: dict[tuple[CardType, CardType], frozenset[Relationship]] = {
-    (CardType.AGENT, CardType.AGENT): frozenset({Relationship.COMMUNICATE}),
-    (CardType.AGENT, CardType.TEXT): frozenset(
-        {Relationship.READ, Relationship.READ_EDIT}
-    ),
-    (CardType.AGENT, CardType.IMAGE): frozenset({Relationship.VIEW}),
-    (CardType.AGENT, CardType.SANDBOX): frozenset({Relationship.EXECUTE}),
-    (CardType.TEXT, CardType.SANDBOX): frozenset(
-        {Relationship.MOUNT_READ_ONLY, Relationship.MOUNT_READ_WRITE}
-    ),
-    (CardType.IMAGE, CardType.SANDBOX): frozenset(
-        {Relationship.MOUNT_READ_ONLY}
-    ),
-}
-
-_DEFAULT_NAMES = {
-    CardType.AGENT: "New Agent",
-    CardType.TEXT: "Untitled Text",
-    CardType.IMAGE: "Untitled Image",
-    CardType.SANDBOX: "New Sandbox",
-}
-
-_DEFAULT_SIZES = {
-    CardType.AGENT: Size(width=300, height=190),
-    CardType.TEXT: Size(width=300, height=220),
-    CardType.IMAGE: Size(width=280, height=240),
-    CardType.SANDBOX: Size(width=340, height=220),
-}
-
-_CONFIG_MODELS = {
-    CardType.AGENT: AgentConfig,
-    CardType.TEXT: TextConfig,
-    CardType.IMAGE: ImageConfig,
-    CardType.SANDBOX: SandboxConfig,
-}
-
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
@@ -88,36 +44,43 @@ def _json(value: dict[str, Any]) -> str:
 
 
 class WorldStore:
-    def __init__(self, database: Database, *, chunk_size: int = 2048) -> None:
+    def __init__(
+        self, database: Database, registry: PluginRegistry, *, chunk_size: int = 2048
+    ) -> None:
         if chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
         self.database = database
+        self.registry = registry
         self.chunk_size = chunk_size
 
     def _chunk(self, coordinate: float) -> int:
         return math.floor(coordinate / self.chunk_size)
 
     def _validate_config(
-        self, card_type: CardType, value: dict[str, Any]
+        self, card_type: str, value: dict[str, Any]
     ) -> dict[str, Any]:
-        try:
-            model = _CONFIG_MODELS[card_type].model_validate(value)
-        except ValidationError as exc:
-            raise GraphValidationError(f"invalid {card_type.value} configuration: {exc}") from exc
-        return model.model_dump(mode="json")
+        return self.registry.validate_config(card_type, value)
 
     def create_card(self, request: CardCreate) -> Card:
         card_id = _id_or_new(request.id)
         now = utc_now().isoformat()
-        size = request.size or _DEFAULT_SIZES[request.type]
+        definition = self.registry.node_type(request.type)
+        self.registry.validate_creation_fields(
+            request.type, content=request.content, data_base64=request.data_base64
+        )
+        if request.status is not None:
+            self.registry.validate_status(request.type, request.status)
+        size = request.size or Size(
+            width=definition.default_size[0], height=definition.default_size[1]
+        )
         raw_config = dict(request.config)
         if request.status is not None:
             raw_config["status"] = request.status
         config = self._validate_config(request.type, raw_config)
         values = (
             card_id,
-            request.type.value,
-            request.name or _DEFAULT_NAMES[request.type],
+            request.type,
+            request.name or definition.default_name,
             request.position.x,
             request.position.y,
             size.width,
@@ -229,6 +192,7 @@ class WorldStore:
         return card
 
     def create_edge(self, request: EdgeCreate) -> Edge:
+        request = self.normalize_edge_request(request)
         edge_id = _id_or_new(request.id)
         now = utc_now().isoformat()
         try:
@@ -244,13 +208,11 @@ class WorldStore:
                 if target_row is None:
                     raise NotFoundError(f"target card {request.target!r} does not exist")
                 self._assert_valid_relationship(
-                    CardType(source_row["type"]),
-                    CardType(target_row["type"]),
-                    request.relationship,
+                    str(source_row["type"]), str(target_row["type"]), request.relationship
                 )
                 self._assert_valid_direction(
-                    CardType(source_row["type"]),
-                    CardType(target_row["type"]),
+                    str(source_row["type"]),
+                    str(target_row["type"]),
                     request.relationship,
                     request.direction,
                 )
@@ -264,7 +226,7 @@ class WorldStore:
                         edge_id,
                         request.source,
                         request.target,
-                        request.relationship.value,
+                        request.relationship,
                         request.direction.value,
                         now,
                         now,
@@ -343,16 +305,16 @@ class WorldStore:
             ).fetchone()
             if row is None:
                 raise NotFoundError(f"edge {edge_id!r} does not exist")
-            relationship = request.relationship or Relationship(row["relationship"])
+            relationship = request.relationship or str(row["relationship"])
             direction = request.direction or EdgeDirection(row["direction"])
             self._assert_valid_relationship(
-                CardType(row["source_type"]),
-                CardType(row["target_type"]),
+                str(row["source_type"]),
+                str(row["target_type"]),
                 relationship,
             )
             self._assert_valid_direction(
-                CardType(row["source_type"]),
-                CardType(row["target_type"]),
+                str(row["source_type"]),
+                str(row["target_type"]),
                 relationship,
                 direction,
             )
@@ -362,7 +324,7 @@ class WorldStore:
                 SET relationship = ?, direction = ?, updated_at = ?, revision = revision + 1
                 WHERE id = ?
                 """,
-                (relationship.value, direction.value, now, edge_id),
+                (relationship, direction.value, now, edge_id),
             )
         return self.get_edge(edge_id)
 
@@ -374,60 +336,42 @@ class WorldStore:
                 raise NotFoundError(f"edge {edge_id!r} does not exist")
         return edge
 
-    @staticmethod
-    def _assert_valid_status(card_type: CardType, status: str) -> None:
-        allowed = {
-            CardType.AGENT: {"idle", "running", "waiting", "error"},
-            CardType.SANDBOX: {"stopped", "ready", "running", "error"},
-            CardType.TEXT: {"available", "modified"},
-            CardType.IMAGE: {"available", "modified"},
-        }[card_type]
-        if status not in allowed:
-            raise GraphValidationError(
-                f"status {status!r} is not valid for {card_type.value}"
-            )
+    def normalize_edge_request(self, request: EdgeCreate) -> EdgeCreate:
+        source = self.get_card(request.source)
+        target = self.get_card(request.target)
+        _definition, reversed_endpoints = self.registry.resolve_relationship(
+            source.type, target.type, request.relationship
+        )
+        self.registry.validate_direction(request.relationship, request.direction.value)
+        if not reversed_endpoints:
+            return request
+        return request.model_copy(update={"source": request.target, "target": request.source})
 
-    @staticmethod
+    def _assert_valid_status(self, card_type: str, status: str) -> None:
+        self.registry.validate_status(card_type, status)
+
     def _assert_valid_relationship(
-        source_type: CardType,
-        target_type: CardType,
-        relationship: Relationship,
+        self,
+        source_type: str,
+        target_type: str,
+        relationship: str,
     ) -> None:
-        allowed = _RELATIONSHIPS.get((source_type, target_type), frozenset())
-        if relationship not in allowed:
-            allowed_text = ", ".join(sorted(item.value for item in allowed)) or "none"
-            raise GraphValidationError(
-                f"{source_type.value} -> {target_type.value} does not allow "
-                f"{relationship.value!r}; allowed relationships: {allowed_text}"
-            )
+        self.registry.validate_relationship_order(source_type, target_type, relationship)
 
-    @staticmethod
     def _assert_valid_direction(
-        source_type: CardType,
-        target_type: CardType,
-        relationship: Relationship,
+        self,
+        source_type: str,
+        target_type: str,
+        relationship: str,
         direction: EdgeDirection,
     ) -> None:
-        if direction is EdgeDirection.BIDIRECTIONAL and not (
-            source_type is CardType.AGENT
-            and target_type is CardType.AGENT
-            and relationship is Relationship.COMMUNICATE
-        ):
-            raise GraphValidationError(
-                "bidirectional edges are only valid for agent communication"
-            )
+        self.registry.validate_relationship_order(source_type, target_type, relationship)
+        self.registry.validate_direction(relationship, direction.value)
 
-    @staticmethod
-    def _card_from_row(row: sqlite3.Row) -> Card:
-        card_type = CardType(row["type"])
+    def _card_from_row(self, row: sqlite3.Row) -> Card:
+        card_type = str(row["type"])
+        definition = self.registry.node_type(card_type)
         config = json.loads(row["config_json"])
-        default_status = (
-            "idle"
-            if card_type is CardType.AGENT
-            else "stopped"
-            if card_type is CardType.SANDBOX
-            else "available"
-        )
         return Card(
             id=row["id"],
             type=card_type,
@@ -435,7 +379,7 @@ class WorldStore:
             position={"x": row["x"], "y": row["y"]},
             size={"width": row["width"], "height": row["height"]},
             expanded=bool(row["expanded"]),
-            status=str(config.get("status", default_status)),
+            status=str(config.get("status", definition.default_status)),
             config=config,
             chunk=(row["chunk_x"], row["chunk_y"]),
             created_at=row["created_at"],
@@ -449,7 +393,7 @@ class WorldStore:
             id=row["id"],
             source=row["source_id"],
             target=row["target_id"],
-            relationship=Relationship(row["relationship"]),
+            relationship=str(row["relationship"]),
             direction=EdgeDirection(row["direction"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
