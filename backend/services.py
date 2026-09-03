@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Mapping
 from contextlib import suppress
 from contextvars import ContextVar
@@ -46,6 +47,7 @@ from backend.resources.models import (
 )
 from backend.runs import RunRecord, RunStatus, RunStore
 from backend.runs.manager import RunManager
+from backend.runs.models import TERMINAL_RUN_STATUSES
 from backend.sandbox import (
     CommandResult,
     ResourceAccess,
@@ -85,6 +87,8 @@ _conversation_turn_depth: ContextVar[int] = ContextVar(
     "conversation_turn_depth", default=0
 )
 _MAX_CONVERSATION_TURN_DEPTH = 4
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -698,8 +702,7 @@ class ApplicationServices:
                 caller_id=source_agent_id,
                 context_id=session_id,
             )
-            record = await manager.wait_terminal(run.run_id)
-            self._require_successful_run(record)
+            await self._await_synchronous_turn(manager, run.run_id, target.name)
             final_text = manager.final_text(run.run_id)
         finally:
             _conversation_turn_depth.reset(token)
@@ -718,6 +721,27 @@ class ApplicationServices:
             "agent_name": target.name,
             "response": final_text,
         }
+
+    async def _await_synchronous_turn(
+        self, manager: RunManager, run_id: str, target_name: str
+    ) -> RunRecord:
+        """Wait for a delegated Run without blocking forever on a suspension.
+
+        Synchronous turns (conversation handoffs, agent-to-agent messages)
+        cannot span an external suspension: if the provider turn ends without a
+        terminal status, the delegated Run is cancelled and a clear error is
+        raised to the caller instead of hanging indefinitely.
+        """
+
+        record = await manager.wait_execution(run_id)
+        if record.status not in TERMINAL_RUN_STATUSES:
+            await manager.cancel_run(run_id)
+            raise RuntimeUnavailableError(
+                f"agent {target_name!r} suspended its run before completing the "
+                "requested turn; the delegated run was cancelled"
+            )
+        self._require_successful_run(record)
+        return record
 
     async def stop_agent(self, agent_id: str) -> dict[str, Any]:
         self._require_card_type(agent_id, CardType.AGENT)
@@ -742,8 +766,7 @@ class ApplicationServices:
             caller_kind="agent",
             caller_id=source_agent_id,
         )
-        record = await manager.wait_terminal(run.run_id)
-        self._require_successful_run(record)
+        await self._await_synchronous_turn(manager, run.run_id, target.name)
         final_text = manager.final_text(run.run_id)
         return {
             "agent_id": target.id,
@@ -840,27 +863,95 @@ class ApplicationServices:
         conversation_id: str,
         session_id: str,
     ) -> None:
-        manager = self._require_run_manager()
-        record = await manager.wait_terminal(run_id)
-        final_text = manager.final_text(run_id)
-        if (
-            record.status is RunStatus.SUCCEEDED
-            and final_text
-            and self._can_agent_post_to_conversation_session(
-                agent_id, conversation_id, session_id
+        """Persist the durable conversation outcome of an Agent Run.
+
+        Every Run started from a conversation ends with a visible transcript
+        entry: a normal agent message on success, or a system notice for
+        failures, cancellations, interruptions, suspensions, and empty
+        responses. Nothing is dropped silently.
+        """
+
+        try:
+            manager = self._require_run_manager()
+            record = await manager.wait_execution(run_id)
+            if record.status not in TERMINAL_RUN_STATUSES:
+                # The provider turn ended without a durable result. Surface the
+                # wait state instead of leaving the transcript stalled, then
+                # keep following the Run until it terminates.
+                suspension = manager.get_suspension(run_id)
+                reason = suspension.reason if suspension is not None else None
+                name = self._conversation_agent_name(agent_id)
+                await self._persist_conversation_outcome_notice(
+                    run_id,
+                    conversation_id,
+                    session_id,
+                    f"{name} paused this response to wait on external work"
+                    + (f" ({reason})." if reason else "."),
+                )
+                record = await manager.wait_terminal(run_id)
+            final_text = manager.final_text(run_id)
+            if record.status is RunStatus.SUCCEEDED and final_text:
+                if self._can_agent_post_to_conversation_session(
+                    agent_id, conversation_id, session_id
+                ):
+                    agent = self.world.get_card(agent_id)
+                    message = self.conversations.add_message(
+                        conversation_id,
+                        session_id,
+                        sender_kind="agent",
+                        sender_id=agent.id,
+                        sender_name=agent.name,
+                        content=final_text,
+                        run_id=run_id,
+                    )
+                    await self._publish_conversation_message(message)
+                return
+            name = self._conversation_agent_name(agent_id)
+            if record.status is RunStatus.SUCCEEDED:
+                notice = f"{name} finished without producing a response."
+            elif record.status is RunStatus.FAILED:
+                detail = record.error or "the runtime reported no error detail"
+                notice = f"{name} could not respond: {detail}"
+            elif record.status is RunStatus.CANCELLED:
+                notice = f"{name}'s response was stopped before completion."
+            else:
+                notice = f"{name}'s response was interrupted by a backend restart."
+            await self._persist_conversation_outcome_notice(
+                run_id, conversation_id, session_id, notice
             )
-        ):
-            agent = self.world.get_card(agent_id)
-            message = self.conversations.add_message(
+        except Exception:
+            logger.exception(
+                "failed to persist conversation outcome for run %s in %s/%s",
+                run_id,
                 conversation_id,
                 session_id,
-                sender_kind="agent",
-                sender_id=agent.id,
-                sender_name=agent.name,
-                content=final_text,
-                run_id=run_id,
             )
-            await self._publish_conversation_message(message)
+
+    def _conversation_agent_name(self, agent_id: str) -> str:
+        agent = self.world.maybe_get_card(agent_id)
+        return agent.name if agent is not None else "The agent"
+
+    async def _persist_conversation_outcome_notice(
+        self,
+        run_id: str,
+        conversation_id: str,
+        session_id: str,
+        content: str,
+    ) -> None:
+        try:
+            self.conversations.get_session(conversation_id, session_id)
+        except NotFoundError:
+            return
+        message = self.conversations.add_message(
+            conversation_id,
+            session_id,
+            sender_kind="system",
+            sender_id=None,
+            sender_name="System",
+            content=content,
+            run_id=run_id,
+        )
+        await self._publish_conversation_message(message)
 
     async def _publish_conversation_message(
         self, message: ConversationMessage
@@ -1153,6 +1244,7 @@ def create_services(
             else settings.agent_runtime
         ),
         provider_options={"google.adk": {"app_name": "open-agent-world"}},
+        inactivity_timeout_seconds=settings.run_inactivity_timeout_seconds,
     )
     for provider_id, runtime_provider in (runtime_providers or {}).items():
         services.install_runtime_provider(provider_id, runtime_provider)

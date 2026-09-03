@@ -27,6 +27,7 @@ class Settings:
     event_queue_size: int = 256
     agent_runtime: str | None = None
     sandbox_runtime: str | None = None
+    run_inactivity_timeout_seconds: float | None = 300.0
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -42,11 +43,22 @@ class Settings:
             sandbox_runtime = "windows"
         if sandbox_runtime not in {None, "windows"}:
             raise ValueError("OPEN_AGENT_WORLD_SANDBOX_RUNTIME must be 'windows' when set")
+        configured_timeout = os.environ.get("OPEN_AGENT_WORLD_RUN_INACTIVITY_TIMEOUT")
+        inactivity_timeout: float | None = 300.0
+        if configured_timeout is not None:
+            try:
+                parsed = float(configured_timeout)
+            except ValueError as exc:
+                raise ValueError(
+                    "OPEN_AGENT_WORLD_RUN_INACTIVITY_TIMEOUT must be a number of seconds"
+                ) from exc
+            inactivity_timeout = parsed if parsed > 0 else None
         return cls(
             data_root=root,
             database_path=root / "database" / "world.sqlite3",
             agent_runtime=runtime,
             sandbox_runtime=sandbox_runtime,
+            run_inactivity_timeout_seconds=inactivity_timeout,
         )
 
     @classmethod

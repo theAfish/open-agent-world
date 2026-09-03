@@ -47,3 +47,8 @@ async def websocket_route(websocket: WebSocket) -> None:
         await event_websocket(websocket)
     except WebSocketDisconnect:
         return
+    except RuntimeError:
+        # A half-open connection can fail on send after the client vanished
+        # without a close frame. Treat it as a normal disconnect; the client
+        # heartbeat re-establishes the stream.
+        return

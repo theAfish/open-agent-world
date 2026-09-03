@@ -328,3 +328,71 @@ async def test_restart_interrupts_incomplete_run_without_claiming_success(
     finally:
         await second.shutdown()
         second.close()
+
+
+@pytest.mark.asyncio
+async def test_inactive_provider_stream_fails_run_instead_of_stalling(
+    tmp_path: Path,
+) -> None:
+    provider = RecordingProvider(mode="block")
+    services = _services(tmp_path, provider)
+    try:
+        agent = await services.create_card(CardCreate(
+            type="agent",
+            name="Atlas",
+            config={"run_inactivity_timeout_seconds": 0.05},
+        ))
+        manager = services._require_run_manager()
+        run = await manager.start_run(agent.id, "hang forever")
+        record = await manager.wait_terminal(run.run_id)
+        assert record.status is RunStatus.FAILED
+        assert "no activity" in (record.error or "")
+        assert not manager.holds_agent_slot(run.run_id)
+        assert services.get_card(agent.id).status == "idle"
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_non_positive_inactivity_timeout_disables_watchdog(
+    tmp_path: Path,
+) -> None:
+    provider = RecordingProvider(mode="tool")
+    services = _services(tmp_path, provider)
+    try:
+        agent = await services.create_card(CardCreate(
+            type="agent",
+            name="Atlas",
+            config={"run_inactivity_timeout_seconds": 0},
+        ))
+        manager = services._require_run_manager()
+        manager.inactivity_timeout_seconds = 0.05  # would trip if not disabled
+        run = await manager.start_run(agent.id, "long tool call")
+        await provider.tool_started.wait()
+        await asyncio.sleep(0.15)
+        assert manager.get_run(run.run_id).status is RunStatus.RUNNING
+        provider.continue_tool.set()
+        assert (await manager.wait_terminal(run.run_id)).status is RunStatus.SUCCEEDED
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_watchdog_resets_on_provider_activity(tmp_path: Path) -> None:
+    provider = RecordingProvider(mode="tool")
+    services = _services(tmp_path, provider)
+    try:
+        agent = await services.create_card(CardCreate(
+            type="agent",
+            name="Atlas",
+            config={"run_inactivity_timeout_seconds": 0.4},
+        ))
+        manager = services._require_run_manager()
+        run = await manager.start_run(agent.id, "steady progress")
+        await provider.tool_started.wait()
+        await asyncio.sleep(0.15)
+        provider.continue_tool.set()
+        record = await manager.wait_terminal(run.run_id)
+        assert record.status is RunStatus.SUCCEEDED
+    finally:
+        services.close()
