@@ -48,6 +48,13 @@ An Agent-to-Agent `communicate` edge has a persisted direction. A `forward` edge
 5. A tool call checks the broker again, modifies the managed resource, records history, and publishes an operational event.
 6. Deleting the edge makes the next check fail without restarting the Agent service.
 
+All graph-derived capability calls share one error boundary. A node operation
+failure is returned to the calling Agent as structured tool data with an error
+code, type, and message, allowing the Agent to retry, choose another action, or
+explain the failure. Such failures do not terminate the calling Run. Runtime
+cancellation remains control flow and is propagated immediately; a Run fails
+only when its runtime/provider itself cannot continue.
+
 Direct resource tools never route through a Sandbox.
 
 ## Sandbox interaction flow

@@ -412,8 +412,12 @@ def create_builtin_registry() -> PluginRegistry:
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.sandbox"}),
         capabilities=(CapabilityGrantDefinition(
             kind="sandbox.execute", tool_prefix="execute_in",
-            description="Execute an argv command in sandbox {target_name!r}.",
-            input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Command and arguments as a non-empty string array."}}, "required": ["argv"], "additionalProperties": False},
+            description=(
+                "Execute an argv command in Windows sandbox {target_name!r}. "
+                "argv[0] must be an executable on PATH; run shell built-ins such as "
+                "echo through ['cmd.exe', '/d', '/c', ...]."
+            ),
+            input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}}, "required": ["argv"], "additionalProperties": False},
         ),),
     ))
     registry.register_relationship(RelationshipDefinition(
