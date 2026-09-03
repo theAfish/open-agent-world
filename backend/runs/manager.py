@@ -10,7 +10,6 @@ from backend.agents import (
     AgentConfig,
     AgentCapabilityProvider,
     AgentEvent,
-    AgentEventType,
     AgentNotFoundError,
     AgentStatus,
     RuntimeProvider,
@@ -27,6 +26,7 @@ from .models import (
     InvocationContext,
     RunRecord,
     RunStatus,
+    RunSuspension,
     RuntimeInput,
     TERMINAL_RUN_STATUSES,
 )
@@ -75,8 +75,11 @@ class RunManager:
     _providers: dict[str, RuntimeProvider] = field(default_factory=dict)
     _agent_provider_ids: dict[str, str] = field(default_factory=dict)
     _runtime_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
-    _completion: dict[str, asyncio.Event] = field(default_factory=dict)
+    _execution_done: dict[str, asyncio.Event] = field(default_factory=dict)
+    _terminal_done: dict[str, asyncio.Event] = field(default_factory=dict)
     _final_text: dict[str, str] = field(default_factory=dict)
+    _occupied_runs: dict[str, str] = field(default_factory=dict)
+    _suspensions: dict[str, RunSuspension] = field(default_factory=dict)
     _start_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     _transition_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
 
@@ -125,6 +128,7 @@ class RunManager:
 
     async def startup(self) -> None:
         for record in self.store.interrupt_incomplete():
+            self._terminal_done.setdefault(record.run_id, asyncio.Event()).set()
             await self._publish_run(record, EventType.RUN_INTERRUPTED)
 
     async def shutdown(self) -> None:
@@ -191,10 +195,14 @@ class RunManager:
                 task_id=task_id,
                 context_id=context_id,
             )
-            self._completion[record.run_id] = asyncio.Event()
+            self._execution_done[record.run_id] = asyncio.Event()
+            self._terminal_done[record.run_id] = asyncio.Event()
+            self._occupied_runs[record.run_id] = agent_id
             await self._publish_run(record, EventType.RUN_CREATED)
             record = await self.transition_run(record.run_id, RunStatus.RUNNING)
-            await self._publish_agent_operational(agent_id, "running", record.run_id)
+            await self._publish_agent_operational(
+                agent_id, "running", record.run_id, started=True
+            )
         task = asyncio.create_task(
             self._execute(record, card, RuntimeInput(prompt=prompt)),
             name=f"run:{record.run_id}",
@@ -205,37 +213,121 @@ class RunManager:
         )
         return record
 
-    async def wait_run(self, run_id: str) -> RunRecord:
-        event = self._completion.get(run_id)
-        if event is not None:
+    async def wait_execution(self, run_id: str) -> RunRecord:
+        """Wait only for the current provider coroutine/turn to finish."""
+
+        self.get_run(run_id)
+        event = self._execution_done.get(run_id)
+        if event is not None and run_id in self._runtime_tasks:
             await event.wait()
+        return self.get_run(run_id)
+
+    async def wait_terminal(self, run_id: str) -> RunRecord:
+        """Wait until the durable Run reaches a terminal lifecycle state."""
+
+        current = self.get_run(run_id)
+        if current.status in TERMINAL_RUN_STATUSES:
+            return current
+        event = self._terminal_done.setdefault(run_id, asyncio.Event())
+        # Recheck after installing the waiter so a concurrent transition cannot
+        # be missed between the first read and Event creation.
+        if self.get_run(run_id).status in TERMINAL_RUN_STATUSES:
+            event.set()
+        await event.wait()
         return self.get_run(run_id)
 
     def final_text(self, run_id: str) -> str:
         return self._final_text.get(run_id, "")
 
+    def holds_agent_slot(self, run_id: str) -> bool:
+        self.get_run(run_id)
+        return run_id in self._occupied_runs
+
+    def get_suspension(self, run_id: str) -> RunSuspension | None:
+        self.get_run(run_id)
+        return self._suspensions.get(run_id)
+
+    async def suspend_run(
+        self,
+        run_id: str,
+        *,
+        reason: str,
+        release_agent_slot: bool = False,
+    ) -> RunRecord:
+        """Explicitly suspend a Run and optionally release Agent capacity."""
+
+        if not reason.strip():
+            raise ValueError("suspension reason must not be empty")
+        current = self.get_run(run_id)
+        if current.status is RunStatus.RUNNING:
+            current = await self.transition_run(run_id, RunStatus.WAITING)
+        elif current.status is not RunStatus.WAITING:
+            raise ValueError(
+                f"cannot suspend a Run in {current.status.value!r} status"
+            )
+        self._suspensions[run_id] = RunSuspension(
+            reason=reason.strip(), release_agent_slot=release_agent_slot
+        )
+        if release_agent_slot:
+            self._release_agent_slot(run_id)
+            await self._publish_agent_operational(
+                current.agent_id,
+                "running" if self._occupied_agent_runs(current.agent_id) else "idle",
+                run_id,
+            )
+        return self.get_run(run_id)
+
     async def transition_run(
         self, run_id: str, status: RunStatus | str, *, error: str | None = None
     ) -> RunRecord:
         target = RunStatus(status)
+        acquired_slot = False
+        current = self.store.get(run_id)
+        if (
+            current.status is RunStatus.WAITING
+            and target is RunStatus.RUNNING
+            and run_id not in self._occupied_runs
+        ):
+            start_lock = self._start_locks.setdefault(current.agent_id, asyncio.Lock())
+            async with start_lock:
+                latest = self.store.get(run_id)
+                if (
+                    latest.status is RunStatus.WAITING
+                    and run_id not in self._occupied_runs
+                ):
+                    self._check_concurrency(self._agent_card(current.agent_id))
+                    self._occupied_runs[run_id] = current.agent_id
+                    acquired_slot = True
         lock = self._transition_locks.setdefault(run_id, asyncio.Lock())
-        async with lock:
-            current = self.store.get(run_id)
-            if target not in _VALID_TRANSITIONS[current.status]:
-                raise ValueError(
-                    f"invalid Run transition: {current.status.value} -> {target.value}"
-                )
-            record = self.store.update_status(run_id, target, error=error)
+        try:
+            async with lock:
+                current = self.store.get(run_id)
+                if target not in _VALID_TRANSITIONS[current.status]:
+                    raise ValueError(
+                        f"invalid Run transition: {current.status.value} -> {target.value}"
+                    )
+                record = self.store.update_status(run_id, target, error=error)
+        except BaseException:
+            if acquired_slot:
+                self._release_agent_slot(run_id)
+            raise
         event_type = _RUN_EVENTS[target]
         if current.status is RunStatus.WAITING and target is RunStatus.RUNNING:
             event_type = EventType.RUN_RESUMED
+            self._suspensions.pop(run_id, None)
+        if target in TERMINAL_RUN_STATUSES:
+            self._release_agent_slot(run_id)
+            self._suspensions.pop(run_id, None)
+            self._terminal_done.setdefault(run_id, asyncio.Event()).set()
         await self._publish_run(record, event_type)
-        if target is RunStatus.WAITING and not self._executing_runs(record.agent_id):
-            await self._publish_agent_operational(record.agent_id, "idle", run_id)
-        elif current.status is RunStatus.WAITING and target is RunStatus.RUNNING:
+        if current.status is RunStatus.WAITING and target is RunStatus.RUNNING:
             await self._publish_agent_operational(record.agent_id, "running", run_id)
-        elif target in TERMINAL_RUN_STATUSES and not self._executing_runs(record.agent_id):
-            await self._publish_agent_operational(record.agent_id, "idle", run_id)
+        elif target in TERMINAL_RUN_STATUSES:
+            await self._publish_agent_operational(
+                record.agent_id,
+                "running" if self._occupied_agent_runs(record.agent_id) else "idle",
+                run_id,
+            )
         return record
 
     async def cancel_run(self, run_id: str, *, propagate: bool = True) -> RunRecord:
@@ -310,7 +402,7 @@ class RunManager:
         card = self._agent_card(agent_id)
         provider_id = self._agent_provider_ids.get(agent_id, self._provider_id(card))
         info = await self._provider(provider_id).get_agent(agent_id)
-        executing = self._executing_runs(agent_id)
+        executing = self._occupied_agent_runs(agent_id)
         return replace(
             info,
             status=AgentStatus.RUNNING if executing else AgentStatus.IDLE,
@@ -347,17 +439,6 @@ class RunManager:
                 text = event.payload.get("text")
                 if isinstance(text, str):
                     self._final_text[record.run_id] = text
-                current = self.get_run(record.run_id)
-                if (
-                    event.type is AgentEventType.TOOL_STARTED
-                    and current.status is RunStatus.RUNNING
-                ):
-                    await self.transition_run(record.run_id, RunStatus.WAITING)
-                elif (
-                    event.type is AgentEventType.TOOL_COMPLETED
-                    and current.status is RunStatus.WAITING
-                ):
-                    await self.transition_run(record.run_id, RunStatus.RUNNING)
                 if event.run_status is not None:
                     current = self.get_run(record.run_id)
                     if current.status not in TERMINAL_RUN_STATUSES:
@@ -369,6 +450,7 @@ class RunManager:
                 # Stream exhaustion means the provider turn ended. It is not
                 # implicit work completion; absent an explicit terminal event,
                 # the durable Run remains waiting for a future resume signal.
+                # Occupancy is retained unless suspend_run explicitly releases it.
                 await self.transition_run(record.run_id, RunStatus.WAITING)
         except asyncio.CancelledError:
             current = self.get_run(record.run_id)
@@ -383,13 +465,14 @@ class RunManager:
         finally:
             _current_invocation.reset(token)
             self._runtime_tasks.pop(record.run_id, None)
-            completion = self._completion.get(record.run_id)
-            if completion is not None:
-                completion.set()
-            if not self._executing_runs(record.agent_id):
-                await self._publish_agent_operational(
-                    record.agent_id, "idle", record.run_id
-                )
+            execution_done = self._execution_done.get(record.run_id)
+            if execution_done is not None:
+                execution_done.set()
+            await self._publish_agent_operational(
+                record.agent_id,
+                "running" if self._occupied_agent_runs(record.agent_id) else "idle",
+                record.run_id,
+            )
 
     def _provider(self, provider_id: str) -> RuntimeProvider:
         existing = self._providers.get(provider_id)
@@ -404,9 +487,9 @@ class RunManager:
 
     def _task_finished(self, run_id: str) -> None:
         self._runtime_tasks.pop(run_id, None)
-        completion = self._completion.get(run_id)
-        if completion is not None:
-            completion.set()
+        execution_done = self._execution_done.get(run_id)
+        if execution_done is not None:
+            execution_done.set()
 
     def _provider_id(self, card: Card) -> str:
         provider_id = self._optional_provider_id(card)
@@ -434,22 +517,21 @@ class RunManager:
     def _check_concurrency(self, card: Card) -> None:
         configured = card.config.get("max_concurrent_runs", 1)
         limit = configured if isinstance(configured, int) and configured > 0 else 1
-        active = sum(
-            1
-            for record in self.list_runs(agent_id=card.id)
-            if record.status is RunStatus.RUNNING
-        )
+        active = len(self._occupied_agent_runs(card.id))
         if active >= limit:
             raise RuntimeUnavailableError(
                 f"agent {card.id!r} reached max_concurrent_runs={limit}"
             )
 
-    def _executing_runs(self, agent_id: str) -> list[RunRecord]:
+    def _occupied_agent_runs(self, agent_id: str) -> list[RunRecord]:
         return [
-            record
-            for record in self.list_runs(agent_id=agent_id)
-            if record.status is RunStatus.RUNNING
+            self.get_run(run_id)
+            for run_id, occupant_agent_id in self._occupied_runs.items()
+            if occupant_agent_id == agent_id
         ]
+
+    def _release_agent_slot(self, run_id: str) -> None:
+        self._occupied_runs.pop(run_id, None)
 
     def _agent_card(self, agent_id: str) -> Card:
         card = self.world.get_card(agent_id)
@@ -520,7 +602,12 @@ class RunManager:
         )
 
     async def _publish_agent_operational(
-        self, agent_id: str, status: str, run_id: str
+        self,
+        agent_id: str,
+        status: str,
+        run_id: str,
+        *,
+        started: bool = False,
     ) -> None:
         # This is availability/load only. A normal Run failure never changes an
         # Agent to error; runtime initialization failures are handled separately.
@@ -528,9 +615,7 @@ class RunManager:
         if card is not None and card.status != status:
             self.world.update_card(agent_id, CardPatch(status=status))
         event_type = (
-            EventType.AGENT_STARTED
-            if status == "running"
-            else EventType.AGENT_STATUS_CHANGED
+            EventType.AGENT_STARTED if started else EventType.AGENT_STATUS_CHANGED
         )
         await self.events.publish(
             event_type,

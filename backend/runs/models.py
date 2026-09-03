@@ -96,3 +96,11 @@ class InvocationContext:
 @dataclass(frozen=True, slots=True)
 class RuntimeInput:
     prompt: str
+
+
+@dataclass(frozen=True, slots=True)
+class RunSuspension:
+    """Process-local suspension decision, separate from durable Run status."""
+
+    reason: str
+    release_agent_slot: bool

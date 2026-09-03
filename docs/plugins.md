@@ -141,6 +141,9 @@ The provider implements `RuntimeProvider.execute(agent_config,
 invocation_context, runtime_input)` and emits provider-neutral `AgentEvent`
 values. A terminal Run outcome is requested explicitly with the event's
 `run_status`; simply exhausting the provider stream leaves the Run waiting.
+That waiting Run retains its Agent execution slot unless orchestration
+explicitly suspends it with `release_agent_slot=True`. Tool activity events do
+not imply suspension.
 See [Runs and runtime providers](runs.md).
 
 Lifecycle handlers receive only the node/request models and a narrow,

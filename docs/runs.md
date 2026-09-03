@@ -28,10 +28,34 @@ startup, persisted `created`, `running`, or `waiting` records from the prior
 process are marked `interrupted`; they are never silently reported as success.
 
 Agent card status remains operational. A failed Run returns the Agent to
-`idle`; it does not set the Agent to `error`. A waiting Run also releases the
-Agent's operational busy state. `max_concurrent_runs` is an explicit per-Agent
-configuration policy (default `1`) and counts executing `running` Runs, not
-durable waiting Runs.
+`idle`; it does not set the Agent to `error`. Run status and execution
+occupancy are independent: changing a Run to `waiting` retains its Agent slot
+by default. `max_concurrent_runs` is an explicit per-Agent configuration policy
+(default `1`) and counts Runs holding execution capacity, regardless of their
+Run status.
+
+`TOOL_STARTED` and `TOOL_COMPLETED` are activity events only. A short tool call
+does not change Run status or release capacity. Long-running work must make an
+explicit suspension decision:
+
+```python
+await run_manager.suspend_run(
+    run_id,
+    reason="external_job",
+    release_agent_slot=True,
+)
+```
+
+A waiting Run may instead retain its slot by leaving `release_agent_slot`
+false. Resuming a released Run through `waiting -> running` reacquires a slot
+and is subject to the same concurrency policy as a newly started Run.
+
+Execution-turn synchronization is also separate from durable completion:
+
+- `wait_execution(run_id)` returns when the current provider coroutine ends,
+  even if the Run remains waiting.
+- `wait_terminal(run_id)` returns only for `succeeded`, `failed`, `cancelled`,
+  or `interrupted`.
 
 ## Lineage and cancellation
 

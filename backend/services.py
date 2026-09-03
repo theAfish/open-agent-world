@@ -698,7 +698,7 @@ class ApplicationServices:
                 caller_id=source_agent_id,
                 context_id=session_id,
             )
-            record = await manager.wait_run(run.run_id)
+            record = await manager.wait_terminal(run.run_id)
             self._require_successful_run(record)
             final_text = manager.final_text(run.run_id)
         finally:
@@ -742,7 +742,7 @@ class ApplicationServices:
             caller_kind="agent",
             caller_id=source_agent_id,
         )
-        record = await manager.wait_run(run.run_id)
+        record = await manager.wait_terminal(run.run_id)
         self._require_successful_run(record)
         final_text = manager.final_text(run.run_id)
         return {
@@ -841,7 +841,7 @@ class ApplicationServices:
         session_id: str,
     ) -> None:
         manager = self._require_run_manager()
-        record = await manager.wait_run(run_id)
+        record = await manager.wait_terminal(run_id)
         final_text = manager.final_text(run_id)
         if (
             record.status is RunStatus.SUCCEEDED
