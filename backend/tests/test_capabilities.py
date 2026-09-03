@@ -73,7 +73,9 @@ def test_capability_derivation_permission_changes_and_revocation(
 def test_agent_communication_is_a_scoped_live_capability(client: TestClient) -> None:
     services = client.app.state.services
     provider = WorldAgentCapabilityProvider(services)
-    services.agent_runtime = MockAgentRuntime(provider)
+    services.install_runtime_provider(
+        "core.mock", MockAgentRuntime(provider), default=True
+    )
     source = create_node(client, "agent", name="Coordinator")
     target = create_node(client, "agent", name="Researcher")
     edge = client.post(

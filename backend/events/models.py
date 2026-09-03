@@ -27,6 +27,14 @@ class EventType(StrEnum):
     AGENT_MESSAGE = "agent_message"
     AGENT_COMPLETED = "agent_completed"
     AGENT_STOPPED = "agent_stopped"
+    RUN_CREATED = "run_created"
+    RUN_STARTED = "run_started"
+    RUN_WAITING = "run_waiting"
+    RUN_RESUMED = "run_resumed"
+    RUN_SUCCEEDED = "run_succeeded"
+    RUN_FAILED = "run_failed"
+    RUN_CANCELLED = "run_cancelled"
+    RUN_INTERRUPTED = "run_interrupted"
     TOOL_STARTED = "tool_started"
     TOOL_COMPLETED = "tool_completed"
     SANDBOX_COMMAND_STARTED = "sandbox_command_started"
@@ -51,4 +59,5 @@ class RuntimeEvent(BaseModel):
     resource_id: str | None = None
     conversation_id: str | None = None
     session_id: str | None = None
+    run_id: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)

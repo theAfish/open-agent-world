@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.api.dependencies import get_services
 from backend.services import ApplicationServices
+from backend.runs import RunRecord
 
 
 router = APIRouter(tags=["runtime"])
@@ -18,6 +19,15 @@ class AgentRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     prompt: Annotated[str, Field(min_length=1, max_length=100_000)]
+    task_id: Annotated[str, Field(min_length=1, max_length=200)] | None = None
+    parent_run_id: Annotated[str, Field(min_length=1, max_length=200)] | None = None
+    detached: bool = False
+
+    @model_validator(mode="after")
+    def validate_lineage(self) -> "AgentRunRequest":
+        if self.detached and self.parent_run_id is not None:
+            raise ValueError("a detached Run cannot also specify parent_run_id")
+        return self
 
 
 class LlmSettingsRequest(BaseModel):
@@ -74,7 +84,55 @@ async def run_agent(
     request: AgentRunRequest,
     services: ApplicationServices = Depends(get_services),
 ) -> dict[str, object]:
-    return await services.run_agent(agent_id, request.prompt)
+    if (
+        request.task_id is None
+        and request.parent_run_id is None
+        and not request.detached
+    ):
+        return await services.run_agent(agent_id, request.prompt)
+    run = await services._require_run_manager().start_run(
+        agent_id,
+        request.prompt,
+        task_id=request.task_id,
+        parent_run_id=request.parent_run_id,
+        detached=request.detached,
+    )
+    return {"accepted": True, "agent_id": agent_id, "run_id": run.run_id}
+
+
+@router.get("/runs", response_model=list[RunRecord])
+async def list_runs(
+    agent_id: str | None = None,
+    task_id: str | None = None,
+    services: ApplicationServices = Depends(get_services),
+) -> list[RunRecord]:
+    return services._require_run_manager().list_runs(
+        agent_id=agent_id, task_id=task_id
+    )
+
+
+@router.get("/runs/{run_id}", response_model=RunRecord)
+async def get_run(
+    run_id: str,
+    services: ApplicationServices = Depends(get_services),
+) -> RunRecord:
+    return services._require_run_manager().get_run(run_id)
+
+
+@router.get("/runs/{run_id}/children", response_model=list[RunRecord])
+async def list_child_runs(
+    run_id: str,
+    services: ApplicationServices = Depends(get_services),
+) -> list[RunRecord]:
+    return services._require_run_manager().list_child_runs(run_id)
+
+
+@router.post("/runs/{run_id}/cancel", response_model=RunRecord)
+async def cancel_run(
+    run_id: str,
+    services: ApplicationServices = Depends(get_services),
+) -> RunRecord:
+    return await services._require_run_manager().cancel_run(run_id)
 
 
 @router.post("/agents/{agent_id}/stop")

@@ -258,7 +258,21 @@ async def _execute_sandbox(
 
 
 def create_builtin_registry() -> PluginRegistry:
+    from backend.agents import GoogleAdkAgentRuntime, MockAgentRuntime
+
     registry = PluginRegistry()
+    registry.register_runtime_provider(
+        "google.adk",
+        lambda capability_provider, **options: GoogleAdkAgentRuntime(
+            capability_provider, **options
+        ),
+    )
+    registry.register_runtime_provider(
+        "core.mock",
+        lambda capability_provider, **options: MockAgentRuntime(
+            capability_provider, **options
+        ),
+    )
     registry.register_capability_handler("agent.communicate", _communicate)
     registry.register_capability_handler(
         "conversation.request_turn", _request_conversation_turn

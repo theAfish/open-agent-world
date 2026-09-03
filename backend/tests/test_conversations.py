@@ -178,7 +178,11 @@ def test_group_session_can_kick_members_and_be_dissolved(client: TestClient) -> 
 def test_addressed_group_message_persists_agent_responses_and_events(data_root: Path) -> None:
     settings = Settings.for_data_root(data_root)
     services = create_services(settings)
-    services.agent_runtime = MockAgentRuntime(WorldAgentCapabilityProvider(services))
+    services.install_runtime_provider(
+        "core.mock",
+        MockAgentRuntime(WorldAgentCapabilityProvider(services)),
+        default=True,
+    )
     application = create_app(settings, services=services)
     try:
         with TestClient(application) as client, client.websocket_connect("/ws/events") as websocket:
@@ -232,6 +236,13 @@ def test_addressed_group_message_persists_agent_responses_and_events(data_root: 
             assert [item["sender_kind"] for item in messages] == ["user", "agent", "agent"]
             assert {item["sender_id"] for item in messages[1:]} == {atlas["id"], river["id"]}
             assert all(item["session_id"] == session["id"] for item in messages)
+            runs = services._require_run_manager().list_runs()
+            assert len(runs) == 2
+            assert all(item.caller_kind == "conversation" for item in runs)
+            assert all(item.caller_id == conversation["id"] for item in runs)
+            assert {item.run_id for item in runs} == {
+                item["run_id"] for item in messages[1:]
+            }
     finally:
         services.close()
 
@@ -266,7 +277,11 @@ async def test_agent_can_request_another_participant_turn_with_structured_routin
 ) -> None:
     settings = Settings.for_data_root(data_root)
     services = create_services(settings)
-    services.agent_runtime = MockAgentRuntime(WorldAgentCapabilityProvider(services))
+    services.install_runtime_provider(
+        "core.mock",
+        MockAgentRuntime(WorldAgentCapabilityProvider(services)),
+        default=True,
+    )
     try:
         atlas = await services.create_card(CardCreate(type="agent", name="Atlas"))
         river = await services.create_card(CardCreate(type="agent", name="River"))
@@ -312,7 +327,11 @@ async def test_agent_requesting_own_turn_is_recoverable_and_does_not_recurse(
 ) -> None:
     settings = Settings.for_data_root(data_root)
     services = create_services(settings)
-    services.agent_runtime = MockAgentRuntime(WorldAgentCapabilityProvider(services))
+    services.install_runtime_provider(
+        "core.mock",
+        MockAgentRuntime(WorldAgentCapabilityProvider(services)),
+        default=True,
+    )
     try:
         atlas = await services.create_card(CardCreate(type="agent", name="Atlas"))
         conversation = await services.create_card(
@@ -356,18 +375,22 @@ async def test_agent_requesting_own_turn_is_recoverable_and_does_not_recurse(
             ),
         }
         assert services.list_conversation_messages(conversation.id, session.id) == []
-        assert services._agent_tasks == {}
+        assert services._require_run_manager()._runtime_tasks == {}
     finally:
         services.close()
 
 
 @pytest.mark.asyncio
-async def test_agent_handoff_back_to_waiting_caller_is_delivered_without_reentry(
+async def test_agent_handoff_executes_as_a_run_and_persists_the_response(
     data_root: Path,
 ) -> None:
     settings = Settings.for_data_root(data_root)
     services = create_services(settings)
-    services.agent_runtime = MockAgentRuntime(WorldAgentCapabilityProvider(services))
+    services.install_runtime_provider(
+        "core.mock",
+        MockAgentRuntime(WorldAgentCapabilityProvider(services)),
+        default=True,
+    )
     try:
         xiaobing = await services.create_card(CardCreate(type="agent", name="xiaobing"))
         atlas = await services.create_card(CardCreate(type="agent", name="Atlas"))
@@ -386,10 +409,6 @@ async def test_agent_handoff_back_to_waiting_caller_is_delivered_without_reentry
                 title="Callback", participant_ids=[xiaobing.id, atlas.id]
             ),
         )
-        current = asyncio.current_task()
-        assert current is not None
-        services._agent_tasks[xiaobing.id] = current
-
         response = await services.request_conversation_turn(
             atlas.id,
             conversation.id,
@@ -399,13 +418,13 @@ async def test_agent_handoff_back_to_waiting_caller_is_delivered_without_reentry
         )
 
         assert response["agent_id"] == xiaobing.id
-        assert "already active earlier in this conversation turn" in response["response"]
+        assert response["response"].startswith("Mock response:")
         messages = services.list_conversation_messages(conversation.id, session.id)
-        assert [(item.sender_name, item.content) for item in messages] == [
-            ("Atlas", "小冰你好，请回复确认一下。")
-        ]
-        assert services._agent_tasks[xiaobing.id] is current
-        services._agent_tasks.pop(xiaobing.id)
+        expected_request = ("Atlas", "小冰你好，请回复确认一下。")
+        assert (messages[0].sender_name, messages[0].content) == expected_request
+        assert [item.sender_name for item in messages] == ["Atlas", "xiaobing"]
+        runs = services._require_run_manager().list_runs(agent_id=xiaobing.id)
+        assert len(runs) == 1
+        assert messages[-1].run_id == runs[0].run_id
     finally:
-        services._agent_tasks.clear()
         services.close()

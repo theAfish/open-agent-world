@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 from dataclasses import dataclass, field
+import asyncio
 
 from .models import (
     AgentConfig,
@@ -22,10 +22,7 @@ class AgentRecord:
     config: AgentConfig
     session_id: str
     status: AgentStatus = AgentStatus.IDLE
-    active_run_id: str | None = None
-    active_task: asyncio.Task[object] | None = None
     last_error: str | None = None
-    run_counter: int = 0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def info(self) -> AgentInfo:
@@ -33,7 +30,7 @@ class AgentRecord:
             config=self.config,
             status=self.status,
             session_id=self.session_id,
-            active_run_id=self.active_run_id,
+            active_run_id=None,
             last_error=self.last_error,
         )
 
@@ -49,3 +46,5 @@ def validate_agent_config(config: AgentConfig) -> None:
         raise AgentConfigurationError("agent model must be non-empty and bounded")
     if not config.system_instruction.strip():
         raise AgentConfigurationError("system instruction must not be empty")
+    if not 1 <= config.max_concurrent_runs <= 64:
+        raise AgentConfigurationError("max_concurrent_runs must be between 1 and 64")

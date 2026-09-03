@@ -3,22 +3,21 @@ from __future__ import annotations
 import inspect
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from backend.agents import (
     AgentConfig,
     AgentConfigurationError,
-    AgentDependencyError,
     AgentEventType,
     AgentStatus,
     GoogleAdkAgentRuntime,
     MockAgentRuntime,
     ScopedToolDefinition,
     ToolParameter,
-    create_agent_runtime,
 )
 from backend.agents.google_adk import _AdkBindings, _runtime_error_message
 from backend.agents.tools import build_scoped_tool_callables, build_scoped_tool_schemas
+from backend.runs import InvocationCaller, InvocationContext, RuntimeInput
+from backend.plugins import create_builtin_registry
 
 
 class CapabilityProvider:
@@ -85,8 +84,13 @@ class MockAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_default_model_and_lifecycle_events(self) -> None:
         created = await self.runtime.create_agent(self.config)
         self.assertEqual(created.config.model, "gemini-3.7-flash")
-        events = [event async for event in self.runtime.run("agent-a", "hello")]
-        self.assertEqual(events[0].type, AgentEventType.STARTED)
+        context = self._context("run-1")
+        events = [
+            event async for event in self.runtime.execute(
+                self.config, context, RuntimeInput("hello")
+            )
+        ]
+        self.assertEqual(events[0].type, AgentEventType.MESSAGE)
         self.assertIn(AgentEventType.COMPLETED, [event.type for event in events])
         message = next(event for event in events if event.type == AgentEventType.MESSAGE)
         self.assertEqual(message.payload["available_tools"], ["read_notes"])
@@ -94,24 +98,38 @@ class MockAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tools_are_resolved_again_for_every_run(self) -> None:
         await self.runtime.create_agent(self.config)
-        _ = [event async for event in self.runtime.run("agent-a", "one")]
+        _ = [event async for event in self.runtime.execute(
+            self.config, self._context("run-1"), RuntimeInput("one")
+        )]
         self.provider.definitions = []
-        events = [event async for event in self.runtime.run("agent-a", "two")]
+        events = [event async for event in self.runtime.execute(
+            self.config, self._context("run-2"), RuntimeInput("two")
+        )]
         message = next(event for event in events if event.type == AgentEventType.MESSAGE)
         self.assertEqual(message.payload["available_tools"], [])
         self.assertEqual(self.provider.list_count, 2)
 
-    async def test_factory_requires_explicit_selection_and_never_falls_back(self) -> None:
-        self.assertIsInstance(create_agent_runtime("mock", self.provider), MockAgentRuntime)
+    async def test_registry_requires_explicit_provider_selection(self) -> None:
+        registry = create_builtin_registry()
+        self.assertIsInstance(
+            registry.create_runtime_provider("core.mock", self.provider),
+            MockAgentRuntime,
+        )
         for unsupported_runtime in ("automatic", "litellm"):
-            with self.assertRaises(AgentConfigurationError):
-                create_agent_runtime(unsupported_runtime, self.provider)
-        with patch(
-            "backend.agents.factory.GoogleAdkAgentRuntime",
-            side_effect=AgentDependencyError("ADK unavailable"),
-        ):
-            with self.assertRaises(AgentDependencyError):
-                create_agent_runtime("google-adk", self.provider)
+            with self.assertRaises(ValueError):
+                registry.create_runtime_provider(unsupported_runtime, self.provider)
+    @staticmethod
+    def _context(run_id: str) -> InvocationContext:
+        return InvocationContext(
+            run_id=run_id,
+            agent_id="agent-a",
+            parent_run_id=None,
+            root_run_id=run_id,
+            caller=InvocationCaller("test"),
+            context_id=None,
+            task_id=None,
+            runtime_provider_id="core.mock",
+        )
 
 
 class FakeSessionService:
@@ -226,7 +244,14 @@ class GoogleAdkBoundaryTests(unittest.IsolatedAsyncioTestCase):
         )
         runtime = GoogleAdkAgentRuntime(provider, adk_bindings=bindings)
         await runtime.create_agent(AgentConfig("agent-a", "Agent"))
-        events = [event async for event in runtime.run("agent-a", "do it")]
+        context = InvocationContext(
+            run_id="run-adk", agent_id="agent-a", parent_run_id=None,
+            root_run_id="run-adk", caller=InvocationCaller("test"),
+            context_id=None, task_id=None, runtime_provider_id="google.adk",
+        )
+        events = [event async for event in runtime.execute(
+            AgentConfig("agent-a", "Agent"), context, RuntimeInput("do it")
+        )]
         types = [event.type for event in events]
         self.assertIn(AgentEventType.TOOL_STARTED, types)
         self.assertIn(AgentEventType.TOOL_COMPLETED, types)

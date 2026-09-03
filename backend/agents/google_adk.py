@@ -1,4 +1,4 @@
-"""Google ADK 2.x adapter behind the application's AgentRuntime boundary."""
+"""Google ADK 2.x adapter behind the RuntimeProvider boundary."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ._state import AgentRecord, validate_agent_config
-from .base import AgentCapabilityProvider, AgentRuntime
+from .base import AgentCapabilityProvider, RuntimeProvider
 from .models import (
     AgentConfig,
     AgentDependencyError,
@@ -22,6 +22,7 @@ from .models import (
     AgentStatus,
 )
 from .tools import build_scoped_tool_callables
+from backend.runs.models import InvocationContext, RunStatus, RuntimeInput
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +54,7 @@ def _load_adk_bindings() -> _AdkBindings:
     return _AdkBindings(Agent, App, Runner, InMemorySessionService, types)
 
 
-class GoogleAdkAgentRuntime(AgentRuntime):
+class GoogleAdkAgentRuntime(RuntimeProvider):
     """Independent ADK state per Agent and optional conversation context.
 
     Tools are reconstructed from the graph at the beginning of every run.  Each
@@ -117,7 +118,6 @@ class GoogleAdkAgentRuntime(AgentRuntime):
 
     async def delete_agent(self, agent_id: str) -> None:
         record = await self._record(agent_id)
-        await self.stop(agent_id)
         session_ids = [record.session_id]
         session_ids.extend(
             value
@@ -139,29 +139,23 @@ class GoogleAdkAgentRuntime(AgentRuntime):
                 if key[0] != agent_id
             }
 
-    async def run(
-        self, agent_id: str, prompt: str, *, context_id: str | None = None
+    async def execute(
+        self,
+        config: AgentConfig,
+        context: InvocationContext,
+        runtime_input: RuntimeInput,
     ) -> AsyncIterator[AgentEvent]:
+        agent_id = context.agent_id
+        prompt = runtime_input.prompt
         if not isinstance(prompt, str) or not prompt.strip():
             raise AgentStateError("prompt must not be empty")
         record = await self._record(agent_id)
-        session_id = await self._context_session(record, context_id)
-        task = asyncio.current_task()
-        if task is None:  # pragma: no cover
-            raise AgentStateError("agent run requires an asyncio task")
+        session_id = await self._context_session(record, context.context_id)
 
         async with record.lock:
-            if record.status == AgentStatus.RUNNING:
-                raise AgentStateError(f"agent is already running: {agent_id}")
-            record.run_counter += 1
-            run_id = f"adk-{agent_id}-{record.run_counter}"
-            record.status = AgentStatus.RUNNING
-            record.active_run_id = run_id
-            record.active_task = task
+            record.config = config
             record.last_error = None
-
-        yield AgentEvent(agent_id, run_id, AgentEventType.STARTED, {"model": record.config.model})
-        yield self._status_event(record, run_id)
+        run_id = context.run_id
         final_text = ""
         try:
             definitions = tuple(await self._provider.list_tools(agent_id))
@@ -193,36 +187,18 @@ class GoogleAdkAgentRuntime(AgentRuntime):
                             final_text = str(translated.payload.get("text", final_text))
                         yield translated
 
-            async with record.lock:
-                record.status = AgentStatus.IDLE
-                record.active_run_id = None
-                record.active_task = None
             yield AgentEvent(
                 agent_id,
                 run_id,
                 AgentEventType.COMPLETED,
                 {"text": final_text},
+                run_status=RunStatus.SUCCEEDED,
             )
-            yield self._status_event(record, run_id)
         except asyncio.CancelledError:
-            async with record.lock:
-                record.status = AgentStatus.IDLE
-                record.active_run_id = None
-                record.active_task = None
-            yield AgentEvent(agent_id, run_id, AgentEventType.STOPPED, {})
-            yield self._status_event(record, run_id)
+            raise
         except Exception as exc:
             error_message = _runtime_error_message(exc)
-            async with record.lock:
-                record.status = AgentStatus.ERROR
-                record.last_error = error_message
-                record.active_run_id = None
-                record.active_task = None
-            yield AgentEvent(
-                agent_id, run_id, AgentEventType.ERROR, {"error": error_message}
-            )
-            yield self._status_event(record, run_id)
-            raise
+            raise RuntimeError(error_message) from exc
 
     async def _translate_event(
         self, record: AgentRecord, run_id: str, event: Any
@@ -232,8 +208,6 @@ class GoogleAdkAgentRuntime(AgentRuntime):
         for part in parts:
             function_call = getattr(part, "function_call", None)
             if function_call is not None:
-                record.status = AgentStatus.WAITING
-                yield self._status_event(record, run_id)
                 yield AgentEvent(
                     record.config.agent_id,
                     run_id,
@@ -258,8 +232,6 @@ class GoogleAdkAgentRuntime(AgentRuntime):
                         ),
                     },
                 )
-                record.status = AgentStatus.RUNNING
-                yield self._status_event(record, run_id)
             # ADK marks model reasoning parts.  Never forward them to runtime
             # events even when they carry text.
             text = getattr(part, "text", None)
@@ -272,13 +244,8 @@ class GoogleAdkAgentRuntime(AgentRuntime):
                     {"text": text, "final": is_final},
                 )
 
-    async def stop(self, agent_id: str) -> None:
-        record = await self._record(agent_id)
-        async with record.lock:
-            task = record.active_task
-        if task is not None and task is not asyncio.current_task() and not task.done():
-            task.cancel()
-            await asyncio.sleep(0)
+    async def stop(self, run_id: str) -> None:
+        del run_id
 
     async def get_agent(self, agent_id: str) -> AgentInfo:
         return (await self._record(agent_id)).info()
@@ -320,15 +287,6 @@ class GoogleAdkAgentRuntime(AgentRuntime):
         if isinstance(resolved, LiteLlm):
             return LiteLlm(configured_model, **self._litellm_connection)
         return configured_model
-
-    @staticmethod
-    def _status_event(record: AgentRecord, run_id: str) -> AgentEvent:
-        return AgentEvent(
-            record.config.agent_id,
-            run_id,
-            AgentEventType.STATUS_CHANGED,
-            {"status": record.status.value},
-        )
 
     @staticmethod
     def _digest(agent_id: str) -> str:

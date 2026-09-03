@@ -124,6 +124,25 @@ def register(registry: PluginRegistry) -> None:
     ))
 ```
 
+Plugins may also register an Agent runtime provider without modifying a core
+factory:
+
+```python
+def register(registry: PluginRegistry) -> None:
+    registry.register_runtime_provider(
+        "acme.runtime",
+        lambda capability_provider, **options: AcmeRuntimeProvider(
+            capability_provider, **options
+        ),
+    )
+```
+
+The provider implements `RuntimeProvider.execute(agent_config,
+invocation_context, runtime_input)` and emits provider-neutral `AgentEvent`
+values. A terminal Run outcome is requested explicitly with the event's
+`run_status`; simply exhausting the provider stream leaves the Run waiting.
+See [Runs and runtime providers](runs.md).
+
 Lifecycle handlers receive only the node/request models and a narrow,
 provider-neutral `NodeLifecycleContext`; they do not receive
 `ApplicationServices`, HTTP requests, provider SDK objects, or database

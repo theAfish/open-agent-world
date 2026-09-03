@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from contextlib import suppress
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import PureWindowsPath
 from typing import Any
 
 from backend.agents import (
-    AgentConfig as RuntimeAgentConfig,
-    AgentEvent,
     AgentNotFoundError,
-    AgentRuntime,
     GoogleAdkAgentRuntime,
-    create_agent_runtime,
+    RuntimeProvider,
 )
 from backend.capabilities.broker import CapabilityBroker
 from backend.config import Settings
@@ -46,6 +44,8 @@ from backend.resources.models import (
     TextPatch,
     TextReplace,
 )
+from backend.runs import RunRecord, RunStatus, RunStore
+from backend.runs.manager import RunManager
 from backend.sandbox import (
     CommandResult,
     ResourceAccess,
@@ -100,32 +100,23 @@ class _LifecycleNodes:
 
 @dataclass(frozen=True, slots=True)
 class _LifecycleAgents:
-    runtime: AgentRuntime
+    manager: RunManager
 
     async def create(self, node: Card) -> None:
-        await self.runtime.create_agent(self._config(node))
+        await self.manager.register_agent(node)
 
     async def update(self, node: Card) -> None:
-        await self.runtime.update_agent(self._config(node))
+        await self.manager.update_agent(node)
 
     async def delete(self, node_id: str, *, missing_ok: bool = False) -> None:
         try:
-            await self.runtime.delete_agent(node_id)
+            await self.manager.delete_agent(node_id, missing_ok=missing_ok)
         except AgentNotFoundError:
             if not missing_ok:
                 raise
 
     async def stop(self, node_id: str) -> None:
-        await self.runtime.stop(node_id)
-
-    @staticmethod
-    def _config(node: Card) -> RuntimeAgentConfig:
-        return RuntimeAgentConfig(
-            agent_id=node.id,
-            name=node.name,
-            system_instruction=str(node.config.get("system_instruction", "")),
-            model=str(node.config.get("model", "gemini-3.7-flash")),
-        )
+        await self.manager.cancel_agent_runs(node_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,11 +193,12 @@ class ApplicationServices:
     events: EventHub
     plugins: PluginRegistry
     conversations: ConversationStore
-    agent_runtime: AgentRuntime | None = None
+    run_manager: RunManager | None = None
     sandbox_backend: SandboxBackend | None = None
-    _agent_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
 
     async def startup(self) -> None:
+        manager = self._require_run_manager()
+        await manager.startup()
         context = self._node_lifecycle_context()
         for card in self.world.list_cards():
             lifecycle = self.plugins.node_type(card.type).lifecycle
@@ -219,12 +211,7 @@ class ApplicationServices:
             lifecycle = self.plugins.node_type(card.type).lifecycle
             if lifecycle is not None:
                 await lifecycle.on_shutdown(context, card)
-        tasks = tuple(self._agent_tasks.values())
-        for task in tasks:
-            task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        self._agent_tasks.clear()
+        await self._require_run_manager().shutdown()
 
     def enrich_card(self, card: Card) -> Card:
         record = self.resources.maybe_get_record(card.id)
@@ -473,19 +460,8 @@ class ApplicationServices:
 
     async def run_agent(self, agent_id: str, prompt: str) -> dict[str, Any]:
         self._require_card_type(agent_id, CardType.AGENT)
-        if self.agent_runtime is None:
-            raise RuntimeUnavailableError(
-                "agent runtime is not configured; set OPEN_AGENT_WORLD_AGENT_RUNTIME explicitly"
-            )
-        existing = self._agent_tasks.get(agent_id)
-        if existing is not None and not existing.done():
-            raise RuntimeUnavailableError(f"agent {agent_id!r} already has an active run")
-        stream = self.agent_runtime.run(agent_id, prompt)
-        first = await anext(stream)
-        await self._publish_agent_event(first)
-        task = asyncio.create_task(self._consume_agent_events(agent_id, stream))
-        self._agent_tasks[agent_id] = task
-        return {"accepted": True, "agent_id": agent_id, "run_id": first.run_id}
+        run = await self._require_run_manager().start_run(agent_id, prompt)
+        return {"accepted": True, "agent_id": agent_id, "run_id": run.run_id}
 
     def conversation_summary(self, conversation_id: str) -> ConversationSummary:
         self._require_card_type(conversation_id, CardType.CONVERSATION)
@@ -619,13 +595,9 @@ class ApplicationServices:
         for agent_id in mentions:
             self._require_session_participant(session, agent_id)
             self._require_conversation_connection(agent_id, conversation_id)
-            active = self._agent_tasks.get(agent_id)
-            if active is not None and not active.done():
-                raise RuntimeUnavailableError(
-                    f"agent {agent_id!r} already has an active run"
-                )
-        if mentions and self.agent_runtime is None:
-            raise RuntimeUnavailableError("agent runtime is not configured")
+        manager = self._require_run_manager()
+        for agent_id in mentions:
+            manager.assert_can_start(agent_id)
         message = self.conversations.add_message(
             conversation_id,
             session_id,
@@ -641,22 +613,23 @@ class ApplicationServices:
             prompt = self._conversation_prompt(
                 conversation_id, session, agent_id, request.content
             )
-            assert self.agent_runtime is not None
-            stream = self.agent_runtime.run(
-                agent_id, prompt, context_id=session_id
-            )
-            first = await anext(stream)
-            await self._publish_agent_event(
-                first,
-                conversation_id=conversation_id,
-                session_id=session_id,
+            run = await self._require_run_manager().start_run(
+                agent_id,
+                prompt,
+                caller_kind="conversation",
+                caller_id=conversation_id,
+                context_id=session_id,
             )
             task = asyncio.create_task(
-                self._consume_conversation_events(
-                    agent_id, stream, conversation_id, session_id
+                self._persist_conversation_run(
+                    agent_id, run.run_id, conversation_id, session_id
                 )
             )
-            self._agent_tasks[agent_id] = task
+            task.add_done_callback(
+                lambda completed: (
+                    completed.exception() if not completed.cancelled() else None
+                )
+            )
             accepted.append(agent_id)
         return ConversationPostResult(
             message=message, accepted_agent_ids=accepted
@@ -692,15 +665,6 @@ class ApplicationServices:
             }
         source = self._require_card_type(source_agent_id, CardType.AGENT)
         target = self._require_card_type(target_agent_id, CardType.AGENT)
-        current = asyncio.current_task()
-        active = self._agent_tasks.get(target_agent_id)
-        if active is not None and not active.done() and active is not current:
-            raise RuntimeUnavailableError(
-                f"agent {target_agent_id!r} already has an active run"
-            )
-        if active is None or active.done():
-            if self.agent_runtime is None:
-                raise RuntimeUnavailableError("agent runtime is not configured")
         request_message = self.conversations.add_message(
             conversation_id,
             session_id,
@@ -711,7 +675,8 @@ class ApplicationServices:
             mention_agent_ids=[target_agent_id],
         )
         await self._publish_conversation_message(request_message)
-        if active is current and current is not None:
+        manager = self._require_run_manager()
+        if manager.is_agent_in_lineage(target_agent_id):
             return {
                 "agent_id": target.id,
                 "agent_name": target.name,
@@ -725,26 +690,19 @@ class ApplicationServices:
             conversation_id, session, target_agent_id, message
         )
         token = _conversation_turn_depth.set(depth + 1)
-        if current is not None:
-            self._agent_tasks[target_agent_id] = current
-        final_text = ""
-        run_id: str | None = None
         try:
-            async for event in self.agent_runtime.run(
-                target_agent_id, prompt, context_id=session_id
-            ):
-                run_id = event.run_id
-                await self._publish_agent_event(
-                    event,
-                    conversation_id=conversation_id,
-                    session_id=session_id,
-                )
-                if event.type.value == "agent_completed":
-                    final_text = str(event.payload.get("text", ""))
+            run = await manager.start_run(
+                target_agent_id,
+                prompt,
+                caller_kind="agent",
+                caller_id=source_agent_id,
+                context_id=session_id,
+            )
+            record = await manager.wait_run(run.run_id)
+            self._require_successful_run(record)
+            final_text = manager.final_text(run.run_id)
         finally:
             _conversation_turn_depth.reset(token)
-            if self._agent_tasks.get(target_agent_id) is current:
-                self._agent_tasks.pop(target_agent_id, None)
         response = self.conversations.add_message(
             conversation_id,
             session_id,
@@ -752,7 +710,7 @@ class ApplicationServices:
             sender_id=target.id,
             sender_name=target.name,
             content=final_text or "No response was produced.",
-            run_id=run_id,
+            run_id=run.run_id,
         )
         await self._publish_conversation_message(response)
         return {
@@ -763,20 +721,12 @@ class ApplicationServices:
 
     async def stop_agent(self, agent_id: str) -> dict[str, Any]:
         self._require_card_type(agent_id, CardType.AGENT)
-        if self.agent_runtime is None:
-            raise RuntimeUnavailableError("agent runtime is not configured")
-        await self.agent_runtime.stop(agent_id)
-        task = self._agent_tasks.get(agent_id)
-        if task is not None:
-            with suppress(asyncio.CancelledError):
-                await task
+        await self._require_run_manager().cancel_agent_runs(agent_id)
         return {"agent_id": agent_id, "status": "idle"}
 
     async def get_agent(self, agent_id: str) -> Any:
         self._require_card_type(agent_id, CardType.AGENT)
-        if self.agent_runtime is None:
-            raise RuntimeUnavailableError("agent runtime is not configured")
-        return await self.agent_runtime.get_agent(agent_id)
+        return await self._require_run_manager().get_agent(agent_id)
 
     async def communicate_with_agent(
         self, source_agent_id: str, target_agent_id: str, message: str
@@ -784,15 +734,17 @@ class ApplicationServices:
         source = self._require_card_type(source_agent_id, CardType.AGENT)
         target = self._require_card_type(target_agent_id, CardType.AGENT)
         self.capabilities.require_agent_communicate(source_agent_id, target_agent_id)
-        if self.agent_runtime is None:
-            raise RuntimeUnavailableError("agent runtime is not configured")
         prompt = f"Message from {source.name}:\n\n{message.strip()}"
-        final_text = ""
-        async for event in self.agent_runtime.run(target_agent_id, prompt):
-            await self._publish_agent_event(event)
-            text = event.payload.get("text")
-            if isinstance(text, str):
-                final_text = text
+        manager = self._require_run_manager()
+        run = await manager.start_run(
+            target_agent_id,
+            prompt,
+            caller_kind="agent",
+            caller_id=source_agent_id,
+        )
+        record = await manager.wait_run(run.run_id)
+        self._require_successful_run(record)
+        final_text = manager.final_text(run.run_id)
         return {
             "agent_id": target.id,
             "agent_name": target.name,
@@ -802,9 +754,10 @@ class ApplicationServices:
     async def configure_llm_connection(
         self, *, base_url: str | None, api_key: str | None
     ) -> dict[str, bool]:
-        if not isinstance(self.agent_runtime, GoogleAdkAgentRuntime):
+        runtime = self._require_run_manager().default_provider()
+        if not isinstance(runtime, GoogleAdkAgentRuntime):
             raise RuntimeUnavailableError("ADK agent runtime is not configured")
-        self.agent_runtime.configure_litellm_connection(
+        runtime.configure_litellm_connection(
             api_base=base_url,
             api_key=api_key,
         )
@@ -880,93 +833,34 @@ class ApplicationServices:
             payload=dict(event.payload),
         )
 
-    async def _consume_agent_events(self, agent_id: str, stream: Any) -> None:
-        try:
-            async for event in stream:
-                await self._publish_agent_event(event)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            await self.events.publish(
-                EventType.RUNTIME_ERROR,
-                node_id=agent_id,
-                agent_id=agent_id,
-                payload={"error": str(exc)},
-            )
-        finally:
-            self._agent_tasks.pop(agent_id, None)
-
-    async def _consume_conversation_events(
+    async def _persist_conversation_run(
         self,
         agent_id: str,
-        stream: Any,
+        run_id: str,
         conversation_id: str,
         session_id: str,
     ) -> None:
-        final_text = ""
-        run_id: str | None = None
-        try:
-            async for event in stream:
-                run_id = event.run_id
-                await self._publish_agent_event(
-                    event,
-                    conversation_id=conversation_id,
-                    session_id=session_id,
-                )
-                if event.type.value == "agent_completed":
-                    final_text = str(event.payload.get("text", ""))
-            if final_text and self._can_agent_post_to_conversation_session(
+        manager = self._require_run_manager()
+        record = await manager.wait_run(run_id)
+        final_text = manager.final_text(run_id)
+        if (
+            record.status is RunStatus.SUCCEEDED
+            and final_text
+            and self._can_agent_post_to_conversation_session(
                 agent_id, conversation_id, session_id
-            ):
-                agent = self.world.get_card(agent_id)
-                message = self.conversations.add_message(
-                    conversation_id,
-                    session_id,
-                    sender_kind="agent",
-                    sender_id=agent.id,
-                    sender_name=agent.name,
-                    content=final_text,
-                    run_id=run_id,
-                )
-                await self._publish_conversation_message(message)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            await self.events.publish(
-                EventType.RUNTIME_ERROR,
-                node_id=conversation_id,
-                agent_id=agent_id,
-                conversation_id=conversation_id,
-                session_id=session_id,
-                payload={"error": str(exc)},
             )
-        finally:
-            self._agent_tasks.pop(agent_id, None)
-
-    async def _publish_agent_event(
-        self,
-        event: AgentEvent,
-        *,
-        conversation_id: str | None = None,
-        session_id: str | None = None,
-    ) -> None:
-        event_type = EventType(event.type.value)
-        status = event.payload.get("status")
-        if event_type is EventType.AGENT_STATUS_CHANGED and isinstance(status, str):
-            self.world.update_card(event.agent_id, CardPatch(status=status))
-        await self.events.publish(
-            event_type,
-            node_id=event.agent_id,
-            agent_id=event.agent_id,
-            conversation_id=conversation_id,
-            session_id=session_id,
-            payload={
-                "run_id": event.run_id,
-                **({"conversation_id": conversation_id} if conversation_id else {}),
-                **({"session_id": session_id} if session_id else {}),
-                **dict(event.payload),
-            },
-        )
+        ):
+            agent = self.world.get_card(agent_id)
+            message = self.conversations.add_message(
+                conversation_id,
+                session_id,
+                sender_kind="agent",
+                sender_id=agent.id,
+                sender_name=agent.name,
+                content=final_text,
+                run_id=run_id,
+            )
+            await self._publish_conversation_message(message)
 
     async def _publish_conversation_message(
         self, message: ConversationMessage
@@ -1172,21 +1066,44 @@ class ApplicationServices:
         )
 
     def _node_lifecycle_context(self) -> NodeLifecycleContext:
+        manager = self._require_run_manager()
         return NodeLifecycleContext(
             nodes=_LifecycleNodes(self.world),
             resources=_LifecycleResources(self.resources),
             conversations=_LifecycleConversations(self.conversations),
-            agents=(
-                _LifecycleAgents(self.agent_runtime)
-                if self.agent_runtime is not None
-                else None
-            ),
+            agents=_LifecycleAgents(manager),
             sandboxes=(
                 _LifecycleSandboxes(self.sandbox_backend)
                 if self.sandbox_backend is not None
                 else None
             ),
         )
+
+    def _require_run_manager(self) -> RunManager:
+        if self.run_manager is None:  # pragma: no cover - construction invariant
+            raise RuntimeError("RunManager has not been initialized")
+        return self.run_manager
+
+    @staticmethod
+    def _require_successful_run(record: RunRecord) -> None:
+        if record.status is RunStatus.SUCCEEDED:
+            return
+        detail = f": {record.error}" if record.error else ""
+        raise RuntimeUnavailableError(
+            f"run {record.run_id!r} ended as {record.status.value}{detail}"
+        )
+
+    def install_runtime_provider(
+        self,
+        provider_id: str,
+        provider: RuntimeProvider,
+        *,
+        default: bool = False,
+    ) -> None:
+        manager = self._require_run_manager()
+        manager.install_provider(provider_id, provider)
+        if default:
+            manager.default_runtime_provider_id = provider_id
 
     def close(self) -> None:
         self.database.close()
@@ -1195,7 +1112,8 @@ class ApplicationServices:
 def create_services(
     settings: Settings,
     *,
-    agent_runtime: AgentRuntime | None = None,
+    runtime_providers: Mapping[str, RuntimeProvider] | None = None,
+    default_runtime_provider_id: str | None = None,
     sandbox_backend: SandboxBackend | None = None,
     plugins: PluginRegistry | None = None,
 ) -> ApplicationServices:
@@ -1218,19 +1136,28 @@ def create_services(
         events=events,
         plugins=plugin_registry,
         conversations=conversations,
-        agent_runtime=agent_runtime,
         sandbox_backend=sandbox_backend,
     )
+    from backend.capabilities.provider import WorldAgentCapabilityProvider
+
+    provider = WorldAgentCapabilityProvider(services)
+    services.run_manager = RunManager(
+        store=RunStore(database),
+        world=world,
+        events=events,
+        plugins=plugin_registry,
+        capability_provider=provider,
+        default_runtime_provider_id=(
+            default_runtime_provider_id
+            if default_runtime_provider_id is not None
+            else settings.agent_runtime
+        ),
+        provider_options={"google.adk": {"app_name": "open-agent-world"}},
+    )
+    for provider_id, runtime_provider in (runtime_providers or {}).items():
+        services.install_runtime_provider(provider_id, runtime_provider)
     if services.sandbox_backend is None and settings.sandbox_runtime == "windows":
         services.sandbox_backend = WindowsSandboxBackend(
             settings.data_root, event_sink=services.publish_sandbox_event
-        )
-    if services.agent_runtime is None and settings.agent_runtime is not None:
-        from backend.capabilities.provider import WorldAgentCapabilityProvider
-
-        provider = WorldAgentCapabilityProvider(services)
-        options = {"app_name": "open-agent-world"} if settings.agent_runtime == "google-adk" else {}
-        services.agent_runtime = create_agent_runtime(
-            settings.agent_runtime, provider, **options
         )
     return services

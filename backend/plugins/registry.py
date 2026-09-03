@@ -3,12 +3,15 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from backend.errors import GraphValidationError
 from backend.plugins.lifecycle import NodeLifecycleHandler
+
+if TYPE_CHECKING:
+    from backend.agents import AgentCapabilityProvider, RuntimeProvider
 
 
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
@@ -140,6 +143,7 @@ class RelationshipDefinition:
 
 
 CapabilityHandler = Callable[[Any, Any, dict[str, Any]], Awaitable[Any]]
+RuntimeProviderFactory = Callable[..., "RuntimeProvider"]
 
 
 class PluginRegistry:
@@ -154,6 +158,7 @@ class PluginRegistry:
         self._nodes: dict[str, NodeTypeDefinition] = {}
         self._relationships: dict[str, RelationshipDefinition] = {}
         self._capability_handlers: dict[str, CapabilityHandler] = {}
+        self._runtime_provider_factories: dict[str, RuntimeProviderFactory] = {}
 
     def register_node_type(self, definition: NodeTypeDefinition) -> None:
         self._validate_identifier(definition.id, "node type")
@@ -192,6 +197,42 @@ class PluginRegistry:
         if kind in self._capability_handlers:
             raise ValueError(f"capability handler {kind!r} is already registered")
         self._capability_handlers[kind] = handler
+
+    def register_runtime_provider(
+        self, provider_id: str, factory: RuntimeProviderFactory
+    ) -> None:
+        """Register a trusted provider factory under a stable namespaced id."""
+
+        self._validate_identifier(provider_id, "runtime provider")
+        if provider_id in self._runtime_provider_factories:
+            raise ValueError(
+                f"runtime provider {provider_id!r} is already registered"
+            )
+        self._runtime_provider_factories[provider_id] = factory
+
+    def create_runtime_provider(
+        self,
+        provider_id: str,
+        capability_provider: "AgentCapabilityProvider",
+        **options: Any,
+    ) -> "RuntimeProvider":
+        try:
+            factory = self._runtime_provider_factories[provider_id]
+        except KeyError as exc:
+            raise ValueError(
+                f"runtime provider {provider_id!r} is not registered"
+            ) from exc
+        provider = factory(capability_provider, **options)
+        from backend.agents import RuntimeProvider
+
+        if not isinstance(provider, RuntimeProvider):
+            raise TypeError(
+                f"runtime provider factory {provider_id!r} returned an invalid provider"
+            )
+        return provider
+
+    def has_runtime_provider(self, provider_id: str) -> bool:
+        return provider_id in self._runtime_provider_factories
 
     def node_type(self, type_id: str) -> NodeTypeDefinition:
         try:

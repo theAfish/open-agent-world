@@ -264,7 +264,11 @@ async def test_builtin_agent_startup_reconstructs_and_shutdown_stops_runtime(
         seed.close()
 
     runtime = RecordingAgentRuntime()
-    restored = create_services(settings, agent_runtime=runtime)
+    restored = create_services(
+        settings,
+        runtime_providers={"test.runtime": runtime},
+        default_runtime_provider_id="test.runtime",
+    )
     try:
         await restored.startup()
         info = await runtime.get_agent("restored-agent")
@@ -272,7 +276,8 @@ async def test_builtin_agent_startup_reconstructs_and_shutdown_stops_runtime(
         assert restored.get_card("restored-agent").status == "idle"
 
         await restored.shutdown()
-        assert runtime.stopped == ["restored-agent"]
+        assert runtime.stopped == []
+        assert restored._require_run_manager()._runtime_tasks == {}
     finally:
         restored.close()
 
@@ -292,7 +297,8 @@ async def test_builtin_node_lifecycle_behavior_is_registered_and_preserved(
     services = create_services(
         Settings.for_data_root(tmp_path / "managed"),
         plugins=registry,
-        agent_runtime=runtime,
+        runtime_providers={"test.runtime": runtime},
+        default_runtime_provider_id="test.runtime",
         sandbox_backend=sandbox,  # type: ignore[arg-type]
     )
     try:

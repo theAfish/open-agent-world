@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Any, Mapping
 
 
@@ -32,6 +33,17 @@ class AgentConfig:
     name: str
     system_instruction: str = "You are a helpful agent in Open Agent World."
     model: str = "gemini-3.7-flash"
+    runtime_provider_id: str | None = None
+    max_concurrent_runs: int = 1
+    provider_config: Mapping[str, Any] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.provider_config, MappingProxyType):
+            object.__setattr__(
+                self, "provider_config", MappingProxyType(dict(self.provider_config))
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +62,7 @@ class AgentEvent:
     type: AgentEventType
     payload: Mapping[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    run_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

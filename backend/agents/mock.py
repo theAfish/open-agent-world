@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator
 
 from ._state import AgentRecord, validate_agent_config
-from .base import AgentCapabilityProvider, AgentRuntime
+from .base import AgentCapabilityProvider, RuntimeProvider
 from .models import (
     AgentConfig,
     AgentEvent,
@@ -16,9 +16,10 @@ from .models import (
     AgentStateError,
     AgentStatus,
 )
+from backend.runs.models import InvocationContext, RunStatus, RuntimeInput
 
 
-class MockAgentRuntime(AgentRuntime):
+class MockAgentRuntime(RuntimeProvider):
     """Predictable non-model runtime for tests and local UI development.
 
     It never substitutes for a Google ADK initialization or execution failure.
@@ -53,33 +54,25 @@ class MockAgentRuntime(AgentRuntime):
 
     async def delete_agent(self, agent_id: str) -> None:
         record = await self._record(agent_id)
-        await self.stop(agent_id)
         async with self._records_lock:
             if self._records.get(agent_id) is record:
                 del self._records[agent_id]
 
-    async def run(
-        self, agent_id: str, prompt: str, *, context_id: str | None = None
+    async def execute(
+        self,
+        config: AgentConfig,
+        context: InvocationContext,
+        runtime_input: RuntimeInput,
     ) -> AsyncIterator[AgentEvent]:
-        del context_id
+        agent_id = context.agent_id
+        prompt = runtime_input.prompt
         if not isinstance(prompt, str) or not prompt.strip():
             raise AgentStateError("prompt must not be empty")
         record = await self._record(agent_id)
-        task = asyncio.current_task()
-        if task is None:  # pragma: no cover - asyncio always supplies this
-            raise AgentStateError("agent run requires an asyncio task")
         async with record.lock:
-            if record.status == AgentStatus.RUNNING:
-                raise AgentStateError(f"agent is already running: {agent_id}")
-            record.run_counter += 1
-            run_id = f"mock-{agent_id}-{record.run_counter}"
-            record.status = AgentStatus.RUNNING
-            record.active_run_id = run_id
-            record.active_task = task
+            record.config = config
             record.last_error = None
-
-        yield AgentEvent(agent_id, run_id, AgentEventType.STARTED, {"model": record.config.model})
-        yield self._status_event(record, run_id)
+        run_id = context.run_id
         try:
             definitions = tuple(await self._provider.list_tools(agent_id))
             # Stable response makes UI and backend lifecycle tests reproducible.
@@ -94,38 +87,20 @@ class MockAgentRuntime(AgentRuntime):
                     "available_tools": [item.name for item in definitions],
                 },
             )
-            async with record.lock:
-                record.status = AgentStatus.IDLE
-                record.active_run_id = None
-                record.active_task = None
-            yield AgentEvent(agent_id, run_id, AgentEventType.COMPLETED, {"text": text})
-            yield self._status_event(record, run_id)
-        except asyncio.CancelledError:
-            async with record.lock:
-                record.status = AgentStatus.IDLE
-                record.active_run_id = None
-                record.active_task = None
-            yield AgentEvent(agent_id, run_id, AgentEventType.STOPPED, {})
-            yield self._status_event(record, run_id)
-        except Exception as exc:
-            async with record.lock:
-                record.status = AgentStatus.ERROR
-                record.last_error = str(exc)
-                record.active_run_id = None
-                record.active_task = None
             yield AgentEvent(
-                agent_id, run_id, AgentEventType.ERROR, {"error": str(exc)}
+                agent_id,
+                run_id,
+                AgentEventType.COMPLETED,
+                {"text": text},
+                run_status=RunStatus.SUCCEEDED,
             )
-            yield self._status_event(record, run_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
             raise
 
-    async def stop(self, agent_id: str) -> None:
-        record = await self._record(agent_id)
-        async with record.lock:
-            task = record.active_task
-        if task is not None and task is not asyncio.current_task() and not task.done():
-            task.cancel()
-            await asyncio.sleep(0)
+    async def stop(self, run_id: str) -> None:
+        del run_id
 
     async def get_agent(self, agent_id: str) -> AgentInfo:
         return (await self._record(agent_id)).info()
@@ -136,13 +111,4 @@ class MockAgentRuntime(AgentRuntime):
                 return self._records[agent_id]
             except KeyError as exc:
                 raise AgentNotFoundError(f"agent not found: {agent_id}") from exc
-
-    @staticmethod
-    def _status_event(record: AgentRecord, run_id: str) -> AgentEvent:
-        return AgentEvent(
-            record.config.agent_id,
-            run_id,
-            AgentEventType.STATUS_CHANGED,
-            {"status": record.status.value},
-        )
 

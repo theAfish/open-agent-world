@@ -26,6 +26,7 @@ class EventHub:
         resource_id: str | None = None,
         conversation_id: str | None = None,
         session_id: str | None = None,
+        run_id: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> RuntimeEvent:
         event = RuntimeEvent(
@@ -36,6 +37,7 @@ class EventHub:
             resource_id=resource_id,
             conversation_id=conversation_id,
             session_id=session_id,
+            run_id=run_id,
             payload=payload or {},
         )
         async with self._lock:

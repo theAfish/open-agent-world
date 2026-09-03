@@ -65,6 +65,8 @@ class AgentConfig(BaseModel):
     system_instruction: str = "You are a helpful agent in Open Agent World."
     model: str = "gemini-3.7-flash"
     status: AgentStatus = AgentStatus.IDLE
+    runtime_provider_id: str | None = None
+    max_concurrent_runs: Annotated[int, Field(ge=1, le=64)] = 1
 
 
 class TextConfig(BaseModel):

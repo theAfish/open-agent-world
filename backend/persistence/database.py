@@ -81,6 +81,31 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
 CREATE INDEX IF NOT EXISTS conversation_messages_session_idx
     ON conversation_messages (session_id, created_at, id);
 
+CREATE TABLE IF NOT EXISTS runs (
+    run_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    parent_run_id TEXT REFERENCES runs(run_id),
+    root_run_id TEXT NOT NULL REFERENCES runs(run_id),
+    task_id TEXT,
+    caller_kind TEXT NOT NULL,
+    caller_id TEXT,
+    context_id TEXT,
+    runtime_provider_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('created', 'running', 'waiting', 'succeeded', 'failed',
+                   'cancelled', 'interrupted')
+    ),
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT,
+    error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS runs_agent_idx ON runs (agent_id, created_at);
+CREATE INDEX IF NOT EXISTS runs_parent_idx ON runs (parent_run_id, created_at);
+CREATE INDEX IF NOT EXISTS runs_task_idx ON runs (task_id, created_at);
+
 CREATE TABLE IF NOT EXISTS resources (
     card_id TEXT PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
     kind TEXT NOT NULL CHECK (kind IN ('text', 'image')),

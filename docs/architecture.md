@@ -9,11 +9,12 @@ React work surface
   |  REST catalog/snapshots/mutations + typed WebSocket events
   v
 FastAPI application
-  |-- Plugin registry (node, relationship, and capability definitions)
+  |-- Plugin registry (nodes, relationships, capabilities, runtime providers)
   |-- World repository (SQLite is authoritative)
   |-- Capability broker (derives permissions from current edges)
   |-- Managed resources (never arbitrary host paths)
-  |-- AgentRuntime (Google ADK adapter)
+  |-- RunManager + durable RunStore
+  |    `-- RuntimeProvider (Google ADK built-in; plugins may add others)
   `-- SandboxBackend (Windows security boundary)
 ```
 
@@ -43,7 +44,7 @@ An Agent-to-Agent `communicate` edge has a persisted direction. A `forward` edge
 1. The user connects an Agent to a Text card.
 2. The backend validates and persists the semantic edge.
 3. When the Agent runs, the capability broker resolves that Agent's current edges.
-4. `AgentRuntime` receives resource-scoped read/edit tools only for the resolved resources.
+4. `RunManager` creates a durable Run, resolves the Agent's registered `RuntimeProvider`, and supplies resource-scoped read/edit tools only for the resolved resources.
 5. A tool call checks the broker again, modifies the managed resource, records history, and publishes an operational event.
 6. Deleting the edge makes the next check fail without restarting the Agent service.
 
@@ -68,7 +69,7 @@ Only edges whose two endpoints are loaded are returned, so React Flow never rece
 
 ## Events
 
-The WebSocket carries operational facts, never hidden reasoning. Event types cover Agent and Sandbox lifecycle, tool start/completion, stdout/stderr, command completion, resource modification, permission changes, and runtime errors. A reconnect triggers a fresh world snapshot; the event stream is not treated as the persistence source of truth.
+The WebSocket carries operational facts, never hidden reasoning. Event types cover Run, Agent, and Sandbox lifecycle, tool start/completion, stdout/stderr, command completion, resource modification, permission changes, and runtime errors. A reconnect triggers a fresh world snapshot; the event stream is not treated as the persistence source of truth. Run history is independently authoritative in SQLite.
 
 ## Storage
 

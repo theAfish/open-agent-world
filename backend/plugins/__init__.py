@@ -15,6 +15,7 @@ from backend.plugins.registry import (
     PluginCatalog,
     PluginRegistry,
     RelationshipDefinition,
+    RuntimeProviderFactory,
 )
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "PluginCatalog",
     "PluginRegistry",
     "RelationshipDefinition",
+    "RuntimeProviderFactory",
     "SandboxNodeLifecycle",
     "create_builtin_registry",
     "ENTRY_POINT_GROUP",

@@ -22,7 +22,7 @@ $env:GOOGLE_API_KEY = "your-key"
 ```
 
 
-All user-facing Agents run through Google ADK. The Agent card selects a model, never an execution backend: native ADK model names such as `gemini-3.7-flash` use ADK's built-in provider support, while provider-qualified names such as `openai/...` or `anthropic/...` are automatically resolved by ADK's LiteLLM model adapter.
+Google ADK is the built-in default Runtime Provider. Native ADK model names such as `gemini-3.7-flash` use ADK's built-in model support, while provider-qualified names such as `openai/...` or `anthropic/...` are resolved internally by ADK's LiteLLM adapter. The backend Run layer can also resolve a different registered Runtime Provider per Agent; this provider selection does not add a second user-facing model configuration path.
 
 For an OpenAI-compatible endpoint, open the gear button, enter its Base URL (for example `https://llmapi.paratera.com`) and API key, then include the provider-qualified model names in the model list. These credentials stay in the browser session and backend runtime memory, are restored after a backend restart while the browser session remains open, and are never written to world data. The agent lifecycle, session handling, tools, permissions, and events remain ADK in every case.
 
@@ -44,6 +44,7 @@ Application data defaults to `%LOCALAPPDATA%/OpenAgentWorld`. Override it before
 - Backend-authoritative edge validation and capability derivation with immediate permission revocation.
 - Managed UTF-8 text read/replace/patch operations and image import/inspection; resources never retain arbitrary host paths.
 - Scoped Google ADK tools rebuilt for every run, with authorization checked again at tool invocation.
+- Durable, provider-neutral Runs with explicit lifecycle transitions, nested lineage, per-Agent concurrency policy, and cancellation by Run ID. See [Runs and runtime providers](docs/runs.md).
 - Windows AppContainer process identity, NTFS ACL grants, a minimal environment, network-denied capability set, and Job Object containment behind `SandboxBackend`.
 - Typed runtime activity over WebSocket without exposing hidden model reasoning.
 - 2048-unit chunk indexing, viewport prefetch, distant-card unloading, and a developer stress generator.
@@ -88,7 +89,8 @@ backend/
   world/            authoritative cards, edges, and chunk index
   capabilities/     permission derivation and guarded operations
   resources/        managed text/image storage
-  agents/           AgentRuntime and Google ADK adapter; mock is test-only
+  agents/           RuntimeProvider contract and built-in ADK/mock adapters
+  runs/             durable Run records, InvocationContext, and RunManager
   sandbox/          SandboxBackend and Windows native boundary
   events/           typed WebSocket activity
   persistence/      SQLite schema and transaction boundary

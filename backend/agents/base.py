@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Mapping, Sequence
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from .models import AgentConfig, AgentEvent, AgentInfo, ScopedToolDefinition
+
+if TYPE_CHECKING:
+    from backend.runs.models import InvocationContext, RuntimeInput
 
 
 class AgentCapabilityProvider(Protocol):
@@ -27,8 +30,8 @@ class AgentCapabilityProvider(Protocol):
     ) -> Any: ...
 
 
-class AgentRuntime(ABC):
-    """Internal runtime boundary; provider SDK objects never cross it."""
+class RuntimeProvider(ABC):
+    """Provider-neutral runtime boundary; provider SDK objects never cross it."""
 
     @abstractmethod
     async def create_agent(self, config: AgentConfig) -> AgentInfo:
@@ -43,13 +46,16 @@ class AgentRuntime(ABC):
         pass
 
     @abstractmethod
-    def run(
-        self, agent_id: str, prompt: str, *, context_id: str | None = None
+    def execute(
+        self,
+        config: AgentConfig,
+        context: InvocationContext,
+        runtime_input: RuntimeInput,
     ) -> AsyncIterator[AgentEvent]:
         pass
 
     @abstractmethod
-    async def stop(self, agent_id: str) -> None:
+    async def stop(self, run_id: str) -> None:
         pass
 
     @abstractmethod

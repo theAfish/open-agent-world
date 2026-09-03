@@ -31,11 +31,12 @@ class Settings:
     @classmethod
     def from_environment(cls) -> "Settings":
         root = _default_data_root().resolve()
-        runtime = os.environ.get("OPEN_AGENT_WORLD_AGENT_RUNTIME", "google-adk")
-        if runtime not in {"google-adk", "mock"}:
-            raise ValueError(
-                "OPEN_AGENT_WORLD_AGENT_RUNTIME must be 'google-adk' or 'mock' when set"
-            )
+        runtime = os.environ.get("OPEN_AGENT_WORLD_AGENT_RUNTIME", "google.adk")
+        runtime = {"google-adk": "google.adk", "mock": "core.mock"}.get(
+            runtime, runtime
+        )
+        if runtime is not None and not runtime.strip():
+            raise ValueError("OPEN_AGENT_WORLD_AGENT_RUNTIME must not be empty")
         sandbox_runtime = os.environ.get("OPEN_AGENT_WORLD_SANDBOX_RUNTIME")
         if sandbox_runtime is None and os.name == "nt":
             sandbox_runtime = "windows"

@@ -20,6 +20,7 @@ from backend.capabilities.provider import WorldAgentCapabilityProvider
 from backend.config import Settings
 from backend.main import create_app
 from backend.services import create_services
+from backend.runs import InvocationCaller, InvocationContext, RunStatus, RuntimeInput
 
 
 class MutableCapabilityProvider:
@@ -49,19 +50,24 @@ class MutableCapabilityProvider:
 
 def test_google_adk_is_the_default_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPEN_AGENT_WORLD_AGENT_RUNTIME", raising=False)
-    assert Settings.from_environment().agent_runtime == "google-adk"
+    assert Settings.from_environment().agent_runtime == "google.adk"
 
 
-def test_litellm_runtime_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OPEN_AGENT_WORLD_AGENT_RUNTIME", "litellm")
-    with pytest.raises(ValueError, match="google-adk.*mock"):
-        Settings.from_environment()
+def test_runtime_provider_id_is_not_limited_to_builtins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPEN_AGENT_WORLD_AGENT_RUNTIME", "plugin.custom")
+    assert Settings.from_environment().agent_runtime == "plugin.custom"
 
 
 def test_adk_litellm_connection_settings_stay_runtime_only(data_root: Path) -> None:
     settings = Settings.for_data_root(data_root)
     runtime = GoogleAdkAgentRuntime(MutableCapabilityProvider())
-    services = create_services(settings, agent_runtime=runtime)
+    services = create_services(
+        settings,
+        runtime_providers={"google.adk": runtime},
+        default_runtime_provider_id="google.adk",
+    )
     application = create_app(settings, services=services)
     try:
         with TestClient(application) as client:
@@ -111,13 +117,32 @@ async def test_mock_runtime_is_explicit_and_rebuilds_tools_each_run() -> None:
     runtime = MockAgentRuntime(provider)
     await runtime.create_agent(AgentConfig(agent_id="agent-1", name="Atlas"))
 
-    first = [event async for event in runtime.run("agent-1", "inspect notes")]
+    context = InvocationContext(
+        run_id="run-1", agent_id="agent-1", parent_run_id=None,
+        root_run_id="run-1", caller=InvocationCaller("test"), context_id=None,
+        task_id=None, runtime_provider_id="core.mock",
+    )
+    config = AgentConfig(agent_id="agent-1", name="Atlas")
+    first = [
+        event async for event in runtime.execute(
+            config, context, RuntimeInput("inspect notes")
+        )
+    ]
     message = next(event for event in first if event.type is AgentEventType.MESSAGE)
     assert message.payload["available_tools"] == ["replace_notes"]
-    assert first[-1].payload["status"] == "idle"
+    assert first[-1].run_status is RunStatus.SUCCEEDED
 
     provider.allowed = False
-    second = [event async for event in runtime.run("agent-1", "try again")]
+    second_context = InvocationContext(
+        run_id="run-2", agent_id="agent-1", parent_run_id=None,
+        root_run_id="run-2", caller=InvocationCaller("test"), context_id=None,
+        task_id=None, runtime_provider_id="core.mock",
+    )
+    second = [
+        event async for event in runtime.execute(
+            config, second_context, RuntimeInput("try again")
+        )
+    ]
     message = next(event for event in second if event.type is AgentEventType.MESSAGE)
     assert message.payload["available_tools"] == []
 
@@ -149,7 +174,11 @@ def test_agent_api_streams_graph_derived_tools_and_live_revocation(
 ) -> None:
     settings = Settings.for_data_root(data_root)
     services = create_services(settings)
-    services.agent_runtime = MockAgentRuntime(WorldAgentCapabilityProvider(services))
+    services.install_runtime_provider(
+        "core.mock",
+        MockAgentRuntime(WorldAgentCapabilityProvider(services)),
+        default=True,
+    )
     application = create_app(settings, services=services)
     try:
         with TestClient(application) as client, client.websocket_connect(
@@ -187,6 +216,12 @@ def test_agent_api_streams_graph_derived_tools_and_live_revocation(
             run_events = _receive_run_events(websocket, accepted.json()["run_id"])
             message = next(item for item in run_events if item["type"] == "agent_message")
             assert len(message["payload"]["available_tools"]) == 2
+            persisted = client.get(
+                f"/api/runs/{accepted.json()['run_id']}"
+            )
+            assert persisted.status_code == 200
+            assert persisted.json()["status"] == "succeeded"
+            assert persisted.json()["agent_id"] == agent["id"]
 
             assert client.delete(f"/api/edges/{edge['id']}").status_code == 200
             _receive_until(websocket, {"edge_deleted", "permission_changed"})

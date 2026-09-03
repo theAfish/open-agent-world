@@ -1,7 +1,6 @@
-"""Public AgentRuntime surface; provider SDKs remain behind this package."""
+"""Public RuntimeProvider surface; provider SDKs remain behind this package."""
 
-from .base import AgentCapabilityProvider, AgentRuntime
-from .factory import AgentRuntimeKind, create_agent_runtime
+from .base import AgentCapabilityProvider, RuntimeProvider
 from .google_adk import GoogleAdkAgentRuntime
 from .mock import MockAgentRuntime
 from .models import (
@@ -28,14 +27,12 @@ __all__ = [
     "AgentEventType",
     "AgentInfo",
     "AgentNotFoundError",
-    "AgentRuntime",
     "AgentRuntimeError",
-    "AgentRuntimeKind",
     "AgentStateError",
     "AgentStatus",
     "GoogleAdkAgentRuntime",
     "MockAgentRuntime",
+    "RuntimeProvider",
     "ScopedToolDefinition",
     "ToolParameter",
-    "create_agent_runtime",
 ]
