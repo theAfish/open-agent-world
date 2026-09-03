@@ -57,6 +57,29 @@ Execution-turn synchronization is also separate from durable completion:
 - `wait_terminal(run_id)` returns only for `succeeded`, `failed`, `cancelled`,
   or `interrupted`.
 
+## Stall detection
+
+`RunManager` guards every provider event stream with a provider-neutral
+inactivity watchdog. If a stream produces no events for the configured window,
+the Run is transitioned to `failed` with an explicit error instead of stalling
+silently, and `stop(run_id)` is called on the provider. The default window is
+300 seconds; it can be changed globally with
+`OPEN_AGENT_WORLD_RUN_INACTIVITY_TIMEOUT` (non-positive disables it) or
+per Agent with the `run_inactivity_timeout_seconds` card configuration key
+(non-positive disables it for that Agent). Each provider event resets the
+window, so long multi-step runs are unaffected as long as they keep reporting
+activity through the normalized event stream.
+
+## Conversation outcomes
+
+Every Run started from a conversation ends with a durable transcript entry.
+A successful Run with text persists a normal agent message; failures,
+cancellations, interruptions, suspensions, and empty responses persist a
+`system` message describing the outcome. Synchronous delegated turns
+(conversation handoffs and agent-to-agent communication) never block on a
+suspended Run: if the delegated provider turn ends without a terminal status,
+the delegated Run is cancelled and a clear error is returned to the caller.
+
 ## Lineage and cancellation
 
 A root Run points `root_run_id` to itself. A child stores its immediate

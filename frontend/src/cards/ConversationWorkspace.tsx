@@ -1,4 +1,4 @@
-import { Bot, MessageSquare, Plus, Send, Trash2, UserMinus, UserRound, Users, X } from "lucide-react";
+import { AlertTriangle, Bot, Info, MessageSquare, Plus, Send, Trash2, UserMinus, UserRound, Users, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { activeConversationAgentIds, conversationLiveUpdates } from "../state/conversationActivity";
@@ -40,6 +40,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       ),
   )?.id);
   const pushToast = useWorldStore((state) => state.pushToast);
+  const socketLive = useWorldStore((state) => state.socketState === "live");
   const [sessions, setSessions] = useState<ConversationSession[]>([]);
   const [agents, setAgents] = useState<ConversationAgent[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>();
@@ -82,6 +83,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     : mentionCompletion(draft, mentionCaret, participants);
 
   useEffect(() => {
+    if (!socketLive) return;
     let current = true;
     void worldApi.getConversation(card.id).then((summary) => {
       if (!current) return;
@@ -95,13 +97,14 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       setError(undefined);
     }).catch((reason) => current && setError(apiErrorMessage(reason)));
     return () => { current = false; };
-  }, [accessEvent, card.id, refreshEvent]);
+  }, [accessEvent, card.id, refreshEvent, socketLive]);
 
   useEffect(() => {
     if (!activeSessionId) {
       setMessages([]);
       return;
     }
+    if (!socketLive) return;
     let current = true;
     void worldApi.getConversationMessages(card.id, activeSessionId).then((items) => {
       if (current) {
@@ -113,7 +116,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       }
     }).catch((reason) => current && setError(apiErrorMessage(reason)));
     return () => { current = false; };
-  }, [activeSessionId, card.id, refreshEvent]);
+  }, [activeSessionId, card.id, refreshEvent, socketLive]);
 
   useEffect(() => {
     setMessages([]);
@@ -345,7 +348,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
             <div className="workspace-welcome"><span><MessageSquare size={22} /></span><strong>This session is ready</strong><p>Select a participant, type an explicit @name, or keep an unaddressed note.</p></div>
           ) : messages.map((message) => (
             <article className={`workspace-message is-${message.sender_kind}`} key={message.id} data-message-id={message.id}>
-              <span>{message.sender_kind === "agent" ? <Bot size={13} /> : <UserRound size={13} />}</span>
+              <span>{message.sender_kind === "agent" ? <Bot size={13} /> : message.sender_kind === "system" ? <Info size={13} /> : <UserRound size={13} />}</span>
               <div><strong>{message.sender_name}</strong><p>{message.content}</p></div>
             </article>
           ))}
@@ -353,11 +356,13 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
             const agent = agents.find((item) => item.id === update.agentId);
             if (!agent) return null;
             return (
-              <article className="workspace-message is-agent is-live" key={`live-${update.runId}`} data-live-run-id={update.runId}>
-                <span><Bot size={13} /></span>
+              <article className={`workspace-message is-agent is-live${update.notice ? ` is-notice is-${update.tone ?? "info"}` : ""}`} key={`live-${update.runId}`} data-live-run-id={update.runId}>
+                <span>{update.notice ? (update.tone === "error" ? <AlertTriangle size={13} /> : <Info size={13} />) : <Bot size={13} />}</span>
                 <div>
                   <strong>{agent.name}</strong>
-                  {update.text ? <p>{update.text}</p> : <div className="conversation-live-activity">{update.activity}</div>}
+                  {update.notice
+                    ? <div className={`conversation-live-notice${update.tone === "error" ? " is-error" : ""}`}>{update.notice}</div>
+                    : update.text ? <p>{update.text}</p> : <div className="conversation-live-activity">{update.activity}</div>}
                 </div>
               </article>
             );

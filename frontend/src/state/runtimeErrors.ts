@@ -22,7 +22,7 @@ export function describeRuntimeError(error: unknown, model = "configured model")
     };
   }
   return {
-    title: "ADK agent run failed",
+    title: "Agent run failed",
     detail: `${model}: ${detail.slice(0, 500)}`,
   };
 }

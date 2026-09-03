@@ -5,6 +5,8 @@ export interface ConversationLiveUpdate {
   runId: string;
   text?: string;
   activity?: string;
+  notice?: string;
+  tone?: "error" | "info";
 }
 
 function normalizedType(event: RuntimeEvent): string {
@@ -26,7 +28,15 @@ function responderState(event: RuntimeEvent): boolean | undefined {
     if (status === "idle" || status === "error") return false;
     return undefined;
   }
-  if (type === "agent_completed" || type === "agent_stopped" || type === "runtime_error") {
+  if (
+    type === "agent_completed"
+    || type === "agent_stopped"
+    || type === "runtime_error"
+    || type === "run_succeeded"
+    || type === "run_failed"
+    || type === "run_cancelled"
+    || type === "run_interrupted"
+  ) {
     return false;
   }
   if (
@@ -34,6 +44,8 @@ function responderState(event: RuntimeEvent): boolean | undefined {
     || type === "agent_message"
     || type === "tool_started"
     || type === "tool_completed"
+    || type === "run_started"
+    || type === "run_resumed"
   ) {
     return true;
   }
@@ -74,7 +86,26 @@ export function conversationLiveUpdates(
       continue;
     }
     if (stoppedRuns.has(id) || updates.has(id)) continue;
-    if (type === "agent_message" && typeof event.payload.text === "string") {
+    if (type === "run_failed") {
+      const error = typeof event.payload.error === "string" && event.payload.error
+        ? event.payload.error
+        : "The run failed without an error detail.";
+      updates.set(id, { agentId: event.agent_id, runId: id, notice: error, tone: "error" });
+    } else if (type === "run_cancelled") {
+      updates.set(id, {
+        agentId: event.agent_id,
+        runId: id,
+        notice: "The response was stopped before completion.",
+        tone: "info",
+      });
+    } else if (type === "run_interrupted") {
+      updates.set(id, {
+        agentId: event.agent_id,
+        runId: id,
+        notice: "The response was interrupted by a backend restart.",
+        tone: "info",
+      });
+    } else if (type === "agent_message" && typeof event.payload.text === "string") {
       updates.set(id, { agentId: event.agent_id, runId: id, text: event.payload.text });
     } else if (type === "tool_started" || type === "tool_completed") {
       const name = typeof event.payload.name === "string" ? event.payload.name : "tool";

@@ -845,6 +845,15 @@ export const useWorldStore = create<WorldState>((set, get) => ({
       const model = String(get().cards.find((card) => card.id === nodeId)?.config.model ?? "configured model");
       get().pushToast({ tone: "error", ...describeRuntimeError(outputText, model) });
     }
+    if (normalizedType === "run_failed") {
+      // Nested run failures propagate to their root; only the root failure is
+      // surfaced globally so the user sees one clear notification per run tree.
+      const run = event.payload.run as Record<string, unknown> | undefined;
+      if (!run || run.parent_run_id == null) {
+        const model = String(get().cards.find((card) => card.id === nodeId)?.config.model ?? "configured model");
+        get().pushToast({ tone: "error", ...describeRuntimeError(outputText || "The run failed without an error detail.", model) });
+      }
+    }
     set((state) => ({
       events: [event, ...state.events].slice(0, 160),
       cards: nodeId
@@ -864,6 +873,7 @@ export const useWorldStore = create<WorldState>((set, get) => ({
               normalizedType.includes("tool_") ||
               normalizedType.includes("command_") ||
               normalizedType.includes("agent_") ||
+              normalizedType.startsWith("run_") ||
               normalizedType.includes("error");
             const existing = Array.isArray(card.config.output) ? card.config.output : [];
             const output = shouldAppend && outputText
