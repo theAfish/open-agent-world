@@ -1005,6 +1005,8 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .workspace-message.is-user > div { grid-column: 1; grid-row: 1; justify-items: end; }
 .workspace-message.is-user p { border-radius: 12px 4px 12px 12px; background: var(--accent-soft); }
 .workspace-message.is-responding > span { animation: conversationResponderPulse 1.5s ease-in-out infinite; }
+.workspace-message.is-live > span { animation: conversationResponderPulse 1.5s ease-in-out infinite; }
+.conversation-live-activity { width: fit-content; padding: 8px 10px; color: var(--ink-faint); border: 1px dashed var(--line-strong); border-radius: 4px 12px 12px; background: var(--surface-soft); font: 8px/1.4 "Cascadia Code", Consolas, monospace; }
 .conversation-typing-bubble { width: fit-content; min-width: 45px; height: 30px; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 0 11px; border: 1px solid var(--line); border-radius: 4px 12px 12px; background: var(--surface-raised); box-shadow: 0 3px 8px color-mix(in srgb, var(--shadow) 70%, transparent); }
 .conversation-typing-bubble i { width: 5px; height: 5px; border-radius: 50%; background: var(--ink-faint); animation: conversationTypingDot 1.05s ease-in-out infinite; }
 .conversation-typing-bubble i:nth-child(2) { animation-delay: 0.14s; }

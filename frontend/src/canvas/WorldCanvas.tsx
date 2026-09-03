@@ -34,6 +34,18 @@ const nodeTypes = { worldCard: WorldCardNode };
 const edgeTypes = { semantic: SemanticEdge };
 const defaultViewport: Viewport = { x: 0, y: 0, zoom: 0.92 };
 
+function isScrollableArea(target: EventTarget | null, boundary: HTMLElement): boolean {
+  let element = target instanceof HTMLElement ? target : null;
+  while (element && element !== boundary) {
+    const style = window.getComputedStyle(element);
+    const scrollableY = /(auto|scroll)/.test(style.overflowY) && element.scrollHeight > element.clientHeight;
+    const scrollableX = /(auto|scroll)/.test(style.overflowX) && element.scrollWidth > element.clientWidth;
+    if (scrollableY || scrollableX) return true;
+    element = element.parentElement;
+  }
+  return false;
+}
+
 function nodeFromCard(
   card: ReturnType<typeof useWorldStore.getState>["cards"][number],
   surfaceLevel: NodeSurfaceLevel,
@@ -283,6 +295,10 @@ export function WorldCanvas() {
       ref={wrapper}
       className="world-canvas"
       data-testid="world-canvas"
+      onWheelCapture={(event) => {
+        const element = wrapper.current;
+        if (element && isScrollableArea(event.target, element)) event.stopPropagation();
+      }}
       onDrop={onDrop}
       onDragOver={(event) => {
         event.preventDefault();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RuntimeEvent } from "../types/world";
-import { activeConversationAgentIds } from "./conversationActivity";
+import { activeConversationAgentIds, conversationLiveUpdates } from "./conversationActivity";
 
 function runtimeEvent(
   id: string,
@@ -53,5 +53,19 @@ describe("conversation response activity", () => {
     event.payload = { conversation_id: "conversation-a", session_id: "session-a" };
     expect(activeConversationAgentIds([event], "conversation-a", "session-a"))
       .toEqual(["atlas"]);
+  });
+
+  it("exposes the newest provider update for a conversation run", () => {
+    const tool = runtimeEvent("1", "tool_started", "atlas", "session-a", { name: "read_file", run_id: "run-1" });
+    const text = runtimeEvent("2", "agent_message", "atlas", "session-a", { text: "I found the notes.", run_id: "run-1" });
+    expect(conversationLiveUpdates([text, tool], "conversation-a", "session-a")).toEqual([
+      { agentId: "atlas", runId: "run-1", text: "I found the notes." },
+    ]);
+  });
+
+  it("does not retain a live update after a failed or stopped run", () => {
+    const failed = runtimeEvent("2", "runtime_error", "atlas", "session-a", { run_id: "run-1" });
+    const text = runtimeEvent("1", "agent_message", "atlas", "session-a", { text: "partial", run_id: "run-1" });
+    expect(conversationLiveUpdates([failed, text], "conversation-a", "session-a")).toEqual([]);
   });
 });

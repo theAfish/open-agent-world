@@ -568,15 +568,14 @@ class RunManager:
         )
 
     async def _publish_run(self, record: RunRecord, event_type: EventType) -> None:
+        conversation_id, session_id = self._conversation_scope(record)
         await self.events.publish(
             event_type,
             node_id=record.agent_id,
             agent_id=record.agent_id,
             run_id=record.run_id,
-            conversation_id=(
-                record.caller_id if record.caller_kind == "conversation" else None
-            ),
-            session_id=record.context_id,
+            conversation_id=conversation_id,
+            session_id=session_id,
             payload={
                 "run": record.model_dump(mode="json"),
                 "run_id": record.run_id,
@@ -589,15 +588,14 @@ class RunManager:
     ) -> None:
         # AgentEvent.COMPLETED means one provider turn finished. Run success is
         # controlled only by the separate explicit ``run_status`` transition.
+        conversation_id, session_id = self._conversation_scope(record)
         await self.events.publish(
             EventType(event.type.value),
             node_id=record.agent_id,
             agent_id=record.agent_id,
             run_id=record.run_id,
-            conversation_id=(
-                record.caller_id if record.caller_kind == "conversation" else None
-            ),
-            session_id=record.context_id,
+            conversation_id=conversation_id,
+            session_id=session_id,
             payload={**dict(event.payload), "run_id": record.run_id},
         )
 
@@ -612,6 +610,12 @@ class RunManager:
         # This is availability/load only. A normal Run failure never changes an
         # Agent to error; runtime initialization failures are handled separately.
         card = self.world.maybe_get_card(agent_id)
+        # Agent availability is also meaningful to the caller that initiated a
+        # Run.  Preserve that scope so generic consumers (including
+        # Conversation) can react immediately, before a provider emits its
+        # first text or tool event.
+        record = self.get_run(run_id)
+        conversation_id, session_id = self._conversation_scope(record)
         if card is not None and card.status != status:
             self.world.update_card(agent_id, CardPatch(status=status))
         event_type = (
@@ -622,5 +626,18 @@ class RunManager:
             node_id=agent_id,
             agent_id=agent_id,
             run_id=run_id,
+            conversation_id=conversation_id,
+            session_id=session_id,
             payload={"status": status, "run_id": run_id},
         )
+
+    def _conversation_scope(self, record: RunRecord) -> tuple[str | None, str | None]:
+        """Resolve conversation scope through delegated Agent runs as well."""
+
+        current = record
+        while True:
+            if current.caller_kind == "conversation":
+                return current.caller_id, current.context_id
+            if current.parent_run_id is None:
+                return None, None
+            current = self.get_run(current.parent_run_id)

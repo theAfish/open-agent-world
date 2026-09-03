@@ -1,7 +1,7 @@
 import { Bot, MessageSquare, Plus, Send, Trash2, UserMinus, UserRound, Users, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
-import { activeConversationAgentIds } from "../state/conversationActivity";
+import { activeConversationAgentIds, conversationLiveUpdates } from "../state/conversationActivity";
 import {
   appendMention,
   completeMention,
@@ -10,6 +10,17 @@ import {
 } from "../state/conversationMentions";
 import { useWorldStore } from "../state/worldStore";
 import type { ConversationAgent, ConversationMessage, ConversationSession, WorldCard } from "../types/world";
+
+function mergeConversationMessages(
+  current: ConversationMessage[],
+  incoming: ConversationMessage[],
+): ConversationMessage[] {
+  const byId = new Map(current.map((message) => [message.id, message]));
+  for (const message of incoming) byId.set(message.id, message);
+  return [...byId.values()].sort((left, right) => (
+    left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id)
+  ));
+}
 
 export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const runtimeEvents = useWorldStore((state) => state.events);
@@ -44,6 +55,8 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const [mentionIndex, setMentionIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const transcript = useRef<HTMLDivElement>(null);
+  const followTranscript = useRef(true);
   const transcriptEnd = useRef<HTMLDivElement>(null);
   const messageInput = useRef<HTMLTextAreaElement>(null);
 
@@ -56,6 +69,11 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     runtimeEvents, card.id, activeSessionId,
   ), [activeSessionId, card.id, runtimeEvents]);
   const respondingAgents = participants.filter((agent) => respondingAgentIds.includes(agent.id));
+  const liveUpdates = useMemo(() => conversationLiveUpdates(
+    runtimeEvents, card.id, activeSessionId,
+  ).filter((update) => !messages.some((message) => message.run_id === update.runId)), [
+    activeSessionId, card.id, messages, runtimeEvents,
+  ]);
   const availableAgents = connectedAgents.filter((agent) => (
     !activeSession?.participant_ids.includes(agent.id)
   ));
@@ -87,12 +105,19 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     let current = true;
     void worldApi.getConversationMessages(card.id, activeSessionId).then((items) => {
       if (current) {
-        setMessages(items);
+        setMessages((existing) => mergeConversationMessages(
+          existing.filter((message) => message.session_id === activeSessionId),
+          items,
+        ));
         setError(undefined);
       }
     }).catch((reason) => current && setError(apiErrorMessage(reason)));
     return () => { current = false; };
   }, [activeSessionId, card.id, refreshEvent]);
+
+  useEffect(() => {
+    setMessages([]);
+  }, [activeSessionId, card.id]);
 
   useEffect(() => {
     if (!activeSession?.participant_ids.includes(selectedAgentId ?? "")) {
@@ -101,8 +126,8 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   }, [activeSession, selectedAgentId]);
 
   useEffect(() => {
-    transcriptEnd.current?.scrollIntoView({ block: "end" });
-  }, [messages.length, respondingAgentIds.join("|")]);
+    if (followTranscript.current) transcriptEnd.current?.scrollIntoView({ block: "end" });
+  }, [messages.length, respondingAgentIds.join("|"), runtimeEvents]);
 
   useEffect(() => {
     setMentionIndex(0);
@@ -306,9 +331,17 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
             ) : null}
           </div>
         </header>
-        <div className="workspace-transcript" aria-live="polite">
+        <div
+          className="workspace-transcript"
+          aria-live="polite"
+          ref={transcript}
+          onScroll={() => {
+            const element = transcript.current;
+            if (element) followTranscript.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+          }}
+        >
           {error ? <div className="workspace-welcome"><strong>Conversation unavailable</strong><p>{error}</p></div> : null}
-          {!error && messages.length === 0 && respondingAgents.length === 0 ? (
+          {!error && messages.length === 0 && respondingAgents.length === 0 && liveUpdates.length === 0 ? (
             <div className="workspace-welcome"><span><MessageSquare size={22} /></span><strong>This session is ready</strong><p>Select a participant, type an explicit @name, or keep an unaddressed note.</p></div>
           ) : messages.map((message) => (
             <article className={`workspace-message is-${message.sender_kind}`} key={message.id} data-message-id={message.id}>
@@ -316,6 +349,19 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
               <div><strong>{message.sender_name}</strong><p>{message.content}</p></div>
             </article>
           ))}
+          {!error ? liveUpdates.map((update) => {
+            const agent = agents.find((item) => item.id === update.agentId);
+            if (!agent) return null;
+            return (
+              <article className="workspace-message is-agent is-live" key={`live-${update.runId}`} data-live-run-id={update.runId}>
+                <span><Bot size={13} /></span>
+                <div>
+                  <strong>{agent.name}</strong>
+                  {update.text ? <p>{update.text}</p> : <div className="conversation-live-activity">{update.activity}</div>}
+                </div>
+              </article>
+            );
+          }) : null}
           {!error ? respondingAgents.map((agent) => (
             <article className="workspace-message is-agent is-responding" key={`responding-${agent.id}`} data-responding-agent-id={agent.id} aria-label={`${agent.name} is responding`}>
               <span><Bot size={13} /></span>

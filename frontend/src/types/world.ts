@@ -126,6 +126,7 @@ export interface RuntimeEvent {
   agent_id?: string;
   sandbox_id?: string;
   resource_id?: string;
+  run_id?: string;
   conversation_id?: string;
   session_id?: string;
   message?: string;

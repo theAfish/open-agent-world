@@ -1,5 +1,12 @@
 import type { RuntimeEvent } from "../types/world";
 
+export interface ConversationLiveUpdate {
+  agentId: string;
+  runId: string;
+  text?: string;
+  activity?: string;
+}
+
 function normalizedType(event: RuntimeEvent): string {
   return event.type.replace(/[.\s-]/g, "_").toLowerCase();
 }
@@ -31,6 +38,54 @@ function responderState(event: RuntimeEvent): boolean | undefined {
     return true;
   }
   return undefined;
+}
+
+function runId(event: RuntimeEvent): string | undefined {
+  if (typeof event.run_id === "string") return event.run_id;
+  const nested = event.payload.run_id;
+  return typeof nested === "string" ? nested : undefined;
+}
+
+/**
+ * The runtime stream is plugin-neutral: providers may emit text and/or tool
+ * lifecycle events.  Surface the newest useful event per Run while its durable
+ * conversation message is still being saved.
+ */
+export function conversationLiveUpdates(
+  events: RuntimeEvent[],
+  conversationId: string,
+  sessionId?: string,
+): ConversationLiveUpdate[] {
+  if (!sessionId) return [];
+  const updates = new Map<string, ConversationLiveUpdate>();
+  const stoppedRuns = new Set<string>();
+  for (const event of events) {
+    if (
+      scopeValue(event, "conversation_id") !== conversationId
+      || scopeValue(event, "session_id") !== sessionId
+      || !event.agent_id
+    ) continue;
+    const id = runId(event);
+    if (!id) continue;
+    const type = normalizedType(event);
+    if (type === "runtime_error" || type === "agent_stopped") {
+      stoppedRuns.add(id);
+      updates.delete(id);
+      continue;
+    }
+    if (stoppedRuns.has(id) || updates.has(id)) continue;
+    if (type === "agent_message" && typeof event.payload.text === "string") {
+      updates.set(id, { agentId: event.agent_id, runId: id, text: event.payload.text });
+    } else if (type === "tool_started" || type === "tool_completed") {
+      const name = typeof event.payload.name === "string" ? event.payload.name : "tool";
+      updates.set(id, {
+        agentId: event.agent_id,
+        runId: id,
+        activity: type === "tool_started" ? `Using ${name}…` : `Finished ${name}.`,
+      });
+    }
+  }
+  return [...updates.values()];
 }
 
 /** Events are stored newest-first; the first lifecycle state wins per Agent. */

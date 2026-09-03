@@ -222,13 +222,22 @@ def test_addressed_group_message_persists_agent_responses_and_events(data_root: 
             assert set(posted.json()["accepted_agent_ids"]) == {atlas["id"], river["id"]}
 
             agent_message_ids: set[str] = set()
+            started_agent_ids: set[str] = set()
             for _ in range(40):
                 event = websocket.receive_json()
+                if event["type"] == "agent_started":
+                    assert event["conversation_id"] == conversation["id"]
+                    assert event["session_id"] == session["id"]
+                    started_agent_ids.add(event["agent_id"])
                 if event["type"] == "conversation_message" and event.get("agent_id"):
                     agent_message_ids.add(event["agent_id"])
-                if agent_message_ids == {atlas["id"], river["id"]}:
+                if (
+                    agent_message_ids == {atlas["id"], river["id"]}
+                    and started_agent_ids == {atlas["id"], river["id"]}
+                ):
                     break
             assert agent_message_ids == {atlas["id"], river["id"]}
+            assert started_agent_ids == {atlas["id"], river["id"]}
 
             messages = client.get(
                 f"/api/conversations/{conversation['id']}/sessions/{session['id']}/messages"
