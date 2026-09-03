@@ -1,11 +1,12 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Bot, ExternalLink, FileText, Image as ImageIcon, Puzzle, Trash2, Workflow, X, type LucideIcon } from "lucide-react";
+import { Bot, ExternalLink, FileText, Image as ImageIcon, MessagesSquare, Puzzle, Trash2, Workflow, X, type LucideIcon } from "lucide-react";
 import { memo, type ComponentType, type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef } from "react";
 import { roundedRectAnchor } from "../edges/geometry";
 import { nodeSurfaceSupport, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
 import { type CardType, type WorldCard } from "../types/world";
 import { AgentCardBody } from "./AgentCard";
+import { ConversationCardBody } from "./ConversationCard";
 import { ImageCardBody } from "./ImageCard";
 import { NodePreview } from "./NodePreview";
 import { SandboxCardBody } from "./SandboxCard";
@@ -18,6 +19,7 @@ const HOVER_LEAVE_GRACE_MS = 260;
 
 const ICONS: Partial<Record<CardType, LucideIcon>> = {
   agent: Bot,
+  conversation: MessagesSquare,
   text: FileText,
   image: ImageIcon,
   sandbox: Workflow,
@@ -27,6 +29,7 @@ interface BodyProps { card: WorldCard; level: NodeSurfaceLevel }
 
 const BODIES: Partial<Record<CardType, ComponentType<BodyProps>>> = {
   agent: AgentCardBody,
+  conversation: ConversationCardBody,
   text: TextCardBody,
   image: ImageCardBody,
   sandbox: SandboxCardBody,

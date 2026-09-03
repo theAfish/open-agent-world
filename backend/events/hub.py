@@ -24,6 +24,8 @@ class EventHub:
         agent_id: str | None = None,
         sandbox_id: str | None = None,
         resource_id: str | None = None,
+        conversation_id: str | None = None,
+        session_id: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> RuntimeEvent:
         event = RuntimeEvent(
@@ -32,6 +34,8 @@ class EventHub:
             agent_id=agent_id,
             sandbox_id=sandbox_id,
             resource_id=resource_id,
+            conversation_id=conversation_id,
+            session_id=session_id,
             payload=payload or {},
         )
         async with self._lock:

@@ -39,5 +39,9 @@ class ResourceValidationError(DomainError):
     code = "invalid_resource"
 
 
+class ConversationValidationError(DomainError):
+    code = "invalid_conversation"
+
+
 class RuntimeUnavailableError(DomainError):
     code = "runtime_unavailable"

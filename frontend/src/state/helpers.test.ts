@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { buildCardDraft, makeStressCards } from "./helpers";
 
 describe("card state helpers", () => {
-  it("creates all four concrete card drafts", () => {
-    for (const type of ["agent", "text", "image", "sandbox"] as const) {
+  it("creates every built-in card draft", () => {
+    for (const type of ["agent", "conversation", "text", "image", "sandbox"] as const) {
       const card = buildCardDraft(type, { x: 12, y: -8 });
       expect(card.type).toBe(type);
       expect(card.position).toEqual({ x: 12, y: -8 });

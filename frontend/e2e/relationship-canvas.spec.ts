@@ -7,7 +7,7 @@ interface CreatedCard {
 async function createCard(
   request: APIRequestContext,
   id: string,
-  type: "agent" | "text",
+  type: "agent" | "text" | "conversation",
   name: string,
   position: { x: number; y: number },
 ): Promise<CreatedCard> {
@@ -24,18 +24,37 @@ async function handleCenter(card: Locator, side: "left" | "right") {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
+async function dragConnection(source: Locator, target: Locator) {
+  const page = source.page();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const start = await handleCenter(source, "right");
+    const end = await handleCenter(target, "left");
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 10 });
+    await page.mouse.up();
+    const dialog = page.getByRole("dialog", { name: "Choose a capability" });
+    if (await dialog.isVisible()) return;
+    await page.waitForTimeout(150);
+  }
+}
+
 async function expectEndpointOnBoundary(endpoint: Locator, card: Locator) {
-  const [point, rect] = await Promise.all([endpoint.boundingBox(), card.boundingBox()]);
-  if (!point || !rect) throw new Error("Endpoint or card geometry is unavailable");
-  const centerX = point.x + point.width / 2;
-  const centerY = point.y + point.height / 2;
-  const distanceToOutline = Math.min(
-    Math.abs(centerX - rect.x),
-    Math.abs(centerX - (rect.x + rect.width)),
-    Math.abs(centerY - rect.y),
-    Math.abs(centerY - (rect.y + rect.height)),
-  );
-  expect(distanceToOutline).toBeLessThan(9);
+  await expect(async () => {
+    const [point, rect] = await Promise.all([endpoint.boundingBox(), card.boundingBox()]);
+    expect(point).not.toBeNull();
+    expect(rect).not.toBeNull();
+    if (!point || !rect) return;
+    const centerX = point.x + point.width / 2;
+    const centerY = point.y + point.height / 2;
+    const distanceToOutline = Math.min(
+      Math.abs(centerX - rect.x),
+      Math.abs(centerX - (rect.x + rect.width)),
+      Math.abs(centerY - rect.y),
+      Math.abs(centerY - (rect.y + rect.height)),
+    );
+    expect(distanceToOutline).toBeLessThan(9);
+  }).toPass();
 }
 
 test("an Agent relationship can be dragged between boundaries and exposes real endpoints", async ({
@@ -66,12 +85,7 @@ test("an Agent relationship can be dragged between boundaries and exposes real e
     await expect(targetCard).toBeVisible();
     await expect(sourceCard).toHaveAttribute("data-card-type", "agent");
 
-    const start = await handleCenter(sourceCard, "right");
-    const end = await handleCenter(targetCard, "left");
-    await page.mouse.move(start.x, start.y);
-    await page.mouse.down();
-    await page.mouse.move(end.x, end.y, { steps: 14 });
-    await page.mouse.up();
+    await dragConnection(sourceCard, targetCard);
 
     const dialog = page.getByRole("dialog", { name: "Choose a capability" });
     await expect(dialog).toBeVisible();
@@ -119,12 +133,7 @@ test("a reverse Text-to-Agent drag uses the allowed Agent-to-Text direction", as
     await expect(textCard).toBeVisible();
     await expect(agentCard).toBeVisible();
 
-    const start = await handleCenter(textCard, "right");
-    const end = await handleCenter(agentCard, "left");
-    await page.mouse.move(start.x, start.y);
-    await page.mouse.down();
-    await page.mouse.move(end.x, end.y, { steps: 14 });
-    await page.mouse.up();
+    await dragConnection(textCard, agentCard);
 
     const dialog = page.getByRole("dialog", { name: "Choose a capability" });
     await expect(dialog).toBeVisible();
@@ -210,5 +219,58 @@ test("a detail card uses the same boundary-following connection hint", async ({ 
     expect(Math.abs(hintBox.x + hintBox.width / 2 - (inspectorBox.x + inspectorBox.width))).toBeLessThan(2);
   } finally {
     await request.delete(`/api/nodes/${card.id}`);
+  }
+});
+
+test("a Conversation workspace creates a group and routes explicit mentions", async ({ page, request }) => {
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const atlas = await createCard(request, `e2e-atlas-${suffix}`, "agent", "E2E Atlas", { x: 260, y: 180 });
+  const river = await createCard(request, `e2e-river-${suffix}`, "agent", "E2E River", { x: 820, y: 180 });
+  const conversation = await createCard(request, `e2e-conversation-${suffix}`, "conversation", "E2E Conversation", { x: 540, y: 390 });
+  await request.post("/api/edges", { data: { source: atlas.id, target: conversation.id, relationship: "participate" } });
+  await request.post("/api/edges", { data: { source: river.id, target: conversation.id, relationship: "participate" } });
+
+  try {
+    await page.goto("/");
+    const conversationCard = page.locator(`[data-card-id="${conversation.id}"]`);
+    await expect(conversationCard).toHaveAttribute("data-card-type", "conversation");
+    await conversationCard.click();
+    await expect(conversationCard).toHaveAttribute("data-surface-level", "inspector");
+    await conversationCard.getByRole("button", { name: "Open workspace" }).click();
+
+    const workspace = page.locator(`[data-workspace-node-id="${conversation.id}"]`);
+    await expect(workspace).toBeVisible();
+    await workspace.getByRole("button", { name: "New group" }).click();
+    await workspace.getByLabel("Session name").fill("E2E Review Group");
+    await workspace.getByLabel("E2E Atlas").check();
+    await workspace.getByLabel("E2E River").check();
+    await workspace.getByRole("button", { name: "Create group" }).click();
+
+    await expect(workspace.getByText("E2E Review Group", { exact: true }).last()).toBeVisible();
+    const composer = workspace.getByLabel("Conversation message");
+    await composer.fill("@E2E Atlas and @E2E River compare this result");
+    await composer.press("Shift+Enter");
+    await composer.type("Include the second line");
+    await expect(composer).toHaveValue("@E2E Atlas and @E2E River compare this result\nInclude the second line");
+    await composer.press("Enter");
+    await expect(composer).toHaveValue("");
+
+    await expect(workspace.getByText("Mock response:", { exact: false })).toHaveCount(2, { timeout: 10000 });
+    await expect(workspace.getByText("E2E Atlas", { exact: true }).last()).toBeVisible();
+    await expect(workspace.getByText("E2E River", { exact: true }).last()).toBeVisible();
+
+    await workspace.getByRole("button", { name: "Close workspace" }).click();
+    await conversationCard.getByRole("button", { name: "Close E2E Conversation inspector" }).click();
+    const atlasCard = page.locator(`[data-card-id="${atlas.id}"]`);
+    await atlasCard.click();
+    await atlasCard.getByRole("button", { name: "Open workspace" }).click();
+    const agentWorkspace = page.locator(`[data-workspace-node-id="${atlas.id}"]`);
+    await expect(agentWorkspace.getByText("Runtime history", { exact: true })).toBeVisible();
+    await expect(agentWorkspace.getByText("E2E Review Group", { exact: true })).toBeVisible();
+    await expect(agentWorkspace.getByLabel("Conversation message")).toHaveCount(0);
+  } finally {
+    await request.delete(`/api/nodes/${conversation.id}`);
+    await request.delete(`/api/nodes/${atlas.id}`);
+    await request.delete(`/api/nodes/${river.id}`);
   }
 });

@@ -12,7 +12,13 @@ from backend.plugins.registry import (
     RelationshipDefinition,
 )
 from backend.resources.models import TextReplace
-from backend.world.models import AgentConfig, ImageConfig, SandboxConfig, TextConfig
+from backend.world.models import (
+    AgentConfig,
+    ConversationConfig,
+    ImageConfig,
+    SandboxConfig,
+    TextConfig,
+)
 
 
 async def _communicate(services: Any, capability: Any, values: dict[str, Any]) -> Any:
@@ -23,6 +29,24 @@ async def _communicate(services: Any, capability: Any, values: dict[str, Any]) -
         )
     return await services.communicate_with_agent(
         capability.agent_id, capability.target_id, message
+    )
+
+
+async def _request_conversation_turn(
+    services: Any, capability: Any, values: dict[str, Any]
+) -> Any:
+    if set(values) != {"session_id", "agent_id", "message"}:
+        raise ResourceValidationError(
+            "conversation turn capability requires session_id, agent_id, and message"
+        )
+    if not all(isinstance(values[key], str) and values[key].strip() for key in values):
+        raise ResourceValidationError("conversation turn arguments must be non-empty strings")
+    return await services.request_conversation_turn(
+        capability.agent_id,
+        capability.target_id,
+        values["session_id"],
+        values["agent_id"],
+        values["message"],
     )
 
 
@@ -91,6 +115,9 @@ async def _execute_sandbox(
 def create_builtin_registry() -> PluginRegistry:
     registry = PluginRegistry()
     registry.register_capability_handler("agent.communicate", _communicate)
+    registry.register_capability_handler(
+        "conversation.request_turn", _request_conversation_turn
+    )
     registry.register_capability_handler("text.read", _read_text)
     registry.register_capability_handler("text.edit", _edit_text)
     registry.register_capability_handler("image.view", _view_image)
@@ -101,6 +128,15 @@ def create_builtin_registry() -> PluginRegistry:
         default_name="New Agent", default_size=(300, 190), default_status="idle",
         statuses=frozenset({"idle", "running", "waiting", "error"}),
         config_model=AgentConfig, traits=frozenset({"core.agent"}),
+        surfaces={"preview": True, "inspector": True, "workspace": True},
+    ))
+    registry.register_node_type(NodeTypeDefinition(
+        id="conversation", label="Conversation", description="Shared communication field",
+        icon="messages-square", color="#9a6954", deck_id="fields",
+        deck_label="Fields", deck_icon="workflow", default_name="New Conversation",
+        default_size=(320, 210), default_status="available",
+        statuses=frozenset({"available"}), config_model=ConversationConfig,
+        traits=frozenset({"core.field", "core.conversation"}),
         surfaces={"preview": True, "inspector": True, "workspace": True},
     ))
     registry.register_node_type(NodeTypeDefinition(
@@ -136,6 +172,37 @@ def create_builtin_registry() -> PluginRegistry:
             kind="agent.communicate", tool_prefix="message_agent",
             description="Send a message to agent {target_name!r} and receive its response.",
             input_schema={"type": "object", "properties": {"message": {"type": "string", "description": "Message or question for the connected agent."}}, "required": ["message"], "additionalProperties": False},
+        ),),
+    ))
+    registry.register_relationship(RelationshipDefinition(
+        id="participate", label="Participate", short_label="join",
+        description="The agent can join sessions and speak inside this Conversation field.",
+        source_traits=frozenset({"core.agent"}),
+        target_traits=frozenset({"core.conversation"}),
+        capabilities=(CapabilityGrantDefinition(
+            kind="conversation.request_turn", tool_prefix="request_turn_in",
+            description=(
+                "Ask a different participant to speak in Conversation {target_name!r}. "
+                "Use the current session id and another participant's agent id. "
+                "Never use your own agent id; if no other participant is available, "
+                "answer directly without this tool."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Current conversation session id."},
+                    "agent_id": {
+                        "type": "string",
+                        "description": (
+                            "Agent id of a different participant to address. "
+                            "This must never be your own agent id."
+                        ),
+                    },
+                    "message": {"type": "string", "description": "Message or question for that participant."},
+                },
+                "required": ["session_id", "agent_id", "message"],
+                "additionalProperties": False,
+            },
         ),),
     ))
     registry.register_relationship(RelationshipDefinition(

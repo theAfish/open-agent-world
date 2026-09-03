@@ -11,6 +11,7 @@ export interface NodeSurfaceSupport {
 
 export const NODE_SURFACE_SUPPORT: Record<CardType, NodeSurfaceSupport> = {
   agent: { preview: true, inspector: true, workspace: true },
+  conversation: { preview: true, inspector: true, workspace: true },
   text: { preview: true, inspector: true, workspace: false },
   image: { preview: true, inspector: true, workspace: false },
   sandbox: { preview: true, inspector: true, workspace: false },

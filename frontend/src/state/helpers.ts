@@ -14,6 +14,9 @@ const DEFAULT_CONFIG: Record<CardType, CardConfig> = {
     prompt: "",
     output: [],
   },
+  conversation: {
+    description: "A shared field for durable human and agent conversations.",
+  },
   text: {
     filename: "field-notes.txt",
     content: "",
@@ -34,6 +37,7 @@ const DEFAULT_CONFIG: Record<CardType, CardConfig> = {
 
 const DEFAULT_NAME: Record<CardType, string> = {
   agent: "Atlas",
+  conversation: "Conversation",
   text: "Field notes",
   image: "Reference image",
   sandbox: "North lab",
@@ -41,6 +45,7 @@ const DEFAULT_NAME: Record<CardType, string> = {
 
 const DEFAULT_STATUS: Record<CardType, CardStatus> = {
   agent: "idle",
+  conversation: "available",
   text: "available",
   image: "available",
   sandbox: "stopped",

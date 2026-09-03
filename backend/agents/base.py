@@ -43,7 +43,9 @@ class AgentRuntime(ABC):
         pass
 
     @abstractmethod
-    def run(self, agent_id: str, prompt: str) -> AsyncIterator[AgentEvent]:
+    def run(
+        self, agent_id: str, prompt: str, *, context_id: str | None = None
+    ) -> AsyncIterator[AgentEvent]:
         pass
 
     @abstractmethod

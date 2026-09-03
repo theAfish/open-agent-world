@@ -6,6 +6,7 @@ import {
   Folder,
   Image as ImageIcon,
   Layers3,
+  MessagesSquare,
   Plus,
   Puzzle,
   Sparkles,
@@ -61,6 +62,7 @@ const NODE_ICONS: Record<string, LucideIcon> = {
   "file-text": FileText,
   image: ImageIcon,
   workflow: Workflow,
+  "messages-square": MessagesSquare,
 };
 
 const isCardType = (value: unknown): value is CardType => (

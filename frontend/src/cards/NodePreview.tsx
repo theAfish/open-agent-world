@@ -1,4 +1,4 @@
-import { Bot, FileText, Image as ImageIcon, ShieldCheck, Workflow } from "lucide-react";
+import { Bot, FileText, Image as ImageIcon, MessagesSquare, ShieldCheck, Workflow } from "lucide-react";
 import { useMemo } from "react";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
@@ -23,6 +23,18 @@ export function NodePreview({ card }: { card: WorldCard }) {
         <div className="node-preview-metadata">
           <span><Bot size={12} /> {String(card.config.model ?? "Default model")}</span>
           <span>{connectionCount} capabilities</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (card.type === "conversation") {
+    return (
+      <div className="node-preview-summary">
+        <p>{compactText(card.config.description, "A shared field for durable conversations.")}</p>
+        <div className="node-preview-metadata">
+          <span><MessagesSquare size={12} /> Conversation field</span>
+          <span>{connectionCount} agents</span>
         </div>
       </div>
     );

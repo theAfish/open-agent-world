@@ -58,7 +58,10 @@ class MockAgentRuntime(AgentRuntime):
             if self._records.get(agent_id) is record:
                 del self._records[agent_id]
 
-    async def run(self, agent_id: str, prompt: str) -> AsyncIterator[AgentEvent]:
+    async def run(
+        self, agent_id: str, prompt: str, *, context_id: str | None = None
+    ) -> AsyncIterator[AgentEvent]:
+        del context_id
         if not isinstance(prompt, str) or not prompt.strip():
             raise AgentStateError("prompt must not be empty")
         record = await self._record(agent_id)

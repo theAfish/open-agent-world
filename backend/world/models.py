@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class CardType(StrEnum):
     AGENT = "agent"
+    CONVERSATION = "conversation"
     TEXT = "text"
     IMAGE = "image"
     SANDBOX = "sandbox"
@@ -16,6 +17,7 @@ class CardType(StrEnum):
 
 class Relationship(StrEnum):
     COMMUNICATE = "communicate"
+    PARTICIPATE = "participate"
     READ = "read"
     READ_EDIT = "read_edit"
     VIEW = "view"
@@ -83,7 +85,13 @@ class SandboxConfig(BaseModel):
     status: SandboxStatus = SandboxStatus.STOPPED
 
 
-ConfigValue = AgentConfig | TextConfig | ImageConfig | SandboxConfig
+class ConversationConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    description: str = "A shared field for durable human and agent conversations."
+
+
+ConfigValue = AgentConfig | ConversationConfig | TextConfig | ImageConfig | SandboxConfig
 
 
 class ResourceSummary(BaseModel):

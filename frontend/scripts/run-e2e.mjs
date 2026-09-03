@@ -7,8 +7,17 @@ const frontendRoot = fileURLToPath(new URL("../", import.meta.url));
 const projectRoot = path.resolve(frontendRoot, "..");
 const backendUrl = "http://127.0.0.1:8017/api/world";
 const frontendUrl = "http://127.0.0.1:5177";
-const resultFile = path.join(projectRoot, ".open-agent-world", "playwright", "result.json");
+const dataRoot = path.resolve(projectRoot, ".open-agent-world", "playwright");
+const resultFile = path.join(dataRoot, "result.json");
 const children = [];
+
+async function resetDataRoot() {
+  const relative = path.relative(projectRoot, dataRoot);
+  if (relative !== path.join(".open-agent-world", "playwright")) {
+    throw new Error(`Refusing to clear unexpected E2E data root: ${dataRoot}`);
+  }
+  await rm(dataRoot, { recursive: true, force: true });
+}
 
 function start(command, args, options) {
   const child = spawn(command, args, {
@@ -63,6 +72,7 @@ async function waitForResult(runner) {
 
 let exitCode = 1;
 try {
+  await resetDataRoot();
   start(
     path.join(projectRoot, "backend", ".venv", "Scripts", "python.exe"),
     ["-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8017"],
@@ -71,7 +81,7 @@ try {
       env: {
         ...process.env,
         OPEN_AGENT_WORLD_AGENT_RUNTIME: "mock",
-        OPEN_AGENT_WORLD_DATA_ROOT: path.join(projectRoot, ".open-agent-world", "playwright"),
+        OPEN_AGENT_WORLD_DATA_ROOT: dataRoot,
       },
     },
   );

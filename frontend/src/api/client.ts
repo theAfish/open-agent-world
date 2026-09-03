@@ -2,6 +2,9 @@ import type {
   CardConfig,
   CardStatus,
   CardType,
+  ConversationMessage,
+  ConversationSession,
+  ConversationSummary,
   EdgeDirection,
   PluginCatalog,
   Relationship,
@@ -348,6 +351,44 @@ export const worldApi = {
     });
   },
 
+  getConversation(conversationId: string): Promise<ConversationSummary> {
+    return request<ConversationSummary>(`/conversations/${encodeURIComponent(conversationId)}`);
+  },
+
+  createConversationSession(
+    conversationId: string,
+    input: { title: string; participant_ids: string[] },
+  ): Promise<ConversationSession> {
+    return request<ConversationSession>(`/conversations/${encodeURIComponent(conversationId)}/sessions`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  getConversationMessages(
+    conversationId: string,
+    sessionId: string,
+  ): Promise<ConversationMessage[]> {
+    return request<ConversationMessage[]>(
+      `/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
+    );
+  },
+
+  postConversationMessage(
+    conversationId: string,
+    sessionId: string,
+    input: { content: string; mention_agent_ids: string[] },
+  ): Promise<{ message: ConversationMessage; accepted_agent_ids: string[] }> {
+    return request(`/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/messages`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  getAgentConversationSessions(agentId: string): Promise<ConversationSession[]> {
+    return request<ConversationSession[]>(`/agents/${encodeURIComponent(agentId)}/conversation-sessions`);
+  },
+
   configureLlm(settings: { base_url: string; api_key: string }): Promise<Record<string, unknown>> {
     return request<Record<string, unknown>>("/settings/llm", {
       method: "PUT",
@@ -397,6 +438,8 @@ export function normalizeRuntimeEvent(input: unknown): RuntimeEvent {
     agent_id: typeof source.agent_id === "string" ? source.agent_id : undefined,
     sandbox_id: typeof source.sandbox_id === "string" ? source.sandbox_id : undefined,
     resource_id: typeof source.resource_id === "string" ? source.resource_id : undefined,
+    conversation_id: typeof source.conversation_id === "string" ? source.conversation_id : undefined,
+    session_id: typeof source.session_id === "string" ? source.session_id : undefined,
     message: typeof source.message === "string"
       ? source.message
       : typeof payload.message === "string"

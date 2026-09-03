@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class CapabilityKind(StrEnum):
     AGENT_COMMUNICATE = "agent.communicate"
+    CONVERSATION_REQUEST_TURN = "conversation.request_turn"
     TEXT_READ = "text.read"
     TEXT_EDIT = "text.edit"
     IMAGE_VIEW = "image.view"

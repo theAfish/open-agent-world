@@ -18,6 +18,8 @@ class EventType(StrEnum):
     EDGE_DELETED = "edge_deleted"
     PERMISSION_CHANGED = "permission_changed"
     RESOURCE_MODIFIED = "resource_modified"
+    CONVERSATION_SESSION_CREATED = "conversation_session_created"
+    CONVERSATION_MESSAGE = "conversation_message"
     AGENT_STARTED = "agent_started"
     AGENT_STATUS_CHANGED = "agent_status_changed"
     AGENT_MESSAGE = "agent_message"
@@ -45,4 +47,6 @@ class RuntimeEvent(BaseModel):
     agent_id: str | None = None
     sandbox_id: str | None = None
     resource_id: str | None = None
+    conversation_id: str | None = None
+    session_id: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)

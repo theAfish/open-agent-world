@@ -47,6 +47,10 @@ function relationship(
 export const TEST_CATALOG: PluginCatalog = {
   node_types: [
     node("agent", ["core.agent"], { default_status: "idle" }),
+    node("conversation", ["core.field", "core.conversation"], {
+      default_status: "available",
+      surfaces: { preview: true, inspector: true, workspace: true },
+    }),
     node("text", ["core.resource", "core.text"]),
     node("image", ["core.resource", "core.image"]),
     node("sandbox", ["core.sandbox"], { default_status: "stopped" }),
@@ -55,6 +59,7 @@ export const TEST_CATALOG: PluginCatalog = {
     relationship("communicate", ["core.agent"], ["core.agent"], {
       directions: ["forward", "bidirectional"],
     }),
+    relationship("participate", ["core.agent"], ["core.conversation"]),
     relationship("read", ["core.agent"], ["core.text"]),
     relationship("read_edit", ["core.agent"], ["core.text"]),
     relationship("view", ["core.agent"], ["core.image"]),

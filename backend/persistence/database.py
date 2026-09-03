@@ -43,6 +43,44 @@ CREATE TABLE IF NOT EXISTS edges (
 CREATE INDEX IF NOT EXISTS edges_source_idx ON edges (source_id);
 CREATE INDEX IF NOT EXISTS edges_target_idx ON edges (target_id);
 
+CREATE TABLE IF NOT EXISTS conversation_sessions (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS conversation_sessions_card_idx
+    ON conversation_sessions (conversation_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS conversation_participants (
+    session_id TEXT NOT NULL REFERENCES conversation_sessions(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    joined_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, agent_id)
+);
+
+CREATE INDEX IF NOT EXISTS conversation_participants_agent_idx
+    ON conversation_participants (agent_id, joined_at DESC);
+
+CREATE TABLE IF NOT EXISTS conversation_messages (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES conversation_sessions(id) ON DELETE CASCADE,
+    sender_kind TEXT NOT NULL CHECK (sender_kind IN ('user', 'agent', 'system')),
+    sender_id TEXT,
+    sender_name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    mention_ids_json TEXT NOT NULL DEFAULT '[]',
+    run_id TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS conversation_messages_session_idx
+    ON conversation_messages (session_id, created_at, id);
+
 CREATE TABLE IF NOT EXISTS resources (
     card_id TEXT PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
     kind TEXT NOT NULL CHECK (kind IN ('text', 'image')),

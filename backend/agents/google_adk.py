@@ -54,7 +54,7 @@ def _load_adk_bindings() -> _AdkBindings:
 
 
 class GoogleAdkAgentRuntime(AgentRuntime):
-    """One independent ADK session per Agent Card.
+    """Independent ADK state per Agent and optional conversation context.
 
     Tools are reconstructed from the graph at the beginning of every run.  Each
     generated callable also delegates back to the capability provider at call
@@ -73,6 +73,7 @@ class GoogleAdkAgentRuntime(AgentRuntime):
         self._adk = adk_bindings or _load_adk_bindings()
         self._sessions = self._adk.InMemorySessionService()
         self._records: dict[str, AgentRecord] = {}
+        self._context_sessions: dict[tuple[str, str], str] = {}
         self._records_lock = asyncio.Lock()
         self._litellm_connection: dict[str, str] = {}
 
@@ -117,19 +118,34 @@ class GoogleAdkAgentRuntime(AgentRuntime):
     async def delete_agent(self, agent_id: str) -> None:
         record = await self._record(agent_id)
         await self.stop(agent_id)
-        await self._sessions.delete_session(
-            app_name=self._app_name,
-            user_id=self._user_id(agent_id),
-            session_id=record.session_id,
+        session_ids = [record.session_id]
+        session_ids.extend(
+            value
+            for (candidate_id, _), value in self._context_sessions.items()
+            if candidate_id == agent_id
         )
+        for session_id in session_ids:
+            await self._sessions.delete_session(
+                app_name=self._app_name,
+                user_id=self._user_id(agent_id),
+                session_id=session_id,
+            )
         async with self._records_lock:
             if self._records.get(agent_id) is record:
                 del self._records[agent_id]
+            self._context_sessions = {
+                key: value
+                for key, value in self._context_sessions.items()
+                if key[0] != agent_id
+            }
 
-    async def run(self, agent_id: str, prompt: str) -> AsyncIterator[AgentEvent]:
+    async def run(
+        self, agent_id: str, prompt: str, *, context_id: str | None = None
+    ) -> AsyncIterator[AgentEvent]:
         if not isinstance(prompt, str) or not prompt.strip():
             raise AgentStateError("prompt must not be empty")
         record = await self._record(agent_id)
+        session_id = await self._context_session(record, context_id)
         task = asyncio.current_task()
         if task is None:  # pragma: no cover
             raise AgentStateError("agent run requires an asyncio task")
@@ -167,7 +183,7 @@ class GoogleAdkAgentRuntime(AgentRuntime):
             ) as runner:
                 async for event in runner.run_async(
                     user_id=self._user_id(agent_id),
-                    session_id=record.session_id,
+                    session_id=session_id,
                     new_message=message,
                 ):
                     async for translated in self._translate_event(
@@ -274,6 +290,24 @@ class GoogleAdkAgentRuntime(AgentRuntime):
             except KeyError as exc:
                 raise AgentNotFoundError(f"agent not found: {agent_id}") from exc
 
+    async def _context_session(
+        self, record: AgentRecord, context_id: str | None
+    ) -> str:
+        if not context_id:
+            return record.session_id
+        key = (record.config.agent_id, context_id)
+        async with self._records_lock:
+            existing = self._context_sessions.get(key)
+            if existing is not None:
+                return existing
+            session = await self._sessions.create_session(
+                app_name=self._app_name,
+                user_id=self._user_id(record.config.agent_id),
+                session_id=self._session_id(record.config.agent_id, context_id),
+            )
+            self._context_sessions[key] = session.id
+            return session.id
+
     def _adk_model(self, configured_model: str) -> Any:
         """Return a configured LiteLlm object only when ADK selects that adapter."""
 
@@ -309,8 +343,9 @@ class GoogleAdkAgentRuntime(AgentRuntime):
         return f"agent-user-{cls._digest(agent_id)}"
 
     @classmethod
-    def _session_id(cls, agent_id: str) -> str:
-        return f"agent-session-{cls._digest(agent_id)}"
+    def _session_id(cls, agent_id: str, context_id: str | None = None) -> str:
+        scope = agent_id if context_id is None else f"{agent_id}:{context_id}"
+        return f"agent-session-{cls._digest(scope)}"
 
 
 def _json_safe(value: Any, *, max_length: int = 8192) -> Any:

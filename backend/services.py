@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import PureWindowsPath
 from typing import Any
@@ -10,7 +11,22 @@ from backend.agents import AgentConfig as RuntimeAgentConfig
 from backend.agents import AgentEvent, AgentRuntime, GoogleAdkAgentRuntime, create_agent_runtime
 from backend.capabilities.broker import CapabilityBroker
 from backend.config import Settings
-from backend.errors import NotFoundError, RuntimeUnavailableError
+from backend.conversations import (
+    ConversationAgent,
+    ConversationMessage,
+    ConversationPost,
+    ConversationPostResult,
+    ConversationSession,
+    ConversationSessionCreate,
+    ConversationStore,
+    ConversationSummary,
+)
+from backend.errors import (
+    ConversationValidationError,
+    NotFoundError,
+    PermissionDeniedError,
+    RuntimeUnavailableError,
+)
 from backend.events.hub import EventHub
 from backend.events.models import EventType
 from backend.persistence.database import Database
@@ -58,6 +74,11 @@ _SANDBOX_EVENT_TYPES = {
     SandboxEventType.RUNTIME_ERROR: EventType.RUNTIME_ERROR,
 }
 
+_conversation_turn_depth: ContextVar[int] = ContextVar(
+    "conversation_turn_depth", default=0
+)
+_MAX_CONVERSATION_TURN_DEPTH = 4
+
 
 @dataclass(slots=True)
 class ApplicationServices:
@@ -68,6 +89,7 @@ class ApplicationServices:
     capabilities: CapabilityBroker
     events: EventHub
     plugins: PluginRegistry
+    conversations: ConversationStore
     agent_runtime: AgentRuntime | None = None
     sandbox_backend: SandboxBackend | None = None
     _agent_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
@@ -145,6 +167,10 @@ class ApplicationServices:
             elif card.type == CardType.AGENT and self.agent_runtime is not None:
                 await self.agent_runtime.create_agent(self._runtime_agent_config(card))
                 runtime_created = True
+            elif card.type == CardType.CONVERSATION:
+                self.conversations.create_session(
+                    card.id, ConversationSessionCreate(title="General")
+                )
             elif card.type == CardType.SANDBOX and self.sandbox_backend is not None:
                 await self.sandbox_backend.create(card.id)
                 sandbox_created = True
@@ -399,6 +425,210 @@ class ApplicationServices:
         self._agent_tasks[agent_id] = task
         return {"accepted": True, "agent_id": agent_id, "run_id": first.run_id}
 
+    def conversation_summary(self, conversation_id: str) -> ConversationSummary:
+        self._require_card_type(conversation_id, CardType.CONVERSATION)
+        sessions = self.conversations.list_sessions(conversation_id)
+        connected_ids = {
+            edge.source
+            for edge in self.world.list_edges_to(conversation_id)
+            if edge.relationship == Relationship.PARTICIPATE
+        }
+        agent_ids = connected_ids | {
+            agent_id for session in sessions for agent_id in session.participant_ids
+        }
+        agents: list[ConversationAgent] = []
+        for agent_id in sorted(agent_ids):
+            card = self.world.maybe_get_card(agent_id)
+            if card is None or card.type != CardType.AGENT:
+                continue
+            agents.append(ConversationAgent(
+                id=card.id,
+                name=card.name,
+                status=card.status,
+                model=str(card.config.get("model", "Default model")),
+                connected=card.id in connected_ids,
+            ))
+        return ConversationSummary(
+            conversation_id=conversation_id,
+            sessions=sessions,
+            agents=agents,
+        )
+
+    def list_agent_conversation_sessions(
+        self, agent_id: str
+    ) -> list[ConversationSession]:
+        self._require_card_type(agent_id, CardType.AGENT)
+        return self.conversations.list_agent_sessions(agent_id)
+
+    async def create_conversation_session(
+        self, conversation_id: str, request: ConversationSessionCreate
+    ) -> ConversationSession:
+        self._require_card_type(conversation_id, CardType.CONVERSATION)
+        participants = list(dict.fromkeys(request.participant_ids))
+        for agent_id in participants:
+            self._require_conversation_connection(agent_id, conversation_id)
+        session = self.conversations.create_session(
+            conversation_id,
+            request.model_copy(update={"participant_ids": participants}),
+        )
+        await self.events.publish(
+            EventType.CONVERSATION_SESSION_CREATED,
+            node_id=conversation_id,
+            conversation_id=conversation_id,
+            session_id=session.id,
+            payload={"session": session.model_dump(mode="json")},
+        )
+        return session
+
+    def list_conversation_messages(
+        self, conversation_id: str, session_id: str, *, limit: int = 200
+    ) -> list[ConversationMessage]:
+        self._require_card_type(conversation_id, CardType.CONVERSATION)
+        return self.conversations.list_messages(
+            conversation_id, session_id, limit=limit
+        )
+
+    async def post_conversation_message(
+        self, conversation_id: str, session_id: str, request: ConversationPost
+    ) -> ConversationPostResult:
+        self._require_card_type(conversation_id, CardType.CONVERSATION)
+        session = self.conversations.get_session(conversation_id, session_id)
+        mentions = list(dict.fromkeys(request.mention_agent_ids))
+        for agent_id in mentions:
+            self._require_session_participant(session, agent_id)
+            self._require_conversation_connection(agent_id, conversation_id)
+            active = self._agent_tasks.get(agent_id)
+            if active is not None and not active.done():
+                raise RuntimeUnavailableError(
+                    f"agent {agent_id!r} already has an active run"
+                )
+        if mentions and self.agent_runtime is None:
+            raise RuntimeUnavailableError("agent runtime is not configured")
+        message = self.conversations.add_message(
+            conversation_id,
+            session_id,
+            sender_kind="user",
+            sender_id=None,
+            sender_name="You",
+            content=request.content,
+            mention_agent_ids=mentions,
+        )
+        await self._publish_conversation_message(message)
+        accepted: list[str] = []
+        for agent_id in mentions:
+            prompt = self._conversation_prompt(
+                conversation_id, session, agent_id, request.content
+            )
+            assert self.agent_runtime is not None
+            stream = self.agent_runtime.run(
+                agent_id, prompt, context_id=session_id
+            )
+            first = await anext(stream)
+            await self._publish_agent_event(
+                first,
+                conversation_id=conversation_id,
+                session_id=session_id,
+            )
+            task = asyncio.create_task(
+                self._consume_conversation_events(
+                    agent_id, stream, conversation_id, session_id
+                )
+            )
+            self._agent_tasks[agent_id] = task
+            accepted.append(agent_id)
+        return ConversationPostResult(
+            message=message, accepted_agent_ids=accepted
+        )
+
+    async def request_conversation_turn(
+        self,
+        source_agent_id: str,
+        conversation_id: str,
+        session_id: str,
+        target_agent_id: str,
+        message: str,
+    ) -> dict[str, str]:
+        depth = _conversation_turn_depth.get()
+        if depth >= _MAX_CONVERSATION_TURN_DEPTH:
+            raise ConversationValidationError(
+                "conversation agent handoff limit reached"
+            )
+        session = self.conversations.get_session(conversation_id, session_id)
+        self._require_session_participant(session, source_agent_id)
+        self._require_session_participant(session, target_agent_id)
+        self._require_conversation_connection(source_agent_id, conversation_id)
+        self._require_conversation_connection(target_agent_id, conversation_id)
+        if source_agent_id == target_agent_id:
+            source = self._require_card_type(source_agent_id, CardType.AGENT)
+            return {
+                "agent_id": source.id,
+                "agent_name": source.name,
+                "response": (
+                    "You already have the current turn. Reply directly instead of "
+                    "requesting another turn from yourself."
+                ),
+            }
+        active = self._agent_tasks.get(target_agent_id)
+        if active is not None and not active.done():
+            raise RuntimeUnavailableError(
+                f"agent {target_agent_id!r} already has an active run"
+            )
+        if self.agent_runtime is None:
+            raise RuntimeUnavailableError("agent runtime is not configured")
+
+        source = self._require_card_type(source_agent_id, CardType.AGENT)
+        request_message = self.conversations.add_message(
+            conversation_id,
+            session_id,
+            sender_kind="agent",
+            sender_id=source.id,
+            sender_name=source.name,
+            content=f"Requested @{self.world.get_card(target_agent_id).name}: {message.strip()}",
+            mention_agent_ids=[target_agent_id],
+        )
+        await self._publish_conversation_message(request_message)
+        prompt = self._conversation_prompt(
+            conversation_id, session, target_agent_id, message
+        )
+        token = _conversation_turn_depth.set(depth + 1)
+        current = asyncio.current_task()
+        if current is not None:
+            self._agent_tasks[target_agent_id] = current
+        final_text = ""
+        run_id: str | None = None
+        try:
+            async for event in self.agent_runtime.run(
+                target_agent_id, prompt, context_id=session_id
+            ):
+                run_id = event.run_id
+                await self._publish_agent_event(
+                    event,
+                    conversation_id=conversation_id,
+                    session_id=session_id,
+                )
+                if event.type.value == "agent_completed":
+                    final_text = str(event.payload.get("text", ""))
+        finally:
+            _conversation_turn_depth.reset(token)
+            if self._agent_tasks.get(target_agent_id) is current:
+                self._agent_tasks.pop(target_agent_id, None)
+        target = self.world.get_card(target_agent_id)
+        response = self.conversations.add_message(
+            conversation_id,
+            session_id,
+            sender_kind="agent",
+            sender_id=target.id,
+            sender_name=target.name,
+            content=final_text or "No response was produced.",
+            run_id=run_id,
+        )
+        await self._publish_conversation_message(response)
+        return {
+            "agent_id": target.id,
+            "agent_name": target.name,
+            "response": final_text,
+        }
+
     async def stop_agent(self, agent_id: str) -> dict[str, Any]:
         self._require_card_type(agent_id, CardType.AGENT)
         if self.agent_runtime is None:
@@ -534,7 +764,58 @@ class ApplicationServices:
         finally:
             self._agent_tasks.pop(agent_id, None)
 
-    async def _publish_agent_event(self, event: AgentEvent) -> None:
+    async def _consume_conversation_events(
+        self,
+        agent_id: str,
+        stream: Any,
+        conversation_id: str,
+        session_id: str,
+    ) -> None:
+        final_text = ""
+        run_id: str | None = None
+        try:
+            async for event in stream:
+                run_id = event.run_id
+                await self._publish_agent_event(
+                    event,
+                    conversation_id=conversation_id,
+                    session_id=session_id,
+                )
+                if event.type.value == "agent_completed":
+                    final_text = str(event.payload.get("text", ""))
+            if final_text:
+                agent = self.world.get_card(agent_id)
+                message = self.conversations.add_message(
+                    conversation_id,
+                    session_id,
+                    sender_kind="agent",
+                    sender_id=agent.id,
+                    sender_name=agent.name,
+                    content=final_text,
+                    run_id=run_id,
+                )
+                await self._publish_conversation_message(message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self.events.publish(
+                EventType.RUNTIME_ERROR,
+                node_id=conversation_id,
+                agent_id=agent_id,
+                conversation_id=conversation_id,
+                session_id=session_id,
+                payload={"error": str(exc)},
+            )
+        finally:
+            self._agent_tasks.pop(agent_id, None)
+
+    async def _publish_agent_event(
+        self,
+        event: AgentEvent,
+        *,
+        conversation_id: str | None = None,
+        session_id: str | None = None,
+    ) -> None:
         event_type = EventType(event.type.value)
         status = event.payload.get("status")
         if event_type is EventType.AGENT_STATUS_CHANGED and isinstance(status, str):
@@ -543,7 +824,86 @@ class ApplicationServices:
             event_type,
             node_id=event.agent_id,
             agent_id=event.agent_id,
-            payload={"run_id": event.run_id, **dict(event.payload)},
+            conversation_id=conversation_id,
+            session_id=session_id,
+            payload={
+                "run_id": event.run_id,
+                **({"conversation_id": conversation_id} if conversation_id else {}),
+                **({"session_id": session_id} if session_id else {}),
+                **dict(event.payload),
+            },
+        )
+
+    async def _publish_conversation_message(
+        self, message: ConversationMessage
+    ) -> None:
+        await self.events.publish(
+            EventType.CONVERSATION_MESSAGE,
+            node_id=message.conversation_id,
+            agent_id=(message.sender_id if message.sender_kind == "agent" else None),
+            conversation_id=message.conversation_id,
+            session_id=message.session_id,
+            payload={"message": message.model_dump(mode="json")},
+        )
+
+    def _require_conversation_connection(
+        self, agent_id: str, conversation_id: str
+    ) -> None:
+        self._require_card_type(agent_id, CardType.AGENT)
+        self._require_card_type(conversation_id, CardType.CONVERSATION)
+        edge = self.world.find_edge(agent_id, conversation_id)
+        if edge is None or edge.relationship != Relationship.PARTICIPATE:
+            raise PermissionDeniedError(
+                f"agent {agent_id!r} is not connected to conversation {conversation_id!r}"
+            )
+
+    @staticmethod
+    def _require_session_participant(
+        session: ConversationSession, agent_id: str
+    ) -> None:
+        if agent_id not in session.participant_ids:
+            raise PermissionDeniedError(
+                f"agent {agent_id!r} is not a participant in session {session.id!r}"
+            )
+
+    def _conversation_prompt(
+        self,
+        conversation_id: str,
+        session: ConversationSession,
+        target_agent_id: str,
+        latest_message: str,
+    ) -> str:
+        participants = [
+            self.world.get_card(agent_id)
+            for agent_id in session.participant_ids
+            if self.world.maybe_get_card(agent_id) is not None
+        ]
+        transcript = self.conversations.list_messages(
+            conversation_id, session.id, limit=40
+        )
+        lines = "\n".join(
+            f"{item.sender_name}: {item.content}" for item in transcript
+        )
+        roster = ", ".join(f"{item.name} ({item.id})" for item in participants)
+        current = self.world.get_card(target_agent_id)
+        eligible_targets = ", ".join(
+            f"{item.name} ({item.id})"
+            for item in participants
+            if item.id != target_agent_id
+        )
+        return (
+            "You are speaking inside a shared Open Agent World conversation.\n"
+            f"Conversation id: {conversation_id}\n"
+            f"Session id: {session.id}\n"
+            f"Participants: {roster or 'none'}\n"
+            f"Current speaker: {current.name} ({current.id})\n"
+            "Eligible request_turn targets (never use the current speaker id): "
+            f"{eligible_targets or 'none; do not call request_turn'}\n"
+            "Use request_turn only when an eligible participant must respond; otherwise "
+            "answer directly. Do not simulate another participant's answer.\n\n"
+            f"Recent transcript:\n{lines}\n\n"
+            f"Respond as {current.name} to the latest message: "
+            f"{latest_message.strip()}"
         )
 
     async def _publish_resource_modified(
@@ -693,6 +1053,7 @@ def create_services(
     plugin_registry = plugins or load_plugin_registry()
     world = WorldStore(database, plugin_registry, chunk_size=settings.chunk_size)
     resources = ManagedResourceStore(database, settings.data_root)
+    conversations = ConversationStore(database)
     capabilities = CapabilityBroker(world, resources, plugin_registry)
     events = EventHub(queue_size=settings.event_queue_size)
     services = ApplicationServices(
@@ -703,6 +1064,7 @@ def create_services(
         capabilities=capabilities,
         events=events,
         plugins=plugin_registry,
+        conversations=conversations,
         agent_runtime=agent_runtime,
         sandbox_backend=sandbox_backend,
     )

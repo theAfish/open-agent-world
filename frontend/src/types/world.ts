@@ -39,6 +39,7 @@ export interface CardConfig extends Record<string, unknown> {
   history?: ModificationRecord[];
   output?: string[];
   active_command?: string;
+  description?: string;
   security?: string;
   revision?: number;
 }
@@ -125,6 +126,8 @@ export interface RuntimeEvent {
   agent_id?: string;
   sandbox_id?: string;
   resource_id?: string;
+  conversation_id?: string;
+  session_id?: string;
   message?: string;
   timestamp: string;
   payload: Record<string, unknown>;
@@ -143,4 +146,42 @@ export interface ToastMessage {
   tone: "neutral" | "success" | "error";
   title: string;
   detail?: string;
+}
+
+export interface ConversationSession {
+  id: string;
+  conversation_id: string;
+  conversation_name?: string;
+  title: string;
+  participant_ids: string[];
+  created_at: string;
+  updated_at: string;
+  revision: number;
+}
+
+export interface ConversationAgent {
+  id: string;
+  name: string;
+  status: string;
+  model: string;
+  connected: boolean;
+}
+
+export interface ConversationMessage {
+  id: string;
+  conversation_id: string;
+  session_id: string;
+  sender_kind: "user" | "agent" | "system";
+  sender_id?: string;
+  sender_name: string;
+  content: string;
+  mention_agent_ids: string[];
+  run_id?: string;
+  created_at: string;
+}
+
+export interface ConversationSummary {
+  conversation_id: string;
+  sessions: ConversationSession[];
+  agents: ConversationAgent[];
 }

@@ -16,6 +16,7 @@ from backend.errors import (
     DomainError,
     NotFoundError,
     PermissionDeniedError,
+    RuntimeUnavailableError,
 )
 from backend.agents import (
     AgentConfigurationError,
@@ -82,6 +83,8 @@ def create_app(
             status_code = 403
         elif isinstance(exc, ConflictError):
             status_code = 409
+        elif isinstance(exc, RuntimeUnavailableError):
+            status_code = 503
         return JSONResponse(
             status_code=status_code,
             content={"error": {"code": exc.code, "message": exc.message}},
