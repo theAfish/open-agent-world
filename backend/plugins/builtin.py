@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import suppress
 from dataclasses import asdict
 from typing import Any
 
@@ -11,14 +12,158 @@ from backend.plugins.registry import (
     PluginRegistry,
     RelationshipDefinition,
 )
+from backend.plugins.lifecycle import NodeLifecycleContext, NodeLifecycleHandler
 from backend.resources.models import TextReplace
 from backend.world.models import (
     AgentConfig,
+    Card,
+    CardCreate,
+    CardPatch,
     ConversationConfig,
     ImageConfig,
     SandboxConfig,
     TextConfig,
 )
+
+
+class AgentNodeBehavior(NodeLifecycleHandler):
+    async def on_startup(self, context: NodeLifecycleContext, node: Card) -> None:
+        if context.agents is not None:
+            await context.agents.create(node)
+        if node.status != "idle":
+            context.nodes.update_status(node.id, "idle")
+
+    async def on_shutdown(self, context: NodeLifecycleContext, node: Card) -> None:
+        if context.agents is not None:
+            with suppress(Exception):
+                await context.agents.stop(node.id)
+
+    async def on_create(
+        self, context: NodeLifecycleContext, node: Card, request: CardCreate
+    ) -> None:
+        del request
+        if context.agents is not None:
+            await context.agents.create(node)
+
+    async def on_create_rollback(
+        self,
+        context: NodeLifecycleContext,
+        node: Card,
+        request: CardCreate,
+        error: BaseException,
+    ) -> None:
+        del request, error
+        if context.agents is not None:
+            await context.agents.delete(node.id, missing_ok=True)
+
+    async def on_update(
+        self, context: NodeLifecycleContext, node: Card, request: CardPatch
+    ) -> None:
+        if context.agents is None or (
+            request.name is None and request.config is None
+        ):
+            return
+        merged = node.model_copy(
+            update={
+                "name": request.name or node.name,
+                "config": {**node.config, **(request.config or {})},
+            }
+        )
+        await context.agents.update(merged)
+
+    async def on_delete(self, context: NodeLifecycleContext, node: Card) -> None:
+        if context.agents is not None:
+            await context.agents.delete(node.id)
+
+
+class SandboxNodeBehavior(NodeLifecycleHandler):
+    async def on_startup(self, context: NodeLifecycleContext, node: Card) -> None:
+        if context.sandboxes is None:
+            return
+        status = await context.sandboxes.ensure(node.id)
+        if node.status != status:
+            context.nodes.update_status(node.id, status)
+
+    async def on_shutdown(self, context: NodeLifecycleContext, node: Card) -> None:
+        if context.sandboxes is not None:
+            await context.sandboxes.terminate(node.id, missing_ok=True)
+
+    async def on_create(
+        self, context: NodeLifecycleContext, node: Card, request: CardCreate
+    ) -> None:
+        del request
+        if context.sandboxes is not None:
+            await context.sandboxes.create(node.id)
+
+    async def on_create_rollback(
+        self,
+        context: NodeLifecycleContext,
+        node: Card,
+        request: CardCreate,
+        error: BaseException,
+    ) -> None:
+        del request, error
+        if context.sandboxes is not None:
+            await context.sandboxes.destroy(node.id, missing_ok=True)
+
+    async def on_delete(self, context: NodeLifecycleContext, node: Card) -> None:
+        if context.sandboxes is not None:
+            await context.sandboxes.destroy(node.id, missing_ok=True)
+
+
+class ConversationNodeBehavior(NodeLifecycleHandler):
+    async def on_create(
+        self, context: NodeLifecycleContext, node: Card, request: CardCreate
+    ) -> None:
+        del request
+        context.conversations.create_initial_session(node.id, "General")
+
+
+class ManagedResourceNodeBehavior(NodeLifecycleHandler):
+    _mount_relationships = frozenset({"mount_read_only", "mount_read_write"})
+
+    async def on_create_rollback(
+        self,
+        context: NodeLifecycleContext,
+        node: Card,
+        request: CardCreate,
+        error: BaseException,
+    ) -> None:
+        del request, error
+        context.resources.remove_file(node.id)
+
+    async def on_delete(self, context: NodeLifecycleContext, node: Card) -> None:
+        if context.sandboxes is not None:
+            for edge in context.nodes.list_edges_from(node.id):
+                if edge.relationship in self._mount_relationships:
+                    await context.sandboxes.detach_resource(
+                        edge.target, node.id, missing_ok=True
+                    )
+        context.resources.remove_file(node.id)
+
+
+class TextNodeBehavior(ManagedResourceNodeBehavior):
+    async def on_create(
+        self, context: NodeLifecycleContext, node: Card, request: CardCreate
+    ) -> None:
+        filename = str(node.config.get("filename", "untitled.txt"))
+        initial_content = request.content
+        if initial_content is None:
+            configured_content = request.config.get("content", "")
+            initial_content = configured_content if isinstance(configured_content, str) else ""
+        context.resources.create_text(node.id, filename, initial_content)
+
+
+class ImageNodeBehavior(ManagedResourceNodeBehavior):
+    async def on_create(
+        self, context: NodeLifecycleContext, node: Card, request: CardCreate
+    ) -> None:
+        if request.data_base64 is None:
+            return
+        filename = str(node.config.get("filename", "image.png"))
+        context.resources.create_image(
+            node.id, filename, request.media_type or "", request.data_base64
+        )
 
 
 async def _communicate(services: Any, capability: Any, values: dict[str, Any]) -> Any:
@@ -129,6 +274,7 @@ def create_builtin_registry() -> PluginRegistry:
         statuses=frozenset({"idle", "running", "waiting", "error"}),
         config_model=AgentConfig, traits=frozenset({"core.agent"}),
         surfaces={"preview": True, "inspector": True, "workspace": True},
+        lifecycle=AgentNodeBehavior(),
     ))
     registry.register_node_type(NodeTypeDefinition(
         id="conversation", label="Conversation", description="Shared communication field",
@@ -138,6 +284,7 @@ def create_builtin_registry() -> PluginRegistry:
         statuses=frozenset({"available"}), config_model=ConversationConfig,
         traits=frozenset({"core.field", "core.conversation"}),
         surfaces={"preview": True, "inspector": True, "workspace": True},
+        lifecycle=ConversationNodeBehavior(),
     ))
     registry.register_node_type(NodeTypeDefinition(
         id="text", label="Text file", description="Managed knowledge", icon="file-text",
@@ -146,6 +293,7 @@ def create_builtin_registry() -> PluginRegistry:
         statuses=frozenset({"available", "modified"}), config_model=TextConfig,
         traits=frozenset({"core.resource", "core.text"}),
         creation_fields=frozenset({"content"}),
+        lifecycle=TextNodeBehavior(),
     ))
     registry.register_node_type(NodeTypeDefinition(
         id="image", label="Image file", description="Visual resource", icon="image",
@@ -154,6 +302,7 @@ def create_builtin_registry() -> PluginRegistry:
         statuses=frozenset({"available", "modified"}), config_model=ImageConfig,
         traits=frozenset({"core.resource", "core.image"}),
         creation_fields=frozenset({"data_base64"}),
+        lifecycle=ImageNodeBehavior(),
     ))
     registry.register_node_type(NodeTypeDefinition(
         id="sandbox", label="Sandbox", description="Secure work field", icon="workflow",
@@ -161,6 +310,7 @@ def create_builtin_registry() -> PluginRegistry:
         default_name="New Sandbox", default_size=(340, 220), default_status="stopped",
         statuses=frozenset({"stopped", "ready", "running", "error"}),
         config_model=SandboxConfig, traits=frozenset({"core.sandbox"}),
+        lifecycle=SandboxNodeBehavior(),
     ))
 
     registry.register_relationship(RelationshipDefinition(

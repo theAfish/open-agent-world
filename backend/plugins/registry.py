@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from backend.errors import GraphValidationError
+from backend.plugins.lifecycle import NodeLifecycleHandler
 
 
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
@@ -85,6 +86,7 @@ class NodeTypeDefinition:
         }
     )
     creation_fields: frozenset[str] = frozenset()
+    lifecycle: NodeLifecycleHandler | None = None
 
     def catalog_item(self) -> NodeTypeCatalogItem:
         default_config = self.config_model().model_dump(mode="json")

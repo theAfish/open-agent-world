@@ -23,15 +23,56 @@ from pydantic import BaseModel, ConfigDict
 
 from backend.plugins import (
     CapabilityGrantDefinition,
+    NodeLifecycleContext,
+    NodeLifecycleHandler,
     NodeTypeDefinition,
     PluginRegistry,
     RelationshipDefinition,
 )
+from backend.world.models import Card, CardCreate, CardPatch
 
 
 class DatasetConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
     query_language: str = "sql"
+
+
+class DatasetBehavior(NodeLifecycleHandler):
+    """Adapter around a provider-neutral runtime owned by this plugin."""
+
+    def __init__(self, runtime: Any) -> None:
+        self.runtime = runtime
+
+    async def on_startup(self, context: NodeLifecycleContext, node: Card) -> None:
+        await self.runtime.open(node.id, node.config)
+
+    async def on_shutdown(self, context: NodeLifecycleContext, node: Card) -> None:
+        await self.runtime.close(node.id)
+
+    async def on_create(
+        self, context: NodeLifecycleContext, node: Card, request: CardCreate
+    ) -> None:
+        await self.runtime.create(node.id, node.config)
+
+    async def on_create_rollback(
+        self,
+        context: NodeLifecycleContext,
+        node: Card,
+        request: CardCreate,
+        error: BaseException,
+    ) -> None:
+        await self.runtime.delete(node.id, missing_ok=True)
+
+    async def on_update(
+        self, context: NodeLifecycleContext, node: Card, request: CardPatch
+    ) -> None:
+        await self.runtime.update(node.id, request.model_dump(exclude_unset=True))
+
+    async def on_delete(self, context: NodeLifecycleContext, node: Card) -> None:
+        await self.runtime.delete(node.id)
+
+
+dataset_runtime = DatasetRuntime()  # Plugin-owned implementation.
 
 
 async def query_dataset(
@@ -58,6 +99,7 @@ def register(registry: PluginRegistry) -> None:
         statuses=frozenset({"available", "indexing", "error"}),
         config_model=DatasetConfig,
         traits=frozenset({"acme.queryable"}),
+        lifecycle=DatasetBehavior(dataset_runtime),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="acme.query",
@@ -81,6 +123,15 @@ def register(registry: PluginRegistry) -> None:
         ),),
     ))
 ```
+
+Lifecycle handlers receive only the node/request models and a narrow,
+provider-neutral `NodeLifecycleContext`; they do not receive
+`ApplicationServices`, HTTP requests, provider SDK objects, or database
+connections. Nodes without `lifecycle` remain ordinary persisted world
+objects. Creation is ordered as persist node, run `on_create`, publish the
+generic event. If `on_create` fails, the backend calls `on_create_rollback`,
+deletes the persisted node, and re-raises the original error. A handler must
+therefore clean up any partial external side effects in `on_create_rollback`.
 
 Relationship endpoint constraints can use exact `source_types`/`target_types`,
 required traits, or both. Connection gestures are unordered: if only the

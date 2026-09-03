@@ -7,8 +7,14 @@ from dataclasses import dataclass, field
 from pathlib import PureWindowsPath
 from typing import Any
 
-from backend.agents import AgentConfig as RuntimeAgentConfig
-from backend.agents import AgentEvent, AgentRuntime, GoogleAdkAgentRuntime, create_agent_runtime
+from backend.agents import (
+    AgentConfig as RuntimeAgentConfig,
+    AgentEvent,
+    AgentNotFoundError,
+    AgentRuntime,
+    GoogleAdkAgentRuntime,
+    create_agent_runtime,
+)
 from backend.capabilities.broker import CapabilityBroker
 from backend.config import Settings
 from backend.conversations import (
@@ -31,7 +37,7 @@ from backend.errors import (
 from backend.events.hub import EventHub
 from backend.events.models import EventType
 from backend.persistence.database import Database
-from backend.plugins import PluginRegistry, load_plugin_registry
+from backend.plugins import NodeLifecycleContext, PluginRegistry, load_plugin_registry
 from backend.resources.manager import ManagedResourceStore
 from backend.resources.models import (
     ImageImport,
@@ -81,6 +87,111 @@ _conversation_turn_depth: ContextVar[int] = ContextVar(
 _MAX_CONVERSATION_TURN_DEPTH = 4
 
 
+@dataclass(frozen=True, slots=True)
+class _LifecycleNodes:
+    world: WorldStore
+
+    def update_status(self, node_id: str, status: str) -> Card:
+        return self.world.update_card(node_id, CardPatch(status=status))
+
+    def list_edges_from(self, node_id: str) -> list[Edge]:
+        return self.world.list_edges_from(node_id)
+
+
+@dataclass(frozen=True, slots=True)
+class _LifecycleAgents:
+    runtime: AgentRuntime
+
+    async def create(self, node: Card) -> None:
+        await self.runtime.create_agent(self._config(node))
+
+    async def update(self, node: Card) -> None:
+        await self.runtime.update_agent(self._config(node))
+
+    async def delete(self, node_id: str, *, missing_ok: bool = False) -> None:
+        try:
+            await self.runtime.delete_agent(node_id)
+        except AgentNotFoundError:
+            if not missing_ok:
+                raise
+
+    async def stop(self, node_id: str) -> None:
+        await self.runtime.stop(node_id)
+
+    @staticmethod
+    def _config(node: Card) -> RuntimeAgentConfig:
+        return RuntimeAgentConfig(
+            agent_id=node.id,
+            name=node.name,
+            system_instruction=str(node.config.get("system_instruction", "")),
+            model=str(node.config.get("model", "gemini-3.7-flash")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _LifecycleSandboxes:
+    backend: SandboxBackend
+
+    async def ensure(self, node_id: str) -> str:
+        try:
+            await self.backend.get(node_id)
+        except SandboxNotFoundError:
+            await self.backend.create(node_id)
+        return (await self.backend.get(node_id)).state.value
+
+    async def create(self, node_id: str) -> None:
+        await self.backend.create(node_id)
+
+    async def destroy(self, node_id: str, *, missing_ok: bool = False) -> None:
+        try:
+            await self.backend.destroy(node_id)
+        except SandboxNotFoundError:
+            if not missing_ok:
+                raise
+
+    async def terminate(self, node_id: str, *, missing_ok: bool = False) -> None:
+        try:
+            await self.backend.terminate(node_id)
+        except SandboxNotFoundError:
+            if not missing_ok:
+                raise
+
+    async def detach_resource(
+        self, node_id: str, resource_id: str, *, missing_ok: bool = False
+    ) -> None:
+        try:
+            await self.backend.detach_resource(node_id, resource_id)
+        except SandboxNotFoundError:
+            if not missing_ok:
+                raise
+
+
+@dataclass(frozen=True, slots=True)
+class _LifecycleResources:
+    resources: ManagedResourceStore
+
+    def create_text(self, node_id: str, filename: str, content: str = "") -> None:
+        self.resources.create_text(node_id, filename, content)
+
+    def create_image(
+        self, node_id: str, filename: str, media_type: str, data_base64: str
+    ) -> None:
+        self.resources.create_image(node_id, filename, media_type, data_base64)
+
+    def remove_file(self, node_id: str) -> None:
+        record = self.resources.maybe_get_record(node_id)
+        if record is not None:
+            self.resources.remove_file(record)
+
+
+@dataclass(frozen=True, slots=True)
+class _LifecycleConversations:
+    conversations: ConversationStore
+
+    def create_initial_session(self, node_id: str, title: str) -> None:
+        self.conversations.create_session(node_id, ConversationSessionCreate(title=title))
+
+
 @dataclass(slots=True)
 class ApplicationServices:
     settings: Settings
@@ -96,35 +207,24 @@ class ApplicationServices:
     _agent_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
 
     async def startup(self) -> None:
+        context = self._node_lifecycle_context()
         for card in self.world.list_cards():
-            if card.type == CardType.AGENT:
-                if self.agent_runtime is not None:
-                    await self.agent_runtime.create_agent(self._runtime_agent_config(card))
-                if card.status != "idle":
-                    self.world.update_card(card.id, CardPatch(status="idle"))
-            elif card.type == CardType.SANDBOX and self.sandbox_backend is not None:
-                await self._ensure_sandbox(card.id)
-                info = await self.sandbox_backend.get(card.id)
-                if card.status != info.state.value:
-                    self.world.update_card(card.id, CardPatch(status=info.state.value))
+            lifecycle = self.plugins.node_type(card.type).lifecycle
+            if lifecycle is not None:
+                await lifecycle.on_startup(context, card)
 
     async def shutdown(self) -> None:
-        if self.agent_runtime is not None:
-            for card in self.world.list_cards():
-                if card.type == CardType.AGENT:
-                    with suppress(Exception):
-                        await self.agent_runtime.stop(card.id)
+        context = self._node_lifecycle_context()
+        for card in self.world.list_cards():
+            lifecycle = self.plugins.node_type(card.type).lifecycle
+            if lifecycle is not None:
+                await lifecycle.on_shutdown(context, card)
         tasks = tuple(self._agent_tasks.values())
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._agent_tasks.clear()
-        if self.sandbox_backend is not None:
-            for card in self.world.list_cards():
-                if card.type == CardType.SANDBOX:
-                    with suppress(SandboxNotFoundError):
-                        await self.sandbox_backend.terminate(card.id)
 
     def enrich_card(self, card: Card) -> Card:
         record = self.resources.maybe_get_record(card.id)
@@ -148,42 +248,27 @@ class ApplicationServices:
 
     async def create_card(self, request: CardCreate) -> Card:
         card = self.world.create_card(request)
-        runtime_created = False
-        sandbox_created = False
+        lifecycle = self.plugins.node_type(card.type).lifecycle
+        context = self._node_lifecycle_context()
         try:
-            if card.type == CardType.TEXT:
-                filename = str(card.config.get("filename", "untitled.txt"))
-                initial_content = request.content
-                if initial_content is None:
-                    configured_content = request.config.get("content", "")
-                    initial_content = (
-                        configured_content if isinstance(configured_content, str) else ""
-                    )
-                self.resources.create_text(card.id, filename, initial_content)
-            elif card.type == CardType.IMAGE and request.data_base64 is not None:
-                filename = str(card.config.get("filename", "image.png"))
-                self.resources.create_image(
-                    card.id, filename, request.media_type or "", request.data_base64
+            if lifecycle is not None:
+                await lifecycle.on_create(context, card, request)
+        except BaseException as error:
+            cleanup_errors: list[BaseException] = []
+            if lifecycle is not None:
+                try:
+                    await lifecycle.on_create_rollback(context, card, request, error)
+                except BaseException as cleanup_error:
+                    cleanup_errors.append(cleanup_error)
+            try:
+                self.world.delete_card(card.id)
+            except BaseException as cleanup_error:
+                cleanup_errors.append(cleanup_error)
+            for cleanup_error in cleanup_errors:
+                error.add_note(
+                    "node creation rollback also failed: "
+                    f"{type(cleanup_error).__name__}: {cleanup_error}"
                 )
-            elif card.type == CardType.AGENT and self.agent_runtime is not None:
-                await self.agent_runtime.create_agent(self._runtime_agent_config(card))
-                runtime_created = True
-            elif card.type == CardType.CONVERSATION:
-                self.conversations.create_session(
-                    card.id, ConversationSessionCreate(title="General")
-                )
-            elif card.type == CardType.SANDBOX and self.sandbox_backend is not None:
-                await self.sandbox_backend.create(card.id)
-                sandbox_created = True
-        except BaseException:
-            if runtime_created and self.agent_runtime is not None:
-                await self.agent_runtime.delete_agent(card.id)
-            if sandbox_created and self.sandbox_backend is not None:
-                await self.sandbox_backend.destroy(card.id)
-            record = self.resources.maybe_get_record(card.id)
-            self.world.delete_card(card.id)
-            if record is not None:
-                self.resources.remove_file(record)
             raise
         card = self.enrich_card(self.world.get_card(card.id))
         await self.events.publish(
@@ -198,18 +283,9 @@ class ApplicationServices:
 
     async def update_card(self, card_id: str, request: CardPatch) -> Card:
         current = self.world.get_card(card_id)
-        if (
-            current.type == CardType.AGENT
-            and self.agent_runtime is not None
-            and (request.name is not None or request.config is not None)
-        ):
-            merged = current.model_copy(
-                update={
-                    "name": request.name or current.name,
-                    "config": {**current.config, **(request.config or {})},
-                }
-            )
-            await self.agent_runtime.update_agent(self._runtime_agent_config(merged))
+        lifecycle = self.plugins.node_type(current.type).lifecycle
+        if lifecycle is not None:
+            await lifecycle.on_update(self._node_lifecycle_context(), current, request)
         card = self.enrich_card(self.world.update_card(card_id, request))
         await self.events.publish(
             EventType.CARD_UPDATED,
@@ -228,26 +304,11 @@ class ApplicationServices:
             )
         }
         affected = {edge.id: self._affected_agents(edge) for edge in attached_edges.values()}
-        record = self.resources.maybe_get_record(card_id)
-
-        if card.type in {CardType.TEXT, CardType.IMAGE} and self.sandbox_backend is not None:
-            for edge in self.world.list_edges_from(card_id):
-                if edge.relationship in {
-                    Relationship.MOUNT_READ_ONLY,
-                    Relationship.MOUNT_READ_WRITE,
-                }:
-                    await self._detach_mount(edge, ignore_missing=True)
-        if card.type == CardType.AGENT and self.agent_runtime is not None:
-            await self.agent_runtime.delete_agent(card.id)
-        if card.type == CardType.SANDBOX and self.sandbox_backend is not None:
-            try:
-                await self.sandbox_backend.destroy(card.id)
-            except SandboxNotFoundError:
-                pass
+        lifecycle = self.plugins.node_type(card.type).lifecycle
+        if lifecycle is not None:
+            await lifecycle.on_delete(self._node_lifecycle_context(), card)
 
         deleted = self.world.delete_card(card_id)
-        if record is not None:
-            self.resources.remove_file(record)
         for edge in attached_edges.values():
             await self._publish_edge_change(
                 EventType.EDGE_DELETED, edge, affected_agents=affected[edge.id]
@@ -1110,13 +1171,21 @@ class ApplicationServices:
             in {Relationship.MOUNT_READ_ONLY, Relationship.MOUNT_READ_WRITE}
         )
 
-    @staticmethod
-    def _runtime_agent_config(card: Card) -> RuntimeAgentConfig:
-        return RuntimeAgentConfig(
-            agent_id=card.id,
-            name=card.name,
-            system_instruction=str(card.config.get("system_instruction", "")),
-            model=str(card.config.get("model", "gemini-3.7-flash")),
+    def _node_lifecycle_context(self) -> NodeLifecycleContext:
+        return NodeLifecycleContext(
+            nodes=_LifecycleNodes(self.world),
+            resources=_LifecycleResources(self.resources),
+            conversations=_LifecycleConversations(self.conversations),
+            agents=(
+                _LifecycleAgents(self.agent_runtime)
+                if self.agent_runtime is not None
+                else None
+            ),
+            sandboxes=(
+                _LifecycleSandboxes(self.sandbox_backend)
+                if self.sandbox_backend is not None
+                else None
+            ),
         )
 
     def close(self) -> None:
