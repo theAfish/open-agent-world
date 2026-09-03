@@ -13,6 +13,12 @@ class ConversationSessionCreate(BaseModel):
     participant_ids: Annotated[list[str], Field(max_length=24)] = Field(default_factory=list)
 
 
+class ConversationParticipantsAdd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    participant_ids: Annotated[list[str], Field(min_length=1, max_length=24)]
+
+
 class ConversationSession(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

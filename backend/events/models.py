@@ -19,6 +19,8 @@ class EventType(StrEnum):
     PERMISSION_CHANGED = "permission_changed"
     RESOURCE_MODIFIED = "resource_modified"
     CONVERSATION_SESSION_CREATED = "conversation_session_created"
+    CONVERSATION_SESSION_UPDATED = "conversation_session_updated"
+    CONVERSATION_SESSION_DELETED = "conversation_session_deleted"
     CONVERSATION_MESSAGE = "conversation_message"
     AGENT_STARTED = "agent_started"
     AGENT_STATUS_CHANGED = "agent_status_changed"

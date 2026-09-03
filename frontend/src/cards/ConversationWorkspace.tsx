@@ -1,8 +1,13 @@
-import { Bot, MessageSquare, Plus, Send, UserRound, Users, X } from "lucide-react";
+import { Bot, MessageSquare, Plus, Send, Trash2, UserMinus, UserRound, Users, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { activeConversationAgentIds } from "../state/conversationActivity";
-import { appendMention, resolveConversationTargets } from "../state/conversationMentions";
+import {
+  appendMention,
+  completeMention,
+  mentionCompletion,
+  resolveConversationTargets,
+} from "../state/conversationMentions";
 import { useWorldStore } from "../state/worldStore";
 import type { ConversationAgent, ConversationMessage, ConversationSession, WorldCard } from "../types/world";
 
@@ -18,6 +23,8 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       && (
         event.type === "conversation_message"
         || event.type === "conversation_session_created"
+        || event.type === "conversation_session_updated"
+        || event.type === "conversation_session_deleted"
         || event.type === "agent_status_changed"
       ),
   )?.id);
@@ -31,9 +38,14 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [groupTitle, setGroupTitle] = useState("");
   const [groupAgentIds, setGroupAgentIds] = useState<string[]>([]);
+  const [addingParticipants, setAddingParticipants] = useState(false);
+  const [participantAgentIds, setParticipantAgentIds] = useState<string[]>([]);
+  const [mentionCaret, setMentionCaret] = useState<number>();
+  const [mentionIndex, setMentionIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const transcriptEnd = useRef<HTMLDivElement>(null);
+  const messageInput = useRef<HTMLTextAreaElement>(null);
 
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const connectedAgents = agents.filter((agent) => agent.connected);
@@ -44,6 +56,12 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     runtimeEvents, card.id, activeSessionId,
   ), [activeSessionId, card.id, runtimeEvents]);
   const respondingAgents = participants.filter((agent) => respondingAgentIds.includes(agent.id));
+  const availableAgents = connectedAgents.filter((agent) => (
+    !activeSession?.participant_ids.includes(agent.id)
+  ));
+  const completion = mentionCaret === undefined
+    ? undefined
+    : mentionCompletion(draft, mentionCaret, participants);
 
   useEffect(() => {
     let current = true;
@@ -86,6 +104,16 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     transcriptEnd.current?.scrollIntoView({ block: "end" });
   }, [messages.length, respondingAgentIds.join("|")]);
 
+  useEffect(() => {
+    setMentionIndex(0);
+  }, [completion?.query]);
+
+  useEffect(() => {
+    setAddingParticipants(false);
+    setParticipantAgentIds([]);
+    setMentionCaret(undefined);
+  }, [activeSessionId]);
+
   const createSession = async (title: string, participantIds: string[]) => {
     setBusy(true);
     try {
@@ -120,6 +148,72 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     if (created) setSelectedAgentId(agent.id);
   };
 
+  const addParticipants = async () => {
+    if (!activeSession || participantAgentIds.length === 0 || busy) return;
+    setBusy(true);
+    try {
+      const updated = await worldApi.addConversationSessionParticipants(
+        card.id, activeSession.id, participantAgentIds,
+      );
+      setSessions((current) => current.map((session) => (
+        session.id === updated.id ? updated : session
+      )));
+      setAddingParticipants(false);
+      setParticipantAgentIds([]);
+    } catch (reason) {
+      pushToast({ tone: "error", title: "Agents were not added", detail: apiErrorMessage(reason) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const chooseMention = (agent: Pick<ConversationAgent, "id" | "name">) => {
+    if (!completion) return;
+    const next = completeMention(draft, completion, agent.name);
+    setDraft(next.content);
+    setSelectedAgentId(agent.id);
+    setMentionCaret(undefined);
+    window.requestAnimationFrame(() => {
+      messageInput.current?.focus();
+      messageInput.current?.setSelectionRange(next.caret, next.caret);
+    });
+  };
+
+  const removeParticipant = async (agent: ConversationAgent) => {
+    if (!activeSession || busy) return;
+    if (!window.confirm(`Remove ${agent.name} from ${activeSession.title}?`)) return;
+    setBusy(true);
+    try {
+      const updated = await worldApi.removeConversationSessionParticipant(
+        card.id, activeSession.id, agent.id,
+      );
+      setSessions((current) => current.map((session) => (
+        session.id === updated.id ? updated : session
+      )));
+      if (selectedAgentId === agent.id) setSelectedAgentId(updated.participant_ids[0]);
+    } catch (reason) {
+      pushToast({ tone: "error", title: "Agent was not removed", detail: apiErrorMessage(reason) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteActiveSession = async () => {
+    if (!activeSession || activeSession.title === "General" || busy) return;
+    if (!window.confirm(`Dissolve ${activeSession.title}? Its conversation history will be deleted.`)) return;
+    setBusy(true);
+    try {
+      await worldApi.deleteConversationSession(card.id, activeSession.id);
+      const remaining = sessions.filter((session) => session.id !== activeSession.id);
+      setSessions(remaining);
+      setActiveSessionId(remaining[0]?.id);
+    } catch (reason) {
+      pushToast({ tone: "error", title: "Session was not deleted", detail: apiErrorMessage(reason) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const submit = async () => {
     const content = draft.trim();
     if (!content || !activeSession || busy) return;
@@ -133,6 +227,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       setMessages((current) => current.some((item) => item.id === result.message.id)
         ? current : [...current, result.message]);
       setDraft("");
+      setMentionCaret(undefined);
       if (targets.length === 0 && participants.length > 1) {
         pushToast({
           tone: "neutral",
@@ -189,10 +284,26 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       <main className="workspace-conversation">
         <header>
           <div><strong>{activeSession?.title ?? "Conversation"}</strong><span>{participants.length} active participants</span></div>
-          <div className="conversation-targets" aria-label="Message target">
-            {participants.map((agent) => (
-              <button type="button" key={agent.id} className={selectedAgentId === agent.id ? "is-selected" : ""} onClick={() => setSelectedAgentId(agent.id)} title={`Address ${agent.name} by default`}>@{agent.name}</button>
-            ))}
+          <div className="conversation-header-tools">
+            <div className="conversation-targets" aria-label="Message target">
+              {participants.map((agent) => (
+                <button type="button" key={agent.id} className={selectedAgentId === agent.id ? "is-selected" : ""} onClick={() => setSelectedAgentId(agent.id)} title={`Address ${agent.name} by default`}>@{agent.name}</button>
+              ))}
+            </div>
+            <button type="button" className="conversation-add-agent" aria-label="Add agents to session" disabled={!activeSession || availableAgents.length === 0} onClick={() => setAddingParticipants((value) => !value)}><Plus size={12} /> Add</button>
+            {activeSession && activeSession.title !== "General" ? <button type="button" className="conversation-delete-session" aria-label="Dissolve session" disabled={busy} onClick={() => void deleteActiveSession()}><Trash2 size={12} /> Delete</button> : null}
+            {addingParticipants ? (
+              <div className="conversation-participant-picker" role="dialog" aria-label="Add participants">
+                <header><strong>Add to session</strong><button type="button" onClick={() => setAddingParticipants(false)} aria-label="Close participant picker"><X size={12} /></button></header>
+                {availableAgents.map((agent) => (
+                  <label key={agent.id}>
+                    <input type="checkbox" aria-label={`Add ${agent.name} to session`} checked={participantAgentIds.includes(agent.id)} onChange={() => setParticipantAgentIds((current) => current.includes(agent.id) ? current.filter((id) => id !== agent.id) : [...current, agent.id])} />
+                    <span><Bot size={11} /> {agent.name}</span>
+                  </label>
+                ))}
+                <button type="button" disabled={busy || participantAgentIds.length === 0} onClick={() => void addParticipants()}>Add selected</button>
+              </div>
+            ) : null}
           </div>
         </header>
         <div className="workspace-transcript" aria-live="polite">
@@ -218,12 +329,44 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
           <div ref={transcriptEnd} />
         </div>
         <div className="workspace-composer">
-          <textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
+          <textarea ref={messageInput} value={draft} onChange={(event) => {
+            setDraft(event.target.value);
+            setMentionCaret(event.target.selectionStart ?? event.target.value.length);
+          }} onClick={(event) => setMentionCaret(event.currentTarget.selectionStart ?? undefined)} onSelect={(event) => setMentionCaret(event.currentTarget.selectionStart ?? undefined)} onKeyDown={(event) => {
+            if (completion && !event.shiftKey) {
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                const direction = event.key === "ArrowDown" ? 1 : -1;
+                setMentionIndex((current) => (
+                  (current + direction + completion.candidates.length) % completion.candidates.length
+                ));
+                return;
+              }
+              if (event.key === "Enter" || event.key === "Tab") {
+                event.preventDefault();
+                chooseMention(completion.candidates[mentionIndex] ?? completion.candidates[0]);
+                return;
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setMentionCaret(undefined);
+                return;
+              }
+            }
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
               void submit();
             }
-          }} placeholder={activeSession ? "Write a message; use @name to address a participant…" : "Create or select a session first…"} aria-label="Conversation message" disabled={!activeSession} />
+          }} placeholder={activeSession ? "Write a message; use @name to address a participant…" : "Create or select a session first…"} aria-label="Conversation message" aria-autocomplete="list" aria-expanded={Boolean(completion)} aria-controls={completion ? "conversation-mention-menu" : undefined} disabled={!activeSession} />
+          {completion ? (
+            <div className="conversation-mention-menu" id="conversation-mention-menu" role="listbox" aria-label="Mention an Agent">
+              {completion.candidates.map((agent, index) => (
+                <button type="button" role="option" aria-selected={index === mentionIndex} className={index === mentionIndex ? "is-selected" : ""} key={agent.id} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseMention(agent)}>
+                  <span><Bot size={12} /></span><strong>{agent.name}</strong><small>@{agent.name}</small>
+                </button>
+              ))}
+            </div>
+          ) : null}
           <footer>
             <span>{selectedAgentId ? `Default: @${agents.find((item) => item.id === selectedAgentId)?.name}` : "No default recipient"} · Enter to send · Shift+Enter for new line</span>
             <button type="button" onClick={() => void submit()} disabled={!draft.trim() || !activeSession || busy} aria-label="Send message"><Send size={14} /></button>
@@ -236,12 +379,15 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
         <section>
           <span className="workspace-panel-label">In this session</span>
           {participants.map((agent) => (
-            <button type="button" className="workspace-context-item" key={agent.id} onClick={() => {
-              setSelectedAgentId(agent.id);
-              setDraft((value) => appendMention(value, agent.name));
-            }}>
-              <span><Bot size={12} /></span><div><strong>{agent.name}</strong><small>{agent.status} · insert mention</small></div>
-            </button>
+            <div className="conversation-participant-row" key={agent.id}>
+              <button type="button" className="workspace-context-item" onClick={() => {
+                setSelectedAgentId(agent.id);
+                setDraft((value) => appendMention(value, agent.name));
+              }}>
+                <span><Bot size={12} /></span><div><strong>{agent.name}</strong><small>{agent.status} · insert mention</small></div>
+              </button>
+              <button type="button" className="conversation-kick-agent" aria-label={`Remove ${agent.name} from session`} disabled={busy} onClick={() => void removeParticipant(agent)} title={`Remove ${agent.name}`}><UserMinus size={12} /></button>
+            </div>
           ))}
           {participants.length === 0 ? <p>This session has no Agents. Create a direct or group session from the left.</p> : null}
         </section>

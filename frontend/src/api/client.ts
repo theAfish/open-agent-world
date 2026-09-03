@@ -365,6 +365,38 @@ export const worldApi = {
     });
   },
 
+  addConversationSessionParticipants(
+    conversationId: string,
+    sessionId: string,
+    participantIds: string[],
+  ): Promise<ConversationSession> {
+    return request<ConversationSession>(
+      `/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/participants`,
+      {
+        method: "POST",
+        body: JSON.stringify({ participant_ids: participantIds }),
+      },
+    );
+  },
+
+  removeConversationSessionParticipant(
+    conversationId: string,
+    sessionId: string,
+    agentId: string,
+  ): Promise<ConversationSession> {
+    return request<ConversationSession>(
+      `/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/participants/${encodeURIComponent(agentId)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  deleteConversationSession(conversationId: string, sessionId: string): Promise<void> {
+    return request<void>(
+      `/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}`,
+      { method: "DELETE" },
+    );
+  },
+
   getConversationMessages(
     conversationId: string,
     sessionId: string,

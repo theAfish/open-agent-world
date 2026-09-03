@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query, status
 from backend.api.dependencies import get_services
 from backend.conversations import (
     ConversationMessage,
+    ConversationParticipantsAdd,
     ConversationPost,
     ConversationPostResult,
     ConversationSession,
@@ -40,6 +41,48 @@ async def create_conversation_session(
     services: ApplicationServices = Depends(get_services),
 ) -> ConversationSession:
     return await services.create_conversation_session(conversation_id, request)
+
+
+@router.post(
+    "/conversations/{conversation_id}/sessions/{session_id}/participants",
+    response_model=ConversationSession,
+)
+async def add_conversation_session_participants(
+    conversation_id: str,
+    session_id: str,
+    request: ConversationParticipantsAdd,
+    services: ApplicationServices = Depends(get_services),
+) -> ConversationSession:
+    return await services.add_conversation_session_participants(
+        conversation_id, session_id, request
+    )
+
+
+@router.delete(
+    "/conversations/{conversation_id}/sessions/{session_id}/participants/{agent_id}",
+    response_model=ConversationSession,
+)
+async def remove_conversation_session_participant(
+    conversation_id: str,
+    session_id: str,
+    agent_id: str,
+    services: ApplicationServices = Depends(get_services),
+) -> ConversationSession:
+    return await services.remove_conversation_session_participant(
+        conversation_id, session_id, agent_id
+    )
+
+
+@router.delete(
+    "/conversations/{conversation_id}/sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_conversation_session(
+    conversation_id: str,
+    session_id: str,
+    services: ApplicationServices = Depends(get_services),
+) -> None:
+    await services.delete_conversation_session(conversation_id, session_id)
 
 
 @router.get(

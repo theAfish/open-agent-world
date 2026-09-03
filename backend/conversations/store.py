@@ -117,6 +117,65 @@ class ConversationStore:
             ).fetchall()
         return [self.get_session(str(row["conversation_id"]), str(row["id"])) for row in rows]
 
+    def add_participants(
+        self, conversation_id: str, session_id: str, participant_ids: list[str]
+    ) -> ConversationSession:
+        self.get_session(conversation_id, session_id)
+        now = _now()
+        participants = list(dict.fromkeys(participant_ids))
+        with self.database.transaction(immediate=True) as connection:
+            for agent_id in participants:
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO conversation_participants (
+                        session_id, agent_id, joined_at
+                    ) VALUES (?, ?, ?)
+                    """,
+                    (session_id, agent_id, now),
+                )
+            connection.execute(
+                """
+                UPDATE conversation_sessions
+                SET updated_at = ?, revision = revision + 1 WHERE id = ?
+                """,
+                (now, session_id),
+            )
+        return self.get_session(conversation_id, session_id)
+
+    def remove_participant(
+        self, conversation_id: str, session_id: str, agent_id: str
+    ) -> ConversationSession:
+        session = self.get_session(conversation_id, session_id)
+        if agent_id not in session.participant_ids:
+            raise ConversationValidationError(
+                f"agent {agent_id!r} is not a participant in session {session_id!r}"
+            )
+        now = _now()
+        with self.database.transaction(immediate=True) as connection:
+            connection.execute(
+                """
+                DELETE FROM conversation_participants
+                WHERE session_id = ? AND agent_id = ?
+                """,
+                (session_id, agent_id),
+            )
+            connection.execute(
+                """
+                UPDATE conversation_sessions
+                SET updated_at = ?, revision = revision + 1 WHERE id = ?
+                """,
+                (now, session_id),
+            )
+        return self.get_session(conversation_id, session_id)
+
+    def delete_session(self, conversation_id: str, session_id: str) -> None:
+        self.get_session(conversation_id, session_id)
+        with self.database.transaction(immediate=True) as connection:
+            connection.execute(
+                "DELETE FROM conversation_sessions WHERE id = ? AND conversation_id = ?",
+                (session_id, conversation_id),
+            )
+
     def add_message(
         self,
         conversation_id: str,

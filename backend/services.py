@@ -14,6 +14,7 @@ from backend.config import Settings
 from backend.conversations import (
     ConversationAgent,
     ConversationMessage,
+    ConversationParticipantsAdd,
     ConversationPost,
     ConversationPostResult,
     ConversationSession,
@@ -480,6 +481,66 @@ class ApplicationServices:
         )
         return session
 
+    async def add_conversation_session_participants(
+        self,
+        conversation_id: str,
+        session_id: str,
+        request: ConversationParticipantsAdd,
+    ) -> ConversationSession:
+        self._require_card_type(conversation_id, CardType.CONVERSATION)
+        session = self.conversations.get_session(conversation_id, session_id)
+        additions = list(dict.fromkeys(request.participant_ids))
+        combined = list(dict.fromkeys([*session.participant_ids, *additions]))
+        if len(combined) > 24:
+            raise ConversationValidationError(
+                "conversation sessions support at most 24 participants"
+            )
+        for agent_id in additions:
+            self._require_conversation_connection(agent_id, conversation_id)
+        updated = self.conversations.add_participants(
+            conversation_id, session_id, additions
+        )
+        await self.events.publish(
+            EventType.CONVERSATION_SESSION_UPDATED,
+            node_id=conversation_id,
+            conversation_id=conversation_id,
+            session_id=session_id,
+            payload={"session": updated.model_dump(mode="json")},
+        )
+        return updated
+
+    async def remove_conversation_session_participant(
+        self, conversation_id: str, session_id: str, agent_id: str
+    ) -> ConversationSession:
+        self._require_card_type(conversation_id, CardType.CONVERSATION)
+        updated = self.conversations.remove_participant(
+            conversation_id, session_id, agent_id
+        )
+        await self.events.publish(
+            EventType.CONVERSATION_SESSION_UPDATED,
+            node_id=conversation_id,
+            conversation_id=conversation_id,
+            session_id=session_id,
+            payload={"session": updated.model_dump(mode="json")},
+        )
+        return updated
+
+    async def delete_conversation_session(
+        self, conversation_id: str, session_id: str
+    ) -> None:
+        self._require_card_type(conversation_id, CardType.CONVERSATION)
+        session = self.conversations.get_session(conversation_id, session_id)
+        if session.title == "General":
+            raise ConversationValidationError("the default General session cannot be deleted")
+        self.conversations.delete_session(conversation_id, session_id)
+        await self.events.publish(
+            EventType.CONVERSATION_SESSION_DELETED,
+            node_id=conversation_id,
+            conversation_id=conversation_id,
+            session_id=session_id,
+            payload={"session_id": session_id},
+        )
+
     def list_conversation_messages(
         self, conversation_id: str, session_id: str, *, limit: int = 200
     ) -> list[ConversationMessage]:
@@ -568,30 +629,41 @@ class ApplicationServices:
                     "requesting another turn from yourself."
                 ),
             }
+        source = self._require_card_type(source_agent_id, CardType.AGENT)
+        target = self._require_card_type(target_agent_id, CardType.AGENT)
+        current = asyncio.current_task()
         active = self._agent_tasks.get(target_agent_id)
-        if active is not None and not active.done():
+        if active is not None and not active.done() and active is not current:
             raise RuntimeUnavailableError(
                 f"agent {target_agent_id!r} already has an active run"
             )
-        if self.agent_runtime is None:
-            raise RuntimeUnavailableError("agent runtime is not configured")
-
-        source = self._require_card_type(source_agent_id, CardType.AGENT)
+        if active is None or active.done():
+            if self.agent_runtime is None:
+                raise RuntimeUnavailableError("agent runtime is not configured")
         request_message = self.conversations.add_message(
             conversation_id,
             session_id,
             sender_kind="agent",
             sender_id=source.id,
             sender_name=source.name,
-            content=f"Requested @{self.world.get_card(target_agent_id).name}: {message.strip()}",
+            content=message.strip(),
             mention_agent_ids=[target_agent_id],
         )
         await self._publish_conversation_message(request_message)
+        if active is current and current is not None:
+            return {
+                "agent_id": target.id,
+                "agent_name": target.name,
+                "response": (
+                    f"{target.name} is already active earlier in this conversation turn. "
+                    "Your message was delivered to the shared session; finish your current "
+                    "response without requesting the same Agent again."
+                ),
+            }
         prompt = self._conversation_prompt(
             conversation_id, session, target_agent_id, message
         )
         token = _conversation_turn_depth.set(depth + 1)
-        current = asyncio.current_task()
         if current is not None:
             self._agent_tasks[target_agent_id] = current
         final_text = ""
@@ -612,7 +684,6 @@ class ApplicationServices:
             _conversation_turn_depth.reset(token)
             if self._agent_tasks.get(target_agent_id) is current:
                 self._agent_tasks.pop(target_agent_id, None)
-        target = self.world.get_card(target_agent_id)
         response = self.conversations.add_message(
             conversation_id,
             session_id,
@@ -783,7 +854,9 @@ class ApplicationServices:
                 )
                 if event.type.value == "agent_completed":
                     final_text = str(event.payload.get("text", ""))
-            if final_text:
+            if final_text and self._can_agent_post_to_conversation_session(
+                agent_id, conversation_id, session_id
+            ):
                 agent = self.world.get_card(agent_id)
                 message = self.conversations.add_message(
                     conversation_id,
@@ -856,6 +929,17 @@ class ApplicationServices:
             raise PermissionDeniedError(
                 f"agent {agent_id!r} is not connected to conversation {conversation_id!r}"
             )
+
+    def _can_agent_post_to_conversation_session(
+        self, agent_id: str, conversation_id: str, session_id: str
+    ) -> bool:
+        try:
+            session = self.conversations.get_session(conversation_id, session_id)
+            self._require_session_participant(session, agent_id)
+            self._require_conversation_connection(agent_id, conversation_id)
+        except (NotFoundError, PermissionDeniedError):
+            return False
+        return True
 
     @staticmethod
     def _require_session_participant(

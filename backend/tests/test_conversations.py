@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -113,6 +114,65 @@ def test_conversation_contact_roster_is_not_limited_to_loaded_canvas_chunks(
         "model": "gemini-3.7-flash",
         "connected": True,
     }]
+
+
+def test_connected_agents_can_be_added_to_an_existing_session(client: TestClient) -> None:
+    atlas = _create(client, "agent", "Atlas")
+    river = _create(client, "agent", "River")
+    conversation = _create(client, "conversation", "Research room")
+    _connect(client, atlas["id"], conversation["id"])
+    session = client.post(
+        f"/api/conversations/{conversation['id']}/sessions",
+        json={"title": "Review", "participant_ids": [atlas["id"]]},
+    ).json()
+
+    denied = client.post(
+        f"/api/conversations/{conversation['id']}/sessions/{session['id']}/participants",
+        json={"participant_ids": [river["id"]]},
+    )
+    assert denied.status_code == 403
+
+    _connect(client, river["id"], conversation["id"])
+    added = client.post(
+        f"/api/conversations/{conversation['id']}/sessions/{session['id']}/participants",
+        json={"participant_ids": [river["id"]]},
+    )
+    assert added.status_code == 200, added.text
+    assert added.json()["participant_ids"] == [atlas["id"], river["id"]]
+
+
+def test_group_session_can_kick_members_and_be_dissolved(client: TestClient) -> None:
+    atlas = _create(client, "agent", "Atlas")
+    river = _create(client, "agent", "River")
+    conversation = _create(client, "conversation", "Research room")
+    _connect(client, atlas["id"], conversation["id"])
+    _connect(client, river["id"], conversation["id"])
+    created = client.post(
+        f"/api/conversations/{conversation['id']}/sessions",
+        json={
+            "title": "Review group",
+            "participant_ids": [atlas["id"], river["id"]],
+        },
+    )
+    assert created.status_code == 201, created.text
+    session = created.json()
+
+    kicked = client.delete(
+        f"/api/conversations/{conversation['id']}/sessions/{session['id']}/participants/{river['id']}"
+    )
+    assert kicked.status_code == 200, kicked.text
+    assert kicked.json()["participant_ids"] == [atlas["id"]]
+
+    dissolved = client.delete(
+        f"/api/conversations/{conversation['id']}/sessions/{session['id']}"
+    )
+    assert dissolved.status_code == 204
+    summary = client.get(f"/api/conversations/{conversation['id']}").json()
+    assert session["id"] not in {item["id"] for item in summary["sessions"]}
+    general = next(item for item in summary["sessions"] if item["title"] == "General")
+    assert client.delete(
+        f"/api/conversations/{conversation['id']}/sessions/{general['id']}"
+    ).status_code == 422
 
 
 def test_addressed_group_message_persists_agent_responses_and_events(data_root: Path) -> None:
@@ -298,4 +358,54 @@ async def test_agent_requesting_own_turn_is_recoverable_and_does_not_recurse(
         assert services.list_conversation_messages(conversation.id, session.id) == []
         assert services._agent_tasks == {}
     finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_agent_handoff_back_to_waiting_caller_is_delivered_without_reentry(
+    data_root: Path,
+) -> None:
+    settings = Settings.for_data_root(data_root)
+    services = create_services(settings)
+    services.agent_runtime = MockAgentRuntime(WorldAgentCapabilityProvider(services))
+    try:
+        xiaobing = await services.create_card(CardCreate(type="agent", name="xiaobing"))
+        atlas = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        conversation = await services.create_card(
+            CardCreate(type="conversation", name="Research room")
+        )
+        await services.create_edge(EdgeCreate(
+            source=xiaobing.id, target=conversation.id, relationship="participate"
+        ))
+        await services.create_edge(EdgeCreate(
+            source=atlas.id, target=conversation.id, relationship="participate"
+        ))
+        session = await services.create_conversation_session(
+            conversation.id,
+            ConversationSessionCreate(
+                title="Callback", participant_ids=[xiaobing.id, atlas.id]
+            ),
+        )
+        current = asyncio.current_task()
+        assert current is not None
+        services._agent_tasks[xiaobing.id] = current
+
+        response = await services.request_conversation_turn(
+            atlas.id,
+            conversation.id,
+            session.id,
+            xiaobing.id,
+            "小冰你好，请回复确认一下。",
+        )
+
+        assert response["agent_id"] == xiaobing.id
+        assert "already active earlier in this conversation turn" in response["response"]
+        messages = services.list_conversation_messages(conversation.id, session.id)
+        assert [(item.sender_name, item.content) for item in messages] == [
+            ("Atlas", "小冰你好，请回复确认一下。")
+        ]
+        assert services._agent_tasks[xiaobing.id] is current
+        services._agent_tasks.pop(xiaobing.id)
+    finally:
+        services._agent_tasks.clear()
         services.close()
