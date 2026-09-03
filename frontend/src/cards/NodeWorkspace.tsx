@@ -1,10 +1,8 @@
 import {
   Bot,
   Clock3,
-  Maximize2,
   MessageSquare,
   MessagesSquare,
-  Minimize2,
   PanelRight,
   Radio,
   X,
@@ -16,36 +14,25 @@ import { useWorldStore } from "../state/worldStore";
 import type { ConversationSession, WorldCard } from "../types/world";
 import { ConversationWorkspace } from "./ConversationWorkspace";
 
-interface WorkspaceWindowProps {
+interface WorkspaceSurfaceProps {
   card: WorldCard;
-  children: React.ReactNode;
 }
 
-function WorkspaceWindow({ card, children }: WorkspaceWindowProps) {
+function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
   const catalog = useWorldStore((state) => state.catalog);
   const closeWorkspace = useNodeSurfaceStore((state) => state.closeWorkspace);
-  const maximized = useNodeSurfaceStore((state) => Boolean(state.maximizedWorkspaces[card.id]));
-  const toggleMaximized = useNodeSurfaceStore((state) => state.toggleWorkspaceMaximized);
 
   return (
-    <div className="node-workspace-layer" data-testid="node-workspace-layer">
-      <section className={`node-workspace-window ${maximized ? "is-maximized" : ""}`} role="dialog" aria-modal="false" aria-label={`${card.name} workspace`} data-workspace-node-id={card.id}>
-        <header className="workspace-titlebar">
-          <div className="workspace-app-mark">{card.type === "conversation" ? <MessagesSquare size={16} /> : <Bot size={16} />}</div>
-          <div>
-            <span>{catalog.node_types.find((item) => item.id === card.type)?.label ?? card.type} workspace</span>
-            <strong>{card.name}</strong>
-          </div>
-          <div className="workspace-window-actions">
-            <button type="button" className="icon-button" onClick={() => toggleMaximized(card.id)} aria-label={maximized ? "Restore workspace" : "Maximize workspace"}>
-              {maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-            </button>
-            <button type="button" className="icon-button" onClick={closeWorkspace} aria-label="Close workspace"><X size={15} /></button>
-          </div>
-        </header>
-        <div className="workspace-content">{children}</div>
-      </section>
-    </div>
+    <header className="workspace-titlebar node-drag-region">
+      <div className="workspace-app-mark">{card.type === "conversation" ? <MessagesSquare size={16} /> : <Bot size={16} />}</div>
+      <div>
+        <span>{catalog.node_types.find((item) => item.id === card.type)?.label ?? card.type} workspace</span>
+        <strong>{card.name}</strong>
+      </div>
+      <div className="workspace-window-actions">
+        <button type="button" className="icon-button" onClick={closeWorkspace} aria-label="Close workspace"><X size={15} /></button>
+      </div>
+    </header>
   );
 }
 
@@ -145,16 +132,12 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
   );
 }
 
-export function NodeWorkspace() {
-  const activeNodeId = useNodeSurfaceStore((state) => state.activeNodeId);
-  const level = useNodeSurfaceStore((state) => state.level);
-  const card = useWorldStore((state) => state.cards.find((item) => item.id === activeNodeId) ?? state.stressCards.find((item) => item.id === activeNodeId));
+export function WorkspaceSurface({ card }: WorkspaceSurfaceProps) {
   const catalog = useWorldStore((state) => state.catalog);
-
-  if (level !== "workspace" || !card || !nodeSurfaceSupport(card.type, catalog).workspace) return null;
-
   return (
-    <WorkspaceWindow card={card}>
+    <section className="node-workspace-window" role="dialog" aria-modal="false" aria-label={`${card.name} workspace`} data-workspace-node-id={card.id}>
+      <WorkspaceTitlebar card={card} />
+      <div className="workspace-content">
       {card.type === "agent" ? <AgentWorkspace card={card} />
         : card.type === "conversation" ? <ConversationWorkspace card={card} /> : (
           <div className="workspace-welcome">
@@ -162,6 +145,7 @@ export function NodeWorkspace() {
             <p>This plugin node exposes a workspace surface. Its frontend module can replace this generic view.</p>
           </div>
         )}
-    </WorkspaceWindow>
+      </div>
+    </section>
   );
 }

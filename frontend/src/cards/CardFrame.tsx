@@ -9,6 +9,7 @@ import { AgentCardBody } from "./AgentCard";
 import { ConversationCardBody } from "./ConversationCard";
 import { ImageCardBody } from "./ImageCard";
 import { NodePreview } from "./NodePreview";
+import { WorkspaceSurface } from "./NodeWorkspace";
 import { SandboxCardBody } from "./SandboxCard";
 import { TextCardBody } from "./TextCard";
 import { RelationshipList } from "./CardUtilities";
@@ -40,7 +41,7 @@ function GenericCardBody({ card }: BodyProps) {
     typeof value === "string" || typeof value === "number" || typeof value === "boolean"
   ));
   return (
-    <div className="expanded-stack nodrag nopan">
+    <div className="expanded-stack">
       <section className="card-section">
         <div className="section-heading"><span>Plugin configuration</span><small>catalog-driven</small></div>
         {entries.length > 0 ? (
@@ -80,7 +81,7 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
   const enterTimer = useRef<ReturnType<typeof setTimeout>>();
   const leaveTimer = useRef<ReturnType<typeof setTimeout>>();
   const level = surfaceLevelForNode(card.id, activeNodeId, activeLevel, inspectorNodeIds);
-  const visualLevel = level === "workspace" ? "inspector" : level;
+  const visualLevel = level;
   const definition = catalog.node_types.find((item) => item.id === card.type);
   const label = definition?.label ?? card.type;
   const Icon = ICONS[card.type] ?? Puzzle;
@@ -137,6 +138,13 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
     element.dataset.connectionHot = "true";
   };
 
+  const onPointerDownCapture = (event: ReactPointerEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, input, textarea, select, label, a, [contenteditable='true'], .react-flow__handle")) {
+      event.stopPropagation();
+    }
+  };
+
   return (
     <article
       ref={cardRef}
@@ -145,11 +153,12 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
       aria-label={`${label} ${card.name}`}
       data-card-id={card.id}
       data-card-type={card.type}
-      data-card-expanded={visualLevel === "inspector" ? "true" : "false"}
+      data-card-expanded={visualLevel === "inspector" || visualLevel === "workspace" ? "true" : "false"}
       data-surface-level={level}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
       onPointerMove={onPointerMove}
+      onPointerDownCapture={onPointerDownCapture}
       onClick={(event) => {
         if ((event.target as HTMLElement).closest("button, input, textarea, select, label, .react-flow__handle, .node-preview-hover-buffer")) return;
         if (support.inspector && (visualLevel === "node" || visualLevel === "preview")) openInspector(card.id);
@@ -176,48 +185,50 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
           aria-label={`Start a relationship from the ${side} edge of ${card.name}`} />
       )) : null}
 
-      <header className="card-header node-surface-header">
-        <div className="card-kind-icon" aria-hidden="true"><Icon size={18} strokeWidth={1.7} /></div>
-        <div className="card-title-group">
-          <span className="card-eyebrow">{label}</span>
-          <h2 title={card.name}>{card.name}</h2>
-          <input className="card-name-input nodrag nopan" defaultValue={card.name}
-            aria-label={`${label} name`}
-            onBlur={(event) => {
-              const name = event.currentTarget.value.trim();
-              if (name && name !== card.name) void updateCard(card.id, { name });
-            }}
-            onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
-        </div>
-        <div className="card-status" data-status={card.status} title={`Status: ${statusLabel(card.status)}`}>
-          <span aria-hidden="true" /><span>{statusLabel(card.status)}</span>
-        </div>
-        <button type="button" className="icon-button node-surface-close nodrag nopan"
-          onClick={() => closeInspector(card.id)} aria-label={`Close ${card.name} inspector`}><X size={14} /></button>
-      </header>
+      {visualLevel === "workspace" ? <WorkspaceSurface card={card} /> : <>
+        <header className="card-header node-surface-header">
+          <div className="card-kind-icon" aria-hidden="true"><Icon size={18} strokeWidth={1.7} /></div>
+          <div className="card-title-group">
+            <span className="card-eyebrow">{label}</span>
+            <h2 title={card.name}>{card.name}</h2>
+            <input className="card-name-input nodrag nopan" defaultValue={card.name}
+              aria-label={`${label} name`}
+              onBlur={(event) => {
+                const name = event.currentTarget.value.trim();
+                if (name && name !== card.name) void updateCard(card.id, { name });
+              }}
+              onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
+          </div>
+          <div className="card-status" data-status={card.status} title={`Status: ${statusLabel(card.status)}`}>
+            <span aria-hidden="true" /><span>{statusLabel(card.status)}</span>
+          </div>
+          <button type="button" className="icon-button node-surface-close nodrag nopan"
+            onClick={() => closeInspector(card.id)} aria-label={`Close ${card.name} inspector`}><X size={14} /></button>
+        </header>
 
-      <div className="node-preview-content" aria-hidden={visualLevel !== "preview"}>
-        <NodePreview card={card} />
-        <span className="node-preview-hint">Click for details</span>
-      </div>
-
-      <div className="card-body node-inspector-content" aria-hidden={visualLevel !== "inspector"}>
-        <Body card={card} level={level} />
-      </div>
-
-      <footer className="card-footer node-inspector-footer">
-        <span className="card-id">{card.ephemeral ? "synthetic" : card.id.slice(0, 8)}</span>
-        <div className="card-footer-actions nodrag nopan">
-          {!card.ephemeral ? <button type="button" className="icon-button icon-button--danger"
-            onClick={() => { dismissSurface(card.id); void deleteCard(card.id); }} aria-label={`Remove ${card.name}`}
-            title="Remove object (Ctrl+Z to undo)"><Trash2 size={14} /></button> : null}
-          {support.workspace ? (
-            <button type="button" className="card-expand-button" onClick={() => openWorkspace(card.id)}>
-              Open workspace <ExternalLink size={13} />
-            </button>
-          ) : null}
+        <div className="node-preview-content" aria-hidden={visualLevel !== "preview"}>
+          <NodePreview card={card} />
+          <span className="node-preview-hint">Click for details</span>
         </div>
-      </footer>
+
+        <div className="card-body node-inspector-content" aria-hidden={visualLevel !== "inspector"}>
+          <Body card={card} level={level} />
+        </div>
+
+        <footer className="card-footer node-inspector-footer">
+          <span className="card-id">{card.ephemeral ? "synthetic" : card.id.slice(0, 8)}</span>
+          <div className="card-footer-actions nodrag nopan">
+            {!card.ephemeral ? <button type="button" className="icon-button icon-button--danger"
+              onClick={() => { dismissSurface(card.id); void deleteCard(card.id); }} aria-label={`Remove ${card.name}`}
+              title="Remove object (Ctrl+Z to undo)"><Trash2 size={14} /></button> : null}
+            {support.workspace ? (
+              <button type="button" className="card-expand-button" onClick={() => openWorkspace(card.id)}>
+                Open workspace <ExternalLink size={13} />
+              </button>
+            ) : null}
+          </div>
+        </footer>
+      </>}
     </article>
   );
 }

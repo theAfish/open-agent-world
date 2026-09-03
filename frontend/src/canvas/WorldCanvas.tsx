@@ -17,7 +17,6 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { WorldCardNode } from "../cards/CardFrame";
-import { NodeWorkspace } from "../cards/NodeWorkspace";
 import type { CanvasNode, CanvasNodeData } from "../cards/types";
 import { EdgeInspector } from "../edges/EdgeInspector";
 import { RelationshipConnectionLine } from "../edges/RelationshipConnectionLine";
@@ -29,7 +28,7 @@ import { useWorldStore } from "../state/worldStore";
 import { NODE_SURFACE_SIZE, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
 import type { CardType } from "../types/world";
 import { ContourLayer } from "./ContourLayer";
-import { displacedPosition, nodePositionFromSurfacePosition, positionSurfaceAtNodeCenter } from "./nodeDisplacement";
+import { displacedPositions, nodePositionFromSurfacePosition, positionSurfaceAtNodeCenter } from "./nodeDisplacement";
 
 const nodeTypes = { worldCard: WorldCardNode };
 const edgeTypes = { semantic: SemanticEdge };
@@ -37,25 +36,22 @@ const defaultViewport: Viewport = { x: 0, y: 0, zoom: 0.92 };
 
 function nodeFromCard(
   card: ReturnType<typeof useWorldStore.getState>["cards"][number],
-  activeNodeId: string | undefined,
-  activeLevel: NodeSurfaceLevel,
-  inspectorNodeIds: readonly string[],
-  inspectors: readonly ReturnType<typeof useWorldStore.getState>["cards"][number][],
+  surfaceLevel: NodeSurfaceLevel,
+  displaced: boolean,
+  position: ReturnType<typeof useWorldStore.getState>["cards"][number]["position"],
 ): CanvasNode {
-  const surfaceLevel = surfaceLevelForNode(card.id, activeNodeId, activeLevel, inspectorNodeIds);
-  const visualLevel = surfaceLevel === "workspace" ? "inspector" : surfaceLevel;
-  const size = NODE_SURFACE_SIZE[visualLevel];
-  const displaced = displacedPosition(card, inspectors);
+  const size = NODE_SURFACE_SIZE[surfaceLevel];
   return {
     id: card.id,
     type: "worldCard",
-    position: positionSurfaceAtNodeCenter(displaced.position, surfaceLevel),
-    data: { card, surfaceLevel, displaced: displaced.displaced },
+    position: positionSurfaceAtNodeCenter(position, surfaceLevel),
+    data: { card, surfaceLevel, displaced },
     style: { width: size.width, height: size.height },
-    draggable: (visualLevel === "node" || visualLevel === "preview") && !displaced.displaced,
+    draggable: !displaced,
+    dragHandle: surfaceLevel === "workspace" ? ".node-drag-region" : undefined,
     selectable: true,
     connectable: !card.ephemeral,
-    zIndex: visualLevel === "inspector" ? 20 : visualLevel === "preview" ? 12 : 1,
+    zIndex: surfaceLevel === "workspace" ? 24 : surfaceLevel === "inspector" ? 20 : surfaceLevel === "preview" ? 12 : 1,
   };
 }
 
@@ -91,19 +87,29 @@ export function WorldCanvas() {
     () => filterCardsToChunks([...cards, ...stressCards], activeChunkKeys),
     [activeChunkKeys, cards, stressCards],
   );
-  const inspectorCards = useMemo(
-    () => renderCards.filter((card) => inspectorNodeIds.includes(card.id)),
-    [inspectorNodeIds, renderCards],
+  const surfaceLevels = useMemo(() => new Map(renderCards.map((card) => [
+    card.id,
+    surfaceLevelForNode(card.id, activeSurfaceNodeId, activeSurfaceLevel, inspectorNodeIds),
+  ])), [activeSurfaceLevel, activeSurfaceNodeId, inspectorNodeIds, renderCards]);
+  const surfaceObstacles = useMemo(() => renderCards.flatMap((card) => {
+    const level = surfaceLevels.get(card.id);
+    return level === "inspector" || level === "workspace" ? [{ card, level }] : [];
+  }), [renderCards, surfaceLevels]);
+  const displacedById = useMemo(
+    () => displacedPositions(renderCards, surfaceObstacles),
+    [renderCards, surfaceObstacles],
   );
   const mappedNodes = useMemo(
-    () => renderCards.map((card) => nodeFromCard(
-      card,
-      activeSurfaceNodeId,
-      activeSurfaceLevel,
-      inspectorNodeIds,
-      inspectorCards,
-    )),
-    [activeSurfaceLevel, activeSurfaceNodeId, inspectorCards, inspectorNodeIds, renderCards],
+    () => renderCards.map((card) => {
+      const displaced = displacedById.get(card.id);
+      return nodeFromCard(
+        card,
+        surfaceLevels.get(card.id) ?? "node",
+        displaced?.displaced ?? false,
+        displaced?.position ?? card.position,
+      );
+    }),
+    [displacedById, renderCards, surfaceLevels],
   );
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(mappedNodes);
   const nodesRef = useRef(nodes);
@@ -345,7 +351,6 @@ export function WorldCanvas() {
         />
       </ReactFlow>
       <EdgeInspector />
-      <NodeWorkspace />
     </div>
   );
 }

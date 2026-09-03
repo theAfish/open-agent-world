@@ -222,6 +222,51 @@ test("a detail card uses the same boundary-following connection hint", async ({ 
   }
 });
 
+test("detail and workspace surfaces are draggable canvas nodes while controls remain usable", async ({ page, request }) => {
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const card = await createCard(
+    request,
+    `e2e-draggable-surface-${suffix}`,
+    "agent",
+    "E2E Draggable Surface",
+    { x: 510, y: 280 },
+  );
+
+  try {
+    await page.goto("/");
+    const surface = page.locator(`[data-card-id="${card.id}"]`);
+    await surface.click();
+    await expect(surface).toHaveAttribute("data-surface-level", "inspector");
+    const section = surface.locator(".card-section").first();
+    const detailBefore = await surface.boundingBox();
+    const sectionBox = await section.boundingBox();
+    if (!detailBefore || !sectionBox) throw new Error("Detail drag geometry is unavailable");
+    await page.mouse.move(sectionBox.x + 18, sectionBox.y + 14);
+    await page.mouse.down();
+    await page.mouse.move(sectionBox.x + 138, sectionBox.y + 52, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(async () => Math.abs(((await surface.boundingBox())?.x ?? detailBefore.x) - detailBefore.x)).toBeGreaterThan(50);
+
+    await surface.getByRole("button", { name: "Open workspace" }).click();
+    const workspace = page.locator(`[data-workspace-node-id="${card.id}"]`);
+    await expect(workspace).toBeVisible();
+    await expect(workspace.locator("xpath=ancestor::div[contains(@class, 'react-flow__node-worldCard')]")).toHaveCount(1);
+    await page.waitForTimeout(450);
+    const workspaceBefore = await workspace.boundingBox();
+    const workspaceTitle = workspace.getByText("E2E Draggable Surface", { exact: true });
+    await expect(workspaceTitle).toBeVisible();
+    const titleBox = await workspaceTitle.boundingBox();
+    if (!workspaceBefore || !titleBox) throw new Error("Workspace drag geometry is unavailable");
+    await page.mouse.move(titleBox.x + titleBox.width / 2, titleBox.y + titleBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(titleBox.x + titleBox.width / 2 + 80, titleBox.y + titleBox.height / 2 + 40, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(async () => Math.abs(((await workspace.boundingBox())?.x ?? workspaceBefore.x) - workspaceBefore.x)).toBeGreaterThan(35);
+  } finally {
+    await request.delete(`/api/nodes/${card.id}`);
+  }
+});
+
 test("a Conversation workspace creates a group and routes explicit mentions", async ({ page, request }) => {
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
   const atlas = await createCard(request, `e2e-atlas-${suffix}`, "agent", "E2E Atlas", { x: 260, y: 180 });

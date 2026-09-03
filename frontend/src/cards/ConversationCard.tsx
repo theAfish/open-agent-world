@@ -31,7 +31,7 @@ export function ConversationCardBody({ card }: { card: WorldCard; level: NodeSur
   }, [accessEventId, card.id, eventId]);
 
   return (
-    <div className="expanded-stack nodrag nopan">
+    <div className="expanded-stack">
       <section className="conversation-field-summary">
         <MessageCircleMore size={19} />
         <div>

@@ -36,6 +36,7 @@ export const NODE_SURFACE_SIZE = {
   node: { width: 96, height: 96 },
   preview: { width: 286, height: 156 },
   inspector: { width: 438, height: 570 },
+  workspace: { width: 1_020, height: 700 },
 } as const;
 
 interface NodeSurfaceState {

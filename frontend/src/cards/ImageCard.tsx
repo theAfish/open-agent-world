@@ -38,7 +38,7 @@ export function ImageCardBody({ card }: { card: WorldCard; level: NodeSurfaceLev
   );
 
   return (
-    <div className="expanded-stack nodrag nopan">
+    <div className="expanded-stack">
       <div className="image-preview-expanded">{preview}</div>
       <div className="image-metadata-grid">
         <div><span>Filename</span><strong title={filename}>{filename}</strong></div>

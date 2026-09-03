@@ -43,7 +43,7 @@ export function AgentCardBody({ card }: { card: WorldCard; level: NodeSurfaceLev
   const modelOptions = [...new Set([model, ...modelSettings.models].filter(Boolean))];
 
   return (
-    <div className="expanded-stack nodrag nopan">
+    <div className="expanded-stack">
       <div className="field-row">
         <label>
           <span>Model</span>

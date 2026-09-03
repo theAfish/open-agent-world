@@ -26,7 +26,7 @@ export function SandboxCardBody({ card }: { card: WorldCard; level: NodeSurfaceL
   const ready = card.status === "ready" || card.status === "running";
 
   return (
-    <div className="expanded-stack nodrag nopan">
+    <div className="expanded-stack">
       <div className="sandbox-status-panel">
         <div className="instrument-gauge" data-active={ready} aria-hidden="true"><i /><i /><i /></div>
         <div>
