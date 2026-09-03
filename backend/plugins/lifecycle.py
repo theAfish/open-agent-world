@@ -62,6 +62,8 @@ class ConversationNodeLifecycle(Protocol):
 
     def create_initial_session(self, node_id: str, title: str) -> None: ...
 
+    def delete_session_state(self, node_id: str) -> None: ...
+
 
 @dataclass(frozen=True, slots=True)
 class NodeLifecycleContext:

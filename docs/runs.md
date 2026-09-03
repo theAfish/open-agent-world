@@ -12,6 +12,11 @@ not lifecycle storage. A provider turn ending also does not imply that the Run
 succeeded: a provider must explicitly emit a terminal `run_status`. If its
 event stream ends without one, `RunManager` leaves the Run in `waiting`.
 
+Run working data is deliberately separate from `RunRecord`. Every new Run owns
+a fresh durable `run:<run_id>` state scope for its input, progress, scratch data,
+intermediate results, and result. The provider receives a typed `StateContext`
+whose Run scope is most local; see [Runtime state](state.md).
+
 ## Lifecycle
 
 Valid transitions are centralized in `RunManager`:

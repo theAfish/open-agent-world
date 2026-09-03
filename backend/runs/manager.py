@@ -19,6 +19,7 @@ from backend.errors import RuntimeUnavailableError
 from backend.events.hub import EventHub
 from backend.events.models import EventType
 from backend.plugins import PluginRegistry
+from backend.state import StateContext, StateScope, StateStore
 from backend.world.models import Card, CardPatch
 from backend.world.store import WorldStore
 
@@ -76,6 +77,7 @@ class RunManager:
     events: EventHub
     plugins: PluginRegistry
     capability_provider: AgentCapabilityProvider
+    state: StateStore
     default_runtime_provider_id: str | None = None
     provider_options: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     inactivity_timeout_seconds: float | None = DEFAULT_INACTIVITY_TIMEOUT_SECONDS
@@ -176,6 +178,8 @@ class RunManager:
         task_id: str | None = None,
         context_id: str | None = None,
     ) -> RunRecord:
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("Run prompt must be a non-empty string")
         lock = self._start_locks.setdefault(agent_id, asyncio.Lock())
         async with lock:
             card = self._agent_card(agent_id)
@@ -201,6 +205,14 @@ class RunManager:
                 parent_run_id=parent_run_id,
                 task_id=task_id,
                 context_id=context_id,
+            )
+            state_context = self._state_context(record)
+            self.state.set(
+                state_context.local_scope,
+                "input",
+                prompt,
+                actor_id=agent_id,
+                run_id=record.run_id,
             )
             self._execution_done[record.run_id] = asyncio.Event()
             self._terminal_done[record.run_id] = asyncio.Event()
@@ -368,6 +380,7 @@ class RunManager:
         return cancelled
 
     async def register_agent(self, card: Card) -> None:
+        self.state.ensure_scope("agent", card.id, schema_id="core.agent")
         provider_id = self._optional_provider_id(card)
         if provider_id is None:
             return
@@ -397,13 +410,13 @@ class RunManager:
     async def delete_agent(self, agent_id: str, *, missing_ok: bool = False) -> None:
         await self.cancel_agent_runs(agent_id)
         provider_id = self._agent_provider_ids.pop(agent_id, None)
-        if provider_id is None:
-            return
-        try:
-            await self._providers[provider_id].delete_agent(agent_id)
-        except AgentNotFoundError:
-            if not missing_ok:
-                raise
+        if provider_id is not None:
+            try:
+                await self._providers[provider_id].delete_agent(agent_id)
+            except AgentNotFoundError:
+                if not missing_ok:
+                    raise
+        self.state.delete_scope("agent", agent_id)
 
     async def get_agent(self, agent_id: str) -> Any:
         card = self._agent_card(agent_id)
@@ -428,6 +441,7 @@ class RunManager:
             context_id=record.context_id,
             task_id=record.task_id,
             runtime_provider_id=record.runtime_provider_id,
+            state_context=self._state_context(record),
         )
         token = _current_invocation.set(context)
         try:
@@ -502,6 +516,24 @@ class RunManager:
                 "running" if self._occupied_agent_runs(record.agent_id) else "idle",
                 record.run_id,
             )
+
+    def _state_context(self, record: RunRecord) -> StateContext:
+        """Build the provider-neutral inheritance stack for one Run."""
+
+        scopes: list[StateScope] = [
+            self.state.ensure_scope("world", "default", schema_id="core.world"),
+            self.state.ensure_scope("agent", record.agent_id, schema_id="core.agent"),
+        ]
+        if record.context_id is not None:
+            scopes.append(
+                self.state.ensure_scope(
+                    "session", record.context_id, schema_id="core.session"
+                )
+            )
+        scopes.append(
+            self.state.ensure_scope("run", record.run_id, schema_id="core.run")
+        )
+        return StateContext(tuple(scopes))
 
     def _provider(self, provider_id: str) -> RuntimeProvider:
         existing = self._providers.get(provider_id)

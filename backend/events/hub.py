@@ -58,6 +58,18 @@ class EventHub:
                 queue.get_nowait()
             queue.put_nowait(event)
 
+    def publish_event_nowait(self, event: RuntimeEvent) -> None:
+        """Publish a synchronously committed state change to live subscribers.
+
+        State persistence is authoritative, so this intentionally does not make
+        event delivery part of the database transaction.
+        """
+
+        for queue in tuple(self._subscribers):
+            if queue.full():
+                queue.get_nowait()
+            queue.put_nowait(event)
+
     @asynccontextmanager
     async def subscribe(self) -> AsyncIterator[asyncio.Queue[RuntimeEvent]]:
         queue: asyncio.Queue[RuntimeEvent] = asyncio.Queue(maxsize=self.queue_size)

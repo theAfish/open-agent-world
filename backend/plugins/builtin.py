@@ -118,6 +118,19 @@ class ConversationNodeBehavior(NodeLifecycleHandler):
         del request
         context.conversations.create_initial_session(node.id, "General")
 
+    async def on_create_rollback(
+        self,
+        context: NodeLifecycleContext,
+        node: Card,
+        request: CardCreate,
+        error: BaseException,
+    ) -> None:
+        del request, error
+        context.conversations.delete_session_state(node.id)
+
+    async def on_delete(self, context: NodeLifecycleContext, node: Card) -> None:
+        context.conversations.delete_session_state(node.id)
+
 
 class ManagedResourceNodeBehavior(NodeLifecycleHandler):
     _mount_relationships = frozenset({"mount_read_only", "mount_read_write"})
@@ -259,8 +272,77 @@ async def _execute_sandbox(
 
 def create_builtin_registry() -> PluginRegistry:
     from backend.agents import GoogleAdkAgentRuntime, MockAgentRuntime
+    from backend.state import MergePolicy, StateFieldDefinition, StateSchema
 
     registry = PluginRegistry()
+
+    def common_fields(scope_kind: str) -> dict[str, StateFieldDefinition]:
+        allowed = frozenset({scope_kind})
+        return {
+            "workspace": StateFieldDefinition(
+                value_type=Any, allowed_scope_kinds=allowed
+            ),
+            "shared_working_memory": StateFieldDefinition(
+                value_type=Any, allowed_scope_kinds=allowed
+            ),
+            "observations": StateFieldDefinition(
+                value_type=list[Any],
+                allowed_scope_kinds=allowed,
+                merge_policy=MergePolicy.APPEND,
+            ),
+            "artifacts": StateFieldDefinition(
+                value_type=list[Any],
+                allowed_scope_kinds=allowed,
+                merge_policy=MergePolicy.APPEND_UNIQUE,
+            ),
+        }
+
+    registry.register_state_schema(StateSchema(id="core.world", fields={
+        **common_fields("world"),
+    }))
+    registry.register_state_schema(StateSchema(id="core.agent", fields={
+        **common_fields("agent"),
+        "memory": StateFieldDefinition(
+            value_type=Any, allowed_scope_kinds=frozenset({"agent"})
+        ),
+    }))
+    registry.register_state_schema(StateSchema(id="core.session", fields={
+        **common_fields("session"),
+    }))
+    run_only = frozenset({"run"})
+    registry.register_state_schema(StateSchema(id="core.run", fields={
+        **common_fields("run"),
+        "input": StateFieldDefinition(
+            value_type=str, allowed_scope_kinds=run_only
+        ),
+        "progress": StateFieldDefinition(
+            value_type=float, allowed_scope_kinds=run_only
+        ),
+        "current_step": StateFieldDefinition(
+            value_type=Any, allowed_scope_kinds=run_only
+        ),
+        "execution_graph": StateFieldDefinition(
+            value_type=dict[str, Any],
+            allowed_scope_kinds=run_only,
+            merge_policy=MergePolicy.MERGE_DICT,
+        ),
+        "scratch": StateFieldDefinition(
+            value_type=dict[str, Any],
+            allowed_scope_kinds=run_only,
+            merge_policy=MergePolicy.MERGE_DICT,
+        ),
+        "intermediate_results": StateFieldDefinition(
+            value_type=list[Any],
+            allowed_scope_kinds=run_only,
+            merge_policy=MergePolicy.APPEND,
+        ),
+        "result": StateFieldDefinition(
+            value_type=Any, allowed_scope_kinds=run_only
+        ),
+        "completed": StateFieldDefinition(
+            value_type=bool, allowed_scope_kinds=run_only, default=False
+        ),
+    }))
     registry.register_runtime_provider(
         "google.adk",
         lambda capability_provider, **options: GoogleAdkAgentRuntime(

@@ -34,7 +34,7 @@ from backend.errors import (
     RuntimeUnavailableError,
 )
 from backend.events.hub import EventHub
-from backend.events.models import EventType
+from backend.events.models import EventType, RuntimeEvent
 from backend.persistence.database import Database
 from backend.plugins import NodeLifecycleContext, PluginRegistry, load_plugin_registry
 from backend.resources.manager import ManagedResourceStore
@@ -57,6 +57,7 @@ from backend.sandbox import (
     SandboxNotFoundError,
     WindowsSandboxBackend,
 )
+from backend.state import StateMutation, StateMutationKind, StateStore
 from backend.world.models import (
     Card,
     CardCreate,
@@ -182,9 +183,17 @@ class _LifecycleResources:
 @dataclass(frozen=True, slots=True)
 class _LifecycleConversations:
     conversations: ConversationStore
+    state: StateStore
 
     def create_initial_session(self, node_id: str, title: str) -> None:
-        self.conversations.create_session(node_id, ConversationSessionCreate(title=title))
+        session = self.conversations.create_session(
+            node_id, ConversationSessionCreate(title=title)
+        )
+        self.state.ensure_scope("session", session.id, schema_id="core.session")
+
+    def delete_session_state(self, node_id: str) -> None:
+        for session in self.conversations.list_sessions(node_id):
+            self.state.delete_scope("session", session.id)
 
 
 @dataclass(slots=True)
@@ -197,6 +206,7 @@ class ApplicationServices:
     events: EventHub
     plugins: PluginRegistry
     conversations: ConversationStore
+    state: StateStore
     run_manager: RunManager | None = None
     sandbox_backend: SandboxBackend | None = None
 
@@ -513,6 +523,7 @@ class ApplicationServices:
             conversation_id,
             request.model_copy(update={"participant_ids": participants}),
         )
+        self.state.ensure_scope("session", session.id, schema_id="core.session")
         await self.events.publish(
             EventType.CONVERSATION_SESSION_CREATED,
             node_id=conversation_id,
@@ -574,6 +585,7 @@ class ApplicationServices:
         if session.title == "General":
             raise ConversationValidationError("the default General session cannot be deleted")
         self.conversations.delete_session(conversation_id, session_id)
+        self.state.delete_scope("session", session_id)
         await self.events.publish(
             EventType.CONVERSATION_SESSION_DELETED,
             node_id=conversation_id,
@@ -1161,7 +1173,7 @@ class ApplicationServices:
         return NodeLifecycleContext(
             nodes=_LifecycleNodes(self.world),
             resources=_LifecycleResources(self.resources),
-            conversations=_LifecycleConversations(self.conversations),
+            conversations=_LifecycleConversations(self.conversations, self.state),
             agents=_LifecycleAgents(manager),
             sandboxes=(
                 _LifecycleSandboxes(self.sandbox_backend)
@@ -1218,6 +1230,36 @@ def create_services(
     conversations = ConversationStore(database)
     capabilities = CapabilityBroker(world, resources, plugin_registry)
     events = EventHub(queue_size=settings.event_queue_size)
+
+    state_event_types = {
+        StateMutationKind.CREATED: EventType.STATE_CREATED,
+        StateMutationKind.UPDATED: EventType.STATE_UPDATED,
+        StateMutationKind.DELETED: EventType.STATE_DELETED,
+    }
+
+    def publish_state_mutation(mutation: StateMutation) -> None:
+        events.publish_event_nowait(RuntimeEvent(
+            type=state_event_types[mutation.kind],
+            node_id=(
+                mutation.scope.owner_id
+                if mutation.scope.scope_kind == "agent"
+                else None
+            ),
+            agent_id=mutation.actor_id,
+            run_id=mutation.run_id,
+            payload={
+                "scope_id": mutation.scope.scope_id,
+                "scope_kind": mutation.scope.scope_kind,
+                "owner_id": mutation.scope.owner_id,
+                "key": mutation.key,
+                "revision": mutation.revision,
+                **({"actor_id": mutation.actor_id} if mutation.actor_id else {}),
+                **({"run_id": mutation.run_id} if mutation.run_id else {}),
+            },
+        ))
+
+    state = StateStore(database, plugin_registry, event_sink=publish_state_mutation)
+    state.ensure_scope("world", "default", schema_id="core.world")
     services = ApplicationServices(
         settings=settings,
         database=database,
@@ -1227,6 +1269,7 @@ def create_services(
         events=events,
         plugins=plugin_registry,
         conversations=conversations,
+        state=state,
         sandbox_backend=sandbox_backend,
     )
     from backend.capabilities.provider import WorldAgentCapabilityProvider
@@ -1238,6 +1281,7 @@ def create_services(
         events=events,
         plugins=plugin_registry,
         capability_provider=provider,
+        state=state,
         default_runtime_provider_id=(
             default_runtime_provider_id
             if default_runtime_provider_id is not None
