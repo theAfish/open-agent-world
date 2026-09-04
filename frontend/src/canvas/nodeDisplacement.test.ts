@@ -7,6 +7,34 @@ function card(id: string, x: number, y: number) {
 }
 
 describe("local inspector displacement", () => {
+  it("leaves close peers untouched when there are no expanded surfaces", () => {
+    const first = card("first", 100, 100);
+    const second = card("second", 180, 170);
+
+    const layout = displacedPositions([first, second], []);
+
+    expect(layout.get(first.id)).toEqual({ position: first.position, displaced: false });
+    expect(layout.get(second.id)).toEqual({ position: second.position, displaced: false });
+  });
+
+  it("does not peer-separate close nodes that a distant obstacle did not move", () => {
+    const first = card("first", 100, 100);
+    const second = card("second", 180, 170);
+    const distantInspector = card("distant-inspector", 2_000, 2_000);
+
+    const layout = displacedPositions(
+      [first, second, distantInspector],
+      [{ card: distantInspector, level: "inspector" }],
+    );
+
+    expect(layout.get(first.id)).toEqual({ position: first.position, displaced: false });
+    expect(layout.get(second.id)).toEqual({ position: second.position, displaced: false });
+    expect(layout.get(distantInspector.id)).toEqual({
+      position: distantInspector.position,
+      displaced: false,
+    });
+  });
+
   it("moves only nearby peers and never mutates persisted positions", () => {
     const inspector = card("inspector", 100, 100);
     const nearby = card("nearby", 250, 250);
@@ -49,6 +77,52 @@ describe("local inspector displacement", () => {
     expect(nodePositionFromSurfacePosition(preview, "preview")).toEqual(compact);
     expect(nodePositionFromSurfacePosition(inspector, "inspector")).toEqual(compact);
     expect(nodePositionFromSurfacePosition(workspace, "workspace")).toEqual(compact);
+  });
+
+  it("uses the full 286 by 156 preview rectangle when clearing nearby nodes", () => {
+    const preview = card("preview", 500, 400);
+    const neighbor = card("neighbor", 650, 400);
+    const original = { ...neighbor.position };
+    const previewTopLeft = positionSurfaceAtNodeCenter(preview.position, "preview");
+    const previewRight = previewTopLeft.x + 286;
+
+    const layout = displacedPositions(
+      [preview, neighbor],
+      [{ card: preview, level: "preview" }],
+    );
+    const movedNeighbor = layout.get(neighbor.id)!;
+
+    expect(layout.get(preview.id)).toEqual({ position: preview.position, displaced: false });
+    expect(movedNeighbor.displaced).toBe(true);
+    expect(movedNeighbor.position).not.toEqual(original);
+    expect(movedNeighbor.position.x).toBeGreaterThanOrEqual(previewRight);
+    expect(neighbor.position).toEqual(original);
+  });
+
+  it("repositions a preview obstacle around an inspector before it clears compact peers", () => {
+    const inspector = card("inspector", 500, 400);
+    const preview = card("preview", 650, 400);
+    const neighbor = card("neighbor", 950, 400);
+    const inspectorTopLeft = positionSurfaceAtNodeCenter(inspector.position, "inspector");
+    const inspectorRight = inspectorTopLeft.x + 438;
+
+    const layout = displacedPositions(
+      [inspector, preview, neighbor],
+      [
+        { card: inspector, level: "inspector" },
+        { card: preview, level: "preview" },
+      ],
+      new Map([[preview.id, "preview"]]),
+    );
+    const movedPreview = layout.get(preview.id)!;
+    const movedNeighbor = layout.get(neighbor.id)!;
+    const movedPreviewTopLeft = positionSurfaceAtNodeCenter(movedPreview.position, "preview");
+    const movedPreviewRight = movedPreviewTopLeft.x + 286;
+
+    expect(movedPreview.displaced).toBe(true);
+    expect(movedPreviewTopLeft.x).toBeGreaterThanOrEqual(inspectorRight);
+    expect(movedNeighbor.displaced).toBe(true);
+    expect(movedNeighbor.position.x).toBeGreaterThanOrEqual(movedPreviewRight);
   });
 
   it("clears a large workspace and separates peers that were pushed into one another", () => {

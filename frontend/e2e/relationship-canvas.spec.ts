@@ -4,6 +4,10 @@ interface CreatedCard {
   id: string;
 }
 
+interface PersistedCard {
+  position: { x: number; y: number };
+}
+
 async function createCard(
   request: APIRequestContext,
   id: string,
@@ -72,6 +76,72 @@ async function panCanvas(page: Page, direction: "left" | "right", times: number)
     await page.mouse.move(direction === "left" ? left : right, y, { steps: 5 });
     await page.mouse.up();
   }
+}
+
+async function cardBox(card: Locator, label: string) {
+  const box = await card.boundingBox();
+  if (!box) throw new Error(`${label} geometry is unavailable`);
+  return box;
+}
+
+function pointDistance(
+  first: { x: number; y: number },
+  second: { x: number; y: number },
+) {
+  return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+async function persistedPosition(request: APIRequestContext, id: string) {
+  const response = await request.get(`/api/nodes/${id}`);
+  expect(response.ok()).toBe(true);
+  return ((await response.json()) as PersistedCard).position;
+}
+
+async function expectPersistedMovement(
+  request: APIRequestContext,
+  id: string,
+  original: { x: number; y: number },
+  minimumDistance = 45,
+) {
+  let latest = original;
+  await expect.poll(async () => {
+    latest = await persistedPosition(request, id);
+    return pointDistance(latest, original);
+  }).toBeGreaterThan(minimumDistance);
+  return latest;
+}
+
+async function dragCardBy(
+  card: Locator,
+  delta: { x: number; y: number },
+  options: {
+    holdBeforeMoveMs?: number;
+    expectedLevelWhilePressed?: "node" | "preview" | "inspector" | "workspace";
+    startRatio?: { x: number; y: number };
+  } = {},
+) {
+  const page = card.page();
+  const before = await cardBox(card, "Card drag start");
+  const ratio = options.startRatio ?? { x: 0.5, y: 0.5 };
+  const start = {
+    x: before.x + before.width * ratio.x,
+    y: before.y + before.height * ratio.y,
+  };
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  if (options.holdBeforeMoveMs) {
+    await page.waitForTimeout(options.holdBeforeMoveMs);
+  }
+  if (options.expectedLevelWhilePressed) {
+    await expect(card).toHaveAttribute("data-surface-level", options.expectedLevelWhilePressed);
+  }
+  await page.mouse.move(start.x + delta.x, start.y + delta.y, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(async () => {
+    const after = await cardBox(card, "Card drag result");
+    return pointDistance(after, before);
+  }).toBeGreaterThan(Math.min(50, pointDistance(delta, { x: 0, y: 0 }) * 0.45));
+  return { before, after: await cardBox(card, "Settled card drag result") };
 }
 
 test("procedural terrain streams deterministic chunks across distant canvas coordinates", async ({ page }) => {
@@ -185,29 +255,84 @@ test("a reverse Text-to-Agent drag uses the allowed Agent-to-Text direction", as
   }
 });
 
+test("close compact nodes remain independently draggable and persist both positions", async ({ page, request }) => {
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const firstPosition = { x: 350, y: 170 };
+  const secondPosition = { x: 460, y: 280 };
+  const first = await createCard(
+    request,
+    `e2e-close-first-${suffix}`,
+    "agent",
+    "E2E Close First",
+    firstPosition,
+  );
+  const second = await createCard(
+    request,
+    `e2e-close-second-${suffix}`,
+    "agent",
+    "E2E Close Second",
+    secondPosition,
+  );
+
+  try {
+    await page.goto("/");
+    const firstCard = page.locator(`[data-card-id="${first.id}"]`);
+    const secondCard = page.locator(`[data-card-id="${second.id}"]`);
+    await expect(firstCard).toHaveAttribute("data-surface-level", "node");
+    await expect(secondCard).toHaveAttribute("data-surface-level", "node");
+
+    await dragCardBy(firstCard, { x: -120, y: 70 }, { expectedLevelWhilePressed: "node" });
+    await expectPersistedMovement(request, first.id, firstPosition);
+
+    await dragCardBy(secondCard, { x: 115, y: 75 }, { expectedLevelWhilePressed: "node" });
+    await expectPersistedMovement(request, second.id, secondPosition);
+
+    await page.reload();
+    await expect(firstCard).toHaveAttribute("data-surface-level", "node");
+    await expect(secondCard).toHaveAttribute("data-surface-level", "node");
+    expect(pointDistance(await persistedPosition(request, first.id), firstPosition)).toBeGreaterThan(45);
+    expect(pointDistance(await persistedPosition(request, second.id), secondPosition)).toBeGreaterThan(45);
+  } finally {
+    await request.delete(`/api/nodes/${first.id}`);
+    await request.delete(`/api/nodes/${second.id}`);
+  }
+});
+
 test("a preview stays open while the pointer uses its outer hover buffer", async ({ page, request }) => {
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const previewPosition = { x: 510, y: 280 };
+  const neighborPosition = { x: 710, y: 250 };
   const card = await createCard(
     request,
     `e2e-preview-${suffix}`,
     "agent",
     "E2E Hover Buffer",
-    { x: 510, y: 280 },
+    previewPosition,
+  );
+  const neighbor = await createCard(
+    request,
+    `e2e-preview-neighbor-${suffix}`,
+    "agent",
+    "E2E Preview Neighbor",
+    neighborPosition,
   );
 
   try {
     await page.goto("/");
     const surface = page.locator(`[data-card-id="${card.id}"]`);
+    const neighborSurface = page.locator(`[data-card-id="${neighbor.id}"]`);
     const hoverHint = surface.locator("[data-connection-hover-hint]");
+    const hoverBuffer = surface.locator("[data-preview-hover-buffer]");
     await expect(surface).toBeVisible();
+    await expect(neighborSurface).toBeVisible();
     await expect(surface).not.toHaveAttribute("data-connection-hot", "true");
     await surface.hover();
     await expect(surface).toHaveAttribute("data-surface-level", "preview");
-    await expect(surface.locator("[data-preview-hover-buffer]")).toBeVisible();
+    await expect(hoverBuffer).toBeVisible();
+    await expect(hoverBuffer).toHaveCSS("pointer-events", "none");
 
-    await page.waitForTimeout(350);
-    const previewBox = await surface.boundingBox();
-    if (!previewBox) throw new Error("Preview card geometry is unavailable");
+    await page.waitForTimeout(450);
+    const previewBox = await cardBox(surface, "Preview card");
     await page.mouse.move(previewBox.x + previewBox.width - 3, previewBox.y + previewBox.height / 2);
     await expect(surface).toHaveAttribute("data-connection-hot", "true");
     const hintBox = await hoverHint.boundingBox();
@@ -216,14 +341,56 @@ test("a preview stays open while the pointer uses its outer hover buffer", async
     await page.mouse.move(previewBox.x + previewBox.width / 2, previewBox.y + previewBox.height / 2);
     await expect(surface).not.toHaveAttribute("data-connection-hot", "true");
 
-    await page.mouse.move(previewBox.x + previewBox.width + 14, previewBox.y + previewBox.height / 2);
+    const safePoint = {
+      x: previewBox.x + previewBox.width + 17,
+      y: previewBox.y + previewBox.height + 17,
+    };
+    await page.mouse.move(safePoint.x, safePoint.y);
+    const safeHit = await page.evaluate(({ x, y }) => {
+      const hit = document.elementFromPoint(x, y) as HTMLElement | null;
+      return {
+        buffer: Boolean(hit?.closest("[data-preview-hover-buffer]")),
+        noDrag: Boolean(hit?.closest(".nodrag")),
+        handle: Boolean(hit?.closest(".react-flow__handle")),
+      };
+    }, safePoint);
+    expect(safeHit).toEqual({ buffer: false, noDrag: false, handle: false });
     await page.waitForTimeout(320);
     await expect(surface).toHaveAttribute("data-surface-level", "preview");
+
+    await page.mouse.move(previewBox.x + previewBox.width / 2, previewBox.y + previewBox.height / 2);
+    const neighborBox = await cardBox(neighborSurface, "Preview-displaced neighbor");
+    const exposedNeighborPoint = { x: neighborBox.x + 4, y: neighborBox.y + 4 };
+    expect(exposedNeighborPoint.x).toBeGreaterThan(previewBox.x + previewBox.width);
+    expect(exposedNeighborPoint.x).toBeLessThanOrEqual(previewBox.x + previewBox.width + 20.5);
+    const neighborHit = await page.evaluate(({ x, y }) => {
+      const hit = document.elementFromPoint(x, y) as HTMLElement | null;
+      return {
+        cardId: hit?.closest("[data-card-id]")?.getAttribute("data-card-id") ?? null,
+        buffer: Boolean(hit?.closest("[data-preview-hover-buffer]")),
+        noDrag: Boolean(hit?.closest(".nodrag")),
+        handle: Boolean(hit?.closest(".react-flow__handle")),
+      };
+    }, exposedNeighborPoint);
+    expect(neighborHit).toEqual({
+      cardId: neighbor.id,
+      buffer: false,
+      noDrag: false,
+      handle: false,
+    });
+
+    await page.mouse.move(exposedNeighborPoint.x, exposedNeighborPoint.y);
+    await page.mouse.down();
+    await expect(neighborSurface).toHaveAttribute("data-surface-level", "node");
+    await page.mouse.move(exposedNeighborPoint.x + 100, exposedNeighborPoint.y + 65, { steps: 8 });
+    await page.mouse.up();
+    await expectPersistedMovement(request, neighbor.id, neighborPosition);
 
     await page.mouse.move(previewBox.x + previewBox.width + 36, previewBox.y + previewBox.height / 2);
     await expect(surface).toHaveAttribute("data-surface-level", "node", { timeout: 1000 });
   } finally {
     await request.delete(`/api/nodes/${card.id}`);
+    await request.delete(`/api/nodes/${neighbor.id}`);
   }
 });
 
@@ -300,6 +467,101 @@ test("detail and workspace surfaces are draggable canvas nodes while controls re
     await expect.poll(async () => Math.abs(((await workspace.boundingBox())?.x ?? workspaceBefore.x) - workspaceBefore.x)).toBeGreaterThan(35);
   } finally {
     await request.delete(`/api/nodes/${card.id}`);
+  }
+});
+
+test("inspector-displaced compact and preview surfaces can be dragged without hover upgrades or rebound", async ({
+  page,
+  request,
+}) => {
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const inspectorPosition = { x: 400, y: 260 };
+  const compactPosition = { x: 560, y: 170 };
+  const previewPosition = { x: 560, y: 390 };
+  const inspector = await createCard(
+    request,
+    `e2e-reflow-inspector-${suffix}`,
+    "agent",
+    "E2E Reflow Inspector",
+    inspectorPosition,
+  );
+  const compact = await createCard(
+    request,
+    `e2e-reflow-compact-${suffix}`,
+    "agent",
+    "E2E Reflow Compact",
+    compactPosition,
+  );
+  const preview = await createCard(
+    request,
+    `e2e-reflow-preview-${suffix}`,
+    "agent",
+    "E2E Reflow Preview",
+    previewPosition,
+  );
+
+  try {
+    await page.goto("/");
+    const inspectorSurface = page.locator(`[data-card-id="${inspector.id}"]`);
+    const compactSurface = page.locator(`[data-card-id="${compact.id}"]`);
+    const previewSurface = page.locator(`[data-card-id="${preview.id}"]`);
+    await expect(inspectorSurface).toHaveAttribute("data-surface-level", "node");
+    await expect(compactSurface).toHaveAttribute("data-surface-level", "node");
+    await expect(previewSurface).toHaveAttribute("data-surface-level", "node");
+
+    await inspectorSurface.click();
+    await expect(inspectorSurface).toHaveAttribute("data-surface-level", "inspector");
+
+    const compactBefore = await cardBox(compactSurface, "Compact card before active reflow drag");
+    const compactStart = {
+      x: compactBefore.x + compactBefore.width / 2,
+      y: compactBefore.y + compactBefore.height / 2,
+    };
+    await page.mouse.move(compactStart.x, compactStart.y);
+    await page.mouse.down();
+    await page.mouse.move(compactStart.x + 8, compactStart.y + 3, { steps: 2 });
+    await page.waitForTimeout(230);
+    await expect(compactSurface).toHaveAttribute("data-surface-level", "node");
+    await page.mouse.move(compactStart.x + 190, compactStart.y + 55, { steps: 8 });
+    await page.mouse.up();
+    await expectPersistedMovement(request, compact.id, compactPosition);
+    await expect.poll(async () => {
+      const box = await cardBox(compactSurface, "Compact card after active reflow drag");
+      return pointDistance(box, compactBefore);
+    }).toBeGreaterThan(80);
+    const compactAfter = await cardBox(compactSurface, "Compact card after drag");
+    await page.waitForTimeout(500);
+    const compactSettled = await cardBox(compactSurface, "Compact card after animation window");
+    expect(pointDistance(compactSettled, compactAfter)).toBeLessThan(15);
+
+    await previewSurface.hover();
+    await expect(previewSurface).toHaveAttribute("data-surface-level", "preview");
+    await expect.poll(async () => (await cardBox(previewSurface, "Displaced preview")).width).toBeGreaterThan(280);
+    await page.waitForTimeout(420);
+    const inspectorBox = await cardBox(inspectorSurface, "Inspector obstacle");
+    const previewBefore = await cardBox(previewSurface, "Preview before drag");
+    const rectanglesOverlap = !(
+      previewBefore.x >= inspectorBox.x + inspectorBox.width
+      || previewBefore.x + previewBefore.width <= inspectorBox.x
+      || previewBefore.y >= inspectorBox.y + inspectorBox.height
+      || previewBefore.y + previewBefore.height <= inspectorBox.y
+    );
+    expect(rectanglesOverlap).toBe(false);
+
+    await dragCardBy(
+      previewSurface,
+      { x: 135, y: -45 },
+      { expectedLevelWhilePressed: "preview", startRatio: { x: 0.5, y: 0.4 } },
+    );
+    await expectPersistedMovement(request, preview.id, previewPosition);
+    const previewAfter = await cardBox(previewSurface, "Preview after drag");
+    await page.waitForTimeout(500);
+    const previewSettled = await cardBox(previewSurface, "Preview after animation window");
+    expect(pointDistance(previewSettled, previewAfter)).toBeLessThan(15);
+  } finally {
+    await request.delete(`/api/nodes/${inspector.id}`);
+    await request.delete(`/api/nodes/${compact.id}`);
+    await request.delete(`/api/nodes/${preview.id}`);
   }
 });
 

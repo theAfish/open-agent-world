@@ -7,12 +7,14 @@ export interface DisplacedPosition {
 }
 
 const SURFACE_CLEARANCE = 52;
+const PREVIEW_CLEARANCE = 14;
 const PEER_CLEARANCE = 28;
 const ITERATIONS = 28;
 
 export interface SurfaceObstacle {
   card: WorldCard;
-  level: Extract<NodeSurfaceLevel, "inspector" | "workspace">;
+  level: Exclude<NodeSurfaceLevel, "node">;
+  clearance?: number;
 }
 
 function surfaceSize(level: NodeSurfaceLevel) {
@@ -48,18 +50,30 @@ function stableDirection(id: string) {
   return { x: Math.cos(angle), y: Math.sin(angle) };
 }
 
-function pushOutsideSurface(position: WorldPosition, card: WorldCard, obstacle: SurfaceObstacle): WorldPosition {
+function surfaceClearance(obstacle: SurfaceObstacle) {
+  return obstacle.clearance ?? (obstacle.level === "preview" ? PREVIEW_CLEARANCE : SURFACE_CLEARANCE);
+}
+
+function pushOutsideSurface(
+  position: WorldPosition,
+  card: WorldCard,
+  level: NodeSurfaceLevel,
+  obstacle: SurfaceObstacle,
+  obstaclePosition: WorldPosition,
+): WorldPosition {
   if (card.id === obstacle.card.id) return position;
-  const nodeSize = NODE_SURFACE_SIZE.node;
+  const nodeSize = surfaceSize(level);
   const obstacleSize = surfaceSize(obstacle.level);
-  const obstaclePosition = positionSurfaceAtNodeCenter(obstacle.card.position, obstacle.level);
-  const center = { x: position.x + nodeSize.width / 2, y: position.y + nodeSize.height / 2 };
+  const renderedObstaclePosition = positionSurfaceAtNodeCenter(obstaclePosition, obstacle.level);
+  const compactSize = NODE_SURFACE_SIZE.node;
+  const center = { x: position.x + compactSize.width / 2, y: position.y + compactSize.height / 2 };
   const obstacleCenter = {
-    x: obstaclePosition.x + obstacleSize.width / 2,
-    y: obstaclePosition.y + obstacleSize.height / 2,
+    x: renderedObstaclePosition.x + obstacleSize.width / 2,
+    y: renderedObstaclePosition.y + obstacleSize.height / 2,
   };
-  const halfWidth = (obstacleSize.width + nodeSize.width) / 2 + SURFACE_CLEARANCE;
-  const halfHeight = (obstacleSize.height + nodeSize.height) / 2 + SURFACE_CLEARANCE;
+  const clearance = surfaceClearance(obstacle);
+  const halfWidth = (obstacleSize.width + nodeSize.width) / 2 + clearance;
+  const halfHeight = (obstacleSize.height + nodeSize.height) / 2 + clearance;
   let dx = center.x - obstacleCenter.x;
   let dy = center.y - obstacleCenter.y;
   let normalized = Math.max(Math.abs(dx) / halfWidth, Math.abs(dy) / halfHeight);
@@ -72,8 +86,8 @@ function pushOutsideSurface(position: WorldPosition, card: WorldCard, obstacle: 
   }
   const scale = 1.008 / normalized;
   return {
-    x: obstacleCenter.x + dx * scale - nodeSize.width / 2,
-    y: obstacleCenter.y + dy * scale - nodeSize.height / 2,
+    x: obstacleCenter.x + dx * scale - compactSize.width / 2,
+    y: obstacleCenter.y + dy * scale - compactSize.height / 2,
   };
 }
 
@@ -82,22 +96,27 @@ function resolvePeerCollision(
   second: WorldPosition,
   firstId: string,
   secondId: string,
+  firstLevel: NodeSurfaceLevel,
+  secondLevel: NodeSurfaceLevel,
 ): [WorldPosition, WorldPosition] {
-  const size = NODE_SURFACE_SIZE.node;
-  const firstCenter = { x: first.x + size.width / 2, y: first.y + size.height / 2 };
-  const secondCenter = { x: second.x + size.width / 2, y: second.y + size.height / 2 };
+  const compactSize = NODE_SURFACE_SIZE.node;
+  const firstSize = surfaceSize(firstLevel);
+  const secondSize = surfaceSize(secondLevel);
+  const firstCenter = { x: first.x + compactSize.width / 2, y: first.y + compactSize.height / 2 };
+  const secondCenter = { x: second.x + compactSize.width / 2, y: second.y + compactSize.height / 2 };
   let dx = secondCenter.x - firstCenter.x;
   let dy = secondCenter.y - firstCenter.y;
-  const required = size.width + PEER_CLEARANCE;
-  if (Math.abs(dx) >= required || Math.abs(dy) >= required) return [first, second];
+  const requiredX = (firstSize.width + secondSize.width) / 2 + PEER_CLEARANCE;
+  const requiredY = (firstSize.height + secondSize.height) / 2 + PEER_CLEARANCE;
+  if (Math.abs(dx) >= requiredX || Math.abs(dy) >= requiredY) return [first, second];
   if (Math.abs(dx) + Math.abs(dy) < 0.0001) {
     const direction = stableDirection(`${firstId}:${secondId}`);
     dx = direction.x;
     dy = direction.y;
   }
-  const resolveX = (required - Math.abs(dx)) <= (required - Math.abs(dy));
+  const resolveX = (requiredX - Math.abs(dx)) <= (requiredY - Math.abs(dy));
   const sign = (resolveX ? dx : dy) >= 0 ? 1 : -1;
-  const distance = resolveX ? required - Math.abs(dx) : required - Math.abs(dy);
+  const distance = resolveX ? requiredX - Math.abs(dx) : requiredY - Math.abs(dy);
   const shift = distance / 2 + 0.5;
   return resolveX
     ? [{ ...first, x: first.x - sign * shift }, { ...second, x: second.x + sign * shift }]
@@ -106,38 +125,86 @@ function resolvePeerCollision(
 
 /**
  * Calculates a temporary reflow around every expanded surface. It uses the
- * rendered rectangle (not a fixed-radius approximation), then repeatedly
- * separates peers so a large workspace cannot leave nearby compact cards on
- * top of one another. Persisted graph coordinates are never changed here.
+ * current rendered rectangles (not a fixed-radius approximation), then
+ * propagates peer separation outward only from cards an obstacle actually
+ * moved. Persisted graph coordinates are never changed here.
  */
 export function displacedPositions(
   cards: readonly WorldCard[],
   obstacles: readonly SurfaceObstacle[],
+  surfaceLevels: ReadonlyMap<string, NodeSurfaceLevel> = new Map(),
 ): Map<string, DisplacedPosition> {
   const obstacleIds = new Set(obstacles.map((obstacle) => obstacle.card.id));
+  const fixedObstacles = obstacles.filter((obstacle) => obstacle.level !== "preview");
+  const previewObstacles = obstacles.filter((obstacle) => obstacle.level === "preview");
   const positions = new Map(cards.map((card) => [card.id, { ...card.position }]));
-  const movable = cards.filter((card) => !obstacleIds.has(card.id));
+  const movablePeers = cards.filter((card) => !obstacleIds.has(card.id));
+  const affected = new Set<string>();
 
   for (let iteration = 0; iteration < ITERATIONS; iteration += 1) {
     let moved = false;
-    for (const card of movable) {
+
+    // A preview repels compact peers, but remains subordinate to persistent
+    // inspector/workspace surfaces. Resolve its live obstacle position first.
+    for (const preview of previewObstacles) {
+      if (!positions.has(preview.card.id)) continue;
+      let next = positions.get(preview.card.id) ?? preview.card.position;
+      for (const obstacle of fixedObstacles) {
+        const pushed = pushOutsideSurface(
+          next,
+          preview.card,
+          surfaceLevels.get(preview.card.id) ?? preview.level,
+          obstacle,
+          positions.get(obstacle.card.id) ?? obstacle.card.position,
+        );
+        if (pushed.x !== next.x || pushed.y !== next.y) moved = true;
+        next = pushed;
+      }
+      positions.set(preview.card.id, next);
+    }
+
+    // Compact peers then see the preview at its resolved position, rather than
+    // the persisted center it occupied before a higher-level surface moved it.
+    for (const card of movablePeers) {
       let next = positions.get(card.id) ?? card.position;
       for (const obstacle of obstacles) {
-        const pushed = pushOutsideSurface(next, card, obstacle);
-        moved ||= pushed.x !== next.x || pushed.y !== next.y;
+        const pushed = pushOutsideSurface(
+          next,
+          card,
+          surfaceLevels.get(card.id) ?? "node",
+          obstacle,
+          positions.get(obstacle.card.id) ?? obstacle.card.position,
+        );
+        if (pushed.x !== next.x || pushed.y !== next.y) {
+          affected.add(card.id);
+          moved = true;
+        }
         next = pushed;
       }
       positions.set(card.id, next);
     }
-    for (let firstIndex = 0; firstIndex < movable.length; firstIndex += 1) {
-      for (let secondIndex = firstIndex + 1; secondIndex < movable.length; secondIndex += 1) {
-        const first = movable[firstIndex];
-        const second = movable[secondIndex];
+    for (let firstIndex = 0; firstIndex < movablePeers.length; firstIndex += 1) {
+      for (let secondIndex = firstIndex + 1; secondIndex < movablePeers.length; secondIndex += 1) {
+        const first = movablePeers[firstIndex];
+        const second = movablePeers[secondIndex];
+        if (!affected.has(first.id) && !affected.has(second.id)) continue;
         const firstPosition = positions.get(first.id) ?? first.position;
         const secondPosition = positions.get(second.id) ?? second.position;
-        const [nextFirst, nextSecond] = resolvePeerCollision(firstPosition, secondPosition, first.id, second.id);
-        moved ||= nextFirst.x !== firstPosition.x || nextFirst.y !== firstPosition.y
+        const [nextFirst, nextSecond] = resolvePeerCollision(
+          firstPosition,
+          secondPosition,
+          first.id,
+          second.id,
+          surfaceLevels.get(first.id) ?? "node",
+          surfaceLevels.get(second.id) ?? "node",
+        );
+        const collided = nextFirst.x !== firstPosition.x || nextFirst.y !== firstPosition.y
           || nextSecond.x !== secondPosition.x || nextSecond.y !== secondPosition.y;
+        if (collided) {
+          affected.add(first.id);
+          affected.add(second.id);
+          moved = true;
+        }
         positions.set(first.id, nextFirst);
         positions.set(second.id, nextSecond);
       }

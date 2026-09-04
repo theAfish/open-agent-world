@@ -17,6 +17,8 @@ import type { CanvasNode } from "./types";
 
 const HOVER_INTENT_MS = 180;
 const HOVER_LEAVE_GRACE_MS = 260;
+const PREVIEW_HOVER_MARGIN_PX = 20;
+const NON_DRAG_SELECTOR = "button, input, textarea, select, label, a, [contenteditable='true'], .react-flow__handle";
 
 const ICONS: Partial<Record<CardType, LucideIcon>> = {
   agent: Bot,
@@ -87,6 +89,7 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
   const cardRef = useRef<HTMLElement>(null);
   const enterTimer = useRef<ReturnType<typeof setTimeout>>();
   const leaveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const pressedPointerId = useRef<number>();
   const level = surfaceLevelForNode(card.id, surfaceLevels);
   const visualLevel = level;
   const definition = catalog.node_types.find((item) => item.id === card.type);
@@ -95,9 +98,19 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
   const Body = BODIES[card.type] ?? GenericCardBody;
   const support = nodeSurfaceSupport(card.type, catalog);
 
-  const clearTimers = () => {
+  const clearEnterTimer = () => {
     if (enterTimer.current) clearTimeout(enterTimer.current);
+    enterTimer.current = undefined;
+  };
+
+  const clearLeaveTimer = () => {
     if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    leaveTimer.current = undefined;
+  };
+
+  const clearTimers = () => {
+    clearEnterTimer();
+    clearLeaveTimer();
   };
 
   useEffect(() => clearTimers, []);
@@ -106,16 +119,84 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
     if (connectingNodeId === card.id) cardRef.current?.removeAttribute("data-connection-hot");
   }, [card.id, connectingNodeId]);
 
+  useEffect(() => {
+    if (level !== "preview") return;
+
+    const isWithinPreviewHoverArea = (clientX: number, clientY: number) => {
+      const bounds = cardRef.current?.getBoundingClientRect();
+      if (!bounds) return false;
+      return clientX >= bounds.left - PREVIEW_HOVER_MARGIN_PX
+        && clientX <= bounds.right + PREVIEW_HOVER_MARGIN_PX
+        && clientY >= bounds.top - PREVIEW_HOVER_MARGIN_PX
+        && clientY <= bounds.bottom + PREVIEW_HOVER_MARGIN_PX;
+    };
+
+    const schedulePreviewHide = () => {
+      if (pressedPointerId.current !== undefined || leaveTimer.current) return;
+      leaveTimer.current = setTimeout(() => {
+        leaveTimer.current = undefined;
+        if (pressedPointerId.current === undefined) hidePreview(card.id);
+      }, HOVER_LEAVE_GRACE_MS);
+    };
+
+    const onWindowPointerMove = (event: PointerEvent) => {
+      if (pressedPointerId.current !== undefined || isWithinPreviewHoverArea(event.clientX, event.clientY)) {
+        clearLeaveTimer();
+        return;
+      }
+      schedulePreviewHide();
+    };
+
+    const onWindowPointerRelease = (event: PointerEvent) => {
+      if (pressedPointerId.current !== event.pointerId) return;
+      pressedPointerId.current = undefined;
+      if (isWithinPreviewHoverArea(event.clientX, event.clientY)) clearLeaveTimer();
+      else schedulePreviewHide();
+    };
+
+    const onWindowBlur = () => {
+      if (pressedPointerId.current === undefined) return;
+      pressedPointerId.current = undefined;
+      schedulePreviewHide();
+    };
+
+    window.addEventListener("pointermove", onWindowPointerMove, true);
+    window.addEventListener("pointerup", onWindowPointerRelease, true);
+    window.addEventListener("pointercancel", onWindowPointerRelease, true);
+    window.addEventListener("blur", onWindowBlur);
+    return () => {
+      window.removeEventListener("pointermove", onWindowPointerMove, true);
+      window.removeEventListener("pointerup", onWindowPointerRelease, true);
+      window.removeEventListener("pointercancel", onWindowPointerRelease, true);
+      window.removeEventListener("blur", onWindowBlur);
+    };
+  }, [card.id, hidePreview, level]);
+
   const onPointerEnter = () => {
-    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    clearLeaveTimer();
+    if (pressedPointerId.current !== undefined) return;
     if (!support.preview || level === "inspector" || level === "workspace" || level === "preview") return;
+    clearEnterTimer();
     enterTimer.current = setTimeout(() => showPreview(card.id), HOVER_INTENT_MS);
   };
 
-  const onPointerLeave = () => {
+  const onPointerLeave = (event: ReactPointerEvent<HTMLElement>) => {
     cardRef.current?.removeAttribute("data-connection-hot");
-    if (enterTimer.current) clearTimeout(enterTimer.current);
-    if (level !== "preview") return;
+    clearEnterTimer();
+    if (level !== "preview" || pressedPointerId.current !== undefined) {
+      clearLeaveTimer();
+      return;
+    }
+    const bounds = cardRef.current?.getBoundingClientRect();
+    if (bounds
+      && event.clientX >= bounds.left - PREVIEW_HOVER_MARGIN_PX
+      && event.clientX <= bounds.right + PREVIEW_HOVER_MARGIN_PX
+      && event.clientY >= bounds.top - PREVIEW_HOVER_MARGIN_PX
+      && event.clientY <= bounds.bottom + PREVIEW_HOVER_MARGIN_PX) {
+      clearLeaveTimer();
+      return;
+    }
+    clearLeaveTimer();
     leaveTimer.current = setTimeout(() => hidePreview(card.id), HOVER_LEAVE_GRACE_MS);
   };
 
@@ -147,7 +228,13 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
 
   const onPointerDownCapture = (event: ReactPointerEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
-    if (target.closest("button, input, textarea, select, label, a, [contenteditable='true'], .react-flow__handle")) {
+    const isNonDraggableTarget = Boolean(target.closest(NON_DRAG_SELECTOR));
+    clearEnterTimer();
+    if (!isNonDraggableTarget && level === "preview") {
+      clearLeaveTimer();
+      pressedPointerId.current = event.pointerId;
+    }
+    if (isNonDraggableTarget) {
       event.stopPropagation();
     }
   };
@@ -172,12 +259,7 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
       }}
     >
       {visualLevel === "preview" ? (
-        <div className="node-preview-hover-buffer nodrag nopan" data-preview-hover-buffer aria-hidden="true">
-          <i className="node-preview-hover-buffer__edge node-preview-hover-buffer__edge--top" />
-          <i className="node-preview-hover-buffer__edge node-preview-hover-buffer__edge--right" />
-          <i className="node-preview-hover-buffer__edge node-preview-hover-buffer__edge--bottom" />
-          <i className="node-preview-hover-buffer__edge node-preview-hover-buffer__edge--left" />
-        </div>
+        <div className="node-preview-hover-buffer" data-preview-hover-buffer aria-hidden="true" />
       ) : null}
       {!card.ephemeral ? (
         <svg className="connection-hover-hint" data-connection-hover-hint viewBox="0 0 12 12" aria-hidden="true">

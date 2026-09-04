@@ -416,13 +416,13 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   cursor: crosshair;
 }
 .semantic-handle--top,
-.semantic-handle--bottom { left: 10px !important; width: calc(100% - 20px) !important; height: 28px !important; }
-.semantic-handle--top { top: -14px !important; }
-.semantic-handle--bottom { top: auto !important; bottom: -14px !important; }
+.semantic-handle--bottom { left: 10px !important; width: calc(100% - 20px) !important; height: 18px !important; }
+.semantic-handle--top { top: 0 !important; }
+.semantic-handle--bottom { top: auto !important; bottom: 0 !important; }
 .semantic-handle--left,
-.semantic-handle--right { top: 10px !important; width: 28px !important; height: calc(100% - 20px) !important; }
-.semantic-handle--left { left: -14px !important; }
-.semantic-handle--right { left: auto !important; right: -14px !important; }
+.semantic-handle--right { top: 10px !important; width: 18px !important; height: calc(100% - 20px) !important; }
+.semantic-handle--left { left: 0 !important; }
+.semantic-handle--right { left: auto !important; right: 0 !important; }
 
 .connection-hover-hint {
   position: absolute;
@@ -811,18 +811,9 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .node-preview-hover-buffer {
   position: absolute;
   z-index: 2;
-  inset: 0;
+  inset: -20px;
   pointer-events: none;
 }
-.node-preview-hover-buffer__edge { position: absolute; display: block; pointer-events: auto; }
-.node-preview-hover-buffer__edge--top,
-.node-preview-hover-buffer__edge--bottom { left: -20px; right: -20px; height: 20px; }
-.node-preview-hover-buffer__edge--top { top: -20px; }
-.node-preview-hover-buffer__edge--bottom { bottom: -20px; }
-.node-preview-hover-buffer__edge--left,
-.node-preview-hover-buffer__edge--right { top: 0; bottom: 0; width: 20px; }
-.node-preview-hover-buffer__edge--left { left: -20px; }
-.node-preview-hover-buffer__edge--right { right: -20px; }
 
 .world-card.node-surface.is-preview { border-radius: 30px; box-shadow: 0 18px 32px var(--shadow-deep), 0 4px 10px var(--shadow), inset 0 1px 0 var(--highlight); }
 .world-card.node-surface.is-inspector { border-radius: 24px; cursor: default; box-shadow: 0 22px 45px var(--shadow-deep), 0 5px 12px var(--shadow), inset 0 1px 0 var(--highlight); }

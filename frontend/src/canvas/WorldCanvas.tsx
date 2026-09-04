@@ -28,7 +28,12 @@ import { useWorldStore } from "../state/worldStore";
 import { NODE_SURFACE_SIZE, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
 import type { CardType } from "../types/world";
 import { ContourLayer } from "./ContourLayer";
-import { displacedPositions, nodePositionFromSurfacePosition, positionSurfaceAtNodeCenter } from "./nodeDisplacement";
+import {
+  displacedPositions,
+  nodePositionFromSurfacePosition,
+  positionSurfaceAtNodeCenter,
+  type SurfaceObstacle,
+} from "./nodeDisplacement";
 
 const nodeTypes = { worldCard: WorldCardNode };
 const edgeTypes = { semantic: SemanticEdge };
@@ -58,7 +63,7 @@ function nodeFromCard(
     position: positionSurfaceAtNodeCenter(position, surfaceLevel),
     data: { card, surfaceLevel, displaced },
     style: { width: size.width, height: size.height },
-    draggable: !displaced,
+    draggable: true,
     dragHandle: surfaceLevel === "workspace" ? ".node-drag-region" : undefined,
     selectable: true,
     connectable: !card.ephemeral,
@@ -101,13 +106,13 @@ export function WorldCanvas() {
     card.id,
     surfaceLevelForNode(card.id, surfaceLevelsByNodeId),
   ])), [renderCards, surfaceLevelsByNodeId]);
-  const surfaceObstacles = useMemo(() => renderCards.flatMap((card) => {
+  const surfaceObstacles = useMemo<SurfaceObstacle[]>(() => renderCards.flatMap<SurfaceObstacle>((card) => {
     const level = surfaceLevels.get(card.id);
-    return level === "inspector" || level === "workspace" ? [{ card, level }] : [];
+    return level === "preview" || level === "inspector" || level === "workspace" ? [{ card, level }] : [];
   }), [renderCards, surfaceLevels]);
   const displacedById = useMemo(
-    () => displacedPositions(renderCards, surfaceObstacles),
-    [renderCards, surfaceObstacles],
+    () => displacedPositions(renderCards, surfaceObstacles, surfaceLevels),
+    [renderCards, surfaceLevels, surfaceObstacles],
   );
   const mappedNodes = useMemo(
     () => renderCards.map((card) => {
@@ -124,21 +129,60 @@ export function WorldCanvas() {
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(mappedNodes);
   const nodesRef = useRef(nodes);
   const positionAnimation = useRef<number>();
+  const activeDragIds = useRef(new Set<string>());
+
+  const cancelPositionAnimation = useCallback(() => {
+    if (positionAnimation.current === undefined) return;
+    cancelAnimationFrame(positionAnimation.current);
+    positionAnimation.current = undefined;
+  }, []);
 
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
 
   useEffect(() => {
-    if (positionAnimation.current) cancelAnimationFrame(positionAnimation.current);
+    cancelPositionAnimation();
     const currentById = new Map(nodesRef.current.map((node) => [node.id, node]));
-    const starts = mappedNodes.map((node) => currentById.get(node.id)?.position ?? node.position);
-    const moving = mappedNodes.some((node, index) => (
-      Math.abs(node.position.x - starts[index].x) > 0.1
-      || Math.abs(node.position.y - starts[index].y) > 0.1
-    ));
+    const starts = new Map(mappedNodes.map((node) => [
+      node.id,
+      currentById.get(node.id)?.position ?? node.position,
+    ]));
+
+    const applyProgress = (eased: number) => {
+      setNodes((currentNodes) => {
+        const liveById = new Map(currentNodes.map((node) => [node.id, node]));
+        return mappedNodes.map((node) => {
+          const live = liveById.get(node.id);
+          if (live && activeDragIds.current.has(node.id)) {
+            return {
+              ...live,
+              ...node,
+              position: live.position,
+              dragging: live.dragging,
+            };
+          }
+          const start = starts.get(node.id) ?? node.position;
+          return {
+            ...live,
+            ...node,
+            position: {
+              x: start.x + (node.position.x - start.x) * eased,
+              y: start.y + (node.position.y - start.y) * eased,
+            },
+          };
+        });
+      });
+    };
+
+    const moving = mappedNodes.some((node) => {
+      if (activeDragIds.current.has(node.id)) return false;
+      const start = starts.get(node.id) ?? node.position;
+      return Math.abs(node.position.x - start.x) > 0.1
+        || Math.abs(node.position.y - start.y) > 0.1;
+    });
     if (!moving) {
-      setNodes(mappedNodes);
+      applyProgress(1);
       return;
     }
 
@@ -146,20 +190,13 @@ export function WorldCanvas() {
     const tick = (now: number) => {
       const progress = Math.min(1, (now - startedAt) / 380);
       const eased = 1 - Math.pow(1 - progress, 3);
-      setNodes(mappedNodes.map((node, index) => ({
-        ...node,
-        position: {
-          x: starts[index].x + (node.position.x - starts[index].x) * eased,
-          y: starts[index].y + (node.position.y - starts[index].y) * eased,
-        },
-      })));
+      applyProgress(eased);
       if (progress < 1) positionAnimation.current = requestAnimationFrame(tick);
+      else positionAnimation.current = undefined;
     };
     positionAnimation.current = requestAnimationFrame(tick);
-    return () => {
-      if (positionAnimation.current) cancelAnimationFrame(positionAnimation.current);
-    };
-  }, [mappedNodes, setNodes]);
+    return cancelPositionAnimation;
+  }, [cancelPositionAnimation, mappedNodes, setNodes]);
 
   const visibleNodeIds = useMemo(() => new Set(renderCards.map((card) => card.id)), [renderCards]);
   const flowEdges = useMemo<CanvasEdge[]>(
@@ -247,11 +284,20 @@ export function WorldCanvas() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [closeWorkspace, deleteCards, deleteSelectedEdge, dismissSurface, redo, selectEdge, selectedCardIds, selectedEdgeId, surfaceLevelsByNodeId, undo]);
 
+  const onNodeDragStart: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
+    cancelPositionAnimation();
+    activeDragIds.current.clear();
+    activeDragIds.current.add(node.id);
+    draggedNodes.forEach((draggedNode) => activeDragIds.current.add(draggedNode.id));
+  }, [cancelPositionAnimation]);
+
   const onNodeDragStop: OnNodeDrag<CanvasNode> = useCallback((_event, node) => {
+    cancelPositionAnimation();
+    activeDragIds.current.clear();
     void updateCard(node.id, {
       position: nodePositionFromSurfacePosition(node.position, node.data.surfaceLevel),
     });
-  }, [updateCard]);
+  }, [cancelPositionAnimation, updateCard]);
 
   const onConnect = useCallback((connection: Connection) => {
     requestConnection(connection.source, connection.target);
@@ -303,6 +349,7 @@ export function WorldCanvas() {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
+        onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
         onConnect={onConnect}
         onConnectStart={(_event, params) => {
