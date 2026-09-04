@@ -62,9 +62,10 @@ _current_invocation: ContextVar[InvocationContext | None] = ContextVar(
     "current_invocation", default=None
 )
 
-# Providers integrate through the normalized event stream. When a stream stops
-# producing events without terminating, the Run would otherwise stall silently.
-# The watchdog converts that condition into an explicit, observable failure.
+# Temporary provider event-stream inactivity policy. Silence is not proof that
+# the underlying task failed, but without a formal provider liveness signal the
+# runtime must bound how long an inactive stream occupies a Run.
+# TODO: Replace this heuristic with a provider liveness/heartbeat contract.
 DEFAULT_INACTIVITY_TIMEOUT_SECONDS: float = 300.0
 
 
@@ -576,7 +577,7 @@ class RunManager:
         return provider_id
 
     def _inactivity_timeout(self, card: Card) -> float | None:
-        """Per-Agent override of the provider stream inactivity watchdog.
+        """Per-Agent override of the provider event-stream inactivity policy.
 
         A non-positive configured value disables the watchdog explicitly.
         Invalid values fall back to the manager default.

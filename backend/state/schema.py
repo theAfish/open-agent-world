@@ -17,11 +17,6 @@ class MergePolicy(StrEnum):
     APPEND_UNIQUE = "append_unique"
 
 
-class StateDurability(StrEnum):
-    DURABLE = "durable"
-    TRANSIENT = "transient"
-
-
 class _NoDefault:
     pass
 
@@ -38,14 +33,12 @@ class StateFieldDefinition:
     read_visibility: str = "inherited"
     write_permissions: frozenset[str] = frozenset({"*"})
     merge_policy: MergePolicy = MergePolicy.REPLACE
-    durability: StateDurability = StateDurability.DURABLE
     default: Any = NO_DEFAULT
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "allowed_scope_kinds", frozenset(self.allowed_scope_kinds))
         object.__setattr__(self, "write_permissions", frozenset(self.write_permissions))
         object.__setattr__(self, "merge_policy", MergePolicy(self.merge_policy))
-        object.__setattr__(self, "durability", StateDurability(self.durability))
         if self.read_visibility not in {"inherited", "scope_only"}:
             raise ValueError("read_visibility must be 'inherited' or 'scope_only'")
 

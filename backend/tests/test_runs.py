@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -14,13 +15,30 @@ from backend.agents import (
     AgentInfo,
     AgentStatus,
     RuntimeProvider,
+    ScopedToolDefinition,
 )
+from backend.agents.tools import build_scoped_tool_callables
 from backend.config import Settings
 from backend.errors import RuntimeUnavailableError
 from backend.plugins import create_builtin_registry
 from backend.runs import InvocationContext, RunStatus, RuntimeInput
 from backend.services import create_services
 from backend.world.models import CardCreate
+
+
+class _ToolBugCapabilityProvider:
+    async def list_tools(self, agent_id: str) -> tuple[ScopedToolDefinition, ...]:
+        del agent_id
+        return ()
+
+    async def invoke_tool(
+        self,
+        agent_id: str,
+        capability_id: str,
+        arguments: Mapping[str, Any],
+    ) -> Any:
+        del agent_id, capability_id, arguments
+        raise TypeError("plugin implementation bug")
 
 
 class RecordingProvider(RuntimeProvider):
@@ -56,6 +74,19 @@ class RecordingProvider(RuntimeProvider):
             await asyncio.Event().wait()
         if self.mode == "failure":
             raise RuntimeError("provider exploded")
+        if self.mode == "tool_failure":
+            tool = build_scoped_tool_callables(
+                _ToolBugCapabilityProvider(),
+                context.agent_id,
+                (
+                    ScopedToolDefinition(
+                        capability_id="test.bug",
+                        name="buggy_tool",
+                        description="Exercise the tool failure boundary.",
+                    ),
+                ),
+            )[0]
+            await tool()
         if self.mode == "tool":
             yield AgentEvent(
                 context.agent_id,
@@ -275,6 +306,23 @@ async def test_failure_is_run_local_and_concurrency_is_explicit(tmp_path: Path) 
         assert cancelled.status is RunStatus.CANCELLED
         await manager.wait_terminal(active.run_id)
         assert (await manager.get_agent(agent.id)).status is AgentStatus.IDLE
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_unexpected_tool_exception_fails_the_run(tmp_path: Path) -> None:
+    provider = RecordingProvider(mode="tool_failure")
+    services = _services(tmp_path, provider)
+    try:
+        agent = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        manager = services._require_run_manager()
+
+        started = await manager.start_run(agent.id, "exercise tool")
+        failed = await manager.wait_terminal(started.run_id)
+
+        assert failed.status is RunStatus.FAILED
+        assert failed.error == "plugin implementation bug"
     finally:
         services.close()
 

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import backend.state as state_contract
 from backend.agents import AgentConfig, AgentEvent, MockAgentRuntime
 from backend.config import Settings
 from backend.errors import NotFoundError, PermissionDeniedError, RevisionConflictError
@@ -60,8 +61,15 @@ def test_scope_identity_explicit_writes_resolution_and_snapshot(
     assert snapshot.values["workspace"].value == {"owner": "run"}
     assert snapshot.values["workspace"].source_scope.scope_id == run.scope_id
     assert snapshot.values["workspace"].revision == 1
-    assert snapshot.values["completed"].value is False
-    assert snapshot.values["completed"].is_default is True
+
+
+def test_builtin_run_schema_is_generic_and_all_state_is_durable() -> None:
+    registry = create_builtin_registry()
+    run_fields = registry.state_schema("core.run").fields
+    assert "completed" not in run_fields
+    assert "execution_graph" not in run_fields
+    assert not hasattr(state_contract, "StateDurability")
+    assert not hasattr(next(iter(run_fields.values())), "durability")
 
 
 def test_merge_policies_revision_conflicts_and_permissions(tmp_path: Path) -> None:

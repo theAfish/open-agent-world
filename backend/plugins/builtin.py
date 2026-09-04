@@ -321,11 +321,6 @@ def create_builtin_registry() -> PluginRegistry:
         "current_step": StateFieldDefinition(
             value_type=Any, allowed_scope_kinds=run_only
         ),
-        "execution_graph": StateFieldDefinition(
-            value_type=dict[str, Any],
-            allowed_scope_kinds=run_only,
-            merge_policy=MergePolicy.MERGE_DICT,
-        ),
         "scratch": StateFieldDefinition(
             value_type=dict[str, Any],
             allowed_scope_kinds=run_only,
@@ -338,9 +333,6 @@ def create_builtin_registry() -> PluginRegistry:
         ),
         "result": StateFieldDefinition(
             value_type=Any, allowed_scope_kinds=run_only
-        ),
-        "completed": StateFieldDefinition(
-            value_type=bool, allowed_scope_kinds=run_only, default=False
         ),
     }))
     registry.register_runtime_provider(

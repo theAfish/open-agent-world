@@ -11,7 +11,6 @@ from backend.state.models import (
 from backend.state.schema import (
     MergePolicy,
     NO_DEFAULT,
-    StateDurability,
     StateFieldDefinition,
     StateSchema,
 )
@@ -23,7 +22,6 @@ __all__ = [
     "ResolvedStateValue",
     "StateAPI",
     "StateContext",
-    "StateDurability",
     "StateFieldDefinition",
     "StateMutation",
     "StateMutationKind",

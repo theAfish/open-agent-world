@@ -19,7 +19,7 @@ from backend.agents import (
 from backend.agents.tools import build_scoped_tool_callables
 from backend.capabilities.provider import WorldAgentCapabilityProvider
 from backend.config import Settings
-from backend.errors import ResourceValidationError
+from backend.errors import PermissionDeniedError, ResourceValidationError
 from backend.main import create_app
 from backend.services import create_services
 from backend.runs import InvocationCaller, InvocationContext, RunStatus, RuntimeInput
@@ -47,7 +47,7 @@ class MutableCapabilityProvider:
         if self.failure is not None:
             raise self.failure
         if not self.allowed or capability_id != self.definition.capability_id:
-            raise PermissionError("capability was revoked")
+            raise PermissionDeniedError("capability was revoked")
         values = dict(arguments)
         self.invocations.append((agent_id, capability_id, values))
         return {"content": values["content"]}
@@ -115,8 +115,8 @@ async def test_scoped_tool_rechecks_provider_after_revocation() -> None:
     assert await tool(content="must fail") == {
         "ok": False,
         "error": {
-            "code": "tool_execution_error",
-            "type": "PermissionError",
+            "code": "permission_denied",
+            "type": "PermissionDeniedError",
             "message": "capability was revoked",
         },
     }
@@ -142,6 +142,18 @@ async def test_scoped_tool_preserves_domain_errors_but_not_cancellation() -> Non
     provider.failure = asyncio.CancelledError()
     with pytest.raises(asyncio.CancelledError):
         await tool(content="cancelled")
+
+
+@pytest.mark.asyncio
+async def test_scoped_tool_propagates_unexpected_exceptions() -> None:
+    provider = MutableCapabilityProvider()
+    tool = build_scoped_tool_callables(
+        provider, "agent-1", (provider.definition,)
+    )[0]
+
+    provider.failure = TypeError("plugin implementation bug")
+    with pytest.raises(TypeError, match="plugin implementation bug"):
+        await tool(content="must fail the run")
 
 
 @pytest.mark.asyncio

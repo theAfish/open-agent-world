@@ -62,12 +62,15 @@ Execution-turn synchronization is also separate from durable completion:
 - `wait_terminal(run_id)` returns only for `succeeded`, `failed`, `cancelled`,
   or `interrupted`.
 
-## Stall detection
+## Provider event-stream inactivity policy
 
-`RunManager` guards every provider event stream with a provider-neutral
-inactivity watchdog. If a stream produces no events for the configured window,
-the Run is transitioned to `failed` with an explicit error instead of stalling
-silently, and `stop(run_id)` is called on the provider. The default window is
+`RunManager` currently applies a provider event-stream inactivity policy. If a
+stream produces no events for the configured window, the Run is transitioned
+to `failed` with an explicit error instead of stalling silently, and
+`stop(run_id)` is called on the provider. Stream silence is an operational
+heuristic, not proof that the provider's underlying task failed. This temporary
+policy should be replaced once providers expose a formal liveness/heartbeat
+contract. The default window is
 300 seconds; it can be changed globally with
 `OPEN_AGENT_WORLD_RUN_INACTIVITY_TIMEOUT` (non-positive disables it) or
 per Agent with the `run_inactivity_timeout_seconds` card configuration key

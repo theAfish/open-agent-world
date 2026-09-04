@@ -8,6 +8,8 @@ import re
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from backend.errors import DomainError
+
 from .base import AgentCapabilityProvider
 from .models import AgentConfigurationError, ScopedToolDefinition
 
@@ -119,13 +121,13 @@ def _build_callable(
             return await provider.invoke_tool(
                 agent_id, definition.capability_id, dict(arguments)
             )
-        except Exception as exc:
+        except DomainError as exc:
             return {
                 "ok": False,
                 "error": {
-                    "code": str(getattr(exc, "code", "tool_execution_error")),
+                    "code": exc.code,
                     "type": type(exc).__name__,
-                    "message": str(exc) or type(exc).__name__,
+                    "message": exc.message,
                 },
             }
 

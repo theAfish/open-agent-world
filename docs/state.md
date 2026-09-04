@@ -27,9 +27,9 @@ remain inside their runtime provider.
 Schemas are registered through `PluginRegistry.register_state_schema`, including
 the built-in `core.world`, `core.agent`, `core.session`, and `core.run` schemas.
 A field declares its value type, allowed scope kinds, read visibility, write
-permissions, merge policy, durability, and optional default. `set` uses replace
-semantics; `patch` applies the field's `replace`, `merge_dict`, `append`, or
-`append_unique` policy.
+permissions, merge policy, and optional default. All `StateStore` values are
+durable. `set` uses replace semantics; `patch` applies the field's `replace`,
+`merge_dict`, `append`, or `append_unique` policy.
 
 Each key has an independent revision. Supplying `expected_revision` makes a
 mutation compare-and-set; a mismatch raises one `RevisionConflictError`. A

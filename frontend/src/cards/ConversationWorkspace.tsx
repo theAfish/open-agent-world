@@ -83,7 +83,8 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     : mentionCompletion(draft, mentionCaret, participants);
 
   useEffect(() => {
-    if (!socketLive) return;
+    // REST owns the durable snapshot. Socket liveness only invalidates that
+    // snapshot on reconnect; it never gates historical reads.
     let current = true;
     void worldApi.getConversation(card.id).then((summary) => {
       if (!current) return;
@@ -104,7 +105,6 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       setMessages([]);
       return;
     }
-    if (!socketLive) return;
     let current = true;
     void worldApi.getConversationMessages(card.id, activeSessionId).then((items) => {
       if (current) {
