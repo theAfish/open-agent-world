@@ -8,7 +8,12 @@ from datetime import UTC, datetime
 from typing import Any, Iterable
 from uuid import uuid4
 
-from backend.errors import ConflictError, GraphValidationError, NotFoundError
+from backend.errors import (
+    ConflictError,
+    GraphValidationError,
+    NotFoundError,
+    PluginUnavailableError,
+)
 from backend.plugins.registry import PluginRegistry
 from backend.persistence.database import Database
 from backend.world.models import (
@@ -53,6 +58,55 @@ class WorldStore:
         self.registry = registry
         self.chunk_size = chunk_size
 
+    def assert_plugin_availability(self) -> None:
+        """Fail startup with ownership-aware diagnostics for persisted objects."""
+
+        with self.database.locked() as connection:
+            cards = connection.execute(
+                "SELECT id, type, plugin_id FROM cards ORDER BY id"
+            ).fetchall()
+            edges = connection.execute(
+                "SELECT id, relationship, plugin_id FROM edges ORDER BY id"
+            ).fetchall()
+        for row in cards:
+            plugin_id = str(row["plugin_id"])
+            if not self.registry.has_plugin(plugin_id):
+                raise PluginUnavailableError(
+                    f"node {row['id']!r} requires unavailable plugin {plugin_id!r} "
+                    f"for node type {row['type']!r}"
+                )
+            try:
+                actual = self.registry.node_type_owner_id(str(row["type"]))
+            except ValueError as exc:
+                raise PluginUnavailableError(
+                    f"plugin {plugin_id!r} does not provide persisted node type "
+                    f"{row['type']!r} required by node {row['id']!r}"
+                ) from exc
+            if actual != plugin_id:
+                raise PluginUnavailableError(
+                    f"node {row['id']!r} records plugin {plugin_id!r}, but node type "
+                    f"{row['type']!r} is owned by {actual!r}"
+                )
+        for row in edges:
+            plugin_id = str(row["plugin_id"])
+            if not self.registry.has_plugin(plugin_id):
+                raise PluginUnavailableError(
+                    f"edge {row['id']!r} requires unavailable plugin {plugin_id!r} "
+                    f"for relationship {row['relationship']!r}"
+                )
+            try:
+                actual = self.registry.relationship_owner_id(str(row["relationship"]))
+            except ValueError as exc:
+                raise PluginUnavailableError(
+                    f"plugin {plugin_id!r} does not provide persisted relationship "
+                    f"{row['relationship']!r} required by edge {row['id']!r}"
+                ) from exc
+            if actual != plugin_id:
+                raise PluginUnavailableError(
+                    f"edge {row['id']!r} records plugin {plugin_id!r}, but relationship "
+                    f"{row['relationship']!r} is owned by {actual!r}"
+                )
+
     def _chunk(self, coordinate: float) -> int:
         return math.floor(coordinate / self.chunk_size)
 
@@ -61,9 +115,11 @@ class WorldStore:
     ) -> dict[str, Any]:
         return self.registry.validate_config(card_type, value)
 
-    def create_card(self, request: CardCreate) -> Card:
-        card_id = _id_or_new(request.id)
-        now = utc_now().isoformat()
+    def preview_card(self, request: CardCreate, *, card_id: str | None = None) -> Card:
+        """Validate a create request and materialize its node without persistence."""
+
+        resolved_id = _id_or_new(card_id if card_id is not None else request.id)
+        now = utc_now()
         definition = self.registry.node_type(request.type)
         self.registry.validate_creation_fields(
             request.type, content=request.content, data_base64=request.data_base64
@@ -77,35 +133,53 @@ class WorldStore:
         if request.status is not None:
             raw_config["status"] = request.status
         config = self._validate_config(request.type, raw_config)
+        return Card(
+            id=resolved_id,
+            type=request.type,
+            name=request.name or definition.default_name,
+            position=request.position,
+            size=size,
+            expanded=request.expanded,
+            status=str(config.get("status", definition.default_status)),
+            config=config,
+            chunk=(self._chunk(request.position.x), self._chunk(request.position.y)),
+            created_at=now,
+            updated_at=now,
+            revision=1,
+        )
+
+    def create_card(self, request: CardCreate, *, card_id: str | None = None) -> Card:
+        card = self.preview_card(request, card_id=card_id)
         values = (
-            card_id,
-            request.type,
-            request.name or definition.default_name,
-            request.position.x,
-            request.position.y,
-            size.width,
-            size.height,
-            int(request.expanded),
-            _json(config),
-            self._chunk(request.position.x),
-            self._chunk(request.position.y),
-            now,
-            now,
+            card.id,
+            card.type,
+            self.registry.node_type_owner_id(card.type),
+            card.name,
+            card.position.x,
+            card.position.y,
+            card.size.width,
+            card.size.height,
+            int(card.expanded),
+            _json(card.config),
+            card.chunk[0],
+            card.chunk[1],
+            card.created_at.isoformat(),
+            card.updated_at.isoformat(),
         )
         try:
             with self.database.transaction(immediate=True) as connection:
                 connection.execute(
                     """
                     INSERT INTO cards (
-                        id, type, name, x, y, width, height, expanded,
+                        id, type, plugin_id, name, x, y, width, height, expanded,
                         config_json, chunk_x, chunk_y, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     values,
                 )
         except sqlite3.IntegrityError as exc:
-            raise ConflictError(f"card {card_id!r} already exists") from exc
-        return self.get_card(card_id)
+            raise ConflictError(f"card {card.id!r} already exists") from exc
+        return self.get_card(card.id)
 
     def get_card(self, card_id: str) -> Card:
         with self.database.locked() as connection:
@@ -183,9 +257,49 @@ class WorldStore:
                 raise NotFoundError(f"card {card_id!r} does not exist")
         return self.get_card(card_id)
 
+    def preview_update_card(self, card_id: str, request: CardPatch) -> Card:
+        """Validate an update and return its resulting node without persisting it."""
+
+        current = self.get_card(card_id)
+        changes = request.model_dump(exclude_unset=True)
+        if not changes:
+            return current
+        name = changes.get("name") or current.name
+        position = request.position or current.position
+        size = request.size or current.size
+        expanded = current.expanded if request.expanded is None else request.expanded
+        config = current.config
+        if request.config is not None:
+            config = {**config, **request.config}
+        if request.status is not None:
+            self._assert_valid_status(current.type, request.status)
+            config = {**config, "status": request.status}
+        config = self._validate_config(current.type, config)
+        return current.model_copy(update={
+            "name": name,
+            "position": position,
+            "size": size,
+            "expanded": expanded,
+            "status": str(config.get("status", current.status)),
+            "config": config,
+            "chunk": (self._chunk(position.x), self._chunk(position.y)),
+            "updated_at": utc_now(),
+            "revision": current.revision + 1,
+        })
+
     def delete_card(self, card_id: str) -> Card:
         card = self.get_card(card_id)
         with self.database.transaction(immediate=True) as connection:
+            connection.execute(
+                """
+                DELETE FROM state_scopes
+                WHERE scope_kind = 'session'
+                  AND owner_id IN (
+                    SELECT id FROM conversation_sessions WHERE conversation_id = ?
+                  )
+                """,
+                (card_id,),
+            )
             cursor = connection.execute("DELETE FROM cards WHERE id = ?", (card_id,))
             if cursor.rowcount != 1:
                 raise NotFoundError(f"card {card_id!r} does not exist")
@@ -219,14 +333,16 @@ class WorldStore:
                 connection.execute(
                     """
                     INSERT INTO edges (
-                        id, source_id, target_id, relationship, direction, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        id, source_id, target_id, relationship, plugin_id, direction,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         edge_id,
                         request.source,
                         request.target,
                         request.relationship,
+                        self.registry.relationship_owner_id(request.relationship),
                         request.direction.value,
                         now,
                         now,
@@ -321,10 +437,17 @@ class WorldStore:
             connection.execute(
                 """
                 UPDATE edges
-                SET relationship = ?, direction = ?, updated_at = ?, revision = revision + 1
+                SET relationship = ?, plugin_id = ?, direction = ?, updated_at = ?,
+                    revision = revision + 1
                 WHERE id = ?
                 """,
-                (relationship, direction.value, now, edge_id),
+                (
+                    relationship,
+                    self.registry.relationship_owner_id(relationship),
+                    direction.value,
+                    now,
+                    edge_id,
+                ),
             )
         return self.get_edge(edge_id)
 
@@ -370,7 +493,19 @@ class WorldStore:
 
     def _card_from_row(self, row: sqlite3.Row) -> Card:
         card_type = str(row["type"])
+        plugin_id = str(row["plugin_id"])
+        if not self.registry.has_plugin(plugin_id):
+            raise PluginUnavailableError(
+                f"node {row['id']!r} requires unavailable plugin {plugin_id!r} "
+                f"for node type {card_type!r}"
+            )
         definition = self.registry.node_type(card_type)
+        owner_id = self.registry.node_type_owner_id(card_type)
+        if owner_id != plugin_id:
+            raise PluginUnavailableError(
+                f"node {row['id']!r} records plugin {plugin_id!r}, but node type "
+                f"{card_type!r} is owned by {owner_id!r}"
+            )
         config = json.loads(row["config_json"])
         return Card(
             id=row["id"],
@@ -387,13 +522,25 @@ class WorldStore:
             revision=row["revision"],
         )
 
-    @staticmethod
-    def _edge_from_row(row: sqlite3.Row) -> Edge:
+    def _edge_from_row(self, row: sqlite3.Row) -> Edge:
+        relationship = str(row["relationship"])
+        plugin_id = str(row["plugin_id"])
+        if not self.registry.has_plugin(plugin_id):
+            raise PluginUnavailableError(
+                f"edge {row['id']!r} requires unavailable plugin {plugin_id!r} "
+                f"for relationship {relationship!r}"
+            )
+        owner_id = self.registry.relationship_owner_id(relationship)
+        if owner_id != plugin_id:
+            raise PluginUnavailableError(
+                f"edge {row['id']!r} records plugin {plugin_id!r}, but relationship "
+                f"{relationship!r} is owned by {owner_id!r}"
+            )
         return Edge(
             id=row["id"],
             source=row["source_id"],
             target=row["target_id"],
-            relationship=str(row["relationship"]),
+            relationship=relationship,
             direction=EdgeDirection(row["direction"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],

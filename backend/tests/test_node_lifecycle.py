@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from pathlib import Path
 from typing import Any
@@ -10,9 +11,14 @@ from pydantic import BaseModel, ConfigDict
 from backend.agents import AgentNotFoundError, MockAgentRuntime
 from backend.config import Settings
 from backend.plugins import (
+    PLUGIN_API_VERSION,
     NodeLifecycleContext,
     NodeLifecycleHandler,
+    NodeLifecycleTransaction,
     NodeTypeDefinition,
+    PluginDefinition,
+    PluginDescriptor,
+    PluginRegistration,
     create_builtin_registry,
 )
 from backend.sandbox import SandboxInfo, SandboxNotFoundError, SandboxState
@@ -47,10 +53,60 @@ def _plugin_node(
     )
 
 
+def _install_node(
+    registry: Any, type_id: str, lifecycle: NodeLifecycleHandler | None
+) -> None:
+    def configure(registration: PluginRegistration) -> None:
+        registration.register_node_type(_plugin_node(type_id, lifecycle))
+
+    registry.install(PluginDefinition(
+        descriptor=PluginDescriptor(
+            id=f"{type_id}.plugin",
+            version="1.0.0",
+            plugin_api_version=PLUGIN_API_VERSION,
+        ),
+        configure=configure,
+    ))
+
+
+class RecordingMutation(NodeLifecycleTransaction):
+    def __init__(
+        self,
+        behavior: RecordingBehavior,
+        operation: str,
+        node_id: str,
+        before: int | None,
+        after: int | None,
+    ) -> None:
+        self.behavior = behavior
+        self.operation = operation
+        self.node_id = node_id
+        self.before = before
+        self.after = after
+
+    async def commit(self) -> None:
+        if self.after is None:
+            self.behavior.values.pop(self.node_id, None)
+        else:
+            self.behavior.values[self.node_id] = self.after
+        self.behavior.calls.append((self.operation, self.node_id))
+        if self.behavior.fail_on == self.operation:
+            raise RuntimeError(f"plugin {self.operation} failed")
+
+    async def rollback(self, error: BaseException) -> None:
+        del error
+        if self.before is None:
+            self.behavior.values.pop(self.node_id, None)
+        else:
+            self.behavior.values[self.node_id] = self.before
+        self.behavior.calls.append((f"rollback_{self.operation}", self.node_id))
+
+
 class RecordingBehavior(NodeLifecycleHandler):
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
         self.values: dict[str, int] = {}
+        self.fail_on: str | None = None
 
     @staticmethod
     def _assert_context_is_narrow(context: NodeLifecycleContext) -> None:
@@ -66,25 +122,38 @@ class RecordingBehavior(NodeLifecycleHandler):
         self._assert_context_is_narrow(context)
         self.calls.append(("shutdown", node.id))
 
-    async def on_create(
+    async def prepare_create(
         self, context: NodeLifecycleContext, node: Card, request: CardCreate
-    ) -> None:
+    ) -> NodeLifecycleTransaction:
         self._assert_context_is_narrow(context)
-        self.values[node.id] = int(request.config.get("value", 0))
-        self.calls.append(("create", node.id))
+        return RecordingMutation(
+            self, "create", node.id, None, int(request.config.get("value", 0))
+        )
 
-    async def on_update(
-        self, context: NodeLifecycleContext, node: Card, request: CardPatch
-    ) -> None:
+    async def prepare_update(
+        self,
+        context: NodeLifecycleContext,
+        current: Card,
+        updated: Card,
+        request: CardPatch,
+    ) -> NodeLifecycleTransaction:
         self._assert_context_is_narrow(context)
-        if request.config is not None and "value" in request.config:
-            self.values[node.id] = int(request.config["value"])
-        self.calls.append(("update", node.id))
+        del request
+        return RecordingMutation(
+            self,
+            "update",
+            current.id,
+            int(current.config.get("value", 0)),
+            int(updated.config.get("value", 0)),
+        )
 
-    async def on_delete(self, context: NodeLifecycleContext, node: Card) -> None:
+    async def prepare_delete(
+        self, context: NodeLifecycleContext, node: Card
+    ) -> NodeLifecycleTransaction:
         self._assert_context_is_narrow(context)
-        self.values.pop(node.id, None)
-        self.calls.append(("delete", node.id))
+        return RecordingMutation(
+            self, "delete", node.id, int(node.config.get("value", 0)), None
+        )
 
 
 class FailingCreateBehavior(NodeLifecycleHandler):
@@ -92,24 +161,23 @@ class FailingCreateBehavior(NodeLifecycleHandler):
         self.active: set[str] = set()
         self.rolled_back: list[str] = []
 
-    async def on_create(
+    async def prepare_create(
         self, context: NodeLifecycleContext, node: Card, request: CardCreate
-    ) -> None:
+    ) -> NodeLifecycleTransaction:
         del context, request
-        self.active.add(node.id)
-        raise RuntimeError("plugin runtime creation failed")
+        behavior = self
 
-    async def on_create_rollback(
-        self,
-        context: NodeLifecycleContext,
-        node: Card,
-        request: CardCreate,
-        error: BaseException,
-    ) -> None:
-        del context, request
-        assert str(error) == "plugin runtime creation failed"
-        self.active.remove(node.id)
-        self.rolled_back.append(node.id)
+        class FailingMutation(NodeLifecycleTransaction):
+            async def commit(self) -> None:
+                behavior.active.add(node.id)
+                raise RuntimeError("plugin runtime creation failed")
+
+            async def rollback(self, error: BaseException) -> None:
+                assert str(error) == "plugin runtime creation failed"
+                behavior.active.discard(node.id)
+                behavior.rolled_back.append(node.id)
+
+        return FailingMutation()
 
 
 @pytest.mark.asyncio
@@ -118,7 +186,7 @@ async def test_custom_plugin_lifecycle_dispatches_without_core_changes(
 ) -> None:
     behavior = RecordingBehavior()
     registry = create_builtin_registry()
-    registry.register_node_type(_plugin_node("example.executable", behavior))
+    _install_node(registry, "example.executable", behavior)
     services = create_services(
         Settings.for_data_root(tmp_path / "managed"), plugins=registry
     )
@@ -151,7 +219,7 @@ async def test_failed_plugin_creation_runs_rollback_and_removes_persisted_node(
 ) -> None:
     behavior = FailingCreateBehavior()
     registry = create_builtin_registry()
-    registry.register_node_type(_plugin_node("example.failing", behavior))
+    _install_node(registry, "example.failing", behavior)
     services = create_services(
         Settings.for_data_root(tmp_path / "managed"), plugins=registry
     )
@@ -169,11 +237,190 @@ async def test_failed_plugin_creation_runs_rollback_and_removes_persisted_node(
 
 
 @pytest.mark.asyncio
+async def test_lifecycle_failures_compensate_update_and_delete(
+    tmp_path: Path,
+) -> None:
+    behavior = RecordingBehavior()
+    registry = create_builtin_registry()
+    _install_node(registry, "example.compensated", behavior)
+    services = create_services(
+        Settings.for_data_root(tmp_path / "managed"), plugins=registry
+    )
+    try:
+        node = await services.create_card(CardCreate(
+            id="compensated-node", type="example.compensated", config={"value": 3}
+        ))
+
+        behavior.fail_on = "update"
+        with pytest.raises(RuntimeError, match="plugin update failed"):
+            await services.update_card(node.id, CardPatch(config={"value": 8}))
+        assert services.get_card(node.id).config["value"] == 3
+        assert behavior.values[node.id] == 3
+        assert behavior.calls[-2:] == [
+            ("update", node.id),
+            ("rollback_update", node.id),
+        ]
+
+        behavior.fail_on = "delete"
+        with pytest.raises(RuntimeError, match="plugin delete failed"):
+            await services.delete_card(node.id)
+        assert services.get_card(node.id).id == node.id
+        assert behavior.values[node.id] == 3
+        assert behavior.calls[-2:] == [
+            ("delete", node.id),
+            ("rollback_delete", node.id),
+        ]
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "update", "delete"])
+async def test_persistence_failures_compensate_plugin_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    behavior = RecordingBehavior()
+    registry = create_builtin_registry()
+    _install_node(registry, f"example.persistence-{operation}", behavior)
+    services = create_services(
+        Settings.for_data_root(tmp_path / operation), plugins=registry
+    )
+    node_id = f"persistence-{operation}"
+    try:
+        if operation == "create":
+            monkeypatch.setattr(
+                services.world,
+                "create_card",
+                lambda *args, **kwargs: (_ for _ in ()).throw(
+                    OSError("create persistence failed")
+                ),
+            )
+            with pytest.raises(OSError, match="create persistence failed"):
+                await services.create_card(CardCreate(
+                    id=node_id,
+                    type=f"example.persistence-{operation}",
+                    config={"value": 3},
+                ))
+            assert services.world.maybe_get_card(node_id) is None
+            assert behavior.values == {}
+            assert behavior.calls == [("rollback_create", node_id)]
+            return
+
+        await services.create_card(CardCreate(
+            id=node_id,
+            type=f"example.persistence-{operation}",
+            config={"value": 3},
+        ))
+        behavior.calls.clear()
+        method_name = "update_card" if operation == "update" else "delete_card"
+        monkeypatch.setattr(
+            services.world,
+            method_name,
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                OSError(f"{operation} persistence failed")
+            ),
+        )
+        with pytest.raises(OSError, match=f"{operation} persistence failed"):
+            if operation == "update":
+                await services.update_card(node_id, CardPatch(config={"value": 9}))
+            else:
+                await services.delete_card(node_id)
+
+        assert services.get_card(node_id).config["value"] == 3
+        assert behavior.values[node_id] == 3
+        assert behavior.calls == [
+            (operation, node_id),
+            (f"rollback_{operation}", node_id),
+        ]
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_lifecycle_commit_finishes_compensation(
+    tmp_path: Path,
+) -> None:
+    started = asyncio.Event()
+    rolled_back = asyncio.Event()
+    active: set[str] = set()
+
+    class CancellationBehavior(NodeLifecycleHandler):
+        async def prepare_create(
+            self, context: NodeLifecycleContext, node: Card, request: CardCreate
+        ) -> NodeLifecycleTransaction:
+            del context, request
+
+            class Mutation(NodeLifecycleTransaction):
+                async def commit(self) -> None:
+                    active.add(node.id)
+                    started.set()
+                    await asyncio.Event().wait()
+
+                async def rollback(self, error: BaseException) -> None:
+                    assert isinstance(error, asyncio.CancelledError)
+                    active.discard(node.id)
+                    rolled_back.set()
+
+            return Mutation()
+
+    registry = create_builtin_registry()
+    _install_node(registry, "example.cancelled", CancellationBehavior())
+    services = create_services(
+        Settings.for_data_root(tmp_path / "managed"), plugins=registry
+    )
+    try:
+        task = asyncio.create_task(services.create_card(CardCreate(
+            id="cancelled-node", type="example.cancelled"
+        )))
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert rolled_back.is_set()
+        assert active == set()
+        assert services.world.maybe_get_card("cancelled-node") is None
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_builtin_resource_delete_restores_file_when_world_delete_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    services = create_services(Settings.for_data_root(tmp_path / "managed"))
+    try:
+        node = await services.create_card(CardCreate(
+            id="durable-text",
+            type="text",
+            config={"filename": "durable.txt"},
+            content="preserve me",
+        ))
+        record = services.resources.get_record(node.id)
+        path = services.resources.resolve_relative_path(record.relative_path)
+        monkeypatch.setattr(
+            services.world,
+            "delete_card",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                OSError("database delete failed")
+            ),
+        )
+
+        with pytest.raises(OSError, match="database delete failed"):
+            await services.delete_card(node.id)
+
+        assert services.get_card(node.id).id == node.id
+        assert services.resources.get_record(node.id).relative_path == record.relative_path
+        assert path.read_text(encoding="utf-8") == "preserve me"
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
 async def test_node_without_lifecycle_is_a_passive_persisted_object(
     tmp_path: Path,
 ) -> None:
     registry = create_builtin_registry()
-    registry.register_node_type(_plugin_node("example.passive", None))
+    _install_node(registry, "example.passive", None)
     services = create_services(
         Settings.for_data_root(tmp_path / "managed"), plugins=registry
     )

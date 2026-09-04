@@ -83,6 +83,7 @@ export interface WorldSnapshot {
 
 export interface NodeTypeCatalogItem {
   id: CardType;
+  plugin_id: string;
   label: string;
   description: string;
   icon: string;
@@ -104,6 +105,7 @@ export interface NodeTypeCatalogItem {
 
 export interface RelationshipCatalogItem {
   id: Relationship;
+  plugin_id: string;
   label: string;
   short_label: string;
   description: string;
@@ -115,6 +117,13 @@ export interface RelationshipCatalogItem {
 }
 
 export interface PluginCatalog {
+  plugins: Array<{
+    id: string;
+    version: string;
+    plugin_api_version: string;
+    name: string | null;
+    description: string | null;
+  }>;
   node_types: NodeTypeCatalogItem[];
   relationships: RelationshipCatalogItem[];
 }

@@ -45,3 +45,11 @@ class ConversationValidationError(DomainError):
 
 class RuntimeUnavailableError(DomainError):
     code = "runtime_unavailable"
+
+
+class PluginCompatibilityError(DomainError):
+    code = "plugin_incompatible"
+
+
+class PluginUnavailableError(DomainError):
+    code = "plugin_unavailable"

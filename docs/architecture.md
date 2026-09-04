@@ -23,7 +23,7 @@ The frontend may request a mutation, but it cannot grant a capability. Every pro
 
 ## World model
 
-A card stores identity, namespaced type, world position, size, expansion state, configuration, timestamps, and a revision. An edge stores a source, target, and one registered semantic relationship. Built-in definitions are registered through the same API exposed to trusted Python plugins.
+A card stores identity, namespaced type, owning plugin ID, world position, size, expansion state, configuration, timestamps, and a revision. An edge stores a source, target, owning plugin ID, and one registered semantic relationship. Built-in definitions are installed through the same descriptor-scoped registration mechanism as trusted Python plugins.
 
 | Source | Target | Relationships |
 | --- | --- | --- |
@@ -34,7 +34,7 @@ A card stores identity, namespaced type, world position, size, expansion state, 
 | Text | Sandbox | `mount_read_only`, `mount_read_write` |
 | Image | Sandbox | `mount_read_only` |
 
-`PluginRegistry` is the single rule authority. It publishes serializable UI metadata at `GET /api/catalog`, while configuration models and executable capability handlers stay in the trusted backend. Endpoint rules can match exact node types and/or declared traits. A connection gesture is unordered: when only its reverse orientation matches, the frontend and backend normalize it to the relationship's canonical source and target.
+`PluginRegistry` is the single rule authority. Entry points create application-scoped plugin instances with versioned descriptors; registration is staged atomically and every contribution retains its owner. The registry publishes plugin descriptors and serializable UI metadata at `GET /api/catalog`, while configuration models and executable capability handlers stay in the trusted backend. Endpoint rules can match exact node types and/or declared traits. A connection gesture is unordered: when only its reverse orientation matches, the frontend and backend normalize it to the relationship's canonical source and target.
 
 The backend rejects unsupported, duplicate, and self-referential edges. Scoped capabilities are generated from registered capability grants; there is no global “resource by ID” tool exposed to an agent.
 

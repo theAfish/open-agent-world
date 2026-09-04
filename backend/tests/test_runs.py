@@ -21,6 +21,7 @@ from backend.agents.tools import build_scoped_tool_callables
 from backend.config import Settings
 from backend.errors import RuntimeUnavailableError
 from backend.plugins import create_builtin_registry
+from backend.tests.plugin_support import install_test_plugin
 from backend.runs import InvocationContext, RunStatus, RuntimeInput
 from backend.services import create_services
 from backend.world.models import CardCreate
@@ -130,7 +131,13 @@ class RecordingProvider(RuntimeProvider):
 
 def _services(tmp_path: Path, provider: RecordingProvider):
     registry = create_builtin_registry()
-    registry.register_runtime_provider("test.runtime", lambda capabilities: provider)
+    install_test_plugin(
+        registry,
+        "test.runtime-plugin",
+        lambda registration: registration.register_runtime_provider(
+            "test.runtime", lambda capabilities: provider
+        ),
+    )
     settings = replace(
         Settings.for_data_root(tmp_path / "managed"),
         agent_runtime="test.runtime",
@@ -177,8 +184,15 @@ async def test_agents_in_one_world_can_select_different_providers(tmp_path: Path
     first = RecordingProvider()
     second = RecordingProvider()
     registry = create_builtin_registry()
-    registry.register_runtime_provider("test.first", lambda capabilities: first)
-    registry.register_runtime_provider("test.second", lambda capabilities: second)
+    def configure(registration: Any) -> None:
+        registration.register_runtime_provider(
+            "test.first", lambda capabilities: first
+        )
+        registration.register_runtime_provider(
+            "test.second", lambda capabilities: second
+        )
+
+    install_test_plugin(registry, "test.multi-runtime", configure)
     services = create_services(
         Settings.for_data_root(tmp_path / "managed"), plugins=registry
     )

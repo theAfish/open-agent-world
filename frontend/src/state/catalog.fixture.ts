@@ -7,6 +7,7 @@ function node(
 ): NodeTypeCatalogItem {
   return {
     id,
+    plugin_id: "open-agent-world.core",
     label: id,
     description: `${id} node`,
     icon: "puzzle",
@@ -32,6 +33,7 @@ function relationship(
 ): RelationshipCatalogItem {
   return {
     id,
+    plugin_id: "open-agent-world.core",
     label: id,
     short_label: id,
     description: `${id} relationship`,
@@ -45,6 +47,15 @@ function relationship(
 }
 
 export const TEST_CATALOG: PluginCatalog = {
+  plugins: [
+    {
+      id: "open-agent-world.core",
+      version: "0.1.0",
+      plugin_api_version: "1.0",
+      name: "Open Agent World Core",
+      description: "Test catalog",
+    },
+  ],
   node_types: [
     node("agent", ["core.agent"], { default_status: "idle" }),
     node("conversation", ["core.field", "core.conversation"], {

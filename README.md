@@ -40,7 +40,7 @@ Application data defaults to `%LOCALAPPDATA%/OpenAgentWorld`. Override it before
 
 - Infinite pan/zoom surface with dot and contour terrain, semantic edges, drag/drop palette, in-place card expansion, selection, and light/dark tokens.
 - Agent, Text, Image, and Sandbox card systems with persisted position, size, configuration, resources, and relationships.
-- Registry-driven plugin node types, relationships, scoped capability handlers, and a backend-authoritative canvas catalog. See [plugin development](docs/plugins.md).
+- Descriptor-scoped plugins with owned node types, relationships, lifecycle transactions, scoped capability handlers, and a backend-authoritative canvas catalog. See [plugin development](docs/plugins.md).
 - A runnable, installable [Greeter plugin example](examples/plugins/greeter/README.md) plus temporary `-PluginPath` mounting for plugin development.
 - Backend-authoritative edge validation and capability derivation with immediate permission revocation.
 - Managed UTF-8 text read/replace/patch operations and image import/inspection; resources never retain arbitrary host paths.

@@ -11,6 +11,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS cards (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
+    plugin_id TEXT NOT NULL,
     name TEXT NOT NULL,
     x REAL NOT NULL,
     y REAL NOT NULL,
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS edges (
     source_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
     target_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
     relationship TEXT NOT NULL,
+    plugin_id TEXT NOT NULL,
     direction TEXT NOT NULL DEFAULT 'forward' CHECK (direction IN ('forward', 'bidirectional')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -191,12 +193,25 @@ class Database:
         with self._lock:
             self._connection.executescript(SCHEMA)
             self._migrate_open_card_types()
+            card_columns = {
+                row["name"] for row in self._connection.execute("PRAGMA table_info(cards)")
+            }
+            if "plugin_id" not in card_columns:
+                self._connection.execute(
+                    "ALTER TABLE cards ADD COLUMN plugin_id TEXT NOT NULL "
+                    "DEFAULT 'open-agent-world.core'"
+                )
             edge_columns = {
                 row["name"] for row in self._connection.execute("PRAGMA table_info(edges)")
             }
             if "direction" not in edge_columns:
                 self._connection.execute(
                     "ALTER TABLE edges ADD COLUMN direction TEXT NOT NULL DEFAULT 'forward'"
+                )
+            if "plugin_id" not in edge_columns:
+                self._connection.execute(
+                    "ALTER TABLE edges ADD COLUMN plugin_id TEXT NOT NULL "
+                    "DEFAULT 'open-agent-world.core'"
                 )
             state_value_columns = {
                 row["name"]
@@ -225,6 +240,7 @@ class Database:
                 CREATE TABLE cards_open_types (
                     id TEXT PRIMARY KEY,
                     type TEXT NOT NULL,
+                    plugin_id TEXT NOT NULL DEFAULT 'open-agent-world.core',
                     name TEXT NOT NULL,
                     x REAL NOT NULL,
                     y REAL NOT NULL,
@@ -238,7 +254,10 @@ class Database:
                     updated_at TEXT NOT NULL,
                     revision INTEGER NOT NULL DEFAULT 1
                 );
-                INSERT INTO cards_open_types
+                INSERT INTO cards_open_types (
+                    id, type, name, x, y, width, height, expanded, config_json,
+                    chunk_x, chunk_y, created_at, updated_at, revision
+                )
                 SELECT id, type, name, x, y, width, height, expanded, config_json,
                        chunk_x, chunk_y, created_at, updated_at, revision
                 FROM cards;
@@ -265,7 +284,12 @@ class Database:
                 self._connection.rollback()
                 raise
             else:
-                self._connection.commit()
+                try:
+                    self._connection.commit()
+                except BaseException:
+                    if self._connection.in_transaction:
+                        self._connection.rollback()
+                    raise
 
     @contextmanager
     def locked(self) -> Iterator[sqlite3.Connection]:

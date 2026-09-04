@@ -545,11 +545,18 @@ class _ScriptedProvider:
 def _scripted_conversation_services(data_root: Path, mode: str):
     from backend.agents import RuntimeProvider
     from backend.plugins import create_builtin_registry
+    from backend.tests.plugin_support import install_test_plugin
 
     provider = _ScriptedProvider(mode)
     RuntimeProvider.register(_ScriptedProvider)
     registry = create_builtin_registry()
-    registry.register_runtime_provider("test.scripted", lambda capabilities: provider)
+    install_test_plugin(
+        registry,
+        "test.scripted-runtime",
+        lambda registration: registration.register_runtime_provider(
+            "test.scripted", lambda capabilities: provider
+        ),
+    )
     settings = Settings.for_data_root(data_root)
     services = create_services(settings, plugins=registry)
     services.install_runtime_provider("test.scripted", provider, default=True)

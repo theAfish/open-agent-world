@@ -5,8 +5,8 @@ import logging
 from collections.abc import Mapping
 from contextlib import suppress
 from contextvars import ContextVar
-from dataclasses import dataclass
-from pathlib import PureWindowsPath
+from dataclasses import dataclass, field
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from backend.agents import (
@@ -36,7 +36,12 @@ from backend.errors import (
 from backend.events.hub import EventHub
 from backend.events.models import EventType, RuntimeEvent
 from backend.persistence.database import Database
-from backend.plugins import NodeLifecycleContext, PluginRegistry, load_plugin_registry
+from backend.plugins import (
+    NodeLifecycleContext,
+    NodeLifecycleTransaction,
+    PluginRegistry,
+    load_plugin_registry,
+)
 from backend.resources.manager import ManagedResourceStore
 from backend.resources.models import (
     ImageImport,
@@ -127,6 +132,7 @@ class _LifecycleAgents:
 @dataclass(frozen=True, slots=True)
 class _LifecycleSandboxes:
     backend: SandboxBackend
+    resources: ManagedResourceStore
 
     async def ensure(self, node_id: str) -> str:
         try:
@@ -161,6 +167,54 @@ class _LifecycleSandboxes:
             if not missing_ok:
                 raise
 
+    async def attach_resource(
+        self,
+        node_id: str,
+        resource_id: str,
+        *,
+        writable: bool,
+        missing_ok: bool = False,
+    ) -> None:
+        try:
+            await self.backend.get(node_id)
+        except SandboxNotFoundError:
+            if missing_ok:
+                return
+            raise
+        record = self.resources.maybe_get_record(resource_id)
+        if record is None:
+            if missing_ok:
+                return
+            raise NotFoundError(f"resource {resource_id!r} does not exist")
+        _, source = self.resources.read_bytes(resource_id)
+        relative = str(PureWindowsPath("resources", record.filename))
+        await self.backend.attach_resource(
+            node_id,
+            resource_id,
+            source,
+            relative,
+            ResourceAccess.READ_WRITE if writable else ResourceAccess.READ_ONLY,
+        )
+
+
+@dataclass(slots=True)
+class _PreparedResourceRemoval:
+    path: Path
+    data: bytes
+    existed: bool
+    committed: bool = False
+
+    def commit(self) -> None:
+        self.path.unlink(missing_ok=True)
+        self.committed = True
+
+    def rollback(self) -> None:
+        if not self.committed or not self.existed:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_bytes(self.data)
+        self.committed = False
+
 
 @dataclass(frozen=True, slots=True)
 class _LifecycleResources:
@@ -178,6 +232,18 @@ class _LifecycleResources:
         record = self.resources.maybe_get_record(node_id)
         if record is not None:
             self.resources.remove_file(record)
+
+    def prepare_file_removal(self, node_id: str) -> _PreparedResourceRemoval | None:
+        record = self.resources.maybe_get_record(node_id)
+        if record is None:
+            return None
+        path = self.resources.resolve_relative_path(record.relative_path)
+        existed = path.is_file()
+        return _PreparedResourceRemoval(
+            path=path,
+            data=path.read_bytes() if existed else b"",
+            existed=existed,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,6 +275,9 @@ class ApplicationServices:
     state: StateStore
     run_manager: RunManager | None = None
     sandbox_backend: SandboxBackend | None = None
+    _node_mutation_lock: asyncio.Lock = field(
+        default_factory=asyncio.Lock, init=False, repr=False
+    )
 
     async def startup(self) -> None:
         manager = self._require_run_manager()
@@ -248,77 +317,135 @@ class ApplicationServices:
         return card.model_copy(update={"resource": summary, "config": config})
 
     async def create_card(self, request: CardCreate) -> Card:
-        card = self.world.create_card(request)
-        lifecycle = self.plugins.node_type(card.type).lifecycle
-        context = self._node_lifecycle_context()
-        try:
-            if lifecycle is not None:
-                await lifecycle.on_create(context, card, request)
-        except BaseException as error:
-            cleanup_errors: list[BaseException] = []
-            if lifecycle is not None:
-                try:
-                    await lifecycle.on_create_rollback(context, card, request, error)
-                except BaseException as cleanup_error:
-                    cleanup_errors.append(cleanup_error)
+        async with self._node_mutation_lock:
+            lifecycle = self.plugins.node_type(request.type).lifecycle
+            context = self._node_lifecycle_context()
+            preview = self.world.preview_card(request)
+            transaction = (
+                await lifecycle.prepare_create(context, preview, request)
+                if lifecycle is not None
+                else NodeLifecycleTransaction()
+            )
+            card: Card | None = None
             try:
-                self.world.delete_card(card.id)
-            except BaseException as cleanup_error:
-                cleanup_errors.append(cleanup_error)
-            for cleanup_error in cleanup_errors:
-                error.add_note(
-                    "node creation rollback also failed: "
-                    f"{type(cleanup_error).__name__}: {cleanup_error}"
-                )
-            raise
-        card = self.enrich_card(self.world.get_card(card.id))
-        await self.events.publish(
-            EventType.CARD_CREATED,
-            node_id=card.id,
-            payload={"node": card.model_dump(mode="json")},
-        )
+                card = self.world.create_card(request, card_id=preview.id)
+                await transaction.commit()
+            except BaseException as error:
+                cleanup_errors: list[BaseException] = []
+                rollback_error = await self._rollback_lifecycle(transaction, error)
+                if rollback_error is not None:
+                    cleanup_errors.append(rollback_error)
+                if card is not None:
+                    try:
+                        self.world.delete_card(card.id)
+                    except BaseException as cleanup_error:
+                        cleanup_errors.append(cleanup_error)
+                for cleanup_error in cleanup_errors:
+                    error.add_note(
+                        "node creation compensation also failed: "
+                        f"{type(cleanup_error).__name__}: {cleanup_error}"
+                    )
+                raise
+            card = self.enrich_card(self.world.get_card(card.id))
+            await self.events.publish(
+                EventType.CARD_CREATED,
+                node_id=card.id,
+                payload={"node": card.model_dump(mode="json")},
+            )
         return card
+
+    @staticmethod
+    async def _rollback_lifecycle(
+        transaction: NodeLifecycleTransaction, error: BaseException
+    ) -> BaseException | None:
+        rollback_task = asyncio.create_task(transaction.rollback(error))
+        while True:
+            try:
+                await asyncio.shield(rollback_task)
+                return None
+            except asyncio.CancelledError:
+                if rollback_task.done():
+                    try:
+                        rollback_task.result()
+                    except BaseException as cleanup_error:
+                        return cleanup_error
+                    return None
+                continue
+            except BaseException as cleanup_error:
+                return cleanup_error
 
     def get_card(self, card_id: str) -> Card:
         return self.enrich_card(self.world.get_card(card_id))
 
     async def update_card(self, card_id: str, request: CardPatch) -> Card:
-        current = self.world.get_card(card_id)
-        lifecycle = self.plugins.node_type(current.type).lifecycle
-        if lifecycle is not None:
-            await lifecycle.on_update(self._node_lifecycle_context(), current, request)
-        card = self.enrich_card(self.world.update_card(card_id, request))
-        await self.events.publish(
-            EventType.CARD_UPDATED,
-            node_id=card.id,
-            payload={"node": card.model_dump(mode="json")},
-        )
+        async with self._node_mutation_lock:
+            current = self.world.get_card(card_id)
+            updated = self.world.preview_update_card(card_id, request)
+            lifecycle = self.plugins.node_type(current.type).lifecycle
+            context = self._node_lifecycle_context()
+            transaction = (
+                await lifecycle.prepare_update(context, current, updated, request)
+                if lifecycle is not None
+                else NodeLifecycleTransaction()
+            )
+            try:
+                await transaction.commit()
+                card = self.enrich_card(self.world.update_card(card_id, request))
+            except BaseException as error:
+                rollback_error = await self._rollback_lifecycle(transaction, error)
+                if rollback_error is not None:
+                    error.add_note(
+                        "node update compensation also failed: "
+                        f"{type(rollback_error).__name__}: {rollback_error}"
+                    )
+                raise
+            await self.events.publish(
+                EventType.CARD_UPDATED,
+                node_id=card.id,
+                payload={"node": card.model_dump(mode="json")},
+            )
         return card
 
     async def delete_card(self, card_id: str) -> Card:
-        card = self.world.get_card(card_id)
-        attached_edges = {
-            edge.id: edge
-            for edge in (
-                *self.world.list_edges_from(card_id),
-                *self.world.list_edges_to(card_id),
+        async with self._node_mutation_lock:
+            card = self.world.get_card(card_id)
+            attached_edges = {
+                edge.id: edge
+                for edge in (
+                    *self.world.list_edges_from(card_id),
+                    *self.world.list_edges_to(card_id),
+                )
+            }
+            affected = {
+                edge.id: self._affected_agents(edge) for edge in attached_edges.values()
+            }
+            lifecycle = self.plugins.node_type(card.type).lifecycle
+            context = self._node_lifecycle_context()
+            transaction = (
+                await lifecycle.prepare_delete(context, card)
+                if lifecycle is not None
+                else NodeLifecycleTransaction()
             )
-        }
-        affected = {edge.id: self._affected_agents(edge) for edge in attached_edges.values()}
-        lifecycle = self.plugins.node_type(card.type).lifecycle
-        if lifecycle is not None:
-            await lifecycle.on_delete(self._node_lifecycle_context(), card)
-
-        deleted = self.world.delete_card(card_id)
-        for edge in attached_edges.values():
-            await self._publish_edge_change(
-                EventType.EDGE_DELETED, edge, affected_agents=affected[edge.id]
+            try:
+                await transaction.commit()
+                deleted = self.world.delete_card(card_id)
+            except BaseException as error:
+                rollback_error = await self._rollback_lifecycle(transaction, error)
+                if rollback_error is not None:
+                    error.add_note(
+                        "node deletion compensation also failed: "
+                        f"{type(rollback_error).__name__}: {rollback_error}"
+                    )
+                raise
+            for edge in attached_edges.values():
+                await self._publish_edge_change(
+                    EventType.EDGE_DELETED, edge, affected_agents=affected[edge.id]
+                )
+            await self.events.publish(
+                EventType.CARD_DELETED,
+                node_id=deleted.id,
+                payload={"node": deleted.model_dump(mode="json")},
             )
-        await self.events.publish(
-            EventType.CARD_DELETED,
-            node_id=deleted.id,
-            payload={"node": deleted.model_dump(mode="json")},
-        )
         return deleted
 
     def snapshot(self, chunks: list[tuple[int, int]] | None = None) -> WorldSnapshot:
@@ -1186,7 +1313,7 @@ class ApplicationServices:
             conversations=_LifecycleConversations(self.conversations, self.state),
             agents=_LifecycleAgents(manager),
             sandboxes=(
-                _LifecycleSandboxes(self.sandbox_backend)
+                _LifecycleSandboxes(self.sandbox_backend, self.resources)
                 if self.sandbox_backend is not None
                 else None
             ),
@@ -1236,6 +1363,11 @@ def create_services(
     database = Database(settings.database_path)
     plugin_registry = plugins or load_plugin_registry()
     world = WorldStore(database, plugin_registry, chunk_size=settings.chunk_size)
+    try:
+        world.assert_plugin_availability()
+    except BaseException:
+        database.close()
+        raise
     resources = ManagedResourceStore(database, settings.data_root)
     conversations = ConversationStore(database)
     capabilities = CapabilityBroker(world, resources, plugin_registry)

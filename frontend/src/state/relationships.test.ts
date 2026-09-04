@@ -43,6 +43,7 @@ describe("semantic relationship rules", () => {
 
   it("matches plugin-defined node traits without adding frontend type branches", () => {
     const pluginCatalog = {
+      ...TEST_CATALOG,
       node_types: [
         ...TEST_CATALOG.node_types,
         {
@@ -56,6 +57,7 @@ describe("semantic relationship rules", () => {
         ...TEST_CATALOG.relationships,
         {
           id: "acme.query",
+          plugin_id: "acme.dataset",
           label: "Query",
           short_label: "query",
           description: "Query a plugin dataset.",

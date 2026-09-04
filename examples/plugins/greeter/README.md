@@ -1,10 +1,11 @@
 # Greeter plugin example
 
-This installable example exercises the complete common plugin path:
+This installable example exercises the canonical plugin path:
 
 ```text
-Python entry point -> registry -> catalog -> canvas node -> relationship
-                   -> scoped Agent tool -> plugin handler/runtime
+entry-point factory -> plugin descriptor -> owned registry contributions
+                    -> catalog/node/lifecycle -> relationship
+                    -> scoped Agent tool -> instance-owned runtime
 ```
 
 From the repository root, start the application with the example attached:
@@ -15,12 +16,14 @@ From the repository root, start the application with the example attached:
 
 In the UI, the **Community examples** deck and **Greeter** card are supplied
 entirely by this package. Connect an Agent to a Greeter with **Greet with**.
-The edge grants that Agent a scoped `greet_with_*` tool.
+The edge grants that Agent a scoped `greet_with_*` tool. Removing the edge or
+Greeter revokes the tool immediately.
 
-Before unplugging, delete every Greeter card from the world so no persisted
-object still depends on its type. Then restart without `-PluginPath`.
+Before unplugging, delete every Greeter card from the world so no persisted object
+still records the plugin as its owner. Then restart without `-PluginPath`.
 
-Run its integration test without changing the backend dependency files:
+Run its integration test through an editable install. The test inspects the real
+entry-point metadata and loads the plugin through host discovery:
 
 ```powershell
 uv run --project backend --with-editable ./examples/plugins/greeter `

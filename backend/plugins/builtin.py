@@ -1,19 +1,24 @@
 from __future__ import annotations
 
-import base64
 from contextlib import suppress
-from dataclasses import asdict
 from typing import Any
 
-from backend.errors import ResourceValidationError, RuntimeUnavailableError
+from backend.errors import ResourceValidationError
 from backend.plugins.registry import (
+    PLUGIN_API_VERSION,
     CapabilityGrantDefinition,
     NodeTypeDefinition,
+    PluginDescriptor,
+    PluginRegistration,
     PluginRegistry,
     RelationshipDefinition,
 )
-from backend.plugins.lifecycle import NodeLifecycleContext, NodeLifecycleHandler
-from backend.resources.models import TextReplace
+from backend.plugins.lifecycle import (
+    NodeLifecycleContext,
+    NodeLifecycleHandler,
+    NodeLifecycleTransaction,
+)
+from backend.plugins.capability import CapabilityContext
 from backend.world.models import (
     AgentConfig,
     Card,
@@ -24,6 +29,18 @@ from backend.world.models import (
     SandboxConfig,
     TextConfig,
 )
+
+
+class _LifecycleOperation(NodeLifecycleTransaction):
+    def __init__(self, commit: Any, rollback: Any) -> None:
+        self._commit = commit
+        self._rollback = rollback
+
+    async def commit(self) -> None:
+        await self._commit()
+
+    async def rollback(self, error: BaseException) -> None:
+        await self._rollback(error)
 
 
 class AgentNodeBehavior(NodeLifecycleHandler):
@@ -38,42 +55,55 @@ class AgentNodeBehavior(NodeLifecycleHandler):
             with suppress(Exception):
                 await context.agents.stop(node.id)
 
-    async def on_create(
+    async def prepare_create(
         self, context: NodeLifecycleContext, node: Card, request: CardCreate
-    ) -> None:
+    ) -> NodeLifecycleTransaction:
         del request
-        if context.agents is not None:
-            await context.agents.create(node)
 
-    async def on_create_rollback(
+        async def commit() -> None:
+            if context.agents is not None:
+                await context.agents.create(node)
+
+        async def rollback(error: BaseException) -> None:
+            del error
+            if context.agents is not None:
+                await context.agents.delete(node.id, missing_ok=True)
+
+        return _LifecycleOperation(commit, rollback)
+
+    async def prepare_update(
         self,
         context: NodeLifecycleContext,
-        node: Card,
-        request: CardCreate,
-        error: BaseException,
-    ) -> None:
-        del request, error
-        if context.agents is not None:
-            await context.agents.delete(node.id, missing_ok=True)
+        current: Card,
+        updated: Card,
+        request: CardPatch,
+    ) -> NodeLifecycleTransaction:
+        changed = request.name is not None or request.config is not None
 
-    async def on_update(
-        self, context: NodeLifecycleContext, node: Card, request: CardPatch
-    ) -> None:
-        if context.agents is None or (
-            request.name is None and request.config is None
-        ):
-            return
-        merged = node.model_copy(
-            update={
-                "name": request.name or node.name,
-                "config": {**node.config, **(request.config or {})},
-            }
-        )
-        await context.agents.update(merged)
+        async def commit() -> None:
+            if context.agents is not None and changed:
+                await context.agents.update(updated)
 
-    async def on_delete(self, context: NodeLifecycleContext, node: Card) -> None:
-        if context.agents is not None:
-            await context.agents.delete(node.id)
+        async def rollback(error: BaseException) -> None:
+            del error
+            if context.agents is not None and changed:
+                await context.agents.update(current)
+
+        return _LifecycleOperation(commit, rollback)
+
+    async def prepare_delete(
+        self, context: NodeLifecycleContext, node: Card
+    ) -> NodeLifecycleTransaction:
+        async def commit() -> None:
+            if context.agents is not None:
+                await context.agents.delete(node.id)
+
+        async def rollback(error: BaseException) -> None:
+            del error
+            if context.agents is not None:
+                await context.agents.create(node)
+
+        return _LifecycleOperation(commit, rollback)
 
 
 class SandboxNodeBehavior(NodeLifecycleHandler):
@@ -88,110 +118,146 @@ class SandboxNodeBehavior(NodeLifecycleHandler):
         if context.sandboxes is not None:
             await context.sandboxes.terminate(node.id, missing_ok=True)
 
-    async def on_create(
+    async def prepare_create(
         self, context: NodeLifecycleContext, node: Card, request: CardCreate
-    ) -> None:
+    ) -> NodeLifecycleTransaction:
         del request
-        if context.sandboxes is not None:
-            await context.sandboxes.create(node.id)
 
-    async def on_create_rollback(
-        self,
-        context: NodeLifecycleContext,
-        node: Card,
-        request: CardCreate,
-        error: BaseException,
-    ) -> None:
-        del request, error
-        if context.sandboxes is not None:
-            await context.sandboxes.destroy(node.id, missing_ok=True)
+        async def commit() -> None:
+            if context.sandboxes is not None:
+                await context.sandboxes.create(node.id)
 
-    async def on_delete(self, context: NodeLifecycleContext, node: Card) -> None:
-        if context.sandboxes is not None:
-            await context.sandboxes.destroy(node.id, missing_ok=True)
+        async def rollback(error: BaseException) -> None:
+            del error
+            if context.sandboxes is not None:
+                await context.sandboxes.destroy(node.id, missing_ok=True)
+
+        return _LifecycleOperation(commit, rollback)
+
+    async def prepare_delete(
+        self, context: NodeLifecycleContext, node: Card
+    ) -> NodeLifecycleTransaction:
+        async def commit() -> None:
+            if context.sandboxes is not None:
+                await context.sandboxes.destroy(node.id, missing_ok=True)
+
+        async def rollback(error: BaseException) -> None:
+            del error
+            if context.sandboxes is not None:
+                await context.sandboxes.create(node.id)
+
+        return _LifecycleOperation(commit, rollback)
 
 
 class ConversationNodeBehavior(NodeLifecycleHandler):
-    async def on_create(
+    async def prepare_create(
         self, context: NodeLifecycleContext, node: Card, request: CardCreate
-    ) -> None:
+    ) -> NodeLifecycleTransaction:
         del request
-        context.conversations.create_initial_session(node.id, "General")
 
-    async def on_create_rollback(
-        self,
-        context: NodeLifecycleContext,
-        node: Card,
-        request: CardCreate,
-        error: BaseException,
-    ) -> None:
-        del request, error
-        context.conversations.delete_session_state(node.id)
+        async def commit() -> None:
+            context.conversations.create_initial_session(node.id, "General")
 
-    async def on_delete(self, context: NodeLifecycleContext, node: Card) -> None:
-        context.conversations.delete_session_state(node.id)
+        async def rollback(error: BaseException) -> None:
+            del error
+            context.conversations.delete_session_state(node.id)
 
+        return _LifecycleOperation(commit, rollback)
 
 class ManagedResourceNodeBehavior(NodeLifecycleHandler):
     _mount_relationships = frozenset({"mount_read_only", "mount_read_write"})
 
-    async def on_create_rollback(
-        self,
-        context: NodeLifecycleContext,
-        node: Card,
-        request: CardCreate,
-        error: BaseException,
-    ) -> None:
-        del request, error
-        context.resources.remove_file(node.id)
+    async def _prepare_create(
+        self, context: NodeLifecycleContext, node: Card, create: Any
+    ) -> NodeLifecycleTransaction:
+        async def commit() -> None:
+            create()
 
-    async def on_delete(self, context: NodeLifecycleContext, node: Card) -> None:
-        if context.sandboxes is not None:
-            for edge in context.nodes.list_edges_from(node.id):
-                if edge.relationship in self._mount_relationships:
-                    await context.sandboxes.detach_resource(
-                        edge.target, node.id, missing_ok=True
+        async def rollback(error: BaseException) -> None:
+            del error
+            context.resources.remove_file(node.id)
+
+        return _LifecycleOperation(commit, rollback)
+
+    async def prepare_delete(
+        self, context: NodeLifecycleContext, node: Card
+    ) -> NodeLifecycleTransaction:
+        edges = tuple(context.nodes.list_edges_from(node.id))
+        removal = context.resources.prepare_file_removal(node.id)
+        detached: list[Any] = []
+
+        async def commit() -> None:
+            if context.sandboxes is not None:
+                for edge in edges:
+                    if edge.relationship in self._mount_relationships:
+                        await context.sandboxes.detach_resource(
+                            edge.target, node.id, missing_ok=True
+                        )
+                        detached.append(edge)
+            if removal is not None:
+                removal.commit()
+
+        async def rollback(error: BaseException) -> None:
+            del error
+            if removal is not None:
+                removal.rollback()
+            if context.sandboxes is not None:
+                for edge in reversed(detached):
+                    await context.sandboxes.attach_resource(
+                        edge.target,
+                        node.id,
+                        writable=edge.relationship == "mount_read_write",
+                        missing_ok=True,
                     )
-        context.resources.remove_file(node.id)
+
+        return _LifecycleOperation(commit, rollback)
 
 
 class TextNodeBehavior(ManagedResourceNodeBehavior):
-    async def on_create(
+    async def prepare_create(
         self, context: NodeLifecycleContext, node: Card, request: CardCreate
-    ) -> None:
+    ) -> NodeLifecycleTransaction:
         filename = str(node.config.get("filename", "untitled.txt"))
         initial_content = request.content
         if initial_content is None:
             configured_content = request.config.get("content", "")
             initial_content = configured_content if isinstance(configured_content, str) else ""
-        context.resources.create_text(node.id, filename, initial_content)
-
-
-class ImageNodeBehavior(ManagedResourceNodeBehavior):
-    async def on_create(
-        self, context: NodeLifecycleContext, node: Card, request: CardCreate
-    ) -> None:
-        if request.data_base64 is None:
-            return
-        filename = str(node.config.get("filename", "image.png"))
-        context.resources.create_image(
-            node.id, filename, request.media_type or "", request.data_base64
+        return await self._prepare_create(
+            context,
+            node,
+            lambda: context.resources.create_text(node.id, filename, initial_content),
         )
 
 
-async def _communicate(services: Any, capability: Any, values: dict[str, Any]) -> Any:
+class ImageNodeBehavior(ManagedResourceNodeBehavior):
+    async def prepare_create(
+        self, context: NodeLifecycleContext, node: Card, request: CardCreate
+    ) -> NodeLifecycleTransaction:
+        def create() -> None:
+            if request.data_base64 is not None:
+                filename = str(node.config.get("filename", "image.png"))
+                context.resources.create_image(
+                    node.id, filename, request.media_type or "", request.data_base64
+                )
+
+        return await self._prepare_create(context, node, create)
+
+
+async def _communicate(
+    context: CapabilityContext, capability: Any, values: dict[str, Any]
+) -> Any:
     message = values.get("message")
     if set(values) != {"message"} or not isinstance(message, str) or not message.strip():
         raise ResourceValidationError(
             "agent communication capability requires one non-empty message"
         )
-    return await services.communicate_with_agent(
+    return await context.communicate(
         capability.agent_id, capability.target_id, message
     )
 
 
 async def _request_conversation_turn(
-    services: Any, capability: Any, values: dict[str, Any]
+    context: CapabilityContext, capability: Any, values: dict[str, Any]
 ) -> Any:
     if set(values) != {"agent_id", "message"}:
         raise ResourceValidationError(
@@ -199,60 +265,44 @@ async def _request_conversation_turn(
         )
     if not all(isinstance(values[key], str) and values[key].strip() for key in values):
         raise ResourceValidationError("conversation turn arguments must be non-empty strings")
-    context = services._require_run_manager().current_context
-    if context is None or not context.context_id:
-        raise ResourceValidationError(
-            "conversation turn capability is only available during a conversation run"
-        )
-    return await services.request_conversation_turn(
+    return await context.request_conversation_turn(
         capability.agent_id,
         capability.target_id,
-        context.context_id,
         values["agent_id"],
         values["message"],
     )
 
 
-async def _read_text(services: Any, capability: Any, values: dict[str, Any]) -> Any:
+async def _read_text(
+    context: CapabilityContext, capability: Any, values: dict[str, Any]
+) -> Any:
     if values:
         raise ResourceValidationError("text read capability takes no arguments")
-    document = services.capabilities.read_text(
-        capability.agent_id, capability.target_id
-    )
-    return document.model_dump(mode="json")
+    return context.read_text(capability.agent_id, capability.target_id)
 
 
-async def _edit_text(services: Any, capability: Any, values: dict[str, Any]) -> Any:
+async def _edit_text(
+    context: CapabilityContext, capability: Any, values: dict[str, Any]
+) -> Any:
     if set(values) != {"content"} or not isinstance(values["content"], str):
         raise ResourceValidationError(
             "text edit capability requires one string content argument"
         )
-    document = await services.replace_text(
-        capability.target_id,
-        TextReplace(content=values["content"]),
-        agent_id=capability.agent_id,
+    return await context.replace_text(
+        capability.agent_id, capability.target_id, values["content"]
     )
-    return document.model_dump(mode="json")
 
 
-async def _view_image(services: Any, capability: Any, values: dict[str, Any]) -> Any:
+async def _view_image(
+    context: CapabilityContext, capability: Any, values: dict[str, Any]
+) -> Any:
     if values:
         raise ResourceValidationError("image view capability takes no arguments")
-    record, path = services.capabilities.view_image(
-        capability.agent_id, capability.target_id
-    )
-    return {
-        "filename": record.filename,
-        "media_type": record.media_type,
-        "width": record.width,
-        "height": record.height,
-        "size_bytes": record.size_bytes,
-        "data_base64": base64.b64encode(path.read_bytes()).decode("ascii"),
-    }
+    return context.view_image(capability.agent_id, capability.target_id)
 
 
 async def _execute_sandbox(
-    services: Any, capability: Any, values: dict[str, Any]
+    context: CapabilityContext, capability: Any, values: dict[str, Any]
 ) -> Any:
     argv = values.get("argv")
     if (
@@ -264,22 +314,14 @@ async def _execute_sandbox(
         raise ResourceValidationError(
             "sandbox execute capability requires a non-empty argv array"
         )
-    services.capabilities.require_sandbox_execute(
-        capability.agent_id, capability.target_id
+    return await context.execute_sandbox(
+        capability.agent_id, capability.target_id, argv
     )
-    if services.sandbox_backend is None:
-        raise RuntimeUnavailableError("the native Windows sandbox backend is unavailable")
-    result = await services.execute_sandbox(
-        capability.target_id, argv, agent_id=capability.agent_id
-    )
-    return asdict(result)
 
 
-def create_builtin_registry() -> PluginRegistry:
+def _register_builtin(registry: PluginRegistration) -> None:
     from backend.agents import GoogleAdkAgentRuntime, MockAgentRuntime
     from backend.state import MergePolicy, StateFieldDefinition, StateSchema
-
-    registry = PluginRegistry()
 
     def common_fields(scope_kind: str) -> dict[str, StateFieldDefinition]:
         allowed = frozenset({scope_kind})
@@ -508,4 +550,20 @@ def create_builtin_registry() -> PluginRegistry:
         description="The text resource can be read and changed inside the sandbox.",
         source_traits=frozenset({"core.text"}), target_traits=frozenset({"core.sandbox"}),
     ))
+class CorePlugin:
+    descriptor = PluginDescriptor(
+        id="open-agent-world.core",
+        version="0.1.0",
+        plugin_api_version=PLUGIN_API_VERSION,
+        name="Open Agent World Core",
+        description="Built-in nodes, relationships, state schemas, and runtimes.",
+    )
+
+    def register(self, registration: PluginRegistration) -> None:
+        _register_builtin(registration)
+
+
+def create_builtin_registry() -> PluginRegistry:
+    registry = PluginRegistry()
+    registry.install(CorePlugin())
     return registry

@@ -16,8 +16,6 @@ class NodeLifecycleNodes(Protocol):
 
 
 class AgentNodeLifecycle(Protocol):
-    """Provider-neutral lifecycle operations for an agent-backed node."""
-
     async def create(self, node: Card) -> None: ...
 
     async def update(self, node: Card) -> None: ...
@@ -28,8 +26,6 @@ class AgentNodeLifecycle(Protocol):
 
 
 class SandboxNodeLifecycle(Protocol):
-    """Provider-neutral lifecycle operations for an execution environment."""
-
     async def ensure(self, node_id: str) -> str: ...
 
     async def create(self, node_id: str) -> None: ...
@@ -42,13 +38,26 @@ class SandboxNodeLifecycle(Protocol):
         self, node_id: str, resource_id: str, *, missing_ok: bool = False
     ) -> None: ...
 
+    async def attach_resource(
+        self,
+        node_id: str,
+        resource_id: str,
+        *,
+        writable: bool,
+        missing_ok: bool = False,
+    ) -> None: ...
+
+
+class ManagedResourceRemoval(Protocol):
+    """A prepared file removal that can restore its exact prior bytes."""
+
+    def commit(self) -> None: ...
+
+    def rollback(self) -> None: ...
+
 
 class ManagedResourceLifecycle(Protocol):
-    """Managed-file operations needed while creating and deleting resource nodes."""
-
-    def create_text(
-        self, node_id: str, filename: str, content: str = ""
-    ) -> None: ...
+    def create_text(self, node_id: str, filename: str, content: str = "") -> None: ...
 
     def create_image(
         self, node_id: str, filename: str, media_type: str, data_base64: str
@@ -56,10 +65,10 @@ class ManagedResourceLifecycle(Protocol):
 
     def remove_file(self, node_id: str) -> None: ...
 
+    def prepare_file_removal(self, node_id: str) -> ManagedResourceRemoval | None: ...
+
 
 class ConversationNodeLifecycle(Protocol):
-    """Conversation operations needed during node creation."""
-
     def create_initial_session(self, node_id: str, title: str) -> None: ...
 
     def delete_session_state(self, node_id: str) -> None: ...
@@ -67,11 +76,7 @@ class ConversationNodeLifecycle(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class NodeLifecycleContext:
-    """Small service surface shared by built-in and third-party node behaviors.
-
-    Provider SDKs, HTTP objects, database connections, and the application
-    service container intentionally do not cross this boundary.
-    """
+    """Provider-neutral host operations available to node lifecycle code."""
 
     nodes: NodeLifecycleNodes
     resources: ManagedResourceLifecycle
@@ -80,14 +85,24 @@ class NodeLifecycleContext:
     sandboxes: SandboxNodeLifecycle | None = None
 
 
-class NodeLifecycleHandler:
-    """Optional lifecycle callbacks for one registered node type.
+class NodeLifecycleTransaction:
+    """One prepared, reversible plugin-side part of a node mutation.
 
-    ``on_create_rollback`` is invoked whenever ``on_create`` raises, including
-    cancellation. Implementations must use it to undo any partial side effects
-    created before the failure. The persisted node is removed by the service
-    layer after this callback returns (or raises).
+    ``commit`` and ``rollback`` must be idempotent. ``rollback`` may be called
+    after a partial or successful commit and must restore the pre-mutation
+    plugin/external state. Preparation itself must not create visible side
+    effects.
     """
+
+    async def commit(self) -> None:
+        pass
+
+    async def rollback(self, error: BaseException) -> None:
+        pass
+
+
+class NodeLifecycleHandler:
+    """Prepares reversible transactions for one registered node type."""
 
     async def on_startup(self, context: NodeLifecycleContext, node: Card) -> None:
         pass
@@ -95,24 +110,21 @@ class NodeLifecycleHandler:
     async def on_shutdown(self, context: NodeLifecycleContext, node: Card) -> None:
         pass
 
-    async def on_create(
+    async def prepare_create(
         self, context: NodeLifecycleContext, node: Card, request: CardCreate
-    ) -> None:
-        pass
+    ) -> NodeLifecycleTransaction:
+        return NodeLifecycleTransaction()
 
-    async def on_create_rollback(
+    async def prepare_update(
         self,
         context: NodeLifecycleContext,
-        node: Card,
-        request: CardCreate,
-        error: BaseException,
-    ) -> None:
-        pass
+        current: Card,
+        updated: Card,
+        request: CardPatch,
+    ) -> NodeLifecycleTransaction:
+        return NodeLifecycleTransaction()
 
-    async def on_update(
-        self, context: NodeLifecycleContext, node: Card, request: CardPatch
-    ) -> None:
-        pass
-
-    async def on_delete(self, context: NodeLifecycleContext, node: Card) -> None:
-        pass
+    async def prepare_delete(
+        self, context: NodeLifecycleContext, node: Card
+    ) -> NodeLifecycleTransaction:
+        return NodeLifecycleTransaction()

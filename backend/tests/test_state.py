@@ -22,6 +22,7 @@ from backend.state import (
     StateScopeRef,
     StateStore,
 )
+from backend.tests.plugin_support import install_test_plugin
 from backend.world.models import CardCreate
 
 
@@ -74,7 +75,7 @@ def test_builtin_run_schema_is_generic_and_all_state_is_durable() -> None:
 
 def test_merge_policies_revision_conflicts_and_permissions(tmp_path: Path) -> None:
     registry = create_builtin_registry()
-    registry.register_state_schema(StateSchema(id="example.runtime", fields={
+    schema = StateSchema(id="example.runtime", fields={
         "replace": StateFieldDefinition(value_type=dict[str, int]),
         "mapping": StateFieldDefinition(
             value_type=dict[str, int], merge_policy=MergePolicy.MERGE_DICT
@@ -88,7 +89,12 @@ def test_merge_policies_revision_conflicts_and_permissions(tmp_path: Path) -> No
         "restricted": StateFieldDefinition(
             value_type=str, write_permissions=frozenset({"example.write"})
         ),
-    }))
+    })
+    install_test_plugin(
+        registry,
+        "example.runtime-plugin",
+        lambda registration: registration.register_state_schema(schema),
+    )
     database = Database(tmp_path / "merges.sqlite3")
     store = StateStore(database, registry)
     try:
@@ -130,7 +136,11 @@ def test_plugin_schema_registration_and_persistence_across_restart(
     schema = StateSchema(id="acme.research", fields={
         "findings": StateFieldDefinition(value_type=list[str])
     })
-    registry.register_state_schema(schema)
+    install_test_plugin(
+        registry,
+        "acme.research-plugin",
+        lambda registration: registration.register_state_schema(schema),
+    )
     assert registry.state_schema("acme.research") is schema
 
     database = Database(path)
@@ -141,7 +151,11 @@ def test_plugin_schema_registration_and_persistence_across_restart(
     database.close()
 
     restarted_registry = create_builtin_registry()
-    restarted_registry.register_state_schema(schema)
+    install_test_plugin(
+        restarted_registry,
+        "acme.research-plugin",
+        lambda registration: registration.register_state_schema(schema),
+    )
     restarted_database = Database(path)
     try:
         restarted = StateStore(restarted_database, restarted_registry)
@@ -200,7 +214,13 @@ async def test_run_scopes_are_automatic_independent_and_typed(tmp_path: Path) ->
         instances.append(runtime)
         return runtime
 
-    registry.register_runtime_provider("test.capture", factory)  # type: ignore[arg-type]
+    install_test_plugin(
+        registry,
+        "test.capture-runtime",
+        lambda registration: registration.register_runtime_provider(
+            "test.capture", factory  # type: ignore[arg-type]
+        ),
+    )
     services = create_services(
         Settings.for_data_root(tmp_path / "managed"),
         plugins=registry,

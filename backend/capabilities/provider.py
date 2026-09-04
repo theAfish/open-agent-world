@@ -1,12 +1,85 @@
 from __future__ import annotations
 
+import base64
 from collections.abc import Mapping, Sequence
+from dataclasses import asdict
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from backend.agents import ScopedToolDefinition, ToolParameter
+from backend.errors import ResourceValidationError, RuntimeUnavailableError
+from backend.resources.models import TextReplace
 
 if TYPE_CHECKING:
     from backend.services import ApplicationServices
+
+
+@dataclass(frozen=True, slots=True)
+class _CapabilityContext:
+    services: ApplicationServices
+
+    async def communicate(
+        self, source_agent_id: str, target_agent_id: str, message: str
+    ) -> Any:
+        return await self.services.communicate_with_agent(
+            source_agent_id, target_agent_id, message
+        )
+
+    async def request_conversation_turn(
+        self,
+        source_agent_id: str,
+        conversation_id: str,
+        participant_agent_id: str,
+        message: str,
+    ) -> Any:
+        run_context = self.services._require_run_manager().current_context
+        if run_context is None or not run_context.context_id:
+            raise ResourceValidationError(
+                "conversation turn capability is only available during a conversation run"
+            )
+        return await self.services.request_conversation_turn(
+            source_agent_id,
+            conversation_id,
+            run_context.context_id,
+            participant_agent_id,
+            message,
+        )
+
+    def read_text(self, agent_id: str, resource_id: str) -> dict[str, Any]:
+        document = self.services.capabilities.read_text(agent_id, resource_id)
+        return document.model_dump(mode="json")
+
+    async def replace_text(
+        self, agent_id: str, resource_id: str, content: str
+    ) -> dict[str, Any]:
+        document = await self.services.replace_text(
+            resource_id, TextReplace(content=content), agent_id=agent_id
+        )
+        return document.model_dump(mode="json")
+
+    def view_image(self, agent_id: str, resource_id: str) -> dict[str, Any]:
+        record, path = self.services.capabilities.view_image(agent_id, resource_id)
+        return {
+            "filename": record.filename,
+            "media_type": record.media_type,
+            "width": record.width,
+            "height": record.height,
+            "size_bytes": record.size_bytes,
+            "data_base64": base64.b64encode(path.read_bytes()).decode("ascii"),
+        }
+
+    async def execute_sandbox(
+        self, agent_id: str, sandbox_id: str, argv: list[str]
+    ) -> dict[str, Any]:
+        self.services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
+        if self.services.sandbox_backend is None:
+            raise RuntimeUnavailableError(
+                "the native Windows sandbox backend is unavailable"
+            )
+        result = await self.services.execute_sandbox(
+            sandbox_id, argv, agent_id=agent_id
+        )
+        return asdict(result)
 
 
 class WorldAgentCapabilityProvider:
@@ -52,7 +125,7 @@ class WorldAgentCapabilityProvider:
             agent_id, capability_id
         )
         handler = self.services.plugins.capability_handler(capability.kind)
-        return await handler(self.services, capability, dict(arguments))
+        return await handler(_CapabilityContext(self.services), capability, dict(arguments))
 
 
 def _python_type(schema_type: object) -> type[Any]:
