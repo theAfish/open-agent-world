@@ -30,7 +30,7 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
         <strong>{card.name}</strong>
       </div>
       <div className="workspace-window-actions">
-        <button type="button" className="icon-button" onClick={closeWorkspace} aria-label="Close workspace"><X size={15} /></button>
+        <button type="button" className="icon-button" onClick={() => closeWorkspace(card.id)} aria-label="Close workspace"><X size={15} /></button>
       </div>
     </header>
   );

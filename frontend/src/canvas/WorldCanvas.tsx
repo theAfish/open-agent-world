@@ -32,7 +32,6 @@ import { displacedPositions, nodePositionFromSurfacePosition, positionSurfaceAtN
 
 const nodeTypes = { worldCard: WorldCardNode };
 const edgeTypes = { semantic: SemanticEdge };
-const defaultViewport: Viewport = { x: 0, y: 0, zoom: 0.92 };
 
 function isScrollableArea(target: EventTarget | null, boundary: HTMLElement): boolean {
   let element = target instanceof HTMLElement ? target : null;
@@ -74,11 +73,10 @@ export function WorldCanvas() {
   const stressCards = useWorldStore((state) => state.stressCards);
   const edges = useWorldStore((state) => state.edges);
   const activeChunkKeys = useWorldStore((state) => state.activeChunkKeys);
+  const viewport = useWorldStore((state) => state.viewport);
   const selectedEdgeId = useWorldStore((state) => state.selectedEdgeId);
   const selectedCardIds = useWorldStore((state) => state.selectedCardIds);
-  const activeSurfaceNodeId = useNodeSurfaceStore((state) => state.activeNodeId);
-  const activeSurfaceLevel = useNodeSurfaceStore((state) => state.level);
-  const inspectorNodeIds = useNodeSurfaceStore((state) => state.inspectorNodeIds);
+  const surfaceLevelsByNodeId = useNodeSurfaceStore((state) => state.surfaceLevels);
   const closeWorkspace = useNodeSurfaceStore((state) => state.closeWorkspace);
   const dismissSurface = useNodeSurfaceStore((state) => state.dismiss);
   const beginConnection = useNodeSurfaceStore((state) => state.beginConnection);
@@ -101,8 +99,8 @@ export function WorldCanvas() {
   );
   const surfaceLevels = useMemo(() => new Map(renderCards.map((card) => [
     card.id,
-    surfaceLevelForNode(card.id, activeSurfaceNodeId, activeSurfaceLevel, inspectorNodeIds),
-  ])), [activeSurfaceLevel, activeSurfaceNodeId, inspectorNodeIds, renderCards]);
+    surfaceLevelForNode(card.id, surfaceLevelsByNodeId),
+  ])), [renderCards, surfaceLevelsByNodeId]);
   const surfaceObstacles = useMemo(() => renderCards.flatMap((card) => {
     const level = surfaceLevels.get(card.id);
     return level === "inspector" || level === "workspace" ? [{ card, level }] : [];
@@ -162,12 +160,6 @@ export function WorldCanvas() {
       if (positionAnimation.current) cancelAnimationFrame(positionAnimation.current);
     };
   }, [mappedNodes, setNodes]);
-
-  useEffect(() => {
-    if (activeSurfaceNodeId && !renderCards.some((card) => card.id === activeSurfaceNodeId)) {
-      dismissSurface(activeSurfaceNodeId);
-    }
-  }, [activeSurfaceNodeId, dismissSurface, renderCards]);
 
   const visibleNodeIds = useMemo(() => new Set(renderCards.map((card) => card.id)), [renderCards]);
   const flowEdges = useMemo<CanvasEdge[]>(
@@ -247,13 +239,13 @@ export function WorldCanvas() {
         }
       }
       if (event.key === "Escape") {
-        if (activeSurfaceLevel === "workspace") closeWorkspace();
+        if (Object.values(surfaceLevelsByNodeId).includes("workspace")) closeWorkspace();
         else if (selectedEdgeId) selectEdge(undefined);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeSurfaceLevel, activeSurfaceNodeId, closeWorkspace, deleteCards, deleteSelectedEdge, dismissSurface, redo, selectEdge, selectedCardIds, selectedEdgeId, undo]);
+  }, [closeWorkspace, deleteCards, deleteSelectedEdge, dismissSurface, redo, selectEdge, selectedCardIds, selectedEdgeId, surfaceLevelsByNodeId, undo]);
 
   const onNodeDragStop: OnNodeDrag<CanvasNode> = useCallback((_event, node) => {
     void updateCard(node.id, {
@@ -330,7 +322,7 @@ export function WorldCanvas() {
         }}
         minZoom={0.12}
         maxZoom={2.2}
-        defaultViewport={defaultViewport}
+        defaultViewport={{ x: viewport.x, y: viewport.y, zoom: viewport.zoom }}
         panOnScroll={false}
         selectionOnDrag={false}
         onlyRenderVisibleElements

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type { CardType, PluginCatalog } from "../types/world";
 
 export type NodeSurfaceLevel = "node" | "preview" | "inspector" | "workspace";
@@ -40,9 +41,7 @@ export const NODE_SURFACE_SIZE = {
 } as const;
 
 interface NodeSurfaceState {
-  activeNodeId?: string;
-  level: NodeSurfaceLevel;
-  inspectorNodeIds: string[];
+  surfaceLevels: Record<string, NodeSurfaceLevel>;
   connectingNodeId?: string;
   drafts: Record<string, string>;
   maximizedWorkspaces: Record<string, boolean>;
@@ -52,65 +51,77 @@ interface NodeSurfaceState {
   closeInspector: (nodeId?: string) => void;
   dismiss: (nodeId?: string) => void;
   openWorkspace: (nodeId: string) => void;
-  closeWorkspace: () => void;
+  closeWorkspace: (nodeId?: string) => void;
   setDraft: (nodeId: string, value: string) => void;
   toggleWorkspaceMaximized: (nodeId: string) => void;
   beginConnection: (nodeId: string) => void;
   endConnection: () => void;
 }
 
-export const useNodeSurfaceStore = create<NodeSurfaceState>((set) => ({
-  level: "node",
-  inspectorNodeIds: [],
+export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set) => ({
+  surfaceLevels: {},
   drafts: {},
   maximizedWorkspaces: {},
 
   showPreview: (nodeId) => set((state) => {
-    if (state.level === "workspace" || state.inspectorNodeIds.includes(nodeId)) return state;
+    if (state.surfaceLevels[nodeId] === "workspace" || state.surfaceLevels[nodeId] === "inspector") return state;
     if (state.connectingNodeId) return state;
-    return { activeNodeId: nodeId, level: "preview" };
+    return {
+      surfaceLevels: {
+        ...Object.fromEntries(Object.entries(state.surfaceLevels).filter(([, level]) => level !== "preview")),
+        [nodeId]: "preview",
+      },
+    };
   }),
 
   hidePreview: (nodeId) => set((state) => (
-    !state.connectingNodeId && state.activeNodeId === nodeId && state.level === "preview"
-      ? { activeNodeId: undefined, level: "node" }
+    !state.connectingNodeId && state.surfaceLevels[nodeId] === "preview"
+      ? { surfaceLevels: Object.fromEntries(Object.entries(state.surfaceLevels).filter(([id]) => id !== nodeId)) }
       : state
   )),
 
   openInspector: (nodeId) => set((state) => ({
-    activeNodeId: undefined,
-    level: "node",
     connectingNodeId: undefined,
-    inspectorNodeIds: [...new Set([...state.inspectorNodeIds, nodeId])],
+    surfaceLevels: {
+      ...Object.fromEntries(Object.entries(state.surfaceLevels).filter(([, level]) => level !== "preview")),
+      [nodeId]: "inspector",
+    },
   })),
 
   closeInspector: (nodeId) => set((state) => {
-    if (!nodeId) return { inspectorNodeIds: [] };
-    return { inspectorNodeIds: state.inspectorNodeIds.filter((id) => id !== nodeId) };
+    const ids = nodeId
+      ? new Set([nodeId])
+      : new Set(Object.entries(state.surfaceLevels)
+        .filter(([, level]) => level === "inspector")
+        .map(([id]) => id));
+    return { surfaceLevels: Object.fromEntries(Object.entries(state.surfaceLevels).filter(([id]) => !ids.has(id))) };
   }),
 
   dismiss: (nodeId) => set((state) => {
     if (!nodeId) {
       return {
-        activeNodeId: undefined,
-        level: "node",
+        surfaceLevels: {},
         connectingNodeId: undefined,
-        inspectorNodeIds: [],
       };
     }
     return {
-      activeNodeId: state.activeNodeId === nodeId ? undefined : state.activeNodeId,
-      level: state.activeNodeId === nodeId ? "node" : state.level,
+      surfaceLevels: Object.fromEntries(Object.entries(state.surfaceLevels).filter(([id]) => id !== nodeId)),
       connectingNodeId: state.connectingNodeId === nodeId ? undefined : state.connectingNodeId,
-      inspectorNodeIds: state.inspectorNodeIds.filter((id) => id !== nodeId),
     };
   }),
 
-  openWorkspace: (nodeId) => set({ activeNodeId: nodeId, level: "workspace" }),
+  openWorkspace: (nodeId) => set((state) => ({
+    surfaceLevels: { ...state.surfaceLevels, [nodeId]: "workspace" },
+  })),
 
-  closeWorkspace: () => set((state) => (
-    state.level === "workspace" ? { activeNodeId: undefined, level: "node" } : state
-  )),
+  closeWorkspace: (nodeId) => set((state) => {
+    const ids = nodeId
+      ? new Set([nodeId])
+      : new Set(Object.entries(state.surfaceLevels)
+        .filter(([, level]) => level === "workspace")
+        .map(([id]) => id));
+    return { surfaceLevels: Object.fromEntries(Object.entries(state.surfaceLevels).filter(([id]) => !ids.has(id))) };
+  }),
 
   setDraft: (nodeId, value) => set((state) => ({
     drafts: { ...state.drafts, [nodeId]: value },
@@ -124,26 +135,49 @@ export const useNodeSurfaceStore = create<NodeSurfaceState>((set) => ({
   })),
 
   beginConnection: (nodeId) => set((state) => {
-    if (state.level === "workspace" || state.inspectorNodeIds.includes(nodeId)) {
+    if (state.surfaceLevels[nodeId] === "workspace" || state.surfaceLevels[nodeId] === "inspector") {
       return { connectingNodeId: nodeId };
     }
-    return { activeNodeId: nodeId, level: "preview", connectingNodeId: nodeId };
+    return { surfaceLevels: { ...state.surfaceLevels, [nodeId]: "preview" }, connectingNodeId: nodeId };
   }),
 
   endConnection: () => set((state) => (
-    state.level === "preview" && state.activeNodeId === state.connectingNodeId
-      ? { activeNodeId: undefined, level: "node", connectingNodeId: undefined }
+    state.connectingNodeId && state.surfaceLevels[state.connectingNodeId] === "preview"
+      ? {
+        surfaceLevels: Object.fromEntries(Object.entries(state.surfaceLevels)
+          .filter(([id]) => id !== state.connectingNodeId)),
+        connectingNodeId: undefined,
+      }
       : { connectingNodeId: undefined }
   )),
+}), {
+  name: "oaw-node-surfaces-v1",
+  version: 2,
+  migrate: (persisted, version) => {
+    if (version >= 2) return persisted;
+    const legacy = persisted as Partial<{
+      activeNodeId: string;
+      level: NodeSurfaceLevel;
+      inspectorNodeIds: string[];
+      maximizedWorkspaces: Record<string, boolean>;
+    }>;
+    return {
+      surfaceLevels: {
+        ...Object.fromEntries((legacy.inspectorNodeIds ?? []).map((nodeId) => [nodeId, "inspector"])),
+        ...(legacy.activeNodeId ? { [legacy.activeNodeId]: legacy.level ?? "node" } : {}),
+      },
+      maximizedWorkspaces: legacy.maximizedWorkspaces ?? {},
+    };
+  },
+  partialize: (state) => ({
+    surfaceLevels: state.surfaceLevels,
+    maximizedWorkspaces: state.maximizedWorkspaces,
+  }),
 }));
 
 export function surfaceLevelForNode(
   nodeId: string,
-  activeNodeId: string | undefined,
-  level: NodeSurfaceLevel,
-  inspectorNodeIds: readonly string[] = [],
+  surfaceLevels: Readonly<Record<string, NodeSurfaceLevel>>,
 ): NodeSurfaceLevel {
-  if (nodeId === activeNodeId && level === "workspace") return "workspace";
-  if (inspectorNodeIds.includes(nodeId)) return "inspector";
-  return nodeId === activeNodeId ? level : "node";
+  return surfaceLevels[nodeId] ?? "node";
 }

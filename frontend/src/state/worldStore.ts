@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import { apiErrorMessage, normalizeCard, resourceContentUrl, worldApi, type CardCreateInput } from "../api/client";
 import type {
   CardType,
@@ -226,7 +227,7 @@ interface WorldState {
 let toastSequence = 0;
 let historySequence = 0;
 
-export const useWorldStore = create<WorldState>((set, get) => ({
+export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   cards: [],
   catalog: EMPTY_CATALOG,
   edges: [],
@@ -250,7 +251,8 @@ export const useWorldStore = create<WorldState>((set, get) => ({
   historyBusy: false,
 
   initialize: async () => {
-    const keys = get().activeChunkKeys;
+    const keys = getViewportChunkKeys(get().viewport);
+    set({ activeChunkKeys: keys });
     set({ syncState: "loading", syncError: undefined });
     try {
       const [catalog, snapshot] = await Promise.all([
@@ -1119,4 +1121,7 @@ export const useWorldStore = create<WorldState>((set, get) => ({
       set({ historyBusy: false });
     }
   },
+}), {
+  name: "oaw-canvas-viewport-v1",
+  partialize: (state) => ({ viewport: state.viewport }),
 }));

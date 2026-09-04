@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Bot, ExternalLink, FileText, Image as ImageIcon, MessagesSquare, Puzzle, Trash2, Workflow, X, type LucideIcon } from "lucide-react";
+import { Bot, ExternalLink, FileText, Image as ImageIcon, MessagesSquare, Puzzle, Sparkles, Trash2, Workflow, X, type LucideIcon } from "lucide-react";
 import { memo, type ComponentType, type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef } from "react";
 import { roundedRectAnchor } from "../edges/geometry";
 import { nodeSurfaceSupport, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
@@ -36,6 +36,15 @@ const BODIES: Partial<Record<CardType, ComponentType<BodyProps>>> = {
   sandbox: SandboxCardBody,
 };
 
+const CATALOG_ICONS: Record<string, LucideIcon> = {
+  bot: Bot,
+  "file-text": FileText,
+  image: ImageIcon,
+  workflow: Workflow,
+  "messages-square": MessagesSquare,
+  sparkles: Sparkles,
+};
+
 function GenericCardBody({ card }: BodyProps) {
   const entries = Object.entries(card.config).filter(([, value]) => (
     typeof value === "string" || typeof value === "number" || typeof value === "boolean"
@@ -65,9 +74,7 @@ function statusLabel(status: WorldCard["status"]): string {
 function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
   const card = data.card;
   const catalog = useWorldStore((state) => state.catalog);
-  const activeNodeId = useNodeSurfaceStore((state) => state.activeNodeId);
-  const activeLevel = useNodeSurfaceStore((state) => state.level);
-  const inspectorNodeIds = useNodeSurfaceStore((state) => state.inspectorNodeIds);
+  const surfaceLevels = useNodeSurfaceStore((state) => state.surfaceLevels);
   const showPreview = useNodeSurfaceStore((state) => state.showPreview);
   const hidePreview = useNodeSurfaceStore((state) => state.hidePreview);
   const openInspector = useNodeSurfaceStore((state) => state.openInspector);
@@ -80,11 +87,11 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
   const cardRef = useRef<HTMLElement>(null);
   const enterTimer = useRef<ReturnType<typeof setTimeout>>();
   const leaveTimer = useRef<ReturnType<typeof setTimeout>>();
-  const level = surfaceLevelForNode(card.id, activeNodeId, activeLevel, inspectorNodeIds);
+  const level = surfaceLevelForNode(card.id, surfaceLevels);
   const visualLevel = level;
   const definition = catalog.node_types.find((item) => item.id === card.type);
   const label = definition?.label ?? card.type;
-  const Icon = ICONS[card.type] ?? Puzzle;
+  const Icon = ICONS[card.type] ?? CATALOG_ICONS[definition?.icon ?? ""] ?? Puzzle;
   const Body = BODIES[card.type] ?? GenericCardBody;
   const support = nodeSurfaceSupport(card.type, catalog);
 
@@ -101,7 +108,7 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
 
   const onPointerEnter = () => {
     if (leaveTimer.current) clearTimeout(leaveTimer.current);
-    if (!support.preview || activeLevel === "inspector" || activeLevel === "workspace" || level === "preview") return;
+    if (!support.preview || level === "inspector" || level === "workspace" || level === "preview") return;
     enterTimer.current = setTimeout(() => showPreview(card.id), HOVER_INTENT_MS);
   };
 
