@@ -1065,7 +1065,9 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .agent-run-event header strong { font-size: 8px; text-transform: capitalize; }
 .agent-run-event time, .agent-run-event small { color: var(--ink-faint); font-size: 7px; }
 .agent-run-event p { margin: 0; color: var(--ink-soft); font: 8px/1.45 "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; }
-.agent-history-session { cursor: default; }
+.agent-run-event details { color: var(--ink-faint); font: 7px/1.4 "Cascadia Code", Consolas, monospace; }
+.agent-run-event summary { cursor: pointer; }
+.agent-run-event pre { max-height: 180px; margin: 3px 0 0; padding: 7px; overflow: auto; color: var(--ink-soft); border: 1px solid var(--line); border-radius: 6px; background: var(--surface-soft); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 @keyframes workspaceIn { from { opacity: 0; transform: translateY(10px) scale(0.985); } }
 @keyframes conversationTypingDot { 0%, 60%, 100% { opacity: 0.34; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }

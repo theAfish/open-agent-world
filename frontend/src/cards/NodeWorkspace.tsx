@@ -41,12 +41,13 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
   const edges = useWorldStore((state) => state.edges);
   const cards = useWorldStore((state) => state.cards);
   const allEvents = useWorldStore((state) => state.events);
-  const events = useMemo(
-    () => allEvents.filter((event) => event.agent_id === card.id),
-    [allEvents, card.id],
-  );
   const [sessions, setSessions] = useState<ConversationSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string>();
   const [historyError, setHistoryError] = useState<string>();
+  const events = useMemo(() => allEvents.filter((event) => (
+    event.agent_id === card.id
+      && (!activeSessionId || event.session_id === activeSessionId)
+  )), [activeSessionId, allEvents, card.id]);
   const context = useMemo(() => edges
     .filter((edge) => edge.source === card.id || edge.target === card.id)
     .map((edge) => cards.find((item) => item.id === (edge.source === card.id ? edge.target : edge.source)))
@@ -57,6 +58,11 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
     void worldApi.getAgentConversationSessions(card.id).then((items) => {
       if (current) {
         setSessions(items);
+        setActiveSessionId((selected) => (
+          selected && items.some((session) => session.id === selected)
+            ? selected
+            : items[0]?.id
+        ));
         setHistoryError(undefined);
       }
     }).catch((reason) => current && setHistoryError(apiErrorMessage(reason)));
@@ -69,10 +75,16 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
         <div className="workspace-nav-label"><MessageSquare size={11} /> Conversation history</div>
         <div className="conversation-sidebar-scroll">
           {sessions.map((session) => (
-            <div className="workspace-session agent-history-session" key={session.id}>
+            <button
+              type="button"
+              className={`workspace-session agent-history-session nodrag nopan ${session.id === activeSessionId ? "is-active" : ""}`}
+              key={session.id}
+              onClick={() => setActiveSessionId(session.id)}
+              aria-label={`Show runtime history for ${session.title}`}
+            >
               <MessageSquare size={13} />
               <span><strong>{session.title}</strong><small>{session.conversation_name ?? cards.find((item) => item.id === session.conversation_id)?.name ?? "Conversation"}</small></span>
-            </div>
+            </button>
           ))}
           {sessions.length === 0 ? <p>{historyError ?? "No Conversation sessions yet."}</p> : null}
         </div>
@@ -84,7 +96,7 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
 
       <main className="agent-run-history">
         <header>
-          <div><strong>Runtime history</strong><span>Agent-centric runs, tools, and errors</span></div>
+          <div><strong>Runtime history</strong><span>{activeSessionId ? "Selected session: runs, tools, output, and errors" : "Select a conversation session to inspect activity"}</span></div>
           <span className="agent-runtime-badge"><Radio size={12} /> {card.status}</span>
         </header>
         <div className="agent-run-timeline">
@@ -93,15 +105,19 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
               <span><Clock3 size={12} /></span>
               <div>
                 <header><strong>{event.type.replaceAll("_", " ")}</strong><time>{new Date(event.timestamp).toLocaleTimeString()}</time></header>
-                <p>{String(event.payload.error ?? event.payload.text ?? event.payload.name ?? event.message ?? "State updated")}</p>
-                {event.session_id ? <small>Session {event.session_id.slice(0, 8)}</small> : null}
+                <p>{String(event.payload.error ?? event.payload.text ?? event.payload.name ?? event.message ?? "No summary provided")}</p>
+                <small>Run {event.run_id?.slice(0, 8) ?? "unscoped"}</small>
+                <details>
+                  <summary>Event data</summary>
+                  <pre>{JSON.stringify(event.payload, null, 2)}</pre>
+                </details>
               </div>
             </article>
           )) : (
             <div className="workspace-welcome">
               <span><Bot size={22} /></span>
-              <strong>No runtime activity for {card.name}</strong>
-              <p>Connect this Agent to a Conversation field and address it from a session.</p>
+              <strong>No runtime activity for this session</strong>
+              <p>{activeSessionId ? "This agent has not emitted a run, tool, or response event for the selected session." : "Select a session to inspect agent activity."}</p>
             </div>
           )}
         </div>
