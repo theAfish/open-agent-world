@@ -140,16 +140,15 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .world-canvas .react-flow__pane:active { cursor: grabbing; }
 
 /* Terrain */
-.contour-world {
+.contour-chunk {
   position: absolute;
-  width: 4200px;
-  height: 3100px;
-  left: -1600px;
-  top: -1200px;
+  width: 2048px;
+  height: 2048px;
   z-index: 0;
   opacity: 0.84;
   overflow: visible;
   pointer-events: none;
+  shape-rendering: geometricPrecision;
 }
 
 .world-canvas .react-flow__viewport-portal {
@@ -160,9 +159,13 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .contour {
   fill: none;
   stroke: var(--contour);
-  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
+
+.contour-minor { stroke-width: 1.05; opacity: 0.58; }
+.contour-major { stroke-width: 1.45; opacity: 0.96; }
 
 /* Global controls */
 .icon-button,

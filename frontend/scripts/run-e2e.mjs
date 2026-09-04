@@ -55,7 +55,7 @@ function stopTree(child) {
 }
 
 async function waitForResult(runner) {
-  const deadline = Date.now() + 45_000;
+  const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     if (runner.exitCode !== null) return runner.exitCode ?? 1;
     try {
@@ -67,7 +67,7 @@ async function waitForResult(runner) {
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error("Playwright did not report a result within 45 seconds");
+  throw new Error("Playwright did not report a result within 60 seconds");
 }
 
 let exitCode = 1;

@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Locator } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
 interface CreatedCard {
   id: string;
@@ -56,6 +56,42 @@ async function expectEndpointOnBoundary(endpoint: Locator, card: Locator) {
     expect(distanceToOutline).toBeLessThan(9);
   }).toPass();
 }
+
+async function panCanvas(page: Page, direction: "left" | "right", times: number) {
+  const pane = page.locator(".react-flow__pane");
+  await expect(pane).toBeVisible();
+  const box = await pane.boundingBox();
+  if (!box) throw new Error("Canvas pane geometry is unavailable");
+  const y = box.y + box.height * 0.72;
+  const left = box.x + box.width * 0.32;
+  const right = box.x + box.width * 0.72;
+
+  for (let index = 0; index < times; index += 1) {
+    await page.mouse.move(direction === "left" ? right : left, y);
+    await page.mouse.down();
+    await page.mouse.move(direction === "left" ? left : right, y, { steps: 5 });
+    await page.mouse.up();
+  }
+}
+
+test("procedural terrain streams deterministic chunks across distant canvas coordinates", async ({ page }) => {
+  await page.goto("/");
+  const chunks = page.locator("svg.contour-chunk");
+  await expect(chunks).toHaveCount(9);
+  await expect(page.locator('svg.contour-chunk[data-chunk="0:0"] path.contour')).not.toHaveCount(0);
+
+  await panCanvas(page, "left", 5);
+  await expect.poll(async () => chunks.evaluateAll((elements) => elements.map((element) => (
+    Number(element.getAttribute("data-chunk")?.split(":")[0])
+  )).some((x) => x >= 2))).toBe(true);
+  await expect(chunks.locator("path.contour").first()).toHaveAttribute("d", /M/);
+
+  await panCanvas(page, "right", 10);
+  await expect.poll(async () => chunks.evaluateAll((elements) => elements.map((element) => (
+    Number(element.getAttribute("data-chunk")?.split(":")[0])
+  )).some((x) => x <= -2))).toBe(true);
+  await expect(chunks.locator("path.contour").first()).toHaveAttribute("d", /M/);
+});
 
 test("an Agent relationship can be dragged between boundaries and exposes real endpoints", async ({
   page,
