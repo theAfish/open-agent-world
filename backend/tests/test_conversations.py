@@ -11,6 +11,8 @@ from backend.agents import MockAgentRuntime
 from backend.capabilities.provider import WorldAgentCapabilityProvider
 from backend.config import Settings
 from backend.main import create_app
+from backend.runs import InvocationCaller, InvocationContext
+from backend.runs.manager import _current_invocation
 from backend.services import create_services
 from backend.conversations import ConversationSessionCreate
 from backend.world.models import CardCreate, EdgeCreate
@@ -364,16 +366,37 @@ async def test_agent_requesting_own_turn_is_recoverable_and_does_not_recurse(
         definitions = await provider.list_tools(atlas.id)
         assert len(definitions) == 1
         assert "Never use your own agent id" in definitions[0].description
+        assert [parameter.name for parameter in definitions[0].parameters] == [
+            "agent_id", "message"
+        ]
 
-        response = await provider.invoke_tool(
-            atlas.id,
-            definitions[0].capability_id,
-            {
-                "session_id": session.id,
-                "agent_id": atlas.id,
-                "message": "Continue",
-            },
-        )
+        from backend.errors import ResourceValidationError
+
+        with pytest.raises(ResourceValidationError, match="only available during a conversation run"):
+            await provider.invoke_tool(
+                atlas.id,
+                definitions[0].capability_id,
+                {"agent_id": atlas.id, "message": "Continue"},
+            )
+
+        token = _current_invocation.set(InvocationContext(
+            run_id="test-run",
+            agent_id=atlas.id,
+            parent_run_id=None,
+            root_run_id="test-run",
+            caller=InvocationCaller("conversation", conversation.id),
+            context_id=session.id,
+            task_id=None,
+            runtime_provider_id="core.mock",
+        ))
+        try:
+            response = await provider.invoke_tool(
+                atlas.id,
+                definitions[0].capability_id,
+                {"agent_id": atlas.id, "message": "Continue"},
+            )
+        finally:
+            _current_invocation.reset(token)
 
         assert response == {
             "agent_id": atlas.id,
@@ -435,6 +458,47 @@ async def test_agent_handoff_executes_as_a_run_and_persists_the_response(
         runs = services._require_run_manager().list_runs(agent_id=xiaobing.id)
         assert len(runs) == 1
         assert messages[-1].run_id == runs[0].run_id
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_agent_message_to_an_active_ancestor_does_not_start_a_second_run(
+    data_root: Path,
+) -> None:
+    settings = Settings.for_data_root(data_root)
+    services = create_services(settings)
+    services.install_runtime_provider(
+        "core.mock",
+        MockAgentRuntime(WorldAgentCapabilityProvider(services)),
+        default=True,
+    )
+    try:
+        atlas = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        xiaobing = await services.create_card(CardCreate(type="agent", name="xiaobing"))
+        await services.create_edge(EdgeCreate(
+            source=xiaobing.id, target=atlas.id, relationship="communicate"
+        ))
+        token = _current_invocation.set(InvocationContext(
+            run_id="atlas-run",
+            agent_id=atlas.id,
+            parent_run_id=None,
+            root_run_id="atlas-run",
+            caller=InvocationCaller("user"),
+            context_id=None,
+            task_id=None,
+            runtime_provider_id="core.mock",
+        ))
+        try:
+            response = await services.communicate_with_agent(
+                xiaobing.id, atlas.id, "What is the session id?"
+            )
+        finally:
+            _current_invocation.reset(token)
+
+        assert response["agent_id"] == atlas.id
+        assert "already active earlier" in response["response"]
+        assert services._require_run_manager().list_runs(agent_id=atlas.id) == []
     finally:
         services.close()
 

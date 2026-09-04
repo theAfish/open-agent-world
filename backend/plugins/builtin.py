@@ -193,16 +193,21 @@ async def _communicate(services: Any, capability: Any, values: dict[str, Any]) -
 async def _request_conversation_turn(
     services: Any, capability: Any, values: dict[str, Any]
 ) -> Any:
-    if set(values) != {"session_id", "agent_id", "message"}:
+    if set(values) != {"agent_id", "message"}:
         raise ResourceValidationError(
-            "conversation turn capability requires session_id, agent_id, and message"
+            "conversation turn capability requires agent_id and message"
         )
     if not all(isinstance(values[key], str) and values[key].strip() for key in values):
         raise ResourceValidationError("conversation turn arguments must be non-empty strings")
+    context = services._require_run_manager().current_context
+    if context is None or not context.context_id:
+        raise ResourceValidationError(
+            "conversation turn capability is only available during a conversation run"
+        )
     return await services.request_conversation_turn(
         capability.agent_id,
         capability.target_id,
-        values["session_id"],
+        context.context_id,
         values["agent_id"],
         values["message"],
     )
@@ -421,14 +426,13 @@ def create_builtin_registry() -> PluginRegistry:
             kind="conversation.request_turn", tool_prefix="request_turn_in",
             description=(
                 "Ask a different participant to speak in Conversation {target_name!r}. "
-                "Use the current session id and another participant's agent id. "
+                "The current conversation session is supplied automatically; provide another participant's agent id. "
                 "Never use your own agent id; if no other participant is available, "
                 "answer directly without this tool."
             ),
             input_schema={
                 "type": "object",
                 "properties": {
-                    "session_id": {"type": "string", "description": "Current conversation session id."},
                     "agent_id": {
                         "type": "string",
                         "description": (
@@ -438,7 +442,7 @@ def create_builtin_registry() -> PluginRegistry:
                     },
                     "message": {"type": "string", "description": "Message or question for that participant."},
                 },
-                "required": ["session_id", "agent_id", "message"],
+                "required": ["agent_id", "message"],
                 "additionalProperties": False,
             },
         ),),

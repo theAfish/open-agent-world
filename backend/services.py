@@ -772,6 +772,16 @@ class ApplicationServices:
         self.capabilities.require_agent_communicate(source_agent_id, target_agent_id)
         prompt = f"Message from {source.name}:\n\n{message.strip()}"
         manager = self._require_run_manager()
+        if manager.is_agent_in_lineage(target_agent_id):
+            return {
+                "agent_id": target.id,
+                "agent_name": target.name,
+                "response": (
+                    f"{target.name} is already active earlier in this request. "
+                    "Your message was not sent as a nested synchronous call; "
+                    "complete the current response instead."
+                ),
+            }
         run = await manager.start_run(
             target_agent_id,
             prompt,
