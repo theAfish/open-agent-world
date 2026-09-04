@@ -10,6 +10,8 @@ from typing import Any, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
+from backend.state.context import StateContext
+
 
 class RunStatus(StrEnum):
     CREATED = "created"
@@ -76,14 +78,13 @@ class InvocationContext:
     context_id: str | None
     task_id: str | None
     runtime_provider_id: str
-    state_context: Mapping[str, Any] | None = None
+    state_context: StateContext | None = None
     group_context: Mapping[str, Any] | None = None
     delegation_context: Mapping[str, Any] | None = None
     extensions: Mapping[str, Any] = MappingProxyType({})
 
     def __post_init__(self) -> None:
         for name in (
-            "state_context",
             "group_context",
             "delegation_context",
             "extensions",

@@ -69,3 +69,34 @@ describe("conversation response activity", () => {
     expect(conversationLiveUpdates([failed, text], "conversation-a", "session-a")).toEqual([]);
   });
 });
+
+describe("run lifecycle reliability", () => {
+  it("surfaces a failed run as an error notice", () => {
+    const failed = runtimeEvent("2", "run_failed", "atlas", "session-a", { run_id: "run-1", error: "model endpoint rejected the request" });
+    const text = runtimeEvent("1", "agent_message", "atlas", "session-a", { text: "partial", run_id: "run-1" });
+    expect(conversationLiveUpdates([failed, text], "conversation-a", "session-a")).toEqual([
+      { agentId: "atlas", runId: "run-1", notice: "model endpoint rejected the request", tone: "error" },
+    ]);
+  });
+
+  it("surfaces a cancelled run as an informational notice", () => {
+    const cancelled = runtimeEvent("2", "run_cancelled", "atlas", "session-a", { run_id: "run-1" });
+    const text = runtimeEvent("1", "agent_message", "atlas", "session-a", { text: "partial", run_id: "run-1" });
+    expect(conversationLiveUpdates([cancelled, text], "conversation-a", "session-a")).toEqual([
+      { agentId: "atlas", runId: "run-1", notice: "The response was stopped before completion.", tone: "info" },
+    ]);
+  });
+
+  it("stops the responding indicator on run terminal events", () => {
+    const events = [
+      runtimeEvent("2", "run_failed", "atlas", "session-a", { run_id: "run-1" }),
+      runtimeEvent("1", "run_started", "atlas", "session-a", { run_id: "run-1" }),
+    ];
+    expect(activeConversationAgentIds(events, "conversation-a", "session-a")).toEqual([]);
+  });
+
+  it("marks an agent as responding from run start events", () => {
+    const events = [runtimeEvent("1", "run_started", "atlas", "session-a", { run_id: "run-1" })];
+    expect(activeConversationAgentIds(events, "conversation-a", "session-a")).toEqual(["atlas"]);
+  });
+});

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Mapping
 from contextlib import suppress
 from contextvars import ContextVar
@@ -33,7 +34,7 @@ from backend.errors import (
     RuntimeUnavailableError,
 )
 from backend.events.hub import EventHub
-from backend.events.models import EventType
+from backend.events.models import EventType, RuntimeEvent
 from backend.persistence.database import Database
 from backend.plugins import NodeLifecycleContext, PluginRegistry, load_plugin_registry
 from backend.resources.manager import ManagedResourceStore
@@ -46,6 +47,7 @@ from backend.resources.models import (
 )
 from backend.runs import RunRecord, RunStatus, RunStore
 from backend.runs.manager import RunManager
+from backend.runs.models import TERMINAL_RUN_STATUSES
 from backend.sandbox import (
     CommandResult,
     ResourceAccess,
@@ -55,6 +57,7 @@ from backend.sandbox import (
     SandboxNotFoundError,
     WindowsSandboxBackend,
 )
+from backend.state import StateMutation, StateMutationKind, StateStore
 from backend.world.models import (
     Card,
     CardCreate,
@@ -85,6 +88,8 @@ _conversation_turn_depth: ContextVar[int] = ContextVar(
     "conversation_turn_depth", default=0
 )
 _MAX_CONVERSATION_TURN_DEPTH = 4
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,9 +183,17 @@ class _LifecycleResources:
 @dataclass(frozen=True, slots=True)
 class _LifecycleConversations:
     conversations: ConversationStore
+    state: StateStore
 
     def create_initial_session(self, node_id: str, title: str) -> None:
-        self.conversations.create_session(node_id, ConversationSessionCreate(title=title))
+        session = self.conversations.create_session(
+            node_id, ConversationSessionCreate(title=title)
+        )
+        self.state.ensure_scope("session", session.id, schema_id="core.session")
+
+    def delete_session_state(self, node_id: str) -> None:
+        for session in self.conversations.list_sessions(node_id):
+            self.state.delete_scope("session", session.id)
 
 
 @dataclass(slots=True)
@@ -193,6 +206,7 @@ class ApplicationServices:
     events: EventHub
     plugins: PluginRegistry
     conversations: ConversationStore
+    state: StateStore
     run_manager: RunManager | None = None
     sandbox_backend: SandboxBackend | None = None
 
@@ -509,6 +523,7 @@ class ApplicationServices:
             conversation_id,
             request.model_copy(update={"participant_ids": participants}),
         )
+        self.state.ensure_scope("session", session.id, schema_id="core.session")
         await self.events.publish(
             EventType.CONVERSATION_SESSION_CREATED,
             node_id=conversation_id,
@@ -570,6 +585,7 @@ class ApplicationServices:
         if session.title == "General":
             raise ConversationValidationError("the default General session cannot be deleted")
         self.conversations.delete_session(conversation_id, session_id)
+        self.state.delete_scope("session", session_id)
         await self.events.publish(
             EventType.CONVERSATION_SESSION_DELETED,
             node_id=conversation_id,
@@ -698,8 +714,7 @@ class ApplicationServices:
                 caller_id=source_agent_id,
                 context_id=session_id,
             )
-            record = await manager.wait_terminal(run.run_id)
-            self._require_successful_run(record)
+            await self._await_synchronous_turn(manager, run.run_id, target.name)
             final_text = manager.final_text(run.run_id)
         finally:
             _conversation_turn_depth.reset(token)
@@ -718,6 +733,27 @@ class ApplicationServices:
             "agent_name": target.name,
             "response": final_text,
         }
+
+    async def _await_synchronous_turn(
+        self, manager: RunManager, run_id: str, target_name: str
+    ) -> RunRecord:
+        """Wait for a delegated Run without blocking forever on a suspension.
+
+        Synchronous turns (conversation handoffs, agent-to-agent messages)
+        cannot span an external suspension: if the provider turn ends without a
+        terminal status, the delegated Run is cancelled and a clear error is
+        raised to the caller instead of hanging indefinitely.
+        """
+
+        record = await manager.wait_execution(run_id)
+        if record.status not in TERMINAL_RUN_STATUSES:
+            await manager.cancel_run(run_id)
+            raise RuntimeUnavailableError(
+                f"agent {target_name!r} suspended its run before completing the "
+                "requested turn; the delegated run was cancelled"
+            )
+        self._require_successful_run(record)
+        return record
 
     async def stop_agent(self, agent_id: str) -> dict[str, Any]:
         self._require_card_type(agent_id, CardType.AGENT)
@@ -742,8 +778,7 @@ class ApplicationServices:
             caller_kind="agent",
             caller_id=source_agent_id,
         )
-        record = await manager.wait_terminal(run.run_id)
-        self._require_successful_run(record)
+        await self._await_synchronous_turn(manager, run.run_id, target.name)
         final_text = manager.final_text(run.run_id)
         return {
             "agent_id": target.id,
@@ -840,27 +875,95 @@ class ApplicationServices:
         conversation_id: str,
         session_id: str,
     ) -> None:
-        manager = self._require_run_manager()
-        record = await manager.wait_terminal(run_id)
-        final_text = manager.final_text(run_id)
-        if (
-            record.status is RunStatus.SUCCEEDED
-            and final_text
-            and self._can_agent_post_to_conversation_session(
-                agent_id, conversation_id, session_id
+        """Persist the durable conversation outcome of an Agent Run.
+
+        Every Run started from a conversation ends with a visible transcript
+        entry: a normal agent message on success, or a system notice for
+        failures, cancellations, interruptions, suspensions, and empty
+        responses. Nothing is dropped silently.
+        """
+
+        try:
+            manager = self._require_run_manager()
+            record = await manager.wait_execution(run_id)
+            if record.status not in TERMINAL_RUN_STATUSES:
+                # The provider turn ended without a durable result. Surface the
+                # wait state instead of leaving the transcript stalled, then
+                # keep following the Run until it terminates.
+                suspension = manager.get_suspension(run_id)
+                reason = suspension.reason if suspension is not None else None
+                name = self._conversation_agent_name(agent_id)
+                await self._persist_conversation_outcome_notice(
+                    run_id,
+                    conversation_id,
+                    session_id,
+                    f"{name} paused this response to wait on external work"
+                    + (f" ({reason})." if reason else "."),
+                )
+                record = await manager.wait_terminal(run_id)
+            final_text = manager.final_text(run_id)
+            if record.status is RunStatus.SUCCEEDED and final_text:
+                if self._can_agent_post_to_conversation_session(
+                    agent_id, conversation_id, session_id
+                ):
+                    agent = self.world.get_card(agent_id)
+                    message = self.conversations.add_message(
+                        conversation_id,
+                        session_id,
+                        sender_kind="agent",
+                        sender_id=agent.id,
+                        sender_name=agent.name,
+                        content=final_text,
+                        run_id=run_id,
+                    )
+                    await self._publish_conversation_message(message)
+                return
+            name = self._conversation_agent_name(agent_id)
+            if record.status is RunStatus.SUCCEEDED:
+                notice = f"{name} finished without producing a response."
+            elif record.status is RunStatus.FAILED:
+                detail = record.error or "the runtime reported no error detail"
+                notice = f"{name} could not respond: {detail}"
+            elif record.status is RunStatus.CANCELLED:
+                notice = f"{name}'s response was stopped before completion."
+            else:
+                notice = f"{name}'s response was interrupted by a backend restart."
+            await self._persist_conversation_outcome_notice(
+                run_id, conversation_id, session_id, notice
             )
-        ):
-            agent = self.world.get_card(agent_id)
-            message = self.conversations.add_message(
+        except Exception:
+            logger.exception(
+                "failed to persist conversation outcome for run %s in %s/%s",
+                run_id,
                 conversation_id,
                 session_id,
-                sender_kind="agent",
-                sender_id=agent.id,
-                sender_name=agent.name,
-                content=final_text,
-                run_id=run_id,
             )
-            await self._publish_conversation_message(message)
+
+    def _conversation_agent_name(self, agent_id: str) -> str:
+        agent = self.world.maybe_get_card(agent_id)
+        return agent.name if agent is not None else "The agent"
+
+    async def _persist_conversation_outcome_notice(
+        self,
+        run_id: str,
+        conversation_id: str,
+        session_id: str,
+        content: str,
+    ) -> None:
+        try:
+            self.conversations.get_session(conversation_id, session_id)
+        except NotFoundError:
+            return
+        message = self.conversations.add_message(
+            conversation_id,
+            session_id,
+            sender_kind="system",
+            sender_id=None,
+            sender_name="System",
+            content=content,
+            run_id=run_id,
+        )
+        await self._publish_conversation_message(message)
 
     async def _publish_conversation_message(
         self, message: ConversationMessage
@@ -1070,7 +1173,7 @@ class ApplicationServices:
         return NodeLifecycleContext(
             nodes=_LifecycleNodes(self.world),
             resources=_LifecycleResources(self.resources),
-            conversations=_LifecycleConversations(self.conversations),
+            conversations=_LifecycleConversations(self.conversations, self.state),
             agents=_LifecycleAgents(manager),
             sandboxes=(
                 _LifecycleSandboxes(self.sandbox_backend)
@@ -1127,6 +1230,36 @@ def create_services(
     conversations = ConversationStore(database)
     capabilities = CapabilityBroker(world, resources, plugin_registry)
     events = EventHub(queue_size=settings.event_queue_size)
+
+    state_event_types = {
+        StateMutationKind.CREATED: EventType.STATE_CREATED,
+        StateMutationKind.UPDATED: EventType.STATE_UPDATED,
+        StateMutationKind.DELETED: EventType.STATE_DELETED,
+    }
+
+    def publish_state_mutation(mutation: StateMutation) -> None:
+        events.publish_event_nowait(RuntimeEvent(
+            type=state_event_types[mutation.kind],
+            node_id=(
+                mutation.scope.owner_id
+                if mutation.scope.scope_kind == "agent"
+                else None
+            ),
+            agent_id=mutation.actor_id,
+            run_id=mutation.run_id,
+            payload={
+                "scope_id": mutation.scope.scope_id,
+                "scope_kind": mutation.scope.scope_kind,
+                "owner_id": mutation.scope.owner_id,
+                "key": mutation.key,
+                "revision": mutation.revision,
+                **({"actor_id": mutation.actor_id} if mutation.actor_id else {}),
+                **({"run_id": mutation.run_id} if mutation.run_id else {}),
+            },
+        ))
+
+    state = StateStore(database, plugin_registry, event_sink=publish_state_mutation)
+    state.ensure_scope("world", "default", schema_id="core.world")
     services = ApplicationServices(
         settings=settings,
         database=database,
@@ -1136,6 +1269,7 @@ def create_services(
         events=events,
         plugins=plugin_registry,
         conversations=conversations,
+        state=state,
         sandbox_backend=sandbox_backend,
     )
     from backend.capabilities.provider import WorldAgentCapabilityProvider
@@ -1147,12 +1281,14 @@ def create_services(
         events=events,
         plugins=plugin_registry,
         capability_provider=provider,
+        state=state,
         default_runtime_provider_id=(
             default_runtime_provider_id
             if default_runtime_provider_id is not None
             else settings.agent_runtime
         ),
         provider_options={"google.adk": {"app_name": "open-agent-world"}},
+        inactivity_timeout_seconds=settings.run_inactivity_timeout_seconds,
     )
     for provider_id, runtime_provider in (runtime_providers or {}).items():
         services.install_runtime_provider(provider_id, runtime_provider)

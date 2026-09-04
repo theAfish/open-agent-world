@@ -115,9 +115,19 @@ def _build_callable(
     definition: ScopedToolDefinition,
 ) -> Callable[..., Any]:
     async def scoped_tool(**arguments: Any) -> Any:
-        return await provider.invoke_tool(
-            agent_id, definition.capability_id, dict(arguments)
-        )
+        try:
+            return await provider.invoke_tool(
+                agent_id, definition.capability_id, dict(arguments)
+            )
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": {
+                    "code": str(getattr(exc, "code", "tool_execution_error")),
+                    "type": type(exc).__name__,
+                    "message": str(exc) or type(exc).__name__,
+                },
+            }
 
     scoped_tool.__name__ = definition.name
     scoped_tool.__qualname__ = definition.name

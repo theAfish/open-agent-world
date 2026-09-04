@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from backend.agents import (
 from backend.agents.tools import build_scoped_tool_callables
 from backend.capabilities.provider import WorldAgentCapabilityProvider
 from backend.config import Settings
+from backend.errors import ResourceValidationError
 from backend.main import create_app
 from backend.services import create_services
 from backend.runs import InvocationCaller, InvocationContext, RunStatus, RuntimeInput
@@ -26,6 +28,7 @@ from backend.runs import InvocationCaller, InvocationContext, RunStatus, Runtime
 class MutableCapabilityProvider:
     def __init__(self) -> None:
         self.allowed = True
+        self.failure: BaseException | None = None
         self.invocations: list[tuple[str, str, dict[str, Any]]] = []
         self.definition = ScopedToolDefinition(
             capability_id="text.edit:notes",
@@ -41,6 +44,8 @@ class MutableCapabilityProvider:
     async def invoke_tool(
         self, agent_id: str, capability_id: str, arguments: Mapping[str, Any]
     ) -> Any:
+        if self.failure is not None:
+            raise self.failure
         if not self.allowed or capability_id != self.definition.capability_id:
             raise PermissionError("capability was revoked")
         values = dict(arguments)
@@ -107,8 +112,36 @@ async def test_scoped_tool_rechecks_provider_after_revocation() -> None:
 
     assert await tool(content="authorized") == {"content": "authorized"}
     provider.allowed = False
-    with pytest.raises(PermissionError, match="revoked"):
-        await tool(content="must fail")
+    assert await tool(content="must fail") == {
+        "ok": False,
+        "error": {
+            "code": "tool_execution_error",
+            "type": "PermissionError",
+            "message": "capability was revoked",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_scoped_tool_preserves_domain_errors_but_not_cancellation() -> None:
+    provider = MutableCapabilityProvider()
+    tool = build_scoped_tool_callables(
+        provider, "agent-1", (provider.definition,)
+    )[0]
+
+    provider.failure = ResourceValidationError("connected node is not ready")
+    assert await tool(content="retryable") == {
+        "ok": False,
+        "error": {
+            "code": "invalid_resource",
+            "type": "ResourceValidationError",
+            "message": "connected node is not ready",
+        },
+    }
+
+    provider.failure = asyncio.CancelledError()
+    with pytest.raises(asyncio.CancelledError):
+        await tool(content="cancelled")
 
 
 @pytest.mark.asyncio

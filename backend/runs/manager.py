@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
@@ -18,6 +19,7 @@ from backend.errors import RuntimeUnavailableError
 from backend.events.hub import EventHub
 from backend.events.models import EventType
 from backend.plugins import PluginRegistry
+from backend.state import StateContext, StateScope, StateStore
 from backend.world.models import Card, CardPatch
 from backend.world.store import WorldStore
 
@@ -60,6 +62,11 @@ _current_invocation: ContextVar[InvocationContext | None] = ContextVar(
     "current_invocation", default=None
 )
 
+# Providers integrate through the normalized event stream. When a stream stops
+# producing events without terminating, the Run would otherwise stall silently.
+# The watchdog converts that condition into an explicit, observable failure.
+DEFAULT_INACTIVITY_TIMEOUT_SECONDS: float = 300.0
+
 
 @dataclass(slots=True)
 class RunManager:
@@ -70,8 +77,10 @@ class RunManager:
     events: EventHub
     plugins: PluginRegistry
     capability_provider: AgentCapabilityProvider
+    state: StateStore
     default_runtime_provider_id: str | None = None
     provider_options: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    inactivity_timeout_seconds: float | None = DEFAULT_INACTIVITY_TIMEOUT_SECONDS
     _providers: dict[str, RuntimeProvider] = field(default_factory=dict)
     _agent_provider_ids: dict[str, str] = field(default_factory=dict)
     _runtime_tasks: dict[str, asyncio.Task[None]] = field(default_factory=dict)
@@ -169,6 +178,8 @@ class RunManager:
         task_id: str | None = None,
         context_id: str | None = None,
     ) -> RunRecord:
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("Run prompt must be a non-empty string")
         lock = self._start_locks.setdefault(agent_id, asyncio.Lock())
         async with lock:
             card = self._agent_card(agent_id)
@@ -194,6 +205,14 @@ class RunManager:
                 parent_run_id=parent_run_id,
                 task_id=task_id,
                 context_id=context_id,
+            )
+            state_context = self._state_context(record)
+            self.state.set(
+                state_context.local_scope,
+                "input",
+                prompt,
+                actor_id=agent_id,
+                run_id=record.run_id,
             )
             self._execution_done[record.run_id] = asyncio.Event()
             self._terminal_done[record.run_id] = asyncio.Event()
@@ -361,6 +380,7 @@ class RunManager:
         return cancelled
 
     async def register_agent(self, card: Card) -> None:
+        self.state.ensure_scope("agent", card.id, schema_id="core.agent")
         provider_id = self._optional_provider_id(card)
         if provider_id is None:
             return
@@ -390,13 +410,13 @@ class RunManager:
     async def delete_agent(self, agent_id: str, *, missing_ok: bool = False) -> None:
         await self.cancel_agent_runs(agent_id)
         provider_id = self._agent_provider_ids.pop(agent_id, None)
-        if provider_id is None:
-            return
-        try:
-            await self._providers[provider_id].delete_agent(agent_id)
-        except AgentNotFoundError:
-            if not missing_ok:
-                raise
+        if provider_id is not None:
+            try:
+                await self._providers[provider_id].delete_agent(agent_id)
+            except AgentNotFoundError:
+                if not missing_ok:
+                    raise
+        self.state.delete_scope("agent", agent_id)
 
     async def get_agent(self, agent_id: str) -> Any:
         card = self._agent_card(agent_id)
@@ -421,6 +441,7 @@ class RunManager:
             context_id=record.context_id,
             task_id=record.task_id,
             runtime_provider_id=record.runtime_provider_id,
+            state_context=self._state_context(record),
         )
         token = _current_invocation.set(context)
         try:
@@ -428,23 +449,45 @@ class RunManager:
             if record.agent_id not in self._agent_provider_ids:
                 await provider.create_agent(self._agent_config(card))
                 self._agent_provider_ids[record.agent_id] = record.runtime_provider_id
-            async for event in provider.execute(
-                self._agent_config(card), context, runtime_input
-            ):
-                if event.agent_id != record.agent_id or event.run_id != record.run_id:
-                    raise RuntimeError(
-                        "runtime provider emitted an event for a different Agent or Run"
-                    )
-                await self._publish_provider_event(event, record)
-                text = event.payload.get("text")
-                if isinstance(text, str):
-                    self._final_text[record.run_id] = text
-                if event.run_status is not None:
-                    current = self.get_run(record.run_id)
-                    if current.status not in TERMINAL_RUN_STATUSES:
-                        await self.transition_run(record.run_id, event.run_status)
-                    if self.get_run(record.run_id).status in TERMINAL_RUN_STATUSES:
+            timeout = self._inactivity_timeout(card)
+            stream = aiter(
+                provider.execute(self._agent_config(card), context, runtime_input)
+            )
+            try:
+                while True:
+                    try:
+                        if timeout is None:
+                            event = await anext(stream)
+                        else:
+                            event = await asyncio.wait_for(anext(stream), timeout)
+                    except StopAsyncIteration:
                         break
+                    except TimeoutError:
+                        await provider.stop(record.run_id)
+                        raise RuntimeError(
+                            "runtime provider produced no activity for "
+                            f"{timeout:g} seconds; the Run was failed instead of "
+                            "stalling silently"
+                        ) from None
+                    if event.agent_id != record.agent_id or event.run_id != record.run_id:
+                        raise RuntimeError(
+                            "runtime provider emitted an event for a different Agent or Run"
+                        )
+                    await self._publish_provider_event(event, record)
+                    text = event.payload.get("text")
+                    if isinstance(text, str):
+                        self._final_text[record.run_id] = text
+                    if event.run_status is not None:
+                        current = self.get_run(record.run_id)
+                        if current.status not in TERMINAL_RUN_STATUSES:
+                            await self.transition_run(record.run_id, event.run_status)
+                        if self.get_run(record.run_id).status in TERMINAL_RUN_STATUSES:
+                            break
+            finally:
+                closer = getattr(stream, "aclose", None)
+                if closer is not None:
+                    with contextlib.suppress(Exception):
+                        await closer()
             current = self.get_run(record.run_id)
             if current.status is RunStatus.RUNNING:
                 # Stream exhaustion means the provider turn ended. It is not
@@ -473,6 +516,24 @@ class RunManager:
                 "running" if self._occupied_agent_runs(record.agent_id) else "idle",
                 record.run_id,
             )
+
+    def _state_context(self, record: RunRecord) -> StateContext:
+        """Build the provider-neutral inheritance stack for one Run."""
+
+        scopes: list[StateScope] = [
+            self.state.ensure_scope("world", "default", schema_id="core.world"),
+            self.state.ensure_scope("agent", record.agent_id, schema_id="core.agent"),
+        ]
+        if record.context_id is not None:
+            scopes.append(
+                self.state.ensure_scope(
+                    "session", record.context_id, schema_id="core.session"
+                )
+            )
+        scopes.append(
+            self.state.ensure_scope("run", record.run_id, schema_id="core.run")
+        )
+        return StateContext(tuple(scopes))
 
     def _provider(self, provider_id: str) -> RuntimeProvider:
         existing = self._providers.get(provider_id)
@@ -514,6 +575,18 @@ class RunManager:
             )
         return provider_id
 
+    def _inactivity_timeout(self, card: Card) -> float | None:
+        """Per-Agent override of the provider stream inactivity watchdog.
+
+        A non-positive configured value disables the watchdog explicitly.
+        Invalid values fall back to the manager default.
+        """
+
+        configured = card.config.get("run_inactivity_timeout_seconds")
+        if isinstance(configured, (int, float)) and not isinstance(configured, bool):
+            return float(configured) if configured > 0 else None
+        return self.inactivity_timeout_seconds
+
     def _check_concurrency(self, card: Card) -> None:
         configured = card.config.get("max_concurrent_runs", 1)
         limit = configured if isinstance(configured, int) and configured > 0 else 1
@@ -551,6 +624,7 @@ class RunManager:
                 "status",
                 "runtime_provider_id",
                 "max_concurrent_runs",
+                "run_inactivity_timeout_seconds",
             }
         }
         return AgentConfig(

@@ -437,3 +437,161 @@ async def test_agent_handoff_executes_as_a_run_and_persists_the_response(
         assert messages[-1].run_id == runs[0].run_id
     finally:
         services.close()
+
+
+class _ScriptedProvider:
+    """Minimal RuntimeProvider double with a scripted execution outcome."""
+
+    def __init__(self, mode: str) -> None:
+        self.mode = mode
+        self.configs: dict[str, Any] = {}
+
+    async def create_agent(self, config: Any) -> Any:
+        self.configs[config.agent_id] = config
+
+    async def update_agent(self, config: Any) -> Any:
+        self.configs[config.agent_id] = config
+
+    async def delete_agent(self, agent_id: str) -> None:
+        self.configs.pop(agent_id, None)
+
+    async def execute(self, config: Any, context: Any, runtime_input: Any):
+        from backend.agents import AgentEvent, AgentEventType
+        from backend.runs import RunStatus
+
+        if self.mode == "failure":
+            raise RuntimeError("model endpoint rejected the request")
+        if self.mode == "empty":
+            yield AgentEvent(
+                context.agent_id,
+                context.run_id,
+                AgentEventType.COMPLETED,
+                {"text": ""},
+                run_status=RunStatus.SUCCEEDED,
+            )
+        # "waiting": end the stream without a terminal status.
+
+    async def stop(self, run_id: str) -> None:
+        del run_id
+
+    async def get_agent(self, agent_id: str) -> Any:
+        raise NotImplementedError
+
+
+def _scripted_conversation_services(data_root: Path, mode: str):
+    from backend.agents import RuntimeProvider
+    from backend.plugins import create_builtin_registry
+
+    provider = _ScriptedProvider(mode)
+    RuntimeProvider.register(_ScriptedProvider)
+    registry = create_builtin_registry()
+    registry.register_runtime_provider("test.scripted", lambda capabilities: provider)
+    settings = Settings.for_data_root(data_root)
+    services = create_services(settings, plugins=registry)
+    services.install_runtime_provider("test.scripted", provider, default=True)
+    return services
+
+
+async def _post_and_collect_outcome(services: Any) -> list[Any]:
+    from backend.conversations import ConversationPost
+
+    atlas = await services.create_card(CardCreate(type="agent", name="Atlas"))
+    conversation = await services.create_card(
+        CardCreate(type="conversation", name="Reliability room")
+    )
+    await services.create_edge(EdgeCreate(
+        source=atlas.id, target=conversation.id, relationship="participate"
+    ))
+    session = await services.create_conversation_session(
+        conversation.id,
+        ConversationSessionCreate(title="Outcomes", participant_ids=[atlas.id]),
+    )
+    await services.post_conversation_message(
+        conversation.id,
+        session.id,
+        ConversationPost(content="@Atlas report status", mention_agent_ids=[atlas.id]),
+    )
+    for _ in range(100):
+        messages = services.list_conversation_messages(conversation.id, session.id)
+        if len(messages) >= 2:
+            return messages
+        await asyncio.sleep(0.02)
+    return services.list_conversation_messages(conversation.id, session.id)
+
+
+@pytest.mark.asyncio
+async def test_failed_conversation_run_persists_a_system_notice(
+    data_root: Path,
+) -> None:
+    services = _scripted_conversation_services(data_root, "failure")
+    try:
+        messages = await _post_and_collect_outcome(services)
+        assert [item.sender_kind for item in messages] == ["user", "system"]
+        assert "Atlas could not respond" in messages[-1].content
+        assert "model endpoint rejected the request" in messages[-1].content
+        assert messages[-1].run_id is not None
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_empty_successful_conversation_run_persists_a_system_notice(
+    data_root: Path,
+) -> None:
+    services = _scripted_conversation_services(data_root, "empty")
+    try:
+        messages = await _post_and_collect_outcome(services)
+        assert [item.sender_kind for item in messages] == ["user", "system"]
+        assert "finished without producing a response" in messages[-1].content
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_suspended_conversation_run_surfaces_a_wait_notice(
+    data_root: Path,
+) -> None:
+    services = _scripted_conversation_services(data_root, "waiting")
+    try:
+        messages = await _post_and_collect_outcome(services)
+        assert [item.sender_kind for item in messages] == ["user", "system"]
+        assert "paused this response to wait on external work" in messages[-1].content
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_synchronous_handoff_to_suspending_agent_fails_clearly(
+    data_root: Path,
+) -> None:
+    services = _scripted_conversation_services(data_root, "waiting")
+    try:
+        atlas = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        river = await services.create_card(CardCreate(type="agent", name="River"))
+        conversation = await services.create_card(
+            CardCreate(type="conversation", name="Handoff room")
+        )
+        for agent in (atlas, river):
+            await services.create_edge(EdgeCreate(
+                source=agent.id, target=conversation.id, relationship="participate"
+            ))
+        session = await services.create_conversation_session(
+            conversation.id,
+            ConversationSessionCreate(
+                title="Handoff", participant_ids=[atlas.id, river.id]
+            ),
+        )
+        from backend.errors import RuntimeUnavailableError
+        from backend.runs import RunStatus
+
+        with pytest.raises(RuntimeUnavailableError, match="suspended its run"):
+            await services.request_conversation_turn(
+                atlas.id, conversation.id, session.id, river.id, "Take over"
+            )
+        manager = services._require_run_manager()
+        delegated = [run for run in manager.list_runs(agent_id=river.id)]
+        assert delegated and all(
+            run.status is RunStatus.CANCELLED for run in delegated
+        )
+    finally:
+        services.close()

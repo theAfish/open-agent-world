@@ -12,6 +12,7 @@ from backend.plugins.lifecycle import NodeLifecycleHandler
 
 if TYPE_CHECKING:
     from backend.agents import AgentCapabilityProvider, RuntimeProvider
+    from backend.state.schema import StateSchema
 
 
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
@@ -159,6 +160,30 @@ class PluginRegistry:
         self._relationships: dict[str, RelationshipDefinition] = {}
         self._capability_handlers: dict[str, CapabilityHandler] = {}
         self._runtime_provider_factories: dict[str, RuntimeProviderFactory] = {}
+        self._state_schemas: dict[str, StateSchema] = {}
+
+    def register_state_schema(self, schema: StateSchema) -> None:
+        """Register a core or plugin state contract through one shared path."""
+
+        from backend.state.schema import StateSchema
+
+        if not isinstance(schema, StateSchema):
+            raise TypeError("state schema must be a StateSchema")
+        self._validate_identifier(schema.id, "state schema")
+        if "." not in schema.id:
+            raise ValueError("state schema ids must be namespaced")
+        if schema.id in self._state_schemas:
+            raise ValueError(f"state schema {schema.id!r} is already registered")
+        self._state_schemas[schema.id] = schema
+
+    def state_schema(self, schema_id: str) -> StateSchema:
+        try:
+            return self._state_schemas[schema_id]
+        except KeyError as exc:
+            raise ValueError(f"state schema {schema_id!r} is not registered") from exc
+
+    def state_schemas(self) -> tuple[StateSchema, ...]:
+        return tuple(self._state_schemas.values())
 
     def register_node_type(self, definition: NodeTypeDefinition) -> None:
         self._validate_identifier(definition.id, "node type")

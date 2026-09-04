@@ -13,6 +13,7 @@ FastAPI application
   |-- World repository (SQLite is authoritative)
   |-- Capability broker (derives permissions from current edges)
   |-- Managed resources (never arbitrary host paths)
+  |-- StateStore + StateContext (scoped runtime state and inherited reads)
   |-- RunManager + durable RunStore
   |    `-- RuntimeProvider (Google ADK built-in; plugins may add others)
   `-- SandboxBackend (Windows security boundary)
@@ -44,9 +45,19 @@ An Agent-to-Agent `communicate` edge has a persisted direction. A `forward` edge
 1. The user connects an Agent to a Text card.
 2. The backend validates and persists the semantic edge.
 3. When the Agent runs, the capability broker resolves that Agent's current edges.
-4. `RunManager` creates a durable Run, resolves the Agent's registered `RuntimeProvider`, and supplies resource-scoped read/edit tools only for the resolved resources.
+4. `RunManager` creates a durable Run and its independent Run state scope, builds
+   the invocation's world/agent/session/run `StateContext`, resolves the Agent's
+   registered `RuntimeProvider`, and supplies resource-scoped read/edit tools only
+   for the resolved resources.
 5. A tool call checks the broker again, modifies the managed resource, records history, and publishes an operational event.
 6. Deleting the edge makes the next check fail without restarting the Agent service.
+
+All graph-derived capability calls share one error boundary. A node operation
+failure is returned to the calling Agent as structured tool data with an error
+code, type, and message, allowing the Agent to retry, choose another action, or
+explain the failure. Such failures do not terminate the calling Run. Runtime
+cancellation remains control flow and is propagated immediately; a Run fails
+only when its runtime/provider itself cannot continue.
 
 Direct resource tools never route through a Sandbox.
 
@@ -69,7 +80,7 @@ Only edges whose two endpoints are loaded are returned, so React Flow never rece
 
 ## Events
 
-The WebSocket carries operational facts, never hidden reasoning. Event types cover Run, Agent, and Sandbox lifecycle, tool start/completion, stdout/stderr, command completion, resource modification, permission changes, and runtime errors. A reconnect triggers a fresh world snapshot; the event stream is not treated as the persistence source of truth. Run history is independently authoritative in SQLite.
+The WebSocket carries operational facts, never hidden reasoning. Event types cover Run, Agent, State, and Sandbox lifecycle, tool start/completion, stdout/stderr, command completion, resource modification, permission changes, and runtime errors. A reconnect triggers a fresh world snapshot; the event stream is not treated as the persistence source of truth. Run history and state are independently authoritative in SQLite.
 
 ## Storage
 

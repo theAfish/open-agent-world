@@ -106,6 +106,32 @@ CREATE INDEX IF NOT EXISTS runs_agent_idx ON runs (agent_id, created_at);
 CREATE INDEX IF NOT EXISTS runs_parent_idx ON runs (parent_run_id, created_at);
 CREATE INDEX IF NOT EXISTS runs_task_idx ON runs (task_id, created_at);
 
+CREATE TABLE IF NOT EXISTS state_scopes (
+    scope_id TEXT PRIMARY KEY,
+    scope_kind TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    schema_id TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CONSTRAINT one_state_scope_per_owner UNIQUE (scope_kind, owner_id)
+);
+
+CREATE INDEX IF NOT EXISTS state_scopes_owner_idx
+    ON state_scopes (scope_kind, owner_id);
+
+CREATE TABLE IF NOT EXISTS state_values (
+    scope_id TEXT NOT NULL REFERENCES state_scopes(scope_id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (scope_id, key)
+);
+
+CREATE INDEX IF NOT EXISTS state_values_scope_idx ON state_values (scope_id);
+
 CREATE TABLE IF NOT EXISTS resources (
     card_id TEXT PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
     kind TEXT NOT NULL CHECK (kind IN ('text', 'image')),
@@ -171,6 +197,14 @@ class Database:
             if "direction" not in edge_columns:
                 self._connection.execute(
                     "ALTER TABLE edges ADD COLUMN direction TEXT NOT NULL DEFAULT 'forward'"
+                )
+            state_value_columns = {
+                row["name"]
+                for row in self._connection.execute("PRAGMA table_info(state_values)")
+            }
+            if "deleted" not in state_value_columns:
+                self._connection.execute(
+                    "ALTER TABLE state_values ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0"
                 )
 
     def _migrate_open_card_types(self) -> None:
