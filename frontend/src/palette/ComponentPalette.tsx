@@ -63,6 +63,7 @@ const NODE_ICONS: Record<string, LucideIcon> = {
   image: ImageIcon,
   workflow: Workflow,
   "messages-square": MessagesSquare,
+  sparkles: Sparkles,
 };
 
 const isCardType = (value: unknown): value is CardType => (

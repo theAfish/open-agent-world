@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [ValidateSet("google-adk", "mock")]
-    [string]$AgentRuntime = "google-adk"
+    [string]$AgentRuntime = "google-adk",
+
+    [string[]]$PluginPath = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -174,7 +176,24 @@ try {
     $env:OAW_DEV_BACKEND_HTTP_URL = $backendHttpUrl
     $env:OAW_DEV_BACKEND_WS_URL = "ws://127.0.0.1:$backendPort"
     $backendArguments = @(
-        "run", "--project", "backend", "--extra", "adk", "--extra", "litellm",
+        "run", "--project", "backend", "--extra", "adk", "--extra", "litellm"
+    )
+    $resolvedPluginPaths = foreach ($candidate in $PluginPath) {
+        $candidatePath = if ([System.IO.Path]::IsPathRooted($candidate)) {
+            $candidate
+        }
+        else {
+            Join-Path $projectRoot $candidate
+        }
+        $resolved = Resolve-Path -LiteralPath $candidatePath -ErrorAction Stop
+        if (-not (Test-Path -LiteralPath (Join-Path $resolved.Path "pyproject.toml"))) {
+            throw "Plugin path must contain a pyproject.toml: $($resolved.Path)"
+        }
+        # Start-Process joins ArgumentList items; retain quotes for paths with spaces.
+        $backendArguments += @("--with-editable", "`"$($resolved.Path)`"")
+        $resolved.Path
+    }
+    $backendArguments += @(
         "uvicorn", "backend.main:app",
         "--host", "127.0.0.1", "--port", $backendPort
     )
@@ -212,6 +231,9 @@ try {
 
     Write-Host "Open Agent World: http://127.0.0.1:$frontendPort/"
     Write-Host "Backend API: $backendHttpUrl"
+    if ($resolvedPluginPaths.Count -gt 0) {
+        Write-Host "Backend plugins: $($resolvedPluginPaths -join ', ')"
+    }
     Write-Host "Backend activity: $backendOut"
     & npm.cmd --prefix frontend run dev -- --port $frontendPort --strictPort
 }
