@@ -19,10 +19,10 @@ from backend.agents import (
 )
 from backend.agents.tools import build_scoped_tool_callables
 from backend.config import Settings
-from backend.errors import RuntimeUnavailableError
+from backend.errors import NotFoundError, RuntimeUnavailableError
 from backend.plugins import create_builtin_registry
 from backend.tests.plugin_support import install_test_plugin
-from backend.runs import InvocationContext, RunStatus, RuntimeInput
+from backend.runs import InvocationContext, RunRecord, RunStatus, RuntimeInput
 from backend.services import create_services
 from backend.world.models import CardCreate
 
@@ -129,6 +129,58 @@ class RecordingProvider(RuntimeProvider):
         )
 
 
+class HangingStopProvider(RecordingProvider):
+    def __init__(self, *, expected_stops: int = 1) -> None:
+        super().__init__(mode="block")
+        self.stop_started = asyncio.Event()
+        self.all_stops_started = asyncio.Event()
+        self.release_stop = asyncio.Event()
+        self.expected_stops = expected_stops
+        self.stopped_run_ids: list[str] = []
+        self.deleted_agent_ids: list[str] = []
+
+    async def stop(self, run_id: str) -> None:
+        self.stopped_run_ids.append(run_id)
+        self.stop_started.set()
+        if len(self.stopped_run_ids) >= self.expected_stops:
+            self.all_stops_started.set()
+        await self.release_stop.wait()
+
+    async def delete_agent(self, agent_id: str) -> None:
+        self.deleted_agent_ids.append(agent_id)
+        await super().delete_agent(agent_id)
+
+
+class TerminalAcloseProvider(RecordingProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.emit_terminal = asyncio.Event()
+        self.aclose_started = asyncio.Event()
+        self.release_aclose = asyncio.Event()
+
+    async def execute(
+        self,
+        config: AgentConfig,
+        context: InvocationContext,
+        runtime_input: RuntimeInput,
+    ) -> AsyncIterator[AgentEvent]:
+        del config, runtime_input
+        self.contexts.append(context)
+        self.started.set()
+        try:
+            await self.emit_terminal.wait()
+            yield AgentEvent(
+                context.agent_id,
+                context.run_id,
+                AgentEventType.COMPLETED,
+                {"text": "done"},
+                run_status=RunStatus.SUCCEEDED,
+            )
+        finally:
+            self.aclose_started.set()
+            await self.release_aclose.wait()
+
+
 def _services(tmp_path: Path, provider: RecordingProvider):
     registry = create_builtin_registry()
     install_test_plugin(
@@ -143,6 +195,207 @@ def _services(tmp_path: Path, provider: RecordingProvider):
         agent_runtime="test.runtime",
     )
     return create_services(settings, plugins=registry)
+
+
+@pytest.mark.asyncio
+async def test_start_run_registers_execution_before_releasing_admission_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider = RecordingProvider(mode="block")
+    services = _services(tmp_path, provider)
+    try:
+        agent = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        manager = services._require_run_manager()
+        original_create_task = asyncio.create_task
+        launch_lock_states: list[bool] = []
+
+        def tracking_create_task(
+            coroutine: Any,
+            *,
+            name: str | None = None,
+            context: Any | None = None,
+        ) -> asyncio.Task[Any]:
+            if name is not None and name.startswith("run:"):
+                launch_lock_states.append(
+                    manager._start_locks[agent.id].locked()
+                )
+            kwargs: dict[str, Any] = {"name": name}
+            if context is not None:
+                kwargs["context"] = context
+            return original_create_task(coroutine, **kwargs)
+
+        monkeypatch.setattr(asyncio, "create_task", tracking_create_task)
+        run = await manager.start_run(agent.id, "hold")
+        await provider.started.wait()
+
+        assert launch_lock_states == [True]
+        assert run.run_id in manager._runtime_tasks
+
+        await manager.cancel_run(run.run_id)
+        await manager.wait_execution(run.run_id)
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_agent_runs_stops_all_local_tasks_before_provider_stops_finish(
+    tmp_path: Path,
+) -> None:
+    provider = HangingStopProvider(expected_stops=2)
+    services = _services(tmp_path, provider)
+    cancellation: asyncio.Task[list[RunRecord]] | None = None
+    try:
+        agent = await services.create_card(
+            CardCreate(
+                type="agent",
+                name="Atlas",
+                config={"max_concurrent_runs": 2},
+            )
+        )
+        manager = services._require_run_manager()
+        runs = [
+            await manager.start_run(agent.id, prompt)
+            for prompt in ("hold one", "hold two")
+        ]
+        await provider.started.wait()
+
+        cancellation = asyncio.create_task(manager.cancel_agent_runs(agent.id))
+        await provider.all_stops_started.wait()
+        await asyncio.gather(
+            *(
+                asyncio.wait_for(manager.wait_execution(run.run_id), timeout=0.2)
+                for run in runs
+            )
+        )
+
+        assert all(
+            manager.get_run(run.run_id).status is RunStatus.CANCELLED
+            for run in runs
+        )
+        assert all(run.run_id not in manager._runtime_tasks for run in runs)
+        assert set(provider.stopped_run_ids) == {run.run_id for run in runs}
+        assert not cancellation.done()
+
+        provider.release_stop.set()
+        assert {record.run_id for record in await cancellation} == {
+            run.run_id for run in runs
+        }
+    finally:
+        provider.release_stop.set()
+        if cancellation is not None and not cancellation.done():
+            cancellation.cancel()
+            await asyncio.gather(cancellation, return_exceptions=True)
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_agent_delete_joins_an_inflight_cancellation_tail(
+    tmp_path: Path,
+) -> None:
+    provider = HangingStopProvider()
+    services = _services(tmp_path, provider)
+    cancellation: asyncio.Task[RunRecord] | None = None
+    deletion: asyncio.Task[Any] | None = None
+    try:
+        agent = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        manager = services._require_run_manager()
+        run = await manager.start_run(agent.id, "hold")
+        await provider.started.wait()
+
+        cancellation = asyncio.create_task(manager.cancel_run(run.run_id))
+        await provider.stop_started.wait()
+        deletion = asyncio.create_task(services.delete_card(agent.id))
+
+        async def wait_for_graph_commit() -> None:
+            while services.world.maybe_get_card(agent.id) is not None:
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(wait_for_graph_commit(), timeout=0.2)
+        assert not deletion.done()
+        assert provider.deleted_agent_ids == []
+
+        provider.release_stop.set()
+        await cancellation
+        await deletion
+
+        assert provider.deleted_agent_ids == [agent.id]
+        assert run.run_id not in manager._runtime_tasks
+    finally:
+        provider.release_stop.set()
+        pending = [
+            task
+            for task in (cancellation, deletion)
+            if task is not None and not task.done()
+        ]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_race_joins_terminal_provider_aclose_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider = TerminalAcloseProvider()
+    services = _services(tmp_path, provider)
+    cancellation: asyncio.Task[RunRecord] | None = None
+    release_cancel_transition = asyncio.Event()
+    try:
+        agent = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        manager = services._require_run_manager()
+        run = await manager.start_run(agent.id, "finish concurrently")
+        await provider.started.wait()
+
+        manager_type = type(manager)
+        original_transition_run = manager_type.transition_run
+        cancel_transition_entered = asyncio.Event()
+
+        async def delay_cancel_transition(
+            current_manager: Any,
+            run_id: str,
+            status: RunStatus | str,
+            *,
+            error: str | None = None,
+        ) -> RunRecord:
+            if (
+                current_manager is manager
+                and run_id == run.run_id
+                and RunStatus(status) is RunStatus.CANCELLED
+            ):
+                cancel_transition_entered.set()
+                await release_cancel_transition.wait()
+            return await original_transition_run(
+                current_manager, run_id, status, error=error
+            )
+
+        monkeypatch.setattr(
+            manager_type, "transition_run", delay_cancel_transition
+        )
+        cancellation = asyncio.create_task(manager.cancel_run(run.run_id))
+        await cancel_transition_entered.wait()
+
+        provider.emit_terminal.set()
+        await provider.aclose_started.wait()
+        assert manager.get_run(run.run_id).status is RunStatus.SUCCEEDED
+
+        release_cancel_transition.set()
+        await asyncio.sleep(0)
+        assert not cancellation.done()
+
+        provider.release_aclose.set()
+        cancelled = await cancellation
+        assert cancelled.status is RunStatus.SUCCEEDED
+        assert run.run_id not in manager._runtime_tasks
+    finally:
+        release_cancel_transition.set()
+        provider.emit_terminal.set()
+        provider.release_aclose.set()
+        if cancellation is not None and not cancellation.done():
+            cancellation.cancel()
+            await asyncio.gather(cancellation, return_exceptions=True)
+        services.close()
 
 
 @pytest.mark.asyncio
@@ -217,7 +470,9 @@ async def test_agents_in_one_world_can_select_different_providers(tmp_path: Path
 
 
 @pytest.mark.asyncio
-async def test_transition_authority_and_stream_exhaustion_waiting(tmp_path: Path) -> None:
+async def test_transition_authority_and_stream_exhaustion_waiting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     provider = RecordingProvider(mode="waiting")
     services = _services(tmp_path, provider)
     try:
@@ -245,8 +500,22 @@ async def test_transition_authority_and_stream_exhaustion_waiting(tmp_path: Path
         assert manager.holds_agent_slot(another.run_id)
         await manager.transition_run(another.run_id, RunStatus.FAILED)
 
+        original_update_status = manager.store.update_status
+        resume_lock_states: list[bool] = []
+
+        def tracking_update_status(
+            run_id: str, status: RunStatus, *, error: str | None = None
+        ) -> RunRecord:
+            if run_id == run.run_id and status is RunStatus.RUNNING:
+                resume_lock_states.append(
+                    manager._start_locks[agent.id].locked()
+                )
+            return original_update_status(run_id, status, error=error)
+
+        monkeypatch.setattr(manager.store, "update_status", tracking_update_status)
         resumed = await manager.transition_run(run.run_id, RunStatus.RUNNING)
         assert resumed.status is RunStatus.RUNNING
+        assert resume_lock_states == [True]
         assert manager.holds_agent_slot(run.run_id)
         terminal_wait = asyncio.create_task(manager.wait_terminal(run.run_id))
         await asyncio.sleep(0)
@@ -260,6 +529,29 @@ async def test_transition_authority_and_stream_exhaustion_waiting(tmp_path: Path
         assert failed.finished_at is not None
         with pytest.raises(ValueError):
             await manager.transition_run(run.run_id, RunStatus.RUNNING)
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_resume_requires_a_live_agent_even_when_the_run_retains_its_slot(
+    tmp_path: Path,
+) -> None:
+    provider = RecordingProvider(mode="waiting")
+    services = _services(tmp_path, provider)
+    try:
+        agent = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        manager = services._require_run_manager()
+        run = await manager.start_run(agent.id, "wait")
+        assert (await manager.wait_execution(run.run_id)).status is RunStatus.WAITING
+        assert manager.holds_agent_slot(run.run_id)
+
+        services.world.delete_card(agent.id)
+        with pytest.raises(NotFoundError, match="does not exist"):
+            await manager.transition_run(run.run_id, RunStatus.RUNNING)
+
+        assert manager.get_run(run.run_id).status is RunStatus.WAITING
+        await manager.delete_agent(agent.id, missing_ok=True)
     finally:
         services.close()
 

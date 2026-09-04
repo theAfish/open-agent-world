@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Bot,
   Boxes,
   ChevronUp,
@@ -19,14 +20,34 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type DragEvent, type FormEvent } from "react";
 import { useWorldStore } from "../state/worldStore";
-import type { CardType, PluginCatalog } from "../types/world";
+import type { CardType, LegionSummary, PluginCatalog } from "../types/world";
+import {
+  LEGACY_NODE_DRAG_MIME,
+  readPaletteDrag,
+  writePaletteDrag,
+  type PaletteDragPayload,
+} from "./dragPayload";
 
-interface DeckCard {
+interface NodeDeckCard {
+  kind: "node";
   type: CardType;
   icon: LucideIcon;
   label: string;
   detail: string;
 }
+
+interface LegionDeckCard {
+  kind: "legion";
+  id: string;
+  revision: number;
+  icon: LucideIcon;
+  label: string;
+  detail: string;
+  compatible: boolean;
+  issues: string[];
+}
+
+type DeckCard = NodeDeckCard | LegionDeckCard;
 
 type DeckIconKey = "bot" | "boxes" | "workflow" | "folder" | "layers" | "sparkles" | "star" | "zap";
 
@@ -41,10 +62,12 @@ interface StoredDeck {
 interface CardDeck extends StoredDeck {
   iconComponent: LucideIcon;
   cards: DeckCard[];
+  legionDeck?: boolean;
 }
 
 const DECKS_KEY = "open-agent-world.decks.v2";
 const LEGACY_CUSTOM_DECKS_KEY = "open-agent-world.custom-decks.v1";
+const LEGIONS_DECK_ID = "__open-agent-world-legions__";
 
 const DECK_ICONS: Record<DeckIconKey, LucideIcon> = {
   bot: Bot,
@@ -168,6 +191,7 @@ function materializeDeck(deck: StoredDeck, catalog: PluginCatalog): CardDeck {
     cards: deck.cardTypes.flatMap((type): DeckCard[] => {
       const definition = catalog.node_types.find((item) => item.id === type);
       return definition ? [{
+        kind: "node",
         type,
         icon: NODE_ICONS[definition.icon] ?? Puzzle,
         label: definition.label,
@@ -177,8 +201,36 @@ function materializeDeck(deck: StoredDeck, catalog: PluginCatalog): CardDeck {
   };
 }
 
+function materializeLegionDeck(legions: LegionSummary[]): CardDeck {
+  return {
+    id: LEGIONS_DECK_ID,
+    label: "Legions",
+    icon: "layers",
+    iconComponent: Layers3,
+    cardTypes: [],
+    custom: false,
+    legionDeck: true,
+    cards: legions.map((legion) => ({
+      kind: "legion",
+      id: legion.id,
+      revision: legion.revision,
+      icon: Layers3,
+      label: legion.name,
+      detail: legion.compatible
+        ? `${legion.node_count} cards · ${legion.edge_count} links`
+        : legion.issues[0] ?? "Required plugin unavailable",
+      compatible: legion.compatible,
+      issues: legion.issues,
+    })),
+  };
+}
+
 export function ComponentPalette() {
   const createCard = useWorldStore((state) => state.createCard);
+  const instantiateLegion = useWorldStore((state) => state.instantiateLegion);
+  const deleteLegion = useWorldStore((state) => state.deleteLegion);
+  const legions = useWorldStore((state) => state.legions);
+  const legionError = useWorldStore((state) => state.legionError);
   const catalog = useWorldStore((state) => state.catalog);
   const [storedDecks, setStoredDecks] = useState<StoredDeck[]>([]);
   const [activeDeckId, setActiveDeckId] = useState("agents");
@@ -187,7 +239,10 @@ export function ComponentPalette() {
   const [deckIcon, setDeckIcon] = useState<DeckIconKey>("folder");
   const [iconMenuOpen, setIconMenuOpen] = useState(false);
   const [dragOverDeckId, setDragOverDeckId] = useState<string>();
-  const decks = storedDecks.map((deck) => materializeDeck(deck, catalog));
+  const decks = [
+    ...storedDecks.map((deck) => materializeDeck(deck, catalog)),
+    materializeLegionDeck(legions),
+  ];
   const activeDeck = decks.find((deck) => deck.id === activeDeckId) ?? decks[0];
 
   useEffect(() => {
@@ -202,9 +257,8 @@ export function ComponentPalette() {
     window.localStorage.setItem(DECKS_KEY, JSON.stringify(storedDecks));
   }, [catalog.node_types.length, storedDecks]);
 
-  const beginDrag = (event: DragEvent<HTMLButtonElement>, type: CardType) => {
-    event.dataTransfer.setData("application/open-agent-card", type);
-    event.dataTransfer.effectAllowed = "copyMove";
+  const beginDrag = (event: DragEvent<HTMLButtonElement>, payload: PaletteDragPayload) => {
+    writePaletteDrag(event.dataTransfer, payload);
   };
 
   const moveCardToDeck = (type: CardType, targetDeckId: string) => {
@@ -283,7 +337,7 @@ export function ComponentPalette() {
                   setActiveDeckId(deck.id);
                 }}
                 onDragOver={(event) => {
-                  if (!event.dataTransfer.types.includes("application/open-agent-card")) return;
+                  if (deck.legionDeck || !event.dataTransfer.types.includes(LEGACY_NODE_DRAG_MIME)) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
                   setDragOverDeckId(deck.id);
@@ -294,10 +348,12 @@ export function ComponentPalette() {
                 onDrop={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  const type = event.dataTransfer.getData("application/open-agent-card");
-                  if (isCardType(type)) moveCardToDeck(type, deck.id);
+                  const payload = readPaletteDrag(event.dataTransfer);
+                  if (payload?.kind === "node" && isCardType(payload.type)) moveCardToDeck(payload.type, deck.id);
                 }}
-                title={`${deck.label}: ${deck.cards.length} cards. Drop a card here to move it.`}
+                title={deck.legionDeck
+                  ? `${deck.label}: ${deck.cards.length} reusable formations.`
+                  : `${deck.label}: ${deck.cards.length} cards. Drop a card here to move it.`}
               >
                 <DeckIcon size={15} />
                 <span>{deck.label}</span>
@@ -380,7 +436,11 @@ export function ComponentPalette() {
           <>
             <div className="deck-caption">
               <span><Layers3 size={13} /> {activeDeck?.label} deck</span>
-              <small>Drag a card onto another deck tab to move it.</small>
+              <small>{activeDeck?.legionDeck
+                ? legionError
+                  ? `Library unavailable: ${legionError}`
+                  : "Deploy a saved formation with all of its internal links."
+                : "Drag a card onto another deck tab to move it."}</small>
               {activeDeck?.custom ? (
                 <button type="button" className="deck-delete-button" onClick={deleteActiveDeck} title="Delete this custom deck">
                   <Trash2 size={12} /> Delete
@@ -389,26 +449,83 @@ export function ComponentPalette() {
             </div>
             {activeDeck?.cards.length ? (
               <div className={`palette-items ${activeDeck.cards.length > 2 ? "has-many" : ""}`}>
-                {activeDeck.cards.map(({ type, icon: Icon, label, detail }) => (
-                  <button
-                    type="button"
-                    key={type}
-                    className={`palette-item palette-item--${type}`}
-                    draggable
-                    onDragStart={(event) => beginDrag(event, type)}
-                    onClick={() => void createCard(type)}
-                    aria-label={`Create ${label}`}
-                    title="Drag to the canvas to create, or onto a deck tab to move"
-                  >
-                    <span className="palette-card-corner"><Icon size={15} /></span>
-                    <span className="palette-item-icon"><Icon size={25} /></span>
-                    <span className="palette-item-copy"><strong>{label}</strong><small>{detail}</small></span>
-                    <span className="palette-draw"><Plus size={12} /> Draw</span>
-                  </button>
-                ))}
+                {activeDeck.cards.map((item) => {
+                  const Icon = item.icon;
+                  if (item.kind === "node") {
+                    return (
+                      <button
+                        type="button"
+                        key={`node:${item.type}`}
+                        className={`palette-item palette-item--${item.type}`}
+                        draggable
+                        onDragStart={(event) => beginDrag(event, { version: 1, kind: "node", type: item.type })}
+                        onClick={() => void createCard(item.type)}
+                        aria-label={`Create ${item.label}`}
+                        title="Drag to the canvas to create, or onto a deck tab to move"
+                      >
+                        <span className="palette-card-corner"><Icon size={15} /></span>
+                        <span className="palette-item-icon"><Icon size={25} /></span>
+                        <span className="palette-item-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>
+                        <span className="palette-draw"><Plus size={12} /> Draw</span>
+                      </button>
+                    );
+                  }
+                  const issueText = item.issues.join(" ") || "One or more required plugins are unavailable.";
+                  return (
+                    <div className="legion-palette-entry" key={`legion:${item.id}`}>
+                      <button
+                        type="button"
+                        className={`palette-item palette-item--legion ${item.compatible ? "" : "is-incompatible"}`}
+                        draggable={item.compatible}
+                        onDragStart={(event) => {
+                          if (item.compatible) beginDrag(event, {
+                            version: 1,
+                            kind: "legion",
+                            id: item.id,
+                            revision: item.revision,
+                          });
+                        }}
+                        onClick={() => void instantiateLegion(item.id)}
+                        disabled={!item.compatible}
+                        aria-label={`Deploy Legion ${item.label}`}
+                        title={item.compatible ? "Drag to deploy this complete formation" : issueText}
+                      >
+                        <span className="palette-card-corner">
+                          {item.compatible ? <Icon size={15} /> : <AlertTriangle size={15} />}
+                        </span>
+                        <span className="palette-item-icon"><Icon size={25} /></span>
+                        <span className="palette-item-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>
+                        <span className="palette-draw"><Plus size={12} /> Deploy</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="legion-card-delete"
+                        onClick={() => {
+                          if (window.confirm(`Remove ${item.label} from the Legion library?`)) {
+                            void deleteLegion(item.id);
+                          }
+                        }}
+                        aria-label={`Delete Legion ${item.label}`}
+                        title="Delete this Legion card"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
-              <div className="deck-empty"><Folder size={22} /><strong>Empty deck</strong><small>Drag a card onto this deck tab.</small></div>
+              <div className="deck-empty">
+                {activeDeck?.legionDeck
+                  ? legionError ? <AlertTriangle size={22} /> : <Layers3 size={22} />
+                  : <Folder size={22} />}
+                <strong>{activeDeck?.legionDeck
+                  ? legionError ? "Legion library unavailable" : "No Legions collected"
+                  : "Empty deck"}</strong>
+                <small>{activeDeck?.legionDeck
+                  ? legionError ?? "Select two or more canvas cards to save a formation."
+                  : "Drag a card onto this deck tab."}</small>
+              </div>
             )}
           </>
         )}

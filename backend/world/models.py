@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class CardType(StrEnum):
@@ -139,6 +139,40 @@ class CardPatch(BaseModel):
     expanded: bool | None = None
     status: str | None = None
     config: dict[str, Any] | None = None
+
+
+class CardsDelete(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_ids: Annotated[list[str], Field(min_length=1, max_length=100)]
+
+    @field_validator("node_ids")
+    @classmethod
+    def unique_node_ids(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("node_ids must not contain duplicates")
+        return value
+
+
+class CardBatchPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str = Field(min_length=1, max_length=100)
+    patch: CardPatch
+
+
+class CardsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    updates: Annotated[list[CardBatchPatch], Field(min_length=1, max_length=100)]
+
+    @field_validator("updates")
+    @classmethod
+    def unique_node_ids(cls, value: list[CardBatchPatch]) -> list[CardBatchPatch]:
+        node_ids = [item.node_id for item in value]
+        if len(node_ids) != len(set(node_ids)):
+            raise ValueError("updates must not contain duplicate node_ids")
+        return value
 
 
 class Card(BaseModel):

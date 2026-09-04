@@ -6,6 +6,8 @@ import type {
   ConversationSession,
   ConversationSummary,
   EdgeDirection,
+  LegionInstantiation,
+  LegionSummary,
   PluginCatalog,
   Relationship,
   RuntimeEvent,
@@ -65,6 +67,12 @@ function imageMediaType(file: File): string {
 
 function asNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
 function normalizeCardType(value: unknown): CardType {
@@ -138,6 +146,53 @@ export function normalizeEdge(input: unknown): WorldEdge {
   };
 }
 
+export function normalizeLegionSummary(input: unknown): LegionSummary {
+  const source = asRecord(input);
+  const bounds = asRecord(source.bounds);
+  return {
+    id: String(source.id),
+    name: String(source.name ?? "Untitled Legion"),
+    description: typeof source.description === "string" && source.description.trim()
+      ? source.description
+      : undefined,
+    node_count: asNumber(source.node_count, 0),
+    edge_count: asNumber(source.edge_count, 0),
+    bounds: {
+      width: asNumber(bounds.width, 0),
+      height: asNumber(bounds.height, 0),
+    },
+    node_types: asStringArray(source.node_types),
+    plugin_ids: asStringArray(source.plugin_ids),
+    compatible: source.compatible === true,
+    issues: asStringArray(source.issues),
+    created_at: typeof source.created_at === "string" ? source.created_at : undefined,
+    updated_at: typeof source.updated_at === "string" ? source.updated_at : undefined,
+    revision: asNumber(source.revision, 1),
+  };
+}
+
+export function normalizeLegionInstantiation(input: unknown): LegionInstantiation {
+  const source = asRecord(input);
+  const nodes = Array.isArray(source.nodes) ? source.nodes : [];
+  const edges = Array.isArray(source.edges) ? source.edges : [];
+  return {
+    legion_id: String(source.legion_id),
+    nodes: nodes.map(normalizeCard),
+    edges: edges.map(normalizeEdge),
+  };
+}
+
+export function normalizeWorldSnapshot(input: unknown): WorldSnapshot {
+  const source = asRecord(input);
+  const nodes = (source.nodes ?? source.cards ?? []) as unknown[];
+  const edges = (source.edges ?? []) as unknown[];
+  return {
+    nodes: nodes.map(normalizeCard),
+    edges: edges.map(normalizeEdge),
+    chunks: Array.isArray(source.chunks) ? (source.chunks as WorldSnapshot["chunks"]) : [],
+  };
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (!(init?.body instanceof FormData) && init?.body !== undefined) {
@@ -191,14 +246,39 @@ export const worldApi = {
       ? `?chunks=${encodeURIComponent(chunks.join(","))}`
       : "";
     const body = await request<unknown>(`/world${query}`);
+    return normalizeWorldSnapshot(body);
+  },
+
+  async getLegions(): Promise<LegionSummary[]> {
+    const body = await request<unknown>("/legions");
     const source = asRecord(body);
-    const nodes = (source.nodes ?? source.cards ?? []) as unknown[];
-    const edges = (source.edges ?? []) as unknown[];
-    return {
-      nodes: nodes.map(normalizeCard),
-      edges: edges.map(normalizeEdge),
-      chunks: Array.isArray(source.chunks) ? (source.chunks as WorldSnapshot["chunks"]) : [],
-    };
+    const legions = Array.isArray(body) ? body : Array.isArray(source.legions) ? source.legions : [];
+    return legions.map(normalizeLegionSummary);
+  },
+
+  async createLegion(input: {
+    name: string;
+    description?: string;
+    node_ids: string[];
+  }): Promise<LegionSummary> {
+    const body = await request<unknown>("/legions", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    return normalizeLegionSummary(unwrap(body, "legion"));
+  },
+
+  async deleteLegion(id: string): Promise<LegionSummary> {
+    const body = await request<unknown>(`/legions/${encodeURIComponent(id)}`, { method: "DELETE" });
+    return normalizeLegionSummary(unwrap(body, "legion"));
+  },
+
+  async instantiateLegion(id: string, position: { x: number; y: number }): Promise<LegionInstantiation> {
+    const body = await request<unknown>(`/legions/${encodeURIComponent(id)}/instances`, {
+      method: "POST",
+      body: JSON.stringify({ position }),
+    });
+    return normalizeLegionInstantiation(body);
   },
 
   async createNode(node: CardCreateInput): Promise<WorldCard> {
@@ -233,8 +313,27 @@ export const worldApi = {
     return normalizeCard(unwrap(body, "node"));
   },
 
+  async batchUpdateNodes(updates: Array<{
+    node_id: string;
+    patch: Partial<Omit<WorldCard, "id" | "type">>;
+  }>): Promise<WorldCard[]> {
+    const body = await request<unknown>("/nodes/batch-update", {
+      method: "POST",
+      body: JSON.stringify({ updates }),
+    });
+    return (Array.isArray(body) ? body : []).map(normalizeCard);
+  },
+
   deleteNode(id: string): Promise<void> {
     return request<void>(`/nodes/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+
+  async deleteNodes(ids: string[]): Promise<WorldCard[]> {
+    const body = await request<unknown>("/nodes/batch-delete", {
+      method: "POST",
+      body: JSON.stringify({ node_ids: ids }),
+    });
+    return (Array.isArray(body) ? body : []).map(normalizeCard);
   },
 
   async getTextContent(nodeId: string): Promise<string> {

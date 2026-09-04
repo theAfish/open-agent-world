@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from typing import Any
+from typing import Any, Mapping
 
-from backend.errors import ResourceValidationError
+from backend.errors import PluginCompatibilityError, ResourceValidationError
 from backend.plugins.registry import (
     PLUGIN_API_VERSION,
     CapabilityGrantDefinition,
@@ -17,6 +17,12 @@ from backend.plugins.lifecycle import (
     NodeLifecycleContext,
     NodeLifecycleHandler,
     NodeLifecycleTransaction,
+)
+from backend.plugins.template import (
+    NodeTemplateCaptureContext,
+    NodeTemplateDependency,
+    NodeTemplateHandler,
+    NodeTemplateRestoreContext,
 )
 from backend.plugins.capability import CapabilityContext
 from backend.world.models import (
@@ -32,15 +38,38 @@ from backend.world.models import (
 
 
 class _LifecycleOperation(NodeLifecycleTransaction):
-    def __init__(self, commit: Any, rollback: Any) -> None:
+    def __init__(
+        self,
+        commit: Any,
+        rollback: Any,
+        *,
+        finalize: Any | None = None,
+        commit_before_node_ids: frozenset[str] = frozenset(),
+        delete_recovery_payload: Mapping[str, Any] | None = None,
+    ) -> None:
         self._commit = commit
         self._rollback = rollback
+        self._finalize = finalize
+        self.commit_before_node_ids = commit_before_node_ids
+        self._delete_recovery_payload = dict(delete_recovery_payload or {})
+
+    @property
+    def has_delete_finalizer(self) -> bool:
+        return self._finalize is not None
+
+    @property
+    def delete_recovery_payload(self) -> Mapping[str, Any]:
+        return self._delete_recovery_payload
 
     async def commit(self) -> None:
         await self._commit()
 
     async def rollback(self, error: BaseException) -> None:
         await self._rollback(error)
+
+    async def finalize(self) -> None:
+        if self._finalize is not None:
+            await self._finalize()
 
 
 class AgentNodeBehavior(NodeLifecycleHandler):
@@ -94,16 +123,73 @@ class AgentNodeBehavior(NodeLifecycleHandler):
     async def prepare_delete(
         self, context: NodeLifecycleContext, node: Card
     ) -> NodeLifecycleTransaction:
+        provider_id = (
+            context.agents.provider_id(node) if context.agents is not None else None
+        )
+
         async def commit() -> None:
+            # Run cancellation is irreversible: RunStatus has no transition
+            # out of CANCELLED and providers expose stop, not pause/resume.
+            # Reserve admission but leave live Runs untouched until the graph
+            # deletion commits.
             if context.agents is not None:
-                await context.agents.delete(node.id)
+                await context.agents.reserve_delete(node.id)
 
         async def rollback(error: BaseException) -> None:
             del error
             if context.agents is not None:
-                await context.agents.create(node)
+                context.agents.release_delete(node.id)
 
-        return _LifecycleOperation(commit, rollback)
+        async def finalize() -> None:
+            if context.agents is not None:
+                await context.agents.delete(node.id, missing_ok=True)
+                context.agents.release_delete(node.id)
+
+        return _LifecycleOperation(
+            commit,
+            rollback,
+            finalize=finalize,
+            delete_recovery_payload={"runtime_provider_id": provider_id},
+        )
+
+    async def prepare_delete_recovery(
+        self,
+        context: NodeLifecycleContext,
+        node: Card,
+        *,
+        plugin_version: str,
+        payload: Mapping[str, Any],
+    ) -> NodeLifecycleTransaction:
+        del plugin_version
+        if set(payload) != {"runtime_provider_id"}:
+            raise PluginCompatibilityError("invalid Agent deletion cleanup payload")
+        raw_provider_id = payload["runtime_provider_id"]
+        if raw_provider_id is not None and not isinstance(raw_provider_id, str):
+            raise PluginCompatibilityError("invalid Agent runtime provider cleanup id")
+
+        async def commit() -> None:
+            pass
+
+        async def rollback(error: BaseException) -> None:
+            del error
+            if context.agents is not None:
+                context.agents.release_delete(node.id)
+
+        async def finalize() -> None:
+            if context.agents is not None:
+                await context.agents.delete(
+                    node.id,
+                    missing_ok=True,
+                    provider_id=raw_provider_id,
+                )
+                context.agents.release_delete(node.id)
+
+        return _LifecycleOperation(
+            commit,
+            rollback,
+            finalize=finalize,
+            delete_recovery_payload=payload,
+        )
 
 
 class SandboxNodeBehavior(NodeLifecycleHandler):
@@ -138,15 +224,70 @@ class SandboxNodeBehavior(NodeLifecycleHandler):
         self, context: NodeLifecycleContext, node: Card
     ) -> NodeLifecycleTransaction:
         async def commit() -> None:
-            if context.sandboxes is not None:
-                await context.sandboxes.destroy(node.id, missing_ok=True)
+            # Native Sandbox commands cannot be suspended and resumed safely.
+            # Keep the reversible phase side-effect free; ``destroy`` performs
+            # the irreversible process-tree termination only after the world
+            # graph deletion has committed.
+            pass
 
         async def rollback(error: BaseException) -> None:
             del error
-            if context.sandboxes is not None:
-                await context.sandboxes.create(node.id)
 
-        return _LifecycleOperation(commit, rollback)
+        async def finalize() -> None:
+            if context.sandboxes is not None:
+                await context.sandboxes.destroy(node.id, missing_ok=True)
+
+        return _LifecycleOperation(
+            commit,
+            rollback,
+            finalize=finalize,
+            delete_recovery_payload={
+                "sandbox_backend_required": context.sandboxes is not None,
+                # Keep the existing payload key so journals written by the
+                # earlier terminate-before-commit implementation remain
+                # recoverable. New deletions never need a compensating start.
+                "restart_after_rollback": False,
+            },
+        )
+
+    async def prepare_delete_recovery(
+        self,
+        context: NodeLifecycleContext,
+        node: Card,
+        *,
+        plugin_version: str,
+        payload: Mapping[str, Any],
+    ) -> NodeLifecycleTransaction:
+        del plugin_version
+        if set(payload) != {
+            "sandbox_backend_required",
+            "restart_after_rollback",
+        } or not all(isinstance(payload[key], bool) for key in payload):
+            raise PluginCompatibilityError("invalid Sandbox deletion cleanup payload")
+        if payload["sandbox_backend_required"] and context.sandboxes is None:
+            raise PluginCompatibilityError(
+                "Sandbox deletion cleanup requires the configured sandbox backend"
+            )
+        restart_after_rollback = bool(payload["restart_after_rollback"])
+
+        async def commit() -> None:
+            pass
+
+        async def rollback(error: BaseException) -> None:
+            del error
+            if context.sandboxes is not None and restart_after_rollback:
+                await context.sandboxes.start(node.id)
+
+        async def finalize() -> None:
+            if context.sandboxes is not None:
+                await context.sandboxes.destroy(node.id, missing_ok=True)
+
+        return _LifecycleOperation(
+            commit,
+            rollback,
+            finalize=finalize,
+            delete_recovery_payload=payload,
+        )
 
 
 class ConversationNodeBehavior(NodeLifecycleHandler):
@@ -184,33 +325,66 @@ class ManagedResourceNodeBehavior(NodeLifecycleHandler):
     ) -> NodeLifecycleTransaction:
         edges = tuple(context.nodes.list_edges_from(node.id))
         removal = context.resources.prepare_file_removal(node.id)
-        detached: list[Any] = []
 
         async def commit() -> None:
+            # Detaching a mount may terminate an active Sandbox command so the
+            # host can revoke its open handles. That work is irreversible and
+            # must wait until the authoritative graph deletion commits.
+            pass
+
+        async def rollback(error: BaseException) -> None:
+            del error
+
+        async def finalize() -> None:
             if context.sandboxes is not None:
                 for edge in edges:
                     if edge.relationship in self._mount_relationships:
                         await context.sandboxes.detach_resource(
                             edge.target, node.id, missing_ok=True
                         )
-                        detached.append(edge)
             if removal is not None:
                 removal.commit()
 
-        async def rollback(error: BaseException) -> None:
-            del error
-            if removal is not None:
-                removal.rollback()
-            if context.sandboxes is not None:
-                for edge in reversed(detached):
-                    await context.sandboxes.attach_resource(
-                        edge.target,
-                        node.id,
-                        writable=edge.relationship == "mount_read_write",
-                        missing_ok=True,
+        return _LifecycleOperation(
+            commit,
+            rollback,
+            finalize=finalize,
+            commit_before_node_ids=frozenset(
+                edge.target
+                for edge in edges
+                if edge.relationship in self._mount_relationships
+            ),
+            delete_recovery_payload={
+                "sandbox_backend_required": (
+                    context.sandboxes is not None
+                    and any(
+                        edge.relationship in self._mount_relationships
+                        for edge in edges
                     )
+                )
+            },
+        )
 
-        return _LifecycleOperation(commit, rollback)
+    async def prepare_delete_recovery(
+        self,
+        context: NodeLifecycleContext,
+        node: Card,
+        *,
+        plugin_version: str,
+        payload: Mapping[str, Any],
+    ) -> NodeLifecycleTransaction:
+        del plugin_version
+        if set(payload) != {"sandbox_backend_required"} or not isinstance(
+            payload["sandbox_backend_required"], bool
+        ):
+            raise PluginCompatibilityError(
+                "invalid managed-resource deletion cleanup payload"
+            )
+        if payload["sandbox_backend_required"] and context.sandboxes is None:
+            raise PluginCompatibilityError(
+                "managed-resource deletion cleanup requires the configured sandbox backend"
+            )
+        return await self.prepare_delete(context, node)
 
 
 class TextNodeBehavior(ManagedResourceNodeBehavior):
@@ -241,6 +415,152 @@ class ImageNodeBehavior(ManagedResourceNodeBehavior):
                 )
 
         return await self._prepare_create(context, node, create)
+
+
+class _CoreConfigProjection:
+    portable_config_fields: frozenset[str]
+
+    def capture_config(self, node: Card) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in node.config.items()
+            if key in self.portable_config_fields
+        }
+
+
+class AgentNodeTemplateHandler(_CoreConfigProjection, NodeTemplateHandler):
+    portable_config_fields = frozenset({
+        "system_instruction",
+        "model",
+        "status",
+        "runtime_provider_id",
+        "max_concurrent_runs",
+    })
+
+    def dependencies(
+        self, config: Mapping[str, Any]
+    ) -> tuple[NodeTemplateDependency, ...]:
+        provider_id = config.get("runtime_provider_id")
+        if not isinstance(provider_id, str) or not provider_id:
+            return ()
+        return (NodeTemplateDependency("runtime_provider", provider_id),)
+
+
+class SandboxNodeTemplateHandler(_CoreConfigProjection, NodeTemplateHandler):
+    portable_config_fields = frozenset({"status"})
+
+
+class TextNodeTemplateHandler(_CoreConfigProjection, NodeTemplateHandler):
+    portable_config_fields = frozenset({"filename", "status"})
+
+    def validate_payload(
+        self, payload: Mapping[str, Any], payload_version: int
+    ) -> None:
+        super().validate_payload(payload, payload_version)
+        content = payload.get("content")
+        if set(payload) != {"content"} or not isinstance(content, str):
+            raise PluginCompatibilityError("invalid text template payload")
+
+    async def capture(
+        self,
+        context: NodeTemplateCaptureContext,
+        node: Card,
+        node_keys: Mapping[str, str],
+    ) -> dict[str, Any]:
+        del node_keys
+        return {"content": context.resources.read_text(node.id)}
+
+    async def prepare_restore(
+        self,
+        context: NodeTemplateRestoreContext,
+        node: Card,
+        payload: Mapping[str, Any],
+        payload_version: int,
+        node_ids: Mapping[str, str],
+    ) -> NodeLifecycleTransaction:
+        del node_ids
+        self.validate_payload(payload, payload_version)
+        content = payload.get("content")
+        assert isinstance(content, str)
+
+        async def commit() -> None:
+            context.resources.replace_text(node.id, content)
+
+        async def rollback(error: BaseException) -> None:
+            del error
+            with suppress(Exception):
+                context.resources.replace_text(node.id, "")
+
+        return _LifecycleOperation(commit, rollback)
+
+
+class ImageNodeTemplateHandler(_CoreConfigProjection, NodeTemplateHandler):
+    portable_config_fields = frozenset({"filename", "status"})
+
+    def validate_payload(
+        self, payload: Mapping[str, Any], payload_version: int
+    ) -> None:
+        super().validate_payload(payload, payload_version)
+        if set(payload) != {"resource"}:
+            raise PluginCompatibilityError("invalid image template payload")
+        resource = payload.get("resource")
+        if resource is None:
+            return
+        if not isinstance(resource, dict) or set(resource) != {
+            "filename",
+            "media_type",
+            "data_base64",
+        }:
+            raise PluginCompatibilityError("invalid image template payload")
+        if not all(isinstance(resource[key], str) for key in resource):
+            raise PluginCompatibilityError("invalid image template payload")
+
+    async def capture(
+        self,
+        context: NodeTemplateCaptureContext,
+        node: Card,
+        node_keys: Mapping[str, str],
+    ) -> dict[str, Any]:
+        del node_keys
+        binary = context.resources.read_binary(node.id)
+        if binary is None:
+            return {"resource": None}
+        return {
+            "resource": {
+                "filename": binary.filename,
+                "media_type": binary.media_type,
+                "data_base64": binary.data_base64,
+            }
+        }
+
+    async def prepare_restore(
+        self,
+        context: NodeTemplateRestoreContext,
+        node: Card,
+        payload: Mapping[str, Any],
+        payload_version: int,
+        node_ids: Mapping[str, str],
+    ) -> NodeLifecycleTransaction:
+        del node_ids
+        self.validate_payload(payload, payload_version)
+        resource = payload.get("resource")
+        if resource is None:
+            return NodeLifecycleTransaction()
+        assert isinstance(resource, dict)
+
+        async def commit() -> None:
+            context.resources.create_image(
+                node.id,
+                resource["filename"],
+                resource["media_type"],
+                resource["data_base64"],
+            )
+
+        async def rollback(error: BaseException) -> None:
+            del error
+            context.resources.remove_file(node.id)
+
+        return _LifecycleOperation(commit, rollback)
 
 
 async def _communicate(
@@ -410,6 +730,8 @@ def _register_builtin(registry: PluginRegistration) -> None:
         config_model=AgentConfig, traits=frozenset({"core.agent"}),
         surfaces={"preview": True, "inspector": True, "workspace": True},
         lifecycle=AgentNodeBehavior(),
+        templateable=True, template_status="idle",
+        template_handler=AgentNodeTemplateHandler(),
     ))
     registry.register_node_type(NodeTypeDefinition(
         id="conversation", label="Conversation", description="Shared communication field",
@@ -420,6 +742,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         traits=frozenset({"core.field", "core.conversation"}),
         surfaces={"preview": True, "inspector": True, "workspace": True},
         lifecycle=ConversationNodeBehavior(),
+        templateable=False,
     ))
     registry.register_node_type(NodeTypeDefinition(
         id="text", label="Text file", description="Managed knowledge", icon="file-text",
@@ -429,6 +752,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         traits=frozenset({"core.resource", "core.text"}),
         creation_fields=frozenset({"content"}),
         lifecycle=TextNodeBehavior(),
+        templateable=True, template_handler=TextNodeTemplateHandler(),
     ))
     registry.register_node_type(NodeTypeDefinition(
         id="image", label="Image file", description="Visual resource", icon="image",
@@ -438,6 +762,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         traits=frozenset({"core.resource", "core.image"}),
         creation_fields=frozenset({"data_base64"}),
         lifecycle=ImageNodeBehavior(),
+        templateable=True, template_handler=ImageNodeTemplateHandler(),
     ))
     registry.register_node_type(NodeTypeDefinition(
         id="sandbox", label="Sandbox", description="Secure work field", icon="workflow",
@@ -446,6 +771,8 @@ def _register_builtin(registry: PluginRegistration) -> None:
         statuses=frozenset({"stopped", "ready", "running", "error"}),
         config_model=SandboxConfig, traits=frozenset({"core.sandbox"}),
         lifecycle=SandboxNodeBehavior(),
+        templateable=True, template_status="stopped",
+        template_handler=SandboxNodeTemplateHandler(),
     ))
 
     registry.register_relationship(RelationshipDefinition(
@@ -453,6 +780,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         description="The agent can send a scoped message to this agent and receive its response.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.agent"}),
         directions=frozenset({"forward", "bidirectional"}),
+        templateable=True,
         capabilities=(CapabilityGrantDefinition(
             kind="agent.communicate", tool_prefix="message_agent",
             description="Send a message to agent {target_name!r} and receive its response.",
@@ -464,6 +792,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         description="The agent can join sessions and speak inside this Conversation field.",
         source_traits=frozenset({"core.agent"}),
         target_traits=frozenset({"core.conversation"}),
+        templateable=True,
         capabilities=(CapabilityGrantDefinition(
             kind="conversation.request_turn", tool_prefix="request_turn_in",
             description=(
@@ -493,6 +822,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         id="read", label="Read", short_label="read",
         description="The agent can inspect this text through a scoped tool.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.text"}),
+        templateable=True,
         capabilities=(CapabilityGrantDefinition(
             kind="text.read", tool_prefix="read_text",
             description="Read the managed text resource {target_name!r}.",
@@ -503,6 +833,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         id="read_edit", label="Read + edit", short_label="read + edit",
         description="The agent can inspect and modify this text through scoped tools.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.text"}),
+        templateable=True,
         capabilities=(
             CapabilityGrantDefinition(
                 kind="text.read", tool_prefix="read_text",
@@ -520,6 +851,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         id="view", label="View", short_label="view",
         description="The agent can inspect the image content.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.image"}),
+        templateable=True,
         capabilities=(CapabilityGrantDefinition(
             kind="image.view", tool_prefix="view_image",
             description="Inspect the managed image {target_name!r}.",
@@ -530,6 +862,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         id="execute", label="Execute", short_label="execute",
         description="The agent can run commands in this isolated workplace.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.sandbox"}),
+        templateable=True,
         capabilities=(CapabilityGrantDefinition(
             kind="sandbox.execute", tool_prefix="execute_in",
             description=(
@@ -544,11 +877,13 @@ def _register_builtin(registry: PluginRegistration) -> None:
         id="mount_read_only", label="Mount read-only", short_label="read-only",
         description="The resource is visible in the sandbox but cannot be changed there.",
         source_traits=frozenset({"core.resource"}), target_traits=frozenset({"core.sandbox"}),
+        templateable=True,
     ))
     registry.register_relationship(RelationshipDefinition(
         id="mount_read_write", label="Mount read/write", short_label="read/write",
         description="The text resource can be read and changed inside the sandbox.",
         source_traits=frozenset({"core.text"}), target_traits=frozenset({"core.sandbox"}),
+        templateable=True,
     ))
 class CorePlugin:
     descriptor = PluginDescriptor(

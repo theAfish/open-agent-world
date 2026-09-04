@@ -20,6 +20,7 @@ function node(
     default_status: "available",
     traits,
     surfaces: { preview: true, inspector: true, workspace: false },
+    templateable: true,
     default_config: {},
     ...overrides,
   };
@@ -42,6 +43,7 @@ function relationship(
     source_traits: sourceTraits,
     target_traits: targetTraits,
     directions: ["forward"],
+    templateable: true,
     ...overrides,
   };
 }
@@ -61,6 +63,7 @@ export const TEST_CATALOG: PluginCatalog = {
     node("conversation", ["core.field", "core.conversation"], {
       default_status: "available",
       surfaces: { preview: true, inspector: true, workspace: true },
+      templateable: false,
     }),
     node("text", ["core.resource", "core.text"]),
     node("image", ["core.resource", "core.image"]),

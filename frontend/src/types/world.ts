@@ -100,6 +100,8 @@ export interface NodeTypeCatalogItem {
     inspector: boolean;
     workspace: boolean;
   };
+  /** Whether this plugin node can be captured inside a reusable Legion. */
+  templateable: boolean;
   default_config: CardConfig;
 }
 
@@ -114,6 +116,8 @@ export interface RelationshipCatalogItem {
   source_traits: string[];
   target_traits: string[];
   directions: EdgeDirection[];
+  /** Whether this plugin relationship can be captured inside a reusable Legion. */
+  templateable: boolean;
 }
 
 export interface PluginCatalog {
@@ -126,6 +130,37 @@ export interface PluginCatalog {
   }>;
   node_types: NodeTypeCatalogItem[];
   relationships: RelationshipCatalogItem[];
+}
+
+export interface LegionBounds {
+  width: number;
+  height: number;
+}
+
+/**
+ * Backend-owned summary for a reusable subgraph template. The serialized node
+ * and relationship state intentionally stays behind the API boundary.
+ */
+export interface LegionSummary {
+  id: string;
+  name: string;
+  description?: string;
+  node_count: number;
+  edge_count: number;
+  bounds: LegionBounds;
+  node_types: CardType[];
+  plugin_ids: string[];
+  compatible: boolean;
+  issues: string[];
+  created_at?: string;
+  updated_at?: string;
+  revision: number;
+}
+
+export interface LegionInstantiation {
+  legion_id: string;
+  nodes: WorldCard[];
+  edges: WorldEdge[];
 }
 
 export interface RuntimeEvent {

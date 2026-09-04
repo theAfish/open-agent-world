@@ -45,6 +45,38 @@ CREATE TABLE IF NOT EXISTS edges (
 CREATE INDEX IF NOT EXISTS edges_source_idx ON edges (source_id);
 CREATE INDEX IF NOT EXISTS edges_target_idx ON edges (target_id);
 
+CREATE TABLE IF NOT EXISTS legions (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    blueprint_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS pending_node_deletions (
+    node_id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL CHECK (sequence >= 0),
+    commit_state TEXT NOT NULL DEFAULT 'prepared'
+        CHECK (commit_state IN ('prepared', 'started', 'committed')),
+    plugin_id TEXT NOT NULL,
+    plugin_version TEXT NOT NULL,
+    plugin_api_version TEXT NOT NULL,
+    requires_finalize INTEGER NOT NULL CHECK (requires_finalize IN (0, 1)),
+    cleanup_json TEXT NOT NULL DEFAULT '{}',
+    card_json TEXT NOT NULL,
+    edges_json TEXT NOT NULL,
+    resource_json TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    last_error TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS pending_node_deletions_batch_idx
+    ON pending_node_deletions (batch_id, sequence);
+
 CREATE TABLE IF NOT EXISTS conversation_sessions (
     id TEXT PRIMARY KEY,
     conversation_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
@@ -220,6 +252,39 @@ class Database:
             if "deleted" not in state_value_columns:
                 self._connection.execute(
                     "ALTER TABLE state_values ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0"
+                )
+            pending_delete_columns = {
+                row["name"]
+                for row in self._connection.execute(
+                    "PRAGMA table_info(pending_node_deletions)"
+                )
+            }
+            if "plugin_version" not in pending_delete_columns:
+                self._connection.execute(
+                    "ALTER TABLE pending_node_deletions ADD COLUMN "
+                    "plugin_version TEXT NOT NULL DEFAULT ''"
+                )
+            if "requires_finalize" not in pending_delete_columns:
+                self._connection.execute(
+                    "ALTER TABLE pending_node_deletions ADD COLUMN "
+                    "requires_finalize INTEGER NOT NULL DEFAULT 1"
+                )
+            if "cleanup_json" not in pending_delete_columns:
+                self._connection.execute(
+                    "ALTER TABLE pending_node_deletions ADD COLUMN "
+                    "cleanup_json TEXT NOT NULL DEFAULT '{}'"
+                )
+            if "commit_state" not in pending_delete_columns:
+                # Rows written by the earlier journal implementation were
+                # persisted only after plugin commit had completed.
+                self._connection.execute(
+                    "ALTER TABLE pending_node_deletions ADD COLUMN "
+                    "commit_state TEXT NOT NULL DEFAULT 'committed'"
+                )
+            if "plugin_api_version" not in pending_delete_columns:
+                self._connection.execute(
+                    "ALTER TABLE pending_node_deletions ADD COLUMN "
+                    "plugin_api_version TEXT NOT NULL DEFAULT '1.0'"
                 )
 
     def _migrate_open_card_types(self) -> None:

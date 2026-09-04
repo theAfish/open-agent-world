@@ -8,6 +8,7 @@ import pytest
 from backend.capabilities.provider import WorldAgentCapabilityProvider
 from backend.config import Settings
 from backend.errors import PermissionDeniedError, ResourceValidationError
+from backend.legions import LegionCapture, LegionInstantiate
 from backend.plugins import ENTRY_POINT_GROUP, load_plugin_registry
 from backend.services import create_services
 from backend.world.models import CardCreate, CardPatch, EdgeCreate
@@ -94,6 +95,25 @@ async def test_greeter_enters_the_catalog_graph_and_agent_tool_flow(
         assert await provider.invoke_tool(
             agent.id, capability.id, {"name": "Grace"}
         ) == {"text": "HELLO, GRACE!", "greeter_id": greeter.id}
+
+        legion = await services.capture_legion(LegionCapture(
+            name="Greeting team", node_ids=[agent.id, greeter.id]
+        ))
+        instance = await services.instantiate_legion(
+            legion.id, LegionInstantiate(position={"x": 800, "y": 400})
+        )
+        cloned_agent = next(node for node in instance.nodes if node.type == "agent")
+        cloned_greeter = next(
+            node for node in instance.nodes if node.type == "community.greeter"
+        )
+        assert cloned_greeter.config == services.get_card(greeter.id).config
+        assert len(instance.edges) == 1
+        cloned_capability = services.capabilities.derive(
+            cloned_agent.id
+        ).capabilities[0]
+        assert await provider.invoke_tool(
+            cloned_agent.id, cloned_capability.id, {"name": "Lin"}
+        ) == {"text": "HELLO, LIN!", "greeter_id": cloned_greeter.id}
 
         await services.delete_card(greeter.id)
         assert services.capabilities.derive(agent.id).capabilities == []

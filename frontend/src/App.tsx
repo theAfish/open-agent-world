@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { WorldCanvas } from "./canvas/WorldCanvas";
 import { ConnectionDialog } from "./edges/ConnectionDialog";
 import { ComponentPalette } from "./palette/ComponentPalette";
+import { LegionSelection } from "./legions/LegionSelection";
 import { ActivityPanel } from "./shell/ActivityPanel";
 import { BackendUnavailableNotice } from "./shell/BackendUnavailableNotice";
 import { EmptyWorld } from "./shell/EmptyWorld";
@@ -30,6 +31,7 @@ export function App() {
         <WorldCanvas />
         <TopBar />
         <BackendUnavailableNotice />
+        <LegionSelection />
         <ComponentPalette />
         <EmptyWorld />
         <ActivityPanel />

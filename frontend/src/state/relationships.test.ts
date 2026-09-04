@@ -66,6 +66,7 @@ describe("semantic relationship rules", () => {
           source_traits: ["core.agent"],
           target_traits: ["acme.queryable"],
           directions: ["forward" as const],
+          templateable: true,
         },
       ],
     };

@@ -18,6 +18,7 @@ from backend.plugins.registry import PluginRegistry
 from backend.persistence.database import Database
 from backend.world.models import (
     Card,
+    CardBatchPatch,
     CardCreate,
     CardPatch,
     Edge,
@@ -257,6 +258,51 @@ class WorldStore:
                 raise NotFoundError(f"card {card_id!r} does not exist")
         return self.get_card(card_id)
 
+    def update_cards(self, updates: Iterable[CardBatchPatch]) -> list[Card]:
+        """Validate every patch, then persist the full batch in one transaction."""
+
+        items = list(updates)
+        if not items:
+            return []
+        previews = [
+            self.preview_update_card(item.node_id, item.patch) for item in items
+        ]
+        changed = [
+            (item, preview)
+            for item, preview in zip(items, previews, strict=True)
+            if item.patch.model_dump(exclude_unset=True)
+        ]
+        if changed:
+            with self.database.transaction(immediate=True) as connection:
+                for item, preview in changed:
+                    cursor = connection.execute(
+                        """
+                        UPDATE cards
+                        SET name = ?, x = ?, y = ?, width = ?, height = ?, expanded = ?,
+                            config_json = ?, chunk_x = ?, chunk_y = ?, updated_at = ?,
+                            revision = revision + 1
+                        WHERE id = ?
+                        """,
+                        (
+                            preview.name,
+                            preview.position.x,
+                            preview.position.y,
+                            preview.size.width,
+                            preview.size.height,
+                            int(preview.expanded),
+                            _json(preview.config),
+                            preview.chunk[0],
+                            preview.chunk[1],
+                            preview.updated_at.isoformat(),
+                            item.node_id,
+                        ),
+                    )
+                    if cursor.rowcount != 1:
+                        raise NotFoundError(
+                            f"card {item.node_id!r} no longer exists"
+                        )
+        return [self.get_card(item.node_id) for item in items]
+
     def preview_update_card(self, card_id: str, request: CardPatch) -> Card:
         """Validate an update and return its resulting node without persisting it."""
 
@@ -288,22 +334,32 @@ class WorldStore:
         })
 
     def delete_card(self, card_id: str) -> Card:
-        card = self.get_card(card_id)
+        return self.delete_cards([card_id])[0]
+
+    def delete_cards(self, card_ids: Iterable[str]) -> list[Card]:
+        ids = list(dict.fromkeys(card_ids))
+        if not ids:
+            return []
+        cards = [self.get_card(card_id) for card_id in ids]
+        placeholders = ",".join("?" for _ in ids)
         with self.database.transaction(immediate=True) as connection:
             connection.execute(
-                """
+                f"""
                 DELETE FROM state_scopes
                 WHERE scope_kind = 'session'
                   AND owner_id IN (
-                    SELECT id FROM conversation_sessions WHERE conversation_id = ?
+                    SELECT id FROM conversation_sessions
+                    WHERE conversation_id IN ({placeholders})
                   )
                 """,
-                (card_id,),
+                ids,
             )
-            cursor = connection.execute("DELETE FROM cards WHERE id = ?", (card_id,))
-            if cursor.rowcount != 1:
-                raise NotFoundError(f"card {card_id!r} does not exist")
-        return card
+            cursor = connection.execute(
+                f"DELETE FROM cards WHERE id IN ({placeholders})", ids
+            )
+            if cursor.rowcount != len(ids):
+                raise NotFoundError("one or more cards no longer exist")
+        return cards
 
     def create_edge(self, request: EdgeCreate) -> Edge:
         request = self.normalize_edge_request(request)
@@ -388,6 +444,29 @@ class WorldStore:
         sql += " ORDER BY created_at, id"
         with self.database.locked() as connection:
             rows = connection.execute(sql, parameters).fetchall()
+        return [self._edge_from_row(row) for row in rows]
+
+    def list_incident_edges(self, card_ids: Iterable[str]) -> list[Edge]:
+        """Return edges touching at least one requested card.
+
+        Chunk snapshots use this form so a cross-chunk edge is retained when
+        its endpoints arrive in separate incremental loads.
+        """
+
+        ids = list(dict.fromkeys(card_ids))
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        with self.database.locked() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT * FROM edges
+                WHERE source_id IN ({placeholders})
+                   OR target_id IN ({placeholders})
+                ORDER BY created_at, id
+                """,
+                [*ids, *ids],
+            ).fetchall()
         return [self._edge_from_row(row) for row in rows]
 
     def list_edges_from(self, source_id: str) -> list[Edge]:

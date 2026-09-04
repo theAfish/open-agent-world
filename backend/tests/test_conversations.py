@@ -106,7 +106,7 @@ def test_conversation_contact_roster_is_not_limited_to_loaded_canvas_chunks(
 
     local_world = client.get("/api/world", params={"chunks": "0:0"}).json()
     assert agent["id"] not in {node["id"] for node in local_world["nodes"]}
-    assert local_world["edges"] == []
+    assert [edge["relationship"] for edge in local_world["edges"]] == ["participate"]
 
     summary = client.get(f"/api/conversations/{conversation['id']}").json()
     assert summary["agents"] == [{

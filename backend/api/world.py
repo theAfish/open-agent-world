@@ -12,6 +12,8 @@ from backend.world.models import (
     Card,
     CardCreate,
     CardPatch,
+    CardsDelete,
+    CardsUpdate,
     Edge,
     EdgeCreate,
     EdgePatch,
@@ -45,7 +47,7 @@ async def get_world(
     chunks: str | None = Query(default=None),
     services: ApplicationServices = Depends(get_services),
 ) -> WorldSnapshot:
-    return services.snapshot(parse_chunks(chunks))
+    return await services.snapshot(parse_chunks(chunks))
 
 
 @router.get("/chunks", response_model=WorldSnapshot)
@@ -66,7 +68,7 @@ async def get_chunk_range(
     ]
     if len(coordinates) > 400:
         raise GraphValidationError("a chunk range may load at most 400 chunks")
-    return services.snapshot(coordinates)
+    return await services.snapshot(coordinates)
 
 
 @router.get("/nodes", response_model=list[Card])
@@ -75,7 +77,7 @@ async def list_cards(
     chunks: str | None = Query(default=None),
     services: ApplicationServices = Depends(get_services),
 ) -> list[Card]:
-    return services.snapshot(parse_chunks(chunks)).nodes
+    return (await services.snapshot(parse_chunks(chunks))).nodes
 
 
 @router.post("/nodes", response_model=Card, status_code=status.HTTP_201_CREATED)
@@ -94,7 +96,7 @@ async def create_card(
 async def get_card(
     card_id: str, services: ApplicationServices = Depends(get_services)
 ) -> Card:
-    return services.get_card(card_id)
+    return await services.read_card(card_id)
 
 
 @router.patch("/nodes/{card_id}", response_model=Card)
@@ -107,6 +109,14 @@ async def update_card(
     return await services.update_card(card_id, request)
 
 
+@router.post("/nodes/batch-update", response_model=list[Card])
+async def update_cards(
+    request: CardsUpdate,
+    services: ApplicationServices = Depends(get_services),
+) -> list[Card]:
+    return await services.update_cards(request.updates)
+
+
 @router.delete("/nodes/{card_id}", response_model=Card)
 @router.delete("/cards/{card_id}", response_model=Card, include_in_schema=False)
 async def delete_card(
@@ -115,11 +125,19 @@ async def delete_card(
     return await services.delete_card(card_id)
 
 
+@router.post("/nodes/batch-delete", response_model=list[Card])
+async def delete_cards(
+    request: CardsDelete,
+    services: ApplicationServices = Depends(get_services),
+) -> list[Card]:
+    return await services.delete_cards(request.node_ids)
+
+
 @router.get("/edges", response_model=list[Edge])
 async def list_edges(
     services: ApplicationServices = Depends(get_services),
 ) -> list[Edge]:
-    return services.world.list_edges()
+    return await services.read_edges()
 
 
 @router.post("/edges", response_model=Edge, status_code=status.HTTP_201_CREATED)
@@ -134,7 +152,7 @@ async def create_edge(
 async def get_edge(
     edge_id: str, services: ApplicationServices = Depends(get_services)
 ) -> Edge:
-    return services.world.get_edge(edge_id)
+    return await services.read_edge(edge_id)
 
 
 @router.patch("/edges/{edge_id}", response_model=Edge)

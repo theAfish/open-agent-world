@@ -19,6 +19,10 @@ entirely by this package. Connect an Agent to a Greeter with **Greet with**.
 The edge grants that Agent a scoped `greet_with_*` tool. Removing the edge or
 Greeter revokes the tool immediately.
 
+Both contributions explicitly opt into Legion portability. Select an Agent and
+Greeter together to collect and redeploy the complete configured formation; the
+plugin lifecycle reconstructs each new Greeter runtime from its copied config.
+
 Before unplugging, delete every Greeter card from the world so no persisted object
 still records the plugin as its owner. Then restart without `-PluginPath`.
 

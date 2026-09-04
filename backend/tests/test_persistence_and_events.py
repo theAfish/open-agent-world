@@ -43,9 +43,12 @@ def test_world_and_text_persist_across_restart(data_root: Path) -> None:
         assert second.get("/api/resources/persistent-text/text").json()[
             "content"
         ] == "survives restart"
-        assert second.get("/api/world", params={"chunks": "1:0"}).json()["nodes"][0][
-            "id"
-        ] == "persistent-agent"
+        first_chunk = second.get("/api/world", params={"chunks": "0:0"}).json()
+        second_chunk = second.get("/api/world", params={"chunks": "1:0"}).json()
+        assert first_chunk["nodes"][0]["id"] == "persistent-text"
+        assert second_chunk["nodes"][0]["id"] == "persistent-agent"
+        assert [edge["id"] for edge in first_chunk["edges"]] == ["persistent-edge"]
+        assert [edge["id"] for edge in second_chunk["edges"]] == ["persistent-edge"]
 
 
 def test_websocket_streams_typed_world_and_permission_events(client: TestClient) -> None:

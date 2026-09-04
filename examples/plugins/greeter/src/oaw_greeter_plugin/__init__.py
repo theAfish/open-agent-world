@@ -7,7 +7,6 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from open_agent_world.plugin_api import (
-    PLUGIN_API_VERSION,
     Capability,
     CapabilityContext,
     CapabilityGrantDefinition,
@@ -131,7 +130,7 @@ class GreeterPlugin:
     descriptor = PluginDescriptor(
         id="community.greeter",
         version="0.1.0",
-        plugin_api_version=PLUGIN_API_VERSION,
+        plugin_api_version="1.1",
         name="Greeter",
         description="A minimal graph-derived Agent tool example.",
     )
@@ -171,6 +170,7 @@ class GreeterPlugin:
             config_model=GreeterConfig,
             traits=frozenset({"community.greeting-target"}),
             lifecycle=GreeterLifecycle(self.runtime),
+            templateable=True,
         ))
         registration.register_relationship(RelationshipDefinition(
             id="community.greet",
@@ -179,6 +179,7 @@ class GreeterPlugin:
             description="The Agent can ask this Greeter to greet a name.",
             source_traits=frozenset({"core.agent"}),
             target_traits=frozenset({"community.greeting-target"}),
+            templateable=True,
             capabilities=(CapabilityGrantDefinition(
                 kind="community.greeter.greet",
                 tool_prefix="greet_with",

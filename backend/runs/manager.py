@@ -92,6 +92,8 @@ class RunManager:
     _suspensions: dict[str, RunSuspension] = field(default_factory=dict)
     _start_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     _transition_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+    _cancel_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+    _deleting_agents: set[str] = field(default_factory=set)
 
     @property
     def current_context(self) -> InvocationContext | None:
@@ -108,9 +110,23 @@ class RunManager:
         return self._provider(self.default_runtime_provider_id)
 
     def assert_can_start(self, agent_id: str) -> None:
+        self._assert_agent_accepts_runs(agent_id)
         card = self._agent_card(agent_id)
         self._provider_id(card)
         self._check_concurrency(card)
+
+    async def reserve_agent_deletion(self, agent_id: str) -> None:
+        """Reversibly stop new Run admission before deleting an Agent node."""
+
+        lock = self._start_locks.setdefault(agent_id, asyncio.Lock())
+        async with lock:
+            self._agent_card(agent_id)
+            self._deleting_agents.add(agent_id)
+
+    def release_agent_deletion(self, agent_id: str) -> None:
+        """Release a process-local deletion reservation idempotently."""
+
+        self._deleting_agents.discard(agent_id)
 
     def is_agent_in_lineage(self, agent_id: str) -> bool:
         context = self.current_context
@@ -183,6 +199,7 @@ class RunManager:
             raise ValueError("Run prompt must be a non-empty string")
         lock = self._start_locks.setdefault(agent_id, asyncio.Lock())
         async with lock:
+            self._assert_agent_accepts_runs(agent_id)
             card = self._agent_card(agent_id)
             provider_id = self._provider_id(card)
             self._check_concurrency(card)
@@ -219,18 +236,23 @@ class RunManager:
             self._terminal_done[record.run_id] = asyncio.Event()
             self._occupied_runs[record.run_id] = agent_id
             await self._publish_run(record, EventType.RUN_CREATED)
-            record = await self.transition_run(record.run_id, RunStatus.RUNNING)
+            record = await self._transition_run_admitted(
+                record.run_id, RunStatus.RUNNING
+            )
             await self._publish_agent_operational(
                 agent_id, "running", record.run_id, started=True
             )
-        task = asyncio.create_task(
-            self._execute(record, card, RuntimeInput(prompt=prompt)),
-            name=f"run:{record.run_id}",
-        )
-        self._runtime_tasks[record.run_id] = task
-        task.add_done_callback(
-            lambda completed, run_id=record.run_id: self._task_finished(run_id)
-        )
+            # Register execution before releasing admission. Otherwise deletion
+            # can reserve this Agent, cancel the durable Run, and still have this
+            # method launch an untracked provider coroutine afterward.
+            task = asyncio.create_task(
+                self._execute(record, card, RuntimeInput(prompt=prompt)),
+                name=f"run:{record.run_id}",
+            )
+            self._runtime_tasks[record.run_id] = task
+            task.add_done_callback(
+                lambda completed, run_id=record.run_id: self._task_finished(run_id)
+            )
         return record
 
     async def wait_execution(self, run_id: str) -> RunRecord:
@@ -301,23 +323,27 @@ class RunManager:
         self, run_id: str, status: RunStatus | str, *, error: str | None = None
     ) -> RunRecord:
         target = RunStatus(status)
-        acquired_slot = False
-        current = self.store.get(run_id)
-        if (
-            current.status is RunStatus.WAITING
-            and target is RunStatus.RUNNING
-            and run_id not in self._occupied_runs
-        ):
-            start_lock = self._start_locks.setdefault(current.agent_id, asyncio.Lock())
+        if target is RunStatus.RUNNING:
+            current = self.store.get(run_id)
+            start_lock = self._start_locks.setdefault(
+                current.agent_id, asyncio.Lock()
+            )
             async with start_lock:
-                latest = self.store.get(run_id)
-                if (
-                    latest.status is RunStatus.WAITING
-                    and run_id not in self._occupied_runs
-                ):
-                    self._check_concurrency(self._agent_card(current.agent_id))
-                    self._occupied_runs[run_id] = current.agent_id
-                    acquired_slot = True
+                return await self._transition_run_admitted(
+                    run_id, target, error=error
+                )
+        return await self._transition_run_admitted(run_id, target, error=error)
+
+    async def _transition_run_admitted(
+        self,
+        run_id: str,
+        target: RunStatus,
+        *,
+        error: str | None = None,
+    ) -> RunRecord:
+        """Transition a Run; RUNNING callers must hold the Agent start lock."""
+
+        acquired_slot = False
         lock = self._transition_locks.setdefault(run_id, asyncio.Lock())
         try:
             async with lock:
@@ -326,6 +352,13 @@ class RunManager:
                     raise ValueError(
                         f"invalid Run transition: {current.status.value} -> {target.value}"
                     )
+                if target is RunStatus.RUNNING:
+                    self._assert_agent_accepts_runs(current.agent_id)
+                    card = self._agent_card(current.agent_id)
+                    if run_id not in self._occupied_runs:
+                        self._check_concurrency(card)
+                        self._occupied_runs[run_id] = current.agent_id
+                        acquired_slot = True
                 record = self.store.update_status(run_id, target, error=error)
         except BaseException:
             if acquired_slot:
@@ -351,8 +384,19 @@ class RunManager:
         return record
 
     async def cancel_run(self, run_id: str, *, propagate: bool = True) -> RunRecord:
+        lock = self._cancel_locks.setdefault(run_id, asyncio.Lock())
+        async with lock:
+            return await self._cancel_run_locked(run_id, propagate=propagate)
+
+    async def _cancel_run_locked(
+        self, run_id: str, *, propagate: bool
+    ) -> RunRecord:
         current = self.store.get(run_id)
         if current.status in TERMINAL_RUN_STATUSES:
+            # A provider can emit a terminal status before its local stream has
+            # finished unwinding. Agent deletion must join that tail before it
+            # removes provider state.
+            await self._join_runtime_task(run_id)
             return current
         if propagate:
             for child in self.list_child_runs(run_id):
@@ -363,22 +407,63 @@ class RunManager:
         except ValueError:
             latest = self.get_run(run_id)
             if latest.status in TERMINAL_RUN_STATUSES:
+                await self._join_runtime_task(run_id)
                 return latest
             raise
-        provider = self._providers.get(current.runtime_provider_id)
-        if provider is not None:
-            await provider.stop(run_id)
         task = self._runtime_tasks.get(run_id)
-        if task is not None and task is not asyncio.current_task() and not task.done():
-            task.cancel()
+        task_to_wait = (
+            task
+            if task is not None
+            and task is not asyncio.current_task()
+            and not task.done()
+            else None
+        )
+        # Signal the local provider consumer before awaiting provider cleanup.
+        # A failing or hanging ``stop`` must not leave execution running after
+        # the durable Run is already CANCELLED.
+        if task_to_wait is not None:
+            task_to_wait.cancel()
+        provider = self._providers.get(current.runtime_provider_id)
+        try:
+            if provider is not None:
+                await provider.stop(run_id)
+        finally:
+            if task_to_wait is not None:
+                task_to_wait.cancel()
+                await asyncio.gather(task_to_wait, return_exceptions=True)
         return record
 
     async def cancel_agent_runs(self, agent_id: str) -> list[RunRecord]:
+        runs = self.list_runs(agent_id=agent_id)
+        if not runs:
+            return []
+        active_run_ids = {
+            record.run_id
+            for record in runs
+            if record.status not in TERMINAL_RUN_STATUSES
+        }
+        # Start every cancellation before waiting for provider cleanup. One
+        # provider stop that hangs must not prevent sibling local tasks from
+        # receiving cancellation after their Agent node has been deleted. Call
+        # terminal Runs too: their per-Run lock joins any concurrent cancellation
+        # or provider-stream tail before Agent provider state is removed.
+        results = await asyncio.gather(
+            *(self.cancel_run(record.run_id) for record in runs),
+            return_exceptions=True,
+        )
         cancelled: list[RunRecord] = []
-        for record in self.list_runs(agent_id=agent_id):
-            if record.status not in TERMINAL_RUN_STATUSES:
-                cancelled.append(await self.cancel_run(record.run_id))
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+            if result.run_id in active_run_ids:
+                cancelled.append(result)
         return cancelled
+
+    async def _join_runtime_task(self, run_id: str) -> None:
+        task = self._runtime_tasks.get(run_id)
+        if task is None or task is asyncio.current_task() or task.done():
+            return
+        await asyncio.gather(task, return_exceptions=True)
 
     async def register_agent(self, card: Card) -> None:
         self.state.ensure_scope("agent", card.id, schema_id="core.agent")
@@ -408,15 +493,27 @@ class RunManager:
             await self._provider(provider_id).update_agent(self._agent_config(card))
         self._agent_provider_ids[card.id] = provider_id
 
-    async def delete_agent(self, agent_id: str, *, missing_ok: bool = False) -> None:
+    def provider_id_for_card(self, card: Card) -> str | None:
+        """Resolve the provider needed to clean up a live or deleted Agent."""
+
+        return self._agent_provider_ids.get(card.id) or self._optional_provider_id(card)
+
+    async def delete_agent(
+        self,
+        agent_id: str,
+        *,
+        missing_ok: bool = False,
+        provider_id: str | None = None,
+    ) -> None:
         await self.cancel_agent_runs(agent_id)
-        provider_id = self._agent_provider_ids.pop(agent_id, None)
-        if provider_id is not None:
+        selected_provider_id = self._agent_provider_ids.get(agent_id) or provider_id
+        if selected_provider_id is not None:
             try:
-                await self._providers[provider_id].delete_agent(agent_id)
+                await self._provider(selected_provider_id).delete_agent(agent_id)
             except AgentNotFoundError:
                 if not missing_ok:
                     raise
+            self._agent_provider_ids.pop(agent_id, None)
         self.state.delete_scope("agent", agent_id)
 
     async def get_agent(self, agent_id: str) -> Any:
@@ -606,6 +703,12 @@ class RunManager:
 
     def _release_agent_slot(self, run_id: str) -> None:
         self._occupied_runs.pop(run_id, None)
+
+    def _assert_agent_accepts_runs(self, agent_id: str) -> None:
+        if agent_id in self._deleting_agents:
+            raise RuntimeUnavailableError(
+                f"agent {agent_id!r} is being deleted and cannot accept Runs"
+            )
 
     def _agent_card(self, agent_id: str) -> Card:
         card = self.world.get_card(agent_id)

@@ -23,10 +23,10 @@ import { RelationshipConnectionLine } from "../edges/RelationshipConnectionLine"
 import { SemanticEdge, type CanvasEdge } from "../edges/SemanticEdge";
 import { filterCardsToChunks } from "../state/chunks";
 import { getNodeType } from "../state/catalog";
+import { hasPaletteDrag, readPaletteDrag } from "../palette/dragPayload";
 import { validateConnection } from "../state/relationships";
 import { useWorldStore } from "../state/worldStore";
 import { NODE_SURFACE_SIZE, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
-import type { CardType } from "../types/world";
 import { ContourLayer } from "./ContourLayer";
 import {
   displacedPositions,
@@ -77,18 +77,21 @@ export function WorldCanvas() {
   const catalog = useWorldStore((state) => state.catalog);
   const stressCards = useWorldStore((state) => state.stressCards);
   const edges = useWorldStore((state) => state.edges);
+  const legions = useWorldStore((state) => state.legions);
   const activeChunkKeys = useWorldStore((state) => state.activeChunkKeys);
   const viewport = useWorldStore((state) => state.viewport);
   const selectedEdgeId = useWorldStore((state) => state.selectedEdgeId);
   const selectedCardIds = useWorldStore((state) => state.selectedCardIds);
+  const selectionRevision = useWorldStore((state) => state.selectionRevision);
   const surfaceLevelsByNodeId = useNodeSurfaceStore((state) => state.surfaceLevels);
   const closeWorkspace = useNodeSurfaceStore((state) => state.closeWorkspace);
   const dismissSurface = useNodeSurfaceStore((state) => state.dismiss);
   const beginConnection = useNodeSurfaceStore((state) => state.beginConnection);
   const endConnection = useNodeSurfaceStore((state) => state.endConnection);
   const setViewportState = useWorldStore((state) => state.setViewport);
-  const updateCard = useWorldStore((state) => state.updateCard);
+  const updateCardPositions = useWorldStore((state) => state.updateCardPositions);
   const createCard = useWorldStore((state) => state.createCard);
+  const instantiateLegion = useWorldStore((state) => state.instantiateLegion);
   const requestConnection = useWorldStore((state) => state.requestConnection);
   const selectEdge = useWorldStore((state) => state.selectEdge);
   const deleteSelectedEdge = useWorldStore((state) => state.deleteSelectedEdge);
@@ -130,6 +133,7 @@ export function WorldCanvas() {
   const nodesRef = useRef(nodes);
   const positionAnimation = useRef<number>();
   const activeDragIds = useRef(new Set<string>());
+  const appliedSelectionRevision = useRef(selectionRevision);
 
   const cancelPositionAnimation = useCallback(() => {
     if (positionAnimation.current === undefined) return;
@@ -197,6 +201,16 @@ export function WorldCanvas() {
     positionAnimation.current = requestAnimationFrame(tick);
     return cancelPositionAnimation;
   }, [cancelPositionAnimation, mappedNodes, setNodes]);
+
+  useEffect(() => {
+    if (appliedSelectionRevision.current === selectionRevision) return;
+    appliedSelectionRevision.current = selectionRevision;
+    const selected = new Set(selectedCardIds);
+    setNodes((currentNodes) => currentNodes.map((node) => ({
+      ...node,
+      selected: selected.has(node.id),
+    })));
+  }, [selectedCardIds, selectionRevision, setNodes]);
 
   const visibleNodeIds = useMemo(() => new Set(renderCards.map((card) => card.id)), [renderCards]);
   const flowEdges = useMemo<CanvasEdge[]>(
@@ -291,13 +305,16 @@ export function WorldCanvas() {
     draggedNodes.forEach((draggedNode) => activeDragIds.current.add(draggedNode.id));
   }, [cancelPositionAnimation]);
 
-  const onNodeDragStop: OnNodeDrag<CanvasNode> = useCallback((_event, node) => {
+  const onNodeDragStop: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
     cancelPositionAnimation();
     activeDragIds.current.clear();
-    void updateCard(node.id, {
-      position: nodePositionFromSurfacePosition(node.position, node.data.surfaceLevel),
-    });
-  }, [cancelPositionAnimation, updateCard]);
+    const moved = draggedNodes.length > 0 ? draggedNodes : [node];
+    const updates = [...new Map(moved.map((draggedNode) => [draggedNode.id, {
+      id: draggedNode.id,
+      position: nodePositionFromSurfacePosition(draggedNode.position, draggedNode.data.surfaceLevel),
+    }])).values()];
+    void updateCardPositions(updates);
+  }, [cancelPositionAnimation, updateCardPositions]);
 
   const onConnect = useCallback((connection: Connection) => {
     requestConnection(connection.source, connection.target);
@@ -322,11 +339,18 @@ export function WorldCanvas() {
 
   const onDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    const type = event.dataTransfer.getData("application/open-agent-card") as CardType;
-    if (!getNodeType(catalog, type)) return;
+    const payload = readPaletteDrag(event.dataTransfer);
+    if (!payload) return;
     const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-    void createCard(type, position);
-  }, [catalog, createCard, screenToFlowPosition]);
+    if (payload.kind === "node") {
+      if (!getNodeType(catalog, payload.type)) return;
+      void createCard(payload.type, position);
+      return;
+    }
+    const legion = legions.find((item) => item.id === payload.id);
+    if (!legion || legion.revision !== payload.revision) return;
+    void instantiateLegion(payload.id, position);
+  }, [catalog, createCard, instantiateLegion, legions, screenToFlowPosition]);
 
   return (
     <div
@@ -339,6 +363,7 @@ export function WorldCanvas() {
       }}
       onDrop={onDrop}
       onDragOver={(event) => {
+        if (!hasPaletteDrag(event.dataTransfer)) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "copy";
       }}

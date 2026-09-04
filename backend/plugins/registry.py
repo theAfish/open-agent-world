@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from backend.errors import GraphValidationError, PluginCompatibilityError
 from backend.plugins.lifecycle import NodeLifecycleHandler
+from backend.plugins.template import NodeTemplateHandler
 
 if TYPE_CHECKING:
     from backend.agents import AgentCapabilityProvider, RuntimeProvider
@@ -17,8 +18,19 @@ if TYPE_CHECKING:
     from backend.state.schema import StateSchema
 
 
-PLUGIN_API_VERSION = "1.0"
+PLUGIN_API_VERSION = "1.1"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
+_API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+
+
+def _supports_plugin_api(required: str) -> bool:
+    host_match = _API_VERSION.fullmatch(PLUGIN_API_VERSION)
+    required_match = _API_VERSION.fullmatch(required)
+    if host_match is None or required_match is None:
+        return False
+    host_major, host_minor = (int(part) for part in host_match.groups())
+    required_major, required_minor = (int(part) for part in required_match.groups())
+    return required_major == host_major and required_minor <= host_minor
 
 
 class PluginDescriptor(BaseModel):
@@ -68,6 +80,7 @@ class NodeTypeCatalogItem(BaseModel):
     traits: list[str]
     surfaces: dict[str, bool]
     default_config: dict[str, Any]
+    templateable: bool
 
 
 class RelationshipCatalogItem(BaseModel):
@@ -83,6 +96,7 @@ class RelationshipCatalogItem(BaseModel):
     source_traits: list[str]
     target_traits: list[str]
     directions: list[str]
+    templateable: bool
 
 
 class PluginCatalog(BaseModel):
@@ -126,6 +140,9 @@ class NodeTypeDefinition:
     )
     creation_fields: frozenset[str] = frozenset()
     lifecycle: NodeLifecycleHandler | None = None
+    templateable: bool = False
+    template_status: str | None = None
+    template_handler: NodeTemplateHandler | None = None
 
     def catalog_item(self, plugin_id: str) -> NodeTypeCatalogItem:
         default_config = self.config_model().model_dump(mode="json")
@@ -152,6 +169,7 @@ class NodeTypeDefinition:
                 "workspace": bool(self.surfaces.get("workspace", False)),
             },
             default_config=default_config,
+            templateable=self.templateable,
         )
 
 
@@ -167,6 +185,7 @@ class RelationshipDefinition:
     target_traits: frozenset[str] = frozenset()
     directions: frozenset[str] = frozenset({"forward"})
     capabilities: tuple[CapabilityGrantDefinition, ...] = ()
+    templateable: bool = False
 
     def catalog_item(self, plugin_id: str) -> RelationshipCatalogItem:
         return RelationshipCatalogItem(
@@ -180,6 +199,7 @@ class RelationshipDefinition:
             source_traits=sorted(self.source_traits),
             target_traits=sorted(self.target_traits),
             directions=sorted(self.directions),
+            templateable=self.templateable,
         )
 
 
@@ -247,7 +267,7 @@ class PluginRegistry:
         if not isinstance(descriptor, PluginDescriptor):
             raise TypeError("plugin descriptor must be a PluginDescriptor")
         self.validate_identifier(descriptor.id, "plugin")
-        if descriptor.plugin_api_version != PLUGIN_API_VERSION:
+        if not _supports_plugin_api(descriptor.plugin_api_version):
             raise PluginCompatibilityError(
                 f"plugin {descriptor.id!r} requires Plugin API "
                 f"{descriptor.plugin_api_version!r}; host provides {PLUGIN_API_VERSION!r}"
@@ -334,6 +354,42 @@ class PluginRegistry:
             ):
                 raise ValueError(
                     f"node type {definition.id!r} has an invalid default status"
+                )
+            if (
+                definition.template_status is not None
+                and definition.template_status not in definition.statuses
+            ):
+                raise ValueError(
+                    f"node type {definition.id!r} has an invalid template status"
+                )
+            if definition.template_status is not None:
+                default_config = definition.config_model().model_dump(mode="json")
+                try:
+                    validated_template_config = definition.config_model.model_validate({
+                        **default_config,
+                        "status": definition.template_status,
+                    }).model_dump(mode="json")
+                except ValidationError as exc:
+                    raise ValueError(
+                        f"node type {definition.id!r} template status cannot be "
+                        "represented by its config model"
+                    ) from exc
+                if validated_template_config.get("status") != definition.template_status:
+                    raise ValueError(
+                        f"node type {definition.id!r} template status cannot be "
+                        "represented by its config model"
+                    )
+            if definition.template_handler is not None and not definition.templateable:
+                raise ValueError(
+                    f"node type {definition.id!r} provides a template handler but is not "
+                    "templateable"
+                )
+            if (
+                definition.template_handler is not None
+                and definition.template_handler.payload_version < 1
+            ):
+                raise ValueError(
+                    f"node type {definition.id!r} template payload version must be positive"
                 )
             try:
                 definition.config_model()

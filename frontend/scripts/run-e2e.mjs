@@ -55,7 +55,7 @@ function stopTree(child) {
 }
 
 async function waitForResult(runner) {
-  const deadline = Date.now() + 60_000;
+  const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     if (runner.exitCode !== null) return runner.exitCode ?? 1;
     try {
@@ -67,7 +67,7 @@ async function waitForResult(runner) {
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error("Playwright did not report a result within 60 seconds");
+  throw new Error("Playwright did not report a result within 120 seconds");
 }
 
 let exitCode = 1;
@@ -105,7 +105,7 @@ try {
   await rm(resultFile, { force: true });
   const runner = start(
     process.execPath,
-    ["node_modules/@playwright/test/cli.js", "test"],
+    ["node_modules/@playwright/test/cli.js", "test", ...process.argv.slice(2)],
     {
       cwd: frontendRoot,
       env: { ...process.env, OAW_E2E_RESULT_FILE: resultFile },

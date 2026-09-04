@@ -25,6 +25,16 @@ from backend.plugins.registry import (
     RuntimeProviderFactory,
 )
 from backend.plugins.capability import CapabilityContext
+from backend.plugins.template import (
+    NodeTemplateBinary,
+    NodeTemplateCaptureContext,
+    NodeTemplateCaptureResources,
+    NodeTemplateDependency,
+    NodeTemplateDependencyKind,
+    NodeTemplateHandler,
+    NodeTemplateRestoreContext,
+    NodeTemplateRestoreResources,
+)
 
 __all__ = [
     "CapabilityGrantDefinition",
@@ -38,6 +48,14 @@ __all__ = [
     "NodeLifecycleHandler",
     "NodeLifecycleNodes",
     "NodeLifecycleTransaction",
+    "NodeTemplateBinary",
+    "NodeTemplateCaptureContext",
+    "NodeTemplateCaptureResources",
+    "NodeTemplateDependency",
+    "NodeTemplateDependencyKind",
+    "NodeTemplateHandler",
+    "NodeTemplateRestoreContext",
+    "NodeTemplateRestoreResources",
     "PLUGIN_API_VERSION",
     "Plugin",
     "PluginCatalog",
