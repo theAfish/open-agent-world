@@ -19,6 +19,7 @@ frontend/playwright-report/
 .open-agent-world/
 data/
 logs/
+.outputs/
 
 # Editors and OS files
 .idea/

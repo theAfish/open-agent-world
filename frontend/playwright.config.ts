@@ -8,7 +8,7 @@ export default defineConfig({
   expect: { timeout: 7_000 },
   reporter: [["list"], ["./e2e/completion-reporter.ts"]],
   use: {
-    baseURL: "http://127.0.0.1:5177",
+    baseURL: process.env.OAW_E2E_BASE_URL ?? "http://127.0.0.1:5177",
     channel: process.env.PLAYWRIGHT_CHANNEL ?? "chrome",
     headless: true,
     viewport: { width: 1280, height: 800 },

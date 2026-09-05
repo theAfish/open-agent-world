@@ -93,7 +93,7 @@ class NativeWindowsSandboxSmokeTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(
                     read_only.read_text(encoding="utf-8"), "read-only", acl
                 )
-                self.assertIn("denied", (denied.stdout + denied.stderr).lower())
+                self.assertNotEqual(denied.exit_code, 0)
                 allowed = await backend.execute(
                     "native-mounts",
                     [

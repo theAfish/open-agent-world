@@ -13,6 +13,7 @@ from .models import (
     ResourceAttachment,
     SandboxEvent,
     SandboxInfo,
+    SandboxValidationError,
 )
 
 
@@ -71,6 +72,15 @@ class SandboxBackend(ABC):
     @abstractmethod
     async def get(self, sandbox_id: str) -> SandboxInfo:
         """Return current backend state."""
+
+    async def configure(
+        self, sandbox_id: str, *, workspace_path: str | None,
+        workspace_access: ResourceAccess,
+    ) -> SandboxInfo:
+        """Bind an existing host directory while stopped, without owning its data."""
+        if workspace_path is not None or workspace_access != ResourceAccess.READ_WRITE:
+            raise SandboxValidationError("this runtime does not support workspace configuration")
+        return await self.get(sandbox_id)
 
     async def events(self, sandbox_id: str) -> AsyncIterator[SandboxEvent]:
         """Optional pull-style event stream.

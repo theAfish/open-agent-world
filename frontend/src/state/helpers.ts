@@ -30,8 +30,10 @@ const DEFAULT_CONFIG: Record<CardType, CardConfig> = {
   },
   sandbox: {
     output: [],
-    security: "AppContainer · Job Object · network denied",
     active_command: "",
+    runtime: "auto",
+    workspace_path: null,
+    workspace_access: "read_write",
   },
 };
 

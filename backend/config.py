@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,12 +12,12 @@ def _default_data_root() -> Path:
         return Path(configured).expanduser()
 
     local_app_data = os.environ.get("LOCALAPPDATA")
-    if local_app_data:
+    if os.name == "nt" and local_app_data:
         return Path(local_app_data) / "OpenAgentWorld"
 
-    # LOCALAPPDATA is always present on supported Windows installations. This
-    # branch keeps development and test imports predictable on other platforms.
-    return Path.cwd() / ".open-agent-world-data"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "OpenAgentWorld"
+    return Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "open-agent-world"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,11 +39,9 @@ class Settings:
         )
         if runtime is not None and not runtime.strip():
             raise ValueError("OPEN_AGENT_WORLD_AGENT_RUNTIME must not be empty")
-        sandbox_runtime = os.environ.get("OPEN_AGENT_WORLD_SANDBOX_RUNTIME")
-        if sandbox_runtime is None and os.name == "nt":
-            sandbox_runtime = "windows"
-        if sandbox_runtime not in {None, "windows"}:
-            raise ValueError("OPEN_AGENT_WORLD_SANDBOX_RUNTIME must be 'windows' when set")
+        sandbox_runtime = os.environ.get("OPEN_AGENT_WORLD_SANDBOX_RUNTIME", "auto")
+        if not sandbox_runtime.strip() or "\x00" in sandbox_runtime:
+            raise ValueError("OPEN_AGENT_WORLD_SANDBOX_RUNTIME must be a non-empty runtime ID")
         configured_timeout = os.environ.get("OPEN_AGENT_WORLD_RUN_INACTIVITY_TIMEOUT")
         inactivity_timeout: float | None = 300.0
         if configured_timeout is not None:

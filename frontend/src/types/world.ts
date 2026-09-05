@@ -2,6 +2,44 @@ export type CardType = string;
 
 export type AgentStatus = "idle" | "running" | "waiting" | "error";
 export type SandboxStatus = "stopped" | "ready" | "running" | "error";
+export type SandboxWorkspaceAccess = "read_write" | "read_only";
+
+export interface SandboxConfig {
+  runtime: string;
+  workspace_path: string | null;
+  workspace_access: SandboxWorkspaceAccess;
+}
+
+export interface SandboxRuntime {
+  id: string;
+  label: string;
+  platform: string;
+  available: boolean;
+  reason: string | null;
+  shell: string[];
+  supports_workspace: boolean;
+}
+
+export interface SandboxRuntimeCatalog {
+  runtimes: SandboxRuntime[];
+  default_runtime: string | null;
+}
+
+export interface SandboxInfo {
+  sandbox_id: string;
+  state: string;
+  runtime_id: string | null;
+  runtime_locked: boolean;
+  platform: string | null;
+  shell: string[];
+  available: boolean;
+  unavailable_reason: string | null;
+  workspace_path: string | null;
+  workspace_access: SandboxWorkspaceAccess;
+  workspace: string | null;
+  resources_path: string | null;
+  security_boundary: string | null;
+}
 export type CardStatus = AgentStatus | SandboxStatus | "available" | "modified" | string;
 
 export type Relationship = string;
@@ -42,6 +80,9 @@ export interface CardConfig extends Record<string, unknown> {
   description?: string;
   security?: string;
   revision?: number;
+  runtime?: string;
+  workspace_path?: string | null;
+  workspace_access?: SandboxWorkspaceAccess;
 }
 
 export interface WorldCard {

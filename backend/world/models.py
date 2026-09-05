@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Annotated
+from typing import Any, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -85,6 +85,22 @@ class SandboxConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     status: SandboxStatus = SandboxStatus.STOPPED
+    runtime: str = Field(default="auto", min_length=1, max_length=200)
+    workspace_path: str | None = Field(default=None, max_length=4096)
+    workspace_access: Literal["read_only", "read_write"] = "read_write"
+
+    @field_validator("runtime", "workspace_path")
+    @classmethod
+    def validate_sandbox_text(cls, value: str | None) -> str | None:
+        if value is not None and (not value.strip() or "\x00" in value):
+            raise ValueError("sandbox settings must be non-empty and NUL-free")
+        return value
+
+    @model_validator(mode="after")
+    def validate_workspace_access(self) -> "SandboxConfig":
+        if self.workspace_path is None and self.workspace_access != "read_write":
+            raise ValueError("read-only access requires a selected working folder")
+        return self
 
 
 class ConversationConfig(BaseModel):

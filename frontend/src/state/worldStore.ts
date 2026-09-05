@@ -10,6 +10,9 @@ import type {
   PluginCatalog,
   Relationship,
   RuntimeEvent,
+  SandboxConfig,
+  SandboxInfo,
+  SandboxRuntimeCatalog,
   ToastMessage,
   WorldCard,
   WorldEdge,
@@ -31,6 +34,7 @@ import {
 
 export type SyncState = "loading" | "online" | "syncing" | "offline";
 export type SocketState = "connecting" | "live" | "closed";
+type SandboxOperation = "saving" | "starting" | "stopping" | "executing";
 
 export interface PendingConnection {
   source: string;
@@ -235,6 +239,13 @@ interface WorldState {
   redoStack: WorldHistoryOperation[];
   historyBusy: boolean;
   positionCommitBusy: boolean;
+  sandboxInfo: Record<string, SandboxInfo | undefined>;
+  sandboxBusy: Record<string, SandboxOperation | undefined>;
+  sandboxErrors: Record<string, string | undefined>;
+  sandboxRevisions: Record<string, number>;
+  sandboxRuntimes?: SandboxRuntimeCatalog;
+  sandboxRuntimesLoading: boolean;
+  sandboxRuntimesError?: string;
 
   initialize: () => Promise<void>;
   refreshWorld: () => Promise<void>;
@@ -273,9 +284,12 @@ interface WorldState {
   uploadImage: (id: string, file: File) => Promise<boolean>;
   runAgent: (id: string, prompt: string) => Promise<void>;
   stopAgent: (id: string) => Promise<void>;
-  startSandbox: (id: string) => Promise<void>;
-  stopSandbox: (id: string) => Promise<void>;
-  executeSandbox: (id: string, command: string) => Promise<void>;
+  loadSandboxRuntimes: (refresh?: boolean) => Promise<void>;
+  refreshSandbox: (id: string) => Promise<void>;
+  saveSandboxConfig: (id: string, config: SandboxConfig) => Promise<boolean>;
+  startSandbox: (id: string) => Promise<boolean>;
+  stopSandbox: (id: string) => Promise<boolean>;
+  executeSandbox: (id: string, command: string) => Promise<boolean>;
   ingestEvent: (event: RuntimeEvent) => void;
   setSocketState: (state: SocketState) => void;
   toggleActivity: () => void;
@@ -352,6 +366,11 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   redoStack: [],
   historyBusy: false,
   positionCommitBusy: false,
+  sandboxInfo: {},
+  sandboxBusy: {},
+  sandboxErrors: {},
+  sandboxRevisions: {},
+  sandboxRuntimesLoading: false,
 
   initialize: async () => {
     const keys = getViewportChunkKeys(get().viewport);
@@ -1179,80 +1198,194 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
   },
 
-  startSandbox: async (id) => {
+  loadSandboxRuntimes: async (refresh = false) => {
+    if (get().sandboxRuntimesLoading || (get().sandboxRuntimes && !refresh)) return;
+    set({ sandboxRuntimesLoading: true, sandboxRuntimesError: undefined });
     try {
-      await worldApi.startSandbox(id);
+      set({ sandboxRuntimes: await worldApi.getSandboxRuntimes(refresh) });
+    } catch (error) {
+      set({ sandboxRuntimesError: apiErrorMessage(error) });
+    } finally {
+      set({ sandboxRuntimesLoading: false });
+    }
+  },
+
+  refreshSandbox: async (id) => {
+    if (get().sandboxBusy[id]) return;
+    const hadInfo = !!get().sandboxInfo[id];
+    const revision = (get().sandboxRevisions[id] ?? 0) + 1;
+    set((state) => ({ sandboxRevisions: { ...state.sandboxRevisions, [id]: revision } }));
+    try {
+      const info = await worldApi.getSandbox(id);
+      if (get().sandboxRevisions[id] !== revision) return;
       set((state) => ({
-        cards: state.cards.map((card) =>
-          card.id === id ? mergeCardPatch(card, { status: "ready" }) : card,
-        ),
+        sandboxInfo: { ...state.sandboxInfo, [id]: info },
+        ...(!hadInfo ? { sandboxErrors: { ...state.sandboxErrors, [id]: undefined } } : {}),
+        cards: state.cards.map((card) => card.id === id ? mergeCardPatch(card, {
+          status: info.state,
+          ...(info.state !== "running" ? { config: { active_command: "" } } : {}),
+        }) : card),
       }));
     } catch (error) {
+      if (get().sandboxRevisions[id] !== revision) return;
+      set((state) => ({
+        sandboxInfo: { ...state.sandboxInfo, [id]: undefined },
+        sandboxErrors: { ...state.sandboxErrors, [id]: apiErrorMessage(error) },
+      }));
+    }
+  },
+
+  saveSandboxConfig: async (id, config) => {
+    if (get().sandboxBusy[id]) return false;
+    const revision = (get().sandboxRevisions[id] ?? 0) + 1;
+    set((state) => ({
+      sandboxBusy: { ...state.sandboxBusy, [id]: "saving" },
+      sandboxErrors: { ...state.sandboxErrors, [id]: undefined },
+      sandboxRevisions: { ...state.sandboxRevisions, [id]: revision },
+    }));
+    return withHistoryTransaction(async () => {
+      try {
+        const current = get().cards.find((card) => card.id === id);
+        if (!current || current.status !== "stopped") throw new Error("Stop the sandbox before changing its workspace.");
+        const authoritative = await worldApi.updateNode(id, { config: { ...config } });
+        markWorldMutation();
+        set((state) => ({
+          cards: state.cards.map((card) => card.id === id ? authoritative : card),
+          sandboxInfo: { ...state.sandboxInfo, [id]: undefined },
+          sandboxBusy: { ...state.sandboxBusy, [id]: undefined },
+          undoStack: appendHistory(state.undoStack, {
+            id: ++historySequence,
+            label: `Configure ${authoritative.name}`,
+            kind: "card-updated",
+            before: copyCard(current),
+            after: copyCard(authoritative),
+          }),
+          redoStack: [],
+        }));
+        await get().refreshSandbox(id);
+        return true;
+      } catch (error) {
+        set((state) => ({
+          sandboxBusy: { ...state.sandboxBusy, [id]: undefined },
+          sandboxErrors: { ...state.sandboxErrors, [id]: apiErrorMessage(error) },
+        }));
+        get().pushToast({ tone: "error", title: "Sandbox settings were not saved", detail: apiErrorMessage(error) });
+        return false;
+      }
+    });
+  },
+
+  startSandbox: async (id) => {
+    if (get().sandboxBusy[id]) return false;
+    const revision = (get().sandboxRevisions[id] ?? 0) + 1;
+    set((state) => ({
+      sandboxBusy: { ...state.sandboxBusy, [id]: "starting" },
+      sandboxErrors: { ...state.sandboxErrors, [id]: undefined },
+      sandboxRevisions: { ...state.sandboxRevisions, [id]: revision },
+    }));
+    let failed = false;
+    try {
+      const info = await worldApi.startSandbox(id);
+      set((state) => ({
+        sandboxInfo: { ...state.sandboxInfo, [id]: info },
+        cards: state.cards.map((card) => card.id === id ? mergeCardPatch(card, { status: info.state }) : card),
+      }));
+      return true;
+    } catch (error) {
+      failed = true;
+      set((state) => ({ sandboxErrors: { ...state.sandboxErrors, [id]: apiErrorMessage(error) } }));
       get().pushToast({ tone: "error", title: "Sandbox did not start", detail: apiErrorMessage(error) });
+      return false;
+    } finally {
+      set((state) => ({ sandboxBusy: { ...state.sandboxBusy, [id]: undefined } }));
+      if (failed) await get().refreshSandbox(id);
     }
   },
 
   stopSandbox: async (id) => {
+    const busy = get().sandboxBusy[id];
+    if (busy && busy !== "executing") return false;
+    const revision = (get().sandboxRevisions[id] ?? 0) + 1;
+    set((state) => ({
+      sandboxBusy: { ...state.sandboxBusy, [id]: "stopping" },
+      sandboxErrors: { ...state.sandboxErrors, [id]: undefined },
+      sandboxRevisions: { ...state.sandboxRevisions, [id]: revision },
+    }));
+    let failed = false;
     try {
-      await worldApi.stopSandbox(id);
+      const info = await worldApi.stopSandbox(id);
       set((state) => ({
-        cards: state.cards.map((card) =>
-          card.id === id
-            ? mergeCardPatch(card, { status: "stopped", config: { active_command: "" } })
-            : card,
-        ),
+        sandboxInfo: { ...state.sandboxInfo, [id]: info },
+        cards: state.cards.map((card) => card.id === id
+          ? mergeCardPatch(card, { status: info.state, config: { active_command: "" } }) : card),
       }));
+      return true;
     } catch (error) {
+      failed = true;
+      set((state) => ({ sandboxErrors: { ...state.sandboxErrors, [id]: apiErrorMessage(error) } }));
       get().pushToast({ tone: "error", title: "Sandbox did not stop", detail: apiErrorMessage(error) });
+      return false;
+    } finally {
+      set((state) => ({ sandboxBusy: { ...state.sandboxBusy, [id]: undefined } }));
+      if (failed) await get().refreshSandbox(id);
     }
   },
 
   executeSandbox: async (id, command) => {
-    const previous = get().cards.find((card) => card.id === id);
+    if (get().sandboxBusy[id]) return false;
+    const previousEventIds = new Set(get().events.map((event) => event.id));
+    const revision = (get().sandboxRevisions[id] ?? 0) + 1;
     set((state) => ({
-      cards: state.cards.map((card) =>
-        card.id === id
-          ? mergeCardPatch(card, {
-              status: "running",
-              config: { active_command: command },
-            })
-          : card,
-      ),
+      sandboxBusy: { ...state.sandboxBusy, [id]: "executing" },
+      sandboxErrors: { ...state.sandboxErrors, [id]: undefined },
+      sandboxRevisions: { ...state.sandboxRevisions, [id]: revision },
+      cards: state.cards.map((card) => card.id === id
+        ? mergeCardPatch(card, { config: { active_command: command } }) : card),
       activityOpen: true,
     }));
     try {
       const result = await worldApi.executeSandbox(id, command);
+      if (get().sandboxRevisions[id] !== revision) return true;
+      const receivedOutput = (channel: "stdout" | "stderr") => get().events.some((event) => (
+        !previousEventIds.has(event.id)
+        && (event.sandbox_id ?? event.node_id) === id
+        && event.type.toLowerCase().includes(channel)
+        && !!(event.payload.text ?? event.payload.output ?? event.message)
+      ));
+      const stdout = receivedOutput("stdout") ? [] : String(result.stdout ?? "").split(/\r?\n/).filter(Boolean);
+      const stderr = receivedOutput("stderr") ? [] : String(result.stderr ?? "").split(/\r?\n/).filter(Boolean).map((line) => `! ${line}`);
+      const completion = typeof result.exit_code === "number"
+        ? [`exit ${result.exit_code}${result.timed_out ? " · timed out" : result.cancelled ? " · cancelled" : ""}`]
+        : [];
       set((state) => ({
-        cards: state.cards.map((card) =>
-          card.id === id
-            ? mergeCardPatch(card, {
-                status: "ready",
-                config: {
-                  active_command: "",
-                  output: state.socketState === "live"
-                    ? card.config.output
-                    : [
-                        ...(Array.isArray(card.config.output) ? card.config.output : []),
-                        ...String(result.stdout ?? "").split(/\r?\n/).filter(Boolean),
-                        ...String(result.stderr ?? "").split(/\r?\n/).filter(Boolean).map((line) => `! ${line}`),
-                      ].slice(-100),
-                },
-              })
-            : card,
-        ),
+        cards: state.cards.map((card) => card.id === id
+          ? mergeCardPatch(card, {
+              config: {
+                active_command: "",
+                output: [
+                  ...(Array.isArray(card.config.output) ? card.config.output : []),
+                  ...stdout,
+                  ...stderr,
+                  ...completion,
+                ].slice(-100),
+              },
+            }) : card),
       }));
+      return true;
     } catch (error) {
-      set((state) => ({
-        cards: state.cards.map((card) =>
-          card.id === id
-            ? mergeCardPatch(card, {
-                status: previous?.status ?? "ready",
-                config: { active_command: "" },
-              })
-            : card,
-        ),
-      }));
+      if (get().sandboxRevisions[id] !== revision) return false;
+      set((state) => ({ sandboxErrors: { ...state.sandboxErrors, [id]: apiErrorMessage(error) } }));
       get().pushToast({ tone: "error", title: "Command was rejected", detail: apiErrorMessage(error) });
+      return false;
+    } finally {
+      if (get().sandboxRevisions[id] === revision) {
+        set((state) => ({
+          sandboxBusy: { ...state.sandboxBusy, [id]: undefined },
+          cards: state.cards.map((card) => card.id === id
+            ? mergeCardPatch(card, { config: { active_command: "" } }) : card),
+        }));
+        await get().refreshSandbox(id);
+      }
     }
   },
 
@@ -1285,7 +1418,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
             else if (normalizedType.includes("agent_started")) status = "running";
             else if (normalizedType.includes("agent_stopped") || normalizedType.includes("agent_completed")) status = "idle";
             else if (normalizedType.includes("command_started")) status = "running";
-            else if (normalizedType.includes("command_finished")) status = "ready";
+            else if (normalizedType.includes("command_finished") && card.type !== "sandbox") status = "ready";
             else if (normalizedType.includes("error")) status = "error";
 
             const shouldAppend =
@@ -1318,6 +1451,9 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
     if (normalizedType.includes("resource_modified") && nodeId) {
       void get().loadText(nodeId);
+    }
+    if (nodeId && ["sandbox_command_finished", "sandbox_state_changed"].includes(normalizedType)) {
+      void get().refreshSandbox(nodeId);
     }
   },
 

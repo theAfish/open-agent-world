@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
@@ -44,6 +45,11 @@ class _SandboxRecord:
     workspace: Path
     identity: str
     profile: AppContainerProfile
+    workspace_path: str | None = None
+    workspace_access: ResourceAccess = ResourceAccess.READ_WRITE
+    workspace_authorized: bool = False
+    workspace_identity: tuple[int, int] | None = None
+    workspace_handle: int | None = None
     state: SandboxState = SandboxState.STOPPED
     attachments: dict[str, ResourceAttachment] = field(default_factory=dict)
     active_command: tuple[str, ...] | None = None
@@ -137,17 +143,65 @@ class WindowsSandboxBackend(SandboxBackend):
         async with record.lock:
             if record.state == SandboxState.RUNNING:
                 raise SandboxStateError("cannot start a sandbox while a command is running")
+            if record.state == SandboxState.READY:
+                return self._info(record)
             # Reassert the native ACL so external ACL removal cannot turn into
             # silent partial functionality after an application restart.
             await asyncio.to_thread(
                 self._native.grant_path,
-                record.workspace,
+                record.root / "workspace",
                 record.profile.sid,
                 read_only=False,
             )
+            if record.workspace_path is not None:
+                interrupted = await self._security_mutation(self._grant_workspace, record)
+                if interrupted:
+                    await self._security_mutation(self._revoke_workspace, record)
+                    self._write_manifest(record)
+                    raise asyncio.CancelledError
             record.stop_requested = False
             record.state = SandboxState.READY
-            self._write_manifest(record)
+            try:
+                self._write_manifest(record)
+            except BaseException:
+                record.state = SandboxState.STOPPED
+                if record.workspace_path is not None:
+                    await asyncio.to_thread(self._revoke_workspace, record)
+                raise
+        await self._emit_state(record)
+        return self._info(record)
+
+    async def configure(
+        self,
+        sandbox_id: str,
+        *,
+        workspace_path: str | None,
+        workspace_access: ResourceAccess,
+    ) -> SandboxInfo:
+        record = await self._record(sandbox_id)
+        try:
+            access = ResourceAccess(workspace_access)
+        except (TypeError, ValueError) as exc:
+            raise SandboxValidationError("invalid workspace access") from exc
+        async with record.lock:
+            if record.state != SandboxState.STOPPED:
+                raise SandboxStateError("stop the sandbox before changing its workspace")
+            workspace = (
+                record.root / "workspace"
+                if workspace_path is None
+                else await asyncio.to_thread(self._validate_workspace, workspace_path)
+            )
+            old = (record.workspace, record.workspace_path, record.workspace_access)
+            if record.workspace_path is not None:
+                await asyncio.to_thread(self._revoke_workspace, record)
+            record.workspace = workspace
+            record.workspace_path = str(workspace) if workspace_path is not None else None
+            record.workspace_access = access
+            try:
+                self._write_manifest(record)
+            except BaseException:
+                record.workspace, record.workspace_path, record.workspace_access = old
+                raise
         await self._emit_state(record)
         return self._info(record)
 
@@ -174,12 +228,26 @@ class WindowsSandboxBackend(SandboxBackend):
                 raise SandboxStateError(
                     f"sandbox {sandbox_id} must be ready, not {record.state.value}"
                 )
+            if record.workspace_path is not None:
+                self._assert_workspace_identity(record)
+                await asyncio.to_thread(self._validate_workspace, record.workspace_path)
+            storage = record.root / "workspace"
+            environment = minimal_windows_environment(
+                record.workspace, env, storage_directory=storage
+            )
             record.state = SandboxState.RUNNING
             record.active_command = command
             record.cancel_event = threading.Event()
             record.stop_requested = False
             record.command_done.clear()
-            self._write_manifest(record)
+            try:
+                self._write_manifest(record)
+            except BaseException:
+                record.state = SandboxState.READY
+                record.active_command = None
+                record.cancel_event = None
+                record.command_done.set()
+                raise
 
         await self._emit_state(record)
         await self._emit(
@@ -214,9 +282,8 @@ class WindowsSandboxBackend(SandboxBackend):
                 record.active_job = None
 
         try:
-            environment = minimal_windows_environment(record.workspace, env)
-            (record.workspace / ".tmp").mkdir(exist_ok=True)
-            native_result: NativeCommandResult = await asyncio.to_thread(
+            (storage / ".tmp").mkdir(exist_ok=True)
+            native_task = asyncio.create_task(asyncio.to_thread(
                 self._native.run_appcontainer,
                 record.profile,
                 command,
@@ -229,7 +296,22 @@ class WindowsSandboxBackend(SandboxBackend):
                 on_stderr=lambda text: emit_stream(SandboxEventType.STDERR, text),
                 on_job_open=job_open,
                 on_job_close=job_close,
-            )
+            ))
+            try:
+                native_result: NativeCommandResult = await asyncio.shield(native_task)
+            except asyncio.CancelledError:
+                # Cancelling to_thread does not stop its native process. Keep
+                # the Job and record alive until the complete tree is gone.
+                record.stop_requested = True
+                record.cancel_event.set()
+                with record.thread_lock:
+                    job = record.active_job
+                if job is not None:
+                    await asyncio.to_thread(self._native.terminate_job, job)
+                try:
+                    await asyncio.shield(native_task)
+                finally:
+                    raise
         except BaseException as exc:
             async with record.lock:
                 record.state = (
@@ -240,6 +322,8 @@ class WindowsSandboxBackend(SandboxBackend):
                 record.active_command = None
                 record.cancel_event = None
                 record.command_done.set()
+                if record.workspace_path is not None:
+                    await asyncio.to_thread(self._revoke_workspace, record)
                 self._write_manifest(record)
             await self._emit(
                 SandboxEvent(
@@ -299,10 +383,20 @@ class WindowsSandboxBackend(SandboxBackend):
             await asyncio.to_thread(self._native.terminate_job, job)
         if not record.command_done.is_set():
             await record.command_done.wait()
+        interrupted = False
         async with record.lock:
+            if record.workspace_path is not None:
+                try:
+                    interrupted = await self._security_mutation(self._revoke_workspace, record)
+                except BaseException:
+                    record.state = SandboxState.ERROR
+                    self._write_manifest(record)
+                    raise
             record.state = SandboxState.STOPPED
             self._write_manifest(record)
         await self._emit_state(record)
+        if interrupted:
+            raise asyncio.CancelledError
 
     async def attach_resource(
         self,
@@ -324,7 +418,7 @@ class WindowsSandboxBackend(SandboxBackend):
 
         validated_source = self._validate_source(Path(source), record)
         validated_relative = self._validate_relative_path(relative_path)
-        target = self._safe_child(record.workspace, *PureWindowsPath(validated_relative).parts)
+        target = self._safe_child(record.root / "workspace", *PureWindowsPath(validated_relative).parts)
 
         async with record.lock:
             if any(
@@ -425,7 +519,7 @@ class WindowsSandboxBackend(SandboxBackend):
         self, record: _SandboxRecord, attachment: ResourceAttachment
     ) -> None:
         target = self._safe_child(
-            record.workspace, *PureWindowsPath(attachment.relative_path).parts
+            record.root / "workspace", *PureWindowsPath(attachment.relative_path).parts
         )
         # The process tree is already gone before ACL revocation, closing the
         # open-handle loophole in permission revocation.
@@ -466,7 +560,7 @@ class WindowsSandboxBackend(SandboxBackend):
         for attachment in tuple(record.attachments.values()):
             self._detach_sync(record, attachment)
         record.attachments.clear()
-        self._native.revoke_path(record.workspace, record.profile.sid)
+        self._native.revoke_path(record.root / "workspace", record.profile.sid)
         self._native.free_appcontainer_sid(record.profile)
         self._native.delete_appcontainer(record.identity)
         self._assert_within(record.root, self._sandboxes_root)
@@ -509,6 +603,21 @@ class WindowsSandboxBackend(SandboxBackend):
         profile = self._native.ensure_appcontainer(identity)
         attachments: dict[str, ResourceAttachment] = {}
         try:
+            workspace_path = data.get("workspace_path")
+            workspace_access = ResourceAccess(data.get("workspace_access", "read_write"))
+            workspace_authorized = data.get("workspace_authorized", False)
+            identity_data = data.get("workspace_identity")
+            if type(workspace_authorized) is not bool or (
+                identity_data is not None and (
+                    not isinstance(identity_data, list) or len(identity_data) != 2
+                    or any(type(value) is not int for value in identity_data)
+                )
+            ) or (workspace_authorized and (workspace_path is None or identity_data is None)):
+                raise SandboxValidationError("invalid persisted workspace authorization")
+            # Keep the binding available for cleanup even if the user moved or
+            # removed the folder while the application was not running.
+            if workspace_path is not None:
+                workspace = self._validate_workspace_name(workspace_path)
             for raw in data.get("attachments", []):
                 resource_id = raw["resource_id"]
                 self._validate_id(resource_id, "resource_id")
@@ -529,7 +638,7 @@ class WindowsSandboxBackend(SandboxBackend):
             raise SandboxSecurityError("sandbox manifest attachment is invalid") from exc
         # A backend process restart closes its Job handles (KILL_ON_JOB_CLOSE),
         # therefore no command can still be live when this record is reloaded.
-        return _SandboxRecord(
+        record = _SandboxRecord(
             sandbox_id=sandbox_id,
             root=root,
             workspace=workspace,
@@ -537,16 +646,34 @@ class WindowsSandboxBackend(SandboxBackend):
             profile=profile,
             state=SandboxState.STOPPED,
             attachments=attachments,
+            workspace_path=workspace_path,
+            workspace_access=workspace_access,
+            workspace_authorized=workspace_authorized,
+            workspace_identity=(
+                tuple(identity_data) if identity_data is not None else None
+            ),
         )
+        if record.workspace_path is not None:
+            try:
+                self._revoke_workspace(record)
+                self._write_manifest(record)
+            except BaseException:
+                self._native.free_appcontainer_sid(profile)
+                raise
+        return record
 
     def _write_manifest(self, record: _SandboxRecord) -> None:
         state = record.state
         # Persisting RUNNING is informative only; reload always becomes stopped.
         payload = {
-            "version": 1,
+            "version": 2,
             "sandbox_id": record.sandbox_id,
             "identity": record.identity,
             "state": state.value,
+            "workspace_path": record.workspace_path,
+            "workspace_access": record.workspace_access.value,
+            "workspace_authorized": record.workspace_authorized,
+            "workspace_identity": record.workspace_identity,
             "attachments": [
                 {
                     "resource_id": item.resource_id,
@@ -576,7 +703,146 @@ class WindowsSandboxBackend(SandboxBackend):
             security_boundary="windows-appcontainer+ntfs-acl+job-object",
             network_enabled=False,
             active_command=record.active_command,
+            runtime_id="windows",
+            platform="windows",
+            shell=(str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "cmd.exe"), "/d", "/s", "/c"),
+            workspace_path=record.workspace_path,
+            workspace_access=record.workspace_access,
+            resources_path=record.root / "workspace",
+            runtime_locked=True,
         )
+
+    def _validate_workspace_name(self, raw: str) -> Path:
+        if not isinstance(raw, str) or not raw.strip() or "\x00" in raw:
+            raise SandboxValidationError("workspace_path must be an absolute folder path")
+        path = Path(raw)
+        if not path.is_absolute() or raw.startswith(("\\\\", "//")):
+            raise SandboxValidationError("workspace must be an absolute local folder")
+        if any(part in {".", ".."} or part.rstrip(" .") != part for part in path.parts[1:]):
+            raise SandboxValidationError("workspace path contains ambiguous components")
+        # Compare lexical paths before resolving: resolving first would hide a
+        # junction in the path and accidentally authorize its target.
+        path = Path(os.path.abspath(path))
+        protected = {Path(path.anchor), Path.home().resolve(), self._managed_root}
+        for key in ("SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"):
+            if value := os.environ.get(key):
+                protected.add(Path(value).resolve())
+        if any(path == item or self._is_within(item, path) for item in protected):
+            raise SandboxValidationError("choose a project folder, not a drive, home or system root")
+        if self._is_within(path, self._managed_root):
+            raise SandboxValidationError("workspace may not overlap managed sandbox storage")
+        for key in ("SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"):
+            if value := os.environ.get(key):
+                if self._is_within(path, Path(value).resolve()):
+                    raise SandboxValidationError("workspace may not be a system folder")
+        return path
+
+    @staticmethod
+    def _is_reparse(path: Path) -> bool:
+        metadata = path.lstat()
+        return stat.S_ISLNK(metadata.st_mode) or bool(
+            getattr(metadata, "st_file_attributes", 0) & 0x400
+        )
+
+    def _validate_workspace(self, raw: str) -> Path:
+        path = self._validate_workspace_name(raw)
+        try:
+            for component in (*reversed(path.parents), path):
+                if self._is_reparse(component):
+                    raise SandboxValidationError("workspace paths may not contain links or reparse points")
+            if not path.is_dir():
+                raise SandboxValidationError("workspace must be an existing folder")
+            self._native.validate_workspace_volume(path)
+            for directory, directories, files in os.walk(path, followlinks=False, onerror=self._walk_error):
+                for name in (*directories, *files):
+                    child = Path(directory) / name
+                    metadata = child.lstat()
+                    if self._is_reparse(child):
+                        raise SandboxValidationError(f"workspace contains a link or reparse point: {child}")
+                    if stat.S_ISREG(metadata.st_mode) and metadata.st_nlink != 1:
+                        raise SandboxValidationError(f"workspace contains a hard-linked file: {child}")
+                    if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):
+                        raise SandboxValidationError(f"workspace contains a special file: {child}")
+        except OSError as exc:
+            raise SandboxValidationError(f"workspace cannot be accessed: {path}: {exc}") from exc
+        return path
+
+    @staticmethod
+    def _walk_error(error: OSError) -> None:
+        raise error
+
+    def _grant_workspace(self, record: _SandboxRecord) -> None:
+        self._validate_workspace(record.workspace_path)
+        if record.workspace_authorized:
+            self._revoke_workspace(record)
+        record.workspace_handle = self._native.open_workspace(record.workspace)
+        try:
+            metadata = record.workspace.stat()
+            record.workspace_identity = (metadata.st_dev, metadata.st_ino)
+            record.workspace_authorized = True
+            # Write the cleanup obligation before granting any authority. A
+            # process crash may close handles but must not forget NTFS ACEs.
+            self._write_manifest(record)
+        except BaseException:
+            record.workspace_authorized = False
+            self._native.close_workspace(record.workspace_handle)
+            record.workspace_handle = None
+            raise
+
+        try:
+            self._native.grant_workspace(
+                record.workspace, record.profile.sid,
+                read_only=record.workspace_access == ResourceAccess.READ_ONLY,
+                root_handle=record.workspace_handle,
+            )
+        except BaseException:
+            self._revoke_workspace(record)
+            self._write_manifest(record)
+            raise
+
+    @staticmethod
+    async def _security_mutation(action: Any, record: _SandboxRecord) -> bool:
+        """Finish ACL mutations before a cancelled caller releases its lock."""
+        task = asyncio.create_task(asyncio.to_thread(action, record))
+        interrupted = False
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                interrupted = True
+        task.result()
+        return interrupted
+
+    def _assert_workspace_identity(self, record: _SandboxRecord) -> None:
+        if not record.workspace_authorized:
+            return
+        try:
+            for component in (*reversed(record.workspace.parents), record.workspace):
+                if self._is_reparse(component):
+                    raise SandboxSecurityError("authorized workspace path changed to a reparse point")
+            metadata = record.workspace.stat()
+        except OSError as exc:
+            raise SandboxSecurityError(
+                "authorized workspace is missing; restore the original folder before stopping or rebinding"
+            ) from exc
+        if record.workspace_identity != (metadata.st_dev, metadata.st_ino):
+            raise SandboxSecurityError(
+                "authorized workspace was replaced; restore the original folder before stopping or rebinding"
+            )
+
+    def _revoke_workspace(self, record: _SandboxRecord) -> None:
+        if not record.workspace_authorized:
+            return
+        self._assert_workspace_identity(record)
+        # Revocation visits links themselves without following them. User files
+        # are never unlinked, copied or restored by workspace lifecycle actions.
+        self._native.revoke_workspace(
+            record.workspace, record.profile.sid, root_handle=record.workspace_handle,
+        )
+        record.workspace_authorized = False
+        if record.workspace_handle is not None:
+            self._native.close_workspace(record.workspace_handle)
+            record.workspace_handle = None
 
     def _identity(self, sandbox_id: str) -> str:
         digest = hashlib.sha256(

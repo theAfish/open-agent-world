@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from contextlib import suppress
+import logging
 from typing import Any, Mapping
 
 from backend.errors import PluginCompatibilityError, ResourceValidationError
+from backend.sandbox.models import SandboxError, SandboxSecurityError, SandboxValidationError
 from backend.plugins.registry import (
     PLUGIN_API_VERSION,
     CapabilityGrantDefinition,
@@ -196,13 +198,23 @@ class SandboxNodeBehavior(NodeLifecycleHandler):
     async def on_startup(self, context: NodeLifecycleContext, node: Card) -> None:
         if context.sandboxes is None:
             return
-        status = await context.sandboxes.ensure(node.id)
+        try:
+            status = await context.sandboxes.ensure(node.id)
+            await context.sandboxes.configure(node.id, node.config)
+        except (SandboxSecurityError, SandboxValidationError):
+            # Missing host folders/runtimes disable this card, not the whole app.
+            status = "error"
         if node.status != status:
             context.nodes.update_status(node.id, status)
 
     async def on_shutdown(self, context: NodeLifecycleContext, node: Card) -> None:
         if context.sandboxes is not None:
-            await context.sandboxes.terminate(node.id, missing_ok=True)
+            try:
+                await context.sandboxes.terminate(node.id, missing_ok=True)
+            except SandboxError:
+                # Keep the runtime's persisted cleanup obligation, and allow
+                # the other nodes/providers to receive their shutdown callback.
+                logging.getLogger(__name__).exception("Sandbox %s could not finish shutdown cleanup", node.id)
 
     async def prepare_create(
         self, context: NodeLifecycleContext, node: Card, request: CardCreate
@@ -212,11 +224,35 @@ class SandboxNodeBehavior(NodeLifecycleHandler):
         async def commit() -> None:
             if context.sandboxes is not None:
                 await context.sandboxes.create(node.id)
+                await context.sandboxes.configure(node.id, node.config)
 
         async def rollback(error: BaseException) -> None:
             del error
             if context.sandboxes is not None:
                 await context.sandboxes.destroy(node.id, missing_ok=True)
+
+        return _LifecycleOperation(commit, rollback)
+
+    async def prepare_update(
+        self, context: NodeLifecycleContext, current: Card,
+        updated: Card, request: CardPatch,
+    ) -> NodeLifecycleTransaction:
+        del request
+        keys = ("runtime", "workspace_path", "workspace_access")
+        if all(current.config.get(key) == updated.config.get(key) for key in keys):
+            return NodeLifecycleTransaction()
+        configured = False
+
+        async def commit() -> None:
+            nonlocal configured
+            if context.sandboxes is not None:
+                await context.sandboxes.configure(current.id, updated.config)
+                configured = True
+
+        async def rollback(error: BaseException) -> None:
+            del error
+            if configured and context.sandboxes is not None:
+                await context.sandboxes.configure(current.id, current.config)
 
         return _LifecycleOperation(commit, rollback)
 
@@ -621,6 +657,14 @@ async def _view_image(
     return context.view_image(capability.agent_id, capability.target_id)
 
 
+async def _inspect_sandbox(
+    context: CapabilityContext, capability: Any, values: dict[str, Any]
+) -> Any:
+    if values:
+        raise ResourceValidationError("sandbox inspect takes no arguments")
+    return await context.inspect_sandbox(capability.agent_id, capability.target_id)
+
+
 async def _execute_sandbox(
     context: CapabilityContext, capability: Any, values: dict[str, Any]
 ) -> Any:
@@ -722,6 +766,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
     registry.register_capability_handler("text.edit", _edit_text)
     registry.register_capability_handler("image.view", _view_image)
     registry.register_capability_handler("sandbox.execute", _execute_sandbox)
+    registry.register_capability_handler("sandbox.inspect", _inspect_sandbox)
     registry.register_node_type(NodeTypeDefinition(
         id="agent", label="Agent", description="Reasoning worker", icon="bot",
         color="#75736c", deck_id="agents", deck_label="Agents", deck_icon="bot",
@@ -866,12 +911,17 @@ def _register_builtin(registry: PluginRegistration) -> None:
         capabilities=(CapabilityGrantDefinition(
             kind="sandbox.execute", tool_prefix="execute_in",
             description=(
-                "Execute an argv command in Windows sandbox {target_name!r}. "
-                "argv[0] must be an executable on PATH; run shell built-ins such as "
-                "echo through ['cmd.exe', '/d', '/c', ...]."
+                "Execute an argv command in sandbox {target_name!r}. "
+                "First use its inspect tool to obtain the runtime shell, cwd and resource paths. "
+                "The configured working folder is live; edits there change real files. "
+                "Attached resources are available through SANDBOX_RESOURCES."
             ),
             input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}}, "required": ["argv"], "additionalProperties": False},
-        ),),
+        ), CapabilityGrantDefinition(
+            kind="sandbox.inspect", tool_prefix="inspect_sandbox",
+            description="Inspect sandbox {target_name!r} before executing: returns its operating system, shell argv prefix, cwd, read/write access, resource directory and availability.",
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        )),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="mount_read_only", label="Mount read-only", short_label="read-only",

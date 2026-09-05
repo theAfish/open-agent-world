@@ -11,6 +11,8 @@ import type {
   PluginCatalog,
   Relationship,
   RuntimeEvent,
+  SandboxInfo,
+  SandboxRuntimeCatalog,
   WorldCard,
   WorldEdge,
   WorldSnapshot,
@@ -527,14 +529,22 @@ export const worldApi = {
     });
   },
 
-  startSandbox(nodeId: string): Promise<Record<string, unknown>> {
-    return request<Record<string, unknown>>(`/sandboxes/${encodeURIComponent(nodeId)}/start`, {
+  getSandboxRuntimes(refresh = false): Promise<SandboxRuntimeCatalog> {
+    return request<SandboxRuntimeCatalog>(`/sandbox/runtimes${refresh ? "?refresh=true" : ""}`);
+  },
+
+  getSandbox(nodeId: string): Promise<SandboxInfo> {
+    return request<SandboxInfo>(`/sandboxes/${encodeURIComponent(nodeId)}`);
+  },
+
+  startSandbox(nodeId: string): Promise<SandboxInfo> {
+    return request<SandboxInfo>(`/sandboxes/${encodeURIComponent(nodeId)}/start`, {
       method: "POST",
     });
   },
 
-  stopSandbox(nodeId: string): Promise<Record<string, unknown>> {
-    return request<Record<string, unknown>>(`/sandboxes/${encodeURIComponent(nodeId)}/stop`, {
+  stopSandbox(nodeId: string): Promise<SandboxInfo> {
+    return request<SandboxInfo>(`/sandboxes/${encodeURIComponent(nodeId)}/stop`, {
       method: "POST",
     });
   },

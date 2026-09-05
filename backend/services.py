@@ -8,7 +8,7 @@ from collections.abc import Coroutine, Mapping
 from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PureWindowsPath, PurePosixPath
 from typing import Any, TypeVar
 from uuid import uuid4
 
@@ -86,8 +86,11 @@ from backend.sandbox import (
     SandboxEvent,
     SandboxEventType,
     SandboxNotFoundError,
-    WindowsSandboxBackend,
+    SandboxStateError,
+    SandboxValidationError,
 )
+from backend.sandbox.manager import SandboxManager
+from backend.sandbox.registry import builtin_sandbox_registry
 from backend.state import StateMutation, StateMutationKind, StateStore
 from backend.world.models import (
     Card,
@@ -307,6 +310,16 @@ class _LifecycleSandboxes:
     async def create(self, node_id: str) -> None:
         await self.backend.create(node_id)
 
+    async def configure(self, node_id: str, config: Mapping[str, Any]) -> None:
+        if isinstance(self.backend, SandboxManager):
+            await self.backend.configure_options(node_id, config)
+            return
+        if isinstance(self.backend, SandboxBackend):
+            await self.backend.configure(
+                node_id, workspace_path=config.get("workspace_path"),
+                workspace_access=ResourceAccess(config.get("workspace_access", "read_write")),
+            )
+
     async def start(self, node_id: str) -> None:
         await self.backend.start(node_id)
 
@@ -353,7 +366,7 @@ class _LifecycleSandboxes:
                 return
             raise NotFoundError(f"resource {resource_id!r} does not exist")
         _, source = self.resources.read_bytes(resource_id)
-        relative = str(PureWindowsPath("resources", record.filename))
+        relative = str(PurePosixPath("resources", record.filename))
         await self.backend.attach_resource(
             node_id,
             resource_id,
@@ -2490,8 +2503,9 @@ class ApplicationServices:
     async def execute_sandbox(
         self,
         sandbox_id: str,
-        argv: list[str],
+        argv: list[str] | None = None,
         *,
+        command: str | None = None,
         timeout_seconds: float | None = None,
         agent_id: str | None = None,
     ) -> CommandResult:
@@ -2503,6 +2517,14 @@ class ApplicationServices:
                 if agent_id is not None:
                     self.capabilities.require_sandbox_execute(agent_id, sandbox_id)
             backend = self._require_sandbox_backend()
+            if (argv is None) == (command is None):
+                raise SandboxValidationError("provide exactly one of command or argv")
+            if command is not None:
+                info = await backend.get(sandbox_id)
+                if not info.shell:
+                    raise SandboxStateError("No execution shell is available for this Sandbox")
+                argv = [*info.shell, command]
+            assert argv is not None
             command_finished = asyncio.Event()
 
             async def execute_and_refresh() -> CommandResult:
@@ -2564,6 +2586,11 @@ class ApplicationServices:
         self._require_card_type(sandbox_id, CardType.SANDBOX)
         backend = self._require_sandbox_backend()
         return await backend.get(sandbox_id)
+
+    async def sandbox_runtimes(self, *, refresh: bool = False) -> dict[str, object]:
+        if isinstance(self.sandbox_backend, SandboxManager):
+            return await self.sandbox_backend.registry.describe(self.sandbox_backend.preferred, refresh=refresh)
+        return {"runtimes": [], "default_runtime": None}
 
     async def publish_sandbox_event(self, event: SandboxEvent) -> None:
         transaction = self._sandbox_event_transaction.get()
@@ -2878,7 +2905,7 @@ class ApplicationServices:
             if relationship == Relationship.MOUNT_READ_WRITE
             else ResourceAccess.READ_ONLY
         )
-        relative = str(PureWindowsPath("resources", record.filename))
+        relative = str(PurePosixPath("resources", record.filename))
         await self.sandbox_backend.attach_resource(
             sandbox_id, resource_id, source, relative, access
         )
@@ -2905,7 +2932,7 @@ class ApplicationServices:
     def _require_sandbox_backend(self) -> SandboxBackend:
         if self.sandbox_backend is None:
             raise RuntimeUnavailableError(
-                "the native Windows sandbox backend is unavailable"
+                "sandbox execution is not configured on this host"
             )
         return self.sandbox_backend
 
@@ -3087,8 +3114,10 @@ def create_services(
     )
     for provider_id, runtime_provider in (runtime_providers or {}).items():
         services.install_runtime_provider(provider_id, runtime_provider)
-    if services.sandbox_backend is None and settings.sandbox_runtime == "windows":
-        services.sandbox_backend = WindowsSandboxBackend(
-            settings.data_root, event_sink=services.publish_sandbox_event
+    if services.sandbox_backend is None and settings.sandbox_runtime is not None:
+        services.sandbox_backend = SandboxManager(
+            settings.data_root,
+            builtin_sandbox_registry(settings.data_root, services.publish_sandbox_event),
+            preferred=settings.sandbox_runtime,
         )
     return services

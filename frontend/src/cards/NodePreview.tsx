@@ -72,10 +72,10 @@ export function NodePreview({ card }: { card: WorldCard }) {
 
   if (card.type === "sandbox") return (
     <div className="node-preview-summary">
-      <p>{card.status === "stopped" ? "Secure execution environment is stopped." : "Contained execution environment is available."}</p>
+      <p>{card.config.workspace_path || "Managed workspace"}</p>
       <div className="node-preview-metadata">
         <span><Workflow size={12} /> {connectionCount} connections</span>
-        <span><ShieldCheck size={12} /> Network denied</span>
+        <span><ShieldCheck size={12} /> {card.config.workspace_access === "read_only" ? "Read only" : "Read & write"} · {card.status}</span>
       </div>
     </div>
   );

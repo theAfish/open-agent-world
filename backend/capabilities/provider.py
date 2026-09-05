@@ -74,12 +74,31 @@ class _CapabilityContext:
         self.services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
         if self.services.sandbox_backend is None:
             raise RuntimeUnavailableError(
-                "the native Windows sandbox backend is unavailable"
+                "sandbox execution is not configured on this host"
             )
         result = await self.services.execute_sandbox(
             sandbox_id, argv, agent_id=agent_id
         )
         return asdict(result)
+
+    async def inspect_sandbox(self, agent_id: str, sandbox_id: str) -> dict[str, Any]:
+        self.services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
+        info = await self.services.get_sandbox(sandbox_id)
+        return {
+            "sandbox_id": sandbox_id, "state": info.state.value,
+            "runtime_id": info.runtime_id, "platform": info.platform,
+            "shell": list(info.shell), "workspace": str(info.workspace),
+            "workspace_access": info.workspace_access.value,
+            "resources_path": str(info.resources_path) if info.resources_path else None,
+            "available": info.available, "unavailable_reason": info.unavailable_reason,
+            "network_enabled": info.network_enabled,
+            "attachments": [
+                {"resource_id": item.resource_id,
+                 "path": str(info.resources_path / item.relative_path.replace("\\", "/")) if info.resources_path else None,
+                 "access": item.access.value}
+                for item in info.attachments
+            ],
+        }
 
 
 class WorldAgentCapabilityProvider:

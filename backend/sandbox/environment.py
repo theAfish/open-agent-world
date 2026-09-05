@@ -25,6 +25,7 @@ def minimal_windows_environment(
     overrides: Mapping[str, str] | None = None,
     *,
     windows_directory: Path | None = None,
+    storage_directory: Path | None = None,
 ) -> dict[str, str]:
     """Return a non-secret environment without copying ``os.environ``.
 
@@ -35,10 +36,11 @@ def minimal_windows_environment(
 
     windows = windows_directory or Path(os.environ.get("SystemRoot", r"C:\Windows"))
     system32 = windows / "System32"
-    temp = workspace / ".tmp"
+    storage = storage_directory or workspace
+    temp = storage / ".tmp"
     result = {
         "COMSPEC": str(system32 / "cmd.exe"),
-        "LOCALAPPDATA": str(workspace),
+        "LOCALAPPDATA": str(storage),
         "PATH": f"{system32};{windows}",
         "PATHEXT": ".COM;.EXE;.BAT;.CMD",
         "SystemRoot": str(windows),
@@ -46,6 +48,8 @@ def minimal_windows_environment(
         "TMP": str(temp),
         "WINDIR": str(windows),
     }
+    if storage_directory is not None:
+        result["SANDBOX_RESOURCES"] = str(storage)
     for key, value in (overrides or {}).items():
         normalized = key.upper()
         if normalized not in _SAFE_OVERRIDE_NAMES:

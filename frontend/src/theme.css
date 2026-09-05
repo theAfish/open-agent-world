@@ -584,6 +584,27 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .security-strip > div { min-width: 0; display: grid; gap: 2px; }
 .security-strip strong { color: var(--ink-soft); font-size: 8px; }
 .security-strip span { overflow: hidden; color: var(--ink-faint); font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.sandbox-config-form { display: grid; gap: 8px; }
+.sandbox-settings > summary { color: var(--ink-soft); font-size: 9px; font-weight: 650; cursor: pointer; }
+.sandbox-settings > summary > span { display: block; margin: 4px 0 0 12px; color: var(--ink-faint); font: 8px/1.4 "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; }
+.sandbox-settings[open] > summary { margin-bottom: 10px; }
+.sandbox-config-form .field-label > span { display: flex; align-items: center; gap: 5px; }
+.sandbox-config-form input,
+.sandbox-config-form select { width: 100%; min-width: 0; height: 32px; padding: 0 9px; color: var(--ink-soft); border: 1px solid var(--line); border-radius: 7px; background: var(--card-surface); font: inherit; font-size: 10px; }
+.sandbox-config-form input:focus,
+.sandbox-config-form select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.sandbox-config-form input:disabled,
+.sandbox-config-form select:disabled { opacity: 0.65; }
+.sandbox-help { margin: 0; color: var(--ink-faint); font-size: 8px; line-height: 1.5; }
+.sandbox-config-actions { display: flex; align-items: center; gap: 6px; }
+.sandbox-config-actions > span { flex: 1; color: var(--ink-faint); font-size: 8px; }
+.sandbox-config-actions button { min-height: 28px; padding: 4px 9px; }
+.sandbox-refresh { display: inline-flex; align-items: center; gap: 4px; padding: 2px 0; color: var(--ink-soft); border: 0; background: transparent; font: inherit; font-size: 8px; cursor: pointer; }
+.sandbox-error { margin: 0; padding: 8px; color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--danger) 5%, var(--card-surface)); font-size: 9px; line-height: 1.5; overflow-wrap: anywhere; }
+.sandbox-shell { color: var(--ink-faint); font: 8px "Cascadia Code", Consolas, monospace; text-transform: none; letter-spacing: normal; }
+.sandbox-working-directory { color: var(--ink-faint); font: 8px/1.4 "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; }
+.sandbox-security > svg { flex-shrink: 0; }
+.sandbox-security span { overflow: visible; font-size: 8px; line-height: 1.5; white-space: normal; }
 
 /* Edges and spatial controls */
 .semantic-edge-path { stroke: var(--edge); stroke-width: 1.4; opacity: 0.72; transition: stroke-width 150ms ease, opacity 150ms ease, stroke 150ms ease; }

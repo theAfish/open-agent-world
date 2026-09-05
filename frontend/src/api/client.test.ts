@@ -12,6 +12,18 @@ afterEach(() => {
 });
 
 describe("API normalization boundary", () => {
+  it("discovers server runtimes and sends terminal text without choosing a frontend shell", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => new Response(JSON.stringify(
+      url.endsWith("/sandbox/runtimes") ? { runtimes: [], default_runtime: null } : { stdout: "hello", exit_code: 0 },
+    ), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await worldApi.getSandboxRuntimes();
+    await worldApi.executeSandbox("folder/name", "printf 'hello'");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/sandbox/runtimes");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/sandboxes/folder%2Fname/execute");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ command: "printf 'hello'" });
+  });
+
   it("merges authoritative resource metadata and status into a card", () => {
     const card = normalizeCard({
       id: "image-1",

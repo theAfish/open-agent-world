@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import os
-from pathlib import Path
+from pathlib import PurePath
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.api.dependencies import get_services
@@ -55,20 +55,6 @@ class SandboxExecuteRequest(BaseModel):
         if self.command is not None and "\x00" in self.command:
             raise ValueError("command must be NUL-free")
         return self
-
-    def execution_argv(self) -> list[str]:
-        if self.argv is not None:
-            return self.argv
-        windows = Path(os.environ.get("SystemRoot", r"C:\Windows"))
-        command_prompt = windows / "System32" / "cmd.exe"
-        return [
-            str(command_prompt),
-            "/d",
-            "/s",
-            "/c",
-            self.command or "",
-        ]
-
 
 @router.get("/agents/{agent_id}")
 async def get_agent(
@@ -154,12 +140,20 @@ async def configure_llm(
     )
 
 
+@router.get("/sandbox/runtimes")
+async def sandbox_runtimes(
+    refresh: bool = False,
+    services: ApplicationServices = Depends(get_services),
+) -> object:
+    return await services.sandbox_runtimes(refresh=refresh)
+
+
 @router.get("/sandboxes/{sandbox_id}")
 async def get_sandbox(
     sandbox_id: str,
     services: ApplicationServices = Depends(get_services),
 ) -> object:
-    return await services.get_sandbox(sandbox_id)
+    return jsonable_encoder(await services.get_sandbox(sandbox_id), custom_encoder={PurePath: str})
 
 
 @router.post("/sandboxes/{sandbox_id}/start")
@@ -167,7 +161,7 @@ async def start_sandbox(
     sandbox_id: str,
     services: ApplicationServices = Depends(get_services),
 ) -> object:
-    return await services.start_sandbox(sandbox_id)
+    return jsonable_encoder(await services.start_sandbox(sandbox_id), custom_encoder={PurePath: str})
 
 
 @router.post("/sandboxes/{sandbox_id}/stop")
@@ -175,7 +169,7 @@ async def stop_sandbox(
     sandbox_id: str,
     services: ApplicationServices = Depends(get_services),
 ) -> object:
-    return await services.stop_sandbox(sandbox_id)
+    return jsonable_encoder(await services.stop_sandbox(sandbox_id), custom_encoder={PurePath: str})
 
 
 @router.post("/sandboxes/{sandbox_id}/execute")
@@ -186,6 +180,7 @@ async def execute_sandbox(
 ) -> object:
     return await services.execute_sandbox(
         sandbox_id,
-        request.execution_argv(),
+        request.argv,
+        command=request.command,
         timeout_seconds=request.timeout_seconds,
     )

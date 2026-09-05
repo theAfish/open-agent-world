@@ -33,6 +33,7 @@ FILE_GENERIC_WRITE = 0x00120116
 FILE_GENERIC_EXECUTE = 0x001200A0
 DELETE = 0x00010000
 FILE_DELETE_CHILD = 0x00000040
+WRITE_DENIED_ACCESS = 0x00000116 | DELETE | FILE_DELETE_CHILD
 
 READ_ACCESS = FILE_GENERIC_READ
 MODIFY_ACCESS = (
@@ -223,6 +224,8 @@ class WindowsNativeApi:
     _ERROR_NO_DATA = 232
     _HANDLE_FLAG_INHERIT = 0x1
     _STD_READ_BUFFER = 64 * 1024
+    _MAX_OUTPUT_BYTES = 2 * 1024 * 1024
+    _OUTPUT_TRUNCATED = "\n[output truncated at 2 MiB]\n"
 
     def __init__(self) -> None:
         if os.name != "nt":
@@ -267,6 +270,8 @@ class WindowsNativeApi:
             ctypes.POINTER(ctypes.c_void_p),
         ]
         adv.GetNamedSecurityInfoW.restype = wintypes.DWORD
+        adv.GetSecurityInfo.argtypes = [wintypes.HANDLE, *adv.GetNamedSecurityInfoW.argtypes[1:]]
+        adv.GetSecurityInfo.restype = wintypes.DWORD
         adv.SetEntriesInAclW.argtypes = [
             wintypes.ULONG,
             ctypes.POINTER(_EXPLICIT_ACCESS_W),
@@ -284,11 +289,23 @@ class WindowsNativeApi:
             ctypes.c_void_p,
         ]
         adv.SetNamedSecurityInfoW.restype = wintypes.DWORD
+        adv.SetSecurityInfo.argtypes = [wintypes.HANDLE, *adv.SetNamedSecurityInfoW.argtypes[1:]]
+        adv.SetSecurityInfo.restype = wintypes.DWORD
         adv.FreeSid.argtypes = [ctypes.c_void_p]
         adv.FreeSid.restype = ctypes.c_void_p
 
         k32.LocalFree.argtypes = [ctypes.c_void_p]
         k32.LocalFree.restype = ctypes.c_void_p
+        k32.GetVolumePathNameW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+        k32.GetVolumePathNameW.restype = wintypes.BOOL
+        k32.GetDriveTypeW.argtypes = [wintypes.LPCWSTR]
+        k32.GetDriveTypeW.restype = wintypes.UINT
+        k32.GetVolumeInformationW.argtypes = [
+            wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD),
+            ctypes.POINTER(wintypes.DWORD), wintypes.LPWSTR, wintypes.DWORD,
+        ]
+        k32.GetVolumeInformationW.restype = wintypes.BOOL
         k32.CloseHandle.argtypes = [wintypes.HANDLE]
         k32.CloseHandle.restype = wintypes.BOOL
         k32.CreatePipe.argtypes = [
@@ -433,8 +450,95 @@ class WindowsNativeApi:
             # inherited allow ACE on the shared file object.  An explicit deny
             # for this AppContainer SID keeps that inherited ACE from turning a
             # read-only mount writable while leaving the host user's ACEs alone.
-            denied = FILE_GENERIC_WRITE | DELETE | FILE_DELETE_CHILD
-            self._change_path_acl(path, sid, self._DENY_ACCESS, denied)
+            # Generic write includes READ_CONTROL and SYNCHRONIZE, both also
+            # needed for ordinary reads. Deny only the specific write rights.
+            self._change_path_acl(path, sid, self._DENY_ACCESS, WRITE_DENIED_ACCESS)
+
+    def validate_workspace_volume(self, path: Path) -> None:
+        volume = ctypes.create_unicode_buffer(32768)
+        if not self._kernel32.GetVolumePathNameW(str(path), volume, len(volume)):
+            self._raise_last_error("GetVolumePathNameW")
+        filesystem = ctypes.create_unicode_buffer(64)
+        flags = wintypes.DWORD()
+        if not self._kernel32.GetVolumeInformationW(
+            volume.value, None, 0, None, None, ctypes.byref(flags),
+            filesystem, len(filesystem),
+        ):
+            self._raise_last_error("GetVolumeInformationW")
+        # No remote shares, FAT/exFAT, WSL redirectors, or ACL emulation.
+        if (
+            self._kernel32.GetDriveTypeW(volume.value) != 3
+            or filesystem.value.upper() != "NTFS"
+            or not flags.value & 0x8  # FILE_PERSISTENT_ACLS
+        ):
+            raise SandboxValidationError("Windows workspaces require a local NTFS volume with persistent ACLs")
+
+    @staticmethod
+    def _workspace_paths(path: Path, *, granting: bool):
+        pending = [path]
+        while pending:
+            item = pending.pop()
+            try:
+                metadata = item.lstat()
+            except FileNotFoundError:
+                if granting:
+                    raise SandboxSecurityError(f"workspace changed during authorization: {item}")
+                continue
+            reparse = bool(getattr(metadata, "st_file_attributes", 0) & 0x400) or item.is_symlink()
+            if reparse and granting:
+                raise SandboxSecurityError(f"workspace contains a reparse point: {item}")
+            yield item
+            if not reparse and item.is_dir():
+                pending.extend(item.iterdir())
+
+    def open_workspace(self, path: Path) -> int:
+        # Keep the selected directory identity stable while authority is live.
+        # Without delete sharing the root cannot be renamed or replaced.
+        handle = self._kernel32.CreateFileW(
+            str(path), 0x02000000, 0x3, None, 3, 0x02200000, None,
+        )
+        if handle == ctypes.c_void_p(-1).value:
+            self._raise_last_error(f"hold workspace directory: {path}")
+        return int(handle)
+
+    def close_workspace(self, handle: int) -> None:
+        self._kernel32.CloseHandle(handle)
+
+    def grant_workspace(
+        self, path: Path, sid: int, *, read_only: bool, root_handle: int | None = None,
+    ) -> None:
+        # Apply only this SID, never replace a tree's ACLs or ownership. Explicit
+        # per-object changes support protected child ACLs and avoid Windows'
+        # automatic recursive propagation following newly introduced junctions.
+        # Directory ACEs still inherit onto files created by the sandbox.
+        try:
+            for item in self._workspace_paths(path, granting=True):
+                handle = root_handle if item == path else None
+                self._change_path_acl(item, sid, self._REVOKE_ACCESS, 0, propagate=False, object_handle=handle)
+                self._change_path_acl(
+                    item, sid, self._GRANT_ACCESS,
+                    READ_ACCESS if read_only else MODIFY_ACCESS,
+                    propagate=False,
+                    object_handle=handle,
+                )
+                if read_only:
+                    self._change_path_acl(item, sid, self._DENY_ACCESS, WRITE_DENIED_ACCESS, propagate=False, object_handle=handle)
+        except BaseException:
+            self.revoke_workspace(path, sid, root_handle=root_handle)
+            raise
+
+    def revoke_workspace(self, path: Path, sid: int, *, root_handle: int | None = None) -> None:
+        errors: list[str] = []
+        for item in self._workspace_paths(path, granting=False):
+            try:
+                self._change_path_acl(
+                    item, sid, self._REVOKE_ACCESS, 0, propagate=False,
+                    object_handle=root_handle if item == path else None,
+                )
+            except SandboxSecurityError as exc:
+                errors.append(str(exc))
+        if errors:
+            raise SandboxSecurityError("workspace ACL revocation failed: " + "; ".join(errors[:3]))
 
     def protect_path_acl(self, path: Path) -> None:
         """Stop a mount file inheriting the writable workspace package ACE.
@@ -497,14 +601,31 @@ class WindowsNativeApi:
     def revoke_path(self, path: Path, sid: int) -> None:
         self._change_path_acl(path, sid, self._REVOKE_ACCESS, 0)
 
-    def _change_path_acl(self, path: Path, sid: int, mode: int, access: int) -> None:
-        if not path.exists():
+    def _change_path_acl(
+        self, path: Path, sid: int, mode: int, access: int, *, propagate: bool = True,
+        object_handle: int | None = None,
+    ) -> None:
+        if not os.path.lexists(path):
             raise SandboxSecurityError(f"cannot change ACL on missing path: {path}")
+
+        handle = object_handle
+        close_handle = False
+        if not propagate and handle is None:
+            # MAXIMUM_ALLOWED deliberately disables SetSecurityInfo's automatic
+            # child propagation (documented Windows API contract). Opening the
+            # reparse point itself keeps cleanup from granting/revoking its target.
+            handle = self._kernel32.CreateFileW(
+                str(path), 0x02000000, 0x7, None, 3, 0x02200000, None,
+            )
+            if handle == ctypes.c_void_p(-1).value:
+                self._raise_last_error(f"open workspace ACL: {path}")
+            close_handle = True
 
         old_dacl = ctypes.c_void_p()
         security_descriptor = ctypes.c_void_p()
-        result = self._advapi32.GetNamedSecurityInfoW(
-            str(path),
+        getter = self._advapi32.GetNamedSecurityInfoW if propagate else self._advapi32.GetSecurityInfo
+        result = getter(
+            str(path) if propagate else handle,
             self._SE_FILE_OBJECT,
             self._DACL_SECURITY_INFORMATION,
             None,
@@ -514,6 +635,8 @@ class WindowsNativeApi:
             ctypes.byref(security_descriptor),
         )
         if result != 0:
+            if close_handle:
+                self._kernel32.CloseHandle(handle)
             raise SandboxSecurityError(
                 f"GetNamedSecurityInfoW failed for {path} (Win32 {result})"
             )
@@ -543,8 +666,9 @@ class WindowsNativeApi:
                 raise SandboxSecurityError(
                     f"SetEntriesInAclW failed for {path} (Win32 {result})"
                 )
-            result = self._advapi32.SetNamedSecurityInfoW(
-                str(path),
+            setter = self._advapi32.SetNamedSecurityInfoW if propagate else self._advapi32.SetSecurityInfo
+            result = setter(
+                str(path) if propagate else handle,
                 self._SE_FILE_OBJECT,
                 self._DACL_SECURITY_INFORMATION,
                 None,
@@ -561,6 +685,8 @@ class WindowsNativeApi:
                 self._kernel32.LocalFree(new_dacl)
             if security_descriptor.value:
                 self._kernel32.LocalFree(security_descriptor)
+            if close_handle:
+                self._kernel32.CloseHandle(handle)
 
     def terminate_job(self, job_handle: int) -> None:
         if job_handle and not self._kernel32.TerminateJobObject(
@@ -907,6 +1033,24 @@ class WindowsNativeApi:
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
         buffer = ctypes.create_string_buffer(self._STD_READ_BUFFER)
         read = wintypes.DWORD()
+        retained = 0
+        truncated = False
+
+        def publish(text: str) -> None:
+            nonlocal retained, truncated
+            encoded = text.encode("utf-8")
+            remaining = self._MAX_OUTPUT_BYTES - retained
+            if len(encoded) > remaining:
+                text = encoded[:remaining].decode("utf-8", errors="ignore")
+                truncated = True
+            retained += len(text.encode("utf-8"))
+            if text:
+                destination.append(text)
+                callback(text)
+            if truncated:
+                destination.append(self._OUTPUT_TRUNCATED)
+                callback(self._OUTPUT_TRUNCATED)
+
         try:
             while True:
                 ok = self._kernel32.ReadFile(
@@ -923,14 +1067,12 @@ class WindowsNativeApi:
                     raise OSError(error, ctypes.FormatError(error))
                 if read.value == 0:
                     break
-                text = decoder.decode(buffer.raw[: read.value])
-                if text:
-                    destination.append(text)
-                    callback(text)
-            tail = decoder.decode(b"", final=True)
-            if tail:
-                destination.append(tail)
-                callback(tail)
+                # Continue draining discarded output so the child's pipe can
+                # never block after the retained and streamed budget is used.
+                if not truncated:
+                    publish(decoder.decode(buffer.raw[: read.value]))
+            if not truncated:
+                publish(decoder.decode(b"", final=True))
         except BaseException as exc:
             failures.append(exc)
 

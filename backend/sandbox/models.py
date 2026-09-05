@@ -9,24 +9,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from enum import StrEnum
-from pathlib import Path
+from enum import Enum
+from pathlib import Path, PurePath
 from typing import Any, Mapping
 
 
-class SandboxState(StrEnum):
+class _StringEnum(str, Enum):
+    def __str__(self) -> str:
+        return self.value
+
+
+class SandboxState(_StringEnum):
     STOPPED = "stopped"
     READY = "ready"
     RUNNING = "running"
     ERROR = "error"
 
 
-class ResourceAccess(StrEnum):
+class ResourceAccess(_StringEnum):
     READ_ONLY = "read_only"
     READ_WRITE = "read_write"
 
 
-class SandboxEventType(StrEnum):
+class SandboxEventType(_StringEnum):
     STATE_CHANGED = "sandbox_state_changed"
     COMMAND_STARTED = "sandbox_command_started"
     STDOUT = "sandbox_stdout"
@@ -39,7 +44,7 @@ class SandboxEventType(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class SandboxLimits:
-    """Limits applied to every command process tree by a Windows Job Object."""
+    """Limits applied to the complete command process tree by every runtime."""
 
     memory_bytes: int = 512 * 1024 * 1024
     active_process_limit: int = 16
@@ -67,11 +72,20 @@ class ResourceAttachment:
 class SandboxInfo:
     sandbox_id: str
     state: SandboxState
-    workspace: Path
+    workspace: PurePath
     attachments: tuple[ResourceAttachment, ...] = ()
-    security_boundary: str = "windows-appcontainer"
+    security_boundary: str = "unknown"
     network_enabled: bool = False
     active_command: tuple[str, ...] | None = None
+    runtime_id: str = "unknown"
+    platform: str = "unknown"
+    shell: tuple[str, ...] = ()
+    workspace_path: str | None = None
+    workspace_access: ResourceAccess = ResourceAccess.READ_WRITE
+    resources_path: PurePath | None = None
+    available: bool = True
+    unavailable_reason: str | None = None
+    runtime_locked: bool = True
 
 
 @dataclass(frozen=True, slots=True)

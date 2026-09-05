@@ -1,14 +1,14 @@
 # Open Agent World
 
-Open Agent World is a Windows-first spatial environment for agents, managed resources, and isolated workplaces. Cards are persisted world objects. Edges are live permissions: changing the graph changes what an Agent or Sandbox can do.
+Open Agent World is a spatial environment for agents, managed resources, and isolated workplaces. Cards are persisted world objects. Edges are live permissions: changing the graph changes what an Agent or Sandbox can do.
 
-This repository is a proof of concept built with React, TypeScript, Vite, React Flow, Zustand, FastAPI, Pydantic, SQLite, WebSockets, Google ADK, and Windows-native AppContainer/Job Object isolation. It does not use Docker or WSL.
+The application uses React, TypeScript, Vite, React Flow, Zustand, FastAPI, SQLite and Google ADK. Sandbox execution supports Windows AppContainer/Job Objects, native Linux isolation, and the same Linux isolation inside an existing WSL2 distribution. Docker and VM images are not required.
 
 ## Run locally
 
 Requirements:
 
-- Windows 10/11 x64
+- Windows 10/11 or Linux (including WSL2); macOS can run the application but has no local Sandbox runtime yet
 - Python 3.11 or newer
 - [uv](https://docs.astral.sh/uv/)
 - Node.js 20 or newer
@@ -20,6 +20,16 @@ Set up and run the Google ADK agent runtime:
 $env:GOOGLE_API_KEY = "your-key"
 ./scripts/dev.ps1
 ```
+
+On Linux or inside WSL2:
+
+```bash
+bash scripts/setup.sh
+export GOOGLE_API_KEY="your-key"
+python3 scripts/dev.py
+```
+
+The Python launcher also works on Windows. Use `--agent-runtime core.mock` for local debugging without credentials. It selects available local ports and terminates its child servers on exit. The application and Sandbox dependencies are separate: creating cards does not install tools, download images, or provision a sandbox.
 
 
 Google ADK is the built-in default Runtime Provider. Native ADK model names such as `gemini-3.7-flash` use ADK's built-in model support, while provider-qualified names such as `openai/...` or `anthropic/...` are resolved internally by ADK's LiteLLM adapter. The backend Run layer can also resolve a different registered Runtime Provider per Agent; this provider selection does not add a second user-facing model configuration path.
@@ -34,7 +44,17 @@ For deterministic local debugging without a model credential, explicitly start t
 
 Google Vertex AI credentials supported by ADK can be used instead by setting `GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, and `GOOGLE_CLOUD_LOCATION` before starting the application. These values remain in the Agent trust zone and are never inherited by Sandbox processes.
 
-Application data defaults to `%LOCALAPPDATA%/OpenAgentWorld`. Override it before startup with `OPEN_AGENT_WORLD_DATA_ROOT` when a disposable development store is useful.
+Application data defaults to `%LOCALAPPDATA%/OpenAgentWorld` on Windows, `$XDG_DATA_HOME/open-agent-world` (or `~/.local/share/open-agent-world`) on Linux, and `~/Library/Application Support/OpenAgentWorld` on macOS. Override it with `OPEN_AGENT_WORLD_DATA_ROOT` for a disposable development store.
+
+## Sandbox working folders
+
+Open a Sandbox inspector, choose its runtime, enter an existing absolute **Working folder** path, select read/write or read-only access, and save before starting. An empty path uses a managed workspace. For a Windows-hosted server with a WSL runtime, enter a Windows path such as `D:\Projects\demo`; the bridge translates it for Linux. Paths always refer to the backend host, not the browser's machine.
+
+Writes in the selected folder change real files immediately. Stop revokes active execution/access; deleting a card removes sandbox-owned storage and permissions, never the selected folder. Working folders can be changed while stopped. The chosen execution runtime is pinned on first start, so automatic discovery cannot silently move an existing card to a different filesystem. Use a new card to change runtime.
+
+Automatic selection prefers a usable existing WSL2 environment on Windows, otherwise native Windows; native Linux uses its own kernel. Linux/WSL requires Bubblewrap, libseccomp, Python 3.10+ for the small trusted worker, and a systemd user manager supporting scopes with cgroup-v2 memory and process limits. The backend itself still requires Python 3.11+. Runtime discovery reports missing prerequisites; **Refresh** explicitly checks again after environment changes. No ordinary host-process execution is substituted when isolation is unavailable. See [the sandbox contract](docs/security.md).
+
+Connected agents receive both inspect and execute tools. Inspection reports the actual OS, shell, working directory, resource paths and access mode. Attached Text/Image resources remain separate from the real working folder and retain their graph-defined permissions. Host folder bindings are excluded from captured Legion templates.
 
 ## What is implemented
 
@@ -46,7 +66,7 @@ Application data defaults to `%LOCALAPPDATA%/OpenAgentWorld`. Override it before
 - Managed UTF-8 text read/replace/patch operations and image import/inspection; resources never retain arbitrary host paths.
 - Scoped Google ADK tools rebuilt for every run, with authorization checked again at tool invocation.
 - Durable, provider-neutral Runs with explicit lifecycle transitions, nested lineage, per-Agent concurrency policy, and cancellation by Run ID. See [Runs and runtime providers](docs/runs.md).
-- Windows AppContainer process identity, NTFS ACL grants, a minimal environment, network-denied capability set, and Job Object containment behind `SandboxBackend`.
+- A per-card runtime registry with lazy provisioning, live host folders, native Windows and Linux isolation, a WSL2 bridge, minimal environments, network denial and process-tree limits behind `SandboxBackend`.
 - Typed runtime activity over WebSocket without exposing hidden model reasoning.
 - 2048-unit chunk indexing, viewport prefetch, distant-card unloading, and a developer stress generator.
 
@@ -57,6 +77,17 @@ Application data defaults to `%LOCALAPPDATA%/OpenAgentWorld`. Override it before
 ```
 
 The verification script runs backend invariant tests, a native disposable AppContainer smoke test, frontend state/relationship tests, and the production frontend build. The native pass verifies read-only mount enforcement, unrelated-host-file isolation, default network denial, timeout, and child-process cleanup. It fails explicitly if the host cannot establish the required boundary; the application never falls back to an ordinary subprocess. Code-only CI on a non-Windows host can opt out with `./scripts/verify.ps1 -SkipNativeSandbox`.
+
+Linux/WSL development checks:
+
+```bash
+uv run --project backend pytest tests backend/tests
+npm --prefix frontend test
+npm --prefix frontend run build
+OAW_TEST_SANDBOX_RUNTIME=linux uv run --project backend pytest backend/tests/test_sandbox_system.py
+```
+
+The last test uses a disposable real folder and exercises the HTTP card lifecycle through the native boundary. On Windows, set `OAW_TEST_SANDBOX_RUNTIME` to `windows` or `wsl:Ubuntu` (using your actual distro name). The broader WSL isolation/timeout/cancellation test is enabled by `OAW_TEST_WSL_DISTRO=Ubuntu` when running `backend/tests/test_linux_sandbox.py` from the repository root. Native checks are opt-in; ordinary unit tests do not claim an OS boundary was exercised.
 
 With the development server running, the public-API acceptance scenario can also be replayed from a second terminal:
 
