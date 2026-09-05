@@ -58,7 +58,6 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const [error, setError] = useState<string>();
   const transcript = useRef<HTMLDivElement>(null);
   const followTranscript = useRef(true);
-  const transcriptEnd = useRef<HTMLDivElement>(null);
   const messageInput = useRef<HTMLTextAreaElement>(null);
 
   const activeSession = sessions.find((session) => session.id === activeSessionId);
@@ -129,7 +128,10 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   }, [activeSession, selectedAgentId]);
 
   useEffect(() => {
-    if (followTranscript.current) transcriptEnd.current?.scrollIntoView({ block: "end" });
+    const element = transcript.current;
+    // Keep auto-follow inside the transcript. scrollIntoView also scrolls the
+    // canvas ancestors when a virtualized workspace enters the viewport.
+    if (followTranscript.current && element) element.scrollTop = element.scrollHeight;
   }, [messages.length, respondingAgentIds.join("|"), runtimeEvents]);
 
   useEffect(() => {
@@ -377,7 +379,6 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
               </div>
             </article>
           )) : null}
-          <div ref={transcriptEnd} />
         </div>
         <div className="workspace-composer">
           <textarea ref={messageInput} value={draft} onChange={(event) => {

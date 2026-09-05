@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
@@ -86,5 +86,28 @@ describe("ConversationWorkspace snapshots", () => {
       expect(worldApi.getConversation).toHaveBeenCalledTimes(initialSummaryCalls + 1);
       expect(worldApi.getConversationMessages).toHaveBeenCalledTimes(initialMessageCalls + 1);
     });
+  });
+
+  it("follows messages inside the transcript and preserves a reader's scroll position", async () => {
+    const { container } = render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    const transcript = container.querySelector<HTMLElement>(".workspace-transcript")!;
+    Object.defineProperties(transcript, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 200 },
+    });
+    act(() => useWorldStore.setState({ events: [] }));
+    expect(transcript.scrollTop).toBe(1000);
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+
+    transcript.scrollTop = 100;
+    fireEvent.scroll(transcript);
+    act(() => useWorldStore.setState({ events: [] }));
+    expect(transcript.scrollTop).toBe(100);
+
+    transcript.scrollTop = 800;
+    fireEvent.scroll(transcript);
+    act(() => useWorldStore.setState({ events: [] }));
+    expect(transcript.scrollTop).toBe(1000);
   });
 });
