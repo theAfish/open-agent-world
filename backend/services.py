@@ -19,6 +19,7 @@ from backend.agents import (
 )
 from backend.capabilities.broker import CapabilityBroker
 from backend.config import Settings
+from backend.sandbox.settings import SandboxSettingsStore
 from backend.conversations import (
     ConversationAgent,
     ConversationMessage,
@@ -672,6 +673,20 @@ class ApplicationServices:
             lifecycle = definition.lifecycle
             context = self._node_lifecycle_context()
             preview = self.world.preview_card(request)
+            default_workspace: Path | None = None
+            if request.type == "sandbox":
+                defaults_store = SandboxSettingsStore(self.database, self.settings.data_root)
+                defaults = defaults_store.read()
+                config = dict(request.config)
+                if config.get("runtime", "auto") == "auto" and defaults.runtime != "auto":
+                    config["runtime"] = defaults.runtime
+                if not config.get("workspace_path") and defaults.workspace_root is not None:
+                    # Revalidate on use: the host folder may have moved since saving.
+                    root = defaults_store.validator.validate_workspace(defaults.workspace_root)
+                    default_workspace = Path(root) / str(uuid4())
+                    config["workspace_path"] = str(default_workspace)
+                request = request.model_copy(update={"config": config})
+                preview = self.world.preview_card(request, card_id=preview.id)
             transactions = [
                 await lifecycle.prepare_create(context, preview, request)
                 if lifecycle is not None
@@ -701,7 +716,14 @@ class ApplicationServices:
                 ))
             card: Card | None = None
             attempted_transactions: list[NodeLifecycleTransaction] = []
+            workspace_created = False
             try:
+                if default_workspace is not None:
+                    try:
+                        default_workspace.mkdir()
+                        workspace_created = True
+                    except OSError as exc:
+                        raise ResourceValidationError(f"Cannot create Sandbox workspace: {exc}") from exc
                 card = self.world.create_card(request, card_id=preview.id)
                 for transaction in transactions:
                     attempted_transactions.append(transaction)
@@ -725,6 +747,10 @@ class ApplicationServices:
                         "node creation compensation also failed: "
                         f"{type(cleanup_error).__name__}: {cleanup_error}"
                     )
+                if workspace_created:
+                    # Never recursively delete user work, even during rollback.
+                    with suppress(OSError):
+                        default_workspace.rmdir()
                 raise
             if _creation_receipts is not None:
                 _creation_receipts[card.id] = tuple(transactions)

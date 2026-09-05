@@ -48,6 +48,10 @@ Application data defaults to `%LOCALAPPDATA%/OpenAgentWorld` on Windows, `$XDG_D
 
 ## Sandbox working folders
 
+Use **Browse…** next to the default Workspace location or a Sandbox's Working folder to open the operating system's folder picker on the backend computer. Selection fills the draft; click Save to apply it. Cancelling preserves the existing path. Desktop browsing is available for local connections; remote/headless deployments can still enter paths manually. Windows uses its built-in folder dialog; Linux/macOS desktop selection requires Python Tk support.
+
+In **Settings → Sandbox**, set a default Workspace location (an existing absolute folder on the backend host, such as `D:\Workspaces`) and a default runtime. New Sandboxes receive separate subfolders there; existing cards keep their settings. These defaults are saved in the backend database and survive restarts. Clear the location to restore system-managed workspaces for new cards. Folders created under a custom location are retained when their Sandbox cards are deleted.
+
 Open a Sandbox inspector, choose its runtime, enter an existing absolute **Working folder** path, select read/write or read-only access, and save before starting. An empty path uses a managed workspace. For a Windows-hosted server with a WSL runtime, enter a Windows path such as `D:\Projects\demo`; the bridge translates it for Linux. Paths always refer to the backend host, not the browser's machine.
 
 Writes in the selected folder change real files immediately. Stop revokes active execution/access; deleting a card removes sandbox-owned storage and permissions, never the selected folder. Working folders can be changed while stopped. The chosen execution runtime is pinned on first start, so automatic discovery cannot silently move an existing card to a different filesystem. Use a new card to change runtime.

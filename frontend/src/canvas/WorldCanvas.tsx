@@ -84,6 +84,10 @@ export function WorldCanvas() {
   const selectedCardIds = useWorldStore((state) => state.selectedCardIds);
   const selectionRevision = useWorldStore((state) => state.selectionRevision);
   const surfaceLevelsByNodeId = useNodeSurfaceStore((state) => state.surfaceLevels);
+  const connectingNodeId = useNodeSurfaceStore((state) => state.connectingNodeId);
+  const dragging = useNodeSurfaceStore((state) => state.dragging);
+  const setDragging = useNodeSurfaceStore((state) => state.setDragging);
+  const closeInspector = useNodeSurfaceStore((state) => state.closeInspector);
   const closeWorkspace = useNodeSurfaceStore((state) => state.closeWorkspace);
   const dismissSurface = useNodeSurfaceStore((state) => state.dismiss);
   const beginConnection = useNodeSurfaceStore((state) => state.beginConnection);
@@ -111,7 +115,7 @@ export function WorldCanvas() {
   ])), [renderCards, surfaceLevelsByNodeId]);
   const surfaceObstacles = useMemo<SurfaceObstacle[]>(() => renderCards.flatMap<SurfaceObstacle>((card) => {
     const level = surfaceLevels.get(card.id);
-    return level === "preview" || level === "inspector" || level === "workspace" ? [{ card, level }] : [];
+    return level === "inspector" || level === "workspace" ? [{ card, level }] : [];
   }), [renderCards, surfaceLevels]);
   const displacedById = useMemo(
     () => displacedPositions(renderCards, surfaceObstacles, surfaceLevels),
@@ -122,7 +126,7 @@ export function WorldCanvas() {
       const displaced = displacedById.get(card.id);
       return nodeFromCard(
         card,
-        surfaceLevels.get(card.id) ?? "node",
+        surfaceLevels.get(card.id) ?? "preview",
         displaced?.displaced ?? false,
         displaced?.position ?? card.position,
       );
@@ -147,6 +151,7 @@ export function WorldCanvas() {
 
   useEffect(() => {
     cancelPositionAnimation();
+    if (connectingNodeId || dragging) return;
     const currentById = new Map(nodesRef.current.map((node) => [node.id, node]));
     const starts = new Map(mappedNodes.map((node) => [
       node.id,
@@ -200,7 +205,7 @@ export function WorldCanvas() {
     };
     positionAnimation.current = requestAnimationFrame(tick);
     return cancelPositionAnimation;
-  }, [cancelPositionAnimation, mappedNodes, setNodes]);
+  }, [cancelPositionAnimation, connectingNodeId, dragging, mappedNodes, setNodes]);
 
   useEffect(() => {
     if (appliedSelectionRevision.current === selectionRevision) return;
@@ -291,22 +296,25 @@ export function WorldCanvas() {
       }
       if (event.key === "Escape") {
         if (Object.values(surfaceLevelsByNodeId).includes("workspace")) closeWorkspace();
+        else if (Object.values(surfaceLevelsByNodeId).includes("inspector")) closeInspector();
         else if (selectedEdgeId) selectEdge(undefined);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeWorkspace, deleteCards, deleteSelectedEdge, dismissSurface, redo, selectEdge, selectedCardIds, selectedEdgeId, surfaceLevelsByNodeId, undo]);
+  }, [closeInspector, closeWorkspace, deleteCards, deleteSelectedEdge, dismissSurface, redo, selectEdge, selectedCardIds, selectedEdgeId, surfaceLevelsByNodeId, undo]);
 
   const onNodeDragStart: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
     cancelPositionAnimation();
+    setDragging(true);
     activeDragIds.current.clear();
     activeDragIds.current.add(node.id);
     draggedNodes.forEach((draggedNode) => activeDragIds.current.add(draggedNode.id));
-  }, [cancelPositionAnimation]);
+  }, [cancelPositionAnimation, setDragging]);
 
   const onNodeDragStop: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
     cancelPositionAnimation();
+    setDragging(false);
     activeDragIds.current.clear();
     const moved = draggedNodes.length > 0 ? draggedNodes : [node];
     const updates = [...new Map(moved.map((draggedNode) => [draggedNode.id, {
@@ -314,7 +322,7 @@ export function WorldCanvas() {
       position: nodePositionFromSurfacePosition(draggedNode.position, draggedNode.data.surfaceLevel),
     }])).values()];
     void updateCardPositions(updates);
-  }, [cancelPositionAnimation, updateCardPositions]);
+  }, [cancelPositionAnimation, setDragging, updateCardPositions]);
 
   const onConnect = useCallback((connection: Connection) => {
     requestConnection(connection.source, connection.target);
@@ -400,6 +408,8 @@ export function WorldCanvas() {
         onlyRenderVisibleElements
         deleteKeyCode={null}
         nodesFocusable
+        nodeDragThreshold={5}
+        nodeClickDistance={5}
         edgesFocusable
         elevateNodesOnSelect
         proOptions={{ hideAttribution: true }}

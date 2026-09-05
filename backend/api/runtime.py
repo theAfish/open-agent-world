@@ -10,6 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from backend.api.dependencies import get_services
 from backend.services import ApplicationServices
 from backend.runs import RunRecord
+from backend.sandbox.settings import SandboxSettings, SandboxSettingsStore
+from backend.sandbox.manager import SandboxManager
+from backend.sandbox.models import SandboxValidationError
 
 
 router = APIRouter(tags=["runtime"])
@@ -146,6 +149,27 @@ async def sandbox_runtimes(
     services: ApplicationServices = Depends(get_services),
 ) -> object:
     return await services.sandbox_runtimes(refresh=refresh)
+
+
+@router.get("/settings/sandbox", response_model=SandboxSettings)
+async def get_sandbox_settings(
+    services: ApplicationServices = Depends(get_services),
+) -> SandboxSettings:
+    return SandboxSettingsStore(services.database, services.settings.data_root).read()
+
+
+@router.put("/settings/sandbox", response_model=SandboxSettings)
+async def save_sandbox_settings(
+    request: SandboxSettings,
+    services: ApplicationServices = Depends(get_services),
+) -> SandboxSettings:
+    if request.runtime != "auto":
+        backend = services.sandbox_backend
+        if not isinstance(backend, SandboxManager) or request.runtime not in {
+            runtime.id for runtime in await backend.registry.catalog()
+        }:
+            raise SandboxValidationError("Choose a runtime installed on this backend host")
+    return SandboxSettingsStore(services.database, services.settings.data_root).save(request)
 
 
 @router.get("/sandboxes/{sandbox_id}")

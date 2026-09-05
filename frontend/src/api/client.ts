@@ -239,6 +239,20 @@ function unwrap<T>(input: unknown, key: string): T {
 }
 
 export const worldApi = {
+  pickFolder(initialPath: string | null): Promise<{ path: string | null }> {
+    return request<{ path: string | null }>("/desktop/pick-folder", {
+      method: "POST", body: JSON.stringify({ initial_path: initialPath }),
+    });
+  },
+  getSandboxSettings(): Promise<SandboxSettings> {
+    return request<SandboxSettings>("/settings/sandbox");
+  },
+
+  saveSandboxSettings(settings: SandboxSettings): Promise<SandboxSettings> {
+    return request<SandboxSettings>("/settings/sandbox", {
+      method: "PUT", body: JSON.stringify(settings),
+    });
+  },
   async getCatalog(): Promise<PluginCatalog> {
     return request<PluginCatalog>("/catalog");
   },
@@ -556,6 +570,11 @@ export const worldApi = {
     });
   },
 };
+
+export interface SandboxSettings {
+  workspace_root: string | null;
+  runtime: string;
+}
 
 export function runtimeWebSocketUrl(): string {
   const configured = import.meta.env.VITE_WS_URL as string | undefined;

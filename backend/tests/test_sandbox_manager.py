@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -84,6 +85,62 @@ def make_manager(tmp_path, *, available=True):
         lambda: backend, probe, 10,
     ))
     return SandboxManager(tmp_path / "managed", registry), backend
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing_binding", [False, True])
+async def test_legacy_windows_auto_config_keeps_pinned_runtime(tmp_path, existing_binding):
+    manager, backend = make_manager(tmp_path)
+
+    async def probe():
+        return True, None
+
+    manager.registry.register(SandboxRuntimeRegistration(
+        SandboxRuntime("windows", "Windows", "windows", ("cmd.exe",)),
+        lambda: backend, probe, -1,
+    ))
+    native_manifest = manager.root / "sandboxes" / "legacy" / "sandbox.json"
+    native_manifest.parent.mkdir(parents=True)
+    native_manifest.write_text('{"legacy": true}')
+    await backend.create("legacy")
+    await manager.create("legacy")
+    if existing_binding:
+        manager = SandboxManager(manager.root, manager.registry)
+    await manager.configure_options("legacy", {"runtime": "auto"})
+    restored = SandboxManager(manager.root, manager.registry)
+    info = await restored.start("legacy")
+    assert info.runtime_id == "windows" and info.runtime_locked
+    assert native_manifest.read_text() == '{"legacy": true}'
+    assert backend.created == ["legacy"]
+    with pytest.raises(SandboxStateError, match="fixed"):
+        await restored.configure_options("legacy", {"runtime": "test-linux"})
+
+
+@pytest.mark.asyncio
+async def test_runtime_conflict_does_not_prevent_application_startup(tmp_path, caplog):
+    manager, backend = make_manager(tmp_path)
+    settings = Settings.for_data_root(manager.root)
+    services = create_services(settings, sandbox_backend=manager)
+    card = await services.create_card(CardCreate(type="sandbox", config={"runtime": "another"}))
+    healthy = await services.create_card(CardCreate(type="sandbox"))
+    await backend.create(card.id)
+    manifest = manager.root / "sandbox-bindings" / f"{card.id}.json"
+    data = json.loads(manifest.read_text())
+    data.update(runtime="test-linux", resolved_runtime="test-linux", provisioned=True)
+    manifest.write_text(json.dumps(data))
+    services.close()
+    original_binding = manifest.read_bytes()
+    restored = SandboxManager(manager.root, manager.registry)
+    services = create_services(settings, sandbox_backend=restored)
+    try:
+        with TestClient(create_app(settings, services=services)) as client:
+            assert client.get("/api/health").status_code == 200
+            assert services.world.get_card(card.id).status == "error"
+            assert services.world.get_card(healthy.id).status == "stopped"
+            assert manifest.read_bytes() == original_binding
+            assert card.id in caplog.text and "Runtime is fixed" in caplog.text
+    finally:
+        services.close()
 
 
 @pytest.mark.asyncio
@@ -282,3 +339,82 @@ def test_api_saves_real_folder_uses_runtime_shell_and_preserves_settings_on_fail
             assert first.is_dir()
     finally:
         services.close()
+
+
+def test_global_sandbox_defaults_persist_and_only_apply_to_new_cards(tmp_path):
+    manager, backend = make_manager(tmp_path)
+    settings = Settings.for_data_root(manager.root)
+    root, other, explicit = (tmp_path / name for name in ("workspaces", "other", "explicit"))
+    for folder in (root, other, explicit):
+        folder.mkdir()
+    services = create_services(settings, sandbox_backend=manager)
+    with TestClient(create_app(settings, services=services)) as client:
+        assert client.get("/api/settings/sandbox").json() == {"workspace_root": None, "runtime": "auto"}
+        old = client.post("/api/nodes", json={"type": "sandbox"}).json()
+        response = client.put("/api/settings/sandbox", json={"workspace_root": str(root), "runtime": "test-linux"})
+        assert response.status_code == 200, response.text
+        first = client.post("/api/nodes", json={"type": "sandbox"}).json()
+        second = client.post("/api/nodes", json={"type": "sandbox"}).json()
+        first_folder = Path(first["config"]["workspace_path"])
+        assert first_folder.parent == root and first_folder.is_dir()
+        assert second["config"]["workspace_path"] != str(first_folder)
+        assert first["config"]["runtime"] == "test-linux"
+        assert services.world.get_card(old["id"]).config["workspace_path"] is None
+        chosen = client.post("/api/nodes", json={"type": "sandbox", "config": {
+            "workspace_path": str(explicit), "runtime": "another",
+        }}).json()
+        assert chosen["config"]["workspace_path"] == str(explicit)
+        assert chosen["config"]["runtime"] == "another"
+        assert client.post(f"/api/sandboxes/{first['id']}/start").status_code == 200
+        assert backend.records[first["id"]].workspace == first_folder
+        assert client.post(f"/api/sandboxes/{first['id']}/stop").status_code == 200
+        assert client.put("/api/settings/sandbox", json={"workspace_root": str(other)}).status_code == 200
+        assert services.world.get_card(first["id"]).config["workspace_path"] == str(first_folder)
+        (first_folder / "work.txt").write_text("keep me")
+        assert client.delete(f"/api/nodes/{first['id']}").status_code == 200
+        assert (first_folder / "work.txt").read_text() == "keep me"
+    services.close()
+
+    services = create_services(settings, sandbox_backend=SandboxManager(manager.root, manager.registry))
+    with TestClient(create_app(settings, services=services)) as client:
+        assert client.get("/api/settings/sandbox").json()["workspace_root"] == str(other)
+        new = client.post("/api/nodes", json={"type": "sandbox"}).json()
+        assert Path(new["config"]["workspace_path"]).parent == other
+        assert client.put("/api/settings/sandbox", json={"workspace_root": None}).status_code == 200
+        reset = client.post("/api/nodes", json={"type": "sandbox"}).json()
+        assert reset["config"]["workspace_path"] is None
+    services.close()
+
+
+def test_invalid_sandbox_defaults_do_not_replace_saved_settings(tmp_path):
+    manager, _ = make_manager(tmp_path)
+    settings = Settings.for_data_root(manager.root)
+    services = create_services(settings, sandbox_backend=manager)
+    with TestClient(create_app(settings, services=services)) as client:
+        for root in ("relative", str(tmp_path / "missing"), str(manager.root), str(tmp_path), str(Path.home())):
+            response = client.put("/api/settings/sandbox", json={"workspace_root": root})
+            assert response.status_code == 422, response.text
+        assert client.put("/api/settings/sandbox", json={"runtime": "unknown"}).status_code == 422
+        assert client.get("/api/settings/sandbox").json() == {"workspace_root": None, "runtime": "auto"}
+    services.close()
+
+
+def test_workspace_creation_failure_and_card_rollback_keep_defaults_safe(tmp_path, monkeypatch):
+    manager, _ = make_manager(tmp_path)
+    settings = Settings.for_data_root(manager.root)
+    services = create_services(settings, sandbox_backend=manager)
+    root = tmp_path / "workspaces"
+    root.mkdir()
+    with TestClient(create_app(settings, services=services)) as client:
+        assert client.put("/api/settings/sandbox", json={"workspace_root": str(root)}).status_code == 200
+        def failed_create(*args, **kwargs):
+            raise SandboxValidationError("creation failed")
+        monkeypatch.setattr(services.world, "create_card", failed_create)
+        response = client.post("/api/nodes", json={"type": "sandbox"})
+        assert response.status_code == 422
+        assert list(root.iterdir()) == []
+        root.rmdir()
+        response = client.post("/api/nodes", json={"type": "sandbox"})
+        assert response.status_code == 422
+        assert services.world.list_cards() == []
+    services.close()

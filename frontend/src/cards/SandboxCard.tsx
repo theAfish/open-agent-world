@@ -4,6 +4,7 @@ import { useWorldStore } from "../state/worldStore";
 import type { SandboxWorkspaceAccess, WorldCard } from "../types/world";
 import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { InstrumentOutput, RelationshipList } from "./CardUtilities";
+import { FolderPathInput } from "../shell/FolderPathInput";
 
 export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeSurfaceLevel }) {
   const edges = useWorldStore((state) => state.edges);
@@ -21,6 +22,7 @@ export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeS
   const runtimesError = useWorldStore((state) => state.sandboxRuntimesError);
   const socketState = useWorldStore((state) => state.socketState);
   const [command, setCommand] = useState("");
+  const [pickingFolder, setPickingFolder] = useState(false);
   const [runtime, setRuntime] = useState(card.config.runtime ?? "auto");
   const [workspace, setWorkspace] = useState(card.config.workspace_path ?? "");
   const [access, setAccess] = useState<SandboxWorkspaceAccess>(card.config.workspace_access ?? "read_write");
@@ -46,7 +48,7 @@ export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeS
     || access !== (card.config.workspace_access ?? "read_write");
   const ready = card.status === "ready" || card.status === "running";
   const stopped = card.status === "stopped";
-  const canConfigure = stopped && !busy && !!info;
+  const canConfigure = stopped && !busy && !pickingFolder && !!info;
   const canStop = ready || card.status === "error" || busy === "executing";
   const selectedRuntime = runtimes?.runtimes.find((item) => item.id === (
     info?.runtime_locked ? info.runtime_id : runtime === "auto" ? runtimes.default_runtime : runtime
@@ -78,7 +80,7 @@ export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeS
           className={canStop ? "secondary-button" : "primary-button"}
           disabled={canStop
             ? !!busy && busy !== "executing"
-            : !!busy || dirty || !info?.available || !stopped}
+            : !!busy || pickingFolder || dirty || !info?.available || !stopped}
           onClick={() => void (canStop ? stopSandbox(card.id) : startSandbox(card.id))}
         >
           {canStop ? <CircleStop size={14} /> : <Play size={14} fill="currentColor" />}
@@ -120,16 +122,17 @@ export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeS
         </label>
         {info?.runtime_locked && <p className="sandbox-help">Runtime fixed for this sandbox. Create another card to use a different environment.</p>}
 
-        <label className="field-label">
+        <div className="field-label">
           <span><Folder size={12} /> Working folder</span>
-          <input value={workspace} disabled={!canConfigure}
-            onChange={(event) => {
-              setWorkspace(event.target.value);
-              if (!event.target.value.trim()) setAccess("read_write");
+          <FolderPathInput label="Working folder" value={workspace} disabled={!canConfigure}
+            onPickingChange={setPickingFolder}
+            onChange={(path) => {
+              setWorkspace(path);
+              if (!path.trim()) setAccess("read_write");
             }}
             placeholder="Leave empty for a managed workspace"
-            aria-describedby={`workspace-help-${card.id}`} spellCheck={false} autoComplete="off" />
-        </label>
+            describedBy={`workspace-help-${card.id}`} />
+        </div>
         <p className="sandbox-help" id={`workspace-help-${card.id}`}>
           Absolute folder path on the machine running the server. For WSL launched from Windows, use a Windows path.
           {workspace.trim() ? (access === "read_write"

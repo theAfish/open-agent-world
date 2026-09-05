@@ -8,6 +8,11 @@ from typing import Iterator
 
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS application_settings (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS cards (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,

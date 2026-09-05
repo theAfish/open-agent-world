@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from backend.api.capabilities import router as capabilities_router
 from backend.api.conversations import router as conversations_router
 from backend.api.dependencies import get_services
+from backend.api.desktop import router as desktop_router
 from backend.api.legions import router as legions_router
 from backend.api.resources import router as resources_router
 from backend.api.runtime import router as runtime_router
@@ -34,3 +35,4 @@ api_router.include_router(resources_router)
 api_router.include_router(capabilities_router)
 api_router.include_router(conversations_router)
 api_router.include_router(runtime_router)
+api_router.include_router(desktop_router)

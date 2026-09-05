@@ -117,7 +117,10 @@ class SandboxManager(SandboxBackend):
         if unchanged and not binding.provisioned:
             return
         async with binding.lock:
-            if binding.provisioned and runtime != binding.runtime:
+            # Auto on an existing Sandbox means keeping its pinned runtime,
+            # including legacy Windows bindings restored with default config.
+            # resolved_runtime remains unchanged, so this never selects a new host.
+            if binding.provisioned and runtime != binding.runtime and runtime != "auto":
                 raise SandboxStateError("Runtime is fixed after first start. Create a new Sandbox to use another runtime.")
             old = (binding.runtime, binding.workspace_path, binding.workspace_access)
             backend: SandboxBackend | None = None

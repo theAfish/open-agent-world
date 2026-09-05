@@ -1,7 +1,8 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Bot, ExternalLink, FileText, Image as ImageIcon, MessagesSquare, Puzzle, Sparkles, Trash2, Workflow, X, type LucideIcon } from "lucide-react";
+import { Bot, Maximize2, Minus, ExternalLink, FileText, Image as ImageIcon, MessagesSquare, Puzzle, Sparkles, Trash2, Workflow, X, type LucideIcon } from "lucide-react";
 import { memo, type ComponentType, type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef } from "react";
 import { roundedRectAnchor } from "../edges/geometry";
+import { IconButton } from "../components/IconButton";
 import { nodeSurfaceSupport, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
 import { type CardType, type WorldCard } from "../types/world";
@@ -15,9 +16,7 @@ import { TextCardBody } from "./TextCard";
 import { RelationshipList } from "./CardUtilities";
 import type { CanvasNode } from "./types";
 
-const HOVER_INTENT_MS = 180;
-const HOVER_LEAVE_GRACE_MS = 260;
-const PREVIEW_HOVER_MARGIN_PX = 20;
+const DRAG_THRESHOLD_PX = 5;
 const NON_DRAG_SELECTOR = "button, input, textarea, select, label, a, [contenteditable='true'], .react-flow__handle";
 
 const ICONS: Partial<Record<CardType, LucideIcon>> = {
@@ -73,7 +72,7 @@ function statusLabel(status: WorldCard["status"]): string {
   return status.replaceAll("_", " ");
 }
 
-function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
+function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNode>) {
   const card = data.card;
   const catalog = useWorldStore((state) => state.catalog);
   const surfaceLevels = useNodeSurfaceStore((state) => state.surfaceLevels);
@@ -87,9 +86,7 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
   const deleteCard = useWorldStore((state) => state.deleteCard);
   const connectingNodeId = useNodeSurfaceStore((state) => state.connectingNodeId);
   const cardRef = useRef<HTMLElement>(null);
-  const enterTimer = useRef<ReturnType<typeof setTimeout>>();
-  const leaveTimer = useRef<ReturnType<typeof setTimeout>>();
-  const pressedPointerId = useRef<number>();
+  const pointerStart = useRef<{ x: number; y: number; moved: boolean }>();
   const level = surfaceLevelForNode(card.id, surfaceLevels);
   const visualLevel = level;
   const definition = catalog.node_types.find((item) => item.id === card.type);
@@ -98,112 +95,22 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
   const Body = BODIES[card.type] ?? GenericCardBody;
   const support = nodeSurfaceSupport(card.type, catalog);
 
-  const clearEnterTimer = () => {
-    if (enterTimer.current) clearTimeout(enterTimer.current);
-    enterTimer.current = undefined;
-  };
-
-  const clearLeaveTimer = () => {
-    if (leaveTimer.current) clearTimeout(leaveTimer.current);
-    leaveTimer.current = undefined;
-  };
-
-  const clearTimers = () => {
-    clearEnterTimer();
-    clearLeaveTimer();
-  };
-
-  useEffect(() => clearTimers, []);
+  useEffect(() => {
+    if (dragging && pointerStart.current) pointerStart.current.moved = true;
+  }, [dragging]);
 
   useEffect(() => {
     if (connectingNodeId === card.id) cardRef.current?.removeAttribute("data-connection-hot");
   }, [card.id, connectingNodeId]);
 
-  useEffect(() => {
-    if (level !== "preview") return;
-
-    const isWithinPreviewHoverArea = (clientX: number, clientY: number) => {
-      const bounds = cardRef.current?.getBoundingClientRect();
-      if (!bounds) return false;
-      return clientX >= bounds.left - PREVIEW_HOVER_MARGIN_PX
-        && clientX <= bounds.right + PREVIEW_HOVER_MARGIN_PX
-        && clientY >= bounds.top - PREVIEW_HOVER_MARGIN_PX
-        && clientY <= bounds.bottom + PREVIEW_HOVER_MARGIN_PX;
-    };
-
-    const schedulePreviewHide = () => {
-      if (pressedPointerId.current !== undefined || leaveTimer.current) return;
-      leaveTimer.current = setTimeout(() => {
-        leaveTimer.current = undefined;
-        if (pressedPointerId.current === undefined) hidePreview(card.id);
-      }, HOVER_LEAVE_GRACE_MS);
-    };
-
-    const onWindowPointerMove = (event: PointerEvent) => {
-      if (pressedPointerId.current !== undefined || isWithinPreviewHoverArea(event.clientX, event.clientY)) {
-        clearLeaveTimer();
-        return;
-      }
-      schedulePreviewHide();
-    };
-
-    const onWindowPointerRelease = (event: PointerEvent) => {
-      if (pressedPointerId.current !== event.pointerId) return;
-      pressedPointerId.current = undefined;
-      if (isWithinPreviewHoverArea(event.clientX, event.clientY)) clearLeaveTimer();
-      else schedulePreviewHide();
-    };
-
-    const onWindowBlur = () => {
-      if (pressedPointerId.current === undefined) return;
-      pressedPointerId.current = undefined;
-      schedulePreviewHide();
-    };
-
-    window.addEventListener("pointermove", onWindowPointerMove, true);
-    window.addEventListener("pointerup", onWindowPointerRelease, true);
-    window.addEventListener("pointercancel", onWindowPointerRelease, true);
-    window.addEventListener("blur", onWindowBlur);
-    return () => {
-      window.removeEventListener("pointermove", onWindowPointerMove, true);
-      window.removeEventListener("pointerup", onWindowPointerRelease, true);
-      window.removeEventListener("pointercancel", onWindowPointerRelease, true);
-      window.removeEventListener("blur", onWindowBlur);
-    };
-  }, [card.id, hidePreview, level]);
-
-  const onPointerEnter = () => {
-    clearLeaveTimer();
-    if (pressedPointerId.current !== undefined) return;
-    if (!support.preview || level === "inspector" || level === "workspace" || level === "preview") return;
-    clearEnterTimer();
-    enterTimer.current = setTimeout(() => showPreview(card.id), HOVER_INTENT_MS);
-  };
-
-  const onPointerLeave = (event: ReactPointerEvent<HTMLElement>) => {
-    cardRef.current?.removeAttribute("data-connection-hot");
-    clearEnterTimer();
-    if (level !== "preview" || pressedPointerId.current !== undefined) {
-      clearLeaveTimer();
-      return;
-    }
-    const bounds = cardRef.current?.getBoundingClientRect();
-    if (bounds
-      && event.clientX >= bounds.left - PREVIEW_HOVER_MARGIN_PX
-      && event.clientX <= bounds.right + PREVIEW_HOVER_MARGIN_PX
-      && event.clientY >= bounds.top - PREVIEW_HOVER_MARGIN_PX
-      && event.clientY <= bounds.bottom + PREVIEW_HOVER_MARGIN_PX) {
-      clearLeaveTimer();
-      return;
-    }
-    clearLeaveTimer();
-    leaveTimer.current = setTimeout(() => hidePreview(card.id), HOVER_LEAVE_GRACE_MS);
-  };
-
   const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
     if (card.ephemeral || connectingNodeId === card.id) return;
     const element = cardRef.current;
     if (!element) return;
+    if ((event.target as Element).closest("button, input, textarea, select, a")) {
+      element.removeAttribute("data-connection-hot");
+      return;
+    }
     const bounds = element.getBoundingClientRect();
     const scaleX = element.offsetWidth / Math.max(bounds.width, 1);
     const scaleY = element.offsetHeight / Math.max(bounds.height, 1);
@@ -229,11 +136,7 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
   const onPointerDownCapture = (event: ReactPointerEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
     const isNonDraggableTarget = Boolean(target.closest(NON_DRAG_SELECTOR));
-    clearEnterTimer();
-    if (!isNonDraggableTarget && level === "preview") {
-      clearLeaveTimer();
-      pressedPointerId.current = event.pointerId;
-    }
+    pointerStart.current = { x: event.clientX, y: event.clientY, moved: false };
     if (isNonDraggableTarget) {
       event.stopPropagation();
     }
@@ -249,18 +152,21 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
       data-card-type={card.type}
       data-card-expanded={visualLevel === "inspector" || visualLevel === "workspace" ? "true" : "false"}
       data-surface-level={level}
-      onPointerEnter={onPointerEnter}
-      onPointerLeave={onPointerLeave}
+      onPointerLeave={() => cardRef.current?.removeAttribute("data-connection-hot")}
+      onPointerMoveCapture={(event) => {
+        const start = pointerStart.current;
+        if (start && event.buttons && Math.hypot(event.clientX - start.x, event.clientY - start.y) >= DRAG_THRESHOLD_PX) start.moved = true;
+      }}
       onPointerMove={onPointerMove}
       onPointerDownCapture={onPointerDownCapture}
       onClick={(event) => {
-        if ((event.target as HTMLElement).closest("button, input, textarea, select, label, .react-flow__handle, .node-preview-hover-buffer")) return;
+        const start = pointerStart.current;
+        if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || connectingNodeId || dragging) return;
+        if (event.detail !== 0 && start && (start.moved || Math.hypot(event.clientX - start.x, event.clientY - start.y) >= DRAG_THRESHOLD_PX)) return;
+        if ((event.target as HTMLElement).closest("button, input, textarea, select, label, a, [contenteditable='true'], .react-flow__handle")) return;
         if (support.inspector && (visualLevel === "node" || visualLevel === "preview")) openInspector(card.id);
       }}
     >
-      {visualLevel === "preview" ? (
-        <div className="node-preview-hover-buffer" data-preview-hover-buffer aria-hidden="true" />
-      ) : null}
       {!card.ephemeral ? (
         <svg className="connection-hover-hint" data-connection-hover-hint viewBox="0 0 12 12" aria-hidden="true">
           <circle className="semantic-edge-endpoint" cx="6" cy="6" r="4.5" />
@@ -291,8 +197,21 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
           <div className="card-status" data-status={card.status} title={`Status: ${statusLabel(card.status)}`}>
             <span aria-hidden="true" /><span>{statusLabel(card.status)}</span>
           </div>
-          <button type="button" className="icon-button node-surface-close nodrag nopan"
-            onClick={() => closeInspector(card.id)} aria-label={`Close ${card.name} inspector`}><X size={14} /></button>
+          {(visualLevel === "node" || visualLevel === "preview") && support.preview ? (
+            <IconButton
+              icon={visualLevel === "node" ? Maximize2 : Minus}
+              size={visualLevel === "node" ? "xs" : "sm"}
+              quiet={visualLevel === "preview"}
+              className={`node-surface-toggle ${visualLevel === "node" ? "node-surface-restore" : ""}`}
+              label={`${visualLevel === "node" ? "Expand" : "Collapse"} ${card.name} card`}
+              title={visualLevel === "node" ? "Expand card" : "Collapse to node"}
+              onClick={() => {
+                if (visualLevel === "node") showPreview(card.id);
+                else hidePreview(card.id);
+              }} />
+          ) : null}
+          <IconButton icon={X} size="sm" quiet className="node-surface-close"
+            onClick={() => closeInspector(card.id)} label={`Close ${card.name} inspector`} />
         </header>
 
         <div className="node-preview-content" aria-hidden={visualLevel !== "preview"}>
@@ -307,9 +226,9 @@ function WorldCardNodeComponent({ data, selected }: NodeProps<CanvasNode>) {
         <footer className="card-footer node-inspector-footer">
           <span className="card-id">{card.ephemeral ? "synthetic" : card.id.slice(0, 8)}</span>
           <div className="card-footer-actions nodrag nopan">
-            {!card.ephemeral ? <button type="button" className="icon-button icon-button--danger"
-              onClick={() => { dismissSurface(card.id); void deleteCard(card.id); }} aria-label={`Remove ${card.name}`}
-              title="Remove object (Ctrl+Z to undo)"><Trash2 size={14} /></button> : null}
+            {!card.ephemeral ? <IconButton icon={Trash2} danger
+              onClick={() => { dismissSurface(card.id); void deleteCard(card.id); }} label={`Remove ${card.name}`}
+              title="Remove object (Ctrl+Z to undo)" /> : null}
             {support.workspace ? (
               <button type="button" className="card-expand-button" onClick={() => openWorkspace(card.id)}>
                 Open workspace <ExternalLink size={13} />

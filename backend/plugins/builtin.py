@@ -5,7 +5,7 @@ import logging
 from typing import Any, Mapping
 
 from backend.errors import PluginCompatibilityError, ResourceValidationError
-from backend.sandbox.models import SandboxError, SandboxSecurityError, SandboxValidationError
+from backend.sandbox.models import SandboxError
 from backend.plugins.registry import (
     PLUGIN_API_VERSION,
     CapabilityGrantDefinition,
@@ -201,8 +201,10 @@ class SandboxNodeBehavior(NodeLifecycleHandler):
         try:
             status = await context.sandboxes.ensure(node.id)
             await context.sandboxes.configure(node.id, node.config)
-        except (SandboxSecurityError, SandboxValidationError):
-            # Missing host folders/runtimes disable this card, not the whole app.
+        except SandboxError:
+            # Invalid persisted state or missing host resources disable this
+            # card, not the whole app. Keep the binding for diagnosis/recovery.
+            logging.getLogger(__name__).exception("Sandbox %s could not restore startup settings", node.id)
             status = "error"
         if node.status != status:
             context.nodes.update_status(node.id, status)

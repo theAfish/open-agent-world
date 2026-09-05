@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
+import { IconButton } from "../components/IconButton";
 import { nodeSurfaceSupport, useNodeSurfaceStore } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
 import type { ConversationSession, WorldCard } from "../types/world";
@@ -30,7 +31,7 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
         <strong>{card.name}</strong>
       </div>
       <div className="workspace-window-actions">
-        <button type="button" className="icon-button" onClick={() => closeWorkspace(card.id)} aria-label="Close workspace"><X size={15} /></button>
+        <IconButton icon={X} size="sm" quiet onClick={() => closeWorkspace(card.id)} label="Close workspace" />
       </div>
     </header>
   );

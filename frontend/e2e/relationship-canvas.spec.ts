@@ -212,6 +212,45 @@ test("an Agent relationship can be dragged between boundaries and exposes real e
   }
 });
 
+test("compact connection endpoints stay fixed throughout dragging and cancellation", async ({ page, request }) => {
+  const suffix = Date.now();
+  const source = await createCard(request, `e2e-fixed-source-${suffix}`, "agent", "E2E Fixed Source", { x: 310, y: 150 });
+  const target = await createCard(request, `e2e-fixed-target-${suffix}`, "agent", "E2E Fixed Target", { x: 820, y: 420 });
+  try {
+    await page.goto("/");
+    const sourceCard = page.locator(`[data-card-id="${source.id}"]`);
+    const targetCard = page.locator(`[data-card-id="${target.id}"]`);
+    await sourceCard.getByRole("button", { name: "Collapse E2E Fixed Source card" }).click();
+    await targetCard.getByRole("button", { name: "Collapse E2E Fixed Target card" }).click();
+    await page.waitForTimeout(450);
+    const sourceBefore = await cardBox(sourceCard, "Source before connection");
+    const targetBefore = await cardBox(targetCard, "Target before connection");
+    const start = await handleCenter(sourceCard, "right");
+    const end = await handleCenter(targetCard, "left");
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 10 });
+    await page.waitForTimeout(600);
+    await expect(sourceCard).toHaveAttribute("data-surface-level", "node");
+    await expect(targetCard).toHaveAttribute("data-surface-level", "node");
+    expect(await cardBox(sourceCard, "Source during connection")).toEqual(sourceBefore);
+    expect(await cardBox(targetCard, "Target during connection")).toEqual(targetBefore);
+    await page.mouse.move(end.x + 100, end.y + 100);
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+    await expect(sourceCard).toHaveAttribute("data-surface-level", "node");
+    await expect(targetCard).toHaveAttribute("data-surface-level", "node");
+    expect(await cardBox(sourceCard, "Source after cancellation")).toEqual(sourceBefore);
+    await dragConnection(sourceCard, targetCard);
+    await expect(page.getByRole("dialog", { name: "Choose a capability" })).toBeVisible();
+    await expect(sourceCard).toHaveAttribute("data-surface-level", "node");
+    await expect(targetCard).toHaveAttribute("data-surface-level", "node");
+  } finally {
+    await request.delete(`/api/nodes/${source.id}`);
+    await request.delete(`/api/nodes/${target.id}`);
+  }
+});
+
 test("a reverse Text-to-Agent drag uses the allowed Agent-to-Text direction", async ({
   page,
   request,
@@ -278,13 +317,15 @@ test("close compact nodes remain independently draggable and persist both positi
     await page.goto("/");
     const firstCard = page.locator(`[data-card-id="${first.id}"]`);
     const secondCard = page.locator(`[data-card-id="${second.id}"]`);
+    await firstCard.getByRole("button", { name: "Collapse E2E Close First card" }).click();
+    await secondCard.getByRole("button", { name: "Collapse E2E Close Second card" }).click();
     await expect(firstCard).toHaveAttribute("data-surface-level", "node");
     await expect(secondCard).toHaveAttribute("data-surface-level", "node");
 
-    await dragCardBy(firstCard, { x: -120, y: 70 }, { expectedLevelWhilePressed: "node" });
+    await dragCardBy(firstCard, { x: -120, y: 70 }, { expectedLevelWhilePressed: "node", startRatio: { x: 0.5, y: 0.75 } });
     await expectPersistedMovement(request, first.id, firstPosition);
 
-    await dragCardBy(secondCard, { x: 115, y: 75 }, { expectedLevelWhilePressed: "node" });
+    await dragCardBy(secondCard, { x: 115, y: 75 }, { expectedLevelWhilePressed: "node", startRatio: { x: 0.5, y: 0.75 } });
     await expectPersistedMovement(request, second.id, secondPosition);
 
     await page.reload();
@@ -298,99 +339,58 @@ test("close compact nodes remain independently draggable and persist both positi
   }
 });
 
-test("a preview stays open while the pointer uses its outer hover buffer", async ({ page, request }) => {
-  const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-  const previewPosition = { x: 510, y: 280 };
-  const neighborPosition = { x: 710, y: 250 };
-  const card = await createCard(
-    request,
-    `e2e-preview-${suffix}`,
-    "agent",
-    "E2E Hover Buffer",
-    previewPosition,
-  );
-  const neighbor = await createCard(
-    request,
-    `e2e-preview-neighbor-${suffix}`,
-    "agent",
-    "E2E Preview Neighbor",
-    neighborPosition,
-  );
-
+test("surfaces change only explicitly and restore their previous level", async ({ page, request }, testInfo) => {
+  const card = await createCard(request, `e2e-surfaces-${Date.now()}`, "agent", "E2E Surfaces", { x: 510, y: 280 });
   try {
     await page.goto("/");
     const surface = page.locator(`[data-card-id="${card.id}"]`);
-    const neighborSurface = page.locator(`[data-card-id="${neighbor.id}"]`);
-    const hoverHint = surface.locator("[data-connection-hover-hint]");
-    const hoverBuffer = surface.locator("[data-preview-hover-buffer]");
-    await expect(surface).toBeVisible();
-    await expect(neighborSurface).toBeVisible();
-    await expect(surface).not.toHaveAttribute("data-connection-hot", "true");
+    await expect(surface).toHaveAttribute("data-surface-level", "preview");
     await surface.hover();
+    await page.mouse.move(20, 20);
+    await page.waitForTimeout(600);
     await expect(surface).toHaveAttribute("data-surface-level", "preview");
-    await expect(hoverBuffer).toBeVisible();
-    await expect(hoverBuffer).toHaveCSS("pointer-events", "none");
-
+    await page.screenshot({ path: testInfo.outputPath("preview-node.png") });
+    await surface.getByRole("button", { name: "Collapse E2E Surfaces card" }).click();
+    await expect(surface).toHaveAttribute("data-surface-level", "node");
     await page.waitForTimeout(450);
-    const previewBox = await cardBox(surface, "Preview card");
-    await page.mouse.move(previewBox.x + previewBox.width - 3, previewBox.y + previewBox.height / 2);
-    await expect(surface).toHaveAttribute("data-connection-hot", "true");
-    const hintBox = await hoverHint.boundingBox();
-    if (!hintBox) throw new Error("Connection hover hint geometry is unavailable");
-    expect(Math.abs(hintBox.x + hintBox.width / 2 - (previewBox.x + previewBox.width))).toBeLessThan(2);
-    await page.mouse.move(previewBox.x + previewBox.width / 2, previewBox.y + previewBox.height / 2);
+    await surface.hover({ position: { x: 48, y: 72 } });
+    await page.waitForTimeout(600);
+    await expect(surface).toHaveAttribute("data-surface-level", "node");
+    const expandButton = surface.getByRole("button", { name: "Expand E2E Surfaces card" });
+    await expect(expandButton).toHaveCSS("opacity", "1");
+    const buttonBox = await cardBox(expandButton, "Compact expand button");
+    for (const region of await surface.locator(".card-kind-icon, .card-title-group, .card-status, .react-flow__handle").all()) {
+      const regionBox = await cardBox(region, "Node content or connection region");
+      expect(buttonBox.x >= regionBox.x + regionBox.width || buttonBox.x + buttonBox.width <= regionBox.x
+        || buttonBox.y >= regionBox.y + regionBox.height || buttonBox.y + buttonBox.height <= regionBox.y).toBe(true);
+    }
+    // Traverse the hover-only control with real pointer events; it must remain reachable.
+    await page.mouse.move(buttonBox.x + buttonBox.width / 2, buttonBox.y + buttonBox.height / 2, { steps: 12 });
+    await expect(expandButton).toHaveCSS("opacity", "1");
     await expect(surface).not.toHaveAttribute("data-connection-hot", "true");
-
-    const safePoint = {
-      x: previewBox.x + previewBox.width + 17,
-      y: previewBox.y + previewBox.height + 17,
-    };
-    await page.mouse.move(safePoint.x, safePoint.y);
-    const safeHit = await page.evaluate(({ x, y }) => {
-      const hit = document.elementFromPoint(x, y) as HTMLElement | null;
-      return {
-        buffer: Boolean(hit?.closest("[data-preview-hover-buffer]")),
-        noDrag: Boolean(hit?.closest(".nodrag")),
-        handle: Boolean(hit?.closest(".react-flow__handle")),
-      };
-    }, safePoint);
-    expect(safeHit).toEqual({ buffer: false, noDrag: false, handle: false });
-    await page.waitForTimeout(320);
+    await page.screenshot({ path: testInfo.outputPath("compact-node.png") });
+    await surface.click({ position: { x: 48, y: 72 } });
+    await expect(surface).toHaveAttribute("data-surface-level", "inspector");
+    await surface.getByRole("button", { name: "Open workspace" }).click();
+    await expect(surface).toHaveAttribute("data-surface-level", "workspace");
+    await surface.getByRole("button", { name: "Close workspace" }).click();
+    await expect(surface).toHaveAttribute("data-surface-level", "inspector");
+    await surface.getByRole("button", { name: "Close E2E Surfaces inspector" }).click();
+    await expect(surface).toHaveAttribute("data-surface-level", "node");
+    await page.reload();
+    await expect(surface).toHaveAttribute("data-surface-level", "node");
+    await surface.hover({ position: { x: 48, y: 72 } });
+    await surface.getByRole("button", { name: "Expand E2E Surfaces card" }).click();
     await expect(surface).toHaveAttribute("data-surface-level", "preview");
-
-    await page.mouse.move(previewBox.x + previewBox.width / 2, previewBox.y + previewBox.height / 2);
-    const neighborBox = await cardBox(neighborSurface, "Preview-displaced neighbor");
-    const exposedNeighborPoint = { x: neighborBox.x + 4, y: neighborBox.y + 4 };
-    expect(exposedNeighborPoint.x).toBeGreaterThan(previewBox.x + previewBox.width);
-    expect(exposedNeighborPoint.x).toBeLessThanOrEqual(previewBox.x + previewBox.width + 20.5);
-    const neighborHit = await page.evaluate(({ x, y }) => {
-      const hit = document.elementFromPoint(x, y) as HTMLElement | null;
-      return {
-        cardId: hit?.closest("[data-card-id]")?.getAttribute("data-card-id") ?? null,
-        buffer: Boolean(hit?.closest("[data-preview-hover-buffer]")),
-        noDrag: Boolean(hit?.closest(".nodrag")),
-        handle: Boolean(hit?.closest(".react-flow__handle")),
-      };
-    }, exposedNeighborPoint);
-    expect(neighborHit).toEqual({
-      cardId: neighbor.id,
-      buffer: false,
-      noDrag: false,
-      handle: false,
-    });
-
-    await page.mouse.move(exposedNeighborPoint.x, exposedNeighborPoint.y);
-    await page.mouse.down();
-    await expect(neighborSurface).toHaveAttribute("data-surface-level", "node");
-    await page.mouse.move(exposedNeighborPoint.x + 100, exposedNeighborPoint.y + 65, { steps: 8 });
-    await page.mouse.up();
-    await expectPersistedMovement(request, neighbor.id, neighborPosition);
-
-    await page.mouse.move(previewBox.x + previewBox.width + 36, previewBox.y + previewBox.height / 2);
-    await expect(surface).toHaveAttribute("data-surface-level", "node", { timeout: 1000 });
+    await page.waitForTimeout(450);
+    await surface.click({ modifiers: ["Shift"] });
+    await expect(surface).toHaveAttribute("data-surface-level", "preview");
+    await surface.click();
+    await expect(surface).toHaveAttribute("data-surface-level", "inspector");
+    await page.keyboard.press("Escape");
+    await expect(surface).toHaveAttribute("data-surface-level", "preview");
   } finally {
     await request.delete(`/api/nodes/${card.id}`);
-    await request.delete(`/api/nodes/${neighbor.id}`);
   }
 });
 
@@ -505,17 +505,21 @@ test("inspector-displaced compact and preview surfaces can be dragged without ho
     const inspectorSurface = page.locator(`[data-card-id="${inspector.id}"]`);
     const compactSurface = page.locator(`[data-card-id="${compact.id}"]`);
     const previewSurface = page.locator(`[data-card-id="${preview.id}"]`);
-    await expect(inspectorSurface).toHaveAttribute("data-surface-level", "node");
+    await compactSurface.getByRole("button", { name: "Collapse E2E Reflow Compact card" }).click();
+    await expect(inspectorSurface).toHaveAttribute("data-surface-level", "preview");
     await expect(compactSurface).toHaveAttribute("data-surface-level", "node");
-    await expect(previewSurface).toHaveAttribute("data-surface-level", "node");
+    await expect(previewSurface).toHaveAttribute("data-surface-level", "preview");
 
     await inspectorSurface.click();
     await expect(inspectorSurface).toHaveAttribute("data-surface-level", "inspector");
+    // The inspector initially covers the compact node while its neighbors move out.
+    // Wait for the exposed drag region before choosing a screen-space start point.
+    await compactSurface.hover({ position: { x: 48, y: 72 } });
 
     const compactBefore = await cardBox(compactSurface, "Compact card before active reflow drag");
     const compactStart = {
       x: compactBefore.x + compactBefore.width / 2,
-      y: compactBefore.y + compactBefore.height / 2,
+      y: compactBefore.y + compactBefore.height * 0.75,
     };
     await page.mouse.move(compactStart.x, compactStart.y);
     await page.mouse.down();
