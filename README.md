@@ -137,3 +137,4 @@ See [architecture](docs/architecture.md) and [sandbox security contract](docs/se
 ## POC boundary
 
 This is a local experimental environment, not a production multi-user service. It includes a trusted backend plugin registration foundation, but intentionally omits accounts, a plugin marketplace or isolation boundary for plugin code, cloud execution, multiplayer collaboration, and arbitrary host filesystem access. Sandbox security is fail-closed, but the code should still be reviewed before using it with hostile workloads.
+- Live Legion container cards with persistent membership, shared state tools, team instructions and model settings, Run admission pause, cross-boundary edges, and reusable templates. See [Legion team spaces](docs/legions.md).

@@ -55,19 +55,19 @@ test("sandbox card confirms folder settings and follows runtime metadata (mock A
   await expect(panel.getByRole("status")).toHaveText("Stopped");
   await expect(panel.getByText("Linux namespaces in WSL2", { exact: true })).toBeVisible();
   await expect(panel.getByText("/bin/sh -c", { exact: true })).toBeVisible();
-  await panel.getByLabel("Working folder").fill("D:\\projects\\demo");
+  await panel.getByLabel("Working folder", { exact: true }).fill("D:\\projects\\demo");
   await panel.getByLabel("Folder access").selectOption("read_only");
   await expect(panel.getByRole("button", { name: "Start", exact: true })).toBeDisabled();
   await panel.getByRole("button", { name: "Save", exact: true }).click();
   await expect(panel.getByRole("alert")).toHaveText("Working folder does not exist.");
-  await expect(panel.getByLabel("Working folder")).toHaveValue("D:\\projects\\demo");
+  await expect(panel.getByLabel("Working folder", { exact: true })).toHaveValue("D:\\projects\\demo");
   await expect(panel.getByText("Unsaved changes", { exact: true })).toBeVisible();
   expect(card.config.workspace_path).toBeNull();
 
   rejectSave = false;
   await panel.getByRole("button", { name: "Save", exact: true }).click();
   await expect(panel.getByText("Saving…", { exact: true })).toBeVisible();
-  await expect(panel.getByLabel("Working folder")).toBeDisabled();
+  await expect(panel.getByLabel("Working folder", { exact: true })).toBeDisabled();
   await expect(panel.getByRole("button", { name: "Start", exact: true })).toBeDisabled();
   expect(savedRequest).toEqual({ runtime: "auto", workspace_path: "D:\\projects\\demo", workspace_access: "read_only" });
   releaseSave!();
@@ -76,7 +76,7 @@ test("sandbox card confirms folder settings and follows runtime metadata (mock A
   await expect(panel.getByRole("status")).toHaveText("Ready");
   await panel.locator(".sandbox-settings > summary").click();
   await expect(panel.getByRole("combobox", { name: "Runtime", exact: true })).toBeDisabled();
-  await expect(panel.getByLabel("Working folder")).toBeDisabled();
+  await expect(panel.getByLabel("Working folder", { exact: true })).toBeDisabled();
   await panel.locator(".sandbox-settings > summary").click();
   await panel.getByLabel("Terminal", { exact: false }).fill("printf 'hello'");
   await panel.getByRole("button", { name: "Execute command" }).click();
@@ -87,6 +87,6 @@ test("sandbox card confirms folder settings and follows runtime metadata (mock A
   await panel.screenshot({ path: testInfo.outputPath("sandbox-ready-dark.png") });
   await panel.getByRole("button", { name: "Stop", exact: true }).click();
   await expect(panel.getByRole("status")).toHaveText("Stopped");
-  await expect(panel.getByLabel("Working folder")).toBeEnabled();
+  await expect(panel.getByLabel("Working folder", { exact: true })).toBeEnabled();
   await expect(panel.getByRole("combobox", { name: "Runtime", exact: true })).toBeDisabled();
 });

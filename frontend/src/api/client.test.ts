@@ -12,6 +12,11 @@ afterEach(() => {
 });
 
 describe("API normalization boundary", () => {
+  it("keeps display metadata out of restorable Legion settings", () => {
+    const card = normalizeCard({ id: "team", type: "legion", config: { instruction: "Review", status: "available" }, resource: { status: "available" } });
+    expect(card.config).toEqual({ instruction: "Review", status: "available" });
+    expect(normalizeCard(card).config).toEqual(card.config);
+  });
   it("discovers server runtimes and sends terminal text without choosing a frontend shell", async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string) => new Response(JSON.stringify(
       url.endsWith("/sandbox/runtimes") ? { runtimes: [], default_runtime: null } : { stdout: "hello", exit_code: 0 },

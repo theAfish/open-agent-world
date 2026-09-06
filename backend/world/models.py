@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 class CardType(StrEnum):
+    LEGION = "legion"
     AGENT = "agent"
     CONVERSATION = "conversation"
     TEXT = "text"
@@ -67,6 +68,19 @@ class AgentConfig(BaseModel):
     status: AgentStatus = AgentStatus.IDLE
     runtime_provider_id: str | None = None
     max_concurrent_runs: Annotated[int, Field(ge=1, le=64)] = 1
+    inherit_legion_model: bool = True
+    legion_role: str = Field(default="", max_length=200)
+
+
+class LegionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["available"] = "available"
+    description: str = Field(default="", max_length=2000)
+    instruction: str = Field(default="", max_length=16000)
+    model_override: str = Field(default="", max_length=200)
+    paused: bool = False
+    shared_state_access: Literal["read_only", "read_write"] = "read_write"
 
 
 class TextConfig(BaseModel):
@@ -109,7 +123,7 @@ class ConversationConfig(BaseModel):
     description: str = "A shared field for durable human and agent conversations."
 
 
-ConfigValue = AgentConfig | ConversationConfig | TextConfig | ImageConfig | SandboxConfig
+ConfigValue = AgentConfig | ConversationConfig | TextConfig | ImageConfig | SandboxConfig | LegionConfig
 
 
 class ResourceSummary(BaseModel):
@@ -135,6 +149,7 @@ class CardCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     id: str | None = None
+    parent_id: str | None = Field(default=None, max_length=100)
     type: str = Field(min_length=1, max_length=128)
     name: str | None = Field(default=None, min_length=1, max_length=200)
     position: Point = Field(default_factory=Point)
@@ -149,6 +164,8 @@ class CardCreate(BaseModel):
 class CardPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    parent_id: str | None = Field(default=None, max_length=100)
+
     name: str | None = Field(default=None, min_length=1, max_length=200)
     position: Point | None = None
     size: Size | None = None
@@ -160,7 +177,7 @@ class CardPatch(BaseModel):
 class CardsDelete(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    node_ids: Annotated[list[str], Field(min_length=1, max_length=100)]
+    node_ids: Annotated[list[str], Field(min_length=1, max_length=101)]
 
     @field_validator("node_ids")
     @classmethod
@@ -180,7 +197,7 @@ class CardBatchPatch(BaseModel):
 class CardsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    updates: Annotated[list[CardBatchPatch], Field(min_length=1, max_length=100)]
+    updates: Annotated[list[CardBatchPatch], Field(min_length=1, max_length=101)]
 
     @field_validator("updates")
     @classmethod
@@ -195,6 +212,7 @@ class Card(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
+    parent_id: str | None = None
     type: str
     name: str
     position: Point

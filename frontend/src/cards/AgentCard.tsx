@@ -44,6 +44,14 @@ export function AgentCardBody({ card }: { card: WorldCard; level: NodeSurfaceLev
 
   return (
     <div className="expanded-stack">
+      {card.parent_id && <section className="card-section">
+        <div className="section-heading"><span>Legion: {cards.find((c) => c.id === card.parent_id)?.name ?? "Team"}</span></div>
+        <label className="field-label"><span>Member role</span><input key={String(card.config.legion_role ?? "")} defaultValue={String(card.config.legion_role ?? "")} maxLength={200} placeholder="Planner, executor, reviewer"
+          onBlur={(e) => { if (e.target.value !== card.config.legion_role) void updateCard(card.id, { config: { legion_role: e.target.value } }); }} /></label>
+        <label><input type="checkbox" checked={card.config.inherit_legion_model !== false}
+          onChange={(e) => void updateCard(card.id, { config: { inherit_legion_model: e.target.checked } })} /> Use team model override</label>
+        <p>Team instructions and shared state are included at the start of each Run.</p>
+      </section>}
       <div className="field-row">
         <label>
           <span>Model</span>

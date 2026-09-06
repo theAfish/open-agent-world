@@ -1789,3 +1789,34 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   .world-shell:has(.component-palette:is(:hover, :focus-within)) .world-controls.react-flow__controls,
   .world-shell:has(.component-palette:is(:hover, :focus-within)) .edge-inspector { bottom: 180px; }
 }
+.legion-container { width: 100%; height: 100%; border: 1px solid #82958c; border-radius: 24px; background: color-mix(in srgb, var(--surface, #f6f4ec) 82%, transparent); box-shadow: inset 0 0 0 7px #82958c0c; position: relative; }
+.legion-container.is-selected { outline: 2px solid #698b7d; outline-offset: 4px; }
+.legion-container-header { display: flex; align-items: center; gap: 16px; height: 76px; padding: 0 24px; border-bottom: 1px solid #82958c44; color: var(--text-primary); cursor: grab; }
+.legion-container-header > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 0 1 260px; }
+.legion-container-header > div > span { font-size: 10px; letter-spacing: 2px; color: #70867b; }
+.legion-container-header input { font: inherit; font-size: 19px; font-weight: 600; color: inherit; border: 0; background: transparent; width: 100%; min-width: 0; }
+.legion-container-header > button, .legion-container-header > svg { flex-shrink: 0; }
+.legion-count { margin-left: auto; font-size: 12px; opacity: .75; white-space: nowrap; }
+.legion-controls { position: absolute; top: 94px; left: 22px; width: 268px; bottom: 22px; overflow-y: auto; padding-right: 12px; display: flex; flex-direction: column; gap: 12px; }
+.legion-controls .field-label { display: flex; flex-direction: column; gap: 7px; }
+.legion-controls input, .legion-controls textarea, .legion-controls select { width: 100%; min-width: 0; box-sizing: border-box; border-radius: 8px; border: 1px solid #82958c55; padding: 8px; background: var(--surface, #f6f4ec); color: inherit; font: inherit; font-size: 12px; }
+.legion-controls textarea { resize: vertical; }
+.legion-controls > * { flex-shrink: 0; }
+.legion-controls .legion-state-editor { font-family: monospace; font-size: 11px; }
+.legion-help { font-size: 11px; line-height: 1.5; opacity: .65; margin: 0; }
+.legion-error { color: #b75442; font-size: 12px; margin: 0; }
+.legion-member-list { display: flex; flex-direction: column; gap: 7px; max-height: 120px; overflow-y: auto; }
+.legion-member-list > div { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.legion-member-list span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.legion-member-list button { font-size: 11px; border: 0; background: transparent; color: inherit; opacity: .7; cursor: pointer; }
+.legion-empty { position: absolute; top: 200px; left: 340px; right: 40px; text-align: center; opacity: .5; font-size: 14px; line-height: 2; pointer-events: none; }
+
+.shared-variables-editor { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.shared-variables-editor legend { font-size: 12px; font-weight: 600; padding: 0 0 8px; }
+.shared-variable-row { border: 1px solid var(--line); background: var(--surface-soft); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 7px; }
+.variable-name-row, .variable-value-row { display: flex; align-items: flex-start; gap: 6px; }
+.variable-name-row input { flex: 1; }
+.legion-controls .variable-value-row > select:first-child { width: 85px; flex-shrink: 0; }
+.variable-value-row textarea { flex: 1; }
+.variable-remove { background: transparent; border: 0; color: var(--ink-soft); padding: 8px 0; cursor: pointer; }
+.variables-empty { color: var(--ink-faint); font-size: 12px; margin: 0; line-height: 1.6; }

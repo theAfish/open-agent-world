@@ -5,7 +5,7 @@ metadata. `StateStore` is the authority for persisted scopes, per-key values,
 merge behavior, revisions, and inherited reads.
 
 Each scope has one stable identity for `(scope_kind, owner_id)`. Scope kinds are
-open strings: the built-ins are `world`, `agent`, `session`, and `run`, while
+open strings: the built-ins are `world`, `legion`, `agent`, `session`, and `run`, while
 plugins and future task/group/controller primitives may introduce additional
 kinds. A `StateContext` orders persisted scopes from broadest to most local.
 Resolution walks that stack in reverse and reports both the value and its source
@@ -14,6 +14,7 @@ explicit destination scope.
 
 ```text
 world:default
+  -> legion:<legion card id> (for members)
   -> agent:<agent id>
     -> session:<context id> (when present)
       -> run:<run id>

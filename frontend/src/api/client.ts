@@ -117,6 +117,7 @@ export function normalizeCard(input: unknown): WorldCard {
   }
   return {
     id: String(source.id),
+    parent_id: typeof source.parent_id === "string" ? source.parent_id : null,
     type,
     name: String(source.name ?? config.filename ?? type),
     position: {
@@ -129,7 +130,7 @@ export function normalizeCard(input: unknown): WorldCard {
     },
     expanded: Boolean(source.expanded),
     status: String(config.status ?? source.status ?? (type === "sandbox" ? "stopped" : type === "agent" ? "idle" : "available")) as CardStatus,
-    config,
+    config: type === "legion" ? { ...asRecord(source.config) } : config,
     created_at: typeof source.created_at === "string" ? source.created_at : undefined,
     updated_at: typeof source.updated_at === "string" ? source.updated_at : undefined,
   };
@@ -265,6 +266,19 @@ export const worldApi = {
     return normalizeWorldSnapshot(body);
   },
 
+  async formLegionGroup(name: string, nodeIds: string[]): Promise<WorldCard[]> {
+    const body = await request<unknown[]>("/legion-groups", { method: "POST", body: JSON.stringify({ name, node_ids: nodeIds }) });
+    return body.map(normalizeCard);
+  },
+
+  getLegionState(id: string): Promise<{ value: Record<string, unknown>; revision: number }> {
+    return request(`/legion-groups/${encodeURIComponent(id)}/state`);
+  },
+
+  saveLegionState(id: string, value: Record<string, unknown>, revision: number): Promise<{ value: Record<string, unknown>; revision: number }> {
+    return request(`/legion-groups/${encodeURIComponent(id)}/state`, { method: "PUT", body: JSON.stringify({ value, expected_revision: revision }) });
+  },
+
   async getLegions(): Promise<LegionSummary[]> {
     const body = await request<unknown>("/legions");
     const source = asRecord(body);
@@ -292,7 +306,7 @@ export const worldApi = {
   async instantiateLegion(id: string, position: { x: number; y: number }): Promise<LegionInstantiation> {
     const body = await request<unknown>(`/legions/${encodeURIComponent(id)}/instances`, {
       method: "POST",
-      body: JSON.stringify({ position }),
+      body: JSON.stringify({ position, as_group: true }),
     });
     return normalizeLegionInstantiation(body);
   },
@@ -301,6 +315,7 @@ export const worldApi = {
     const payload = {
       ...("id" in node ? { id: node.id } : {}),
       type: node.type,
+      parent_id: node.parent_id,
       name: node.name,
       position: node.position,
       size: node.size,
@@ -381,7 +396,7 @@ export const worldApi = {
   }): Promise<WorldEdge> {
     const body = await request<unknown>("/edges", {
       method: "POST",
-      body: JSON.stringify(input),
+      body: JSON.stringify({ id: input.id, source: input.source, target: input.target, relationship: input.relationship, direction: input.direction }),
     });
     return normalizeEdge(unwrap(body, "edge"));
   },

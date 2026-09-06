@@ -233,6 +233,11 @@ class Database:
             card_columns = {
                 row["name"] for row in self._connection.execute("PRAGMA table_info(cards)")
             }
+            if "parent_id" not in card_columns:
+                self._connection.execute(
+                    "ALTER TABLE cards ADD COLUMN parent_id TEXT REFERENCES cards(id) ON DELETE SET NULL"
+                )
+            self._connection.execute("CREATE INDEX IF NOT EXISTS cards_parent_idx ON cards(parent_id)")
             if "plugin_id" not in card_columns:
                 self._connection.execute(
                     "ALTER TABLE cards ADD COLUMN plugin_id TEXT NOT NULL "

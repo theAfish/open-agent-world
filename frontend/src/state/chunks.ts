@@ -38,7 +38,19 @@ export function getViewportChunkKeys(
 
 export function filterCardsToChunks(cards: WorldCard[], keys: Iterable<string>): WorldCard[] {
   const keySet = keys instanceof Set ? keys : new Set(keys);
-  return cards.filter((card) => keySet.has(positionToChunk(card.position).key));
+  const visible = new Set(cards.filter((card) => keySet.has(positionToChunk(card.position).key)).map((c) => c.id));
+  for (const group of cards.filter((c) => c.type === "legion")) {
+    const members = cards.filter((c) => c.parent_id === group.id);
+    const intersects = [...keySet].some((key) => {
+      const [x, y] = key.split(":").map(Number);
+      return group.position.x < (x + 1) * CHUNK_SIZE && group.position.x + group.size.width >= x * CHUNK_SIZE
+        && group.position.y < (y + 1) * CHUNK_SIZE && group.position.y + group.size.height >= y * CHUNK_SIZE;
+    });
+    if (intersects || members.some((c) => visible.has(c.id))) {
+      visible.add(group.id); members.forEach((c) => visible.add(c.id));
+    }
+  }
+  return cards.filter((card) => visible.has(card.id));
 }
 
 export function viewportCenterToWorld(viewport: FlowViewportState): WorldPosition {

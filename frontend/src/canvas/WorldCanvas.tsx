@@ -16,6 +16,7 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { LegionCardNode } from "../cards/LegionCard";
 import { WorldCardNode } from "../cards/CardFrame";
 import type { CanvasNode, CanvasNodeData } from "../cards/types";
 import { EdgeInspector } from "../edges/EdgeInspector";
@@ -35,7 +36,7 @@ import {
   type SurfaceObstacle,
 } from "./nodeDisplacement";
 
-const nodeTypes = { worldCard: WorldCardNode };
+const nodeTypes = { worldCard: WorldCardNode, legion: LegionCardNode };
 const edgeTypes = { semantic: SemanticEdge };
 
 function isScrollableArea(target: EventTarget | null, boundary: HTMLElement): boolean {
@@ -59,7 +60,7 @@ function nodeFromCard(
   const size = NODE_SURFACE_SIZE[surfaceLevel];
   return {
     id: card.id,
-    type: "worldCard",
+    type: card.type === "legion" ? "legion" : "worldCard",
     position: positionSurfaceAtNodeCenter(position, surfaceLevel),
     data: { card, surfaceLevel, displaced },
     style: { width: size.width, height: size.height },
@@ -95,6 +96,7 @@ export function WorldCanvas() {
   const setViewportState = useWorldStore((state) => state.setViewport);
   const updateCardPositions = useWorldStore((state) => state.updateCardPositions);
   const createCard = useWorldStore((state) => state.createCard);
+  const updateCard = useWorldStore((state) => state.updateCard);
   const instantiateLegion = useWorldStore((state) => state.instantiateLegion);
   const requestConnection = useWorldStore((state) => state.requestConnection);
   const selectEdge = useWorldStore((state) => state.selectEdge);
@@ -114,25 +116,33 @@ export function WorldCanvas() {
     surfaceLevelForNode(card.id, surfaceLevelsByNodeId),
   ])), [renderCards, surfaceLevelsByNodeId]);
   const surfaceObstacles = useMemo<SurfaceObstacle[]>(() => renderCards.flatMap<SurfaceObstacle>((card) => {
+    if (card.type === "legion" || card.parent_id) return [];
     const level = surfaceLevels.get(card.id);
     return level === "inspector" || level === "workspace" ? [{ card, level }] : [];
   }), [renderCards, surfaceLevels]);
   const displacedById = useMemo(
-    () => displacedPositions(renderCards, surfaceObstacles, surfaceLevels),
+    () => displacedPositions(renderCards.filter((c) => c.type !== "legion" && !c.parent_id), surfaceObstacles, surfaceLevels),
     [renderCards, surfaceLevels, surfaceObstacles],
   );
-  const mappedNodes = useMemo(
-    () => renderCards.map((card) => {
+  const mappedNodes = useMemo(() => {
+    const byId = new Map(renderCards.map((c) => [c.id, c]));
+    return [...renderCards].sort((a, b) => Number(a.type !== "legion") - Number(b.type !== "legion")).map((card) => {
+      const level = surfaceLevels.get(card.id) ?? "preview";
       const displaced = displacedById.get(card.id);
-      return nodeFromCard(
-        card,
-        surfaceLevels.get(card.id) ?? "preview",
-        displaced?.displaced ?? false,
-        displaced?.position ?? card.position,
-      );
-    }),
-    [displacedById, renderCards, surfaceLevels],
-  );
+      const node = nodeFromCard(card, level, displaced?.displaced ?? false, displaced?.position ?? card.position);
+      if (card.type === "legion") {
+        const members = renderCards.filter((c) => c.parent_id === card.id);
+        const width = Math.max(card.size.width, ...members.map((c) => c.position.x - card.position.x + NODE_SURFACE_SIZE[surfaceLevels.get(c.id) ?? "preview"].width + 40));
+        const height = Math.max(card.size.height, ...members.map((c) => c.position.y - card.position.y + NODE_SURFACE_SIZE[surfaceLevels.get(c.id) ?? "preview"].height + 40));
+        return { ...node, position: card.position, style: { width, height }, zIndex: 0, dragHandle: ".legion-drag-region", connectable: false };
+      }
+      if (card.parent_id && byId.has(card.parent_id)) {
+        const parent = byId.get(card.parent_id)!;
+        return { ...node, parentId: parent.id, position: { x: card.position.x - parent.position.x, y: card.position.y - parent.position.y }, extent: "parent" as const };
+      }
+      return node;
+    });
+  }, [displacedById, renderCards, surfaceLevels]);
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(mappedNodes);
   const nodesRef = useRef(nodes);
   const positionAnimation = useRef<number>();
@@ -317,12 +327,18 @@ export function WorldCanvas() {
     setDragging(false);
     activeDragIds.current.clear();
     const moved = draggedNodes.length > 0 ? draggedNodes : [node];
-    const updates = [...new Map(moved.map((draggedNode) => [draggedNode.id, {
-      id: draggedNode.id,
-      position: nodePositionFromSurfacePosition(draggedNode.position, draggedNode.data.surfaceLevel),
-    }])).values()];
+    const movedIds = new Set(moved.map((n) => n.id));
+    const updates = moved.filter((n) => !n.parentId || !movedIds.has(n.parentId)).map((draggedNode) => {
+      const parent = cards.find((c) => c.id === draggedNode.parentId);
+      return {
+        id: draggedNode.id,
+        position: parent ? { x: draggedNode.position.x + parent.position.x, y: draggedNode.position.y + parent.position.y }
+          : draggedNode.data.card.type === "legion" ? draggedNode.position
+          : nodePositionFromSurfacePosition(draggedNode.position, draggedNode.data.surfaceLevel),
+      };
+    });
     void updateCardPositions(updates);
-  }, [cancelPositionAnimation, setDragging, updateCardPositions]);
+  }, [cancelPositionAnimation, cards, setDragging, updateCardPositions]);
 
   const onConnect = useCallback((connection: Connection) => {
     requestConnection(connection.source, connection.target);
@@ -352,13 +368,18 @@ export function WorldCanvas() {
     const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
     if (payload.kind === "node") {
       if (!getNodeType(catalog, payload.type)) return;
-      void createCard(payload.type, position);
+      const parent = [...cards].reverse().find((card) => card.type === "legion"
+        && position.x >= card.position.x + 320 && position.x < card.position.x + card.size.width
+        && position.y >= card.position.y + 90 && position.y < card.position.y + card.size.height);
+      void createCard(payload.type, position).then((created) => {
+        if (created && created.type !== "legion" && parent) void updateCard(created.id, { parent_id: parent.id });
+      });
       return;
     }
     const legion = legions.find((item) => item.id === payload.id);
     if (!legion || legion.revision !== payload.revision) return;
     void instantiateLegion(payload.id, position);
-  }, [catalog, createCard, instantiateLegion, legions, screenToFlowPosition]);
+  }, [cards, catalog, createCard, instantiateLegion, legions, screenToFlowPosition, updateCard]);
 
   return (
     <div
@@ -411,7 +432,7 @@ export function WorldCanvas() {
         nodeDragThreshold={5}
         nodeClickDistance={5}
         edgesFocusable
-        elevateNodesOnSelect
+        elevateNodesOnSelect={false}
         proOptions={{ hideAttribution: true }}
         aria-label="Open Agent World spatial canvas"
       >

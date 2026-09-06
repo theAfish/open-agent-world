@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import math
 from collections.abc import Coroutine, Mapping
 from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
@@ -814,7 +815,10 @@ class ApplicationServices:
     async def update_card(self, card_id: str, request: CardPatch) -> Card:
         async with self._node_mutation():
             current = self.world.get_card(card_id)
+            if current.type == "legion" and request.position is not None:
+                return (await self.update_cards([CardBatchPatch(node_id=card_id, patch=request)]))[0]
             updated = self.world.preview_update_card(card_id, request)
+            self._validate_membership_change(current, updated)
             lifecycle = self.plugins.node_type(current.type).lifecycle
             context = self._node_lifecycle_context()
             transaction = (
@@ -842,11 +846,22 @@ class ApplicationServices:
 
     async def update_cards(self, updates: list[CardBatchPatch]) -> list[Card]:
         async with self._node_mutation():
+            updates = list(updates)
+            requested = {item.node_id for item in updates}
+            for item in tuple(updates):
+                group = self.world.get_card(item.node_id)
+                if group.type == "legion" and item.patch.position is not None:
+                    dx, dy = item.patch.position.x - group.position.x, item.patch.position.y - group.position.y
+                    for member in self.world.list_members(group.id):
+                        if member.id not in requested:
+                            updates.append(CardBatchPatch(node_id=member.id, patch=CardPatch(position={"x": member.position.x + dx, "y": member.position.y + dy})))
+                            requested.add(member.id)
             context = self._node_lifecycle_context()
             prepared: list[tuple[CardBatchPatch, NodeLifecycleTransaction]] = []
             for item in updates:
                 current = self.world.get_card(item.node_id)
                 updated = self.world.preview_update_card(item.node_id, item.patch)
+                self._validate_membership_change(current, updated)
                 lifecycle = self.plugins.node_type(current.type).lifecycle
                 transaction = (
                     await lifecycle.prepare_update(
@@ -893,6 +908,9 @@ class ApplicationServices:
         async with self._node_mutation():
             ids = list(dict.fromkeys(card_ids))
             cards = [self.world.get_card(card_id) for card_id in ids]
+            for card in cards:
+                if card.type == "legion" and any(m.id not in ids for m in self.world.list_members(card.id)):
+                    raise GraphValidationError("Detach Legion members before deleting their container")
             attached_edges: dict[str, Edge] = {}
             for card in cards:
                 for edge in (
@@ -1406,6 +1424,18 @@ class ApplicationServices:
     ) -> WorldSnapshot:
         async with self._node_mutation(read_only=True):
             cards = self.world.list_cards(chunks)
+            if chunks is not None:
+                by_id = {card.id: card for card in cards}
+                requested = set(chunks)
+                for group in self.world.list_legion_groups():
+                    covered = any((x, y) in requested
+                                  for x in range(math.floor(group.position.x / self.world.chunk_size), math.floor((group.position.x + group.size.width) / self.world.chunk_size) + 1)
+                                  for y in range(math.floor(group.position.y / self.world.chunk_size), math.floor((group.position.y + group.size.height) / self.world.chunk_size) + 1))
+                    members = self.world.list_members(group.id)
+                    if covered or any(m.id in by_id for m in members):
+                        by_id[group.id] = group
+                        by_id.update({m.id: m for m in members})
+                cards = list(by_id.values())
             enriched = [self.enrich_card(card) for card in cards]
             card_ids = [card.id for card in cards] if chunks is not None else None
             edges = (
@@ -1425,6 +1455,38 @@ class ApplicationServices:
                 chunk_size=self.world.chunk_size,
             )
 
+    def _validate_membership_change(self, current: Card, updated: Card) -> None:
+        if current.parent_id == updated.parent_id or current.type != "agent":
+            return
+        if self.run_manager is not None and any(
+            run.status not in TERMINAL_RUN_STATUSES for run in self.run_manager.list_runs(agent_id=current.id)
+        ):
+            raise ConflictError("Stop the Agent's active Runs before changing Legion membership")
+
+    async def form_legion_group(self, name: str, node_ids: list[str]) -> list[Card]:
+        async with self._node_mutation():
+            cards = [self.world.get_card(node_id) for node_id in dict.fromkeys(node_ids)]
+            if not cards or any(c.type == "legion" or c.parent_id for c in cards):
+                raise GraphValidationError("Select ungrouped member cards to form a Legion")
+            x = min(c.position.x for c in cards) - 320
+            y = min(c.position.y for c in cards) - 90
+            width = max(1100, max(c.position.x + c.size.width for c in cards) - x + 60)
+            height = max(700, max(c.position.y + c.size.height for c in cards) - y + 60)
+            if width > 4096 or height > 4096:
+                raise GraphValidationError("Move the selected cards closer together before grouping")
+            group_id = str(uuid4())
+            for card in cards:
+                self._validate_membership_change(card, card.model_copy(update={"parent_id": group_id}))
+            with self.world.database.transaction(immediate=True) as connection:
+                group = self.world.create_card(CardCreate(id=group_id, type="legion", name=name,
+                    position={"x": x, "y": y}, size={"width": width, "height": height}), _connection=connection)
+                members = self.world.update_cards([CardBatchPatch(node_id=c.id, patch=CardPatch(parent_id=group.id)) for c in cards], _connection=connection)
+            self._publish_card_created_nowait(group)
+            for member in members:
+                await self.events.publish(EventType.CARD_UPDATED, node_id=member.id,
+                                          payload={"node": self.enrich_card(member).model_dump(mode="json")})
+            return [group, *[self.enrich_card(m) for m in members]]
+
     async def capture_legion(self, request: LegionCapture) -> LegionSummary:
         # Commands may mutate read-write hard links before their resource
         # revisions are refreshed. Captures take the exclusive side of this
@@ -1434,7 +1496,13 @@ class ApplicationServices:
                 return await self._capture_legion_locked(request)
 
     async def _capture_legion_locked(self, request: LegionCapture) -> LegionSummary:
+        selected_ids = list(request.node_ids)
+        for node_id in request.node_ids:
+            if self.world.get_card(node_id).type == "legion":
+                selected_ids.extend(m.id for m in self.world.list_members(node_id))
+        request = request.model_copy(update={"node_ids": list(dict.fromkeys(selected_ids))})
         cards = [self.world.get_card(node_id) for node_id in request.node_ids]
+        cards.sort(key=lambda card: card.type != "legion")
         edges = self.world.list_edges(request.node_ids)
         card_revisions = {card.id: card.revision for card in cards}
         edge_revisions = {edge.id: edge.revision for edge in edges}
@@ -1445,6 +1513,11 @@ class ApplicationServices:
                 else None
             )
             for card in cards
+        }
+        from backend.legions.runtime import read_shared_state
+        shared_states = {
+            card.id: read_shared_state(self.world, self.state, card.id)
+            for card in cards if card.type == "legion"
         }
         node_keys = {
             card.id: f"node-{index + 1}" for index, card in enumerate(cards)
@@ -1517,6 +1590,8 @@ class ApplicationServices:
                 definition.template_handler.validate_payload(payload, payload_version)
             template_node = LegionTemplateNode(
                 key=node_keys[card.id],
+                parent_key=node_keys.get(card.parent_id),
+                initial_shared_state=shared_states[card.id]["value"] if card.id in shared_states else None,
                 type=card.type,
                 plugin_id=self.plugins.node_type_owner_id(card.type),
                 name=card.name,
@@ -1581,6 +1656,10 @@ class ApplicationServices:
             raise RevisionConflictError(
                 "the world changed while the Legion was being captured; retry"
             )
+
+        if any(read_shared_state(self.world, self.state, group_id) != captured
+               for group_id, captured in shared_states.items()):
+            raise RevisionConflictError("Legion shared variables changed during capture; retry")
 
         template_edges = [
             LegionTemplateEdge(
@@ -1656,10 +1735,20 @@ class ApplicationServices:
             str, tuple[NodeLifecycleTransaction, ...]
         ] = {}
         try:
-            for node in record.blueprint.nodes:
+            wrapper = None
+            if request.as_group and not any(n.type == "legion" for n in record.blueprint.nodes):
+                wrapper = await self._create_card(CardCreate(
+                    type="legion", name=record.name,
+                    position={"x": request.position.x - 320, "y": request.position.y - 90},
+                    size={"width": min(4096, record.blueprint.bounds.width + 380), "height": min(4096, max(700, record.blueprint.bounds.height + 150))},
+                    config={"description": record.description},
+                ), _creation_receipts=creation_receipts, _publish_event=False)
+                created_nodes.append(wrapper)
+            for node in sorted(record.blueprint.nodes, key=lambda n: n.type != "legion"):
                 created_nodes.append(await self._create_card(
                     CardCreate(
                         id=node_ids[node.key],
+                        parent_id=node_ids[node.parent_key] if node.parent_key else (wrapper.id if wrapper else None),
                         type=node.type,
                         name=node.name,
                         position={
@@ -1676,6 +1765,10 @@ class ApplicationServices:
                     _creation_receipts=creation_receipts,
                     _publish_event=False,
                 ))
+                if node.initial_shared_state is not None:
+                    from backend.legions.runtime import LegionStateWrite, write_shared_state
+                    write_shared_state(self.world, self.state, node_ids[node.key],
+                                       LegionStateWrite(value=node.initial_shared_state, expected_revision=0))
             for edge in record.blueprint.edges:
                 created_edges.append(await self.create_edge(EdgeCreate(
                     source=node_ids[edge.source],

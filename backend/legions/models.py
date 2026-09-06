@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from typing import Any, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -20,7 +21,7 @@ class LegionCapture(BaseModel):
 
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=500)
-    node_ids: Annotated[list[str], Field(min_length=2, max_length=100)]
+    node_ids: Annotated[list[str], Field(min_length=2, max_length=101)]
 
     @field_validator("name")
     @classmethod
@@ -47,6 +48,7 @@ class LegionInstantiate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     position: Point = Field(default_factory=Point)
+    as_group: bool = False
 
 
 class LegionTemplateDependency(BaseModel):
@@ -69,6 +71,8 @@ class LegionTemplateNode(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     key: str
+    parent_key: str | None = None
+    initial_shared_state: dict[str, Any] | None = None
     type: str
     plugin_id: str
     name: str
@@ -83,6 +87,11 @@ class LegionTemplateNode(BaseModel):
 
     @model_validator(mode="after")
     def require_payload_version_pair(self) -> "LegionTemplateNode":
+        if self.initial_shared_state is not None:
+            if self.type != "legion":
+                raise ValueError("Only Legion containers may define initial shared state")
+            if len(json.dumps(self.initial_shared_state).encode("utf-8")) > 64 * 1024:
+                raise ValueError("Legion shared state is limited to 64 KiB")
         if (self.payload is None) != (self.payload_version is None):
             raise ValueError("payload and payload_version must be provided together")
         return self
@@ -106,6 +115,18 @@ class LegionBlueprint(BaseModel):
     bounds: LegionBounds
     nodes: list[LegionTemplateNode]
     edges: list[LegionTemplateEdge]
+
+    @model_validator(mode="after")
+    def validate_memberships(self) -> "LegionBlueprint":
+        nodes = {node.key: node for node in self.nodes}
+        if len(nodes) != len(self.nodes):
+            raise ValueError("Template node keys must be unique")
+        for node in self.nodes:
+            if node.parent_key is not None:
+                parent = nodes.get(node.parent_key)
+                if node.type == "legion" or parent is None or parent.type != "legion":
+                    raise ValueError("Template parents must reference a Legion; nesting is not supported")
+        return self
 
 
 class LegionRecord(BaseModel):

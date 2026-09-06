@@ -69,6 +69,22 @@ class CapabilityBroker:
                         input_schema=dict(grant.input_schema),
                     )
                 )
+        if agent.parent_id:
+            group = self.world.get_card(agent.parent_id)
+            for operation in ("read", "patch"):
+                if operation == "patch" and group.config.get("shared_state_access") != "read_write":
+                    continue
+                kind = f"legion.state.{operation}"
+                capabilities.append(Capability(
+                    id=f"{kind}:{group.id}", tool_name=f"{operation}_legion_state", kind=kind,
+                    agent_id=agent.id, target_id=group.id, target_type=group.type, target_name=group.name,
+                    description=("Read shared team state and revision." if operation == "read" else
+                                 "Merge top-level keys into shared team state. Read first and supply the revision; refresh on conflict."),
+                    input_schema={"type": "object", "properties": {} if operation == "read" else {
+                        "value": {"type": "object", "description": "Top-level state keys to merge."},
+                        "expected_revision": {"type": "integer", "description": "Revision returned by read_legion_state."},
+                    }, "required": [] if operation == "read" else ["value", "expected_revision"], "additionalProperties": False},
+                ))
         return CapabilitySet(agent_id=agent.id, capabilities=capabilities)
 
     def require_agent_communicate(self, agent_id: str, target_agent_id: str) -> None:

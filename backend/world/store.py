@@ -5,6 +5,7 @@ import math
 import re
 import sqlite3
 from datetime import UTC, datetime
+from contextlib import nullcontext
 from typing import Any, Iterable
 from uuid import uuid4
 
@@ -116,10 +117,36 @@ class WorldStore:
     ) -> dict[str, Any]:
         return self.registry.validate_config(card_type, value)
 
+    def validate_parent(self, card_id: str, card_type: str, parent_id: str | None) -> None:
+        if parent_id is None:
+            return
+        if card_type == "legion" or parent_id == card_id:
+            raise GraphValidationError("Nested Legions are not supported")
+        parent = self.get_card(parent_id)
+        if parent.type != "legion":
+            raise GraphValidationError("A card parent must be a Legion")
+        with self.database.locked() as connection:
+            count = connection.execute(
+                "SELECT count(*) FROM cards WHERE parent_id = ? AND id <> ?", (parent_id, card_id)
+            ).fetchone()[0]
+        if count >= 100:
+            raise GraphValidationError("A Legion supports at most 100 members")
+
+    def list_legion_groups(self) -> list[Card]:
+        with self.database.locked() as connection:
+            rows = connection.execute("SELECT * FROM cards WHERE type = 'legion' ORDER BY created_at, id").fetchall()
+        return [self._card_from_row(row) for row in rows]
+
+    def list_members(self, parent_id: str) -> list[Card]:
+        with self.database.locked() as connection:
+            rows = connection.execute("SELECT * FROM cards WHERE parent_id = ? ORDER BY created_at, id", (parent_id,)).fetchall()
+        return [self._card_from_row(row) for row in rows]
+
     def preview_card(self, request: CardCreate, *, card_id: str | None = None) -> Card:
         """Validate a create request and materialize its node without persistence."""
 
         resolved_id = _id_or_new(card_id if card_id is not None else request.id)
+        self.validate_parent(resolved_id, request.type, request.parent_id)
         now = utc_now()
         definition = self.registry.node_type(request.type)
         self.registry.validate_creation_fields(
@@ -136,6 +163,7 @@ class WorldStore:
         config = self._validate_config(request.type, raw_config)
         return Card(
             id=resolved_id,
+            parent_id=request.parent_id,
             type=request.type,
             name=request.name or definition.default_name,
             position=request.position,
@@ -149,7 +177,7 @@ class WorldStore:
             revision=1,
         )
 
-    def create_card(self, request: CardCreate, *, card_id: str | None = None) -> Card:
+    def create_card(self, request: CardCreate, *, card_id: str | None = None, _connection: sqlite3.Connection | None = None) -> Card:
         card = self.preview_card(request, card_id=card_id)
         values = (
             card.id,
@@ -166,15 +194,16 @@ class WorldStore:
             card.chunk[1],
             card.created_at.isoformat(),
             card.updated_at.isoformat(),
+            card.parent_id,
         )
         try:
-            with self.database.transaction(immediate=True) as connection:
+            with (nullcontext(_connection) if _connection is not None else self.database.transaction(immediate=True)) as connection:
                 connection.execute(
                     """
                     INSERT INTO cards (
                         id, type, plugin_id, name, x, y, width, height, expanded,
-                        config_json, chunk_x, chunk_y, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        config_json, chunk_x, chunk_y, created_at, updated_at, parent_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     values,
                 )
@@ -219,6 +248,8 @@ class WorldStore:
         if not changes:
             return current
 
+        parent_id = changes.get("parent_id", current.parent_id)
+        self.validate_parent(card_id, current.type, parent_id)
         name = changes.get("name") or current.name
         position = request.position or current.position
         size = request.size or current.size
@@ -237,7 +268,7 @@ class WorldStore:
                 UPDATE cards
                 SET name = ?, x = ?, y = ?, width = ?, height = ?, expanded = ?,
                     config_json = ?, chunk_x = ?, chunk_y = ?, updated_at = ?,
-                    revision = revision + 1
+                    revision = revision + 1, parent_id = ?
                 WHERE id = ?
                 """,
                 (
@@ -251,6 +282,7 @@ class WorldStore:
                     self._chunk(position.x),
                     self._chunk(position.y),
                     now,
+                    parent_id,
                     card_id,
                 ),
             )
@@ -258,7 +290,7 @@ class WorldStore:
                 raise NotFoundError(f"card {card_id!r} does not exist")
         return self.get_card(card_id)
 
-    def update_cards(self, updates: Iterable[CardBatchPatch]) -> list[Card]:
+    def update_cards(self, updates: Iterable[CardBatchPatch], *, _connection: sqlite3.Connection | None = None) -> list[Card]:
         """Validate every patch, then persist the full batch in one transaction."""
 
         items = list(updates)
@@ -273,14 +305,14 @@ class WorldStore:
             if item.patch.model_dump(exclude_unset=True)
         ]
         if changed:
-            with self.database.transaction(immediate=True) as connection:
+            with (nullcontext(_connection) if _connection is not None else self.database.transaction(immediate=True)) as connection:
                 for item, preview in changed:
                     cursor = connection.execute(
                         """
                         UPDATE cards
                         SET name = ?, x = ?, y = ?, width = ?, height = ?, expanded = ?,
                             config_json = ?, chunk_x = ?, chunk_y = ?, updated_at = ?,
-                            revision = revision + 1
+                            revision = revision + 1, parent_id = ?
                         WHERE id = ?
                         """,
                         (
@@ -294,6 +326,7 @@ class WorldStore:
                             preview.chunk[0],
                             preview.chunk[1],
                             preview.updated_at.isoformat(),
+                            preview.parent_id,
                             item.node_id,
                         ),
                     )
@@ -301,6 +334,9 @@ class WorldStore:
                         raise NotFoundError(
                             f"card {item.node_id!r} no longer exists"
                         )
+                oversized = connection.execute("SELECT parent_id FROM cards WHERE parent_id IS NOT NULL GROUP BY parent_id HAVING count(*) > 100").fetchone()
+                if oversized is not None:
+                    raise GraphValidationError("A Legion supports at most 100 members")
         return [self.get_card(item.node_id) for item in items]
 
     def preview_update_card(self, card_id: str, request: CardPatch) -> Card:
@@ -310,6 +346,8 @@ class WorldStore:
         changes = request.model_dump(exclude_unset=True)
         if not changes:
             return current
+        parent_id = changes.get("parent_id", current.parent_id)
+        self.validate_parent(card_id, current.type, parent_id)
         name = changes.get("name") or current.name
         position = request.position or current.position
         size = request.size or current.size
@@ -322,6 +360,7 @@ class WorldStore:
             config = {**config, "status": request.status}
         config = self._validate_config(current.type, config)
         return current.model_copy(update={
+            "parent_id": parent_id,
             "name": name,
             "position": position,
             "size": size,
@@ -341,6 +380,9 @@ class WorldStore:
         if not ids:
             return []
         cards = [self.get_card(card_id) for card_id in ids]
+        for card in cards:
+            if card.type == "legion" and any(member.id not in ids for member in self.list_members(card.id)):
+                raise GraphValidationError("Detach Legion members before deleting their container")
         placeholders = ",".join("?" for _ in ids)
         with self.database.transaction(immediate=True) as connection:
             connection.execute(
@@ -354,6 +396,7 @@ class WorldStore:
                 """,
                 ids,
             )
+            connection.execute(f"DELETE FROM state_scopes WHERE scope_kind = 'legion' AND owner_id IN ({placeholders})", ids)
             cursor = connection.execute(
                 f"DELETE FROM cards WHERE id IN ({placeholders})", ids
             )
@@ -588,6 +631,7 @@ class WorldStore:
         config = json.loads(row["config_json"])
         return Card(
             id=row["id"],
+            parent_id=row["parent_id"],
             type=card_type,
             name=row["name"],
             position={"x": row["x"], "y": row["y"]},

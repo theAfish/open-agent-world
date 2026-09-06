@@ -143,6 +143,22 @@ class WorldAgentCapabilityProvider:
         capability = self.services.capabilities.capability_for_id(
             agent_id, capability_id
         )
+        if capability.kind in {"legion.state.read", "legion.state.patch"}:
+            from backend.legions.runtime import LegionStateWrite, read_shared_state, write_shared_state
+            from pydantic import ValidationError
+            async with self.services._node_mutation():
+                self.services.capabilities.capability_for_id(agent_id, capability_id)
+                if capability.kind == "legion.state.read":
+                    if arguments:
+                        raise ResourceValidationError("State read takes no arguments")
+                    return read_shared_state(self.services.world, self.services.state, capability.target_id)
+                try:
+                    request = LegionStateWrite.model_validate(dict(arguments))
+                except ValidationError as exc:
+                    raise ResourceValidationError(str(exc)) from exc
+                context = self.services._require_run_manager().current_context
+                return write_shared_state(self.services.world, self.services.state, capability.target_id,
+                                          request, actor_id=agent_id, run_id=context.run_id if context else None, merge=True)
         handler = self.services.plugins.capability_handler(capability.kind)
         return await handler(_CapabilityContext(self.services), capability, dict(arguments))
 

@@ -34,6 +34,7 @@ from backend.world.models import (
     CardPatch,
     ConversationConfig,
     ImageConfig,
+    LegionConfig,
     SandboxConfig,
     TextConfig,
 )
@@ -713,6 +714,12 @@ def _register_builtin(registry: PluginRegistration) -> None:
     registry.register_state_schema(StateSchema(id="core.world", fields={
         **common_fields("world"),
     }))
+    registry.register_state_schema(StateSchema(id="core.legion", fields={
+        "shared_working_memory": StateFieldDefinition(
+            value_type=dict[str, Any], allowed_scope_kinds=frozenset({"legion"}),
+            merge_policy=MergePolicy.MERGE_DICT, default={},
+        ),
+    }))
     registry.register_state_schema(StateSchema(id="core.agent", fields={
         **common_fields("agent"),
         "memory": StateFieldDefinition(
@@ -725,6 +732,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
     run_only = frozenset({"run"})
     registry.register_state_schema(StateSchema(id="core.run", fields={
         **common_fields("run"),
+        "legion_context": StateFieldDefinition(value_type=dict[str, Any], allowed_scope_kinds=run_only),
         "input": StateFieldDefinition(
             value_type=str, allowed_scope_kinds=run_only
         ),
@@ -779,6 +787,14 @@ def _register_builtin(registry: PluginRegistration) -> None:
         lifecycle=AgentNodeBehavior(),
         templateable=True, template_status="idle",
         template_handler=AgentNodeTemplateHandler(),
+    ))
+    registry.register_node_type(NodeTypeDefinition(
+        id="legion", label="Legion", description="Team space with shared context and settings",
+        icon="workflow", color="#697c78", deck_id="fields", deck_label="Fields",
+        deck_icon="workflow", default_name="New Legion", default_size=(1100, 700),
+        default_status="available", statuses=frozenset({"available"}),
+        config_model=LegionConfig, traits=frozenset({"core.legion"}),
+        templateable=True,
     ))
     registry.register_node_type(NodeTypeDefinition(
         id="conversation", label="Conversation", description="Shared communication field",

@@ -3,6 +3,12 @@ import { CHUNK_SIZE, filterCardsToChunks, getViewportChunkKeys, positionToChunk 
 import { buildCardDraft } from "./helpers";
 
 describe("world chunks", () => {
+  it("keeps a spanning Legion and its members together across chunk boundaries", () => {
+    const group = { id: "group", ...buildCardDraft("agent", { x: 1800, y: 100 }), type: "legion", size: { width: 1100, height: 700 } };
+    const member = { id: "member", ...buildCardDraft("agent", { x: 2400, y: 200 }), parent_id: group.id };
+    expect(filterCardsToChunks([group, member], ["1:0"]).map((c) => c.id)).toEqual(["group", "member"]);
+    expect(filterCardsToChunks([group, member], ["9:9"])).toEqual([]);
+  });
   it("indexes positive and negative world coordinates consistently", () => {
     expect(positionToChunk({ x: 0, y: 0 }).key).toBe("0:0");
     expect(positionToChunk({ x: CHUNK_SIZE, y: -1 }).key).toBe("1:-1");
@@ -18,4 +24,3 @@ describe("world chunks", () => {
     expect(filterCardsToChunks([near, far], keys).map((card) => card.id)).toEqual(["near"]);
   });
 });
-

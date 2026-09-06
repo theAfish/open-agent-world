@@ -64,6 +64,45 @@ describe("authoritative world synchronization", () => {
     });
   });
 
+  it("forms, undoes and restores a team without recreating its existing members", async () => {
+    const first = card("first", "agent");
+    const second = card("second", "text");
+    const group = { ...card("group", "agent"), type: "legion", size: { width: 1100, height: 700 } };
+    const grouped = [first, second].map((c) => ({ ...c, parent_id: group.id }));
+    useWorldStore.setState({ cards: [first, second] });
+    vi.spyOn(worldApi, "formLegionGroup").mockResolvedValue([group, ...grouped]);
+    vi.spyOn(worldApi, "getLegionState").mockResolvedValue({ value: { phase: "review" }, revision: 2 });
+    const saveState = vi.spyOn(worldApi, "saveLegionState").mockResolvedValue({ value: { phase: "review" }, revision: 1 });
+    const create = vi.spyOn(worldApi, "createNode").mockResolvedValue(group);
+    const remove = vi.spyOn(worldApi, "deleteNode").mockResolvedValue();
+    vi.spyOn(worldApi, "batchUpdateNodes").mockImplementation(async (updates) => updates.map((item) => ({
+      ...useWorldStore.getState().cards.find((c) => c.id === item.node_id)!, ...item.patch,
+    })));
+    await useWorldStore.getState().formLegionGroup([first.id, second.id]);
+    expect(useWorldStore.getState().cards.find((c) => c.id === first.id)?.parent_id).toBe(group.id);
+    await useWorldStore.getState().undo();
+    expect(remove).toHaveBeenCalledWith(group.id);
+    expect(useWorldStore.getState().cards.map((c) => c.parent_id)).toEqual([null, null]);
+    await useWorldStore.getState().redo();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(saveState).toHaveBeenCalledWith(group.id, { phase: "review" }, 0);
+    expect(useWorldStore.getState().cards.find((c) => c.id === first.id)?.parent_id).toBe(group.id);
+  });
+
+  it("moves every member once and preserves membership when undoing the move", async () => {
+    const group = { ...card("group", "agent"), type: "legion" };
+    const member = { ...card("member", "agent"), parent_id: group.id, position: { x: 400, y: 200 } };
+    useWorldStore.setState({ cards: [group, member] });
+    const batch = vi.spyOn(worldApi, "batchUpdateNodes").mockImplementation(async (updates) => updates.map((item) => ({
+      ...useWorldStore.getState().cards.find((c) => c.id === item.node_id)!, ...item.patch,
+    })));
+    await useWorldStore.getState().updateCardPositions([{ id: group.id, position: { x: 100, y: 70 } }]);
+    expect(batch.mock.calls[0][0]).toHaveLength(2);
+    expect(useWorldStore.getState().cards.find((c) => c.id === member.id)?.position).toEqual({ x: 500, y: 270 });
+    await useWorldStore.getState().undo();
+    expect(useWorldStore.getState().cards.find((c) => c.id === member.id)).toMatchObject({ parent_id: group.id, position: { x: 400, y: 200 } });
+  });
+
   it("replaces local graph state with the backend snapshot on initialization", async () => {
     const agent = card("agent", "agent");
     const text = card("text", "text");

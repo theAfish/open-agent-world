@@ -87,6 +87,7 @@ export interface CardConfig extends Record<string, unknown> {
 
 export interface WorldCard {
   id: string;
+  parent_id?: string | null;
   type: CardType;
   name: string;
   position: WorldPosition;
