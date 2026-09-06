@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Authoritative world and capability backend for Open Agent World"
 requires-python = ">=3.11"
 dependencies = [
+    "cryptography>=45,<51",
     "fastapi>=0.116,<1",
     "pydantic>=2.11,<3",
     "uvicorn[standard]>=0.35,<1",

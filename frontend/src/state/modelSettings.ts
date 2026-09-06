@@ -1,12 +1,14 @@
 export interface ModelSettings {
   baseUrl: string;
   apiKey: string;
+  apiKeyConfigured: boolean;
   models: string[];
 }
 
 export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
   baseUrl: "",
   apiKey: "",
+  apiKeyConfigured: false,
   models: [
     "openai/gpt-4o-mini",
     "openai/gpt-4.1-mini",
@@ -16,7 +18,7 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettings = {
 };
 
 const MODEL_SETTINGS_KEY = "oaw-model-settings";
-const SESSION_API_KEY = "oaw-litellm-api-key";
+const LEGACY_SESSION_API_KEY = "oaw-litellm-api-key";
 
 export function normalizeModelList(value: string | string[]): string[] {
   const entries = Array.isArray(value) ? value : value.split(/\r?\n/);
@@ -32,16 +34,15 @@ export function readModelSettings(): ModelSettings {
   } catch {
     stored = {};
   }
-  let apiKey = "";
+  // Remove credentials saved by older builds. Secrets now stay on the backend.
   try {
-    apiKey = window.sessionStorage.getItem(SESSION_API_KEY) ?? "";
-  } catch {
-    apiKey = "";
-  }
+    window.sessionStorage.removeItem(LEGACY_SESSION_API_KEY);
+  } catch { /* storage may be unavailable */ }
   const models = normalizeModelList(stored.models ?? DEFAULT_MODEL_SETTINGS.models);
   return {
     baseUrl: typeof stored.baseUrl === "string" ? stored.baseUrl : "",
-    apiKey,
+    apiKey: "",
+    apiKeyConfigured: false,
     models: models.length > 0 ? models : [...DEFAULT_MODEL_SETTINGS.models],
   };
 }
@@ -53,11 +54,7 @@ export function persistModelSettings(settings: ModelSettings): void {
       MODEL_SETTINGS_KEY,
       JSON.stringify({ baseUrl: settings.baseUrl, models: settings.models }),
     );
-    if (settings.apiKey) {
-      window.sessionStorage.setItem(SESSION_API_KEY, settings.apiKey);
-    } else {
-      window.sessionStorage.removeItem(SESSION_API_KEY);
-    }
+    window.sessionStorage.removeItem(LEGACY_SESSION_API_KEY);
   } catch {
     // Settings remain available in Zustand for this browser session.
   }

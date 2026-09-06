@@ -561,8 +561,12 @@ export const worldApi = {
     return request<ConversationSession[]>(`/agents/${encodeURIComponent(agentId)}/conversation-sessions`);
   },
 
-  configureLlm(settings: { base_url: string; api_key: string }): Promise<Record<string, unknown>> {
-    return request<Record<string, unknown>>("/settings/llm", {
+  getLlmSettings(): Promise<{ base_url: string; api_key_configured: boolean }> {
+    return request("/settings/llm");
+  },
+
+  configureLlm(settings: { base_url: string; api_key: string | null; clear_api_key: boolean }): Promise<{ base_url: string; api_key_configured: boolean }> {
+    return request("/settings/llm", {
       method: "PUT",
       body: JSON.stringify(settings),
     });

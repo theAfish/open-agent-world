@@ -10,6 +10,7 @@ describe("Sandbox application settings", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     useWorldStore.setState({ settingsOpen: true });
+    vi.spyOn(worldApi, "getLlmSettings").mockResolvedValue({ base_url: "", api_key_configured: false });
     vi.spyOn(worldApi, "getSandboxSettings").mockResolvedValue({ workspace_root: "D:\\Workspaces", runtime: "auto" });
     vi.spyOn(worldApi, "getSandboxRuntimes").mockResolvedValue({ default_runtime: "windows", runtimes: [
       { id: "windows", label: "Windows", platform: "windows", available: true, reason: null, shell: [], supports_workspace: true },
@@ -66,5 +67,36 @@ describe("Sandbox application settings", () => {
     expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("shows saved-key status without loading the secret into the browser", async () => {
+    vi.mocked(worldApi.getLlmSettings).mockResolvedValue({
+      base_url: "https://example.test/v1",
+      api_key_configured: true,
+    });
+    const saveModel = vi.spyOn(useWorldStore.getState(), "saveModelSettings").mockResolvedValue(true);
+    render(<SettingsPanel />);
+
+    const key = await screen.findByLabelText("API key") as HTMLInputElement;
+    await waitFor(() => expect(key.placeholder).toContain("Saved securely"));
+    expect(key.value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => expect(saveModel).toHaveBeenCalled());
+    expect(saveModel.mock.calls[0][0].apiKey).toBe("");
+    expect(saveModel.mock.calls[0][1]).toBe(false);
+  });
+
+  it("only removes a persisted key after an explicit user action", async () => {
+    vi.mocked(worldApi.getLlmSettings).mockResolvedValue({ base_url: "", api_key_configured: true });
+    const saveModel = vi.spyOn(useWorldStore.getState(), "saveModelSettings").mockResolvedValue(true);
+    render(<SettingsPanel />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove saved key" }));
+    expect(screen.getByText("The saved key will be removed when you save.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => expect(saveModel).toHaveBeenCalled());
+    expect(saveModel.mock.calls[0][1]).toBe(true);
   });
 });

@@ -34,12 +34,26 @@ class AgentRunRequest(BaseModel):
 
 
 class LlmSettingsRequest(BaseModel):
-    """Runtime-only connection overrides for ADK's LiteLLM model adapter."""
+    """Persistent connection settings for ADK's LiteLLM model adapter."""
 
     model_config = ConfigDict(extra="forbid")
 
     base_url: Annotated[str, Field(max_length=2_048)] = ""
-    api_key: Annotated[str, Field(max_length=4_096)] = ""
+    api_key: Annotated[str, Field(max_length=4_096)] | None = None
+    clear_api_key: bool = False
+
+    @model_validator(mode="after")
+    def validate_secret_change(self) -> "LlmSettingsRequest":
+        if self.clear_api_key and self.api_key:
+            raise ValueError("api_key and clear_api_key cannot be used together")
+        return self
+
+
+class LlmSettingsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_url: str
+    api_key_configured: bool
 
 
 class SandboxExecuteRequest(BaseModel):
@@ -132,14 +146,30 @@ async def stop_agent(
     return await services.stop_agent(agent_id)
 
 
-@router.put("/settings/llm")
+@router.get("/settings/llm", response_model=LlmSettingsResponse)
+async def get_llm_settings(
+    services: ApplicationServices = Depends(get_services),
+) -> LlmSettingsResponse:
+    settings = services.get_llm_connection_settings()
+    return LlmSettingsResponse(
+        base_url=settings.base_url,
+        api_key_configured=settings.api_key_configured,
+    )
+
+
+@router.put("/settings/llm", response_model=LlmSettingsResponse)
 async def configure_llm(
     request: LlmSettingsRequest,
     services: ApplicationServices = Depends(get_services),
-) -> dict[str, bool]:
-    return await services.configure_llm_connection(
+) -> LlmSettingsResponse:
+    settings = await services.configure_llm_connection(
         base_url=request.base_url.strip() or None,
-        api_key=request.api_key or None,
+        api_key=request.api_key,
+        clear_api_key=request.clear_api_key,
+    )
+    return LlmSettingsResponse(
+        base_url=settings.base_url,
+        api_key_configured=settings.api_key_configured,
     )
 
 

@@ -11,7 +11,6 @@ export function RuntimeConnection() {
   const ingestEvent = useWorldStore((state) => state.ingestEvent);
   const setSocketState = useWorldStore((state) => state.setSocketState);
   const refreshWorld = useWorldStore((state) => state.refreshWorld);
-  const restoreModelConnection = useWorldStore((state) => state.restoreModelConnection);
 
   useEffect(() => {
     let active = true;
@@ -35,7 +34,6 @@ export function RuntimeConnection() {
         lastMessageAt = Date.now();
         setSocketState("live");
         void refreshWorld();
-        void restoreModelConnection();
         stopHeartbeat();
         heartbeatTimer = window.setInterval(() => {
           if (!socket || socket.readyState !== WebSocket.OPEN) return;
@@ -80,7 +78,7 @@ export function RuntimeConnection() {
       if (retryTimer) window.clearTimeout(retryTimer);
       socket?.close();
     };
-  }, [ingestEvent, refreshWorld, restoreModelConnection, setSocketState]);
+  }, [ingestEvent, refreshWorld, setSocketState]);
 
   return null;
 }

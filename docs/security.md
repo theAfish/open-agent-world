@@ -50,6 +50,6 @@ The implementation must never compensate by launching an ordinary host process.
 
 ## Trust zones
 
-The FastAPI process and Agent runtime may hold model credentials. Sandbox processes are untrusted and never receive those values. Resource access crosses the boundary only through explicit graph relationships and the controlled workspace.
+The FastAPI process and Agent runtime may hold model credentials. Saved model credentials use authenticated encryption at rest, are never returned to the browser after submission, and are never stored in browser storage. The database contains only ciphertext. Its encryption key is stored separately with owner-only permissions and is additionally bound to the backend's Windows account through DPAPI on Windows. Sandbox processes are untrusted and never receive those values. Resource access crosses the boundary only through explicit graph relationships and the controlled workspace.
 
 Operational logs may contain commands and program output, but they must not contain hidden model reasoning or copied host environment values.

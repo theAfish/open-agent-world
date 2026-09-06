@@ -21,6 +21,7 @@ from backend.agents import (
 from backend.capabilities.broker import CapabilityBroker
 from backend.config import Settings
 from backend.sandbox.settings import SandboxSettingsStore
+from backend.security import LlmPublicSettings, LlmSettingsStore
 from backend.conversations import (
     ConversationAgent,
     ConversationMessage,
@@ -514,6 +515,7 @@ class ApplicationServices:
     conversations: ConversationStore
     state: StateStore
     legions: LegionStore
+    llm_settings: LlmSettingsStore
     run_manager: RunManager | None = None
     sandbox_backend: SandboxBackend | None = None
     _node_mutation_lock: asyncio.Lock = field(
@@ -2595,16 +2597,28 @@ class ApplicationServices:
         }
 
     async def configure_llm_connection(
-        self, *, base_url: str | None, api_key: str | None
-    ) -> dict[str, bool]:
+        self,
+        *,
+        base_url: str | None,
+        api_key: str | None,
+        clear_api_key: bool = False,
+    ) -> LlmPublicSettings:
         runtime = self._require_run_manager().default_provider()
         if not isinstance(runtime, GoogleAdkAgentRuntime):
             raise RuntimeUnavailableError("ADK agent runtime is not configured")
-        runtime.configure_litellm_connection(
-            api_base=base_url,
+        saved = self.llm_settings.save(
+            base_url=base_url or "",
             api_key=api_key,
+            clear_api_key=clear_api_key,
         )
-        return {"configured": True}
+        runtime.configure_litellm_connection(
+            api_base=saved.base_url or None,
+            api_key=saved.api_key,
+        )
+        return saved.public()
+
+    def get_llm_connection_settings(self) -> LlmPublicSettings:
+        return self.llm_settings.read().public()
 
     async def start_sandbox(self, sandbox_id: str) -> Any:
         async with self._node_mutation():
@@ -3228,6 +3242,7 @@ def create_services(
         conversations=conversations,
         state=state,
         legions=legions,
+        llm_settings=LlmSettingsStore(database, settings.data_root),
         sandbox_backend=sandbox_backend,
     )
     from backend.capabilities.provider import WorldAgentCapabilityProvider
@@ -3250,6 +3265,19 @@ def create_services(
     )
     for provider_id, runtime_provider in (runtime_providers or {}).items():
         services.install_runtime_provider(provider_id, runtime_provider)
+    saved_llm = services.llm_settings.read()
+    if (
+        (saved_llm.base_url or saved_llm.api_key)
+        and services.run_manager.default_runtime_provider_id is not None
+    ):
+        default_provider = services.run_manager.default_provider()
+    else:
+        default_provider = None
+    if isinstance(default_provider, GoogleAdkAgentRuntime):
+        default_provider.configure_litellm_connection(
+            api_base=saved_llm.base_url or None,
+            api_key=saved_llm.api_key,
+        )
     if services.sandbox_backend is None and settings.sandbox_runtime is not None:
         services.sandbox_backend = SandboxManager(
             settings.data_root,

@@ -320,8 +320,7 @@ interface WorldState {
   toggleActivity: () => void;
   setActivityOpen: (open: boolean) => void;
   toggleSettings: () => void;
-  saveModelSettings: (settings: ModelSettings) => Promise<boolean>;
-  restoreModelConnection: () => Promise<void>;
+  saveModelSettings: (settings: ModelSettings, clearApiKey?: boolean) => Promise<boolean>;
   togglePalette: () => void;
   toggleTheme: () => void;
   generateStressWorld: (count?: number) => void;
@@ -425,7 +424,6 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
           detail: `${legionError} The canvas remains available.`,
         });
       }
-      await get().restoreModelConnection();
     } catch (error) {
       const message = apiErrorMessage(error);
       set({ syncState: "offline", syncError: message });
@@ -1552,10 +1550,11 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   setActivityOpen: (activityOpen) => set({ activityOpen }),
   toggleSettings: () => set((state) => ({ settingsOpen: !state.settingsOpen })),
 
-  saveModelSettings: async (settings) => {
+  saveModelSettings: async (settings, clearApiKey = false) => {
     const normalized: ModelSettings = {
       baseUrl: settings.baseUrl.trim(),
       apiKey: settings.apiKey,
+      apiKeyConfigured: settings.apiKeyConfigured,
       models: normalizeModelList(settings.models),
     };
     if (normalized.models.length === 0) {
@@ -1563,10 +1562,20 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       return false;
     }
     try {
-      await worldApi.configureLlm({ base_url: normalized.baseUrl, api_key: normalized.apiKey });
-      set({ modelSettings: normalized });
-      persistModelSettings(normalized);
-      get().pushToast({ tone: "success", title: "ADK model connection saved", detail: "New Agent runs use this connection when ADK selects LiteLLM." });
+      const saved = await worldApi.configureLlm({
+        base_url: normalized.baseUrl,
+        api_key: normalized.apiKey || null,
+        clear_api_key: clearApiKey,
+      });
+      const persisted = {
+        ...normalized,
+        baseUrl: saved.base_url,
+        apiKey: "",
+        apiKeyConfigured: saved.api_key_configured,
+      };
+      set({ modelSettings: persisted });
+      persistModelSettings(persisted);
+      get().pushToast({ tone: "success", title: "Model connection saved securely", detail: "The backend will restore this connection automatically after restarts." });
       return true;
     } catch (error) {
       get().pushToast({ tone: "error", title: "Model connection was not applied", detail: apiErrorMessage(error) });
@@ -1574,19 +1583,6 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
   },
 
-  restoreModelConnection: async () => {
-    const settings = get().modelSettings;
-    if (!settings.baseUrl && !settings.apiKey) return;
-    try {
-      await worldApi.configureLlm({ base_url: settings.baseUrl, api_key: settings.apiKey });
-    } catch (error) {
-      get().pushToast({
-        tone: "error",
-        title: "Model connection was not restored",
-        detail: apiErrorMessage(error),
-      });
-    }
-  },
   togglePalette: () => set((state) => ({ paletteCollapsed: !state.paletteCollapsed })),
 
   toggleTheme: () => {

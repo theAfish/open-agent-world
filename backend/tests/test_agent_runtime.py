@@ -65,7 +65,7 @@ def test_runtime_provider_id_is_not_limited_to_builtins(
     assert Settings.from_environment().agent_runtime == "plugin.custom"
 
 
-def test_adk_litellm_connection_settings_stay_runtime_only(data_root: Path) -> None:
+def test_adk_litellm_connection_settings_are_encrypted_and_restored(data_root: Path) -> None:
     settings = Settings.for_data_root(data_root)
     runtime = GoogleAdkAgentRuntime(MutableCapabilityProvider())
     services = create_services(
@@ -81,7 +81,10 @@ def test_adk_litellm_connection_settings_stay_runtime_only(data_root: Path) -> N
                 json={"base_url": "https://llmapi.paratera.com", "api_key": "session-secret"},
             )
             assert response.status_code == 200
-            assert response.json() == {"configured": True}
+            assert response.json() == {
+                "base_url": "https://llmapi.paratera.com",
+                "api_key_configured": True,
+            }
             assert runtime._litellm_connection == {
                 "api_base": "https://llmapi.paratera.com",
                 "api_key": "session-secret",
@@ -92,6 +95,45 @@ def test_adk_litellm_connection_settings_stay_runtime_only(data_root: Path) -> N
             assert "session-secret" not in response.text
     finally:
         services.close()
+
+    database_bytes = settings.database_path.read_bytes()
+    assert b"session-secret" not in database_bytes
+    assert (data_root / "secrets" / "settings.key").is_file()
+
+    restored_runtime = GoogleAdkAgentRuntime(MutableCapabilityProvider())
+    restored_services = create_services(
+        settings,
+        runtime_providers={"google.adk": restored_runtime},
+        default_runtime_provider_id="google.adk",
+    )
+    try:
+        assert restored_runtime._litellm_connection == {
+            "api_base": "https://llmapi.paratera.com",
+            "api_key": "session-secret",
+        }
+        with TestClient(create_app(settings, services=restored_services)) as client:
+            public = client.get("/api/settings/llm")
+            assert public.json() == {
+                "base_url": "https://llmapi.paratera.com",
+                "api_key_configured": True,
+            }
+            assert "session-secret" not in public.text
+
+            kept = client.put(
+                "/api/settings/llm",
+                json={"base_url": "https://example.test/v1", "api_key": None},
+            )
+            assert kept.json()["api_key_configured"] is True
+            assert restored_runtime._litellm_connection["api_key"] == "session-secret"
+
+            cleared = client.put(
+                "/api/settings/llm",
+                json={"base_url": "https://example.test/v1", "clear_api_key": True},
+            )
+            assert cleared.json()["api_key_configured"] is False
+            assert "api_key" not in restored_runtime._litellm_connection
+    finally:
+        restored_services.close()
 
 
 def test_adk_resolves_provider_qualified_models_through_litellm() -> None:

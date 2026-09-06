@@ -14,6 +14,10 @@ export function SettingsPanel() {
   const setOpen = useWorldStore((state) => state.toggleSettings);
   const save = useWorldStore((state) => state.saveModelSettings);
   const [draft, setDraft] = useState<ModelSettings>(settings);
+  const [modelLoaded, setModelLoaded] = useState(false);
+  const [modelError, setModelError] = useState("");
+  const [modelRetry, setModelRetry] = useState(0);
+  const [clearApiKey, setClearApiKey] = useState(false);
   const [section, setSection] = useState<"model" | "sandbox">("model");
   const [sandbox, setSandbox] = useState<SandboxSettings>({ workspace_root: null, runtime: "auto" });
   const [runtimes, setRuntimes] = useState<SandboxRuntime[]>([]);
@@ -25,8 +29,28 @@ export function SettingsPanel() {
   const [retry, setRetry] = useState(0);
 
   useEffect(() => {
-    if (open) setDraft(settings);
-  }, [open, settings]);
+    if (!open) return;
+    setDraft(settings);
+    setClearApiKey(false);
+    setModelLoaded(false);
+    setModelError("");
+    let active = true;
+    worldApi.getLlmSettings()
+      .then((value) => {
+        if (!active) return;
+        setDraft((current) => ({
+          ...current,
+          baseUrl: value.base_url,
+          apiKey: "",
+          apiKeyConfigured: value.api_key_configured,
+        }));
+        setModelLoaded(true);
+      })
+      .catch((cause: unknown) => {
+        if (active) setModelError(cause instanceof Error ? cause.message : "Could not load model settings.");
+      });
+    return () => { active = false; };
+  }, [open, settings, modelRetry]);
 
   useEffect(() => {
     if (!open) return;
@@ -50,7 +74,7 @@ export function SettingsPanel() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (busy || (section === "sandbox" && !loaded)) return;
+    if (busy || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)) return;
     setBusy(true);
     setError("");
     try {
@@ -58,7 +82,7 @@ export function SettingsPanel() {
         await worldApi.saveSandboxSettings({ ...sandbox, workspace_root: sandbox.workspace_root?.trim() || null });
         setOpen();
       } else {
-        const applied = await save({ ...draft, models: draft.models.join("\n").split(/\r?\n/) });
+        const applied = await save({ ...draft, models: draft.models.join("\n").split(/\r?\n/) }, clearApiKey);
         if (applied) setOpen();
       }
     } catch (cause) {
@@ -88,16 +112,33 @@ export function SettingsPanel() {
         </nav>
 
         {section === "model" ? <div className="settings-form">
+          {!modelLoaded && !modelError && <p role="status">Loading model settings…</p>}
           <label className="field-label">
             <span><Server size={11} /> OpenAI-compatible base URL</span>
             <input value={draft.baseUrl} placeholder="https://api.openai.com/v1" onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} spellCheck={false} />
             <small>Used only when ADK resolves the selected model through its LiteLLM adapter.</small>
           </label>
-          <label className="field-label">
-            <span><KeyRound size={11} /> API key</span>
-            <input type="password" value={draft.apiKey} placeholder="sk-..." onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} autoComplete="off" spellCheck={false} />
-            <small>Kept in this browser session and ADK runtime memory; restored automatically after a backend restart, never stored in world data.</small>
-          </label>
+          <div className="field-label">
+            <label htmlFor="model-api-key"><span><KeyRound size={11} /> API key</span></label>
+            <input id="model-api-key" type="password" value={draft.apiKey}
+              placeholder={draft.apiKeyConfigured && !clearApiKey ? "Saved securely — enter a new key to replace it" : "sk-..."}
+              onChange={(event) => {
+                const apiKey = event.target.value;
+                setDraft({ ...draft, apiKey });
+                if (apiKey) setClearApiKey(false);
+              }}
+              disabled={!modelLoaded || clearApiKey} autoComplete="new-password" spellCheck={false} data-1p-ignore />
+            {draft.apiKeyConfigured && !clearApiKey
+              ? <small>A key is configured. Its value is never sent back to the browser. Leave this blank to keep it.</small>
+              : clearApiKey
+                ? <small>The saved key will be removed when you save.</small>
+                : <small>The key is encrypted on the backend and restored automatically after restarts.</small>}
+            {draft.apiKeyConfigured && <button type="button" className="secondary-button" disabled={busy}
+              onClick={() => {
+                setClearApiKey((value) => !value);
+                setDraft((current) => ({ ...current, apiKey: "" }));
+              }}>{clearApiKey ? "Keep saved key" : "Remove saved key"}</button>}
+          </div>
           <label className="field-label">
             <span>Available models</span>
             <textarea rows={7} value={draft.models.join("\n")} placeholder={'openai/gpt-4o-mini\nanthropic/claude-3-5-sonnet'} onChange={(event) => setDraft({ ...draft, models: event.target.value.split(/\r?\n/) })} spellCheck={false} />
@@ -124,11 +165,11 @@ export function SettingsPanel() {
           </label>
           <p className="settings-description">Settings are saved on the backend and survive restarts. Workspaces in your chosen folder are retained when a Sandbox is deleted.</p>
         </div>}
-        {error && <p role="alert" className="settings-error">{error} {section === "sandbox" && !loaded && <button type="button" className="secondary-button" onClick={() => setRetry((value) => value + 1)}>Retry</button>}</p>}
+        {(error || (section === "model" && modelError)) && <p role="alert" className="settings-error">{error || modelError} {section === "sandbox" && !loaded && <button type="button" className="secondary-button" onClick={() => setRetry((value) => value + 1)}>Retry</button>} {section === "model" && !modelLoaded && <button type="button" className="secondary-button" onClick={() => setModelRetry((value) => value + 1)}>Retry</button>}</p>}
 
         <footer>
           <button type="button" className="secondary-button" onClick={setOpen} disabled={busy}>Cancel</button>
-          <button type="submit" className="primary-button" disabled={busy || (section === "sandbox" && !loaded)}>{saving ? "Saving…" : "Save settings"}</button>
+          <button type="submit" className="primary-button" disabled={busy || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)}>{saving ? "Saving…" : "Save settings"}</button>
         </footer>
       </form>
     </div>
