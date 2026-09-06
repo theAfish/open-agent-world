@@ -1,5 +1,5 @@
 import { Check, Circle, GitBranch, ListTodo, Plus, RefreshCw, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
@@ -40,6 +40,8 @@ export function TaskBoardPreview({ card }: { card: WorldCard }) {
 
 function DependencyGraph({ tasks, onSelect }: { tasks: BoardTask[]; onSelect: (task: BoardTask) => void }) {
   const arrowId = useId().replaceAll(":", "");
+  const drag = useRef<{ pointerId: number; x: number; y: number; left: number; top: number; moved: boolean }>();
+  const suppressClick = useRef(false);
   const levels = new Map<string, number>();
   const byId = new Map(tasks.map((task) => [task.id, task]));
   const depth = (id: string): number => {
@@ -54,7 +56,41 @@ function DependencyGraph({ tasks, onSelect }: { tasks: BoardTask[]; onSelect: (t
     const column = depth(task.id); const row = rows.get(column) ?? 0; rows.set(column, row + 1);
     return [task.id, { x: 24 + column * 240, y: 24 + row * 90 }];
   }));
-  return <div className="task-dependency-graph nowheel" aria-label="Task dependency graph"><svg role="img" aria-label="Prerequisites flow from left to right" width={Math.max(680, (Math.max(0, ...levels.values()) + 1) * 240)} height={Math.max(270, Math.max(0, ...rows.values()) * 90 + 36)}>
+  return <div className="task-dependency-graph nowheel" aria-label="Task dependency graph"
+    onPointerDown={(event) => {
+      if (event.button !== 0) return;
+      drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop, moved: false };
+    }}
+    onPointerMove={(event) => {
+      const start = drag.current;
+      if (!start || start.pointerId !== event.pointerId) return;
+      const dx = event.clientX - start.x; const dy = event.clientY - start.y;
+      if (!start.moved && Math.hypot(dx, dy) < 4) return;
+      if (!start.moved) {
+        start.moved = true; suppressClick.current = true;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        event.currentTarget.classList.add("is-dragging");
+      }
+      event.preventDefault();
+      event.currentTarget.scrollLeft = start.left - dx;
+      event.currentTarget.scrollTop = start.top - dy;
+    }}
+    onPointerUp={(event) => {
+      const moved = drag.current?.pointerId === event.pointerId && drag.current.moved;
+      if (drag.current?.pointerId !== event.pointerId) return;
+      drag.current = undefined;
+      event.currentTarget.classList.remove("is-dragging");
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      if (moved) window.setTimeout(() => { suppressClick.current = false; }, 0);
+    }}
+    onPointerCancel={(event) => {
+      drag.current = undefined; suppressClick.current = false;
+      event.currentTarget.classList.remove("is-dragging");
+    }}
+    onClickCapture={(event) => {
+      if (!suppressClick.current) return;
+      event.preventDefault(); event.stopPropagation(); suppressClick.current = false;
+    }}><svg role="img" aria-label="Prerequisites flow from left to right" width={Math.max(680, (Math.max(0, ...levels.values()) + 1) * 240)} height={Math.max(270, Math.max(0, ...rows.values()) * 90 + 36)}>
     <defs><marker id={arrowId} markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><polygon points="0 0, 7 3.5, 0 7" fill="#8b9c94" /></marker></defs>
     {tasks.flatMap((task) => task.depends_on.map((dependency) => {
       const source = positions.get(dependency); const target = positions.get(task.id)!;
