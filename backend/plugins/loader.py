@@ -37,4 +37,7 @@ def load_plugin_registry() -> PluginRegistry:
     if not any(plugin.id == "oaw.skills" for plugin in registry.plugins()):
         from plugins.skill_packages.oaw_skill_packages import create_plugin as create_toolboxes
         registry.install(create_toolboxes())
+    if not any(plugin.id == "oaw.barracks" for plugin in registry.plugins()):
+        from plugins.agent_barracks.oaw_agent_barracks import create_plugin as create_barracks
+        registry.install(create_barracks())
     return registry

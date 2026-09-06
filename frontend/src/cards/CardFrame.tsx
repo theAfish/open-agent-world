@@ -1,3 +1,4 @@
+import { BarracksBody } from "./Barracks";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Bot, Maximize2, Minus, ExternalLink, FileText, Image as ImageIcon, MessagesSquare, Puzzle, Sparkles, Trash2, Workflow, X, type LucideIcon } from "lucide-react";
 import { memo, type ComponentType, type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef } from "react";
@@ -97,7 +98,7 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
   const definition = catalog.node_types.find((item) => item.id === card.type);
   const label = definition?.label ?? card.type;
   const Icon = ICONS[card.type] ?? CATALOG_ICONS[definition?.icon ?? ""] ?? Puzzle;
-  const Body = definition?.traits.includes("ui.skill.v1") ? SkillNodeBody : definition?.traits.includes("ui.skill-package.v1") ? SkillToolboxBody : definition?.traits.includes("ui.task-board.v1") ? TaskBoardBody : BODIES[card.type] ?? GenericCardBody;
+  const Body = definition?.traits.some((trait) => ["ui.agent-template.v1", "ui.agent-barracks.v1"].includes(trait)) ? BarracksBody : definition?.traits.includes("ui.skill.v1") ? SkillNodeBody : definition?.traits.includes("ui.skill-package.v1") ? SkillToolboxBody : definition?.traits.includes("ui.task-board.v1") ? TaskBoardBody : BODIES[card.type] ?? GenericCardBody;
   const support = nodeSurfaceSupport(card.type, catalog);
 
   useEffect(() => {

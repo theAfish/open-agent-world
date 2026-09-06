@@ -81,6 +81,7 @@ from backend.resources.models import (
 )
 from backend.runs import RunRecord, RunStatus, RunStore
 from backend.runs.manager import RunManager
+from backend.summoning import SummoningService
 from backend.node_execution import NodeExecutionService
 from backend.runs.models import TERMINAL_RUN_STATUSES
 from backend.sandbox import (
@@ -519,6 +520,7 @@ class ApplicationServices:
     llm_settings: LlmSettingsStore
     run_manager: RunManager | None = None
     node_execution: NodeExecutionService | None = None
+    summoning: SummoningService | None = None
     sandbox_backend: SandboxBackend | None = None
     _node_mutation_lock: asyncio.Lock = field(
         default_factory=asyncio.Lock, init=False, repr=False
@@ -1541,6 +1543,10 @@ class ApplicationServices:
                 return await self._capture_legion_locked(request)
 
     async def _capture_legion_locked(self, request: LegionCapture) -> LegionSummary:
+        blueprint, _ = await self._capture_subgraph_locked(request)
+        return self._legion_summary(self.legions.create(request.name, request.description, blueprint))
+
+    async def _capture_subgraph_locked(self, request):
         selected_ids = list(request.node_ids)
         for node_id in request.node_ids:
             if self.world.is_container(self.world.get_card(node_id)):
@@ -1724,16 +1730,10 @@ class ApplicationServices:
             )
             for index, edge in enumerate(edges)
         ]
-        record = self.legions.create(
-            request.name,
-            request.description,
-            LegionBlueprint(
-                bounds=LegionBounds(width=max_x - min_x, height=max_y - min_y),
-                nodes=template_nodes,
-                edges=template_edges,
-            ),
-        )
-        return self._legion_summary(record)
+        return LegionBlueprint(
+            bounds=LegionBounds(width=max_x - min_x, height=max_y - min_y),
+            nodes=template_nodes, edges=template_edges,
+        ), node_keys
 
     def list_legions(self) -> list[LegionSummary]:
         return [self._legion_summary(record) for record in self.legions.list()]
@@ -1743,13 +1743,13 @@ class ApplicationServices:
             return self._legion_summary(self.legions.delete(legion_id))
 
     async def instantiate_legion(
-        self, legion_id: str, request: LegionInstantiate
+        self, legion_id: str, request: LegionInstantiate, *, record=None, bindings=()
     ) -> LegionInstance:
         async with self._node_mutation():
             event_transaction = _SandboxEventTransaction()
             token = self._sandbox_event_transaction.set(event_transaction)
             try:
-                instance = await self._instantiate_legion_locked(legion_id, request)
+                instance = await self._instantiate_legion_locked(legion_id, request, record=record, bindings=bindings)
             except BaseException:
                 event_transaction.state = "discarded"
                 self._sandbox_event_transaction.reset(token)
@@ -1771,9 +1771,9 @@ class ApplicationServices:
             return instance
 
     async def _instantiate_legion_locked(
-        self, legion_id: str, request: LegionInstantiate
+        self, legion_id: str, request: LegionInstantiate, *, record=None, bindings=()
     ) -> LegionInstance:
-        record = self.legions.get(legion_id)
+        record = record or self.legions.get(legion_id)
         summary = self._legion_summary(record)
         if not summary.compatible:
             raise PluginCompatibilityError(
@@ -1835,6 +1835,16 @@ class ApplicationServices:
                     relationship=edge.relationship,
                     direction=edge.direction,
                 ), _publish_event=False))
+            for binding in bindings:
+                external = self.world.get_card(binding["external_id"])
+                if external.type != binding["external_type"] or self.plugins.node_type_owner_id(external.type) != binding["external_plugin_id"] or self.plugins.relationship_owner_id(binding["relationship"]) != binding["plugin_id"]:
+                    raise PluginCompatibilityError("A shared binding changed its plugin ownership or type")
+                internal = node_ids[binding["internal_key"]]
+                created_edges.append(await self.create_edge(EdgeCreate(
+                    source=internal if binding["internal_is_source"] else external.id,
+                    target=external.id if binding["internal_is_source"] else internal,
+                    relationship=binding["relationship"], direction=binding["direction"],
+                ), _publish_event=False))
         except BaseException as error:
             cleanup_errors = await self._compensate_legion_instance(
                 created_nodes, created_edges, creation_receipts, error
@@ -1847,6 +1857,7 @@ class ApplicationServices:
             raise
         return LegionInstance(
             legion_id=record.id,
+            node_ids=node_ids,
             nodes=created_nodes,
             edges=created_edges,
         )
@@ -3297,6 +3308,7 @@ def create_services(
 
     provider = WorldAgentCapabilityProvider(services)
     services.node_execution = NodeExecutionService(services)
+    services.summoning = SummoningService(services)
     services.run_manager = RunManager(
         store=RunStore(database),
         world=world,

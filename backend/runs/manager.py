@@ -405,10 +405,6 @@ class RunManager:
             # removes provider state.
             await self._join_runtime_task(run_id)
             return current
-        if propagate:
-            for child in self.list_child_runs(run_id):
-                if child.status not in TERMINAL_RUN_STATUSES:
-                    await self.cancel_run(child.run_id, propagate=True)
         try:
             record = await self.transition_run(run_id, RunStatus.CANCELLED)
         except ValueError:
@@ -432,6 +428,11 @@ class RunManager:
             task_to_wait.cancel()
         provider = self._providers.get(current.runtime_provider_id)
         try:
+            # Settle the parent first: a cancelled child wakes synchronous tool
+            # waiters, which otherwise could finish the parent as succeeded.
+            if propagate:
+                for child in self.list_child_runs(run_id):
+                    await self.cancel_run(child.run_id, propagate=True)
             if provider is not None:
                 await provider.stop(run_id)
         finally:

@@ -756,3 +756,96 @@ host-provided `node_id`; accepted children must implement the collection's docum
 shape. Child nodes remain the content source. The collection's capture callback
 omits projected entries because subgraph capture independently preserves children
 and their relationships. See the skill helper for this specialization.
+
+
+## Callable subgraphs and Agent Barracks (Plugin API 1.6)
+
+`plugins/agent_barracks` is an ordinary first-party plugin. It registers the
+`oaw.barracks` document collection, its `oaw.barracks.template` member cards, and
+an owned `oaw.barracks.summon` relationship. Both the library and its individual
+members are connectable. The common open-container frame handles drag membership,
+resizing, movement and dissolution; template cards can also stand alone.
+
+A callable template is a saved subgraph plus one entry Agent. A single Agent,
+an Agent with Skills and a Sandbox, and a Legion with multiple Agents all use
+the existing subgraph capture/restore pipeline. Plugin ownership, payloads,
+resource lifecycle compensation, membership, documents and internal relationships
+are preserved. Capturing does not add a record to the user's Legion preset list.
+Invoking a non-Legion template does not wrap it in a Legion or grant team powers.
+
+The public contracts are available from `open_agent_world.plugin_api`:
+
+```python
+from open_agent_world.plugin_api import (
+    CallableTemplate, NodeSummoningDefinition, SummoningAction, SummoningPolicy,
+)
+
+# Attached to the library's NodeTypeDefinition, with an owned capability handler:
+# summoning=NodeSummoningDefinition("acme.workers.summon", templates_field="templates")
+# An individual template omits templates_field and uses CallableTemplate as its document.
+
+async def invoke(context, capability, arguments):
+    return await context.summoning_action(capability, arguments)
+```
+
+`NodeSummoningDefinition` requires a document and a capability handler owned by
+the same plugin. The named collection field contains `CallableTemplate` documents;
+without a collection field the node document is one template. Libraries may use
+`instructions` and `policy` fields. `SummoningAction` provides the tool schema:
+`list`, `summon`, `inspect`, `message`, `stop`, and `reclaim`. `list` returns short
+names, descriptions, entry keys and copied/shared node summaries. `summon` accepts
+`template_id` and `prompt`; the remaining instance operations use `instance_id`.
+`message` also takes a prompt and reuses the instance's nodes and provider session.
+
+Every operation rederives the caller's live graph capability. A direct template
+connection lists only that template. Agent-created instances are manageable only
+by their creating Agent, through the original connected library/template. Agents
+cannot capture or edit templates through this capability. The host API for humans
+provides `GET /api/nodes/{id}/summoning`, `POST .../summoning/capture` and
+`POST .../summoning/actions`; capture uses an expected document revision.
+
+Dropping an Agent, a selection containing Agents, or a Legion into a library opens
+the capture form with those nodes selected. It creates a saved copy; source node
+positions, membership and connections stay unchanged, including when cancelled.
+The catalog exposes `summoning.templates_field` so drop handling follows the host
+contract rather than a plugin ID. Existing template cards still use ordinary
+container membership when dragged in or out.
+
+The capture form explicitly selects copied nodes, the entry Agent and existing
+connected resources to share. Unselected external edges are omitted. Copied
+Sandboxes get fresh managed workspaces; their old directory configuration and
+working files are not captured. Shared bindings retain their world IDs, node types,
+relationship directions and plugin owners. They must still exist when restored;
+an unavailable binding rolls back the whole restoration. This explicit sharing
+contract is distinct from ordinary document references which are cleared outside
+portable groups. Shared resources are never owned or deleted by the instance.
+
+A binding to the destination library is stored as `$library`. It resolves to the
+current library at invocation, allowing recursive calls without embedding the
+library in itself. For a connected individual template this means its containing
+library, or the template itself when detached. A copied child Agent receives only
+the relationships explicitly included or shared in its saved graph.
+
+Summoning starts an ordinary child Run with `caller_kind="summon"`, preserving
+parent/root lineage, state inheritance and cancellation propagation. Agent tools
+wait for the provider turn and return status, result, errors, Run ID, instance ID,
+entry Agent ID and owned node IDs. Human try returns immediately for interactive
+monitoring. Failed Runs retain their result/instance handles. An unfinished turn
+can return a waiting status; the instance remains available for inspection or stop.
+
+All summons in a root task share depth, concurrent Run and total instance limits
+(defaults 4, 4 and 16). Nested libraries can tighten the root limits. Completed or
+reclaimed instances still count toward that task's total. Admission is serialized
+with graph mutation; waiting and cancellation happen outside the mutation lock.
+Run ancestry remains independent of spatial membership.
+
+Instance records and Run results survive restart. Each new instance is placed
+beside the library and below its previous live instances. Stop settles the instance
+and its summoned descendants, including work-source batches and Runs on their owned
+Agents. Reclaim then deletes those nodes through their normal plugin lifecycle.
+User-owned cards moved into an instance are detached and preserved. Deleting a
+saved template or library does not delete already instantiated subgraphs.
+
+The UI exposes settings as ordinary form fields and shows saved template contents,
+shared bindings, invocation results, follow-up and reclaim controls. Result details
+can be collapsed without changing the canvas subgraph or ending its Runs.

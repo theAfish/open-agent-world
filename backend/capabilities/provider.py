@@ -18,6 +18,10 @@ if TYPE_CHECKING:
 class _CapabilityContext:
     services: ApplicationServices
 
+    async def summoning_action(self, capability, arguments):
+        from backend.plugins.summoning import SummoningAction
+        return await self.services.summoning.action(capability.target_id, SummoningAction.model_validate(arguments), capability=capability)
+
     async def node_execution_action(self, capability, action, arguments):
         from backend.node_execution import ExecutionRequest
         from backend.node_documents import validation_message

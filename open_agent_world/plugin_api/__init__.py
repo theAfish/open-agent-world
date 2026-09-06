@@ -1,5 +1,6 @@
 """Stable contracts for trusted Open Agent World Python plugins."""
 
+from backend.plugins.summoning import CallableTemplate, NodeSummoningDefinition, SummoningAction, SummoningPolicy
 from backend.plugins.documents import NodeDocumentAction, NodeDocumentDefinition, NodeDocumentDownload
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import ExecutionPolicy, NodeExecutionDefinition, WorkItem, WorkOutcome
@@ -66,6 +67,7 @@ from backend.runs import InvocationContext, RuntimeInput
 from backend.world.models import Card, CardCreate, CardPatch, Edge
 
 __all__ = [
+    "CallableTemplate", "NodeSummoningDefinition", "SummoningAction", "SummoningPolicy",
     "ExecutionPolicy",
     "NodeExecutionDefinition",
     "WorkItem",

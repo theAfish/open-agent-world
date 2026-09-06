@@ -1,3 +1,4 @@
+import type { SummoningSnapshot, SummonedInstance } from "../cards/Barracks";
 import type {
   CardConfig,
   CardStatus,
@@ -258,6 +259,18 @@ export const worldApi = {
       method: "PUT", body: JSON.stringify(settings),
     });
   },
+  async getSummoning(id: string): Promise<SummoningSnapshot> {
+    return request(`/nodes/${encodeURIComponent(id)}/summoning`);
+  },
+
+  async captureSummoning(id: string, args: Record<string, unknown>): Promise<SummoningSnapshot> {
+    return request(`/nodes/${encodeURIComponent(id)}/summoning/capture`, { method: "POST", body: JSON.stringify(args) });
+  },
+
+  async summoningAction(id: string, args: Record<string, unknown>): Promise<SummonedInstance> {
+    return request(`/nodes/${encodeURIComponent(id)}/summoning/actions`, { method: "POST", body: JSON.stringify(args) });
+  },
+
   async getNodeDocument(id: string): Promise<{ value: Record<string, unknown>; revision: number; summary: Record<string, unknown> }> {
     return request(`/nodes/${encodeURIComponent(id)}/document`);
   },

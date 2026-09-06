@@ -170,5 +170,6 @@ class LegionInstance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     legion_id: str
+    node_ids: dict[str, str] = Field(default_factory=dict)
     nodes: list[Card]
     edges: list[Edge]

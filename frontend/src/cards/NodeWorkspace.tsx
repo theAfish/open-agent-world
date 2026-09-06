@@ -1,3 +1,4 @@
+import { BarracksBody } from "./Barracks";
 import {
   Bot,
   Boxes,
@@ -161,6 +162,7 @@ export function WorkspaceSurface({ card }: WorkspaceSurfaceProps) {
       <WorkspaceTitlebar card={card} />
       <div className="workspace-content">
       {card.type === "agent" ? <AgentWorkspace card={card} />
+        : catalog.node_types.find((definition) => definition.id === card.type)?.traits.some((trait) => ["ui.agent-template.v1", "ui.agent-barracks.v1"].includes(trait)) ? <BarracksBody card={card} workspace />
         : card.type === "conversation" ? <ConversationWorkspace card={card} />
         : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill-package.v1") ? <SkillToolboxBody card={card} workspace />
         : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill.v1") ? <SkillNodeBody card={card} workspace />

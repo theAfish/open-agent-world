@@ -12,6 +12,7 @@ from backend.api.legion_groups import router as legion_groups_router
 from backend.api.resources import router as resources_router
 from backend.api.runtime import router as runtime_router
 from backend.api.world import router as world_router
+from backend.api.summoning import router as summoning_router
 from backend.plugins import PluginCatalog
 from backend.services import ApplicationServices
 
@@ -32,6 +33,7 @@ async def plugin_catalog(
 
 
 api_router.include_router(world_router)
+api_router.include_router(summoning_router)
 api_router.include_router(node_documents_router)
 api_router.include_router(legions_router)
 api_router.include_router(legion_groups_router)

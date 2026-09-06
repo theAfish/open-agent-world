@@ -1,3 +1,4 @@
+import { AgentTemplatePreview } from "./Barracks";
 import { Bot, FileText, Image as ImageIcon, MessagesSquare, ShieldCheck, Workflow } from "lucide-react";
 import { TaskBoardPreview } from "./TaskBoard";
 import { SkillToolboxPreview } from "./SkillToolbox";
@@ -22,6 +23,8 @@ export function NodePreview({ card }: { card: WorldCard }) {
   if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.task-board.v1")) return <TaskBoardPreview card={card} />;
 
   if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill.v1")) return <SkillToolboxPreview card={card} single />;
+
+  if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.agent-template.v1")) return <AgentTemplatePreview card={card} />;
 
   if (card.type === "agent") {
     return (

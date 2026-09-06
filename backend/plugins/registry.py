@@ -12,6 +12,7 @@ from backend.plugins.lifecycle import NodeLifecycleHandler
 from backend.plugins.template import NodeTemplateHandler
 
 if TYPE_CHECKING:
+    from backend.plugins.summoning import NodeSummoningDefinition
     from backend.agents import AgentCapabilityProvider, RuntimeProvider
     from backend.capabilities import Capability
     from backend.plugins.capability import CapabilityContext
@@ -22,7 +23,7 @@ from backend.plugins.documents import NodeDocumentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.5"
+PLUGIN_API_VERSION = "1.6"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -86,6 +87,7 @@ class NodeTypeCatalogItem(BaseModel):
     has_document: bool = False
     has_execution: bool = False
     container: dict[str, Any] | None = None
+    summoning: dict[str, Any] | None = None
     default_config: dict[str, Any]
     user_creatable: bool
     templateable: bool
@@ -157,6 +159,7 @@ class NodeTypeDefinition:
     document: NodeDocumentDefinition | None = None
     execution: NodeExecutionDefinition | None = None
     container: NodeContainerDefinition | None = None
+    summoning: NodeSummoningDefinition | None = None
 
     def catalog_item(self, plugin_id: str) -> NodeTypeCatalogItem:
         default_config = self.config_model().model_dump(mode="json")
@@ -186,6 +189,7 @@ class NodeTypeDefinition:
             has_document=self.document is not None,
             has_execution=self.execution is not None,
             container=self.container.catalog_item() if self.container else None,
+            summoning={"templates_field": self.summoning.templates_field} if self.summoning else None,
             user_creatable=self.user_creatable,
             templateable=self.templateable,
         )
@@ -421,6 +425,11 @@ class PluginRegistry:
                         raise ValueError("document actions require a handler and cannot use reserved name 'replace'")
                     if action.capability_kind and action.capability_kind not in staged.capability_handlers:
                         raise ValueError("document action capabilities must be owned by the same plugin")
+            if definition.summoning:
+                if definition.document is None or definition.summoning.capability_kind not in staged.capability_handlers:
+                    raise ValueError("Summoning requires a document and a capability owned by the same plugin")
+                if definition.summoning.templates_field and definition.summoning.templates_field not in definition.document.model.model_fields:
+                    raise ValueError("Summoning templates_field must name a document field")
             if definition.container and definition.container.document_field:
                 member = staged.nodes.get(definition.container.member_type)
                 if member is None or member.document is None or member.lifecycle is not None:

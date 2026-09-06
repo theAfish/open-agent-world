@@ -1,3 +1,4 @@
+import { useSummoningCaptureStore } from "../state/summoningCapture";
 import {
   Background,
   BackgroundVariant,
@@ -17,7 +18,7 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { ContainerCardNode } from "../cards/ContainerCard";
-import { ancestors, containerDefinition, containerSizes, dropContainer, isContainer, parentFirst } from "../state/containers";
+import { acceptsMember, ancestors, descendants, containerDefinition, containerSizes, dropContainer, isContainer, parentFirst } from "../state/containers";
 import { WorldCardNode } from "../cards/CardFrame";
 import type { CanvasNode, CanvasNodeData } from "../cards/types";
 import { EdgeInspector } from "../edges/EdgeInspector";
@@ -341,10 +342,29 @@ export function WorldCanvas() {
           : nodePositionFromSurfacePosition(surfacePosition, draggedNode.data.surfaceLevel),
       };
     });
+    const sizes = new Map(nodesRef.current.map((item) => [item.id, { width: Number(item.style?.width), height: Number(item.style?.height) }]));
+    const captureNodes = updates.flatMap((update) => [cards.find((card) => card.id === update.id)!, ...descendants(cards, update.id)]);
+    const callable = captureNodes.some((card) => catalog.node_types.find((type) => type.id === card.type)?.traits.includes("core.agent"));
+    const canCapture = (container: typeof cards[number]) => callable
+      && !!catalog.node_types.find((type) => type.id === container.type)?.summoning?.templates_field
+      && !captureNodes.some((card) => card.id === container.id)
+      && captureNodes.every((card) => !card.ephemeral && catalog.node_types.find((type) => type.id === card.type)?.templateable);
+    const dragged = updates.find((update) => update.id === node.id) ?? updates[0];
+    if (dragged) {
+      const member = cards.find((card) => card.id === dragged.id)!;
+      const destination = dropContainer(cards, member, { x: dragged.position.x + 48, y: dragged.position.y + 48 }, catalog, sizes,
+        (container, candidate) => acceptsMember(container, candidate, catalog, cards) || canCapture(container));
+      if (destination && canCapture(destination)) {
+        // Importing a saved template leaves the source graph in its original space.
+        activeDragIds.current.clear();
+        setDragging(false);
+        useSummoningCaptureStore.getState().open(destination.id, updates.map((update) => update.id));
+        return;
+      }
+    }
     void updateCardPositions(updates.map((update) => {
       const member = cards.find((card) => card.id === update.id)!;
       if (member.ephemeral || containerDefinition(member, catalog)?.parentable === false) return update;
-      const sizes = new Map(nodesRef.current.map((node) => [node.id, { width: Number(node.style?.width), height: Number(node.style?.height) }]));
       const destination = dropContainer(cards, member, { x: update.position.x + 48, y: update.position.y + 48 }, catalog, sizes);
       return { ...update, parent_id: destination?.id ?? null };
     })).finally(() => {

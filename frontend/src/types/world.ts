@@ -148,6 +148,7 @@ export interface NodeTypeCatalogItem {
   user_creatable: boolean;
   has_document?: boolean;
   has_execution?: boolean;
+  summoning?: { templates_field: string | null } | null;
   container?: ContainerDefinition | null;
   default_config: CardConfig;
 }

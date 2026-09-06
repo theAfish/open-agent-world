@@ -42,9 +42,9 @@ export function containerSizes(cards: WorldCard[], catalog: PluginCatalog, level
 }
 
 /** Deepest eligible space wins; smaller spaces win when unrelated frames overlap. */
-export function dropContainer(cards: WorldCard[], member: WorldCard, point: WorldPosition, catalog: PluginCatalog, sizes = new Map<string, WorldSize>()) {
+export function dropContainer(cards: WorldCard[], member: WorldCard, point: WorldPosition, catalog: PluginCatalog, sizes = new Map<string, WorldSize>(), accepts = acceptsMember) {
   return cards.filter((card) => {
-    if (!acceptsMember(card, member, catalog, cards)) return false;
+    if (!containerDefinition(card, catalog) || !accepts(card, member, catalog, cards)) return false;
     const [left, top, right, bottom] = containerDefinition(card, catalog)!.content_inset;
     const size = sizes.get(card.id) ?? card.size;
     return point.x >= card.position.x + left && point.x <= card.position.x + size.width - right
