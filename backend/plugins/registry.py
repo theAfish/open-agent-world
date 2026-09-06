@@ -19,9 +19,10 @@ if TYPE_CHECKING:
 
 
 from backend.plugins.documents import NodeDocumentDefinition
+from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.4"
+PLUGIN_API_VERSION = "1.5"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -84,6 +85,7 @@ class NodeTypeCatalogItem(BaseModel):
     surfaces: dict[str, bool]
     has_document: bool = False
     has_execution: bool = False
+    container: dict[str, Any] | None = None
     default_config: dict[str, Any]
     user_creatable: bool
     templateable: bool
@@ -154,6 +156,7 @@ class NodeTypeDefinition:
     template_handler: NodeTemplateHandler | None = None
     document: NodeDocumentDefinition | None = None
     execution: NodeExecutionDefinition | None = None
+    container: NodeContainerDefinition | None = None
 
     def catalog_item(self, plugin_id: str) -> NodeTypeCatalogItem:
         default_config = self.config_model().model_dump(mode="json")
@@ -182,6 +185,7 @@ class NodeTypeDefinition:
             default_config=default_config,
             has_document=self.document is not None,
             has_execution=self.execution is not None,
+            container=self.container.catalog_item() if self.container else None,
             user_creatable=self.user_creatable,
             templateable=self.templateable,
         )
@@ -417,6 +421,12 @@ class PluginRegistry:
                         raise ValueError("document actions require a handler and cannot use reserved name 'replace'")
                     if action.capability_kind and action.capability_kind not in staged.capability_handlers:
                         raise ValueError("document action capabilities must be owned by the same plugin")
+            if definition.container and definition.container.document_field:
+                member = staged.nodes.get(definition.container.member_type)
+                if member is None or member.document is None or member.lifecycle is not None:
+                    raise ValueError("Document collections require an owned document-only member type")
+                if definition.document is None or definition.container.document_field not in definition.document.model.model_fields:
+                    raise ValueError("Document collection field must be present in the container document")
             if definition.execution is not None:
                 execution = definition.execution
                 if definition.document is None:

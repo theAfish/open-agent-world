@@ -60,6 +60,7 @@ export const TEST_CATALOG: PluginCatalog = {
     },
   ],
   node_types: [
+    node("legion", ["core.legion", "ui.legion.v1"], { user_creatable: false, container: { member_traits: [], parentable: false, connectable: false, min_size: [800, 550], content_inset: [320, 100, 24, 24], max_members: 100, document_field: null } }),
     node("agent", ["core.agent"], { default_status: "idle" }),
     node("conversation", ["core.field", "core.conversation"], {
       default_status: "available",

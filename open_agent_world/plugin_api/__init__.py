@@ -1,6 +1,7 @@
 """Stable contracts for trusted Open Agent World Python plugins."""
 
 from backend.plugins.documents import NodeDocumentAction, NodeDocumentDefinition, NodeDocumentDownload
+from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import ExecutionPolicy, NodeExecutionDefinition, WorkItem, WorkOutcome
 
 from backend.agents import (
@@ -73,6 +74,7 @@ __all__ = [
     "NodeDocumentAction",
     "NodeDocumentDefinition",
     "NodeDocumentDownload",
+    "NodeContainerDefinition",
     "AgentCapabilityProvider",
     "AgentConfig",
     "AgentConfigurationError",

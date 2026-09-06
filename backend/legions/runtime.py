@@ -53,6 +53,8 @@ def group_context(world: WorldStore, state: StateStore, card: Card) -> dict[str,
     if not card.parent_id:
         return None
     group = world.get_card(card.parent_id)
+    if group.type != "legion":
+        return None
     return {
         "legion_id": group.id, "name": group.name,
         "role": card.config.get("legion_role", ""),

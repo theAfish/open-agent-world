@@ -8,6 +8,7 @@ import { SkillFilesEditor, type SkillFiles } from "./SkillFilesEditor";
 
 interface Skill {
   id: string; name: string; description: string; instructions: string;
+  node_id?: string | null;
   files: SkillFiles; directories?: string[]; defaults: Record<string, unknown>;
 }
 interface Package {
@@ -15,29 +16,41 @@ interface Package {
   instructions: string; skills: Skill[]; source: { plugin_id: string; version: string } | null;
 }
 interface Snapshot { value: Package; revision: number; summary: { total: number; names: string[] } }
-const snapshot = (value: unknown) => value as Snapshot;
+const snapshot = (value: unknown, single = false): Snapshot => {
+  const result = value as Snapshot;
+  if (!single) return result;
+  const skill = result.value as unknown as Skill;
+  return { ...result, value: { package_id: "local.skill", version: "0.1.0", name: skill.name, description: skill.description, author: "", instructions: "", source: null, skills: [skill] }, summary: { total: 1, names: [skill.name] } };
+};
 
-function useToolbox(id: string) {
+function useToolbox(id: string, single = false) {
   const eventId = useWorldStore((state) => state.events.find((event) => event.payload.scope_kind === "node_document" && event.payload.owner_id === id)?.id);
   const socketState = useWorldStore((state) => state.socketState);
   const [box, setBox] = useState<Snapshot>();
   const [error, setError] = useState("");
   const accept = useCallback((next: Snapshot) => setBox((current) => !current || next.revision >= current.revision ? next : current), []);
   const reload = useCallback(async () => {
-    try { accept(snapshot(await worldApi.getNodeDocument(id))); setError(""); }
+    try { accept(snapshot(await worldApi.getNodeDocument(id), single)); setError(""); }
     catch (error) { setError(apiErrorMessage(error)); }
-  }, [id, accept]);
+  }, [id, accept, single]);
   useEffect(() => {
     let active = true;
-    worldApi.getNodeDocument(id).then((value) => { if (active) accept(snapshot(value)); })
+    worldApi.getNodeDocument(id).then((value) => { if (active) accept(snapshot(value, single)); })
       .catch((error) => { if (active) setError(apiErrorMessage(error)); });
     return () => { active = false; };
-  }, [id, eventId, socketState, accept]);
+  }, [id, eventId, socketState, accept, single]);
   return { box, accept, reload, error, setError };
 }
 
-export function SkillToolboxPreview({ card }: { card: WorldCard }) {
-  const { box, error } = useToolbox(card.id);
+export function SkillToolboxPreview({ card, single = false }: { card: WorldCard; single?: boolean }) {
+  const { box, error } = useToolbox(card.id, single);
+  if (single) {
+    const skill = box?.value.skills[0];
+    return <div className="node-preview-summary toolbox-preview">
+      <p>{skill?.description || skill?.instructions || error || "Add instructions, settings and files to this skill."}</p>
+      <div className="node-preview-metadata"><span><Wrench size={12} /> Skill</span><span>{Object.keys(skill?.files ?? {}).length} files</span></div>
+    </div>;
+  }
   return <div className="node-preview-summary toolbox-preview">
     <p>{box ? box.value.description || (box.summary.total ? box.summary.names.join(" · ") : "An empty toolbox, ready for your skills.") : error || "Loading skills…"}</p>
     <div className="node-preview-metadata"><span><Boxes size={12} /> {box?.summary.total ?? 0} skills</span>
@@ -45,8 +58,13 @@ export function SkillToolboxPreview({ card }: { card: WorldCard }) {
   </div>;
 }
 
-export function SkillToolboxBody({ card, workspace = false }: { card: WorldCard; workspace?: boolean }) {
-  const { box, accept, reload, error, setError } = useToolbox(card.id);
+export function SkillNodeBody({ card, workspace = false }: { card: WorldCard; workspace?: boolean }) {
+  return <SkillToolboxBody card={card} workspace={workspace} single />;
+}
+
+export function SkillToolboxBody({ card, workspace = false, single = false }: { card: WorldCard; workspace?: boolean; single?: boolean }) {
+  const { box, accept, reload, error, setError } = useToolbox(card.id, single);
+  const updateCard = useWorldStore((state) => state.updateCard);
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [skillTab, setSkillTab] = useState<"instructions" | "settings" | "files">("instructions");
@@ -55,7 +73,11 @@ export function SkillToolboxBody({ card, workspace = false }: { card: WorldCard;
   const editing = !!draft || !!settings;
   const mutate = async (action: string, args: Record<string, unknown>, revision: number) => {
     setBusy(true); setError("");
-    try { accept(snapshot(await worldApi.nodeDocumentAction(card.id, action, args, revision))); return true; }
+    try {
+      accept(snapshot(await worldApi.nodeDocumentAction(card.id, single ? "replace" : action, args, revision), single));
+      if (single && typeof args.name === "string") await updateCard(card.id, { name: args.name });
+      return true;
+    }
     catch (error) { setError(apiErrorMessage(error)); return false; }
     finally { setBusy(false); }
   };
@@ -78,14 +100,17 @@ export function SkillToolboxBody({ card, workspace = false }: { card: WorldCard;
     catch (error) { setError(apiErrorMessage(error)); }
   };
   return <div className={`skill-toolbox nodrag nopan nowheel ${workspace ? "is-workspace" : ""}`}>
-    <header className="toolbox-heading"><div><span className="toolbox-eyebrow">SKILL TOOLBOX</span><h3>{box?.value.name ?? "Loading toolbox…"}</h3></div><Boxes size={28} strokeWidth={1.3} /></header>
-    <p className="toolbox-help">{box?.value.description || "Collect the tools you use together. Connect an Agent with “Use skills” to let it open the right tool for the job."}</p>
+    <header className="toolbox-heading"><div><span className="toolbox-eyebrow">{single ? "SKILL" : "SKILL TOOLBOX"}</span><h3>{box?.value.name ?? "Loading toolbox…"}</h3></div>{single ? <Wrench size={28} strokeWidth={1.3} /> : <Boxes size={28} strokeWidth={1.3} />}</header>
+    <p className="toolbox-help">{box?.value.description || (single ? "Connect an Agent with Use skill to share these instructions, settings and files." : "Collect the tools you use together. Connect an Agent with “Use skills” to let it open the right tool for the job.")}</p>
     {box?.value.source && <p className="toolbox-origin">From {box.value.author || box.value.source.plugin_id} · v{box.value.source.version} · Editable local copy</p>}
     <div className="toolbox-toolbar">
+      {!single && <>
       <button className="primary-button" onClick={add} disabled={!box || busy || editing}><Plus size={14} /> Add skill</button>
       <button className="secondary-button" aria-label="Toolbox settings" disabled={!box || busy || editing} onClick={() => setSettings({ value: { ...box!.value }, revision: box!.revision })}><Settings2 size={14} /> Toolbox</button>
       <a className="secondary-button toolbox-export" href={nodeDocumentDownloadUrl(card.id, "plugin")} aria-disabled={!box || busy || editing}
         onClick={(event) => { if (!box || busy || editing) event.preventDefault(); }} title={editing ? "Save or close your draft before exporting" : "Download this toolbox as an installable plugin"}><Download size={14} /> Export plugin</a>
+      </>}
+      {single && card.parent_id && <button className="secondary-button" disabled={busy || editing} onClick={() => void updateCard(card.id, { parent_id: null })}>Detach skill</button>}
       <button className="secondary-button" aria-label="Reload toolbox" disabled={busy} onClick={() => { setDraft(undefined); setSettings(undefined); void reload(); }}><RefreshCw size={14} /></button>
     </div>
     {error && <p className="toolbox-error" role="alert">{error}</p>}
@@ -106,10 +131,10 @@ export function SkillToolboxBody({ card, workspace = false }: { card: WorldCard;
     </form>}
     <div className="toolbox-layout">
       <section className="toolbox-tools" aria-label="Skills">
-        {!!box?.value.skills.length && <input className="toolbox-search" aria-label="Search skills" placeholder="Find a tool…" value={search} onChange={(event) => setSearch(event.target.value)} />}
+        {!single && !!box?.value.skills.length && <input className="toolbox-search" aria-label="Search skills" placeholder="Find a tool…" value={search} onChange={(event) => setSearch(event.target.value)} />}
         {box?.value.skills.length === 0 && <div className="toolbox-empty"><Wrench size={30} strokeWidth={1.3} /><strong>Start with one useful tool.</strong><p>Add a skill, write its instructions, or import a SKILL.md file.</p></div>}
         {box?.value.skills.filter((skill) => `${skill.name} ${skill.description}`.toLowerCase().includes(search.toLowerCase())).map((skill) =>
-          <button key={skill.id} className={`toolbox-tool ${draft?.skill.id === skill.id ? "is-selected" : ""}`} aria-label={`Edit skill ${skill.name}`} disabled={busy || editing} onClick={() => select(skill)}>
+          <button key={skill.node_id || skill.id} className={`toolbox-tool ${draft?.skill.id === skill.id && draft?.skill.node_id === skill.node_id ? "is-selected" : ""}`} aria-label={`Edit skill ${skill.name}`} disabled={busy || editing} onClick={() => select(skill)}>
             <Wrench size={18} /><span><strong>{skill.name}</strong><small>{skill.description || "Open instructions"}</small><em>{Object.keys(skill.files).length} files</em></span>
           </button>)}
         {!!box?.value.skills.length && box.value.skills.every((skill) => !`${skill.name} ${skill.description}`.toLowerCase().includes(search.toLowerCase())) && <p className="toolbox-help">No skills match your search.</p>}
@@ -137,10 +162,10 @@ export function SkillToolboxBody({ card, workspace = false }: { card: WorldCard;
               onChange={(files, directories) => patch({ files, directories })} onInstructions={(instructions) => patch({ instructions })}
               onError={setError} onBusy={setBusy} />
           </div>
-          <div className="toolbox-editor-actions">{!draft.isNew && <button type="button" className="secondary-button" onClick={async () => { if (await mutate("remove", { skill_id: draft.skill.id }, draft.revision)) setDraft(undefined); }}><Trash2 size={14} /> Remove skill</button>}<button className="primary-button">Save skill</button></div>
+          <div className="toolbox-editor-actions">{!draft.isNew && !single && <button type="button" className="secondary-button" onClick={async () => { if (await mutate("remove", { skill_id: draft.skill.node_id || draft.skill.id }, draft.revision)) setDraft(undefined); }}><Trash2 size={14} /> Detach skill</button>}<button className="primary-button">Save skill</button></div>
         </fieldset>
       </form>}
     </div>
-    {!editing && box && <footer className="toolbox-footer"><span>{box.summary.total} skills · v{box.value.version}</span><span>Instructions load on demand</span></footer>}
+    {!single && !editing && box && <footer className="toolbox-footer"><span>{box.summary.total} skills · v{box.value.version}</span><span>Instructions load on demand</span></footer>}
   </div>;
 }

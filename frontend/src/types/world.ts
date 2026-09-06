@@ -148,6 +148,7 @@ export interface NodeTypeCatalogItem {
   user_creatable: boolean;
   has_document?: boolean;
   has_execution?: boolean;
+  container?: ContainerDefinition | null;
   default_config: CardConfig;
 }
 
@@ -275,4 +276,14 @@ export interface ConversationSummary {
   conversation_id: string;
   sessions: ConversationSession[];
   agents: ConversationAgent[];
+}
+
+export interface ContainerDefinition {
+  member_traits: string[];
+  parentable: boolean;
+  connectable: boolean;
+  min_size: [number, number];
+  content_inset: [number, number, number, number];
+  max_members: number;
+  document_field: string | null;
 }

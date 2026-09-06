@@ -39,6 +39,10 @@ def read_document(services, node_id):
         value = spec.model.model_validate(current.value).model_dump(mode="json")
     except ValueError as error:
         raise ResourceValidationError("Stored document is incompatible with this plugin: " + validation_message(error)) from error
+    container = services.plugins.node_type(services.world.get_card(node_id).type).container
+    if container and container.document_field:
+        from backend.node_containers import member_documents
+        value[container.document_field] = member_documents(services, node_id)
     return {"value": value, "revision": current.revision, "summary": spec.summarize(value)}
 
 
@@ -51,7 +55,16 @@ def write_document(services, node_id, value, expected_revision, *, actor_id=None
     if len(json.dumps(value).encode("utf-8")) > spec.max_size_bytes:
         raise ResourceValidationError(f"This document is limited to {spec.max_size_bytes // 1024} KiB")
     scope = services.state.ensure_scope("node_document", node_id, schema_id="core.node_document")
+    node = services.world.get_card(node_id)
+    container = services.plugins.node_type(node.type).container
+    entries = value.get(container.document_field) if container and container.document_field else None
+    if entries is not None:
+        value = {**value, container.document_field: []}
     services.state.set(scope, "document", value, expected_revision=expected_revision, actor_id=actor_id, run_id=run_id)
+    from backend.node_containers import sync_members, touch_parent
+    if entries is not None:
+        sync_members(services, node_id, entries)
+    touch_parent(services, node.parent_id)
     return read_document(services, node_id)
 
 

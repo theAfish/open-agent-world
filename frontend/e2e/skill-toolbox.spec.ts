@@ -11,8 +11,7 @@ test("build a toolbox, import a skill, export a plugin and restore the local cop
   try {
     await page.goto("/");
     let card = page.locator(`[data-card-id="${node.id}"]`);
-    await card.locator(".card-kind-icon").click();
-    await card.getByRole("button", { name: "Open workspace", exact: true }).click();
+    await card.getByRole("button", { name: "Edit toolbox", exact: true }).click();
     const box = page.getByRole("dialog", { name: "Review toolbox workspace", exact: true });
     await box.getByRole("button", { name: "Toolbox settings", exact: true }).click();
     await box.getByLabel("Toolbox name", { exact: true }).fill("Review Bench");
@@ -82,6 +81,7 @@ test("build a toolbox, import a skill, export a plugin and restore the local cop
     await page.screenshot({ path: "../.open-agent-world/skill-toolbox-dark.png" });
     await page.getByRole("button", { name: "Use light theme" }).click();
     await page.reload();
+    await card.getByRole("button", { name: "Edit toolbox", exact: true }).click();
     await expect(box.getByRole("button", { name: "Edit skill Review a patch", exact: true })).toBeVisible();
     await box.getByRole("button", { name: "Edit skill Review a patch", exact: true }).click();
     await box.getByRole("button", { name: "Default settings", exact: true }).click();
@@ -92,10 +92,9 @@ test("build a toolbox, import a skill, export a plugin and restore the local cop
     await page.screenshot({ path: "../.open-agent-world/skill-toolbox-settings.png" });
     await box.getByRole("button", { name: "Save skill", exact: true }).click();
     await expect(box.getByRole("button", { name: "Edit skill Review a patch", exact: true })).toBeEnabled();
-    await box.getByRole("button", { name: "Close workspace", exact: true }).click();
+    await box.getByRole("button", { name: "Close toolbox editor", exact: true }).click();
     card = page.locator(`[data-card-id="${node.id}"]`);
-    await card.locator(".card-kind-icon").click();
-    await card.getByRole("button", { name: "Remove Review toolbox", exact: true }).click();
+    await card.getByRole("button", { name: "Delete Review toolbox and skills", exact: true }).click();
     await expect(card).toHaveCount(0);
     await page.getByRole("button", { name: "Undo last canvas action", exact: true }).click();
     await expect(card).toHaveCount(1);
@@ -106,5 +105,113 @@ test("build a toolbox, import a skill, export a plugin and restore the local cop
     expect(restored.value.skills[0].files["assets/brand/logo.png"].data_base64).toBe(logo);
     expect(restored.value.skills[0].defaults).toEqual({ language: "Chinese", checks: { limit: 3, enabled: true }, formats: ["md"] });
     expect(restored.value.instructions).toContain("Read the diff");
-  } finally { await request.delete(url); }
+  } finally {
+    const value = (await (await request.get(url + "/document")).json()).value;
+    await request.post("/api/nodes/batch-delete", { data: { node_ids: [node.id, ...value.skills.map((skill: { node_id: string }) => skill.node_id)] } });
+  }
+});
+
+test("drag an independent skill into an open toolbox and back out", async ({ page, request }) => {
+  await page.setViewportSize({ width: 1600, height: 1100 });
+  const create = async (type: string, name: string, x: number, y: number) => (await request.post("/api/nodes", { data: { type, name, position: { x, y } } })).json();
+  const box = await create("oaw.skills", "Open toolbox", 450, 200);
+  const skill = await create("oaw.skills.skill", "Independent skill", 80, 300);
+  const agent = await create("agent", "Skill user", 80, 650);
+  try {
+    await page.goto("/");
+    const frame = page.locator(`[data-card-id="${box.id}"]`);
+    const card = page.locator(`[data-card-id="${skill.id}"]`);
+    await expect(card).toBeVisible();
+    const bounds = (await frame.boundingBox())!;
+    const drag = async (x: number, y: number) => {
+      const start = (await card.boundingBox())!;
+      await page.mouse.move(start.x + 30, start.y + 30);
+      await page.mouse.down();
+      await page.mouse.move(x, y, { steps: 20 });
+      const dropped = (await card.boundingBox())!;
+      await page.mouse.up();
+      const frames = await card.evaluate((element) => new Promise<Array<{ x: number; y: number }>>((resolve) => {
+        const samples: Array<{ x: number; y: number }> = [];
+        const started = performance.now();
+        const sample = () => {
+          const rect = element.getBoundingClientRect();
+          samples.push({ x: rect.x, y: rect.y });
+          if (performance.now() - started < 550) requestAnimationFrame(sample);
+          else resolve(samples);
+        };
+        sample();
+      }));
+      expect(Math.max(...frames.map((point) => Math.hypot(point.x - dropped.x, point.y - dropped.y))), "Reparenting should keep the card at its drop position throughout the animation").toBeLessThan(4);
+    };
+    await drag(bounds.x + 240, bounds.y + 200);
+    await expect.poll(async () => (await (await request.get(`/api/nodes/${skill.id}`)).json()).parent_id).toBe(box.id);
+    const agentCard = page.locator(`[data-card-id="${agent.id}"]`);
+    for (const target of [card, frame]) {
+      const start = (await agentCard.locator('[data-connection-side="right"]').boundingBox())!;
+      await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+      await page.mouse.down();
+      const end = (await target.locator('[data-connection-side="left"]').boundingBox())!;
+      await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 15 });
+      await page.mouse.up();
+      await expect(page.getByRole("dialog", { name: "Choose a capability" })).toBeVisible();
+      await page.getByRole("dialog", { name: "Choose a capability" }).getByRole("button", { name: "Grant capability" }).click();
+    }
+    await card.locator(".card-kind-icon").click();
+    await expect(card.getByRole("button", { name: "Edit skill New skill", exact: true })).toBeVisible();
+    await page.screenshot({ path: "../.open-agent-world/skill-open-space.png" });
+    await drag(200, bounds.y + 200);
+    await expect.poll(async () => (await (await request.get(`/api/nodes/${skill.id}`)).json()).parent_id).toBeNull();
+    expect((await (await request.get(`/api/nodes/${box.id}/document`)).json()).value.skills).toEqual([]);
+    await page.getByRole("button", { name: "Undo last canvas action", exact: true }).click();
+    await expect.poll(async () => (await (await request.get(`/api/nodes/${skill.id}`)).json()).parent_id).toBe(box.id);
+    const world = await (await request.get("/api/world")).json();
+    expect(world.edges.filter((edge: { source: string }) => edge.source === agent.id)).toHaveLength(2);
+  } finally { await request.post("/api/nodes/batch-delete", { data: { node_ids: [box.id, skill.id, agent.id] } }); }
+});
+
+test("nested containers share drag membership and move their descendants once", async ({ page, request }) => {
+  await page.setViewportSize({ width: 2200, height: 1400 });
+  const create = async (type: string, name: string, x: number, y: number, parent_id?: string) => (await request.post("/api/nodes", { data: { type, name, position: { x, y }, parent_id } })).json();
+  const agent = await create("agent", "Nested team member", 900, 800);
+  const formed = await (await request.post("/api/legion-groups", { data: { name: "Nested team", node_ids: [agent.id] } })).json();
+  const group = formed.find((node: { type: string }) => node.type === "legion");
+  await request.patch(`/api/nodes/${group.id}`, { data: { position: { x: 100, y: 100 } } });
+  const box = await create("oaw.skills", "Nested toolbox", 720, 270, group.id);
+  const skill = await create("oaw.skills.skill", "Traveling skill", 190, 420);
+  const position = async (id: string) => (await (await request.get(`/api/nodes/${id}`)).json()).position;
+  const parent = async (id: string) => (await (await request.get(`/api/nodes/${id}`)).json()).parent_id;
+  try {
+    await page.goto("/");
+    const frame = page.locator(`[data-card-id="${box.id}"]`);
+    const team = page.locator(`[data-card-id="${group.id}"]`);
+    const card = page.locator(`[data-card-id="${skill.id}"]`);
+    const drag = async (node: typeof card, x: number, y: number) => {
+      const start = (await node.boundingBox())!;
+      await page.mouse.move(start.x + 30, start.y + 30);
+      await page.mouse.down();
+      await page.mouse.move(x, y, { steps: 20 });
+      await page.mouse.up();
+    };
+    const boxBounds = (await frame.boundingBox())!;
+    await drag(card, boxBounds.x + 260, boxBounds.y + 200);
+    await expect.poll(() => parent(skill.id)).toBe(box.id);
+    const before = await position(skill.id);
+    const groupBefore = await position(group.id);
+    const teamBounds = (await team.boundingBox())!;
+    await drag(team, teamBounds.x + 110, teamBounds.y + 80);
+    await expect.poll(async () => (await position(group.id)).x - groupBefore.x).toBeGreaterThan(50);
+    const groupAfter = await position(group.id);
+    expect((await position(skill.id)).x - before.x).toBeCloseTo(groupAfter.x - groupBefore.x, 0);
+    expect((await position(skill.id)).y - before.y).toBeCloseTo(groupAfter.y - groupBefore.y, 0);
+    const movedTeam = (await team.boundingBox())!;
+    await drag(card, movedTeam.x + 390, movedTeam.y + 540);
+    await expect.poll(() => parent(skill.id)).toBe(group.id);
+    expect((await (await request.get(`/api/nodes/${box.id}/document`)).json()).value.skills).toEqual([]);
+    await page.getByRole("button", { name: "Undo last canvas action", exact: true }).click();
+    await expect.poll(() => parent(skill.id)).toBe(box.id);
+    // A Legion uses the same open drag-out interaction as the toolbox.
+    await drag(page.locator(`[data-card-id="${agent.id}"]`), movedTeam.x - 50, movedTeam.y + 420);
+    await expect.poll(() => parent(agent.id)).toBeNull();
+    await page.screenshot({ path: "../.open-agent-world/nested-containers.png" });
+  } finally { await request.post("/api/nodes/batch-delete", { data: { node_ids: [group.id, box.id, skill.id, agent.id] } }); }
 });

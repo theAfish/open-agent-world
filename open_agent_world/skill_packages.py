@@ -5,9 +5,11 @@ additional capabilities; execution still uses the Agent's live graph tools.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 import io
 import base64
 import json
+from uuid import uuid4
 from typing import Any, Literal
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -17,6 +19,7 @@ from open_agent_world.plugin_api import (
     CapabilityGrantDefinition, NodeDocumentAction, NodeDocumentDefinition,
     NodeDocumentDownload, NodeTypeDefinition, PluginDescriptor, RelationshipDefinition,
     ResourceValidationError,
+    NodeContainerDefinition,
 )
 
 
@@ -29,8 +32,9 @@ class SkillAsset(BaseModel):
 
 class Skill(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    id: str = Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9_-]+$")
-    name: str = Field(min_length=1, max_length=120)
+    id: str = Field(default_factory=lambda: uuid4().hex, min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9_-]+$")
+    node_id: str | None = None
+    name: str = Field(default="New skill", min_length=1, max_length=120)
     description: str = Field(default="", max_length=1000)
     instructions: str = ""
     files: dict[str, str | SkillAsset] = Field(default_factory=dict)
@@ -75,7 +79,7 @@ class SkillPackage(BaseModel):
 
     @model_validator(mode="after")
     def unique_skills(self):
-        if len({skill.id for skill in self.skills}) != len(self.skills):
+        if len({skill.node_id or skill.id for skill in self.skills}) != len(self.skills):
             raise ValueError("Skill IDs must be unique within a toolbox")
         return self
 
@@ -108,15 +112,17 @@ def _read(value, arguments):
 
 def _upsert(value, arguments):
     skill = Skill.model_validate(arguments).model_dump(mode="json")
-    skills = [skill if old["id"] == skill["id"] else old for old in value["skills"]]
-    if not any(old["id"] == skill["id"] for old in value["skills"]):
+    def matches(old):
+        return old.get("node_id") == skill["node_id"] if skill["node_id"] else old["id"] == skill["id"]
+    skills = [{**skill, "node_id": old.get("node_id")} if matches(old) else old for old in value["skills"]]
+    if not any(matches(old) for old in value["skills"]):
         skills.append(skill)
     return {**value, "skills": skills}
 
 
 def _remove(value, arguments):
     key = RemoveSkill.model_validate(arguments).skill_id
-    return {**value, "skills": [skill for skill in value["skills"] if skill["id"] != key]}
+    return {**value, "skills": [skill for skill in value["skills"] if (skill.get("node_id") or skill["id"]) != key and skill["id"] != key]}
 
 
 def _configure(value, arguments):
@@ -131,6 +137,8 @@ def _summary(value):
 
 def export_plugin(value: dict[str, Any]) -> NodeDocumentDownload:
     package = SkillPackage.model_validate(value)
+    # World node identities become portable skill-local IDs in the release.
+    package = package.model_copy(update={"skills": [skill.model_copy(update={"id": skill.node_id or skill.id, "node_id": None}) for skill in package.skills]})
     distribution = "oaw-toolbox-" + package.package_id.replace(".", "-")
     module = "oaw_toolbox_" + package.package_id.replace(".", "_").replace("-", "_")
     manifest = f'''[project]
@@ -176,7 +184,7 @@ def create_plugin():
 
 Author: {package.author or "Unspecified"}
 Package: {package.package_id} / {package.version}
-Requires Open Agent World Plugin API 1.4.
+Requires Open Agent World Plugin API 1.5.
 
 From an Open Agent World checkout, mount this extracted folder:
 
@@ -213,12 +221,20 @@ Scripts are package files; execute them using the Agent's connected Sandbox.
     return NodeDocumentDownload(f"{distribution}-{package.version}.zip", output.getvalue(), "application/zip")
 
 
+@dataclass(frozen=True, slots=True)
+class SkillContainerDefinition(NodeContainerDefinition):
+    member_traits: frozenset[str] = frozenset({"oaw.skill"})
+    document_field: str | None = "skills"
+
+
 def register_skill_package(registration, *, node_type: str, package: SkillPackage, published: bool = True):
     """Register one owned toolbox, relationship and scoped reading capability."""
     value = package.model_dump(mode="json")
     value["source"] = ({"plugin_id": registration.descriptor.id, "version": registration.descriptor.version}
                        if published else None)
     kind = f"{node_type}.read"
+    child_type = f"{node_type}.skill"
+    register_skill_node(registration, node_type=child_type, user_creatable=not published)
 
     async def invoke(context, capability, arguments):
         request = ReadSkill.model_validate(arguments)
@@ -226,9 +242,9 @@ def register_skill_package(registration, *, node_type: str, package: SkillPackag
         current = snapshot["value"]
         result = {key: current[key] for key in ("name", "description", "instructions", "author", "version", "source")}
         if request.skill_id is None:
-            result["skills"] = [{key: skill[key] for key in ("id", "name", "description")} for skill in current["skills"]]
+            result["skills"] = [{**{key: skill[key] for key in ("name", "description")}, "id": skill.get("node_id") or skill["id"]} for skill in current["skills"]]
         else:
-            skill = next((skill for skill in current["skills"] if skill["id"] == request.skill_id), None)
+            skill = next((skill for skill in current["skills"] if (skill.get("node_id") or skill["id"]) == request.skill_id), None)
             if skill is None:
                 raise ResourceValidationError("Skill no longer exists; list the toolbox again")
             if request.file_path is not None:
@@ -245,15 +261,16 @@ def register_skill_package(registration, *, node_type: str, package: SkillPackag
     registration.register_node_type(NodeTypeDefinition(
         id=node_type, label=package.name, description=package.description or "A portable toolbox of skills and shared working instructions.",
         icon="boxes", color="#ac8b57", deck_id="tools", deck_label="Tools", deck_icon="boxes",
-        default_name=package.name, default_size=(360, 235), default_status="available",
+        default_name=package.name, default_size=(1100, 650), default_status="available",
         statuses=frozenset({"available"}), config_model=ToolboxConfig,
         traits=frozenset({"oaw.skill-package", "ui.skill-package.v1"}),
         surfaces={"preview": True, "inspector": True, "workspace": True}, templateable=True,
+        container=SkillContainerDefinition(member_type=child_type),
         document=NodeDocumentDefinition(model=SkillPackage, initial_value=value,
             actions={"read": NodeDocumentAction(_read, capability_kind=kind, read_only=True),
                      "upsert": NodeDocumentAction(_upsert), "remove": NodeDocumentAction(_remove),
                      "configure": NodeDocumentAction(_configure)},
-            summarize=_summary, downloads={"plugin": export_plugin}, max_size_bytes=16 * 1024 * 1024),
+            summarize=_summary, capture=lambda value: {**value, "skills": []}, downloads={"plugin": export_plugin}, max_size_bytes=16 * 1024 * 1024),
     ))
     registration.register_relationship(RelationshipDefinition(
         id=f"{node_type}.use", label="Use skills", short_label="skills",
@@ -270,7 +287,35 @@ class SkillPackagePlugin:
     def __init__(self, package: SkillPackage):
         self.package = package
         self.descriptor = PluginDescriptor(id=package.package_id, version=package.version,
-            plugin_api_version="1.4", name=package.name, description=package.description)
+            plugin_api_version="1.5", name=package.name, description=package.description)
 
     def register(self, registration):
         register_skill_package(registration, node_type=f"{self.package.package_id}.toolbox", package=self.package)
+
+
+def register_skill_node(registration, *, node_type: str, user_creatable: bool = True):
+    kind = f"{node_type}.read"
+    async def invoke(context, capability, arguments):
+        # A direct connection reads only this document, never its parent collection.
+        snapshot = await context.node_document_action(capability, "read", {})
+        skill = snapshot["value"]
+        path = arguments.get("file_path")
+        if path is not None:
+            if path not in skill["files"]:
+                raise ResourceValidationError("File no longer exists; read the skill again")
+            return {"file": {"path": path, "content": skill["files"][path]}}
+        return {"skill": {**skill, "files": {path: asset if isinstance(asset, str) else {
+            "media_type": asset["media_type"], "size_bytes": len(base64.b64decode(asset["data_base64"]))
+        } for path, asset in skill["files"].items()}}}
+    registration.register_capability_handler(kind, invoke)
+    registration.register_node_type(NodeTypeDefinition(id=node_type, label="Skill", description="One independently connected skill, with its own files and settings.",
+        icon="wrench", color="#ac8b57", deck_id="tools", deck_label="Tools", deck_icon="boxes", default_name="New skill",
+        default_size=(360, 235), default_status="available", statuses=frozenset({"available"}), config_model=ToolboxConfig,
+        traits=frozenset({"oaw.skill", "ui.skill.v1"}), user_creatable=user_creatable,
+        surfaces={"preview": True, "inspector": True, "workspace": True}, templateable=True,
+        document=NodeDocumentDefinition(model=Skill, initial_value={}, max_size_bytes=16 * 1024 * 1024,
+            actions={"read": NodeDocumentAction(lambda value, arguments: value, capability_kind=kind, read_only=True)})))
+    registration.register_relationship(RelationshipDefinition(id=f"{node_type}.use", label="Use skill", short_label="skill",
+        description="Access only this skill, even when it is inside a toolbox.", source_traits=frozenset({"core.agent"}), target_types=frozenset({node_type}), templateable=True,
+        capabilities=(CapabilityGrantDefinition(kind=kind, tool_prefix="read_skill", description="Read only skill {target_name!r}. Supply file_path to read one of its files. Its parent toolbox and siblings are not included.",
+            input_schema={"type": "object", "properties": {"file_path": {"type": "string", "description": "Optional file path inside this skill."}}, "additionalProperties": False}),)))

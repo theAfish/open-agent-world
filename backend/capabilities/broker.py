@@ -69,7 +69,7 @@ class CapabilityBroker:
                         input_schema=dict(grant.input_schema),
                     )
                 )
-        if agent.parent_id:
+        if agent.parent_id and self.world.get_card(agent.parent_id).type == "legion":
             group = self.world.get_card(agent.parent_id)
             for operation in ("read", "patch"):
                 if operation == "patch" and group.config.get("shared_state_access") != "read_write":

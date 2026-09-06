@@ -16,7 +16,8 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { LegionCardNode } from "../cards/LegionCard";
+import { ContainerCardNode } from "../cards/ContainerCard";
+import { ancestors, containerDefinition, containerSizes, dropContainer, isContainer, parentFirst } from "../state/containers";
 import { WorldCardNode } from "../cards/CardFrame";
 import type { CanvasNode, CanvasNodeData } from "../cards/types";
 import { EdgeInspector } from "../edges/EdgeInspector";
@@ -36,7 +37,7 @@ import {
   type SurfaceObstacle,
 } from "./nodeDisplacement";
 
-const nodeTypes = { worldCard: WorldCardNode, legion: LegionCardNode };
+const nodeTypes = { worldCard: WorldCardNode, container: ContainerCardNode };
 const edgeTypes = { semantic: SemanticEdge };
 
 function isScrollableArea(target: EventTarget | null, boundary: HTMLElement): boolean {
@@ -60,10 +61,12 @@ function nodeFromCard(
   const size = NODE_SURFACE_SIZE[surfaceLevel];
   return {
     id: card.id,
-    type: card.type === "legion" ? "legion" : "worldCard",
+    type: "worldCard",
     position: positionSurfaceAtNodeCenter(position, surfaceLevel),
     data: { card, surfaceLevel, displaced },
     style: { width: size.width, height: size.height },
+    parentId: undefined,
+    extent: undefined,
     draggable: true,
     dragHandle: surfaceLevel === "workspace" ? ".node-drag-region" : undefined,
     selectable: true,
@@ -108,41 +111,41 @@ export function WorldCanvas() {
   const { getViewport, screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
 
   const renderCards = useMemo(
-    () => filterCardsToChunks([...cards, ...stressCards], activeChunkKeys),
-    [activeChunkKeys, cards, stressCards],
+    () => filterCardsToChunks([...cards, ...stressCards], activeChunkKeys, catalog),
+    [activeChunkKeys, cards, stressCards, catalog],
   );
   const surfaceLevels = useMemo(() => new Map(renderCards.map((card) => [
     card.id,
     surfaceLevelForNode(card.id, surfaceLevelsByNodeId),
   ])), [renderCards, surfaceLevelsByNodeId]);
   const surfaceObstacles = useMemo<SurfaceObstacle[]>(() => renderCards.flatMap<SurfaceObstacle>((card) => {
-    if (card.type === "legion" || card.parent_id) return [];
+    if (isContainer(card, catalog) || card.parent_id) return [];
     const level = surfaceLevels.get(card.id);
     return level === "inspector" || level === "workspace" ? [{ card, level }] : [];
-  }), [renderCards, surfaceLevels]);
+  }), [renderCards, surfaceLevels, catalog]);
   const displacedById = useMemo(
-    () => displacedPositions(renderCards.filter((c) => c.type !== "legion" && !c.parent_id), surfaceObstacles, surfaceLevels),
-    [renderCards, surfaceLevels, surfaceObstacles],
+    () => displacedPositions(renderCards.filter((c) => !isContainer(c, catalog) && !c.parent_id), surfaceObstacles, surfaceLevels),
+    [renderCards, surfaceLevels, surfaceObstacles, catalog],
   );
   const mappedNodes = useMemo(() => {
     const byId = new Map(renderCards.map((c) => [c.id, c]));
-    return [...renderCards].sort((a, b) => Number(a.type !== "legion") - Number(b.type !== "legion")).map((card) => {
+    const frameSizes = containerSizes(renderCards, catalog, surfaceLevels);
+    return parentFirst(renderCards).map((card) => {
       const level = surfaceLevels.get(card.id) ?? "preview";
       const displaced = displacedById.get(card.id);
-      const node = nodeFromCard(card, level, displaced?.displaced ?? false, displaced?.position ?? card.position);
-      if (card.type === "legion") {
-        const members = renderCards.filter((c) => c.parent_id === card.id);
-        const width = Math.max(card.size.width, ...members.map((c) => c.position.x - card.position.x + NODE_SURFACE_SIZE[surfaceLevels.get(c.id) ?? "preview"].width + 40));
-        const height = Math.max(card.size.height, ...members.map((c) => c.position.y - card.position.y + NODE_SURFACE_SIZE[surfaceLevels.get(c.id) ?? "preview"].height + 40));
-        return { ...node, position: card.position, style: { width, height }, zIndex: 0, dragHandle: ".legion-drag-region", connectable: false };
+      let node = nodeFromCard(card, level, displaced?.displaced ?? false, displaced?.position ?? card.position);
+      if (isContainer(card, catalog)) {
+        const { width, height } = frameSizes.get(card.id)!;
+        node = { ...node, type: "container", position: card.position, style: { width, height }, zIndex: 0,
+          dragHandle: ".container-drag-region", connectable: containerDefinition(card, catalog)!.connectable };
       }
       if (card.parent_id && byId.has(card.parent_id)) {
         const parent = byId.get(card.parent_id)!;
-        return { ...node, parentId: parent.id, position: { x: card.position.x - parent.position.x, y: card.position.y - parent.position.y }, extent: "parent" as const };
+        return { ...node, parentId: parent.id, position: { x: node.position.x - parent.position.x, y: node.position.y - parent.position.y } };
       }
       return node;
     });
-  }, [displacedById, renderCards, surfaceLevels]);
+  }, [displacedById, renderCards, surfaceLevels, catalog]);
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(mappedNodes);
   const nodesRef = useRef(nodes);
   const positionAnimation = useRef<number>();
@@ -165,7 +168,8 @@ export function WorldCanvas() {
     const currentById = new Map(nodesRef.current.map((node) => [node.id, node]));
     const starts = new Map(mappedNodes.map((node) => [
       node.id,
-      currentById.get(node.id)?.position ?? node.position,
+      // A changed parent changes the coordinate space, not the visual location.
+      currentById.has(node.id) && currentById.get(node.id)!.parentId === node.parentId ? currentById.get(node.id)!.position : node.position,
     ]));
 
     const applyProgress = (eased: number) => {
@@ -324,21 +328,30 @@ export function WorldCanvas() {
 
   const onNodeDragStop: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
     cancelPositionAnimation();
-    setDragging(false);
-    activeDragIds.current.clear();
     const moved = draggedNodes.length > 0 ? draggedNodes : [node];
     const movedIds = new Set(moved.map((n) => n.id));
-    const updates = moved.filter((n) => !n.parentId || !movedIds.has(n.parentId)).map((draggedNode) => {
+    const updates = moved.filter((n) => !ancestors(cards, n.data.card).some((parent) => movedIds.has(parent.id))).map((draggedNode) => {
       const parent = cards.find((c) => c.id === draggedNode.parentId);
+      const surfacePosition = parent
+        ? { x: draggedNode.position.x + parent.position.x, y: draggedNode.position.y + parent.position.y }
+        : draggedNode.position;
       return {
         id: draggedNode.id,
-        position: parent ? { x: draggedNode.position.x + parent.position.x, y: draggedNode.position.y + parent.position.y }
-          : draggedNode.data.card.type === "legion" ? draggedNode.position
-          : nodePositionFromSurfacePosition(draggedNode.position, draggedNode.data.surfaceLevel),
+        position: isContainer(draggedNode.data.card, catalog) ? surfacePosition
+          : nodePositionFromSurfacePosition(surfacePosition, draggedNode.data.surfaceLevel),
       };
     });
-    void updateCardPositions(updates);
-  }, [cancelPositionAnimation, cards, setDragging, updateCardPositions]);
+    void updateCardPositions(updates.map((update) => {
+      const member = cards.find((card) => card.id === update.id)!;
+      if (member.ephemeral || containerDefinition(member, catalog)?.parentable === false) return update;
+      const sizes = new Map(nodesRef.current.map((node) => [node.id, { width: Number(node.style?.width), height: Number(node.style?.height) }]));
+      const destination = dropContainer(cards, member, { x: update.position.x + 48, y: update.position.y + 48 }, catalog, sizes);
+      return { ...update, parent_id: destination?.id ?? null };
+    })).finally(() => {
+      activeDragIds.current.clear();
+      setDragging(false);
+    });
+  }, [cancelPositionAnimation, cards, setDragging, updateCardPositions, catalog]);
 
   const onConnect = useCallback((connection: Connection) => {
     requestConnection(connection.source, connection.target);
@@ -368,11 +381,9 @@ export function WorldCanvas() {
     const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
     if (payload.kind === "node") {
       if (!getNodeType(catalog, payload.type)) return;
-      const parent = [...cards].reverse().find((card) => card.type === "legion"
-        && position.x >= card.position.x + 320 && position.x < card.position.x + card.size.width
-        && position.y >= card.position.y + 90 && position.y < card.position.y + card.size.height);
+      const parent = dropContainer(cards, { id: "", type: payload.type } as typeof cards[number], position, catalog);
       void createCard(payload.type, position).then((created) => {
-        if (created && created.type !== "legion" && parent) void updateCard(created.id, { parent_id: parent.id });
+        if (created && parent) void updateCard(created.id, { parent_id: parent.id });
       });
       return;
     }
@@ -384,7 +395,7 @@ export function WorldCanvas() {
   return (
     <div
       ref={wrapper}
-      className="world-canvas"
+      className={`world-canvas ${cards.some((card) => selectedCardIds.includes(card.id) && isContainer(card, catalog)) ? "has-selected-container" : ""}`}
       data-testid="world-canvas"
       onWheelCapture={(event) => {
         const element = wrapper.current;

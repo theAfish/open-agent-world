@@ -1831,11 +1831,11 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 }
 .legion-container { width: 100%; height: 100%; border: 1px solid #82958c; border-radius: 24px; background: color-mix(in srgb, var(--surface, #f6f4ec) 82%, transparent); box-shadow: inset 0 0 0 7px #82958c0c; position: relative; }
 .legion-container.is-selected { outline: 2px solid #698b7d; outline-offset: 4px; }
-.legion-container-header { display: flex; align-items: center; gap: 16px; height: 76px; padding: 0 24px; border-bottom: 1px solid #82958c44; color: var(--text-primary); cursor: grab; }
-.legion-container-header > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 0 1 260px; }
-.legion-container-header > div > span { font-size: 10px; letter-spacing: 2px; color: #70867b; }
-.legion-container-header input { font: inherit; font-size: 19px; font-weight: 600; color: inherit; border: 0; background: transparent; width: 100%; min-width: 0; }
-.legion-container-header > button, .legion-container-header > svg { flex-shrink: 0; }
+.legion-container > .container-header { display: flex; align-items: center; gap: 16px; height: 76px; padding: 0 24px; border-bottom: 1px solid #82958c44; color: var(--text-primary); cursor: grab; }
+.legion-container > .container-header > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 0 1 260px; }
+.legion-container > .container-header > div > span { font-size: 10px; letter-spacing: 2px; color: #70867b; }
+.legion-container > .container-header input { font: inherit; font-size: 19px; font-weight: 600; color: inherit; border: 0; background: transparent; width: 100%; min-width: 0; }
+.legion-container > .container-header > button, .legion-container > .container-header > svg { flex-shrink: 0; }
 .legion-count { margin-left: auto; font-size: 12px; opacity: .75; white-space: nowrap; }
 .legion-controls { position: absolute; top: 94px; left: 22px; width: 268px; bottom: 22px; overflow-y: auto; padding-right: 12px; display: flex; flex-direction: column; gap: 12px; }
 .legion-controls .field-label { display: flex; flex-direction: column; gap: 7px; }
@@ -2022,3 +2022,17 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .skill-file-actions button { display: flex; align-items: center; gap: 5px; }
 .skill-binary-preview { display: grid; justify-items: start; gap: 9px; font-size: 10px; color: var(--ink-soft); }
 .skill-binary-preview img { max-width: 100%; max-height: 160px; object-fit: contain; border-radius: 6px; }
+.skill-container { position: relative; width: 100%; height: 100%; box-sizing: border-box; border: 2px solid #ac8b5780; border-radius: 24px; background: color-mix(in srgb, var(--surface) 45%, transparent); }
+.skill-container.is-selected { outline: 2px solid #ac8b57; outline-offset: 3px; }
+.skill-container > .container-header { height: 72px; padding: 0 24px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--line); cursor: grab; color: var(--ink); }
+.skill-container > .container-header > div { flex: 1; display: grid; gap: 5px; }
+.skill-container > .container-header > div > span { font-size: 10px; letter-spacing: 1.5px; color: #ac8b57; }
+.skill-container > .container-header strong { font-size: 19px; }
+.skill-container > .container-header > span { font-size: 11px; color: var(--ink-soft); }
+.skill-container > .container-header button { display: flex; gap: 6px; align-items: center; }
+.skill-container-hint { margin: 12px 24px; font-size: 11px; color: var(--ink-soft); pointer-events: none; }
+.skill-container-editor { position: fixed; inset: 8vh max(24px, calc((100vw - 1020px) / 2)); background: var(--surface-solid); border: 1px solid var(--line); border-radius: 16px; z-index: 100; box-shadow: var(--panel-shadow); }
+.skill-container-close { position: absolute; top: 10px; right: 12px; border: 0; background: transparent; color: var(--ink); cursor: pointer; z-index: 1; }
+
+/* A selected container remains interactive through its own header and controls. */
+.world-canvas.has-selected-container .react-flow__nodesselection-rect { pointer-events: none; }

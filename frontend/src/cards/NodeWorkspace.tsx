@@ -16,7 +16,7 @@ import { nodeSurfaceSupport, useNodeSurfaceStore } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
 import type { ConversationSession, WorldCard } from "../types/world";
 import { TaskBoardBody } from "./TaskBoard";
-import { SkillToolboxBody } from "./SkillToolbox";
+import { SkillToolboxBody, SkillNodeBody } from "./SkillToolbox";
 import { WorkSourceWorkspace } from "./NodeExecution";
 import { ConversationWorkspace } from "./ConversationWorkspace";
 
@@ -163,6 +163,7 @@ export function WorkspaceSurface({ card }: WorkspaceSurfaceProps) {
       {card.type === "agent" ? <AgentWorkspace card={card} />
         : card.type === "conversation" ? <ConversationWorkspace card={card} />
         : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill-package.v1") ? <SkillToolboxBody card={card} workspace />
+        : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill.v1") ? <SkillNodeBody card={card} workspace />
         : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.task-board.v1") ? <TaskBoardBody card={card} workspace />
         : catalog.node_types.find((definition) => definition.id === card.type)?.has_execution ? <WorkSourceWorkspace nodeId={card.id} /> : (
           <div className="workspace-welcome">

@@ -21,6 +21,8 @@ export function NodePreview({ card }: { card: WorldCard }) {
   if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill-package.v1")) return <SkillToolboxPreview card={card} />;
   if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.task-board.v1")) return <TaskBoardPreview card={card} />;
 
+  if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill.v1")) return <SkillToolboxPreview card={card} single />;
+
   if (card.type === "agent") {
     return (
       <div className="node-preview-summary">

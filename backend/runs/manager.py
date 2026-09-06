@@ -650,7 +650,7 @@ class RunManager:
             self.state.ensure_scope("agent", record.agent_id, schema_id="core.agent"),
         ]
         card = self.world.maybe_get_card(record.agent_id)
-        if card is not None and card.parent_id:
+        if card is not None and card.parent_id and self.world.get_card(card.parent_id).type == "legion":
             scopes.insert(1, self.state.ensure_scope("legion", card.parent_id, schema_id="core.legion"))
         if record.context_id is not None:
             scopes.append(
@@ -716,7 +716,7 @@ class RunManager:
         return self.inactivity_timeout_seconds
 
     def _check_concurrency(self, card: Card) -> None:
-        if card.parent_id and self.world.get_card(card.parent_id).config.get("paused"):
+        if card.parent_id and self.world.get_card(card.parent_id).type == "legion" and self.world.get_card(card.parent_id).config.get("paused"):
             raise RuntimeUnavailableError("Legion is paused; its members cannot start new Runs")
         configured = card.config.get("max_concurrent_runs", 1)
         limit = configured if isinstance(configured, int) and configured > 0 else 1

@@ -120,22 +120,47 @@ class WorldStore:
     def validate_parent(self, card_id: str, card_type: str, parent_id: str | None) -> None:
         if parent_id is None:
             return
-        if card_type == "legion" or parent_id == card_id:
-            raise GraphValidationError("Nested Legions are not supported")
+        member_type = self.registry.node_type(card_type)
+        if parent_id == card_id or (member_type.container and not member_type.container.parentable):
+            raise GraphValidationError("This node cannot be nested in that container")
         parent = self.get_card(parent_id)
-        if parent.type != "legion":
-            raise GraphValidationError("A card parent must be a Legion")
+        container = self.registry.node_type(parent.type).container
+        if container is None:
+            raise GraphValidationError("A card parent must be a container")
+        if not container.member_traits <= member_type.traits:
+            raise GraphValidationError("This container does not accept that node type")
+        ancestor = parent
+        while ancestor.parent_id:
+            if ancestor.parent_id == card_id:
+                raise GraphValidationError("Container membership cannot form a cycle")
+            ancestor = self.get_card(ancestor.parent_id)
         with self.database.locked() as connection:
             count = connection.execute(
                 "SELECT count(*) FROM cards WHERE parent_id = ? AND id <> ?", (parent_id, card_id)
             ).fetchone()[0]
-        if count >= 100:
-            raise GraphValidationError("A Legion supports at most 100 members")
+        if count >= container.max_members:
+            raise GraphValidationError(f"This container supports at most {container.max_members} members")
 
     def list_legion_groups(self) -> list[Card]:
         with self.database.locked() as connection:
             rows = connection.execute("SELECT * FROM cards WHERE type = 'legion' ORDER BY created_at, id").fetchall()
         return [self._card_from_row(row) for row in rows]
+
+    def is_container(self, card: Card) -> bool:
+        return self.registry.node_type(card.type).container is not None
+
+    def ancestors(self, card: Card) -> list[Card]:
+        if card.parent_id is None:
+            return []
+        parent = self.get_card(card.parent_id)
+        return [parent, *self.ancestors(parent)]
+
+    def descendants(self, parent_id: str) -> list[Card]:
+        result = []
+        for member in self.list_members(parent_id):
+            result.append(member)
+            result.extend(self.descendants(member.id))
+        return result
 
     def list_members(self, parent_id: str) -> list[Card]:
         with self.database.locked() as connection:
@@ -334,9 +359,9 @@ class WorldStore:
                         raise NotFoundError(
                             f"card {item.node_id!r} no longer exists"
                         )
-                oversized = connection.execute("SELECT parent_id FROM cards WHERE parent_id IS NOT NULL GROUP BY parent_id HAVING count(*) > 100").fetchone()
-                if oversized is not None:
-                    raise GraphValidationError("A Legion supports at most 100 members")
+                # Validate the resulting membership graph, including cycles across a batch.
+                for _, preview in changed:
+                    self.validate_parent(preview.id, preview.type, preview.parent_id)
         return [self.get_card(item.node_id) for item in items]
 
     def preview_update_card(self, card_id: str, request: CardPatch) -> Card:
@@ -381,8 +406,8 @@ class WorldStore:
             return []
         cards = [self.get_card(card_id) for card_id in ids]
         for card in cards:
-            if card.type == "legion" and any(member.id not in ids for member in self.list_members(card.id)):
-                raise GraphValidationError("Detach Legion members before deleting their container")
+            if self.is_container(card) and any(member.id not in ids for member in self.list_members(card.id)):
+                raise GraphValidationError("Detach members before deleting their container")
         placeholders = ",".join("?" for _ in ids)
         with self.database.transaction(immediate=True) as connection:
             connection.execute(

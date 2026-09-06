@@ -1,4 +1,5 @@
-import type { FlowViewportState, WorldCard, WorldPosition } from "../types/world";
+import type { FlowViewportState, WorldCard, WorldPosition, PluginCatalog } from "../types/world";
+import { descendants, isContainer, parentFirst } from "./containers";
 
 export const CHUNK_SIZE = 2048;
 export const PREFETCH_RING = 1;
@@ -36,11 +37,11 @@ export function getViewportChunkKeys(
   return keys;
 }
 
-export function filterCardsToChunks(cards: WorldCard[], keys: Iterable<string>): WorldCard[] {
+export function filterCardsToChunks(cards: WorldCard[], keys: Iterable<string>, catalog?: PluginCatalog): WorldCard[] {
   const keySet = keys instanceof Set ? keys : new Set(keys);
   const visible = new Set(cards.filter((card) => keySet.has(positionToChunk(card.position).key)).map((c) => c.id));
-  for (const group of cards.filter((c) => c.type === "legion")) {
-    const members = cards.filter((c) => c.parent_id === group.id);
+  for (const group of parentFirst(cards.filter((c) => catalog ? isContainer(c, catalog) : cards.some((member) => member.parent_id === c.id))).reverse()) {
+    const members = descendants(cards, group.id);
     const intersects = [...keySet].some((key) => {
       const [x, y] = key.split(":").map(Number);
       return group.position.x < (x + 1) * CHUNK_SIZE && group.position.x + group.size.width >= x * CHUNK_SIZE

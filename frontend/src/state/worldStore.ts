@@ -23,6 +23,7 @@ import { getViewportChunkKeys, viewportCenterToWorld } from "./chunks";
 import { EMPTY_CATALOG, getNodeType } from "./catalog";
 import { buildCardDraft, makeStressCards, mergeCardPatch } from "./helpers";
 import { summarizeLegionSelection } from "./legions";
+import { ancestors, containerDefinition, descendants, isContainer, parentFirst } from "./containers";
 import { validateConnection, type RelationshipOption } from "./relationships";
 import { describeRuntimeError } from "./runtimeErrors";
 import {
@@ -146,6 +147,8 @@ async function snapshotCardForHistory(card: WorldCard): Promise<RestorableCard> 
   const snapshot = copyCard(card);
   if (useWorldStore.getState().catalog.node_types.find((definition) => definition.id === card.type)?.has_document) {
     snapshot.restoreDocument = (await worldApi.getNodeDocument(card.id)).value;
+    const field = useWorldStore.getState().catalog.node_types.find((definition) => definition.id === card.type)?.container?.document_field;
+    if (field) snapshot.restoreDocument[field] = [];
   }
   try {
     if (card.type === "legion") snapshot.restoreLegionState = (await worldApi.getLegionState(card.id)).value;
@@ -277,13 +280,13 @@ interface WorldState {
   ensureChunks: (keys: string[]) => Promise<void>;
   setViewport: (viewport: FlowViewportState) => void;
   formLegionGroup: (nodeIds: string[]) => Promise<void>;
-  setLegionMembership: (ids: string[], parentId: string | null) => Promise<void>;
+  setContainerMembership: (ids: string[], parentId: string | null) => Promise<void>;
   createCard: (type: CardType, position?: WorldPosition) => Promise<WorldCard | undefined>;
   updateCard: (
     id: string,
     patch: Partial<Omit<WorldCard, "id" | "type">>,
   ) => Promise<void>;
-  updateCardPositions: (updates: Array<{ id: string; position: WorldPosition }>) => Promise<void>;
+  updateCardPositions: (updates: Array<{ id: string; position: WorldPosition; parent_id?: string | null }>) => Promise<void>;
   waitForPositionCommits: () => Promise<void>;
   createLegion: (input: {
     name: string;
@@ -295,7 +298,7 @@ interface WorldState {
     id: string,
     anchor?: WorldPosition,
   ) => Promise<LegionInstantiation | undefined>;
-  dissolveLegion: (id: string) => Promise<void>;
+  dissolveContainer: (id: string) => Promise<void>;
   deleteCard: (id: string) => Promise<void>;
   deleteCards: (ids: string[]) => Promise<void>;
   requestConnection: (source?: string | null, target?: string | null) => void;
@@ -547,17 +550,17 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     } catch (error) { get().pushToast({ tone: "error", title: "Legion was not formed", detail: apiErrorMessage(error) }); }
   }),
 
-  setLegionMembership: (ids, parentId) => withHistoryTransaction(async () => {
-    const before = get().cards.filter((c) => ids.includes(c.id) && c.type !== "legion" && !c.ephemeral).map(copyCard);
+  setContainerMembership: (ids, parentId) => withHistoryTransaction(async () => {
+    const before = get().cards.filter((c) => ids.includes(c.id) && !c.ephemeral).map(copyCard);
     const group = get().cards.find((c) => c.id === parentId);
     try {
       const after = await worldApi.batchUpdateNodes(before.map((c, index) => ({ node_id: c.id, patch: {
         parent_id: parentId,
-        ...(group ? { position: { x: group.position.x + 340 + (index % 2) * 310, y: group.position.y + 100 + Math.floor(index / 2) * 200 } } : {}),
+        ...(group ? { position: { x: group.position.x + containerDefinition(group, get().catalog)!.content_inset[0] + 100 + (index % 2) * 310, y: group.position.y + containerDefinition(group, get().catalog)!.content_inset[1] + 40 + Math.floor(index / 2) * 200 } } : {}),
       } })));
       markWorldMutation();
       set((state) => ({ cards: mergeCards(state.cards, after),
-        undoStack: appendHistory(state.undoStack, { id: ++historySequence, kind: "cards-updated", label: parentId ? "Join Legion" : "Leave Legion", before, after, membership: true }), redoStack: [] }));
+        undoStack: appendHistory(state.undoStack, { id: ++historySequence, kind: "cards-updated", label: parentId ? "Join container" : "Leave container", before, after, membership: true }), redoStack: [] }));
     } catch (error) { get().pushToast({ tone: "error", title: "Membership was not changed", detail: apiErrorMessage(error) }); }
   }),
 
@@ -674,15 +677,19 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   }),
 
   updateCardPositions: (updates) => {
+    const parents = new Map(updates.filter((update) => update.parent_id !== undefined).map((update) => [update.id, update.parent_id!]));
     const requested = new Map<string, WorldPosition>();
     for (const update of updates) {
       if (!Number.isFinite(update.position.x) || !Number.isFinite(update.position.y)) continue;
       requested.set(update.id, { ...update.position });
     }
-    for (const group of get().cards.filter((c) => c.type === "legion" && requested.has(c.id))) {
-      const target = requested.get(group.id)!;
-      for (const member of get().cards.filter((c) => c.parent_id === group.id)) {
-        if (!requested.has(member.id)) requested.set(member.id, { x: member.position.x + target.x - group.position.x, y: member.position.y + target.y - group.position.y });
+    const explicit = new Map(requested);
+    for (const member of get().cards) {
+      if (explicit.has(member.id)) continue;
+      const movedParent = ancestors(get().cards, member).find((parent) => explicit.has(parent.id));
+      if (movedParent) {
+        const target = explicit.get(movedParent.id)!;
+        requested.set(member.id, { x: member.position.x + target.x - movedParent.position.x, y: member.position.y + target.y - movedParent.position.y });
       }
     }
     if (requested.size === 0) return Promise.resolve();
@@ -692,7 +699,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       const available = [...get().cards, ...get().stressCards];
       const before = available.filter((card) => {
         const position = requested.get(card.id);
-        return position !== undefined && !samePosition(card.position, position);
+        return position !== undefined && (!samePosition(card.position, position) || (parents.has(card.id) && card.parent_id !== parents.get(card.id)));
       });
       if (before.length === 0) return;
 
@@ -700,7 +707,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       const requestedById = new Map(before.map((card) => [card.id, requested.get(card.id)!]));
       const optimisticById = new Map(before.map((card) => [
         card.id,
-        mergeCardPatch(card, { position: requestedById.get(card.id)! }),
+        mergeCardPatch(card, { position: requestedById.get(card.id)!, ...(parents.has(card.id) ? { parent_id: parents.get(card.id)! } : {}) }),
       ]));
       markWorldMutation();
       set((state) => ({
@@ -716,7 +723,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         try {
           const authoritative = await worldApi.batchUpdateNodes(persistent.map((card) => ({
             node_id: card.id,
-            patch: { position: requestedById.get(card.id)! },
+            patch: { position: requestedById.get(card.id)!, ...(parents.has(card.id) ? { parent_id: parents.get(card.id)! } : {}) },
           })));
           const authoritativeById = new Map(authoritative.map((card) => [card.id, card]));
           const missing = persistent.filter((card) => !authoritativeById.has(card.id));
@@ -753,6 +760,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
             kind: "cards-updated" as const,
             before: historyBefore,
             after: historyAfter,
+            membership: parents.size > 0,
           }),
           redoStack: [],
         } : {}),
@@ -939,8 +947,8 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
   })),
 
-  dissolveLegion: (id) => withHistoryTransaction(async () => {
-    const group = get().cards.find((c) => c.id === id && c.type === "legion");
+  dissolveContainer: (id) => withHistoryTransaction(async () => {
+    const group = get().cards.find((c) => c.id === id && isContainer(c, get().catalog));
     if (!group) return;
     const members = get().cards.filter((c) => c.parent_id === id).map(copyCard);
     const edges = get().edges.filter((e) => e.source === id || e.target === id).map(copyEdge);
@@ -953,15 +961,19 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       set((state) => ({ cards: mergeCards(state.cards.filter((c) => c.id !== id), detached),
         edges: state.edges.filter((e) => e.source !== id && e.target !== id),
         selectedCardIds: members.map((c) => c.id), selectedEdgeId: undefined, selectionRevision: state.selectionRevision + 1,
-        undoStack: appendHistory(state.undoStack, { id: ++historySequence, kind: "group-dissolved", label: "Dissolve Legion", group: snapshot, members, edges }), redoStack: [] }));
-      get().pushToast({ tone: "neutral", title: `${group.name} dissolved`, detail: "Members and their connections were kept. Ctrl+Z to restore the team." });
-    } catch (error) { get().pushToast({ tone: "error", title: "Legion was not dissolved", detail: apiErrorMessage(error) }); }
+        undoStack: appendHistory(state.undoStack, { id: ++historySequence, kind: "group-dissolved", label: "Dissolve container", group: snapshot, members, edges }), redoStack: [] }));
+      get().pushToast({ tone: "neutral", title: `${group.name} dissolved`, detail: "Members and their connections were kept. Ctrl+Z to restore the container." });
+    } catch (error) { get().pushToast({ tone: "error", title: "Container was not dissolved", detail: apiErrorMessage(error) }); }
   }),
 
   deleteCard: async (id) => get().deleteCards([id]),
 
   deleteCards: (ids) => withHistoryTransaction(async () => {
     const requested = new Set(ids);
+    for (const id of ids) {
+      const card = get().cards.find((item) => item.id === id);
+      if (card && isContainer(card, get().catalog)) descendants(get().cards, id).forEach((member) => requested.add(member.id));
+    }
     const cards = [...get().cards, ...get().stressCards].filter((card) => requested.has(card.id));
     if (cards.length === 0) return;
 
@@ -975,7 +987,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
 
     const attachedBefore = get().edges.filter((edge) => requested.has(edge.source) || requested.has(edge.target)).map(copyEdge);
     const removed: WorldCard[] = [];
-    if (cards.some((card) => card.type === "legion")) {
+    if (cards.some((card) => isContainer(card, get().catalog))) {
       try {
         const persistent = cards.filter((card) => !card.ephemeral);
         if (persistent.length) await worldApi.deleteNodes(persistent.map((card) => card.id));
@@ -1660,7 +1672,13 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
           break;
         }
         case "card-created": {
-          for (const card of operation.cards) if (!card.ephemeral) await worldApi.deleteNode(card.id);
+          const expanded = operation.cards.flatMap((card) => [card, ...descendants(get().cards, card.id)]);
+          operation.cards = await Promise.all(parentFirst([...new Map(expanded.map((card) => [card.id, card])).values()]).map(snapshotCardForHistory));
+          if (operation.cards.some((card) => isContainer(card, get().catalog))) {
+            await worldApi.deleteNodes(operation.cards.filter((card) => !card.ephemeral).map((card) => card.id));
+          } else {
+            for (const card of operation.cards) if (!card.ephemeral) await worldApi.deleteNode(card.id);
+          }
           const ids = new Set(operation.cards.map((card) => card.id));
           set((state) => ({
             cards: state.cards.filter((card) => !ids.has(card.id)),
@@ -1672,7 +1690,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         }
         case "cards-deleted": {
           const restored: WorldCard[] = [];
-          for (const card of [...operation.cards].sort((a, b) => Number(a.type !== "legion") - Number(b.type !== "legion"))) {
+          for (const card of parentFirst(operation.cards)) {
             restored.push(card.ephemeral ? copyCard(card) : await restoreCard(card));
           }
           const restoredEdges: WorldEdge[] = [];
@@ -1810,7 +1828,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         }
         case "card-created": {
           const restored: WorldCard[] = [];
-          for (const card of [...operation.cards].sort((a, b) => Number(a.type !== "legion") - Number(b.type !== "legion"))) {
+          for (const card of parentFirst(operation.cards)) {
             restored.push(card.ephemeral ? copyCard(card) : await restoreCard(card));
           }
           set((state) => ({
@@ -1820,7 +1838,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
           break;
         }
         case "cards-deleted": {
-          if (operation.cards.some((card) => card.type === "legion")) {
+          if (operation.cards.some((card) => isContainer(card, get().catalog))) {
             await worldApi.deleteNodes(operation.cards.filter((card) => !card.ephemeral).map((card) => card.id));
           } else {
             for (const card of operation.cards) if (!card.ephemeral) await worldApi.deleteNode(card.id);

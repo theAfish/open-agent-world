@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from backend.plugins.containers import NodeContainerDefinition
+
+from dataclasses import dataclass
 from contextlib import suppress
 import logging
 from typing import Any, Mapping
@@ -73,6 +76,14 @@ class _LifecycleOperation(NodeLifecycleTransaction):
     async def finalize(self) -> None:
         if self._finalize is not None:
             await self._finalize()
+
+
+@dataclass(frozen=True, slots=True)
+class LegionContainerDefinition(NodeContainerDefinition):
+    parentable: bool = False
+    connectable: bool = False
+    min_size: tuple[int, int] = (800, 550)
+    content_inset: tuple[int, int, int, int] = (320, 100, 24, 24)
 
 
 class AgentNodeBehavior(NodeLifecycleHandler):
@@ -798,7 +809,8 @@ def _register_builtin(registry: PluginRegistration) -> None:
         icon="workflow", color="#697c78", deck_id="fields", deck_label="Fields",
         deck_icon="workflow", default_name="New Legion", default_size=(1100, 700),
         default_status="available", statuses=frozenset({"available"}),
-        config_model=LegionConfig, traits=frozenset({"core.legion"}),
+        config_model=LegionConfig, traits=frozenset({"core.legion", "ui.legion.v1"}),
+        container=LegionContainerDefinition(),
         user_creatable=False, templateable=True,
     ))
     registry.register_node_type(NodeTypeDefinition(

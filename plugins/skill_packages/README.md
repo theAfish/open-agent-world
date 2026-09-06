@@ -1,6 +1,6 @@
 # Skill Toolboxes
 
-**Tools → Skill Toolbox** creates an empty toolbox. Open its workspace, add skills,
+**Tools → Skill Toolbox** creates an empty toolbox. Use **Edit toolbox** to add skills,
 and give each a name, a description of when to use it, and Markdown instructions.
 Import SKILL.md copies its complete text into the instruction editor. **Default
 settings** uses named fields with text, numbers, switches, groups and lists; no
@@ -25,6 +25,31 @@ binary contents return base64 and media type. Skills are guidance for the Agent:
 not register new executables, mount files, or grant Sandbox permissions. Use the
 normal world connections for execution. Disconnecting the toolbox revokes reading.
 
+## Independent cards and open spaces
+
+**Tools ? Skill** creates a standalone card. Drag its header into a toolbox to
+join, and drag it out to detach. Skills inside remain ordinary editable nodes
+with their own external connections. Moving a toolbox moves its members.
+
+Connect an Agent directly with **Use skill** to read only that skill. This does
+not include sibling skills or the toolbox conventions. Connecting the toolbox
+with **Use skills** grants its shared instructions and all current members.
+Membership changes immediately change that aggregate access; direct connections
+survive detaching. Old embedded skills become live nodes on startup.
+
+The plugin API `NodeContainerDefinition` declares accepted member traits. Its
+optional `document_field` projects child documents into a collection; `member_type`
+is the plugin-owned document-only type used when adding entries. Entries carry a
+`name` and a host `node_id`; child documents remain the source of their contents.
+Toolbox capture stores metadata while the normal node/edge capture stores children.
+Legion and Toolbox share the open container frame, drag membership, resizing,
+dissolution and deletion. A toolbox can live inside a Legion. Dragging a skill out
+of that toolbox but into the surrounding Legion keeps it as a direct Legion member.
+See the [container base contract](../../docs/plugins.md#open-containers-plugin-api-15)
+for custom container definitions and default UI.
+The bundled Skill type is `oaw.skills.skill`; curated plugins own their corresponding
+`<toolbox-type>.skill` types and exact-target reading relationships.
+
 ## Share a toolbox
 
 Save your edits and choose **Export plugin**. The downloaded ZIP contains an ordinary
@@ -48,7 +73,7 @@ uv add --project backend --editable ./path/to/oaw-toolbox-example-review
 
 Restart the application after installation. Its curated card appears under Tools,
 and uses the same editor as an empty toolbox. The published plugin owns its node
-type, relationship and capability. It requires host Plugin API 1.4; it does not
+type, relationship and capability. It requires host Plugin API 1.5; it does not
 depend on the bundled toolbox plugin being installed, inject frontend code, or
 introduce a separate plugin loader.
 

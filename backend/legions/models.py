@@ -125,8 +125,14 @@ class LegionBlueprint(BaseModel):
         for node in self.nodes:
             if node.parent_key is not None:
                 parent = nodes.get(node.parent_key)
-                if node.type == "legion" or parent is None or parent.type != "legion":
-                    raise ValueError("Template parents must reference a Legion; nesting is not supported")
+                if parent is None or parent.key == node.key:
+                    raise ValueError("Template parents must reference another container")
+                visited = {node.key}
+                while parent:
+                    if parent.key in visited:
+                        raise ValueError("Template memberships cannot form a cycle")
+                    visited.add(parent.key)
+                    parent = nodes.get(parent.parent_key)
         return self
 
 

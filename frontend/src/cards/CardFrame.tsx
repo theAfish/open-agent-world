@@ -7,8 +7,8 @@ import { nodeSurfaceSupport, surfaceLevelForNode, useNodeSurfaceStore, type Node
 import { useWorldStore } from "../state/worldStore";
 import { type CardType, type WorldCard } from "../types/world";
 import { TaskBoardBody } from "./TaskBoard";
-import { SkillToolboxBody } from "./SkillToolbox";
-import { Boxes } from "lucide-react";
+import { SkillToolboxBody, SkillNodeBody } from "./SkillToolbox";
+import { Boxes, Wrench } from "lucide-react";
 import { AgentCardBody } from "./AgentCard";
 import { ConversationCardBody } from "./ConversationCard";
 import { ImageCardBody } from "./ImageCard";
@@ -42,6 +42,7 @@ const BODIES: Partial<Record<CardType, ComponentType<BodyProps>>> = {
 
 const CATALOG_ICONS: Record<string, LucideIcon> = {
   boxes: Boxes,
+  wrench: Wrench,
   bot: Bot,
   "file-text": FileText,
   image: ImageIcon,
@@ -96,7 +97,7 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
   const definition = catalog.node_types.find((item) => item.id === card.type);
   const label = definition?.label ?? card.type;
   const Icon = ICONS[card.type] ?? CATALOG_ICONS[definition?.icon ?? ""] ?? Puzzle;
-  const Body = definition?.traits.includes("ui.skill-package.v1") ? SkillToolboxBody : definition?.traits.includes("ui.task-board.v1") ? TaskBoardBody : BODIES[card.type] ?? GenericCardBody;
+  const Body = definition?.traits.includes("ui.skill.v1") ? SkillNodeBody : definition?.traits.includes("ui.skill-package.v1") ? SkillToolboxBody : definition?.traits.includes("ui.task-board.v1") ? TaskBoardBody : BODIES[card.type] ?? GenericCardBody;
   const support = nodeSurfaceSupport(card.type, catalog);
 
   useEffect(() => {

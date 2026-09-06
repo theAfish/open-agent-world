@@ -125,7 +125,10 @@ delete-transaction dependencies/recovery payloads; otherwise a plugin using only
 the original contracts can continue to declare `"1.0"`.
 Use `"1.2"` for documents and `"1.3"` for work-source execution or document
 reference remapping.
-Use `"1.4"` for document seeds, document downloads, or the skill toolbox helper.
+Use `"1.4"` for document seeds or document downloads. Use `"1.5"` for
+`NodeContainerDefinition` and the skill toolbox helper. Open containers retain
+ordinary child nodes and their external relationships; see
+[Skill Toolboxes](../plugins/skill_packages/README.md#independent-cards-and-open-spaces).
 
 Registration is staged. The registry validates the complete contribution set and
 publishes it atomically only if registration succeeds. Every node type,
@@ -695,3 +698,61 @@ The Greeter integration test verifies editable entry-point discovery, descriptor
 ownership, independent runtime state across registries, lifecycle updates,
 canonical graph orientation, Agent tool invocation, validation, and immediate
 permission revocation.
+
+
+## Open containers (Plugin API 1.5)
+
+`NodeContainerDefinition` is the shared declarative base for container nodes.
+Assign it to `NodeTypeDefinition.container`. Use it directly, or inherit a small
+specialization with different defaults:
+
+```python
+from dataclasses import dataclass
+from open_agent_world.plugin_api import NodeContainerDefinition
+
+@dataclass(frozen=True, slots=True)
+class ResourceShelf(NodeContainerDefinition):
+    member_traits: frozenset[str] = frozenset({"core.resource"})
+    min_size: tuple[int, int] = (800, 500)
+    content_inset: tuple[int, int, int, int] = (24, 110, 24, 24)
+    max_members: int = 40
+
+# In the plugin's NodeTypeDefinition:
+# container=ResourceShelf()
+```
+
+The catalog exposes `container`: accepted member traits, minimum size, reserved
+content insets (left/top/right/bottom), capacity, whether the container itself can
+have a parent, and whether its border offers connection handles. All required
+member traits must match. Membership is a tree; cycles, including cycles formed
+by a batch, are rejected. `parentable=False` keeps a specialized container at the
+world root. Legion uses this restriction because its team context is not nested.
+
+The host owns parent/child persistence, absolute world coordinates, movement of
+descendants, chunk visibility, copying and restoring the tree. Both Legion and
+Skill Toolbox use the same `ContainerFrame`, membership actions and drop targeting.
+Dropping selects the deepest eligible frame at the node center. Overlapping peers
+prefer the smaller frame. Moving out detaches or joins the eligible surrounding
+container. Position and membership are one undoable action. Moving a parent and
+an explicitly positioned child applies each descendant's nearest moved ancestor
+exactly once.
+
+The common frame supplies resizing, border handles, header dragging, member
+selection, detaching, dissolution and deletion. Dissolution keeps direct members
+and their subtrees; deletion includes descendants. Specialized reviewed UI adds
+its header content and controls by composition. A plugin without a specialized
+UI gets the standard frame. `ui.legion.v1` adds team settings and shared variables;
+`ui.skill-package.v1` adds the toolbox editor and export workflow.
+
+Spatial membership grants no capabilities. Relationships still declare exactly
+which node can expose which tools. Legion's direct Agent members retain its team
+state, pause and model behavior; an Agent in an ordinary plugin container inherits
+none of these. Existing node lifecycle validation also continues to run on
+membership changes, including active-run restrictions.
+
+A container can optionally project child documents into its own `document_field`.
+Its `member_type` must be an owned document-only node type. Entries use `name` and
+host-provided `node_id`; accepted children must implement the collection's document
+shape. Child nodes remain the content source. The collection's capture callback
+omits projected entries because subgraph capture independently preserves children
+and their relationships. See the skill helper for this specialization.
