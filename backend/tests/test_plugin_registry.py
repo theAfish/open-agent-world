@@ -62,7 +62,7 @@ def test_plugin_install_is_compatible_owned_and_atomic() -> None:
         ),
         configure=lambda registration: None,
     )
-    with pytest.raises(PluginCompatibilityError, match="host provides '1.1'"):
+    with pytest.raises(PluginCompatibilityError, match=f"host provides '{PLUGIN_API_VERSION}'"):
         registry.install(incompatible)
     assert not registry.has_plugin("example.incompatible")
 
@@ -81,11 +81,11 @@ def test_plugin_install_is_compatible_owned_and_atomic() -> None:
         descriptor=PluginDescriptor(
             id="example.future",
             version="1.0.0",
-            plugin_api_version="1.2",
+            plugin_api_version="1.3",
         ),
         configure=lambda registration: None,
     )
-    with pytest.raises(PluginCompatibilityError, match="requires Plugin API '1.2'"):
+    with pytest.raises(PluginCompatibilityError, match="requires Plugin API '1.3'"):
         registry.install(future_minor)
 
     def fail_after_staging(registration: PluginRegistration) -> None:

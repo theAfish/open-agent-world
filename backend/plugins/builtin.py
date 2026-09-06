@@ -714,6 +714,9 @@ def _register_builtin(registry: PluginRegistration) -> None:
     registry.register_state_schema(StateSchema(id="core.world", fields={
         **common_fields("world"),
     }))
+    registry.register_state_schema(StateSchema(id="core.node_document", fields={
+        "document": StateFieldDefinition(value_type=dict[str, Any], allowed_scope_kinds=frozenset({"node_document"}), default={}),
+    }))
     registry.register_state_schema(StateSchema(id="core.legion", fields={
         "shared_working_memory": StateFieldDefinition(
             value_type=dict[str, Any], allowed_scope_kinds=frozenset({"legion"}),

@@ -413,6 +413,19 @@ describe("authoritative world synchronization", () => {
     });
   });
 
+  it("keeps document nodes when their undo snapshot cannot be read", async () => {
+    const board = { ...card("board", "text"), type: "example.board" };
+    const catalog = useWorldStore.getState().catalog;
+    useWorldStore.setState({ cards: [board], catalog: { ...catalog, node_types: [...catalog.node_types,
+      { ...catalog.node_types[0], id: board.type, has_document: true }] } });
+    vi.spyOn(worldApi, "getNodeDocument").mockRejectedValue(new Error("Document is temporarily unavailable"));
+    const remove = vi.spyOn(worldApi, "deleteNode");
+    await useWorldStore.getState().deleteCards([board.id]);
+    expect(remove).not.toHaveBeenCalled();
+    expect(useWorldStore.getState().cards).toEqual([board]);
+    expect(useWorldStore.getState().undoStack).toEqual([]);
+  });
+
   it("restores a deleted card and its relationships, then can delete it again", async () => {
     const agent = card("agent", "agent");
     const text = card("text", "text");

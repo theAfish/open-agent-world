@@ -1519,6 +1519,8 @@ class ApplicationServices:
             card.id: read_shared_state(self.world, self.state, card.id)
             for card in cards if card.type == "legion"
         }
+        from backend.node_documents import read_document
+        documents = {card.id: read_document(self, card.id) for card in cards if self.plugins.node_type(card.type).document is not None}
         node_keys = {
             card.id: f"node-{index + 1}" for index, card in enumerate(cards)
         }
@@ -1591,6 +1593,7 @@ class ApplicationServices:
             template_node = LegionTemplateNode(
                 key=node_keys[card.id],
                 parent_key=node_keys.get(card.parent_id),
+                initial_document=definition.document.capture(documents[card.id]["value"]) if definition.document else None,
                 initial_shared_state=shared_states[card.id]["value"] if card.id in shared_states else None,
                 type=card.type,
                 plugin_id=self.plugins.node_type_owner_id(card.type),
@@ -1660,6 +1663,9 @@ class ApplicationServices:
         if any(read_shared_state(self.world, self.state, group_id) != captured
                for group_id, captured in shared_states.items()):
             raise RevisionConflictError("Legion shared variables changed during capture; retry")
+
+        if any(read_document(self, node_id) != captured for node_id, captured in documents.items()):
+            raise RevisionConflictError("A node document changed during capture; retry")
 
         template_edges = [
             LegionTemplateEdge(
@@ -1765,6 +1771,9 @@ class ApplicationServices:
                     _creation_receipts=creation_receipts,
                     _publish_event=False,
                 ))
+                if node.initial_document is not None:
+                    from backend.node_documents import write_document
+                    write_document(self, node_ids[node.key], node.initial_document, 0)
                 if node.initial_shared_state is not None:
                     from backend.legions.runtime import LegionStateWrite, write_shared_state
                     write_shared_state(self.world, self.state, node_ids[node.key],
@@ -1911,6 +1920,14 @@ class ApplicationServices:
             except GraphValidationError as error:
                 issues.append(str(error))
                 config_is_valid = False
+            if node.initial_document is not None:
+                if definition.document is None:
+                    issues.append(f"node type {node.type!r} no longer provides its document contract")
+                else:
+                    try:
+                        definition.document.model.model_validate(node.initial_document)
+                    except ValueError as error:
+                        issues.append(f"node type {node.type!r} document is incompatible: {error}")
             handler = definition.template_handler
             if handler is not None and config_is_valid:
                 try:

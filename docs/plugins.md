@@ -469,6 +469,47 @@ enter a blueprint. Conversation is currently not templateable because silently
 dropping its durable sessions and transcript would violate snapshot semantics.
 Runs, processes, and transient provider state are not copied.
 
+## Node documents and actions (Plugin API 1.2)
+
+`NodeTypeDefinition.document` accepts a public `NodeDocumentDefinition` with a
+Pydantic `model` (constructible with defaults), an action map, optional `summarize`,
+and optional portable `capture` transformation. `NodeDocumentAction` contains a
+pure synchronous `(value, arguments) -> value` handler, `read_only`, and an optional
+`capability_kind` owned by the same plugin. Handlers validate their own argument
+models. They receive JSON data copies, never host databases or service containers.
+
+The host stores one validated document per node in StateStore, outside Card config.
+A successful write increments its revision and emits a State event; the node's
+delete transaction removes the document. Documents are limited to 256 KiB. Actions
+are serialized with node mutations and require `expected_revision` for writes.
+Read-only actions validate arguments without committing. `replace` is reserved for
+human/host full-document restoration and cannot be called using Agent permissions.
+
+Human-facing APIs:
+
+```text
+GET  /api/nodes/{id}/document
+POST /api/nodes/{id}/actions/{action}  {arguments, expected_revision?}
+```
+
+Both return `{value, revision, summary}`. Capability handlers call
+`context.node_document_action(capability, action, arguments, expected_revision)`;
+the host re-derives the capability inside the mutation gate and requires its kind
+to match that action. Registering an action alone grants Agents no access.
+
+A templateable node's document is captured automatically, using `capture(value)`
+when supplied, and validated on deployment. Capture checks the source revision
+again after asynchronous resource handlers finish. Incompatible document models
+make the preset unavailable; plugin authors must keep their data contract compatible
+or provide a deliberate migration. Canvas delete/undo restores the untransformed
+saved document, including progress.
+
+`has_document` is exposed in the node catalog. Browser rendering remains reviewed
+host code. The first supported structured view is selected by the trait
+`ui.task-board.v1`, with the task/value/summary/action contract implemented by the
+[Task Board plugin](../plugins/task_board/README.md). Other plugins can adopt that
+contract; different visual document types require an explicit host renderer.
+
 ## Relationships, traits, and capabilities
 
 Relationships match exact types, required traits, or both:

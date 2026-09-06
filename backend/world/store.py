@@ -396,7 +396,7 @@ class WorldStore:
                 """,
                 ids,
             )
-            connection.execute(f"DELETE FROM state_scopes WHERE scope_kind = 'legion' AND owner_id IN ({placeholders})", ids)
+            connection.execute(f"DELETE FROM state_scopes WHERE scope_kind IN ('legion', 'node_document') AND owner_id IN ({placeholders})", ids)
             cursor = connection.execute(
                 f"DELETE FROM cards WHERE id IN ({placeholders})", ids
             )

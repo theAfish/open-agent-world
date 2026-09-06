@@ -43,6 +43,7 @@ export interface PendingConnection {
 }
 
 type RestorableCard = WorldCard & {
+  restoreDocument?: Record<string, unknown>;
   restoreLegionState?: Record<string, unknown>;
   restoreContent?: string;
   restoreImageData?: string;
@@ -127,6 +128,10 @@ function restoreCardInput(card: RestorableCard): CardCreateInput {
 
 async function restoreCard(card: RestorableCard): Promise<WorldCard> {
   const restored = await worldApi.createNode(restoreCardInput(card));
+  if (card.restoreDocument) {
+    try { await worldApi.nodeDocumentAction(restored.id, "replace", card.restoreDocument, 0); }
+    catch (error) { await worldApi.deleteNode(restored.id); throw error; }
+  }
   if (card.type === "legion" && card.restoreLegionState) {
     try { await worldApi.saveLegionState(restored.id, card.restoreLegionState, 0); }
     catch (error) { await worldApi.deleteNode(restored.id); throw error; }
@@ -136,6 +141,9 @@ async function restoreCard(card: RestorableCard): Promise<WorldCard> {
 
 async function snapshotCardForHistory(card: WorldCard): Promise<RestorableCard> {
   const snapshot = copyCard(card);
+  if (useWorldStore.getState().catalog.node_types.find((definition) => definition.id === card.type)?.has_document) {
+    snapshot.restoreDocument = (await worldApi.getNodeDocument(card.id)).value;
+  }
   try {
     if (card.type === "legion") snapshot.restoreLegionState = (await worldApi.getLegionState(card.id)).value;
     if (card.type === "text") {
@@ -949,7 +957,12 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     if (cards.length === 0) return;
 
     const snapshots = new Map<string, RestorableCard>();
-    await Promise.all(cards.map(async (card) => snapshots.set(card.id, await snapshotCardForHistory(card))));
+    try {
+      await Promise.all(cards.map(async (card) => snapshots.set(card.id, await snapshotCardForHistory(card))));
+    } catch (error) {
+      get().pushToast({ tone: "error", title: "Cards were not removed", detail: `Could not preserve document data for undo: ${apiErrorMessage(error)}` });
+      return;
+    }
 
     const attachedBefore = get().edges.filter((edge) => requested.has(edge.source) || requested.has(edge.target)).map(copyEdge);
     const removed: WorldCard[] = [];

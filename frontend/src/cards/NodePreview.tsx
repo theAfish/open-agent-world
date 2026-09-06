@@ -1,4 +1,5 @@
 import { Bot, FileText, Image as ImageIcon, MessagesSquare, ShieldCheck, Workflow } from "lucide-react";
+import { TaskBoardPreview } from "./TaskBoard";
 import { useMemo } from "react";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
@@ -15,6 +16,8 @@ export function NodePreview({ card }: { card: WorldCard }) {
     () => edges.filter((edge) => edge.source === card.id || edge.target === card.id).length,
     [card.id, edges],
   );
+
+  if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.task-board.v1")) return <TaskBoardPreview card={card} />;
 
   if (card.type === "agent") {
     return (

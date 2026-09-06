@@ -18,6 +18,11 @@ if TYPE_CHECKING:
 class _CapabilityContext:
     services: ApplicationServices
 
+    async def node_document_action(self, capability, action, arguments, expected_revision=None):
+        from backend.node_documents import DocumentActionRequest, invoke_document_action
+        return await invoke_document_action(self.services, capability.target_id, action,
+            DocumentActionRequest(arguments=arguments, expected_revision=expected_revision), capability=capability)
+
     async def communicate(
         self, source_agent_id: str, target_agent_id: str, message: str
     ) -> Any:
@@ -119,7 +124,7 @@ class WorldAgentCapabilityProvider:
                     str(schema.get("description", "Tool argument.")),
                     name in required,
                 )
-                for name, schema in properties.items()
+                for name, schema in sorted(properties.items(), key=lambda item: item[0] not in required)
                 if isinstance(name, str) and isinstance(schema, dict)
             )
             definitions.append(

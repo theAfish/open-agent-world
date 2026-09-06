@@ -4,6 +4,10 @@ Open Agent World is a spatial environment for agents, managed resources, and iso
 
 The application uses React, TypeScript, Vite, React Flow, Zustand, FastAPI, SQLite and Google ADK. Sandbox execution supports Windows AppContainer/Job Objects, native Linux isolation, and the same Linux isolation inside an existing WSL2 distribution. Docker and VM images are not required.
 
+The bundled [Task Board plugin](plugins/task_board/README.md) adds shared todo lists
+and dependency graphs under **Fields**. Connect an Agent with read, progress-only,
+or full planning access. Boards can be saved with Legions as reusable plans.
+
 ## Run locally
 
 Requirements:

@@ -6,6 +6,7 @@ import { IconButton } from "../components/IconButton";
 import { nodeSurfaceSupport, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
 import { type CardType, type WorldCard } from "../types/world";
+import { TaskBoardBody } from "./TaskBoard";
 import { AgentCardBody } from "./AgentCard";
 import { ConversationCardBody } from "./ConversationCard";
 import { ImageCardBody } from "./ImageCard";
@@ -92,7 +93,7 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
   const definition = catalog.node_types.find((item) => item.id === card.type);
   const label = definition?.label ?? card.type;
   const Icon = ICONS[card.type] ?? CATALOG_ICONS[definition?.icon ?? ""] ?? Puzzle;
-  const Body = BODIES[card.type] ?? GenericCardBody;
+  const Body = definition?.traits.includes("ui.task-board.v1") ? TaskBoardBody : BODIES[card.type] ?? GenericCardBody;
   const support = nodeSurfaceSupport(card.type, catalog);
 
   useEffect(() => {

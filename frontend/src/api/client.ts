@@ -130,7 +130,7 @@ export function normalizeCard(input: unknown): WorldCard {
     },
     expanded: Boolean(source.expanded),
     status: String(config.status ?? source.status ?? (type === "sandbox" ? "stopped" : type === "agent" ? "idle" : "available")) as CardStatus,
-    config: type === "legion" ? { ...asRecord(source.config) } : config,
+    config: !(["agent", "conversation", "text", "image", "sandbox"].includes(type)) ? { ...asRecord(source.config) } : config,
     created_at: typeof source.created_at === "string" ? source.created_at : undefined,
     updated_at: typeof source.updated_at === "string" ? source.updated_at : undefined,
   };
@@ -254,6 +254,16 @@ export const worldApi = {
       method: "PUT", body: JSON.stringify(settings),
     });
   },
+  async getNodeDocument(id: string): Promise<{ value: Record<string, unknown>; revision: number; summary: Record<string, unknown> }> {
+    return request(`/nodes/${encodeURIComponent(id)}/document`);
+  },
+
+  async nodeDocumentAction(id: string, action: string, args: Record<string, unknown>, expectedRevision?: number): Promise<{ value: Record<string, unknown>; revision: number; summary: Record<string, unknown> }> {
+    return request(`/nodes/${encodeURIComponent(id)}/actions/${encodeURIComponent(action)}`, {
+      method: "POST", body: JSON.stringify({ arguments: args, expected_revision: expectedRevision }),
+    });
+  },
+
   async getCatalog(): Promise<PluginCatalog> {
     return request<PluginCatalog>("/catalog");
   },

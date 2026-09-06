@@ -72,6 +72,7 @@ class LegionTemplateNode(BaseModel):
 
     key: str
     parent_key: str | None = None
+    initial_document: dict[str, Any] | None = None
     initial_shared_state: dict[str, Any] | None = None
     type: str
     plugin_id: str

@@ -18,7 +18,9 @@ if TYPE_CHECKING:
     from backend.state.schema import StateSchema
 
 
-PLUGIN_API_VERSION = "1.1"
+from backend.plugins.documents import NodeDocumentDefinition
+
+PLUGIN_API_VERSION = "1.2"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -79,6 +81,7 @@ class NodeTypeCatalogItem(BaseModel):
     default_status: str
     traits: list[str]
     surfaces: dict[str, bool]
+    has_document: bool = False
     default_config: dict[str, Any]
     templateable: bool
 
@@ -143,6 +146,7 @@ class NodeTypeDefinition:
     templateable: bool = False
     template_status: str | None = None
     template_handler: NodeTemplateHandler | None = None
+    document: NodeDocumentDefinition | None = None
 
     def catalog_item(self, plugin_id: str) -> NodeTypeCatalogItem:
         default_config = self.config_model().model_dump(mode="json")
@@ -169,6 +173,7 @@ class NodeTypeDefinition:
                 "workspace": bool(self.surfaces.get("workspace", False)),
             },
             default_config=default_config,
+            has_document=self.document is not None,
             templateable=self.templateable,
         )
 
@@ -391,6 +396,16 @@ class PluginRegistry:
                 raise ValueError(
                     f"node type {definition.id!r} template payload version must be positive"
                 )
+            if definition.document is not None:
+                document = definition.document
+                document.model()
+                if not callable(document.capture) or not callable(document.summarize):
+                    raise TypeError("document capture and summary must be callable")
+                for name, action in document.actions.items():
+                    if not name or name == "replace" or not callable(action.handler):
+                        raise ValueError("document actions require a handler and cannot use reserved name 'replace'")
+                    if action.capability_kind and action.capability_kind not in staged.capability_handlers:
+                        raise ValueError("document action capabilities must be owned by the same plugin")
             try:
                 definition.config_model()
             except ValidationError as exc:

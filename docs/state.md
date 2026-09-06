@@ -38,3 +38,13 @@ snapshot provides the resolved values, source scopes, and revision metadata for
 debugging and future checkpointing. State mutation events are live descriptions
 of committed changes; the SQLite state tables remain authoritative.
 
+
+## Node documents
+
+Plugin API 1.2 adds `node_document:<node_id>` scopes using `core.node_document`.
+These resource-like documents are not inherited by Agent/Legion scope stacks.
+Agents access them only through currently granted document capabilities. The host
+validates against the node's declared Pydantic model and uses one revision for the
+whole document, allowing tasks and dependencies to change atomically. Node deletion
+cleans up its document in the same database transaction. See the
+[Task Board plugin](../plugins/task_board/README.md) for the first implementation.

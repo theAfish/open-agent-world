@@ -30,4 +30,8 @@ def load_plugin_registry() -> PluginRegistry:
             )
         plugin = factory()
         registry.install(plugin)
+    # Ship a useful first-party plugin; an installed distribution takes precedence.
+    if not any(plugin.id == "oaw.tasks" for plugin in registry.plugins()):
+        from plugins.task_board.oaw_task_board import create_plugin
+        registry.install(create_plugin())
     return registry

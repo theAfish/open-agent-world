@@ -1,5 +1,7 @@
 """Stable contracts for trusted Open Agent World Python plugins."""
 
+from backend.plugins.documents import NodeDocumentAction, NodeDocumentDefinition
+
 from backend.agents import (
     AgentCapabilityProvider,
     AgentConfig,
@@ -63,6 +65,8 @@ from backend.world.models import Card, CardCreate, CardPatch, Edge
 
 __all__ = [
     "PLUGIN_API_VERSION",
+    "NodeDocumentAction",
+    "NodeDocumentDefinition",
     "AgentCapabilityProvider",
     "AgentConfig",
     "AgentConfigurationError",
