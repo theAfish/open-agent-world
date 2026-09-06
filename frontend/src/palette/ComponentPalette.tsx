@@ -18,7 +18,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useState, type DragEvent, type FormEvent } from "react";
+import { useEffect, useState, type CSSProperties, type DragEvent, type FormEvent } from "react";
 import { useWorldStore } from "../state/worldStore";
 import type { CardType, LegionSummary, PluginCatalog } from "../types/world";
 import {
@@ -68,6 +68,16 @@ interface CardDeck extends StoredDeck {
 const DECKS_KEY = "open-agent-world.decks.v2";
 const LEGACY_CUSTOM_DECKS_KEY = "open-agent-world.custom-decks.v1";
 const LEGIONS_DECK_ID = "__open-agent-world-legions__";
+
+type FanStyle = CSSProperties & {
+  "--fan-angle": string;
+};
+
+function deckCardFanStyle(index: number, count: number): FanStyle {
+  const distanceFromCenter = count > 1 ? (index / (count - 1)) * 2 - 1 : 0;
+  const spread = Math.min(10, 3 + count * 0.8);
+  return { "--fan-angle": `${distanceFromCenter * spread}deg` };
+}
 
 const DECK_ICONS: Record<DeckIconKey, LucideIcon> = {
   bot: Bot,
@@ -449,8 +459,11 @@ export function ComponentPalette() {
               ) : null}
             </div>
             {activeDeck?.cards.length ? (
-              <div className={`palette-items ${activeDeck.cards.length > 2 ? "has-many" : ""}`}>
-                {activeDeck.cards.map((item) => {
+              <div
+                className={`palette-items ${activeDeck.cards.length > 2 ? "has-many" : ""}`}
+                style={{ "--deck-card-count": activeDeck.cards.length } as CSSProperties}
+              >
+                {activeDeck.cards.map((item, index) => {
                   const Icon = item.icon;
                   if (item.kind === "node") {
                     return (
@@ -458,6 +471,7 @@ export function ComponentPalette() {
                         type="button"
                         key={`node:${item.type}`}
                         className={`palette-item palette-item--${item.type}`}
+                        style={deckCardFanStyle(index, activeDeck.cards.length)}
                         draggable
                         onDragStart={(event) => beginDrag(event, { version: 1, kind: "node", type: item.type })}
                         onClick={() => void createCard(item.type)}
@@ -473,7 +487,11 @@ export function ComponentPalette() {
                   }
                   const issueText = item.issues.join(" ") || "One or more required plugins are unavailable.";
                   return (
-                    <div className="legion-palette-entry" key={`legion:${item.id}`}>
+                    <div
+                      className="legion-palette-entry"
+                      key={`legion:${item.id}`}
+                      style={deckCardFanStyle(index, activeDeck.cards.length)}
+                    >
                       <button
                         type="button"
                         className={`palette-item palette-item--legion ${item.compatible ? "" : "is-incompatible"}`}

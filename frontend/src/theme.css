@@ -1412,7 +1412,7 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   gap: 8px;
   margin-top: 0;
   padding: 0 14px 0 12px;
-  overflow: hidden;
+  overflow: visible;
   visibility: hidden;
   opacity: 0;
   border: 0 solid var(--line);
@@ -1477,13 +1477,16 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   gap: 0;
   height: 125px;
   padding: 2px 16px 0;
+  overflow: visible;
+  isolation: isolate;
 }
 
 .component-palette .palette-items.has-many {
-  justify-content: flex-start;
-  overflow-x: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-strong) transparent;
+  display: grid;
+  grid-template-columns: repeat(var(--deck-card-count), minmax(0, 1fr));
+  align-items: end;
+  justify-items: center;
+  padding-inline: 40px;
 }
 
 .component-palette .palette-item {
@@ -1509,8 +1512,8 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
 
-.component-palette .palette-item:nth-child(1) { transform: rotate(-3deg); }
-.component-palette .palette-item:nth-child(2) { transform: rotate(3deg); }
+.component-palette .palette-items:not(.has-many) > .palette-item:nth-child(1) { transform: rotate(-3deg); }
+.component-palette .palette-items:not(.has-many) > .palette-item:nth-child(2) { transform: rotate(3deg); }
 .component-palette .palette-item:hover {
   z-index: 3;
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
@@ -1546,9 +1549,22 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   margin: 0 -3px;
   transform-origin: 50% 110%;
 }
-.legion-palette-entry:nth-child(1) { transform: rotate(-3deg); }
-.legion-palette-entry:nth-child(2) { transform: rotate(3deg); }
+.palette-items:not(.has-many) > .legion-palette-entry:nth-child(1) { transform: rotate(-3deg); }
+.palette-items:not(.has-many) > .legion-palette-entry:nth-child(2) { transform: rotate(3deg); }
 .legion-palette-entry:hover { z-index: 4; transform: translateY(-8px) rotate(0); }
+
+.component-palette .palette-items.has-many > .palette-item,
+.component-palette .palette-items.has-many > .legion-palette-entry {
+  transform: rotate(var(--fan-angle));
+}
+
+.component-palette .palette-items.has-many > .palette-item:hover,
+.component-palette .palette-items.has-many > .palette-item:focus-visible,
+.component-palette .palette-items.has-many > .legion-palette-entry:hover,
+.component-palette .palette-items.has-many > .legion-palette-entry:focus-within {
+  z-index: 20;
+  transform: translateY(-9px) rotate(0) scale(1.035);
+}
 .legion-palette-entry .palette-item,
 .legion-palette-entry .palette-item:hover {
   width: 100%;
