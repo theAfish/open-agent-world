@@ -127,7 +127,7 @@ function restoreCardInput(card: RestorableCard): CardCreateInput {
 }
 
 async function restoreCard(card: RestorableCard): Promise<WorldCard> {
-  const restored = await worldApi.createNode(restoreCardInput(card));
+  const restored = await worldApi.restoreNode(restoreCardInput(card));
   if (card.restoreDocument) {
     try { await worldApi.nodeDocumentAction(restored.id, "replace", card.restoreDocument, 0); }
     catch (error) { await worldApi.deleteNode(restored.id); throw error; }
@@ -573,6 +573,14 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         tone: "error",
         title: "Unknown plugin node type",
         detail: `The backend catalog does not define ${type}.`,
+      });
+      return undefined;
+    }
+    if (definition.user_creatable === false) {
+      get().pushToast({
+        tone: "error",
+        title: "Use the dedicated creation action",
+        detail: `${definition.label} cannot be placed as a standalone card.`,
       });
       return undefined;
     }

@@ -221,6 +221,13 @@ The configuration model must construct with no arguments so the catalog can emit
 Prefer `extra="forbid"`. Traits are composable contracts used by relationships;
 they avoid dependencies on another plugin's concrete node IDs.
 
+`user_creatable` defaults to `True`. Set it to `False` for managed node types that
+must exist in the registry for persistence, rendering, or template restoration but
+must only be created through a dedicated domain operation. Managed types remain in
+the catalog for existing-node rendering, but are omitted from card decks and are
+rejected by the generic node-creation API. This flag is independent of
+`templateable`: restoration support never implies standalone creation.
+
 `surfaces` declares generic `preview`, `inspector`, and `workspace` availability.
 The backend does not load plugin-supplied browser code.
 

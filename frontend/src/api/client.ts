@@ -343,6 +343,28 @@ export const worldApi = {
     return normalizeCard(unwrap(body, "node"));
   },
 
+  async restoreNode(node: CardCreateInput): Promise<WorldCard> {
+    if (!("id" in node) || !node.id) throw new Error("Restoring a node requires its original id.");
+    const body = await request<unknown>("/nodes/restore", {
+      method: "POST",
+      body: JSON.stringify({
+        id: node.id,
+        type: node.type,
+        parent_id: node.parent_id,
+        name: node.name,
+        position: node.position,
+        size: node.size,
+        expanded: node.expanded,
+        status: node.status,
+        config: node.config,
+        content: node.content,
+        data_base64: node.data_base64,
+        media_type: node.media_type,
+      }),
+    });
+    return normalizeCard(unwrap(body, "node"));
+  },
+
   async updateNode(
     id: string,
     patch: Partial<Omit<WorldCard, "id" | "type">>,

@@ -83,6 +83,7 @@ class NodeTypeCatalogItem(BaseModel):
     surfaces: dict[str, bool]
     has_document: bool = False
     default_config: dict[str, Any]
+    user_creatable: bool
     templateable: bool
 
 
@@ -142,6 +143,9 @@ class NodeTypeDefinition:
         }
     )
     creation_fields: frozenset[str] = frozenset()
+    # Persisted node types are not necessarily standalone objects. Managed
+    # containers, for example, must be created through their domain operation.
+    user_creatable: bool = True
     lifecycle: NodeLifecycleHandler | None = None
     templateable: bool = False
     template_status: str | None = None
@@ -174,6 +178,7 @@ class NodeTypeDefinition:
             },
             default_config=default_config,
             has_document=self.document is not None,
+            user_creatable=self.user_creatable,
             templateable=self.templateable,
         )
 

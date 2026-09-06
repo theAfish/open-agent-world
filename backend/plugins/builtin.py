@@ -797,7 +797,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         deck_icon="workflow", default_name="New Legion", default_size=(1100, 700),
         default_status="available", statuses=frozenset({"available"}),
         config_model=LegionConfig, traits=frozenset({"core.legion"}),
-        templateable=True,
+        user_creatable=False, templateable=True,
     ))
     registry.register_node_type(NodeTypeDefinition(
         id="conversation", label="Conversation", description="Shared communication field",

@@ -98,9 +98,9 @@ const isDeckIcon = (value: unknown): value is DeckIconKey => (
   || value === "layers" || value === "sparkles" || value === "star" || value === "zap"
 );
 
-function defaultDecks(catalog: PluginCatalog): StoredDeck[] {
+export function defaultDecks(catalog: PluginCatalog): StoredDeck[] {
   const decks = new Map<string, StoredDeck>();
-  catalog.node_types.forEach((definition) => {
+  catalog.node_types.filter((definition) => definition.user_creatable !== false).forEach((definition) => {
     const current = decks.get(definition.deck_id);
     if (current) current.cardTypes.push(definition.id);
     else decks.set(definition.deck_id, {
@@ -114,14 +114,15 @@ function defaultDecks(catalog: PluginCatalog): StoredDeck[] {
   return [...decks.values()];
 }
 
-function normalizeDecks(candidates: StoredDeck[], catalog: PluginCatalog): StoredDeck[] {
+export function normalizeDecks(candidates: StoredDeck[], catalog: PluginCatalog): StoredDeck[] {
   const defaults = defaultDecks(catalog);
   const merged = [
     ...defaults.filter((deck) => !candidates.some((candidate) => candidate.id === deck.id)),
     ...candidates,
   ];
-  const validTypes = new Set(catalog.node_types.map((definition) => definition.id));
-  const defaultHome = new Map(catalog.node_types.map((definition) => [definition.id, definition.deck_id]));
+  const creatableTypes = catalog.node_types.filter((definition) => definition.user_creatable !== false);
+  const validTypes = new Set(creatableTypes.map((definition) => definition.id));
+  const defaultHome = new Map(creatableTypes.map((definition) => [definition.id, definition.deck_id]));
   const decks = merged.map((deck) => ({ ...deck, cardTypes: [] as CardType[] }));
   const claimed = new Set<CardType>();
   merged.forEach((candidate, index) => {

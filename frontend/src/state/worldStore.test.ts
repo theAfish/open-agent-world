@@ -73,7 +73,7 @@ describe("authoritative world synchronization", () => {
     vi.spyOn(worldApi, "formLegionGroup").mockResolvedValue([group, ...grouped]);
     vi.spyOn(worldApi, "getLegionState").mockResolvedValue({ value: { phase: "review" }, revision: 2 });
     const saveState = vi.spyOn(worldApi, "saveLegionState").mockResolvedValue({ value: { phase: "review" }, revision: 1 });
-    const create = vi.spyOn(worldApi, "createNode").mockResolvedValue(group);
+    const create = vi.spyOn(worldApi, "restoreNode").mockResolvedValue(group);
     const remove = vi.spyOn(worldApi, "deleteNode").mockResolvedValue();
     vi.spyOn(worldApi, "batchUpdateNodes").mockImplementation(async (updates) => updates.map((item) => ({
       ...useWorldStore.getState().cards.find((c) => c.id === item.node_id)!, ...item.patch,
@@ -442,7 +442,7 @@ describe("authoritative world synchronization", () => {
       selectedCardIds: [text.id],
     });
     const deleteNode = vi.spyOn(worldApi, "deleteNode").mockResolvedValue(undefined);
-    const createNode = vi.spyOn(worldApi, "createNode").mockResolvedValue(text);
+    const createNode = vi.spyOn(worldApi, "restoreNode").mockResolvedValue(text);
     const createEdge = vi.spyOn(worldApi, "createEdge").mockResolvedValue(edge);
     vi.spyOn(worldApi, "getTextContent").mockResolvedValue("remembered text");
 
@@ -481,6 +481,25 @@ describe("authoritative world synchronization", () => {
     expect(updated.status).toBe("ready");
     expect(updated.config.active_command).toBe("");
     expect(updated.config.output).toContain("contained output");
+  });
+
+  it("refuses to directly create a managed node type", async () => {
+    const managed = {
+      ...TEST_CATALOG.node_types[0],
+      id: "legion",
+      label: "Legion",
+      user_creatable: false,
+    };
+    useWorldStore.setState({
+      catalog: { ...TEST_CATALOG, node_types: [...TEST_CATALOG.node_types, managed] },
+    });
+    const createNode = vi.spyOn(worldApi, "createNode");
+
+    expect(await useWorldStore.getState().createCard("legion")).toBeUndefined();
+    expect(createNode).not.toHaveBeenCalled();
+    expect(useWorldStore.getState().toasts.at(-1)).toMatchObject({
+      title: "Use the dedicated creation action",
+    });
   });
 
   it("merges a Legion instance as one undoable topology operation", async () => {

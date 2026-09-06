@@ -14,6 +14,25 @@ from backend.tests.conftest import create_node
 from backend.world.models import CardCreate, CardPatch
 
 
+def test_legion_is_managed_and_cannot_be_created_directly(client):
+    legion_type = next(
+        item for item in client.get("/api/catalog").json()["node_types"]
+        if item["id"] == "legion"
+    )
+    assert legion_type["user_creatable"] is False
+
+    response = client.post("/api/nodes", json={"type": "legion"})
+    assert response.status_code == 422
+    assert "cannot be created directly" in response.text
+
+    member = create_node(client, "agent")
+    formed = client.post(
+        "/api/legion-groups", json={"name": "Managed", "node_ids": [member["id"]]}
+    )
+    assert formed.status_code == 200, formed.text
+    assert formed.json()[0]["type"] == "legion"
+
+
 def test_group_membership_move_external_edges_and_reload(client):
     first = create_node(client, "agent", position={"x": 400, "y": 200})
     second = create_node(client, "text", position={"x": 800, "y": 400})
@@ -84,7 +103,7 @@ async def test_runtime_inherits_context_and_revokes_tools(tmp_path: Path):
     runtime = CaptureRuntime(manager.capability_provider)
     manager.install_provider("core.mock", runtime)
     try:
-        group = await services.create_card(CardCreate(type="legion", config={"instruction": "Coordinate through the board", "model_override": "team/model"}))
+        group = await services.restore_card(CardCreate(id="runtime-team", type="legion", config={"instruction": "Coordinate through the board", "model_override": "team/model"}))
         member = await services.create_card(CardCreate(type="agent", parent_id=group.id, config={"model": "own/model", "legion_role": "Planner"}))
         outsider = await services.create_card(CardCreate(type="agent"))
         write_shared_state(services.world, services.state, group.id, LegionStateWrite(value={"goal": "Deliver a report"}, expected_revision=0))
@@ -130,7 +149,7 @@ async def test_runtime_inherits_context_and_revokes_tools(tmp_path: Path):
 async def test_group_state_and_membership_survive_backend_restart(tmp_path: Path):
     settings = Settings.for_data_root(tmp_path / "world")
     services = create_services(settings)
-    group = await services.create_card(CardCreate(type="legion"))
+    group = await services.restore_card(CardCreate(id="persistent-team", type="legion"))
     member = await services.create_card(CardCreate(type="text", parent_id=group.id))
     write_shared_state(services.world, services.state, group.id, LegionStateWrite(value={"step": 2}, expected_revision=0))
     await services.shutdown()

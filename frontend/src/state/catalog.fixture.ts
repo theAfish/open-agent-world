@@ -20,6 +20,7 @@ function node(
     default_status: "available",
     traits,
     surfaces: { preview: true, inspector: true, workspace: false },
+    user_creatable: true,
     templateable: true,
     default_config: {},
     ...overrides,

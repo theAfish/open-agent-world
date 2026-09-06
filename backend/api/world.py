@@ -91,6 +91,17 @@ async def create_card(
     return await services.create_card(request)
 
 
+@router.post(
+    "/nodes/restore", response_model=Card, status_code=status.HTTP_201_CREATED,
+    include_in_schema=False,
+)
+async def restore_card(
+    request: CardCreate,
+    services: ApplicationServices = Depends(get_services),
+) -> Card:
+    return await services.restore_card(request)
+
+
 @router.get("/nodes/{card_id}", response_model=Card)
 @router.get("/cards/{card_id}", response_model=Card, include_in_schema=False)
 async def get_card(

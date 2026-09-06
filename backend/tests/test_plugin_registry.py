@@ -248,6 +248,10 @@ def test_plugin_registration_drives_catalog_storage_edges_and_tools(tmp_path: Pa
                 item["plugin_id"] for item in catalog.json()["node_types"]
                 if item["id"] == "example.dataset"
             } == {"example.dataset"}
+            assert next(
+                item for item in catalog.json()["node_types"]
+                if item["id"] == "example.dataset"
+            )["user_creatable"] is True
 
             agent = client.post("/api/nodes", json={"type": "agent"}).json()
             dataset_response = client.post(

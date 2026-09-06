@@ -655,6 +655,18 @@ class ApplicationServices:
         return card.model_copy(update={"resource": summary, "config": config})
 
     async def create_card(self, request: CardCreate) -> Card:
+        definition = self.world.registry.node_type(request.type)
+        if not definition.user_creatable:
+            raise GraphValidationError(
+                f"node type {request.type!r} cannot be created directly; "
+                "use its dedicated creation operation"
+            )
+        return await self._create_card(request)
+
+    async def restore_card(self, request: CardCreate) -> Card:
+        """Restore a previously captured node, including managed node types."""
+        if request.id is None:
+            raise GraphValidationError("restoring a node requires its original id")
         return await self._create_card(request)
 
     async def _create_card(

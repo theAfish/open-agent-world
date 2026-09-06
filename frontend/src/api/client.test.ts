@@ -188,6 +188,31 @@ describe("API normalization boundary", () => {
     expect(JSON.parse(String(options.body))).toEqual({ node_ids: ["node-a", "node-b"] });
   });
 
+  it("uses the explicit restore route for history reconstruction", async () => {
+    const restored = {
+      id: "managed-team",
+      type: "legion",
+      name: "Managed team",
+      position: { x: 10, y: 20 },
+      size: { width: 1100, height: 700 },
+      expanded: false,
+      status: "available",
+      config: {},
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(restored), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await worldApi.restoreNode(restored);
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/nodes/restore");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(String(options.body))).toMatchObject({ id: restored.id, type: "legion" });
+  });
+
   it("updates a moved selection through one normalized batch request", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([
       { id: "a", type: "agent", name: "A", position: { x: 10, y: 20 }, size: { width: 96, height: 96 }, config: {} },

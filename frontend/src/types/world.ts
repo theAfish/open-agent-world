@@ -144,6 +144,8 @@ export interface NodeTypeCatalogItem {
   };
   /** Whether this plugin node can be captured inside a reusable Legion. */
   templateable: boolean;
+  /** Whether a user may create this node directly from the card library. */
+  user_creatable: boolean;
   has_document?: boolean;
   default_config: CardConfig;
 }
