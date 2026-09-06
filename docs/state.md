@@ -48,3 +48,13 @@ validates against the node's declared Pydantic model and uses one revision for t
 whole document, allowing tasks and dependencies to change atomically. Node deletion
 cleans up its document in the same database transaction. See the
 [Task Board plugin](../plugins/task_board/README.md) for the first implementation.
+
+Plugin API 1.3 adds a host-owned `execution` field to this scope. It records batch
+status and recent attempt metadata separately from the plugin's editable document.
+Execution history is not copied into Legion templates; document settings and
+internal executor references are copied and remapped. Node deletion removes this
+history alongside the document. Canvas undo restores the saved document, not the
+host execution history. Durable Run records remain separate.
+
+Run scopes now also preserve the latest provider text in `output_text`. The
+structured `result` field remains available independently to providers/plugins.

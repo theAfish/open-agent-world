@@ -1924,3 +1924,101 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .task-board.is-workspace > :not(.task-board-layout) { flex-shrink: 0; }
 .task-board.is-workspace .task-editor { max-height: 420px; overflow: auto; box-sizing: border-box; }
 .task-editor-actions { position: sticky; bottom: -1px; padding: 8px 0 0; background: var(--surface-soft); }
+.task-execution-settings, .execution-history {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-block: 8px;
+  font-size: 12px;
+}
+.task-execution-settings summary, .execution-history summary { cursor: pointer; }
+.task-execution-settings summary span { opacity: .65; margin-left: 8px; }
+.task-execution-settings fieldset { border: 0; padding: 4px 0; display: grid; gap: 10px; }
+.task-execution-settings label { display: grid; gap: 5px; }
+.task-execution-settings select { width: 100%; min-width: 0; }
+.task-execution-settings .execution-checkbox { display: flex; align-items: center; gap: 8px; }
+.node-execution-controls { margin-block: 8px; font-size: 12px; }
+.execution-history ol { padding-left: 18px; max-height: 180px; overflow: auto; }
+.execution-history li { margin-block: 10px; overflow-wrap: anywhere; }
+.execution-history li span, .execution-history li small { display: block; opacity: .75; margin-top: 3px; }
+.work-source-workspace { padding: 24px; overflow: auto; }
+.work-source-workspace li { margin-block: 12px; }
+
+/* Reviewed toolbox surface shared by empty and plugin-curated packages. */
+.skill-toolbox { padding: 18px; color: var(--ink); font-size: 12px; min-width: 0; }
+.skill-toolbox.is-workspace { height: 100%; overflow: auto; box-sizing: border-box; padding: 26px 32px; }
+.toolbox-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: #ac8b57; }
+.toolbox-heading h3 { margin: 7px 0; font-size: 23px; font-weight: 550; color: var(--ink); overflow-wrap: anywhere; }
+.toolbox-eyebrow { font-size: 9px; letter-spacing: 1.8px; }
+.toolbox-help { color: var(--ink-soft); line-height: 1.65; font-size: 11px; margin: 8px 0 14px; }
+.toolbox-origin { color: var(--ink-soft); font-size: 10px; border-left: 2px solid #ac8b57; padding-left: 9px; overflow-wrap: anywhere; }
+.toolbox-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin: 18px 0; }
+.toolbox-toolbar button, .toolbox-toolbar a, .toolbox-editor-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 11px; }
+.toolbox-export { text-decoration: none; }
+.toolbox-export[aria-disabled="true"] { opacity: .45; cursor: default; }
+.toolbox-layout { display: grid; gap: 18px; align-items: start; }
+.skill-toolbox.is-workspace .toolbox-layout:has(.toolbox-editor) { grid-template-columns: minmax(160px, .7fr) minmax(280px, 1.3fr); }
+.toolbox-tools { display: grid; gap: 9px; min-width: 0; }
+.toolbox-tool { display: flex; align-items: flex-start; gap: 12px; padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); text-align: left; cursor: pointer; font: inherit; }
+.toolbox-tool > svg { color: #ac8b57; flex-shrink: 0; margin-top: 2px; }
+.toolbox-tool > span { min-width: 0; }
+.toolbox-tool strong, .toolbox-tool small, .toolbox-tool em { display: block; overflow-wrap: anywhere; }
+.toolbox-tool strong { font-size: 13px; font-weight: 550; }
+.toolbox-tool small { color: var(--ink-soft); line-height: 1.6; margin-top: 5px; }
+.toolbox-tool em { color: var(--ink-faint); font-style: normal; font-size: 10px; margin-top: 9px; }
+.toolbox-tool.is-selected { border-color: #ac8b57; background: var(--surface-soft); }
+.toolbox-tool:disabled { cursor: default; }
+.toolbox-empty { display: grid; justify-items: center; gap: 12px; padding: 35px 16px; text-align: center; color: var(--ink-soft); border: 1px dashed var(--line-strong); border-radius: 14px; }
+.toolbox-empty strong { color: var(--ink); font-size: 14px; font-weight: 550; }
+.toolbox-empty p { margin: 0; line-height: 1.65; max-width: 290px; }
+.skill-toolbox input, .skill-toolbox textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; }
+.skill-toolbox textarea { resize: vertical; line-height: 1.65; }
+.toolbox-editor { padding: 17px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-soft); min-width: 0; }
+.toolbox-editor header { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 16px; overflow-wrap: anywhere; }
+.toolbox-editor header button, .toolbox-reference > button { border: 0; background: transparent; color: var(--ink-soft); padding: 0; cursor: pointer; }
+.toolbox-editor fieldset { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 13px; }
+.toolbox-editor label { display: grid; gap: 7px; font-size: 11px; }
+.toolbox-editor summary { cursor: pointer; padding-block: 5px; font-size: 11px; }
+.toolbox-editor details label { margin-top: 10px; }
+.toolbox-instructions { font-family: ui-monospace, Consolas, monospace !important; font-size: 11px !important; }
+.toolbox-editor .toolbox-file-input { display: flex; align-items: center; width: fit-content; cursor: pointer; color: var(--ink-soft); }
+.toolbox-file-input input { width: 1px; height: 1px; position: absolute; opacity: 0; padding: 0; }
+.toolbox-file-input:focus-within { outline: 2px solid #ac8b57; outline-offset: 4px; }
+.toolbox-editor-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.toolbox-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.toolbox-settings { margin-bottom: 20px; }
+.toolbox-reference { display: flex; gap: 10px; justify-content: space-between; border-bottom: 1px solid var(--line); padding-block: 5px; }
+.toolbox-reference details { min-width: 0; }
+.toolbox-reference summary { overflow-wrap: anywhere; }
+.toolbox-reference pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; font-size: 10px; }
+.toolbox-error { padding: 10px; border: 1px solid var(--danger); border-radius: 8px; line-height: 1.6; overflow-wrap: anywhere; }
+.toolbox-footer { display: flex; justify-content: space-between; gap: 10px; margin-top: 20px; color: var(--ink-faint); font-size: 10px; }
+.toolbox-skill-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; border-radius: 9px; background: var(--surface); }
+.toolbox-skill-tabs button { flex: 1; padding: 8px 6px; white-space: nowrap; border: 0; border-radius: 6px; background: transparent; color: var(--ink-soft); font: inherit; font-size: 11px; cursor: pointer; }
+.toolbox-skill-tabs button[aria-pressed="true"] { background: var(--surface-soft); color: var(--ink); }
+.toolbox-editor-actions { position: sticky; bottom: -17px; background: var(--surface-soft); padding-block: 10px; }
+.skill-defaults-editor { display: grid; gap: 9px; min-width: 0; }
+.skill-defaults-editor > button { justify-self: start; }
+.skill-setting { padding: 10px; display: grid; gap: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; min-width: 0; }
+.skill-setting-heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.skill-setting-heading > input, .skill-setting-heading > span { flex: 1; min-width: 0; }
+.skill-toolbox select { padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); font: inherit; min-width: 0; }
+.skill-setting-heading > select { width: 100px; }
+.skill-setting .skill-setting-switch { display: flex; align-items: center; gap: 8px; }
+.skill-setting-switch input { width: auto; accent-color: var(--accent); }
+.skill-setting .skill-defaults-editor { border-left: 2px solid var(--line); padding-left: 10px; }
+.skill-files-location, .skill-files-create, .skill-files-import, .skill-file-actions { display: flex; align-items: center; gap: 8px; margin-block: 10px; }
+.skill-files-location select, .skill-files-create input { flex: 1; }
+.skill-file-icon { border: 0; background: transparent; color: var(--ink-soft); padding: 5px; cursor: pointer; flex-shrink: 0; }
+.skill-file-icon:disabled { opacity: .35; cursor: default; }
+.skill-files-import { flex-wrap: wrap; gap: 16px; }
+.skill-file-list { border: 1px solid var(--line); border-radius: 9px; padding: 5px; max-height: 220px; overflow: auto; }
+.skill-file-list > p { padding: 7px; margin: 0; }
+.skill-file-row { display: flex; gap: 8px; align-items: center; width: 100%; padding: 9px; text-align: left; border: 0; border-radius: 5px; background: transparent; color: var(--ink); font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+.skill-file-row svg { color: #ac8b57; flex-shrink: 0; }
+.skill-file-row.is-selected { background: var(--surface); }
+.skill-file-details { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 4px; }
+.skill-file-actions { flex-wrap: wrap; }
+.skill-file-actions button { display: flex; align-items: center; gap: 5px; }
+.skill-binary-preview { display: grid; justify-items: start; gap: 9px; font-size: 10px; color: var(--ink-soft); }
+.skill-binary-preview img { max-width: 100%; max-height: 160px; object-fit: contain; border-radius: 6px; }

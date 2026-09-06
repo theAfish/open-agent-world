@@ -19,8 +19,9 @@ if TYPE_CHECKING:
 
 
 from backend.plugins.documents import NodeDocumentDefinition
+from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.2"
+PLUGIN_API_VERSION = "1.4"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -82,6 +83,7 @@ class NodeTypeCatalogItem(BaseModel):
     traits: list[str]
     surfaces: dict[str, bool]
     has_document: bool = False
+    has_execution: bool = False
     default_config: dict[str, Any]
     user_creatable: bool
     templateable: bool
@@ -151,6 +153,7 @@ class NodeTypeDefinition:
     template_status: str | None = None
     template_handler: NodeTemplateHandler | None = None
     document: NodeDocumentDefinition | None = None
+    execution: NodeExecutionDefinition | None = None
 
     def catalog_item(self, plugin_id: str) -> NodeTypeCatalogItem:
         default_config = self.config_model().model_dump(mode="json")
@@ -178,6 +181,7 @@ class NodeTypeDefinition:
             },
             default_config=default_config,
             has_document=self.document is not None,
+            has_execution=self.execution is not None,
             user_creatable=self.user_creatable,
             templateable=self.templateable,
         )
@@ -404,13 +408,25 @@ class PluginRegistry:
             if definition.document is not None:
                 document = definition.document
                 document.model()
-                if not callable(document.capture) or not callable(document.summarize):
-                    raise TypeError("document capture and summary must be callable")
+                if document.initial_value is not None:
+                    document.model.model_validate(document.initial_value)
+                if not all(callable(fn) for fn in (document.capture, document.summarize, document.remap_references)):
+                    raise TypeError("document capture, summary and reference remapping must be callable")
                 for name, action in document.actions.items():
                     if not name or name == "replace" or not callable(action.handler):
                         raise ValueError("document actions require a handler and cannot use reserved name 'replace'")
                     if action.capability_kind and action.capability_kind not in staged.capability_handlers:
                         raise ValueError("document action capabilities must be owned by the same plugin")
+            if definition.execution is not None:
+                execution = definition.execution
+                if definition.document is None:
+                    raise ValueError("executable nodes require a document")
+                if not all(callable(fn) for fn in (execution.items, execution.apply_outcome, execution.policy)):
+                    raise TypeError("execution callbacks must be callable")
+                if execution.executor_relationship not in staged.relationships:
+                    raise ValueError("executor relationship must be owned by the same plugin")
+                if execution.control_capability_kind and execution.control_capability_kind not in staged.capability_handlers:
+                    raise ValueError("execution control capability must be owned by the same plugin")
             try:
                 definition.config_model()
             except ValidationError as exc:

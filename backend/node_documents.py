@@ -48,8 +48,8 @@ def write_document(services, node_id, value, expected_revision, *, actor_id=None
         value = spec.model.model_validate(value).model_dump(mode="json")
     except (ValidationError, ValueError) as exc:
         raise ResourceValidationError(validation_message(exc)) from exc
-    if len(json.dumps(value).encode("utf-8")) > 256 * 1024:
-        raise ResourceValidationError("Node documents are limited to 256 KiB")
+    if len(json.dumps(value).encode("utf-8")) > spec.max_size_bytes:
+        raise ResourceValidationError(f"This document is limited to {spec.max_size_bytes // 1024} KiB")
     scope = services.state.ensure_scope("node_document", node_id, schema_id="core.node_document")
     services.state.set(scope, "document", value, expected_revision=expected_revision, actor_id=actor_id, run_id=run_id)
     return read_document(services, node_id)
@@ -59,6 +59,8 @@ async def invoke_document_action(services, node_id, action, request, *, capabili
     async with services._node_mutation():
         spec = definition(services, node_id)
         handler = spec.actions.get(action)
+        if action == "replace" or (handler is not None and not handler.read_only):
+            services.node_execution.assert_editable(node_id)
         if capability is not None:
             live = services.capabilities.capability_for_id(capability.agent_id, capability.id)
             if live.target_id != node_id or handler is None or handler.capability_kind != live.kind:

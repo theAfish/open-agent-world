@@ -1,13 +1,16 @@
-import { Check, Circle, GitBranch, ListTodo, Plus, RefreshCw, Trash2, X } from "lucide-react";
+import { Check, Circle, GitBranch, ListTodo, Play, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
+import { NodeExecutionControls, useNodeExecution } from "./NodeExecution";
 
 export interface BoardTask {
   id: string; title: string; description: string; status: "todo" | "doing" | "done" | "blocked"; depends_on: string[]; note: string;
+  executor_id?: string | null; last_run_id?: string | null; execution_status?: string | null;
 }
-interface BoardSnapshot { value: { tasks: BoardTask[] }; revision: number; summary: { total: number; done: number; ready_ids: string[] } }
+interface BoardExecution { default_executor_id: string | null; max_parallel: number; pause_on_failure: boolean }
+interface BoardSnapshot { value: { tasks: BoardTask[]; execution: BoardExecution }; revision: number; summary: { total: number; done: number; ready_ids: string[] } }
 const statuses = { todo: "To do", doing: "In progress", done: "Done", blocked: "Blocked" };
 const snapshot = (value: unknown) => value as BoardSnapshot;
 
@@ -104,12 +107,16 @@ function DependencyGraph({ tasks, onSelect }: { tasks: BoardTask[]; onSelect: (t
 
 export function TaskBoardBody({ card, workspace = false }: { card: WorldCard; workspace?: boolean }) {
   const { board, accept, reload, error, setError } = useBoard(card.id);
-  const [busy, setBusy] = useState(false);
+  const execution = useNodeExecution(card.id, reload);
+  const [editing, setBusy] = useState(false);
+  const busy = editing || execution.busy || !!execution.state?.active;
   const [view, setView] = useState<"list" | "graph">("list");
   const [filter, setFilter] = useState<"all" | "ready" | "done">("all");
   const [quickTitle, setQuickTitle] = useState("");
   const [draft, setDraft] = useState<{ task: BoardTask; revision: number }>();
   const tasks = board?.value.tasks ?? [];
+  const settings = board?.value.execution ?? { default_executor_id: null, max_parallel: 1, pause_on_failure: true };
+  const executors = execution.state?.executors ?? [];
   const ready = new Set(board?.summary.ready_ids ?? []);
   const select = (task: BoardTask) => setDraft({ task: { ...task, depends_on: [...task.depends_on] }, revision: board!.revision });
   const mutate = async (action: string, args: Record<string, unknown>, revision = board?.revision): Promise<boolean> => {
@@ -130,6 +137,18 @@ export function TaskBoardBody({ card, workspace = false }: { card: WorldCard; wo
       <button className="secondary-button" title="Reload the board and discard the open task draft" aria-label="Reload task board" disabled={busy} onClick={() => { setDraft(undefined); void reload(); }}><RefreshCw size={14} /></button></header>
     <progress aria-label="Task completion" value={board?.summary.done ?? 0} max={board?.summary.total || 1} />
     <p className="task-board-help">Connect an Agent to read tasks, update progress, or manage the plan.</p>
+    <details className="task-execution-settings"><summary>Agent execution <span>{settings.default_executor_id ? "Configured" : "Optional"}</span></summary>
+      <p className="task-board-help">Connect this board to an Agent with “Execute with”, then choose an executor. Leaving it unset keeps this a todo board. Successful runs complete tasks automatically.</p>
+      <fieldset disabled={busy || !board}>
+        <label>Default executor<select aria-label="Default executor" value={settings.default_executor_id ?? ""} onChange={(e) => void mutate("configure_execution", { ...settings, default_executor_id: e.target.value || null })}>
+          <option value="">No default executor</option>{settings.default_executor_id && !executors.some((agent) => agent.id === settings.default_executor_id) && <option value={settings.default_executor_id}>Executor disconnected</option>}
+          {executors.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
+        <label>Execution mode<select aria-label="Execution mode" value={settings.max_parallel} onChange={(e) => void mutate("configure_execution", { ...settings, max_parallel: Number(e.target.value) })}>
+          <option value={1}>One task at a time</option>{[2, 3, 4, 8].map((count) => <option key={count} value={count}>Up to {count} tasks in parallel</option>)}</select></label>
+        <label className="execution-checkbox"><input type="checkbox" checked={settings.pause_on_failure} onChange={(e) => void mutate("configure_execution", { ...settings, pause_on_failure: e.target.checked })} /> Pause new tasks on failure</label>
+      </fieldset>
+    </details>
+    <NodeExecutionControls execution={execution} revision={board?.revision} readyCount={ready.size} disabled={editing || !!draft} titleForItem={(id) => tasks.find((task) => task.id === id)?.title ?? id} />
     <div className="task-board-toolbar"><div className="task-view-toggle" role="group" aria-label="Task view"><button aria-pressed={view === "list"} onClick={() => setView("list")}><ListTodo size={14} /> List</button><button aria-pressed={view === "graph"} onClick={() => setView("graph")}><GitBranch size={14} /> Dependencies</button></div>
       <select aria-label="Filter tasks" value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)} disabled={view === "graph"}><option value="all">All tasks</option><option value="ready">Ready to start</option><option value="done">Completed</option></select></div>
     {error && <p className="task-board-error" role="alert">{error}</p>}
@@ -142,6 +161,7 @@ export function TaskBoardBody({ card, workspace = false }: { card: WorldCard; wo
             <button className="task-check" disabled={busy || (task.status !== "done" && (waiting || task.status === "blocked"))} aria-label={`${task.status === "done" ? "Reopen" : "Complete"} ${task.title}`} title={waiting ? "Complete prerequisites first" : task.status === "blocked" ? "Resolve the blocker in task details first" : undefined}
               onClick={() => void mutate("progress", { task_id: task.id, status: task.status === "done" ? "todo" : "done", note: task.note })}>{task.status === "done" ? <Check size={16} /> : <Circle size={16} />}</button>
             <button className="task-row-content" onClick={() => select(task)} aria-label={`Edit task ${task.title}`}><strong>{task.title}</strong><span>{waiting ? "Waiting for prerequisites" : ready.has(task.id) ? "Ready to start" : statuses[task.status]}{task.depends_on.length > 0 && ` / ${task.depends_on.length} dependencies`}</span></button>
+            {(ready.has(task.id) || (task.status === "blocked" && ["failed", "cancelled", "interrupted"].includes(task.execution_status ?? ""))) && <button className="task-check" disabled={busy || !!draft || !executors.some((agent) => agent.id === (task.executor_id || settings.default_executor_id))} aria-label={`${task.status === "blocked" ? "Retry" : "Run"} ${task.title}`} title={task.status === "blocked" ? "Retry this task only" : "Run this task only"} onClick={() => void execution.run(board!.revision, task.id)}><Play size={14} /></button>}
           </article>;
         })}</div>}
     {tasks.length > 0 && view === "list" && filter !== "all" && !tasks.some((task) => filter === "ready" ? ready.has(task.id) : task.status === "done") && <p className="task-board-help">{filter === "ready" ? "No tasks are ready. Check prerequisites and blockers." : "No completed tasks yet."}</p>}
@@ -150,12 +170,15 @@ export function TaskBoardBody({ card, workspace = false }: { card: WorldCard; wo
       <header><strong>Task details</strong><button type="button" aria-label="Close task details" onClick={() => setDraft(undefined)}><X size={16} /></button></header>
       <fieldset disabled={busy}><label>Title<input aria-label="Task title" maxLength={200} required value={draft.task.title} onChange={(e) => patch({ title: e.target.value })} /></label>
       <label>Description<textarea aria-label="Task description" rows={3} maxLength={4000} placeholder="Expected outcome or instructions" value={draft.task.description} onChange={(e) => patch({ description: e.target.value })} /></label>
+      <label>Executor<select aria-label="Task executor" value={draft.task.executor_id ?? ""} onChange={(e) => patch({ executor_id: e.target.value || null })}>
+        <option value="">Use board default</option>{draft.task.executor_id && !executors.some((agent) => agent.id === draft.task.executor_id) && <option value={draft.task.executor_id}>Executor disconnected</option>}
+        {executors.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
       <label>Status<select aria-label="Task status" value={draft.task.status} onChange={(e) => patch({ status: e.target.value as BoardTask["status"] })}>{Object.entries(statuses).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <label>Progress note<textarea aria-label="Progress note" rows={2} maxLength={4000} placeholder="Result, blocker, or next step" value={draft.task.note} onChange={(e) => patch({ note: e.target.value })} /></label>
       <div className="task-dependencies"><strong>Depends on</strong><p>These tasks must finish first.</p>{tasks.filter((task) => task.id !== draft.task.id).map((task) => <label key={task.id}><input type="checkbox" aria-label={`Depends on ${task.title}`} checked={draft.task.depends_on.includes(task.id)} onChange={(e) => patch({ depends_on: e.target.checked ? [...draft.task.depends_on, task.id] : draft.task.depends_on.filter((id) => id !== task.id) })} />{task.title}</label>)}{tasks.length < 2 && <p>Add another task to set a dependency.</p>}</div>
       <div className="task-editor-actions"><button type="button" className="secondary-button" aria-label="Delete task" title="Delete this task" onClick={async () => { if (await mutate("remove", { task_id: draft.task.id }, draft.revision)) setDraft(undefined); }}><Trash2 size={14} /></button><button className="primary-button">Save task</button></div></fieldset>
       <small>Task ID: {draft.task.id}</small>
     </form>}
-    </div><p className="task-board-help task-board-footnote">Dependencies control readiness. Tasks run when you or an Agent act on them.</p>
+    </div><p className="task-board-help task-board-footnote">Run ready work continues through newly unlocked dependencies. Stop preserves completed work. Retry runs only the selected task; resume the remaining plan with Run ready work.</p>
   </div>;
 }

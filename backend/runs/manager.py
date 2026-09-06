@@ -283,7 +283,10 @@ class RunManager:
         return self.get_run(run_id)
 
     def final_text(self, run_id: str) -> str:
-        return self._final_text.get(run_id, "")
+        if run_id in self._final_text:
+            return self._final_text[run_id]
+        scope = self.state.ensure_scope("run", run_id, schema_id="core.run")
+        return self.state.resolve(StateContext((scope,)), "output_text").value
 
     def holds_agent_slot(self, run_id: str) -> bool:
         self.get_run(run_id)
@@ -581,6 +584,7 @@ class RunManager:
                     text = event.payload.get("text")
                     if isinstance(text, str):
                         self._final_text[record.run_id] = text
+                        self.state.set(context.state_context.local_scope, "output_text", text, run_id=record.run_id)
                     if event.run_status is not None:
                         current = self.get_run(record.run_id)
                         if current.status not in TERMINAL_RUN_STATUSES:

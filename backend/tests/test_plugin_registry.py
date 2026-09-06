@@ -77,15 +77,17 @@ def test_plugin_install_is_compatible_owned_and_atomic() -> None:
     registry.install(legacy)
     assert registry.has_plugin("example.legacy")
 
+    major, minor = map(int, PLUGIN_API_VERSION.split("."))
+    future_version = f"{major}.{minor + 1}"
     future_minor = PluginDefinition(
         descriptor=PluginDescriptor(
             id="example.future",
             version="1.0.0",
-            plugin_api_version="1.3",
+            plugin_api_version=future_version,
         ),
         configure=lambda registration: None,
     )
-    with pytest.raises(PluginCompatibilityError, match="requires Plugin API '1.3'"):
+    with pytest.raises(PluginCompatibilityError, match=f"requires Plugin API '{future_version}'"):
         registry.install(future_minor)
 
     def fail_after_staging(registration: PluginRegistration) -> None:

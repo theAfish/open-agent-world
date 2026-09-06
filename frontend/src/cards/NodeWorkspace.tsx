@@ -1,5 +1,6 @@
 import {
   Bot,
+  Boxes,
   Clock3,
   MessageSquare,
   MessagesSquare,
@@ -15,6 +16,8 @@ import { nodeSurfaceSupport, useNodeSurfaceStore } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
 import type { ConversationSession, WorldCard } from "../types/world";
 import { TaskBoardBody } from "./TaskBoard";
+import { SkillToolboxBody } from "./SkillToolbox";
+import { WorkSourceWorkspace } from "./NodeExecution";
 import { ConversationWorkspace } from "./ConversationWorkspace";
 
 interface WorkspaceSurfaceProps {
@@ -27,7 +30,7 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
 
   return (
     <header className="workspace-titlebar node-drag-region">
-      <div className="workspace-app-mark">{card.type === "conversation" ? <MessagesSquare size={16} /> : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.task-board.v1") ? <ListTodo size={16} /> : <Bot size={16} />}</div>
+      <div className="workspace-app-mark">{card.type === "conversation" ? <MessagesSquare size={16} /> : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill-package.v1") ? <Boxes size={16} /> : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.task-board.v1") ? <ListTodo size={16} /> : <Bot size={16} />}</div>
       <div>
         <span>{catalog.node_types.find((item) => item.id === card.type)?.label ?? card.type} workspace</span>
         <strong>{card.name}</strong>
@@ -159,7 +162,9 @@ export function WorkspaceSurface({ card }: WorkspaceSurfaceProps) {
       <div className="workspace-content">
       {card.type === "agent" ? <AgentWorkspace card={card} />
         : card.type === "conversation" ? <ConversationWorkspace card={card} />
-        : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.task-board.v1") ? <TaskBoardBody card={card} workspace /> : (
+        : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill-package.v1") ? <SkillToolboxBody card={card} workspace />
+        : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.task-board.v1") ? <TaskBoardBody card={card} workspace />
+        : catalog.node_types.find((definition) => definition.id === card.type)?.has_execution ? <WorkSourceWorkspace nodeId={card.id} /> : (
           <div className="workspace-welcome">
             <strong>{card.name}</strong>
             <p>This plugin node exposes a workspace surface. Its frontend module can replace this generic view.</p>

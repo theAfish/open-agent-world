@@ -6,7 +6,15 @@ The application uses React, TypeScript, Vite, React Flow, Zustand, FastAPI, SQLi
 
 The bundled [Task Board plugin](plugins/task_board/README.md) adds shared todo lists
 and dependency graphs under **Fields**. Connect an Agent with read, progress-only,
-or full planning access. Boards can be saved with Legions as reusable plans.
+or full planning access. Optional execution connections enable dependency-aware
+Agent Runs, bounded parallelism, stop/retry, and result handoff. Boards and executor
+bindings can be saved with Legions as reusable plans. The underlying
+[work-source execution contract](docs/execution.md) also supports non-DAG plugins.
+
+The bundled [Skill Toolboxes plugin](plugins/skill_packages/README.md) adds **Tools**:
+create an empty toolbox, add skills and shared instructions, connect an Agent for
+on-demand reading, or export the curated collection as an installable plugin.
+Imported toolboxes remain editable local copies and can be reused with Legions.
 
 ## Run locally
 

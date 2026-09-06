@@ -3,7 +3,7 @@
 Open Agent World keeps four execution concepts separate:
 
 - **Agent** is the persistent actor and capability-bearing world object.
-- **Task** is a future work contract. A Task may have several Run attempts.
+- **Work item** is a plugin-owned unit of work, such as a Task. One item may have several Run attempts; its acceptance rules belong to its plugin.
 - **Run** is one durable execution attempt by one Agent.
 - **External Job** is a future long-running operation started during a Run.
 
@@ -16,6 +16,11 @@ Run working data is deliberately separate from `RunRecord`. Every new Run owns
 a fresh durable `run:<run_id>` state scope for its input, progress, scratch data,
 intermediate results, and result. The provider receives a typed `StateContext`
 whose Run scope is most local; see [Runtime state](state.md).
+
+The host also persists the latest provider text as `output_text`, so execution
+result handoff survives restart. Plugin-dispatched Runs use `caller_kind="work"`,
+the batch ID as `caller_id`, and `<source_node_id>:<item_id>` as `task_id`.
+See [plugin work-source execution](execution.md) for scheduling and recovery.
 
 ## Lifecycle
 

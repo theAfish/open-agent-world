@@ -20,7 +20,9 @@ def action(client, url, name, arguments, revision):
 
 def test_dependency_validation_progress_and_conflicts(client):
     node, url = board(client)
-    assert client.get(url + "/document").json()["value"] == {"tasks": []}
+    initial = client.get(url + "/document").json()["value"]
+    assert initial["tasks"] == []
+    assert initial["execution"]["default_executor_id"] is None
     response = action(client, url, "upsert", {"tasks": [{"id": "a", "title": "Research"}, {"id": "b", "title": "Write", "depends_on": ["a"]}]}, 0)
     assert response.status_code == 200, response.text
     assert response.json()["summary"]["ready_ids"] == ["a"]

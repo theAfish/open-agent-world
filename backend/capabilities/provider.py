@@ -18,6 +18,26 @@ if TYPE_CHECKING:
 class _CapabilityContext:
     services: ApplicationServices
 
+    async def node_execution_action(self, capability, action, arguments):
+        from backend.node_execution import ExecutionRequest
+        from backend.node_documents import validation_message
+        from pydantic import ValidationError
+        service = self.services.node_execution
+        if action == "start":
+            try:
+                request = ExecutionRequest.model_validate(arguments)
+            except ValidationError as error:
+                raise ResourceValidationError(validation_message(error)) from error
+            return await service.start(capability.target_id, request, capability=capability)
+        if arguments:
+            raise ResourceValidationError("Only start accepts execution arguments")
+        if action == "stop":
+            return await service.stop(capability.target_id, capability=capability)
+        if action == "read":
+            service.authorize(capability.target_id, capability)
+            return service.snapshot(capability.target_id)
+        raise ResourceValidationError("Unknown execution action")
+
     async def node_document_action(self, capability, action, arguments, expected_revision=None):
         from backend.node_documents import DocumentActionRequest, invoke_document_action
         return await invoke_document_action(self.services, capability.target_id, action,

@@ -129,7 +129,10 @@ function restoreCardInput(card: RestorableCard): CardCreateInput {
 async function restoreCard(card: RestorableCard): Promise<WorldCard> {
   const restored = await worldApi.restoreNode(restoreCardInput(card));
   if (card.restoreDocument) {
-    try { await worldApi.nodeDocumentAction(restored.id, "replace", card.restoreDocument, 0); }
+    try {
+      const current = await worldApi.getNodeDocument(restored.id);
+      await worldApi.nodeDocumentAction(restored.id, "replace", card.restoreDocument, current.revision);
+    }
     catch (error) { await worldApi.deleteNode(restored.id); throw error; }
   }
   if (card.type === "legion" && card.restoreLegionState) {

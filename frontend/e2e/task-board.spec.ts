@@ -60,3 +60,57 @@ test("task board edits dependencies, rejects cycles, stays live and restores aft
     expect(restored.value.tasks.find((task: { id: string }) => task.id === report.id).note).toBe("Draft in progress");
   } finally { await request.delete(url); }
 });
+
+test("optional execution settings dispatch connected agents and show durable results", async ({ page, request }) => {
+  await page.setViewportSize({ width: 1600, height: 1100 });
+  const create = async (type: string, name: string, x: number) => {
+    const response = await request.post("/api/nodes", { data: { type, name, position: { x, y: 430 }, ...(type === "agent" ? { config: { runtime_provider_id: "core.mock" } } : {}) } });
+    expect(response.status()).toBe(201); return response.json();
+  };
+  const node = await create("oaw.tasks", "Executable plan", 710);
+  const first = await create("agent", "Primary worker", 1100);
+  const second = await create("agent", "Second worker", 1450);
+  const url = `/api/nodes/${node.id}`;
+  try {
+    for (const agent of [first, second]) {
+      const edge = await request.post("/api/edges", { data: { source: node.id, target: agent.id, relationship: "oaw.tasks.executor" } });
+      expect(edge.status()).toBe(201);
+    }
+    await request.post(url + "/actions/upsert", { data: { expected_revision: 0, arguments: { tasks: [
+      { id: "a", title: "First analysis" }, { id: "b", title: "Second analysis" }, { id: "c", title: "Combined report", depends_on: ["a", "b"] },
+    ] } } });
+    await page.goto("/");
+    const card = page.locator(`[data-card-id="${node.id}"]`);
+    await card.locator(".card-kind-icon").click();
+    await card.getByRole("button", { name: "Open workspace", exact: true }).click();
+    const board = page.getByRole("dialog", { name: "Executable plan workspace", exact: true });
+    await board.locator(".task-execution-settings summary").click();
+    await board.getByLabel("Default executor", { exact: true }).selectOption(first.id);
+    await expect(board.getByLabel("Default executor", { exact: true })).toHaveValue(first.id);
+    await board.getByLabel("Execution mode").selectOption("2");
+    await expect(board.getByLabel("Execution mode")).toHaveValue("2");
+    await page.screenshot({ path: "../.open-agent-world/task-execution-settings.png" });
+    await board.locator(".task-execution-settings summary").click();
+    await board.getByRole("button", { name: "Edit task Second analysis", exact: true }).click();
+    await board.getByLabel("Task executor", { exact: true }).selectOption(second.id);
+    await board.getByRole("button", { name: "Save task", exact: true }).click();
+    await board.getByRole("button", { name: "Run ready work", exact: true }).click();
+    await expect(board.getByRole("heading", { name: "3 / 3 complete", exact: true })).toBeVisible();
+    await board.locator(".execution-history summary").click();
+    await expect(board.locator(".execution-history li")).toHaveCount(3);
+    await board.locator(".execution-history summary").click();
+    await board.getByRole("button", { name: "Edit task Combined report", exact: true }).click();
+    await expect(board.getByLabel("Progress note", { exact: true })).toContainText("First analysis");
+    await page.screenshot({ path: "../.open-agent-world/task-execution-light.png" });
+    await page.getByRole("button", { name: "Use dark theme" }).click();
+    await page.screenshot({ path: "../.open-agent-world/task-execution-dark.png" });
+    await page.getByRole("button", { name: "Use light theme" }).click();
+    await page.reload();
+    await expect(page.getByRole("dialog", { name: "Executable plan workspace", exact: true }).getByRole("heading", { name: "3 / 3 complete", exact: true })).toBeVisible();
+    const state = await (await request.get(url + "/execution")).json();
+    expect(state.attempts.map((attempt: { item_id: string }) => attempt.item_id)).toEqual(["a", "b", "c"]);
+  } finally {
+    await request.post(url + "/execution/stop");
+    for (const id of [node.id, first.id, second.id]) await request.delete(`/api/nodes/${id}`);
+  }
+});

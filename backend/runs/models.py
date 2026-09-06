@@ -31,7 +31,7 @@ TERMINAL_RUN_STATUSES = frozenset(
 class RunRecord(BaseModel):
     """Durable execution-attempt metadata.
 
-    Agent is the actor, Task is a future work contract, Run is one attempt, and
+    Agent is the actor, a plugin work item is the work contract, Run is one attempt, and
     an external Job is future work performed during a Run. Their lifecycles are
     deliberately not stored on one another.
     """

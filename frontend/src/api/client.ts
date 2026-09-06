@@ -26,6 +26,10 @@ export type CardCreateInput = (Omit<WorldCard, "id"> | WorldCard) & {
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, "") ?? "/api";
 
+export function nodeDocumentDownloadUrl(id: string, name: string): string {
+  return `${API_BASE}/nodes/${encodeURIComponent(id)}/document/downloads/${encodeURIComponent(name)}`;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -341,6 +345,20 @@ export const worldApi = {
       body: JSON.stringify(payload),
     });
     return normalizeCard(unwrap(body, "node"));
+  },
+
+  getNodeExecution(id: string): Promise<import("../cards/NodeExecution").ExecutionSnapshot> {
+    return request(`/nodes/${encodeURIComponent(id)}/execution`);
+  },
+
+  startNodeExecution(id: string, revision: number, itemId?: string): Promise<import("../cards/NodeExecution").ExecutionSnapshot> {
+    return request(`/nodes/${encodeURIComponent(id)}/execution/start`, {
+      method: "POST", body: JSON.stringify({ expected_revision: revision, item_id: itemId }),
+    });
+  },
+
+  stopNodeExecution(id: string): Promise<import("../cards/NodeExecution").ExecutionSnapshot> {
+    return request(`/nodes/${encodeURIComponent(id)}/execution/stop`, { method: "POST" });
   },
 
   async restoreNode(node: CardCreateInput): Promise<WorldCard> {

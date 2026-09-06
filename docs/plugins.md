@@ -119,10 +119,13 @@ requires an explicit data migration.
 `plugin_api_version` is the plugin's literal minimum host contract, not the
 installed host's current version. Compatibility follows semantic `major.minor`
 rules: the major version must match and the host minor must be at least the
-requested minor. Host 1.1 therefore accepts plugins requiring 1.0 or 1.1, while
-rejecting 1.2 and 2.0. Pin `"1.1"` when using Legion template contracts or
+requested minor. Host 1.3 accepts plugins requiring 1.0 through 1.3, while
+rejecting 1.4 and 2.0. Pin `"1.1"` when using Legion template contracts or
 delete-transaction dependencies/recovery payloads; otherwise a plugin using only
 the original contracts can continue to declare `"1.0"`.
+Use `"1.2"` for documents and `"1.3"` for work-source execution or document
+reference remapping.
+Use `"1.4"` for document seeds, document downloads, or the skill toolbox helper.
 
 Registration is staged. The registry validates the complete contribution set and
 publishes it atomically only if registration succeeds. Every node type,
@@ -487,7 +490,9 @@ models. They receive JSON data copies, never host databases or service container
 
 The host stores one validated document per node in StateStore, outside Card config.
 A successful write increments its revision and emits a State event; the node's
-delete transaction removes the document. Documents are limited to 256 KiB. Actions
+delete transaction removes the document. Documents default to a 256 KiB limit;
+`max_size_bytes` lets a definition set its content budget (skill toolboxes use
+16 MiB to include assets). Actions
 are serialized with node mutations and require `expected_revision` for writes.
 Read-only actions validate arguments without committing. `replace` is reserved for
 human/host full-document restoration and cannot be called using Agent permissions.
@@ -517,7 +522,43 @@ host code. The first supported structured view is selected by the trait
 [Task Board plugin](../plugins/task_board/README.md). Other plugins can adopt that
 contract; different visual document types require an explicit host renderer.
 
+## Document seeds and downloads (Plugin API 1.4)
+
+`NodeDocumentDefinition.initial_value` optionally supplies validated initial JSON.
+The host copies it into the node's document at creation, starting at revision 1.
+This pins published presets independently of later plugin versions. Definitions
+without an explicit seed retain their existing lazy defaults and revision 0.
+Always read the current revision before writing or restoring a document.
+
+`NodeDocumentDefinition.downloads` maps names to pure synchronous callbacks taking
+the saved document and returning `NodeDocumentDownload(filename, content,
+media_type)`. The host exposes these through
+`GET /api/nodes/{id}/document/downloads/{name}` as attachment responses. This is a
+human download surface; it does not grant an Agent a new capability or execute
+exported code. Callbacks receive JSON data, not service containers or filesystem
+access. The normal trusted-plugin boundary still applies to the callback itself.
+
+The public `open_agent_world.skill_packages` helper uses these contracts to
+register editable, portable skill toolboxes and export ordinary entry-point
+plugin packages. See [Skill Toolboxes](../plugins/skill_packages/README.md) for
+the authoring contract and `ui.skill-package.v1` renderer. Curated collections
+remain owned plugin contributions; the core does not maintain a parallel skill
+registry, plugin marketplace, or content-hash identity scheme.
+
 ## Relationships, traits, and capabilities
+
+Executable nodes can additionally declare `NodeExecutionDefinition` (API 1.3).
+It uses pure callbacks to enumerate work, apply outcomes, and supply an execution
+policy. The host handles Agent admission, live permissions, durable attempts,
+stop/retry, and restart reconciliation. This contract does not require Task Board
+fields, a DAG, or automatic result acceptance. See the complete
+[execution contract and example](execution.md).
+
+API 1.3 also adds `NodeDocumentDefinition.remap_references(value, ids)`. During
+Legion capture, `ids` maps live node IDs to template keys; during instantiation it
+maps template keys to the new instance's node IDs. Clear external references
+instead of carrying authority to an unrelated original Agent. This callback
+must remain pure and support older compatible document versions.
 
 Relationships match exact types, required traits, or both:
 

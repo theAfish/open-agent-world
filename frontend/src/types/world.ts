@@ -147,6 +147,7 @@ export interface NodeTypeCatalogItem {
   /** Whether a user may create this node directly from the card library. */
   user_creatable: boolean;
   has_document?: boolean;
+  has_execution?: boolean;
   default_config: CardConfig;
 }
 

@@ -1,5 +1,6 @@
 import { Bot, FileText, Image as ImageIcon, MessagesSquare, ShieldCheck, Workflow } from "lucide-react";
 import { TaskBoardPreview } from "./TaskBoard";
+import { SkillToolboxPreview } from "./SkillToolbox";
 import { useMemo } from "react";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
@@ -17,6 +18,7 @@ export function NodePreview({ card }: { card: WorldCard }) {
     [card.id, edges],
   );
 
+  if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill-package.v1")) return <SkillToolboxPreview card={card} />;
   if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.task-board.v1")) return <TaskBoardPreview card={card} />;
 
   if (card.type === "agent") {

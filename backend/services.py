@@ -81,6 +81,7 @@ from backend.resources.models import (
 )
 from backend.runs import RunRecord, RunStatus, RunStore
 from backend.runs.manager import RunManager
+from backend.node_execution import NodeExecutionService
 from backend.runs.models import TERMINAL_RUN_STATUSES
 from backend.sandbox import (
     CommandResult,
@@ -517,6 +518,7 @@ class ApplicationServices:
     legions: LegionStore
     llm_settings: LlmSettingsStore
     run_manager: RunManager | None = None
+    node_execution: NodeExecutionService | None = None
     sandbox_backend: SandboxBackend | None = None
     _node_mutation_lock: asyncio.Lock = field(
         default_factory=asyncio.Lock, init=False, repr=False
@@ -619,6 +621,7 @@ class ApplicationServices:
     async def startup(self) -> None:
         manager = self._require_run_manager()
         await manager.startup()
+        await self.node_execution.startup()
         await self._retry_pending_node_deletions()
         context = self._node_lifecycle_context()
         for card in self.world.list_cards():
@@ -627,6 +630,7 @@ class ApplicationServices:
                 await lifecycle.on_startup(context, card)
 
     async def shutdown(self) -> None:
+        await self.node_execution.shutdown()
         context = self._node_lifecycle_context()
         for card in self.world.list_cards():
             lifecycle = self.plugins.node_type(card.type).lifecycle
@@ -740,6 +744,9 @@ class ApplicationServices:
                     except OSError as exc:
                         raise ResourceValidationError(f"Cannot create Sandbox workspace: {exc}") from exc
                 card = self.world.create_card(request, card_id=preview.id)
+                if definition.document is not None and definition.document.initial_value is not None:
+                    from backend.node_documents import write_document
+                    write_document(self, card.id, definition.document.initial_value, 0)
                 for transaction in transactions:
                     attempted_transactions.append(transaction)
                     await transaction.commit()
@@ -922,6 +929,8 @@ class ApplicationServices:
         async with self._node_mutation():
             ids = list(dict.fromkeys(card_ids))
             cards = [self.world.get_card(card_id) for card_id in ids]
+            for card in cards:
+                self.node_execution.assert_editable(card.id)
             for card in cards:
                 if card.type == "legion" and any(m.id not in ids for m in self.world.list_members(card.id)):
                     raise GraphValidationError("Detach Legion members before deleting their container")
@@ -1607,7 +1616,7 @@ class ApplicationServices:
             template_node = LegionTemplateNode(
                 key=node_keys[card.id],
                 parent_key=node_keys.get(card.parent_id),
-                initial_document=definition.document.capture(documents[card.id]["value"]) if definition.document else None,
+                initial_document=definition.document.remap_references(definition.document.capture(documents[card.id]["value"]), node_keys) if definition.document else None,
                 initial_shared_state=shared_states[card.id]["value"] if card.id in shared_states else None,
                 type=card.type,
                 plugin_id=self.plugins.node_type_owner_id(card.type),
@@ -1786,8 +1795,10 @@ class ApplicationServices:
                     _publish_event=False,
                 ))
                 if node.initial_document is not None:
-                    from backend.node_documents import write_document
-                    write_document(self, node_ids[node.key], node.initial_document, 0)
+                    from backend.node_documents import read_document, write_document
+                    document_spec = self.plugins.node_type(node.type).document
+                    revision = read_document(self, node_ids[node.key])["revision"]
+                    write_document(self, node_ids[node.key], document_spec.remap_references(node.initial_document, node_ids), revision)
                 if node.initial_shared_state is not None:
                     from backend.legions.runtime import LegionStateWrite, write_shared_state
                     write_shared_state(self.world, self.state, node_ids[node.key],
@@ -3260,6 +3271,7 @@ def create_services(
     from backend.capabilities.provider import WorldAgentCapabilityProvider
 
     provider = WorldAgentCapabilityProvider(services)
+    services.node_execution = NodeExecutionService(services)
     services.run_manager = RunManager(
         store=RunStore(database),
         world=world,
