@@ -125,6 +125,8 @@ export interface WorldSnapshot {
 }
 
 export interface NodeTypeCatalogItem {
+  icon_url?: string | null;
+  frontend?: Partial<Record<"preview" | "body" | "settings" | "workspace", string>>;
   id: CardType;
   plugin_id: string;
   label: string;
@@ -154,6 +156,7 @@ export interface NodeTypeCatalogItem {
   summoning?: Record<string, never> | null;
   container?: ContainerDefinition | null;
   default_config: CardConfig;
+  config_schema?: Record<string, unknown>;
 }
 
 export interface RelationshipCatalogItem {

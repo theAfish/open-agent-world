@@ -745,7 +745,7 @@ class RunManager:
 
     def _agent_card(self, agent_id: str) -> Card:
         card = self.world.get_card(agent_id)
-        if card.type != "agent":
+        if not self.plugins.has_trait(card.type, "core.agent"):
             raise RuntimeUnavailableError(f"card {agent_id!r} is not an Agent")
         return card
 

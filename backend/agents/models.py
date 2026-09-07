@@ -53,6 +53,7 @@ class AgentInfo:
     session_id: str
     active_run_id: str | None = None
     last_error: str | None = None
+    details: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

@@ -14,7 +14,12 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "paths": {
+      "@oaw/plugin-api": ["./src/plugins/sdk.ts"],
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"]
+    }
   },
-  "include": ["src"]
+  "include": ["src", "../plugins/*/frontend/**/*.ts", "../plugins/*/frontend/**/*.tsx"]
 }

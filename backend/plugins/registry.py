@@ -23,7 +23,7 @@ from backend.plugins.documents import NodeDocumentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.7"
+PLUGIN_API_VERSION = "1.9"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -75,6 +75,8 @@ class NodeTypeCatalogItem(BaseModel):
     label: str
     description: str
     icon: str
+    icon_url: str | None = None
+    frontend: dict[str, str] = Field(default_factory=dict)
     color: str
     deck_id: str
     deck_label: str
@@ -90,6 +92,7 @@ class NodeTypeCatalogItem(BaseModel):
     container: dict[str, Any] | None = None
     summoning: dict[str, Any] | None = None
     default_config: dict[str, Any]
+    config_schema: dict[str, Any] = Field(default_factory=dict)
     user_creatable: bool
     templateable: bool
 
@@ -128,6 +131,15 @@ class CapabilityGrantDefinition:
 
 
 @dataclass(frozen=True, slots=True)
+class PluginAsset:
+    """Explicit public resource; bytes are captured during plugin registration."""
+
+    id: str
+    content: bytes
+    media_type: str
+
+
+@dataclass(frozen=True, slots=True)
 class NodeTypeDefinition:
     id: str
     label: str
@@ -145,6 +157,8 @@ class NodeTypeDefinition:
     # Bump this when a plugin intentionally changes a card's default deck.
     # Clients use it to migrate old catalog-owned deck assignments once.
     deck_revision: int = 1
+    icon_asset: str | None = None
+    frontend: Mapping[str, str] = field(default_factory=dict)
     traits: frozenset[str] = frozenset()
     surfaces: Mapping[str, bool] = field(
         default_factory=lambda: {
@@ -174,6 +188,8 @@ class NodeTypeDefinition:
             label=self.label,
             description=self.description,
             icon=self.icon,
+            icon_url=f"/api/plugins/{plugin_id}/assets/{self.icon_asset}" if self.icon_asset else None,
+            frontend=dict(self.frontend),
             color=self.color,
             deck_id=self.deck_id,
             deck_label=self.deck_label,
@@ -192,6 +208,7 @@ class NodeTypeDefinition:
                 "workspace": bool(self.surfaces.get("workspace", False)),
             },
             default_config=default_config,
+            config_schema=self.config_model.model_json_schema(),
             has_document=self.document is not None,
             has_execution=self.execution is not None,
             container=self.container.catalog_item() if self.container else None,
@@ -250,6 +267,12 @@ class PluginRegistration:
         self.capability_handlers: dict[str, CapabilityHandler] = {}
         self.runtime_provider_factories: dict[str, RuntimeProviderFactory] = {}
         self.state_schemas: dict[str, StateSchema] = {}
+        self.assets: dict[str, PluginAsset] = {}
+
+    def register_asset(self, asset: PluginAsset) -> None:
+        if not isinstance(asset, PluginAsset):
+            raise TypeError("asset must be a PluginAsset")
+        self._add(self.assets, asset.id, asset, "asset")
 
     def register_node_type(self, definition: NodeTypeDefinition) -> None:
         self._add(self.nodes, definition.id, definition, "node type")
@@ -292,6 +315,7 @@ class PluginRegistry:
         self._runtime_provider_factories: dict[str, RuntimeProviderFactory] = {}
         self._state_schemas: dict[str, StateSchema] = {}
         self._owners: dict[tuple[str, str], str] = {}
+        self._assets: dict[tuple[str, str], PluginAsset] = {}
 
     def install(self, plugin: Plugin) -> None:
         descriptor = getattr(plugin, "descriptor", None)
@@ -314,6 +338,7 @@ class PluginRegistry:
         self._validate_registration(staged)
 
         self._plugins[descriptor.id] = descriptor
+        self._assets.update({(descriptor.id, key): asset for key, asset in staged.assets.items()})
         self._commit_owned("node_type", descriptor.id, self._nodes, staged.nodes)
         self._commit_owned(
             "relationship", descriptor.id, self._relationships, staged.relationships
@@ -336,6 +361,12 @@ class PluginRegistry:
 
     def _validate_registration(self, staged: PluginRegistration) -> None:
         from backend.state.schema import StateSchema
+
+        for asset in staged.assets.values():
+            if not isinstance(asset.content, bytes) or not asset.content or len(asset.content) > 5 * 1024 * 1024:
+                raise ValueError("public assets require 1 byte to 5 MiB of content")
+            if asset.media_type not in {"image/svg+xml", "image/png", "image/jpeg", "image/webp", "image/gif"}:
+                raise ValueError("unsupported public asset media type")
 
         contribution_sets = (
             ("node_type", "node type", self._nodes, staged.nodes),
@@ -379,6 +410,12 @@ class PluginRegistry:
                 raise ValueError("state schema ids must be namespaced")
 
         for definition in staged.nodes.values():
+            if definition.icon_asset is not None and definition.icon_asset not in staged.assets:
+                raise ValueError("node icon must reference an asset registered by the same plugin")
+            for slot, reference in definition.frontend.items():
+                if slot not in {"preview", "body", "settings", "workspace"}:
+                    raise ValueError(f"unknown frontend slot {slot!r}")
+                self.validate_identifier(reference, "frontend view")
             if (
                 not definition.statuses
                 or definition.default_status not in definition.statuses
@@ -500,8 +537,14 @@ class PluginRegistry:
     def plugins(self) -> tuple[PluginDescriptor, ...]:
         return tuple(self._plugins.values())
 
+    def asset(self, plugin_id: str, asset_id: str) -> PluginAsset:
+        return self._assets[(plugin_id, asset_id)]
+
     def has_plugin(self, plugin_id: str) -> bool:
         return plugin_id in self._plugins
+
+    def has_trait(self, type_id: str, trait: str) -> bool:
+        return trait in self.node_type(type_id).traits
 
     def owner_id(self, kind: str, contribution_id: str) -> str:
         try:

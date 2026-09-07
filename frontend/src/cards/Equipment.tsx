@@ -1,12 +1,12 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Backpack, ExternalLink, Plus, X, Puzzle } from "lucide-react";
+import { Backpack, ExternalLink, Plus, X } from "lucide-react";
 import type { MouseEvent } from "react";
 import { useWorldStore } from "../state/worldStore";
 import { canEquip, equipmentOwner, useEquipmentDrag, useEquipmentPanel } from "../state/equipment";
 import { getConnectionOptions } from "../state/relationships";
 import type { WorldCard } from "../types/world";
 import type { CanvasNode } from "./types";
-import { CATALOG_ICONS } from "./CardFrame";
+import { CatalogIcon } from "../components/CatalogIcon";
 import { useNodeSurfaceStore } from "../state/nodeSurfaces";
 import "./equipment.css";
 import { ActivityGlow } from "../effects/ActivityGlow";
@@ -72,7 +72,7 @@ export function EquipmentCardNode({ data }: NodeProps<CanvasNode>) {
   const options = bindingOwner ? getConnectionOptions(catalog, bindingOwner.type, card.type) : [];
   const unequip = () => void update(card.id, { equipment: null, parent_id: null,
     position: { x: (owner?.position.x ?? card.position.x) + 460, y: owner?.position.y ?? card.position.y } });
-  const Icon = CATALOG_ICONS[catalog.node_types.find((type) => type.id === card.type)?.icon ?? ""] ?? Puzzle;
+  const definition = catalog.node_types.find((type) => type.id === card.type);
   const onOriginClick = (event: MouseEvent<HTMLDivElement>) => {
     if (origin && !(event.target as HTMLElement).closest(".equipment-item-remove, select")) inspect();
   };
@@ -81,7 +81,7 @@ export function EquipmentCardNode({ data }: NodeProps<CanvasNode>) {
     <ActivityGlow phase={activity.phase} />
     {!origin && <Handle type="source" position={Position.Left} id="boundary-left" aria-label={`Connect ${card.name} left`} />}
     <button type="button" className="equipment-item-open" onClick={inspect} title={origin ? "Hide details" : card.name}
-      aria-label={origin ? `Hide ${card.name} details` : card.name} aria-expanded={!!origin}><Icon size={17} /><span>{card.name}</span></button>
+      aria-label={origin ? `Hide ${card.name} details` : card.name} aria-expanded={!!origin}><CatalogIcon definition={definition} size={17} /><span>{card.name}</span></button>
     <button className="equipment-item-remove" onClick={unequip} aria-label={`Unequip ${card.name}`} title="Unequip"><ExternalLink size={12} /></button>
     {options.length > 1 && <select aria-label={`${card.name} relationship`} value={card.equipment?.relationship ?? options[0].value}
       onChange={(event) => void update(card.id, { equipment: { owner_id: bindingOwner!.id, relationship: event.target.value } })}>

@@ -38,7 +38,7 @@ class CapabilityBroker:
         self.plugins = plugins
 
     def derive(self, agent_id: str) -> CapabilitySet:
-        agent = self._require_type(agent_id, CardType.AGENT)
+        agent = self._require_agent(agent_id)
         capabilities: list[Capability] = []
         directed_edges = [(edge, edge.target) for edge in self.world.connections_from(agent_id)]
         directed_edges.extend(
@@ -97,8 +97,8 @@ class CapabilityBroker:
         return CapabilitySet(agent_id=agent.id, capabilities=capabilities)
 
     def require_agent_communicate(self, agent_id: str, target_agent_id: str) -> None:
-        self._require_type(agent_id, CardType.AGENT)
-        self._require_type(target_agent_id, CardType.AGENT)
+        self._require_agent(agent_id)
+        self._require_agent(target_agent_id)
         self.capability_for_id(agent_id, f"agent.communicate:{target_agent_id}")
 
     def require_text_read(self, agent_id: str, resource_id: str) -> None:
@@ -230,6 +230,12 @@ class CapabilityBroker:
             # an explicit dispatch request for the runtime adapter.
             return capability.target_id, argv
         raise AssertionError(f"unhandled capability kind {capability.kind}")
+
+    def _require_agent(self, card_id: str) -> Card:
+        card = self.world.get_card(card_id)
+        if not self.plugins.has_trait(card.type, "core.agent"):
+            raise ResourceValidationError(f"card {card_id!r} is not an Agent")
+        return card
 
     def _require_type(self, card_id: str, expected: str) -> Card:
         card = self.world.get_card(card_id)

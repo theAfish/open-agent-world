@@ -1,5 +1,8 @@
 """Stable contracts for trusted Open Agent World Python plugins."""
 
+from backend.plugins.builtin import AgentNodeBehavior, AgentNodeTemplateHandler
+from backend.plugins.registry import PluginAsset
+
 from backend.plugins.summoning import NodeSummoningDefinition, SummoningAction, SummoningPolicy
 from backend.plugins.documents import NodeDocumentAction, NodeDocumentDefinition, NodeDocumentDownload
 from backend.plugins.containers import NodeContainerDefinition
@@ -16,6 +19,7 @@ from backend.agents import (
     AgentNotFoundError,
     AgentRuntimeError,
     AgentStateError,
+    AgentStatus,
     RuntimeProvider,
     ScopedToolDefinition,
     ToolParameter,
@@ -67,6 +71,8 @@ from backend.runs import InvocationContext, RuntimeInput
 from backend.world.models import Card, CardCreate, CardPatch, Edge
 
 __all__ = [
+    "PluginAsset",
+    "AgentNodeBehavior", "AgentNodeTemplateHandler",
     "NodeSummoningDefinition", "SummoningAction", "SummoningPolicy",
     "ExecutionPolicy",
     "NodeExecutionDefinition",
@@ -88,6 +94,7 @@ __all__ = [
     "AgentNotFoundError",
     "AgentRuntimeError",
     "AgentStateError",
+    "AgentStatus",
     "Capability",
     "CapabilityContext",
     "CapabilityGrantDefinition",

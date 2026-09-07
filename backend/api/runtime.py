@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import PurePath
+from dataclasses import fields
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
@@ -78,7 +79,19 @@ async def get_agent(
     agent_id: str,
     services: ApplicationServices = Depends(get_services),
 ) -> object:
-    return await services.get_agent(agent_id)
+    info = await services.get_agent(agent_id)
+    # Runtime configs use immutable mapping proxies internally. Build the wire
+    # representation explicitly instead of asking FastAPI to serialize those.
+    config = {field.name: getattr(info.config, field.name) for field in fields(info.config)}
+    config["provider_config"] = dict(info.config.provider_config)
+    return {
+        "config": config,
+        "status": info.status,
+        "session_id": info.session_id,
+        "active_run_id": info.active_run_id,
+        "last_error": info.last_error,
+        "details": dict(info.details),
+    }
 
 
 @router.post("/agents/{agent_id}/run", status_code=status.HTTP_202_ACCEPTED)

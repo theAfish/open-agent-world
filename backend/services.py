@@ -1513,7 +1513,7 @@ class ApplicationServices:
             )
 
     def _validate_membership_change(self, current: Card, updated: Card) -> None:
-        if current.parent_id == updated.parent_id or current.type != "agent":
+        if current.parent_id == updated.parent_id or not self.plugins.has_trait(current.type, "core.agent"):
             return
         if self.run_manager is not None and any(
             run.status not in TERMINAL_RUN_STATUSES for run in self.run_manager.list_runs(agent_id=current.id)
@@ -2364,7 +2364,7 @@ class ApplicationServices:
         return document
 
     async def run_agent(self, agent_id: str, prompt: str) -> dict[str, Any]:
-        self._require_card_type(agent_id, CardType.AGENT)
+        self._require_agent(agent_id)
         run = await self._require_run_manager().start_run(agent_id, prompt)
         return {"accepted": True, "agent_id": agent_id, "run_id": run.run_id}
 
@@ -2382,7 +2382,7 @@ class ApplicationServices:
         agents: list[ConversationAgent] = []
         for agent_id in sorted(agent_ids):
             card = self.world.maybe_get_card(agent_id)
-            if card is None or card.type != CardType.AGENT:
+            if card is None or not self.plugins.has_trait(card.type, "core.agent"):
                 continue
             agents.append(ConversationAgent(
                 id=card.id,
@@ -2400,7 +2400,7 @@ class ApplicationServices:
     def list_agent_conversation_sessions(
         self, agent_id: str
     ) -> list[ConversationSession]:
-        self._require_card_type(agent_id, CardType.AGENT)
+        self._require_agent(agent_id)
         return self.conversations.list_agent_sessions(agent_id)
 
     async def create_conversation_session(
@@ -2561,7 +2561,7 @@ class ApplicationServices:
         self._require_conversation_connection(source_agent_id, conversation_id)
         self._require_conversation_connection(target_agent_id, conversation_id)
         if source_agent_id == target_agent_id:
-            source = self._require_card_type(source_agent_id, CardType.AGENT)
+            source = self._require_agent(source_agent_id)
             return {
                 "agent_id": source.id,
                 "agent_name": source.name,
@@ -2570,8 +2570,8 @@ class ApplicationServices:
                     "requesting another turn from yourself."
                 ),
             }
-        source = self._require_card_type(source_agent_id, CardType.AGENT)
-        target = self._require_card_type(target_agent_id, CardType.AGENT)
+        source = self._require_agent(source_agent_id)
+        target = self._require_agent(target_agent_id)
         request_message = self.conversations.add_message(
             conversation_id,
             session_id,
@@ -2647,19 +2647,19 @@ class ApplicationServices:
         return record
 
     async def stop_agent(self, agent_id: str) -> dict[str, Any]:
-        self._require_card_type(agent_id, CardType.AGENT)
+        self._require_agent(agent_id)
         await self._require_run_manager().cancel_agent_runs(agent_id)
         return {"agent_id": agent_id, "status": "idle"}
 
     async def get_agent(self, agent_id: str) -> Any:
-        self._require_card_type(agent_id, CardType.AGENT)
+        self._require_agent(agent_id)
         return await self._require_run_manager().get_agent(agent_id)
 
     async def communicate_with_agent(
         self, source_agent_id: str, target_agent_id: str, message: str
     ) -> dict[str, str]:
-        source = self._require_card_type(source_agent_id, CardType.AGENT)
-        target = self._require_card_type(target_agent_id, CardType.AGENT)
+        source = self._require_agent(source_agent_id)
+        target = self._require_agent(target_agent_id)
         self.capabilities.require_agent_communicate(source_agent_id, target_agent_id)
         prompt = f"Message from {source.name}:\n\n{message.strip()}"
         manager = self._require_run_manager()
@@ -2981,7 +2981,7 @@ class ApplicationServices:
     def _require_conversation_connection(
         self, agent_id: str, conversation_id: str
     ) -> None:
-        self._require_card_type(agent_id, CardType.AGENT)
+        self._require_agent(agent_id)
         self._require_card_type(conversation_id, CardType.CONVERSATION)
         if not any(edge.target == conversation_id and edge.relationship == Relationship.PARTICIPATE
                    for edge in self.world.connections_from(agent_id)):
@@ -3112,12 +3112,12 @@ class ApplicationServices:
         source = self.world.maybe_get_card(edge.source)
         if source is not None and source.equipment:
             return [source.equipment.owner_id]
-        if source is not None and source.type == CardType.AGENT:
+        if source is not None and self.plugins.has_trait(source.type, "core.agent"):
             target = self.world.maybe_get_card(edge.target)
             if (
                 edge.direction is EdgeDirection.BIDIRECTIONAL
                 and target is not None
-                and target.type == CardType.AGENT
+                and self.plugins.has_trait(target.type, "core.agent")
             ):
                 return sorted([source.id, target.id])
             return [source.id]
@@ -3178,6 +3178,13 @@ class ApplicationServices:
                 "sandbox execution is not configured on this host"
             )
         return self.sandbox_backend
+
+    def _require_agent(self, card_id: str) -> Card:
+        self._assert_no_live_pending_deletions()
+        card = self.world.get_card(card_id)
+        if not self.plugins.has_trait(card.type, "core.agent"):
+            raise NotFoundError(f"agent card {card_id!r} does not exist")
+        return card
 
     def _require_card_type(self, card_id: str, expected: str) -> Card:
         self._assert_no_live_pending_deletions()

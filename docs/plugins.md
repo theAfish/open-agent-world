@@ -48,14 +48,22 @@ build-backend = "hatchling.build"
 packages = ["src/acme_oaw_plugin"]
 ```
 
-The loader sorts entry points by name, calls each factory once per registry, and
-installs the returned plugin. Import, construction, and registration must be
+Normal backend startup scans immediate package directories under the repository's
+`plugins/` folder. Each package declares the entry-point group above in its
+`pyproject.toml`; both `src` and flat Python package layouts are supported. No
+`-PluginPath` flag or editable installation is needed for these local packages.
+Dependencies must already be available in the backend environment.
+
+The loader also discovers installed entry points. An installed entry with the
+same name and factory as a local declaration is loaded only once. Local packages
+are ordered by directory name, and entry points by name. The loader calls each
+factory once per registry and installs the returned plugin. Import, construction, and registration must be
 deterministic and free of network calls, threads, or external resource creation.
 An import, compatibility, validation, or identifier collision error prevents host
 startup.
 
-During development, mount an editable package without changing backend dependency
-files:
+For packages outside `plugins/`, mount an editable package without changing
+backend dependency files:
 
 ```powershell
 ./scripts/dev.ps1 -AgentRuntime mock -PluginPath ./path/to/my-plugin
@@ -70,6 +78,92 @@ uv run --project backend --with-editable ./path/to/my-plugin `
 
 The repository's [Greeter plugin](../examples/plugins/greeter/README.md) is the
 canonical compact example.
+
+## Local frontend extensions and public assets
+
+Plugin API 1.9 adds explicit public image assets and frontend view references.
+The backend remains authoritative for each card's owner and selected views.
+Register resources from your Python package, so the same code works with local
+discovery and installed wheels:
+
+```python
+from importlib.resources import files
+from open_agent_world.plugin_api import PluginAsset
+
+registration.register_asset(PluginAsset(
+    id="logo",
+    content=files(__package__).joinpath("assets/logo.svg").read_bytes(),
+    media_type="image/svg+xml",
+))
+# On your NodeTypeDefinition:
+# icon="bot", icon_asset="logo", frontend={"settings": "settings"}
+```
+
+Only explicitly registered bytes are served at
+`/api/plugins/{plugin_id}/assets/{asset_id}`. The host publishes `icon_url` in the
+catalog; consumers should use that URL rather than constructing filesystem paths.
+Asset names are local to their owning plugin. Registration is atomic, including
+asset references. Images can be SVG, PNG, JPEG, WebP or GIF, up to 5 MiB each.
+Card icons use their alpha mask with the current text color, so provide a
+monochrome mark with a transparent background. The host has no brand-name map.
+
+For a local frontend extension, add:
+
+```text
+plugins/my-plugin/
+  frontend/
+    plugin.json
+    index.tsx
+  src/my_plugin/assets/logo.svg
+```
+
+`frontend/plugin.json` identifies the backend owner:
+
+```json
+{ "pluginId": "acme.example", "apiVersion": 1 }
+```
+
+`frontend/index.tsx` exports named views:
+
+```tsx
+import type { FrontendPlugin, PluginViewProps } from "@oaw/plugin-api";
+
+function Settings({ card, host }: PluginViewProps) {
+  return <label>Greeting<input defaultValue={String(card.config.greeting ?? "")}
+    onBlur={(event) => void host.updateConfig({ greeting: event.target.value })} /></label>;
+}
+
+export default {
+  apiVersion: 1,
+  views: { settings: Settings },
+} satisfies FrontendPlugin;
+```
+
+The catalog's `frontend` map supports `preview`, `body`, `settings`, and
+`workspace`. Each value selects a view exported by that card's owning plugin.
+`settings` replaces configuration inside the shared Agent controls; `body`
+replaces inspector content, and `workspace` replaces content inside the host
+window. The host retains its titlebar, canvas interaction and window controls.
+Undeclared slots keep their standard interface. A declared view that cannot load
+or render displays a local error instead of silently substituting another view.
+
+Views receive the current card, definition, surface level, and a card-scoped host
+adapter with `updateConfig` and `getAgentInfo`. Updates go through existing host
+actions and backend validation. `SchemaFields` is also exported for scalar schema
+controls. Import host contracts only from `@oaw/plugin-api`; React is shared with
+the host. Do not import host stores or internal components. UI extensions are
+trusted application code, not a security sandbox; error boundaries isolate
+rendering and module-load errors, not arbitrary asynchronous side effects.
+
+Vite discovers immediate `plugins/*/frontend` entries at startup/build time and
+loads their view modules on demand. Restart development servers after adding a
+plugin; rebuild the frontend for production. Existing sources support Vite HMR.
+Installing a Python wheel alone does not add its UI to an existing frontend
+bundle: place its frontend source under the local plugin directory and rebuild.
+This version does not load remote JavaScript or independently versioned React.
+
+See [Codex](../plugins/codex/frontend/index.tsx) for a working SDK-based settings
+view and its package-owned icon.
 
 ## Public Plugin API
 
@@ -611,6 +705,16 @@ relationship capabilities in reverse; use separate relationships for different
 meanings.
 
 ## Runtime providers
+
+API 1.8 supports plugin-defined Agent card types through the `core.agent` trait
+across Runs, Conversations and capability authorization. Reuse public
+`AgentNodeBehavior` for transactional lifecycle handling and
+`AgentNodeTemplateHandler` for portable configuration (subclass its field set
+when needed). Register a distinct node type with its own Pydantic configuration.
+Catalog entries expose `config_schema`; the `ui.schema-agent.v1` trait selects
+schema-driven scalar settings in the standard Agent workspace. Constant fields
+are not editable. `AgentInfo.details` carries JSON-compatible, non-secret runtime
+inspection data. See the [Codex plugin](../plugins/codex/README.md).
 
 Agent-engine integrations implement the public `RuntimeProvider` contract and
 register a factory:

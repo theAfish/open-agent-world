@@ -339,6 +339,10 @@ export const worldApi = {
     return request(`/agents/${encodeURIComponent(id)}/capabilities`);
   },
 
+  getAgentInfo(id: string): Promise<{ session_id: string; details?: Record<string, unknown> }> {
+    return request(`/agents/${encodeURIComponent(id)}`);
+  },
+
   async duplicateAgent(id: string): Promise<LegionInstantiation> {
     return normalizeLegionInstantiation(await request(`/nodes/${encodeURIComponent(id)}/duplicate`, { method: "POST" }));
   },

@@ -3,13 +3,9 @@ import {
   Bot,
   Boxes,
   ChevronUp,
-  FileText,
   Folder,
-  Image as ImageIcon,
   Layers3,
-  MessagesSquare,
   Plus,
-  Puzzle,
   Sparkles,
   Star,
   Trash2,
@@ -20,6 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type CSSProperties, type DragEvent, type FormEvent } from "react";
 import { useWorldStore } from "../state/worldStore";
+import { CatalogIcon } from "../components/CatalogIcon";
 import { useEquipmentDrag } from "../state/equipment";
 import { buildCardDraft } from "../state/helpers";
 import type { CardType, LegionSummary, PluginCatalog } from "../types/world";
@@ -33,7 +30,6 @@ import {
 interface NodeDeckCard {
   kind: "node";
   type: CardType;
-  icon: LucideIcon;
   label: string;
   detail: string;
 }
@@ -92,15 +88,6 @@ const DECK_ICONS: Record<DeckIconKey, LucideIcon> = {
   sparkles: Sparkles,
   star: Star,
   zap: Zap,
-};
-
-const NODE_ICONS: Record<string, LucideIcon> = {
-  bot: Bot,
-  "file-text": FileText,
-  image: ImageIcon,
-  workflow: Workflow,
-  "messages-square": MessagesSquare,
-  sparkles: Sparkles,
 };
 
 const isCardType = (value: unknown): value is CardType => (
@@ -225,7 +212,6 @@ function materializeDeck(deck: StoredDeck, catalog: PluginCatalog): CardDeck {
       return definition ? [{
         kind: "node",
         type,
-        icon: NODE_ICONS[definition.icon] ?? Puzzle,
         label: definition.label,
         detail: definition.description,
       }] : [];
@@ -495,7 +481,6 @@ export function ComponentPalette() {
                 style={{ "--deck-card-count": activeDeck.cards.length } as CSSProperties}
               >
                 {activeDeck.cards.map((item, index) => {
-                  const Icon = item.icon;
                   if (item.kind === "node") {
                     return (
                       <button
@@ -510,14 +495,15 @@ export function ComponentPalette() {
                         aria-label={`Create ${item.label}`}
                         title="Drag to the canvas to create, or onto a deck tab to move"
                       >
-                        <span className="palette-card-corner"><Icon size={15} /></span>
-                        <span className="palette-item-icon"><Icon size={25} /></span>
+                        <span className="palette-card-corner"><CatalogIcon definition={catalog.node_types.find((d) => d.id === item.type)} size={15} /></span>
+                        <span className="palette-item-icon"><CatalogIcon definition={catalog.node_types.find((d) => d.id === item.type)} size={25} /></span>
                         <span className="palette-item-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>
                         <span className="palette-draw"><Plus size={12} /> Draw</span>
                       </button>
                     );
                   }
                   const issueText = item.issues.join(" ") || "One or more required plugins are unavailable.";
+                  const Icon = item.icon;
                   return (
                     <div
                       className="legion-palette-entry"

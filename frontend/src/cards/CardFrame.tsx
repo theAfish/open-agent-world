@@ -1,7 +1,7 @@
 import { EquipmentToggle } from "./Equipment";
 import { BarracksBody } from "./Barracks";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Bot, Maximize2, Minus, ExternalLink, FileText, Image as ImageIcon, MessagesSquare, Puzzle, Sparkles, Trash2, Workflow, X, type LucideIcon } from "lucide-react";
+import { Maximize2, Minus, ExternalLink, Trash2, X } from "lucide-react";
 import { memo, type ComponentType, type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef } from "react";
 import { ConnectionHoverHint, clearConnectionHoverHint, updateConnectionHoverHint } from "./ConnectionHoverHint";
 import { IconButton } from "../components/IconButton";
@@ -10,7 +10,6 @@ import { useWorldStore } from "../state/worldStore";
 import { type CardType, type WorldCard } from "../types/world";
 import { TaskBoardBody } from "./TaskBoard";
 import { SkillToolboxBody, SkillNodeBody } from "./SkillToolbox";
-import { Boxes, Wrench } from "lucide-react";
 import { AgentCardBody } from "./AgentCard";
 import { ConversationCardBody } from "./ConversationCard";
 import { ImageCardBody } from "./ImageCard";
@@ -23,17 +22,11 @@ import type { CanvasNode } from "./types";
 import { ActivityGlow } from "../effects/ActivityGlow";
 import { useNodeActivity } from "../effects/useNodeActivity";
 import { useNodeGeneration } from "../effects/generation";
+import { PluginSurface } from "../plugins/PluginSurface";
+import { CatalogIcon } from "../components/CatalogIcon";
 
 const DRAG_THRESHOLD_PX = 5;
 const NON_DRAG_SELECTOR = "button, input, textarea, select, label, a, [contenteditable='true'], .react-flow__handle";
-
-const ICONS: Partial<Record<CardType, LucideIcon>> = {
-  agent: Bot,
-  conversation: MessagesSquare,
-  text: FileText,
-  image: ImageIcon,
-  sandbox: Workflow,
-};
 
 interface BodyProps { card: WorldCard; level: NodeSurfaceLevel }
 
@@ -43,17 +36,6 @@ const BODIES: Partial<Record<CardType, ComponentType<BodyProps>>> = {
   text: TextCardBody,
   image: ImageCardBody,
   sandbox: SandboxCardBody,
-};
-
-export const CATALOG_ICONS: Record<string, LucideIcon> = {
-  boxes: Boxes,
-  wrench: Wrench,
-  bot: Bot,
-  "file-text": FileText,
-  image: ImageIcon,
-  workflow: Workflow,
-  "messages-square": MessagesSquare,
-  sparkles: Sparkles,
 };
 
 function GenericCardBody({ card }: BodyProps) {
@@ -81,8 +63,8 @@ function GenericCardBody({ card }: BodyProps) {
 export function CardContent({ card, level }: BodyProps) {
   const catalog = useWorldStore((s) => s.catalog);
   const definition = catalog.node_types.find((t) => t.id === card.type);
-  const Body = definition?.traits.includes("ui.agent-barracks.v1") ? BarracksBody : definition?.traits.includes("ui.skill.v1") ? SkillNodeBody : definition?.traits.includes("ui.skill-package.v1") ? SkillToolboxBody : definition?.traits.includes("ui.task-board.v1") ? TaskBoardBody : BODIES[card.type] ?? GenericCardBody;
-  return <Body card={card} level={level} />;
+  const Body = definition?.traits.includes("ui.agent-barracks.v1") ? BarracksBody : definition?.traits.includes("ui.skill.v1") ? SkillNodeBody : definition?.traits.includes("ui.skill-package.v1") ? SkillToolboxBody : definition?.traits.includes("ui.task-board.v1") ? TaskBoardBody : definition?.traits.includes("core.agent") ? AgentCardBody : BODIES[card.type] ?? GenericCardBody;
+  return <PluginSurface card={card} slot="body" level={level}><Body card={card} level={level} /></PluginSurface>;
 }
 
 function statusLabel(status: WorldCard["status"]): string {
@@ -112,7 +94,6 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
   const visualLevel = level;
   const definition = catalog.node_types.find((item) => item.id === card.type);
   const label = definition?.label ?? card.type;
-  const Icon = ICONS[card.type] ?? CATALOG_ICONS[definition?.icon ?? ""] ?? Puzzle;
 
   const support = nodeSurfaceSupport(card.type, catalog);
 
@@ -182,7 +163,7 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
       {visualLevel !== "inspector" && <EquipmentToggle card={card} />}
       {visualLevel === "workspace" ? <WorkspaceSurface card={card} /> : <>
         <header className="card-header node-surface-header">
-          <div className="card-kind-icon" aria-hidden="true"><Icon size={18} strokeWidth={1.7} /></div>
+          <div className="card-kind-icon" aria-hidden="true"><CatalogIcon definition={definition} size={18} /></div>
           <div className="card-title-group">
             <span className="card-eyebrow">{label}</span>
             <h2 title={card.name}>{card.name}</h2>

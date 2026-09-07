@@ -4,6 +4,7 @@ import { SkillToolboxPreview } from "./SkillToolbox";
 import { useMemo } from "react";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
+import { PluginSurface } from "../plugins/PluginSurface";
 
 function compactText(value: unknown, fallback: string): string {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
@@ -11,6 +12,10 @@ function compactText(value: unknown, fallback: string): string {
 }
 
 export function NodePreview({ card }: { card: WorldCard }) {
+  return <PluginSurface card={card} slot="preview" level="preview"><DefaultNodePreview card={card} /></PluginSurface>;
+}
+
+function DefaultNodePreview({ card }: { card: WorldCard }) {
   const edges = useWorldStore((state) => state.edges);
   const catalog = useWorldStore((state) => state.catalog);
   const connectionCount = useMemo(
@@ -24,7 +29,7 @@ export function NodePreview({ card }: { card: WorldCard }) {
   if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill.v1")) return <SkillToolboxPreview card={card} single />;
 
 
-  if (card.type === "agent") {
+  if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("core.agent")) {
     return (
       <div className="node-preview-summary">
         <p>{compactText(card.config.system_instruction, "Ready for a scoped instruction.")}</p>

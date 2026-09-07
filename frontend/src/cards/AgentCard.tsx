@@ -1,3 +1,5 @@
+import { AgentSchemaSettings } from "./AgentSchemaSettings";
+import { PluginSurface } from "../plugins/PluginSurface";
 import { worldApi, apiErrorMessage } from "../api/client";
 import { CircleStop, Play, Radio } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -8,6 +10,8 @@ import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { InstrumentOutput } from "./CardUtilities";
 
 export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSurfaceLevel }) {
+  const definition = useWorldStore((state) => state.catalog.node_types.find((item) => item.id === card.type));
+  const schemaSettings = definition?.traits.includes("ui.schema-agent.v1");
   const edges = useWorldStore((state) => state.edges);
   const cards = useWorldStore((state) => state.cards);
   const updateCard = useWorldStore((state) => state.updateCard);
@@ -42,6 +46,8 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
 
   return (
     <div className="expanded-stack">
+      <PluginSurface card={card} slot="settings" level={level}>
+      {schemaSettings ? <AgentSchemaSettings card={card} /> : <>
       {level === "workspace" && <><label className="field-label"><span>When to use this Agent</span><textarea defaultValue={String(card.config.description ?? "")} maxLength={500}
         onBlur={(event) => { if (event.target.value !== card.config.description) void updateCard(card.id, { config: { description: event.target.value } }); }} /></label>
       {cards.find((c) => c.id === card.parent_id)?.type === "legion" && <section className="card-section">
@@ -71,7 +77,7 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
         </label>
         <div className="live-readout">
           <Radio size={13} aria-hidden="true" />
-          <span title="Google ADK selects the model adapter automatically.">ADK · {card.status}</span>
+          <span title="Agent runtime provider">{String(card.config.runtime_provider_id ?? "google.adk")} · {card.status}</span>
         </div>
       </div>
 
@@ -89,6 +95,8 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
         />
       </label>
 
+      </>}
+      </PluginSurface>
       {level === "workspace" && <section className="card-section">
         <div className="section-heading">
           <span>Effective capabilities</span>

@@ -1,11 +1,8 @@
 import { BarracksBody } from "./Barracks";
 import {
   Bot,
-  Boxes,
   Clock3,
   MessageSquare,
-  MessagesSquare,
-  ListTodo,
   PanelRight,
   Radio,
   X,
@@ -21,6 +18,8 @@ import { SkillToolboxBody, SkillNodeBody } from "./SkillToolbox";
 import { WorkSourceWorkspace } from "./NodeExecution";
 import { ConversationWorkspace } from "./ConversationWorkspace";
 import { AgentCardBody } from "./AgentCard";
+import { PluginSurface } from "../plugins/PluginSurface";
+import { CatalogIcon } from "../components/CatalogIcon";
 
 interface WorkspaceSurfaceProps {
   card: WorldCard;
@@ -32,7 +31,7 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
 
   return (
     <header className="workspace-titlebar node-drag-region">
-      <div className="workspace-app-mark">{card.type === "conversation" ? <MessagesSquare size={16} /> : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill-package.v1") ? <Boxes size={16} /> : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.task-board.v1") ? <ListTodo size={16} /> : <Bot size={16} />}</div>
+      <div className="workspace-app-mark"><CatalogIcon definition={catalog.node_types.find((d) => d.id === card.type)} size={16} /></div>
       <div>
         <span>{catalog.node_types.find((item) => item.id === card.type)?.label ?? card.type} workspace</span>
         <strong>{card.name}</strong>
@@ -163,7 +162,8 @@ export function WorkspaceSurface({ card }: WorkspaceSurfaceProps) {
     <section className="node-workspace-window" role="dialog" aria-modal="false" aria-label={`${card.name} workspace`} data-workspace-node-id={card.id}>
       <WorkspaceTitlebar card={card} />
       <div className="workspace-content">
-      {card.type === "agent" ? <>
+      <PluginSurface card={card} slot="workspace" level="workspace">
+      {catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("core.agent") ? <>
         <nav className="agent-window-tabs nodrag nopan" role="tablist" aria-label="Agent window">
           <button role="tab" aria-selected={agentTab === "activity"} onClick={() => setAgentTab("activity")}>Activity</button>
           <button role="tab" aria-selected={agentTab === "settings"} onClick={() => setAgentTab("settings")}>Settings</button>
@@ -183,6 +183,7 @@ export function WorkspaceSurface({ card }: WorkspaceSurfaceProps) {
             <p>This plugin node exposes a workspace surface. Its frontend module can replace this generic view.</p>
           </div>
         )}
+      </PluginSurface>
       </div>
     </section>
   );
