@@ -17,13 +17,74 @@ Existing files are kept; conflicting imports ask you to choose a different locat
 Binary files such as images keep their original bytes, and common image formats
 have a preview. Empty folders created in the editor are also preserved.
 
-Connect an Agent with **Use skills**. Its `read_skills_*` tool lists skill names and
+Connect an Agent with **Use skills**. Its `read_skills(toolbox)` tool lists skill names and
 descriptions, plus shared instructions. Supplying `skill_id` reads that skill's full
 instructions, defaults, folders and text files. Binary assets are listed with their
 media type and size. Supply `skill_id` and `file_path` to retrieve a specific file;
-binary contents return base64 and media type. Skills are guidance for the Agent: they do
-not register new executables, mount files, or grant Sandbox permissions. Use the
-normal world connections for execution. Disconnecting the toolbox revokes reading.
+binary contents return base64 and media type. A Skill provides instructions and
+reusable runtime files. It never executes by itself or grants Sandbox permission.
+Disconnecting the toolbox revokes access to its current members.
+
+## Run bundled scripts
+
+Give an Agent access to a Skill (directly or through its Toolbox) and an **Execute**
+connection to a Sandbox. Equipping the same resources uses these same capabilities.
+The `run_skill_script` tool appears when both capabilities are present. Multiple
+Skills and Sandboxes share one tool; each selector lists its authorized resources.
+Start the Sandbox, inspect its runtime, then select the Skill and Sandbox using
+their listed aliases (exact unambiguous names or node IDs are also accepted):
+
+```json
+{
+  "skill": "review",
+  "sandbox": "python",
+  "script": "scripts/check.py",
+  "interpreter": ["python3"],
+  "argv": ["--output", "report.txt"]
+}
+```
+
+Choose an interpreter installed and accessible inside that Sandbox. For Windows
+batch files, use `script: "scripts/check.cmd"` and
+`interpreter: ["cmd.exe", "/d", "/c", "call"]`. Omit `interpreter` for an executable
+file supported by the runtime (for example a Linux script with a shebang). Shell
+interpreters apply their own quoting and expansion rules. The host never installs
+dependencies or falls back to executing on the unrestricted host.
+
+The host lazily materializes `SKILL.md`, bundled files and empty directories under
+the Sandbox's private `.oaw/skills/<skill-node-id>/`, outside its mutable workspace.
+Linux and WSL expose the selected bundle at `/.oaw/skills/<skill-node-id>/` using a
+read-only bind mount. Windows uses a Sandbox-owned directory with command-scoped
+AppContainer read/execute grants and explicit write denial. These paths are runtime
+state, not generated artifacts, portable configuration or ordinary resource mounts.
+
+Scripts run through the normal Sandbox backend with its workspace as `cwd`, and
+return the usual command result and events. Use the script's location to read
+references, assets and templates; write relative output paths in the workspace.
+Copy individual templates explicitly when they need editing, for example inside
+a bundled Python script:
+
+```python
+from pathlib import Path
+import shutil
+
+bundle = Path(__file__).resolve().parent.parent
+shutil.copyfile(bundle / "templates/report.md", Path.cwd() / "report.md")
+```
+
+Listing or reading instructions does not start a Sandbox or materialize files.
+Repeated execution reuses the current bundle bytes; edits replace its materialization
+on the next execution without retaining old versions. Only declared files enter the
+bundle: host credentials, environment, node configuration and default settings are
+not copied. Runtime filenames must be portable relative paths without traversal,
+Windows device names, alternate streams or case aliases.
+
+Every invocation rechecks live Skill and Sandbox access. After a command ends,
+ordinary Sandbox commands cannot read its cached Skill files. Disconnecting either
+resource prevents new Skill execution; an already submitted command retains its
+normal Sandbox lifetime and can be stopped through the Sandbox controls. Destroying
+the Sandbox removes materializations. Duplicated and summoned Agents receive fresh
+equipped Sandboxes, workspaces and runtime caches.
 
 ## Independent cards and open spaces
 
@@ -73,7 +134,7 @@ uv add --project backend --editable ./path/to/oaw-toolbox-example-review
 
 Restart the application after installation. Its curated card appears under Tools,
 and uses the same editor as an empty toolbox. The published plugin owns its node
-type, relationship and capability. It requires host Plugin API 1.5; it does not
+type, relationship and capability. It requires host Plugin API 1.10; it does not
 depend on the bundled toolbox plugin being installed, inject frontend code, or
 introduce a separate plugin loader.
 
@@ -129,7 +190,7 @@ directory, and uses the same helper. The reviewed frontend is selected by
 ## Verify
 
 ```powershell
-./backend/.venv/Scripts/python.exe -m pytest backend/tests/test_skill_packages.py
+./backend/.venv/Scripts/python.exe -m pytest backend/tests/test_skill_packages.py backend/tests/test_skill_runtime.py
 $env:PLAYWRIGHT_CHANNEL = "msedge" # or chrome, if installed
 npm --prefix frontend run test:e2e -- skill-toolbox.spec.ts
 ```
@@ -138,3 +199,9 @@ The backend scenarios cover progressive reading, local edits, Legion copies and
 plugin export/reload across versions with scripts and binary assets. The browser
 scenario edits nested default fields, creates scripts, imports a directory tree
 and image, renames a file, downloads the plugin and verifies reload/delete/undo.
+
+Real isolation tests are explicit opt-ins. Set `OAW_TEST_SANDBOX_RUNTIME` to
+`windows`, `linux`, or an installed `wsl:<distribution>` and run
+`backend/tests/test_skill_runtime.py -k real_skill`. These exercise the ordinary
+capability provider and native backend, including workspace output, write refusal
+and refusal to reuse cached paths after access is revoked.

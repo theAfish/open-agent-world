@@ -122,14 +122,14 @@ def test_controller_tools_start_read_stop_and_validate_arguments(client):
     definitions = client.portal.call(provider.list_tools, controller["id"])
     tool = next(tool for tool in build_scoped_tool_callables(provider, controller["id"], definitions)
                 if tool.__name__.startswith("control_task_execution"))
-    assert client.portal.call(lambda: tool(action="read"))["status"] == "idle"
-    invalid = client.portal.call(lambda: tool(action="start"))
+    assert client.portal.call(lambda: tool(target=node["id"], action="read"))["status"] == "idle"
+    invalid = client.portal.call(lambda: tool(target=node["id"], action="start"))
     assert invalid["ok"] is False and "expected_revision" in invalid["error"]["message"]
     runtime = RecordingProvider(mode="block")
     client.app.state.services.run_manager.install_provider("core.mock", runtime)
-    assert client.portal.call(lambda: tool(action="start", expected_revision=2))["active"]
+    assert client.portal.call(lambda: tool(target=node["id"], action="start", expected_revision=2))["active"]
     client.portal.call(lambda: asyncio.wait_for(runtime.started.wait(), 3))
-    assert client.portal.call(lambda: tool(action="stop"))["status"] == "stopped"
+    assert client.portal.call(lambda: tool(target=node["id"], action="stop"))["status"] == "stopped"
 
 
 def test_failure_pauses_new_admission_and_explicit_retry(client):

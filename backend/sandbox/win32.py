@@ -454,6 +454,15 @@ class WindowsNativeApi:
             # needed for ordinary reads. Deny only the specific write rights.
             self._change_path_acl(path, sid, self._DENY_ACCESS, WRITE_DENIED_ACCESS)
 
+    def grant_runtime_path(self, path: Path, sid: int) -> None:
+        """Runtime files need read/execute, with the same explicit write deny."""
+        self.grant_path(path, sid, read_only=True)
+        self._change_path_acl(path, sid, self._GRANT_ACCESS, FILE_GENERIC_EXECUTE)
+
+    def grant_runtime_traverse(self, path: Path, sid: int) -> None:
+        """Traverse mount parents without listing other cached bundles."""
+        self._change_path_acl(path, sid, self._GRANT_ACCESS, FILE_GENERIC_EXECUTE, propagate=False)
+
     def validate_workspace_volume(self, path: Path) -> None:
         volume = ctypes.create_unicode_buffer(32768)
         if not self._kernel32.GetVolumePathNameW(str(path), volume, len(volume)):

@@ -109,10 +109,10 @@ def test_agent_tool_callables_support_optional_fields_and_scoped_invocation(clie
     provider = WorldAgentCapabilityProvider(client.app.state.services)
     definitions = client.portal.call(provider.list_tools, agent["id"])
     tools = build_scoped_tool_callables(provider, agent["id"], definitions)
-    writer = next(tool for tool in tools if tool.__name__.startswith("write_tasks_"))
-    update = next(tool for tool in tools if tool.__name__.startswith("update_task_progress_"))
-    reader = next(tool for tool in tools if tool.__name__.startswith("read_tasks_"))
-    client.portal.call(lambda: writer(tasks=[{"id": "a", "title": "Work", "note": "Preserve me"}], expected_revision=0))
-    result = client.portal.call(lambda: update(task_id="a", status="done", expected_revision=1))
+    writer = next(tool for tool in tools if tool.__name__ == "write_tasks")
+    update = next(tool for tool in tools if tool.__name__ == "update_task_progress")
+    reader = next(tool for tool in tools if tool.__name__ == "read_tasks")
+    client.portal.call(lambda: writer(target=node["id"], tasks=[{"id": "a", "title": "Work", "note": "Preserve me"}], expected_revision=0))
+    result = client.portal.call(lambda: update(target=node["id"], task_id="a", status="done", expected_revision=1))
     assert result["summary"]["done"] == 1
-    assert client.portal.call(reader)["value"]["tasks"][0]["note"] == "Preserve me"
+    assert client.portal.call(lambda: reader(target=node["id"]))["value"]["tasks"][0]["note"] == "Preserve me"

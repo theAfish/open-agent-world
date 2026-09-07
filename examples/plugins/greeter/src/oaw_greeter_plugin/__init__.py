@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from open_agent_world.plugin_api import (
     Capability,
     CapabilityContext,
+    CapabilityDefinition,
     CapabilityGrantDefinition,
     Card,
     CardCreate,
@@ -130,7 +131,7 @@ class GreeterPlugin:
     descriptor = PluginDescriptor(
         id="community.greeter",
         version="0.1.0",
-        plugin_api_version="1.1",
+        plugin_api_version="1.10",
         name="Greeter",
         description="A minimal graph-derived Agent tool example.",
     )
@@ -151,8 +152,18 @@ class GreeterPlugin:
         return self.runtime.greet(capability.target_id, name.strip())
 
     def register(self, registration: PluginRegistration) -> None:
-        registration.register_capability_handler(
-            "community.greeter.greet", self.greet
+        registration.register_capability(
+            CapabilityDefinition(
+                kind="community.greeter.greet",
+                tool_name="greet",
+                description="Ask the selected Greeter to greet a person by name.",
+                input_schema={
+                    "type": "object",
+                    "properties": {"name": {"type": "string", "description": "The name to greet."}},
+                    "required": ["name"],
+                    "additionalProperties": False,
+                },
+            ), self.greet
         )
         registration.register_node_type(NodeTypeDefinition(
             id="community.greeter",
@@ -182,19 +193,6 @@ class GreeterPlugin:
             templateable=True,
             capabilities=(CapabilityGrantDefinition(
                 kind="community.greeter.greet",
-                tool_prefix="greet_with",
-                description="Ask {target_name!r} to greet a person by name.",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "The name to greet.",
-                        },
-                    },
-                    "required": ["name"],
-                    "additionalProperties": False,
-                },
             ),),
         ))
 

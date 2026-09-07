@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import keyword
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
@@ -23,7 +24,7 @@ from backend.plugins.documents import NodeDocumentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.9"
+PLUGIN_API_VERSION = "1.10"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -124,10 +125,38 @@ class PluginCatalog(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class CapabilityGrantDefinition:
+    """Relationships grant kinds; inline metadata is a legacy install input."""
     kind: str
-    tool_prefix: str
+    tool_prefix: str = ""
+    description: str = ""
+    input_schema: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilitySelector:
+    """Independent resource selected from live grants, optionally a document member."""
+    parameter: str
+    argument: str
+    capability_kinds: frozenset[str] = frozenset()
+    target_traits: frozenset[str] = frozenset()
+    document_action: str | None = None
+    include_members: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilityDefinition:
+    """Operation metadata separate from the relationships granting its kind.
+
+    Kinds may share a tool_name only with identical operation contracts; their
+    handlers still receive the selected, independently authorized capability.
+    """
+    kind: str
+    tool_name: str
     description: str
     input_schema: Mapping[str, Any] = field(default_factory=dict)
+    target_parameter: str = "target"
+    selectors: tuple[CapabilitySelector, ...] = ()
+    target_capabilities: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,6 +294,7 @@ class PluginRegistration:
         self.nodes: dict[str, NodeTypeDefinition] = {}
         self.relationships: dict[str, RelationshipDefinition] = {}
         self.capability_handlers: dict[str, CapabilityHandler] = {}
+        self.capabilities: dict[str, CapabilityDefinition] = {}
         self.runtime_provider_factories: dict[str, RuntimeProviderFactory] = {}
         self.state_schemas: dict[str, StateSchema] = {}
         self.assets: dict[str, PluginAsset] = {}
@@ -282,6 +312,10 @@ class PluginRegistration:
 
     def register_capability_handler(self, kind: str, handler: CapabilityHandler) -> None:
         self._add(self.capability_handlers, kind, handler, "capability handler")
+
+    def register_capability(self, definition: CapabilityDefinition, handler: CapabilityHandler) -> None:
+        self._add(self.capabilities, definition.kind, definition, "capability")
+        self.register_capability_handler(definition.kind, handler)
 
     def register_runtime_provider(
         self, provider_id: str, factory: RuntimeProviderFactory
@@ -312,6 +346,7 @@ class PluginRegistry:
         self._nodes: dict[str, NodeTypeDefinition] = {}
         self._relationships: dict[str, RelationshipDefinition] = {}
         self._capability_handlers: dict[str, CapabilityHandler] = {}
+        self._capabilities: dict[str, CapabilityDefinition] = {}
         self._runtime_provider_factories: dict[str, RuntimeProviderFactory] = {}
         self._state_schemas: dict[str, StateSchema] = {}
         self._owners: dict[tuple[str, str], str] = {}
@@ -335,11 +370,13 @@ class PluginRegistry:
 
         staged = PluginRegistration(descriptor)
         register(staged)
+        self._normalize_capabilities(staged)
         self._validate_registration(staged)
 
         self._plugins[descriptor.id] = descriptor
         self._assets.update({(descriptor.id, key): asset for key, asset in staged.assets.items()})
         self._commit_owned("node_type", descriptor.id, self._nodes, staged.nodes)
+        self._commit_owned("capability", descriptor.id, self._capabilities, staged.capabilities)
         self._commit_owned(
             "relationship", descriptor.id, self._relationships, staged.relationships
         )
@@ -359,6 +396,22 @@ class PluginRegistry:
             "state_schema", descriptor.id, self._state_schemas, staged.state_schemas
         )
 
+    def _normalize_capabilities(self, staged: PluginRegistration) -> None:
+        # Legacy input is normalized once. Projection uses the same registry.
+        for relationship in staged.relationships.values():
+            for grant in relationship.capabilities:
+                existing = staged.capabilities.get(grant.kind) or self._capabilities.get(grant.kind)
+                if grant.tool_prefix:
+                    definition = CapabilityDefinition(grant.kind, grant.tool_prefix,
+                        grant.description.replace("{target_name!r}", "the selected target").replace("{target_name}", "the selected target"),
+                        grant.input_schema)
+                    if existing is None:
+                        staged.capabilities[grant.kind] = definition
+                    elif (existing.tool_name, existing.input_schema) != (definition.tool_name, definition.input_schema):
+                        raise ValueError(f"Conflicting operation metadata for capability {grant.kind!r}")
+                elif existing is None:
+                    raise ValueError(f"Capability {grant.kind!r} needs a registered operation definition")
+
     def _validate_registration(self, staged: PluginRegistration) -> None:
         from backend.state.schema import StateSchema
 
@@ -369,6 +422,7 @@ class PluginRegistry:
                 raise ValueError("unsupported public asset media type")
 
         contribution_sets = (
+            ("capability", "capability", self._capabilities, staged.capabilities),
             ("node_type", "node type", self._nodes, staged.nodes),
             (
                 "relationship",
@@ -500,9 +554,41 @@ class PluginRegistry:
                     "for palette creation"
                 ) from exc
 
+        operations: dict[str, CapabilityDefinition] = {}
+        for definition in (*self._capabilities.values(), *staged.capabilities.values()):
+            names = [definition.tool_name, definition.target_parameter,
+                     *(s.parameter for s in definition.selectors), *(s.argument for s in definition.selectors)]
+            if any(not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]{0,63}", name) or keyword.iskeyword(name) for name in names):
+                raise ValueError("Capability operation and selector names must be valid tool identifiers")
+            selectors = [definition.target_parameter, *(s.parameter for s in definition.selectors)]
+            if len(set(selectors)) != len(selectors) or set(selectors) & definition.input_schema.get("properties", {}).keys():
+                raise ValueError("Capability selectors must not collide with operation parameters")
+            arguments = [s.argument for s in definition.selectors]
+            if len(set(arguments)) != len(arguments) or set(arguments) & definition.input_schema.get("properties", {}).keys():
+                raise ValueError("Selector destination arguments must be unique and separate from operation parameters")
+            if any(s.argument in set(selectors) - {s.parameter} for s in definition.selectors):
+                raise ValueError("Selector destination arguments must not overwrite other selectors")
+            if any(s.include_members and not s.document_action for s in definition.selectors):
+                raise ValueError("Member selectors require an authorized document action")
+            if definition.kind in staged.capabilities and definition.kind not in staged.capability_handlers:
+                raise ValueError("Capability definitions must own their handlers")
+            previous = operations.get(definition.tool_name)
+            if previous is not None and (
+                previous.description, previous.input_schema, previous.target_parameter, previous.selectors, previous.target_capabilities
+            ) != (definition.description, definition.input_schema, definition.target_parameter, definition.selectors, definition.target_capabilities):
+                raise ValueError(f"Conflicting contracts for operation {definition.tool_name!r}")
+            operations[definition.tool_name] = definition
+
         known_handlers = (
             self._capability_handlers.keys() | staged.capability_handlers.keys()
         )
+        for definition in staged.capabilities.values():
+            required = set(definition.target_capabilities)
+            for selector in definition.selectors:
+                required.update(selector.capability_kinds)
+            if required - known_handlers:
+                raise ValueError(f"Capability {definition.kind!r} references unregistered capability kinds: "
+                                 + ", ".join(sorted(required - known_handlers)))
         for definition in staged.relationships.values():
             if not definition.directions or not definition.directions <= {
                 "forward",
@@ -623,6 +709,12 @@ class PluginRegistry:
             raise GraphValidationError(
                 f"capability handler {kind!r} is not registered"
             ) from exc
+
+    def capability_definition(self, kind: str) -> CapabilityDefinition:
+        try:
+            return self._capabilities[kind]
+        except KeyError as exc:
+            raise GraphValidationError(f"capability {kind!r} is not registered") from exc
 
     def validate_config(self, type_id: str, value: dict[str, Any]) -> dict[str, Any]:
         definition = self.node_type(type_id)

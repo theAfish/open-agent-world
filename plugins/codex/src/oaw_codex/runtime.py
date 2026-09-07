@@ -151,8 +151,11 @@ class CodexRuntime(RuntimeProvider):
             return [{
                 "capability_id": tool.capability_id, "name": tool.name,
                 "description": tool.description,
+                "input_schema": tool.input_schema,
                 "parameters": [{"name": p.name, "description": p.description,
-                                "required": p.required, "schema": TypeAdapter(p.python_type).json_schema()}
+                                "required": p.required,
+                                "schema": ((tool.input_schema or {}).get("properties", {}).get(p.name)
+                                           or TypeAdapter(p.python_type).json_schema())}
                                for p in tool.parameters],
             } for tool in definitions]
         if name == "oaw_invoke_tool":

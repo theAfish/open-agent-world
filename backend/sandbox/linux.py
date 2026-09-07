@@ -29,6 +29,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .base import SandboxBackend, SandboxEventSink
+from .materialization import RuntimeMount, materialize_bundle, cleanup_materializations
 from .models import (
     CommandResult, ResourceAccess, ResourceAttachment, SandboxEvent,
     SandboxEventType, SandboxInfo, SandboxLimits, SandboxNotFoundError,
@@ -199,6 +200,7 @@ def bubblewrap_command(
     workspace: Path, access: ResourceAccess,
     attachments: Sequence[ResourceAttachment], argv: Sequence[str],
     environment: Mapping[str, str],
+    runtime_mount: tuple[Path, str] | None = None,
 ) -> list[str]:
     result = [
         "/usr/bin/bwrap", "--unshare-all", "--unshare-user",
@@ -232,6 +234,9 @@ def bubblewrap_command(
             "--ro-bind" if item.access == ResourceAccess.READ_ONLY else "--bind",
             str(item.source), f"/sandbox/{item.relative_path}",
         ))
+    if runtime_mount is not None:
+        source, key = runtime_mount
+        result.extend(("--ro-bind", str(source), f"/.oaw/{key}"))
     for key, value in environment.items():
         result.extend(("--setenv", key, value))
     result.extend(("--chdir", "/workspace", "--remount-ro", "/", "--", *argv))
@@ -363,6 +368,7 @@ class LinuxSandboxBackend(SandboxBackend):
         self, sandbox_id: str, argv: Sequence[str], *,
         timeout_seconds: float | None = None, env: Mapping[str, str] | None = None,
         _unit_name: str | None = None,
+        runtime_mount: RuntimeMount | None = None,
     ) -> CommandResult:
         command = validate_argv(argv)
         environment = minimal_linux_environment(env)
@@ -377,8 +383,13 @@ class LinuxSandboxBackend(SandboxBackend):
             if record.deleted or record.state != SandboxState.READY:
                 raise SandboxStateError("sandbox must be ready before executing a command")
             await asyncio.to_thread(self._validate_record_paths, record)
+            mount = None
+            if runtime_mount is not None:
+                command = runtime_mount.command(command, Path("/.oaw") / runtime_mount.bundle.key)
+                source = materialize_bundle(record.root, runtime_mount.bundle)
+                mount = (source, runtime_mount.bundle.key)
             isolated = bubblewrap_command(record.host_workspace, record.workspace_access,
-                tuple(record.attachments.values()), command, environment)
+                tuple(record.attachments.values()), command, environment, mount)
             invocation = service_command(isolated, unit, self._limits, timeout)
             record.state = SandboxState.RUNNING
             record.active_command, record.unit = command, unit
@@ -589,6 +600,7 @@ class LinuxSandboxBackend(SandboxBackend):
             self._assert_within(record.root.resolve(), self._root)
             # External workspace and attachment sources are never descendants
             # that we own. Only this card's managed metadata/storage is removed.
+            cleanup_materializations(record.root)
             shutil.rmtree(record.root)
             record.deleted = True
         async with self._records_lock:

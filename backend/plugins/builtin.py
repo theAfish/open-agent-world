@@ -12,6 +12,7 @@ from backend.sandbox.models import SandboxError
 from backend.plugins.registry import (
     PLUGIN_API_VERSION,
     CapabilityGrantDefinition,
+    CapabilityDefinition,
     NodeTypeDefinition,
     PluginDescriptor,
     PluginRegistration,
@@ -677,6 +678,14 @@ async def _view_image(
     return context.view_image(capability.agent_id, capability.target_id)
 
 
+async def _run_skill_script(context, capability, arguments):
+    return await context.run_skill_script(capability.agent_id, capability.target_id, arguments)
+
+
+async def _legion_state(context, capability, arguments):
+    return await context.legion_state_action(capability, arguments)
+
+
 async def _inspect_sandbox(
     context: CapabilityContext, capability: Any, values: dict[str, Any]
 ) -> Any:
@@ -704,6 +713,16 @@ async def _execute_sandbox(
 
 
 def _register_builtin(registry: PluginRegistration) -> None:
+    for operation in ("read", "patch"):
+        registry.register_capability(CapabilityDefinition(
+            kind=f"legion.state.{operation}", tool_name=f"{operation}_legion_state", target_parameter="legion",
+            description=("Read shared team state and revision." if operation == "read" else
+                         "Merge top-level keys into shared team state. Read first and supply the revision; refresh on conflict."),
+            input_schema={"type": "object", "properties": {} if operation == "read" else {
+                "value": {"type": "object", "description": "Top-level state keys to merge."},
+                "expected_revision": {"type": "integer", "description": "Revision returned by read_legion_state."},
+            }, "required": [] if operation == "read" else ["value", "expected_revision"], "additionalProperties": False},
+        ), _legion_state)
     from backend.agents import GoogleAdkAgentRuntime, MockAgentRuntime
     from backend.state import MergePolicy, StateFieldDefinition, StateSchema
 
@@ -790,15 +809,53 @@ def _register_builtin(registry: PluginRegistration) -> None:
             capability_provider, **options
         ),
     )
-    registry.register_capability_handler("agent.communicate", _communicate)
-    registry.register_capability_handler(
-        "conversation.request_turn", _request_conversation_turn
-    )
-    registry.register_capability_handler("text.read", _read_text)
-    registry.register_capability_handler("text.edit", _edit_text)
-    registry.register_capability_handler("image.view", _view_image)
-    registry.register_capability_handler("sandbox.execute", _execute_sandbox)
-    registry.register_capability_handler("sandbox.inspect", _inspect_sandbox)
+    from backend.skill_runtime import SKILL_SELECTOR, skill_script_schema
+    registry.register_capability(CapabilityDefinition(
+        kind='agent.communicate', tool_name='send_message', target_parameter='target',
+        description='Send a message to the selected Agent and receive its response.',
+        input_schema={"type": "object", "properties": {"message": {"type": "string", "description": "Message or question for the connected agent."}}, "required": ["message"], "additionalProperties": False}), _communicate)
+    registry.register_capability(CapabilityDefinition(
+        kind='conversation.request_turn', tool_name='request_conversation_turn', target_parameter='conversation',
+        description="Ask a different participant to speak in the selected conversation. The current conversation session is supplied automatically; provide another participant's agent id. Never use your own agent id; if no other participant is available, answer directly without this tool.",
+        input_schema={
+                "type": "object",
+                "properties": {
+                    "agent_id": {
+                        "type": "string",
+                        "description": (
+                            "Agent id of a different participant to address. "
+                            "This must never be your own agent id."
+                        ),
+                    },
+                    "message": {"type": "string", "description": "Message or question for that participant."},
+                },
+                "required": ["agent_id", "message"],
+                "additionalProperties": False,
+            }), _request_conversation_turn)
+    registry.register_capability(CapabilityDefinition(
+        kind='text.read', tool_name='read_text', target_parameter='target',
+        description='Read the selected managed text resource.',
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False}), _read_text)
+    registry.register_capability(CapabilityDefinition(
+        kind='text.edit', tool_name='edit_text', target_parameter='target',
+        description='Replace the contents of the selected target.',
+        input_schema={"type": "object", "properties": {"content": {"type": "string", "description": "Complete replacement text for this resource."}}, "required": ["content"], "additionalProperties": False}), _edit_text)
+    registry.register_capability(CapabilityDefinition(
+        kind='image.view', tool_name='view_image', target_parameter='target',
+        description='Inspect the selected managed image.',
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False}), _view_image)
+    registry.register_capability(CapabilityDefinition(
+        kind='sandbox.execute', tool_name='execute_command', target_parameter='sandbox',
+        description='Execute an argv command in the selected sandbox. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES.',
+        input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}}, "required": ["argv"], "additionalProperties": False}), _execute_sandbox)
+    registry.register_capability(CapabilityDefinition(
+        kind='sandbox.run_skill_script', tool_name='run_skill_script', target_parameter='sandbox',
+        description='Run a file from the selected Skill in the selected sandbox. Both resources require independent live authorization. The current bundle is mounted read-only outside the workspace; cwd and generated outputs use the sandbox workspace.',
+        input_schema=skill_script_schema(), selectors=(SKILL_SELECTOR,), target_capabilities=frozenset({"sandbox.execute"})), _run_skill_script)
+    registry.register_capability(CapabilityDefinition(
+        kind='sandbox.inspect', tool_name='inspect_sandbox', target_parameter='sandbox',
+        description='Inspect the selected sandbox before executing: returns its operating system, shell argv prefix, cwd, read/write access, resource directory and availability.',
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False}), _inspect_sandbox)
     registry.register_node_type(NodeTypeDefinition(
         id="agent", label="Agent", description="Reasoning worker", icon="bot",
         color="#75736c", deck_id="agents", deck_label="Agents", deck_icon="bot",
@@ -879,11 +936,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.agent"}),
         directions=frozenset({"forward", "bidirectional"}),
         templateable=True,
-        capabilities=(CapabilityGrantDefinition(
-            kind="agent.communicate", tool_prefix="message_agent",
-            description="Send a message to agent {target_name!r} and receive its response.",
-            input_schema={"type": "object", "properties": {"message": {"type": "string", "description": "Message or question for the connected agent."}}, "required": ["message"], "additionalProperties": False},
-        ),),
+        capabilities=(CapabilityGrantDefinition(kind='agent.communicate'),),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="participate", label="Participate", short_label="join",
@@ -891,41 +944,14 @@ def _register_builtin(registry: PluginRegistration) -> None:
         source_traits=frozenset({"core.agent"}),
         target_traits=frozenset({"core.conversation"}),
         templateable=True,
-        capabilities=(CapabilityGrantDefinition(
-            kind="conversation.request_turn", tool_prefix="request_turn_in",
-            description=(
-                "Ask a different participant to speak in Conversation {target_name!r}. "
-                "The current conversation session is supplied automatically; provide another participant's agent id. "
-                "Never use your own agent id; if no other participant is available, "
-                "answer directly without this tool."
-            ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "agent_id": {
-                        "type": "string",
-                        "description": (
-                            "Agent id of a different participant to address. "
-                            "This must never be your own agent id."
-                        ),
-                    },
-                    "message": {"type": "string", "description": "Message or question for that participant."},
-                },
-                "required": ["agent_id", "message"],
-                "additionalProperties": False,
-            },
-        ),),
+        capabilities=(CapabilityGrantDefinition(kind='conversation.request_turn'),),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="read", label="Read", short_label="read",
         description="The agent can inspect this text through a scoped tool.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.text"}),
         templateable=True,
-        capabilities=(CapabilityGrantDefinition(
-            kind="text.read", tool_prefix="read_text",
-            description="Read the managed text resource {target_name!r}.",
-            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
-        ),),
+        capabilities=(CapabilityGrantDefinition(kind='text.read'),),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="read_edit", label="Read + edit", short_label="read + edit",
@@ -933,16 +959,8 @@ def _register_builtin(registry: PluginRegistration) -> None:
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.text"}),
         templateable=True,
         capabilities=(
-            CapabilityGrantDefinition(
-                kind="text.read", tool_prefix="read_text",
-                description="Read the managed text resource {target_name!r}.",
-                input_schema={"type": "object", "properties": {}, "additionalProperties": False},
-            ),
-            CapabilityGrantDefinition(
-                kind="text.edit", tool_prefix="replace_text",
-                description="Replace the contents of {target_name!r}.",
-                input_schema={"type": "object", "properties": {"content": {"type": "string", "description": "Complete replacement text for this resource."}}, "required": ["content"], "additionalProperties": False},
-            ),
+            CapabilityGrantDefinition(kind='text.read'),
+            CapabilityGrantDefinition(kind='text.edit'),
         ),
     ))
     registry.register_relationship(RelationshipDefinition(
@@ -950,31 +968,14 @@ def _register_builtin(registry: PluginRegistration) -> None:
         description="The agent can inspect the image content.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.image"}),
         templateable=True,
-        capabilities=(CapabilityGrantDefinition(
-            kind="image.view", tool_prefix="view_image",
-            description="Inspect the managed image {target_name!r}.",
-            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
-        ),),
+        capabilities=(CapabilityGrantDefinition(kind='image.view'),),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="execute", label="Execute", short_label="execute",
         description="The agent can run commands in this isolated workplace.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.sandbox"}),
         templateable=True,
-        capabilities=(CapabilityGrantDefinition(
-            kind="sandbox.execute", tool_prefix="execute_in",
-            description=(
-                "Execute an argv command in sandbox {target_name!r}. "
-                "First use its inspect tool to obtain the runtime shell, cwd and resource paths. "
-                "The configured working folder is live; edits there change real files. "
-                "Attached resources are available through SANDBOX_RESOURCES."
-            ),
-            input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}}, "required": ["argv"], "additionalProperties": False},
-        ), CapabilityGrantDefinition(
-            kind="sandbox.inspect", tool_prefix="inspect_sandbox",
-            description="Inspect sandbox {target_name!r} before executing: returns its operating system, shell argv prefix, cwd, read/write access, resource directory and availability.",
-            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
-        )),
+        capabilities=(CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect')),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="mount_read_only", label="Mount read-only", short_label="read-only",

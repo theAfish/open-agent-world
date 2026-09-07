@@ -15,6 +15,7 @@ from .models import (
     SandboxInfo,
     SandboxValidationError,
 )
+from .materialization import RuntimeMount
 
 
 SandboxEventSink: TypeAlias = Callable[[SandboxEvent], Awaitable[None] | None]
@@ -43,8 +44,13 @@ class SandboxBackend(ABC):
         *,
         timeout_seconds: float | None = None,
         env: Mapping[str, str] | None = None,
+        runtime_mount: RuntimeMount | None = None,
     ) -> CommandResult:
-        """Run one argv vector inside the sandbox security boundary."""
+        """Run argv with an optional command-scoped, read-only runtime bundle.
+
+        Replace its argument_index with the materialized runtime file path.
+        Cached bundles must remain inaccessible to commands without a mount.
+        """
 
     @abstractmethod
     async def terminate(self, sandbox_id: str) -> None:

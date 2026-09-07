@@ -11,8 +11,11 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath, PurePosixPath
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from backend.skill_runtime import RunSkillScript
 
 from backend.agents import (
     AgentNotFoundError,
@@ -2749,6 +2752,7 @@ class ApplicationServices:
         command: str | None = None,
         timeout_seconds: float | None = None,
         agent_id: str | None = None,
+        _skill_request: RunSkillScript | None = None,
     ) -> CommandResult:
         async with self._portable_state_gate.execution():
             # Validate graph authority against a complete formation, but do
@@ -2770,8 +2774,20 @@ class ApplicationServices:
 
             async def execute_and_refresh() -> CommandResult:
                 try:
+                    execution_argv = argv
+                    options = {}
+                    # Re-check after scheduling, immediately before dispatch.
+                    async with self._node_mutation():
+                        if agent_id is not None:
+                            self.capabilities.require_sandbox_execute(agent_id, sandbox_id)
+                        if _skill_request is not None:
+                            from backend.skill_runtime import resolve_skill_mount
+                            if agent_id is None:
+                                raise ResourceValidationError("Skill execution requires an Agent")
+                            execution_argv, mount = resolve_skill_mount(self, agent_id, sandbox_id, _skill_request)
+                            options["runtime_mount"] = mount
                     return await backend.execute(
-                        sandbox_id, argv, timeout_seconds=timeout_seconds
+                        sandbox_id, execution_argv, timeout_seconds=timeout_seconds, **options
                     )
                 finally:
                     command_finished.set()

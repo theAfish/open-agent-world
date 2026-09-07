@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .base import SandboxBackend
+from .materialization import RuntimeMount
 from .models import (
     CommandResult, ResourceAccess, ResourceAttachment, SandboxInfo,
     SandboxError, SandboxNotFoundError, SandboxSecurityError, SandboxState,
@@ -203,12 +204,14 @@ class SandboxManager(SandboxBackend):
             return replace(info, runtime_id=runtime.id, runtime_locked=True)
 
     async def execute(self, sandbox_id: str, argv: Sequence[str], *, timeout_seconds: float | None = None,
-                      env: Mapping[str, str] | None = None) -> CommandResult:
+                      env: Mapping[str, str] | None = None,
+                      runtime_mount: RuntimeMount | None = None) -> CommandResult:
         binding = self._binding(sandbox_id)
         if not binding.provisioned:
             raise SandboxStateError("Start the Sandbox before executing commands")
+        options = {"runtime_mount": runtime_mount} if runtime_mount is not None else {}
         return await self._backend(binding.resolved_runtime or "").execute(
-            sandbox_id, argv, timeout_seconds=timeout_seconds, env=env)
+            sandbox_id, argv, timeout_seconds=timeout_seconds, env=env, **options)
 
     async def terminate(self, sandbox_id: str) -> None:
         binding = self._binding(sandbox_id)

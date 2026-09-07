@@ -220,7 +220,9 @@ the original contracts can continue to declare `"1.0"`.
 Use `"1.2"` for documents and `"1.3"` for work-source execution or document
 reference remapping.
 Use `"1.4"` for document seeds or document downloads. Use `"1.5"` for
-`NodeContainerDefinition` and the skill toolbox helper. Open containers retain
+`NodeContainerDefinition`. The current skill toolbox helper requires `"1.10"`.
+Use `"1.10"` for `CapabilityDefinition`, `CapabilitySelector`, and operation tools
+with target selectors. Open containers retain
 ordinary child nodes and their external relationships; see
 [Skill Toolboxes](../plugins/skill_packages/README.md#independent-cards-and-open-spaces).
 
@@ -242,7 +244,8 @@ installation management; executable callbacks remain backend-only.
 
 - `register_node_type`
 - `register_relationship`
-- `register_capability_handler`
+- `register_capability` (definition and handler)
+- `register_capability_handler` (legacy inline relationship definitions)
 - `register_runtime_provider`
 - `register_state_schema`
 
@@ -253,7 +256,7 @@ class DatasetPlugin:
     descriptor = PluginDescriptor(
         id="acme.dataset",
         version="1.2.0",
-        plugin_api_version="1.0",
+        plugin_api_version="1.10",
     )
 
     def __init__(self) -> None:
@@ -261,8 +264,8 @@ class DatasetPlugin:
 
     def register(self, registration: PluginRegistration) -> None:
         lifecycle = DatasetLifecycle(self.runtime)
-        registration.register_capability_handler(
-            "acme.dataset.query", self.query
+        registration.register_capability(
+            query_capability(), self.query
         )
         registration.register_node_type(dataset_node(lifecycle))
         registration.register_relationship(query_relationship())
@@ -661,9 +664,24 @@ Relationships match exact types, required traits, or both:
 
 ```python
 from open_agent_world.plugin_api import (
+    CapabilityDefinition,
     CapabilityGrantDefinition,
     RelationshipDefinition,
 )
+
+
+def query_capability() -> CapabilityDefinition:
+    return CapabilityDefinition(
+        kind="acme.dataset.query",
+        tool_name="query_dataset",
+        description="Query the selected dataset.",
+        input_schema={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    )
 
 
 def query_relationship() -> RelationshipDefinition:
@@ -677,27 +695,55 @@ def query_relationship() -> RelationshipDefinition:
         templateable=True,
         capabilities=(CapabilityGrantDefinition(
             kind="acme.dataset.query",
-            tool_prefix="query_dataset",
-            description="Query dataset {target_name!r}.",
-            input_schema={
-                "type": "object",
-                "properties": {"query": {"type": "string"}},
-                "required": ["query"],
-                "additionalProperties": False,
-            },
         ),),
     )
 ```
 
-Register capability handlers before relationships that reference them. A handler
+Register the capability definition and handler with `register_capability`.
+Relationships grant a kind; its definition owns the operation name and schema.
+The projection collects all authorized targets into one `query_dataset(target,
+query)` tool. It adds the `target` parameter, so omit it from `input_schema`.
+Set `target_parameter` for a domain-specific selector such as `sandbox` or `skill`.
+
+Selectors use normalized readable names. Duplicate names receive a short stable
+disambiguator; ambiguous names are rejected. Exact unambiguous names and node IDs
+are also accepted by the host. Renames, membership changes and collisions can change
+the listing; refresh it when a selector no longer resolves. Tool names never depend
+on those changes. Runtime adapters should preserve `ScopedToolDefinition.input_schema`,
+including selector enums and nested schemas, when exposing tools to a model.
+
+Composite operations declare additional `CapabilitySelector` values. Each maps a
+public `parameter` to an internal handler `argument`. Resources must satisfy all
+declared `capability_kinds`, `target_traits`, and read-only `document_action` filters
+(a capability kind matches any entry in `capability_kinds`).
+`include_members=True` extends that document access to its projected collection's
+current members. `target_capabilities` requires additional kinds on the primary
+target. For example, `run_skill_script(sandbox, skill, script, argv)` requires
+Sandbox execution and independently resolves the selected Skill's current read
+access. These independent selectors avoid generating tools for every resource pair.
+
+Kinds can share an operation name when their descriptions, schemas and selector
+contracts are identical; the selected target determines the handler. Conflicting
+contracts fail registration atomically. If multiple kinds implement the same
+operation for the same target, invocation rejects the ambiguity.
+
+Legacy inline `tool_prefix` metadata is normalized into definitions during plugin
+registration. It becomes the stable operation name with a required target selector;
+per-target suffixed tool names are no longer exposed. Old internal capability ID
+invocations remain supported and still recheck their exact current scope.
+
+A handler
 receives `CapabilityContext`, the freshly authorized `Capability`, and untrusted
 arguments. `CapabilityContext` is a narrow set of provider-neutral host operations;
 plugins normally use the capability scope plus their instance-owned runtime.
 
 The input schema describes an Agent tool but does not replace handler validation.
 The host derives capabilities from the current graph immediately before every
-invocation. A capability ID is a locator, never an authorization token. Deleting or
-changing its granting edge revokes permission immediately.
+invocation. The host resolves all selectors against live resources and verifies
+the primary and additional capability scopes before calling the handler. Neither
+a selector nor an operation/capability ID is an authorization token. Deleting or
+changing a granting edge revokes permission for subsequent invocations, including
+calls through a tool exposed before that change.
 
 Connection gestures are unordered. The host stores the endpoints in the canonical
 orientation defined by the relationship. A `bidirectional` edge grants the same

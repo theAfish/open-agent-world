@@ -126,7 +126,8 @@ Conversations using the normal OAW edges.
   `./.open-agent-world/codex`. Keep this directory separate for separate worlds.
   Codex retains its own conversation files in its configured home. Deleting the
   OAW Agent removes its mapping, not those external Codex history files.
-- `oaw_list_tools` discovers live capabilities; `oaw_invoke_tool` goes through
+- `oaw_list_tools` discovers semantic operation tools and their complete input
+  schemas, including currently authorized target aliases; `oaw_invoke_tool` goes through
   the OAW broker on every invocation. Removing a connection revokes access even
   if the model remembers the old capability ID. Tool results are returned as JSON
   text. This preview does not translate image results into visual input.

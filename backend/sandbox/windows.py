@@ -16,6 +16,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from .base import SandboxBackend, SandboxEventSink
+from .materialization import RuntimeMount, materialize_bundle, runtime_tree, cleanup_materializations
 from .environment import minimal_windows_environment
 from .models import (
     CommandResult,
@@ -212,6 +213,7 @@ class WindowsSandboxBackend(SandboxBackend):
         *,
         timeout_seconds: float | None = None,
         env: Any = None,
+        runtime_mount: RuntimeMount | None = None,
     ) -> CommandResult:
         record = await self._record(sandbox_id)
         command = self._validate_argv(argv)
@@ -235,6 +237,11 @@ class WindowsSandboxBackend(SandboxBackend):
             environment = minimal_windows_environment(
                 record.workspace, env, storage_directory=storage
             )
+            mount_root = None
+            if runtime_mount is not None:
+                command = runtime_mount.command(command, record.root / ".oaw" / runtime_mount.bundle.key)
+                self._revoke_runtime_access(record)
+                mount_root = materialize_bundle(record.root, runtime_mount.bundle)
             record.state = SandboxState.RUNNING
             record.active_command = command
             record.cancel_event = threading.Event()
@@ -284,8 +291,8 @@ class WindowsSandboxBackend(SandboxBackend):
         try:
             (storage / ".tmp").mkdir(exist_ok=True)
             native_task = asyncio.create_task(asyncio.to_thread(
-                self._native.run_appcontainer,
-                record.profile,
+                self._run_with_runtime_mount,
+                record, mount_root,
                 command,
                 cwd=record.workspace,
                 environment=environment,
@@ -548,6 +555,35 @@ class WindowsSandboxBackend(SandboxBackend):
             )
             raise
 
+    def _revoke_runtime_access(self, record: _SandboxRecord) -> None:
+        errors = []
+        for path in runtime_tree(record.root / ".oaw"):
+            try:
+                self._native.revoke_path(path, record.profile.sid)
+            except BaseException as exc:
+                errors.append(str(exc))
+        if errors:
+            raise SandboxSecurityError("Runtime bundle ACL revocation failed: " + "; ".join(errors[:3]))
+
+    def _run_with_runtime_mount(self, record, mount_root, command, **options):
+        # Clear stale grants after an interrupted host process, including for
+        # ordinary commands which have no runtime mount at all.
+        self._revoke_runtime_access(record)
+        try:
+            if mount_root is not None:
+                paths = runtime_tree(mount_root)
+                for path in paths:
+                    self._native.protect_path_acl(path)
+                for path in paths:
+                    self._native.grant_runtime_path(path, record.profile.sid)
+                parent = mount_root.parent
+                while parent != record.root:
+                    self._native.grant_runtime_traverse(parent, record.profile.sid)
+                    parent = parent.parent
+            return self._native.run_appcontainer(record.profile, command, **options)
+        finally:
+            self._revoke_runtime_access(record)
+
     async def destroy(self, sandbox_id: str) -> None:
         record = await self._record(sandbox_id)
         await self.terminate(sandbox_id)
@@ -557,6 +593,8 @@ class WindowsSandboxBackend(SandboxBackend):
             self._records.pop(sandbox_id, None)
 
     def _destroy_sync(self, record: _SandboxRecord) -> None:
+        self._revoke_runtime_access(record)
+        cleanup_materializations(record.root)
         for attachment in tuple(record.attachments.values()):
             self._detach_sync(record, attachment)
         record.attachments.clear()
@@ -885,8 +923,8 @@ class WindowsSandboxBackend(SandboxBackend):
             command = tuple(argv)
         except TypeError as exc:
             raise SandboxValidationError("argv must be a sequence") from exc
-        if not command or any(not isinstance(item, str) or not item for item in command):
-            raise SandboxValidationError("argv must contain non-empty strings")
+        if not command or any(not isinstance(item, str) for item in command) or not command[0]:
+            raise SandboxValidationError("argv must contain strings and a non-empty executable")
         if any("\x00" in item for item in command):
             raise SandboxValidationError("argv must be NUL-free")
         return command

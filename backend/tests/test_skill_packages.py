@@ -39,7 +39,7 @@ def test_toolbox_editing_progressive_read_and_legion_copy(client):
     provider = WorldAgentCapabilityProvider(client.app.state.services)
     tool = client.portal.call(provider.list_tools, agent["id"])[0]
     def read(arguments):
-        return client.portal.call(provider.invoke_tool, agent["id"], tool.capability_id, arguments)
+        return client.portal.call(provider.invoke_tool, agent["id"], tool.capability_id, {"toolbox": node["id"], **arguments})
     listing = read({})
     assert listing["instructions"] == "Check the result before handing it over."
     assert listing["skills"] == [{"id": skill_id, "name": "Review", "description": "Review a patch"}]
@@ -109,9 +109,9 @@ def test_exported_plugin_owns_cards_and_updates_only_new_instances(client, tmp_p
                     installed.post("/api/edges", json={"source": agent["id"], "target": current["id"], "relationship": "example.review.toolbox.use"})
                     provider = WorldAgentCapabilityProvider(services)
                     tool = installed.portal.call(provider.list_tools, agent["id"])[0]
-                    contents = installed.portal.call(provider.invoke_tool, agent["id"], tool.capability_id, {"skill_id": skill_id})
+                    contents = installed.portal.call(provider.invoke_tool, agent["id"], tool.capability_id, {"toolbox": current["id"], "skill_id": skill_id})
                     assert contents["skill"]["files"]["assets/logo.png"]["size_bytes"] == 10
-                    file = installed.portal.call(provider.invoke_tool, agent["id"], tool.capability_id, {"skill_id": skill_id, "file_path": "assets/logo.png"})
+                    file = installed.portal.call(provider.invoke_tool, agent["id"], tool.capability_id, {"toolbox": current["id"], "skill_id": skill_id, "file_path": "assets/logo.png"})
                     assert file["file"]["content"] == asset
                     edited = create_node(installed, "example.review.toolbox")
                     local_skill = installed.get(f"/api/nodes/{edited['id']}/document").json()["value"]["skills"][0]
@@ -136,7 +136,8 @@ def test_direct_skill_connection_stays_scoped_when_membership_changes(client):
     provider = WorldAgentCapabilityProvider(client.app.state.services)
     tool = client.portal.call(provider.list_tools, agent["id"])[0]
     def read(capability, arguments=None):
-        return client.portal.call(provider.invoke_tool, agent["id"], capability.capability_id, arguments or {})
+        selector = {"skill": skill["id"]} if capability.name == "read_skill" else {"toolbox": box["id"]}
+        return client.portal.call(provider.invoke_tool, agent["id"], capability.capability_id, {**selector, **(arguments or {})})
     assert client.patch(f"/api/nodes/{skill['id']}", json={"parent_id": box["id"]}).status_code == 200
     result = read(tool)
     assert set(result) == {"skill"}

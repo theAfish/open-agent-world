@@ -367,7 +367,7 @@ async def test_agent_requesting_own_turn_is_recoverable_and_does_not_recurse(
         assert len(definitions) == 1
         assert "Never use your own agent id" in definitions[0].description
         assert [parameter.name for parameter in definitions[0].parameters] == [
-            "agent_id", "message"
+            "conversation", "agent_id", "message"
         ]
 
         from backend.errors import ResourceValidationError
@@ -376,7 +376,7 @@ async def test_agent_requesting_own_turn_is_recoverable_and_does_not_recurse(
             await provider.invoke_tool(
                 atlas.id,
                 definitions[0].capability_id,
-                {"agent_id": atlas.id, "message": "Continue"},
+                {"conversation": conversation.id, "agent_id": atlas.id, "message": "Continue"},
             )
 
         token = _current_invocation.set(InvocationContext(
@@ -393,7 +393,7 @@ async def test_agent_requesting_own_turn_is_recoverable_and_does_not_recurse(
             response = await provider.invoke_tool(
                 atlas.id,
                 definitions[0].capability_id,
-                {"agent_id": atlas.id, "message": "Continue"},
+                {"conversation": conversation.id, "agent_id": atlas.id, "message": "Continue"},
             )
         finally:
             _current_invocation.reset(token)

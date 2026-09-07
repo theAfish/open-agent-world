@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .linux import LinuxSandboxBackend
+from .materialization import RuntimeMount
 from .models import ResourceAccess, SandboxEvent, SandboxLimits, SandboxValidationError
 
 
@@ -62,6 +63,7 @@ async def handle(request: dict[str, Any], *, stdin_pending: bool = False) -> Any
         await backend.start(sandbox_id)
         execution = asyncio.create_task(backend.execute(sandbox_id, request["argv"],
             timeout_seconds=request.get("timeout_seconds"), env=request.get("env"),
+            runtime_mount=RuntimeMount.from_wire(request["runtime_mount"]) if request.get("runtime_mount") is not None else None,
             _unit_name=request["unit"]))
         disconnected = asyncio.Event()
         if stdin_pending:

@@ -1,7 +1,7 @@
 """Reusable skill toolbox contract for trusted Open Agent World plugins.
 
-Skills are portable instructions and text resources. Reading one grants no
-additional capabilities; execution still uses the Agent's live graph tools.
+Skills are portable instructions and reusable runtime assets. Reading one grants
+no additional capabilities; execution composes live Skill and Sandbox access.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from open_agent_world.plugin_api import (
-    CapabilityGrantDefinition, NodeDocumentAction, NodeDocumentDefinition,
+    CapabilityDefinition, CapabilityGrantDefinition, NodeDocumentAction, NodeDocumentDefinition,
     NodeDocumentDownload, NodeTypeDefinition, PluginDescriptor, RelationshipDefinition,
     ResourceValidationError,
     NodeContainerDefinition,
@@ -184,7 +184,7 @@ def create_plugin():
 
 Author: {package.author or "Unspecified"}
 Package: {package.package_id} / {package.version}
-Requires Open Agent World Plugin API 1.5.
+Requires Open Agent World Plugin API 1.10.
 
 From an Open Agent World checkout, mount this extracted folder:
 
@@ -199,7 +199,8 @@ Edit src/{module}/package.json for settings and skills/<id>/ for instructions,
 scripts, assets and other files. The manifest lists each file: null for UTF-8 text,
 or an object with media_type for binary files. Keep package_id stable
 for updates; choose a new package_id when publishing an independent fork.
-Scripts are package files; execute them using the Agent's connected Sandbox.
+Scripts are package files; use the Agent's run_skill_script tool with a separately
+authorized Sandbox. The host materializes the bundle read-only outside the workspace.
 '''
     output = io.BytesIO()
     metadata = package.model_dump(mode="json")
@@ -257,7 +258,9 @@ def register_skill_package(registration, *, node_type: str, package: SkillPackag
                 } for path, asset in skill["files"].items()}}
         return result
 
-    registration.register_capability_handler(kind, invoke)
+    registration.register_capability(CapabilityDefinition(kind=kind, tool_name="read_skills", target_parameter="toolbox",
+        description="List a toolbox's current skills and shared conventions. Supply skill_id to read one member, or skill_id and file_path to read a bundled file. Execution requires an independently authorized Sandbox.",
+        input_schema=ReadSkill.model_json_schema()), invoke)
     registration.register_node_type(NodeTypeDefinition(
         id=node_type, label=package.name, description=package.description or "A portable toolbox of skills and shared working instructions.",
         icon="boxes", color="#ac8b57", deck_id="tools", deck_label="Tools", deck_icon="boxes",
@@ -276,9 +279,7 @@ def register_skill_package(registration, *, node_type: str, package: SkillPackag
         id=f"{node_type}.use", label="Use skills", short_label="skills",
         description="Read this toolbox and load individual skills when needed.",
         source_traits=frozenset({"core.agent"}), target_types=frozenset({node_type}), templateable=True,
-        capabilities=(CapabilityGrantDefinition(kind=kind, tool_prefix="read_skills",
-            description="List skills in {target_name!r}, then supply skill_id to load instructions, defaults and the file tree. Supply file_path to read a script, reference or binary asset. Follow the toolbox conventions when using its skills. Execution uses your separately connected tools and Sandboxes.",
-            input_schema=ReadSkill.model_json_schema()),),
+        capabilities=(CapabilityGrantDefinition(kind=kind),),
     ))
 
 
@@ -287,7 +288,7 @@ class SkillPackagePlugin:
     def __init__(self, package: SkillPackage):
         self.package = package
         self.descriptor = PluginDescriptor(id=package.package_id, version=package.version,
-            plugin_api_version="1.5", name=package.name, description=package.description)
+            plugin_api_version="1.10", name=package.name, description=package.description)
 
     def register(self, registration):
         register_skill_package(registration, node_type=f"{self.package.package_id}.toolbox", package=self.package)
@@ -307,7 +308,9 @@ def register_skill_node(registration, *, node_type: str, user_creatable: bool = 
         return {"skill": {**skill, "files": {path: asset if isinstance(asset, str) else {
             "media_type": asset["media_type"], "size_bytes": len(base64.b64decode(asset["data_base64"]))
         } for path, asset in skill["files"].items()}}}
-    registration.register_capability_handler(kind, invoke)
+    registration.register_capability(CapabilityDefinition(kind=kind, tool_name="read_skill", target_parameter="skill",
+        description="Read one independently authorized Skill. Supply file_path for a bundled file. Access does not include its parent toolbox or siblings.",
+        input_schema={"type": "object", "properties": {"file_path": {"type": "string", "description": "Optional file path inside this skill."}}, "additionalProperties": False}), invoke)
     registration.register_node_type(NodeTypeDefinition(id=node_type, label="Skill", description="One independently connected skill, with its own files and settings.",
         icon="wrench", color="#ac8b57", deck_id="tools", deck_label="Tools", deck_icon="boxes", default_name="New skill",
         default_size=(360, 235), default_status="available", statuses=frozenset({"available"}), config_model=ToolboxConfig,
@@ -317,5 +320,4 @@ def register_skill_node(registration, *, node_type: str, user_creatable: bool = 
             actions={"read": NodeDocumentAction(lambda value, arguments: value, capability_kind=kind, read_only=True)})))
     registration.register_relationship(RelationshipDefinition(id=f"{node_type}.use", label="Use skill", short_label="skill",
         description="Access only this skill, even when it is inside a toolbox.", source_traits=frozenset({"core.agent"}), target_types=frozenset({node_type}), templateable=True,
-        capabilities=(CapabilityGrantDefinition(kind=kind, tool_prefix="read_skill", description="Read only skill {target_name!r}. Supply file_path to read one of its files. Its parent toolbox and siblings are not included.",
-            input_schema={"type": "object", "properties": {"file_path": {"type": "string", "description": "Optional file path inside this skill."}}, "additionalProperties": False}),)))
+        capabilities=(CapabilityGrantDefinition(kind=kind),)))

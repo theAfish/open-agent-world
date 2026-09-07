@@ -14,6 +14,8 @@ from backend.plugins.lifecycle import (
 from backend.plugins.registry import (
     PLUGIN_API_VERSION,
     CapabilityGrantDefinition,
+    CapabilityDefinition,
+    CapabilitySelector,
     NodeTypeDefinition,
     PluginCatalog,
     PluginDescriptor,
@@ -38,6 +40,8 @@ from backend.plugins.template import (
 
 __all__ = [
     "CapabilityGrantDefinition",
+    "CapabilityDefinition",
+    "CapabilitySelector",
     "CapabilityContext",
     "AgentNodeLifecycle",
     "ConversationNodeLifecycle",

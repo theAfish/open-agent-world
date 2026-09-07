@@ -56,6 +56,33 @@ def test_packaged_discovery():
 
 
 @pytest.mark.asyncio
+async def test_operation_selectors_survive_tool_bridge(tmp_path):
+    schema = {"type": "object", "properties": {
+        "target": {"type": "string", "enum": ["notes", "report"]},
+        "content": {"type": "string"}}, "required": ["target", "content"],
+        "additionalProperties": False}
+
+    class Operations(Capabilities):
+        async def list_tools(self, agent_id):
+            return [ScopedToolDefinition("operation:edit_text", "edit_text", "Edit selected text",
+                (ToolParameter("target"), ToolParameter("content")), input_schema=schema)]
+
+    capabilities = Operations()
+    provider = runtime(tmp_path, capabilities)
+    listed = await provider._tool("agent1", "oaw_list_tools", {})
+    assert listed[0]["input_schema"] == schema
+    assert listed[0]["parameters"][0]["schema"]["enum"] == ["notes", "report"]
+    arguments = {"target": "notes", "content": "updated"}
+    await provider._tool("agent1", "oaw_invoke_tool", {
+        "capability_id": listed[0]["capability_id"], "arguments": arguments})
+    assert capabilities.calls == [("agent1", "operation:edit_text", arguments)]
+    capabilities.allowed = False
+    with pytest.raises(PermissionError):
+        await provider._tool("agent1", "oaw_invoke_tool", {
+            "capability_id": listed[0]["capability_id"], "arguments": arguments})
+
+
+@pytest.mark.asyncio
 async def test_stream_and_resume_across_provider_restart(tmp_path):
     cfg = config(tmp_path)
     first = runtime(tmp_path)

@@ -50,6 +50,36 @@ The implementation must never compensate by launching an ordinary host process.
 
 ## Trust zones
 
+Agent tools are grouped by operation. Relationships grant capability kinds;
+operation definitions supply schemas, and the tool projection lists currently
+authorized resource aliases. An alias, node ID, or operation ID is only a locator.
+Every call resolves the selected resources against the live graph and rechecks
+their required capability scopes before dispatch. Composite operations check each
+resource independently, including calls using legacy internal capability IDs.
+Tool listings and cached callables do not preserve revoked authority.
+
+Skill runtime bundles compose current Skill-document access with current Sandbox
+execution access. The host reads the existing card document, projects only declared
+bundle files, and submits a command-scoped `RuntimeMount` to `SandboxBackend.execute`.
+There is no separate Skill process launcher or package loader. Plugins supply the
+ordinary Skill document contract and receive no runtime filesystem or service-container
+access through this integration.
+
+Materializations live below the Sandbox-owned `.oaw` directory, outside the workspace.
+Portable paths and complete file trees are validated before writing; traversal,
+case aliases, device paths, reparse points, symlinks and hard links are rejected.
+Each execution exposes only its authorized bundle. Linux/WSL bind it read-only for
+that command; Windows applies protected read/execute ACLs with explicit write denial,
+then revokes them after the complete native process tree terminates, including failures
+and cancellation. Parent traversal grants do not permit listing other cached bundles.
+ACL failures fail closed. Ordinary commands clear stale Windows runtime grants before
+launch, so cached paths never confer durable authority.
+
+Revocation blocks subsequent submissions; it does not retroactively erase data already
+read into a command or explicitly copied into its workspace. The current bundle bytes
+are reused, replaced on edits, and removed with the Sandbox. Materializations are not
+artifacts or portable state and are not copied into duplicated/summoned runtime instances.
+
 The FastAPI process and Agent runtime may hold model credentials. Saved model credentials use authenticated encryption at rest, are never returned to the browser after submission, and are never stored in browser storage. The database contains only ciphertext. Its encryption key is stored separately with owner-only permissions and is additionally bound to the backend's Windows account through DPAPI on Windows. Sandbox processes are untrusted and never receive those values. Resource access crosses the boundary only through explicit graph relationships and the controlled workspace.
 
 Operational logs may contain commands and program output, but they must not contain hidden model reasoning or copied host environment values.

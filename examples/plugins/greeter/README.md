@@ -16,7 +16,8 @@ From the repository root, start the application with the example attached:
 
 In the UI, the **Community examples** deck and **Greeter** card are supplied
 entirely by this package. Connect an Agent to a Greeter with **Greet with**.
-The edge grants that Agent a scoped `greet_with_*` tool. Removing the edge or
+The edge authorizes that Greeter as a target of `greet(target, name)`. Multiple
+Greeters share one tool, with readable target aliases. Removing the edge or
 Greeter revokes the tool immediately.
 
 Both contributions explicitly opt into Legion portability. Select an Agent and

@@ -1,22 +1,15 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
-from backend.capabilities.models import Capability, CapabilityKind, CapabilitySet
+from backend.capabilities.models import Capability, CapabilitySet
 from backend.errors import PermissionDeniedError, ResourceValidationError
 from backend.plugins import PluginRegistry
 from backend.resources.manager import ManagedResourceStore
 from backend.resources.models import ResourceRecord, TextDocument, TextEdit
 from backend.world.models import Card, CardType, EdgeDirection, Relationship
 from backend.world.store import WorldStore
-
-
-def _tool_suffix(card: Card) -> str:
-    readable = re.sub(r"[^a-z0-9]+", "_", card.name.lower()).strip("_")[:24]
-    identifier = re.sub(r"[^a-zA-Z0-9]+", "", card.id)[:12].lower()
-    return "_".join(part for part in (readable, identifier) if part) or "resource"
 
 
 class CapabilityBroker:
@@ -53,13 +46,13 @@ class CapabilityBroker:
                 continue
             visited.add((edge.relationship, target_id))
             target = self.world.get_card(target_id)
-            suffix = _tool_suffix(target)
             relationship = self.plugins.relationship(edge.relationship)
             if relationship.generated:
                 continue
             if not relationship.capabilities:
                 directed_edges.extend((child, child.target) for child in self.world.connections_from(target_id))
             for grant in relationship.capabilities:
+                operation = self.plugins.capability_definition(grant.kind)
                 capability_id = f"{grant.kind}:{target.id}"
                 if capability_id in capability_ids:
                     continue
@@ -67,15 +60,15 @@ class CapabilityBroker:
                 capabilities.append(
                     Capability(
                         id=capability_id,
-                        tool_name=f"{grant.tool_prefix}_{suffix}",
+                        tool_name=operation.tool_name,
                         kind=grant.kind,
                         agent_id=agent.id,
                         target_id=target.id,
                         target_type=target.type,
                         target_name=target.name,
                         source_node_id=edge.source if edge.target == target_id else edge.target,
-                        description=grant.description.format(target_name=target.name),
-                        input_schema=dict(grant.input_schema),
+                        description=operation.description,
+                        input_schema=dict(operation.input_schema),
                     )
                 )
         if agent.parent_id and self.world.get_card(agent.parent_id).type == "legion":
@@ -84,15 +77,11 @@ class CapabilityBroker:
                 if operation == "patch" and group.config.get("shared_state_access") != "read_write":
                     continue
                 kind = f"legion.state.{operation}"
+                definition = self.plugins.capability_definition(kind)
                 capabilities.append(Capability(
-                    id=f"{kind}:{group.id}", tool_name=f"{operation}_legion_state", kind=kind,
+                    id=f"{kind}:{group.id}", tool_name=definition.tool_name, kind=kind,
                     agent_id=agent.id, target_id=group.id, target_type=group.type, target_name=group.name,
-                    description=("Read shared team state and revision." if operation == "read" else
-                                 "Merge top-level keys into shared team state. Read first and supply the revision; refresh on conflict."),
-                    input_schema={"type": "object", "properties": {} if operation == "read" else {
-                        "value": {"type": "object", "description": "Top-level state keys to merge."},
-                        "expected_revision": {"type": "integer", "description": "Revision returned by read_legion_state."},
-                    }, "required": [] if operation == "read" else ["value", "expected_revision"], "additionalProperties": False},
+                    description=definition.description, input_schema=dict(definition.input_schema),
                 ))
         return CapabilitySet(agent_id=agent.id, capabilities=capabilities)
 
@@ -172,15 +161,6 @@ class CapabilityBroker:
         self.require_image_view(agent_id, resource_id)
         return self.resources.read_bytes(resource_id)
 
-    def capability_for_tool(self, agent_id: str, tool_name: str) -> Capability:
-        # Derivation is intentionally repeated immediately before invocation.
-        for capability in self.derive(agent_id).capabilities:
-            if capability.tool_name == tool_name:
-                return capability
-        raise PermissionDeniedError(
-            f"tool {tool_name!r} is not currently available to agent {agent_id!r}"
-        )
-
     def capability_for_id(self, agent_id: str, capability_id: str) -> Capability:
         # A capability id identifies scope for dispatch, but it is never treated
         # as an authorization token. Derivation re-reads the graph here.
@@ -190,46 +170,6 @@ class CapabilityBroker:
         raise PermissionDeniedError(
             f"capability {capability_id!r} is not currently available to agent {agent_id!r}"
         )
-
-    def invoke_structured_tool(
-        self, agent_id: str, tool_name: str, arguments: dict[str, Any]
-    ) -> TextDocument | tuple[ResourceRecord, Path] | tuple[str, list[str]] | tuple[str, str]:
-        capability = self.capability_for_tool(agent_id, tool_name)
-        if capability.kind == CapabilityKind.AGENT_COMMUNICATE:
-            message = arguments.get("message")
-            if (
-                set(arguments) != {"message"}
-                or not isinstance(message, str)
-                or not message.strip()
-            ):
-                raise ResourceValidationError(
-                    "agent communication tool requires one non-empty message"
-                )
-            self.require_agent_communicate(agent_id, capability.target_id)
-            return capability.target_id, message
-        if capability.kind == CapabilityKind.TEXT_READ:
-            if arguments:
-                raise ResourceValidationError("text read tool takes no arguments")
-            return self.read_text(agent_id, capability.target_id)
-        if capability.kind == CapabilityKind.TEXT_EDIT:
-            if set(arguments) != {"content"} or not isinstance(arguments["content"], str):
-                raise ResourceValidationError("text edit tool requires one string content argument")
-            return self.replace_text(agent_id, capability.target_id, arguments["content"])
-        if capability.kind == CapabilityKind.IMAGE_VIEW:
-            if arguments:
-                raise ResourceValidationError("image view tool takes no arguments")
-            return self.view_image(agent_id, capability.target_id)
-        if capability.kind == CapabilityKind.SANDBOX_EXECUTE:
-            argv = arguments.get("argv")
-            if set(arguments) != {"argv"} or not isinstance(argv, list) or not argv or not all(
-                isinstance(value, str) and value for value in argv
-            ):
-                raise ResourceValidationError("sandbox execute tool requires a non-empty argv array")
-            self.require_sandbox_execute(agent_id, capability.target_id)
-            # Execution itself belongs to SandboxBackend. This return value is
-            # an explicit dispatch request for the runtime adapter.
-            return capability.target_id, argv
-        raise AssertionError(f"unhandled capability kind {capability.kind}")
 
     def _require_agent(self, card_id: str) -> Card:
         card = self.world.get_card(card_id)

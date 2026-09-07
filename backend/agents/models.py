@@ -79,12 +79,13 @@ class ToolParameter:
 
 @dataclass(frozen=True, slots=True)
 class ScopedToolDefinition:
-    """One concrete graph-derived capability, never a global resource tool."""
+    """One graph-scoped operation. capability_id is a dispatch locator, not a token."""
 
     capability_id: str
     name: str
     description: str
     parameters: tuple[ToolParameter, ...] = ()
+    input_schema: Mapping[str, Any] | None = None
 
 
 class AgentRuntimeError(RuntimeError):

@@ -152,11 +152,12 @@ class Summoner(RecordingProvider):
         count = int(prompt.split(":")[1]) if ":" in prompt else 0
         if count:
             tool = next(t for t in await self.tools.list_tools(context.agent_id) if t.name.startswith("summon_agents"))
-            listing = await self.tools.invoke_tool(context.agent_id, tool.capability_id, {})
+            target = tool.input_schema["properties"]["target"]["enum"][0]
+            listing = await self.tools.invoke_tool(context.agent_id, tool.capability_id, {"target": target})
             for _ in range(2 if prompt.startswith("twice") else 1):
                 try:
                     result = await self.tools.invoke_tool(context.agent_id, tool.capability_id, {
-                        "action": "summon", "agent_id": listing["agents"][0]["id"],
+                        "target": target, "action": "summon", "agent_id": listing["agents"][0]["id"],
                         "prompt": "failure" if prompt.startswith("failchain") else (f"holdchain:{count - 1}" if count > 1 else "hold") if prompt.startswith("holdchain") else f"chain:{count - 1}"})
                     self.results.append(result)
                 except ConflictError as error:
@@ -233,12 +234,14 @@ async def test_failed_child_returns_result_handle_only_its_caller_can_manage(tmp
         assert result["status"] == "failed" and "Research provider failed" in result["error"]
         assert services.world.get_card(result["entry_agent_id"])
         tool = next(t for t in await runtime.tools.list_tools(caller.id) if t.name.startswith("summon_agents"))
-        assert (await runtime.tools.invoke_tool(caller.id, tool.capability_id, {"action": "inspect", "instance_id": result["id"]}))["status"] == "failed"
+        target = tool.input_schema["properties"]["target"]["enum"][0]
+        assert (await runtime.tools.invoke_tool(caller.id, tool.capability_id, {"target": target, "action": "inspect", "instance_id": result["id"]}))["status"] == "failed"
         child = result["entry_agent_id"]
         child_tool = next(t for t in await runtime.tools.list_tools(child) if t.name.startswith("summon_agents"))
-        assert (await runtime.tools.invoke_tool(child, child_tool.capability_id, {}))["instances"] == []
+        child_target = child_tool.input_schema["properties"]["target"]["enum"][0]
+        assert (await runtime.tools.invoke_tool(child, child_tool.capability_id, {"target": child_target}))["instances"] == []
         with pytest.raises(PermissionDeniedError):
-            await runtime.tools.invoke_tool(child, child_tool.capability_id, {"action": "inspect", "instance_id": result["id"]})
+            await runtime.tools.invoke_tool(child, child_tool.capability_id, {"target": child_target, "action": "inspect", "instance_id": result["id"]})
     finally:
         services.close()
 

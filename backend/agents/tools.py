@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from copy import deepcopy
 import keyword
 import re
 from collections.abc import Callable, Sequence
@@ -81,7 +82,7 @@ def build_scoped_tool_schemas(
                 "function": {
                     "name": definition.name,
                     "description": definition.description.strip(),
-                    "parameters": {
+                    "parameters": deepcopy(dict(definition.input_schema)) if definition.input_schema is not None else {
                         "type": "object",
                         "properties": properties,
                         "required": [
