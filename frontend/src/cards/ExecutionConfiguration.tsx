@@ -47,7 +47,7 @@ export function environmentVariablesToValue(rows: EnvironmentVariableRow[]): Rec
   return { variables };
 }
 
-function CredentialBinding({ id, reference, configured, revision, changed }: {
+export function CredentialBinding({ id, reference, configured, revision, changed }: {
   id: string; reference: string; configured: boolean; revision: number; changed(): Promise<void>;
 }) {
   const [value, setValue] = useState("");
@@ -74,7 +74,7 @@ function CredentialBinding({ id, reference, configured, revision, changed }: {
   </div>;
 }
 
-function EnvironmentVariablesEditor({ rows, onChange, disabled }: {
+export function EnvironmentVariablesEditor({ rows, onChange, disabled }: {
   rows: EnvironmentVariableRow[]; onChange(rows: EnvironmentVariableRow[]): void; disabled: boolean;
 }) {
   const patch = (id: number, change: Partial<EnvironmentVariableRow>) => onChange(rows.map((row) => row.id === id ? { ...row, ...change } : row));

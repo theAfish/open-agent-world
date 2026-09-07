@@ -10,7 +10,7 @@ router = APIRouter(prefix="/nodes", tags=["execution-credentials"])
 
 def requirements(services, node_id):
     node = services.world.get_card(node_id)
-    if "core.environment" not in services.plugins.node_type(node.type).traits:
+    if not {"core.environment", "core.sandbox"} & services.plugins.node_type(node.type).traits:
         raise ResourceValidationError("Credential bindings require an Environment Profile")
     snapshot = read_document(services, node_id)
     profile = EnvironmentProfile.model_validate(snapshot["value"])

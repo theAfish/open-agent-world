@@ -22,6 +22,8 @@ class SandboxRuntime:
     available: bool = False
     reason: str | None = None
     supports_workspace: bool = True
+    supported_network_modes: tuple[str, ...] = ("disabled",)
+    network_reason: str = "Networking unavailable: isolated egress protecting host control services is not implemented"
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,7 +119,7 @@ def builtin_sandbox_registry(root: Path, event_sink: SandboxEventSink | None) ->
                 return False, str(exc)
 
         registry.register(SandboxRuntimeRegistration(
-            SandboxRuntime("windows", "Windows · AppContainer", "windows", shell),
+            SandboxRuntime("windows", "Windows · AppContainer", "windows", shell, network_reason="Windows AppContainer has no network capabilities; enabled networking is unsupported"),
             lambda: WindowsSandboxBackend(root, event_sink=event_sink), windows_probe, 50,
         ))
 

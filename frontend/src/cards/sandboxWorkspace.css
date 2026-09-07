@@ -1,0 +1,22 @@
+.sandbox-workspace { display:flex; width:100%; height:100%; min-height:0; color:var(--ink); }
+.sandbox-files { width:240px; min-width:180px; max-width:45%; flex-shrink:0; overflow:auto; padding:14px; }
+.sandbox-file-divider { flex:0 0 5px; cursor:col-resize; touch-action:none; background:var(--line); }
+.sandbox-file-divider:hover, .sandbox-file-divider:focus { background:var(--accent); outline:none; }
+.sandbox-files section { margin:16px 0; display:flex; flex-direction:column; gap:7px; }
+.sandbox-files small { opacity:.65; font-size:11px; }
+.sandbox-files p { font-size:11px; line-height:1.5; overflow-wrap:anywhere; }
+.sandbox-files ul { list-style:none; padding-left:12px; margin:4px 0; font-size:12px; }
+.sandbox-files button { text-align:left; overflow-wrap:anywhere; }
+.sandbox-work-area { flex:1; min-width:0; overflow:auto; padding:14px; }
+.sandbox-window-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:12px; }
+.sandbox-workspace button, .sandbox-workspace select, .sandbox-workspace input { font:inherit; font-size:12px; padding:6px 8px; border:1px solid var(--line-strong); border-radius:6px; background:transparent; color:inherit; }
+.sandbox-workspace button:disabled { opacity:.45; cursor:not-allowed; }
+.sandbox-console p { font-size:12px; line-height:1.5; opacity:.8; }
+.sandbox-console textarea { width:100%; box-sizing:border-box; resize:vertical; padding:12px; font:12px/1.6 monospace; background:var(--surface-raised); color:inherit; border:1px solid var(--line-strong); border-radius:8px; }
+.sandbox-diagnostics { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0; }
+.sandbox-workspace pre { white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.6 monospace; }
+.sandbox-preview img { max-width:100%; max-height:480px; object-fit:contain; }
+.sandbox-preview a { display:block; font-size:12px; margin:10px 0; }
+.sandbox-history article { border-bottom:1px solid #8884; padding:12px 0; display:flex; flex-direction:column; gap:6px; }
+.sandbox-variable { font-size:12px; overflow-wrap:anywhere; }
+.sandbox-variable small { opacity:.65; }

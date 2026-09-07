@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 import { TEST_CATALOG } from "../src/state/catalog.fixture";
 
 test("sandbox card confirms folder settings and follows runtime metadata (mock API)", async ({ page }, testInfo) => {
@@ -8,6 +9,9 @@ test("sandbox card confirms folder settings and follows runtime metadata (mock A
     config: { runtime: "auto", workspace_path: null as string | null, workspace_access: "read_write", output: [] as string[] },
   };
   let state = "stopped";
+  let executions = 0;
+  let previewState = "text";
+  const receipts: Record<string, unknown>[] = [];
   let locked = false;
   let rejectSave = true;
   let releaseSave: (() => void) | undefined;
@@ -30,6 +34,18 @@ test("sandbox card confirms folder settings and follows runtime metadata (mock A
       runtimes: [{ id: "wsl:Ubuntu", label: "WSL · Ubuntu", platform: "linux", available: true,
         reason: null, shell: ["/bin/sh", "-c"], supports_workspace: true }],
     });
+    if (path.endsWith("/document")) return reply({ value: { variables: {} }, revision: 0, summary: {} });
+    if (path.endsWith("/credentials")) return reply({});
+    if (path.endsWith("/configuration")) return reply({ profile_id: null, ready: true, variables: [] });
+    if (path.endsWith("/history")) return reply(receipts);
+    if (path.endsWith("/files")) {
+      const operation = new URL(route.request().url()).searchParams.get("operation");
+      if (operation === "list") return reply({ entries: [{ name: "result.txt", directory: false, blocked: false, size: 5 }], truncated: false });
+      if (operation === "preview") return reply({ state: previewState, text: "hello" });
+      if (operation === "download") return route.fulfill({ contentType: "application/octet-stream", headers: { "Content-Disposition": "attachment; filename=result.txt" }, body: "hello" });
+      return reply([{ id: "workspace", label: "Workspace", access: "read_only", directory: true }]);
+    }
+    if (path.endsWith("/diagnostics")) return reply({ status: "checked", stdout: "python3: available\nWorkspace: readable", stderr: "", network_reason: "Disabled" });
     if (path === `/api/sandboxes/${card.id}`) return reply(info());
     if (path === `/api/nodes/${card.id}` && route.request().method() === "PATCH") {
       const patch = route.request().postDataJSON();
@@ -42,7 +58,9 @@ test("sandbox card confirms folder settings and follows runtime metadata (mock A
     if (path.endsWith("/start")) { state = "ready"; locked = true; return reply(info()); }
     if (path.endsWith("/stop")) { state = "stopped"; return reply(info()); }
     if (path.endsWith("/execute")) {
+      executions++;
       expect(route.request().postDataJSON()).toEqual({ command: "printf 'hello'" });
+      receipts.push({ id: "manual-1", caller: "user", state: "finished", argv: ["/bin/sh", "-c", "printf 'hello'"], stdout: "hello", stderr: "", exit_code: 0, duration_seconds: 0.01 });
       return reply({ stdout: "hello\n", stderr: "", exit_code: 0 });
     }
     return reply({ detail: `Unexpected mock request: ${path}` }, 404);
@@ -74,19 +92,59 @@ test("sandbox card confirms folder settings and follows runtime metadata (mock A
   await expect(panel.getByText("Settings saved", { exact: true })).toBeVisible();
   await panel.getByRole("button", { name: "Start", exact: true }).click();
   await expect(panel.getByRole("status")).toHaveText("Ready");
-  await panel.locator(".sandbox-settings > summary").click();
+  await panel.locator(".sandbox-settings > summary").first().click();
   await expect(panel.getByRole("combobox", { name: "Runtime", exact: true })).toBeDisabled();
   await expect(panel.getByLabel("Working folder", { exact: true })).toBeDisabled();
-  await panel.locator(".sandbox-settings > summary").click();
-  await panel.getByLabel("Terminal", { exact: false }).fill("printf 'hello'");
-  await panel.getByRole("button", { name: "Execute command" }).click();
-  await expect(panel.getByRole("status")).toHaveText("Ready");
-  await expect(panel.getByRole("log")).toContainText("hello");
-  await panel.screenshot({ path: testInfo.outputPath("sandbox-ready.png") });
+  await panel.locator(".sandbox-settings > summary").first().click();
+  await expect(panel.getByLabel("Command", { exact: true })).toHaveCount(0);
+  await expect(panel.getByRole("log")).toHaveCount(0);
+  await panel.getByRole("button", { name: "Open Window", exact: true }).click();
+  const window = page.getByRole("dialog", { name: "Project workspace workspace" });
+  await expect(window.getByLabel("Sandbox files")).toBeVisible();
+  expect(executions).toBe(0);
+  await window.getByRole("button", { name: "Check execution environment" }).click();
+  await expect(window).toContainText("python3: available");
+  await window.getByLabel("Command", { exact: true }).fill("printf 'hello'");
+  await window.getByRole("button", { name: "Run command", exact: true }).click();
+  await expect(window.getByRole("log")).toContainText("hello");
+  await window.getByRole("button", { name: "▸ Workspace", exact: true }).click();
+  await window.getByRole("button", { name: "· result.txt", exact: true }).click();
+  await expect(window.locator(".sandbox-preview pre")).toHaveText("hello");
+  await expect(window.getByLabel("Sandbox files")).toBeVisible();
+  const downloadEvent = page.waitForEvent("download");
+  await window.getByRole("button", { name: /Download/ }).click();
+  const download = await downloadEvent;
+  expect(download.suggestedFilename()).toBe("result.txt");
+  expect(await readFile((await download.path())!, "utf8")).toBe("hello");
+  for (const [state, message] of [["oversized", "Preview exceeds 1 MiB"], ["missing", "File no longer exists"], ["permission_denied", "Permission denied"], ["unsupported", "Preview unsupported"]]) {
+    previewState = state;
+    await window.getByRole("button", { name: "· result.txt", exact: true }).click();
+    await expect(window.locator(".sandbox-preview")).toContainText(message);
+    await expect(window.getByLabel("Sandbox files")).toBeVisible();
+  }
+  previewState = "text";
+  await window.getByRole("button", { name: "Console", exact: true }).click();
+  await expect(window.getByLabel("Command", { exact: true })).toHaveValue("printf 'hello'");
+  await page.getByRole("button", { name: "Close runtime activity" }).click();
+  const sidebar = window.getByLabel("Sandbox files");
+  const beforeResize = (await sidebar.boundingBox())!;
+  const divider = (await window.getByRole("separator", { name: "Resize file sidebar" }).boundingBox())!;
+  await page.mouse.move(divider.x + divider.width / 2, divider.y + 80);
+  await page.mouse.down();
+  await page.mouse.move(divider.x + 50, divider.y + 80, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(async () => (await sidebar.boundingBox())!.width).toBeGreaterThan(beforeResize.width + 20);
+  await window.screenshot({ path: testInfo.outputPath("sandbox-window.png") });
   await page.getByRole("button", { name: "Use dark theme" }).click();
-  await panel.screenshot({ path: testInfo.outputPath("sandbox-ready-dark.png") });
-  await panel.getByRole("button", { name: "Stop", exact: true }).click();
-  await expect(panel.getByRole("status")).toHaveText("Stopped");
-  await expect(panel.getByLabel("Working folder", { exact: true })).toBeEnabled();
-  await expect(panel.getByRole("combobox", { name: "Runtime", exact: true })).toBeDisabled();
+  await window.screenshot({ path: testInfo.outputPath("sandbox-window-dark.png") });
+  await window.getByRole("button", { name: "Close workspace" }).click();
+  await panel.locator(".card-kind-icon").click();
+  await panel.getByRole("button", { name: "Open Window", exact: true }).click();
+  await expect(window.getByLabel("Command", { exact: true })).toHaveValue("printf 'hello'");
+  await window.getByRole("button", { name: "History", exact: true }).click();
+  await expect(window.locator(".sandbox-history")).toContainText("user · finished");
+  expect(executions).toBe(1);
+  await page.reload();
+  await expect(page.getByRole("dialog", { name: "Project workspace workspace" })).toBeVisible();
+  expect(executions).toBe(1);
 });

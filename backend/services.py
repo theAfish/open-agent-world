@@ -150,6 +150,7 @@ class _SandboxEventTransaction:
 
     events: list[SandboxEvent] = field(default_factory=list)
     state: str = "open"
+    state_events: list[RuntimeEvent] = field(default_factory=list)
 
 
 class _PortableStateGate:
@@ -325,6 +326,9 @@ class _LifecycleSandboxes:
             await self.backend.configure_options(node_id, config)
             return
         if isinstance(self.backend, SandboxBackend):
+            info = await self.backend.get(node_id)
+            if config.get("network_enabled") and "enabled" not in info.supported_network_modes:
+                raise SandboxValidationError("This runtime supports disabled networking only")
             await self.backend.configure(
                 node_id, workspace_path=config.get("workspace_path"),
                 workspace_access=ResourceAccess(config.get("workspace_access", "read_write")),
@@ -523,6 +527,7 @@ class ApplicationServices:
     state: StateStore
     legions: LegionStore
     llm_settings: LlmSettingsStore
+    _sandbox_commands: dict[str, dict] = field(default_factory=dict, init=False, repr=False)
     _execution_secrets: ContextVar[tuple[str, ...]] = field(
         default_factory=lambda: ContextVar("execution_secrets", default=()), init=False, repr=False)
     run_manager: RunManager | None = None
@@ -1799,6 +1804,8 @@ class ApplicationServices:
                 self._publish_card_created_nowait(node)
             for edge in instance.edges:
                 self._publish_edge_change_nowait(EventType.EDGE_CREATED, edge)
+            for event in event_transaction.state_events:
+                self.events.publish_event_nowait(event)
             index = 0
             while index < len(event_transaction.events):
                 self._emit_sandbox_event_nowait(event_transaction.events[index])
@@ -2197,6 +2204,12 @@ class ApplicationServices:
         self.world._assert_valid_direction(
             source.type, target.type, request.relationship, request.direction
         )
+        if request.relationship == "environment.default":
+            from backend.execution_config import linked_environment
+            if source.equipment:
+                raise GraphValidationError("Private Agent equipment cannot become shared Sandbox defaults")
+            if linked_environment(self, target.id) is not None:
+                raise GraphValidationError("Disconnect the current default profile first")
         mounted = False
         if self._is_mount(source.type, target.type, request.relationship):
             mounted = await self._attach_mount_values(
@@ -2229,6 +2242,10 @@ class ApplicationServices:
         direction = request.direction or old.direction
         self.world._assert_valid_relationship(source.type, target.type, relationship)
         self.world._assert_valid_direction(source.type, target.type, relationship, direction)
+        if relationship == "environment.default" and old.relationship != relationship:
+            from backend.execution_config import linked_environment
+            if source.equipment or linked_environment(self, target.id) is not None:
+                raise GraphValidationError("Only one non-private default profile is allowed")
         if self._is_mount(source.type, target.type, relationship):
             await self._attach_mount_values(old.source, old.target, relationship)
         try:
@@ -2761,6 +2778,7 @@ class ApplicationServices:
         timeout_seconds: float | None = None,
         agent_id: str | None = None,
         _skill_request: RunSkillScript | None = None,
+        _keep_on_disconnect: bool = False,
         environment_id: str | None = None,
         target_id: str | None = None,
     ) -> CommandResult:
@@ -2774,6 +2792,8 @@ class ApplicationServices:
             backend = self._require_sandbox_backend()
             if (argv is None) == (command is None):
                 raise SandboxValidationError("provide exactly one of command or argv")
+            from backend.sandbox.commands import require_noninteractive
+            require_noninteractive(argv if _skill_request is None else None, command)
             if command is not None:
                 info = await backend.get(sandbox_id)
                 if not info.shell:
@@ -2784,9 +2804,13 @@ class ApplicationServices:
 
             async def execute_and_refresh() -> CommandResult:
                 secret_token = None
+                receipt = None
                 try:
                     execution_argv = argv
                     options = {}
+                    if getattr(backend, "supports_execution_policy", False):
+                        config = self.world.get_card(sandbox_id).config
+                        options["execution_policy"] = {key: config[key] for key in ("network_enabled", "memory_bytes", "active_process_limit", "command_timeout") if key in config}
                     # Re-check after scheduling, immediately before dispatch.
                     async with self._node_mutation():
                         if agent_id is not None:
@@ -2797,23 +2821,36 @@ class ApplicationServices:
                                 values["skill_id"] = _skill_request.skill_id
                                 kind = "sandbox.run_skill_script"
                             authorize_invocation(self, agent_id, f"{kind}:{sandbox_id}", values)
-                        elif environment_id is not None or target_id is not None:
-                            raise ResourceValidationError("Configuration selection requires an authorized Agent")
+
                         if _skill_request is not None:
                             from backend.skill_runtime import resolve_skill_mount
                             if agent_id is None:
                                 raise ResourceValidationError("Skill execution requires an Agent")
                             execution_argv, mount = resolve_skill_mount(self, agent_id, sandbox_id, _skill_request)
                             options["runtime_mount"] = mount
-                        if environment_id is not None or target_id is not None:
+                        from backend.execution_config import resolve_sandbox_configuration
+                        from backend.execution_config import effective_variables
+                        _, pending_variables = effective_variables(self, sandbox_id, environment_id)
+                        if (pending_variables or target_id or environment_id) and not backend.supports_invocation_environment:
+                            raise SandboxValidationError("This Sandbox backend does not support invocation configuration")
+                        injected, secrets = resolve_sandbox_configuration(self, sandbox_id, environment_id, target_id)
+                        if injected:
                             if not backend.supports_invocation_environment:
                                 raise SandboxValidationError("This Sandbox backend does not support invocation configuration")
-                            from backend.execution_config import resolve_execution_configuration
-                            injected, secrets = resolve_execution_configuration(self, environment_id, target_id)
                             options["invocation_env"] = injected
                             secret_token = self._execution_secrets.set(secrets)
+                        current = self._sandbox_commands.get(sandbox_id)
+                        if current:
+                            raise SandboxStateError(f"Sandbox busy: {current['caller']} owns command {current['id']}")
+                        from backend.sandbox.history import save
+                        from backend.security.redaction import redact
+                        receipt = {"id": uuid4().hex, "caller": agent_id or "user", "state": "running",
+                            "started_at": datetime.now(UTC).isoformat(), "argv": redact(list(execution_argv), secrets),
+                            "skill_id": _skill_request.skill_id if _skill_request else None}
+                        self._sandbox_commands[sandbox_id] = receipt
+                        save(self, sandbox_id, receipt)
                     result = await backend.execute(
-                        sandbox_id, execution_argv, timeout_seconds=timeout_seconds, **options
+                        sandbox_id, execution_argv, timeout_seconds=timeout_seconds or self.world.get_card(sandbox_id).config.get("command_timeout", 60), **options
                     )
                     if self._execution_secrets.get():
                         from backend.security.redaction import redact
@@ -2823,8 +2860,14 @@ class ApplicationServices:
                         for event_type, output in ((SandboxEventType.STDOUT, result.stdout), (SandboxEventType.STDERR, result.stderr)):
                             if output:
                                 await self._emit_sandbox_event(SandboxEvent(sandbox_id, event_type, {"text": output}))
+                    receipt.update(state="cancelled" if result.cancelled else "timed_out" if result.timed_out else "finished",
+                        stdout=result.stdout[-65536:], stderr=result.stderr[-65536:], exit_code=result.exit_code,
+                        duration_seconds=result.duration_seconds)
                     return result
                 except Exception as error:
+                    if receipt is not None:
+                        from backend.security.redaction import redact
+                        receipt.update(state="error", error=redact(str(error), self._execution_secrets.get())[:4096])
                     if self._execution_secrets.get():
                         from backend.errors import DomainError
                         from backend.security.redaction import redact
@@ -2832,19 +2875,28 @@ class ApplicationServices:
                         raise error_type(redact(str(error), self._execution_secrets.get())) from None
                     raise
                 finally:
-                    if secret_token is not None:
-                        self._execution_secrets.reset(secret_token)
-                    command_finished.set()
-                    await self._refresh_sandbox_write_mounts(
-                        sandbox_id, agent_id=agent_id
-                    )
+                    try:
+                        if receipt is not None:
+                            from backend.sandbox.history import save
+                            if receipt["state"] == "running":
+                                receipt.update(state="interrupted", error="Command interrupted")
+                            save(self, sandbox_id, receipt)
+                    finally:
+                        if receipt is not None:
+                            self._sandbox_commands.pop(sandbox_id, None)
+                        if secret_token is not None:
+                            self._execution_secrets.reset(secret_token)
+                        command_finished.set()
+                        await self._refresh_sandbox_write_mounts(
+                            sandbox_id, agent_id=agent_id
+                        )
 
             execution_task = asyncio.create_task(execute_and_refresh())
             try:
                 return await asyncio.shield(execution_task)
             except asyncio.CancelledError:
                 async def stop_and_finish() -> None:
-                    if not command_finished.is_set():
+                    if not command_finished.is_set() and not _keep_on_disconnect:
                         try:
                             await backend.terminate(sandbox_id)
                         except BaseException as error:
@@ -3377,8 +3429,10 @@ def create_services(
         StateMutationKind.DELETED: EventType.STATE_DELETED,
     }
 
+    services = None
+
     def publish_state_mutation(mutation: StateMutation) -> None:
-        events.publish_event_nowait(RuntimeEvent(
+        event = RuntimeEvent(
             type=state_event_types[mutation.kind],
             node_id=(
                 mutation.scope.owner_id
@@ -3396,7 +3450,15 @@ def create_services(
                 **({"actor_id": mutation.actor_id} if mutation.actor_id else {}),
                 **({"run_id": mutation.run_id} if mutation.run_id else {}),
             },
-        ))
+        )
+        transaction = services._sandbox_event_transaction.get() if services else None
+        if transaction is not None:
+            if transaction.state in {"open", "committing"}:
+                transaction.state_events.append(event)
+                return
+            if transaction.state == "discarded":
+                return
+        events.publish_event_nowait(event)
 
     state = StateStore(database, plugin_registry, event_sink=publish_state_mutation)
     state.ensure_scope("world", "default", schema_id="core.world")

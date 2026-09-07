@@ -16,6 +16,8 @@ export function NodePreview({ card }: { card: WorldCard }) {
 }
 
 function DefaultNodePreview({ card }: { card: WorldCard }) {
+  const sandbox = useWorldStore(s => s.sandboxInfo[card.id]);
+  const sandboxError = useWorldStore(s => s.sandboxErrors[card.id]);
   const edges = useWorldStore((state) => state.edges);
   const catalog = useWorldStore((state) => state.catalog);
   const connectionCount = useMemo(
@@ -85,7 +87,8 @@ function DefaultNodePreview({ card }: { card: WorldCard }) {
 
   if (card.type === "sandbox") return (
     <div className="node-preview-summary">
-      <p>{card.config.workspace_path || "Managed workspace"}</p>
+      <p>{String(sandbox?.runtime_id ?? card.config.runtime ?? "auto")} · {(sandbox?.network_enabled ?? card.config.network_enabled) ? "Network enabled" : "Network disabled"}</p>
+      <p>{String(sandboxError || sandbox?.unavailable_reason || card.config.active_command || card.config.last_error || "Idle")}</p>
       <div className="node-preview-metadata">
         <span><Workflow size={12} /> {connectionCount} connections</span>
         <span><ShieldCheck size={12} /> {card.config.workspace_access === "read_only" ? "Read only" : "Read & write"} · {card.status}</span>

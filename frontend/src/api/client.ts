@@ -650,6 +650,19 @@ export const worldApi = {
     return request<SandboxRuntimeCatalog>(`/sandbox/runtimes${refresh ? "?refresh=true" : ""}`);
   },
 
+  sandboxWorkspace<T = Record<string, unknown>>(nodeId: string, action: string, body?: unknown): Promise<T> {
+    return request<T>(`/sandboxes/${encodeURIComponent(nodeId)}/${action}`, body === undefined ? undefined : { method: "POST", body: JSON.stringify(body) });
+  },
+
+  async downloadSandboxFile(nodeId: string, root: string, path: string): Promise<Blob> {
+    const response = await fetch(`${API_BASE}/sandboxes/${encodeURIComponent(nodeId)}/files?${new URLSearchParams({ operation: "download", root, path })}`);
+    if (!response.ok || response.headers.get("content-type")?.includes("application/json")) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.state === "oversized" ? "Download exceeds the 16 MiB limit." : error.message ?? error.error?.message ?? "File is missing or access was denied.");
+    }
+    return response.blob();
+  },
+
   getSandbox(nodeId: string): Promise<SandboxInfo> {
     return request<SandboxInfo>(`/sandboxes/${encodeURIComponent(nodeId)}`);
   },

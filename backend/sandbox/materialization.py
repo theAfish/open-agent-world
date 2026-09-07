@@ -165,3 +165,15 @@ def cleanup_materializations(runtime_root: Path) -> None:
     area = runtime_root / ".oaw"
     if runtime_tree(area):
         shutil.rmtree(area)
+
+
+def bundle_status(runtime_root: Path, bundle: RuntimeBundle) -> dict:
+    target = runtime_root / ".oaw"
+    # Never grant ACLs or materialize files merely because a window inspected it.
+    runtime_tree(target)
+    target = target.joinpath(*bundle.key.split("/"))
+    directories = set(bundle.directories)
+    for path in [*(p for p, _ in bundle.files), *directories]:
+        parts = path.split("/")
+        directories.update("/".join(parts[:i]) for i in range(1, len(parts)))
+    return {"cached": target.exists(), "current": _matches_bundle(target, dict(bundle.files), directories)}

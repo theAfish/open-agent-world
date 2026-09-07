@@ -26,6 +26,7 @@ class _Binding:
     workspace_path: str | None = None
     workspace_access: ResourceAccess = ResourceAccess.READ_WRITE
     provisioned: bool = False
+    policy: dict = field(default_factory=dict)
     attachments: dict[str, ResourceAttachment] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -51,7 +52,7 @@ class SandboxManager(SandboxBackend):
         path.parent.mkdir(parents=True, exist_ok=True)
         data = {"version": 1, "runtime": binding.runtime, "resolved_runtime": binding.resolved_runtime,
                 "workspace_path": binding.workspace_path, "workspace_access": binding.workspace_access.value,
-                "provisioned": binding.provisioned}
+                "provisioned": binding.provisioned, "policy": binding.policy}
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         temporary.replace(path)
@@ -116,7 +117,12 @@ class SandboxManager(SandboxBackend):
         binding = self._binding(sandbox_id)
         runtime = str(config.get("runtime", "auto"))
         access = ResourceAccess(config.get("workspace_access", "read_write"))
-        unchanged = (binding.runtime, binding.workspace_path, binding.workspace_access) == (runtime, config.get("workspace_path"), access)
+        policy = {key: config[key] for key in ("network_enabled", "memory_bytes", "active_process_limit", "command_timeout") if key in config}
+        selected = await self.registry.select(binding.resolved_runtime or (self.preferred if runtime == "auto" else runtime))
+        if policy.get("network_enabled") and "enabled" not in selected.supported_network_modes:
+            raise SandboxValidationError(selected.network_reason)
+        policy_changed = policy != binding.policy
+        unchanged = not policy_changed and (binding.runtime, binding.workspace_path, binding.workspace_access) == (runtime, config.get("workspace_path"), access)
         if unchanged and not binding.provisioned:
             return
         async with binding.lock:
@@ -125,6 +131,7 @@ class SandboxManager(SandboxBackend):
             # resolved_runtime remains unchanged, so this never selects a new host.
             if binding.provisioned and runtime != binding.runtime and runtime != "auto":
                 raise SandboxStateError("Runtime is fixed after first start. Create a new Sandbox to use another runtime.")
+            old_policy = binding.policy
             old = (binding.runtime, binding.workspace_path, binding.workspace_access)
             backend: SandboxBackend | None = None
             if binding.provisioned:
@@ -138,10 +145,12 @@ class SandboxManager(SandboxBackend):
             workspace = await asyncio.to_thread(self.validate_workspace, config.get("workspace_path"))
             if backend is not None:
                 await backend.configure(sandbox_id, workspace_path=workspace, workspace_access=access)
+            binding.policy = policy
             binding.runtime, binding.workspace_path, binding.workspace_access = runtime, workspace, access
             try:
                 self._write(binding)
             except BaseException:
+                binding.policy = old_policy
                 binding.runtime, binding.workspace_path, binding.workspace_access = old
                 if backend is not None:
                     await backend.configure(sandbox_id, workspace_path=old[1], workspace_access=old[2])
@@ -149,7 +158,7 @@ class SandboxManager(SandboxBackend):
 
     async def configure(self, sandbox_id: str, *, workspace_path: str | None, workspace_access: ResourceAccess) -> SandboxInfo:
         binding = self._binding(sandbox_id)
-        await self.configure_options(sandbox_id, {"runtime": binding.runtime, "workspace_path": workspace_path, "workspace_access": workspace_access})
+        await self.configure_options(sandbox_id, {**binding.policy, "runtime": binding.runtime, "workspace_path": workspace_path, "workspace_access": workspace_access})
         return await self.get(sandbox_id)
 
     async def get(self, sandbox_id: str) -> SandboxInfo:
@@ -160,7 +169,7 @@ class SandboxManager(SandboxBackend):
                 # A failed fresh probe does not prove an existing command has
                 # stopped. Preserve the concrete backend's actual state.
                 info = await self._backend(runtime.id).get(sandbox_id)
-                return replace(info, runtime_id=runtime.id, runtime_locked=True,
+                return replace(info, **self._policy_info(binding, runtime), runtime_id=runtime.id, runtime_locked=True,
                                available=runtime.available, unavailable_reason=runtime.reason)
             except (SandboxError, OSError) as exc:
                 runtime = replace(runtime, available=False, reason=str(exc))
@@ -171,6 +180,7 @@ class SandboxManager(SandboxBackend):
             runtime_id=runtime.id, platform=runtime.platform, shell=runtime.shell,
             workspace_path=binding.workspace_path, workspace_access=binding.workspace_access,
             available=runtime.available, unavailable_reason=runtime.reason, runtime_locked=binding.provisioned,
+            **self._policy_info(binding, runtime),
         )
 
     async def start(self, sandbox_id: str) -> SandboxInfo:
@@ -203,7 +213,13 @@ class SandboxManager(SandboxBackend):
                 await backend.attach_resource(sandbox_id, attachment.resource_id, attachment.source,
                                               attachment.relative_path, attachment.access)
             info = await backend.start(sandbox_id)
-            return replace(info, runtime_id=runtime.id, runtime_locked=True)
+            return replace(info, **self._policy_info(binding, runtime), runtime_id=runtime.id, runtime_locked=True)
+
+    @staticmethod
+    def _policy_info(binding, runtime):
+        return {"network_enabled": binding.policy.get("network_enabled", False),
+            "supported_network_modes": runtime.supported_network_modes,
+            "network_reason": runtime.network_reason}
 
     async def execute(self, sandbox_id: str, argv: Sequence[str], *, timeout_seconds: float | None = None,
                       env: Mapping[str, str] | None = None,
@@ -214,12 +230,42 @@ class SandboxManager(SandboxBackend):
             raise SandboxStateError("Start the Sandbox before executing commands")
         options = {"runtime_mount": runtime_mount} if runtime_mount is not None else {}
         backend = self._backend(binding.resolved_runtime or "")
+        if binding.policy and backend.supports_execution_policy:
+            options["execution_policy"] = dict(binding.policy)
+        elif any(binding.policy.get(k, v) != v for k, v in {"network_enabled": False, "memory_bytes": 536870912, "active_process_limit": 16, "command_timeout": 60}.items()):
+            raise SandboxValidationError("This runtime does not support configurable execution policy")
         if invocation_env is not None:
             if not backend.supports_invocation_environment:
                 raise SandboxValidationError("This Sandbox runtime does not support invocation configuration")
             options["invocation_env"] = invocation_env
         return await backend.execute(
             sandbox_id, argv, timeout_seconds=timeout_seconds, env=env, **options)
+
+    async def bundle_status(self, sandbox_id, bundle):
+        binding = self._binding(sandbox_id)
+        if not binding.provisioned:
+            return {"cached": False, "current": False}
+        return await self._backend(binding.resolved_runtime or "").bundle_status(sandbox_id, bundle)
+
+    async def reset_cache(self, sandbox_id):
+        binding = self._binding(sandbox_id)
+        if binding.provisioned:
+            await self._backend(binding.resolved_runtime or "").reset_cache(sandbox_id)
+
+    async def cancel(self, sandbox_id):
+        binding = self._binding(sandbox_id)
+        if binding.provisioned:
+            await self._backend(binding.resolved_runtime or "").cancel(sandbox_id)
+
+    async def file_operation(self, sandbox_id, operation, **options):
+        binding = self._binding(sandbox_id)
+        if not binding.provisioned:
+            if binding.workspace_path:
+                from .files import file_operation, run_file_operation
+                return await run_file_operation(file_operation, Path(binding.workspace_path), binding.workspace_access,
+                    tuple(binding.attachments.values()), operation, **options)
+            raise SandboxStateError("Start once to prepare the managed workspace")
+        return await self._backend(binding.resolved_runtime or "").file_operation(sandbox_id, operation, **options)
 
     async def terminate(self, sandbox_id: str) -> None:
         binding = self._binding(sandbox_id)

@@ -102,6 +102,19 @@ class SandboxConfig(BaseModel):
     runtime: str = Field(default="auto", min_length=1, max_length=200)
     workspace_path: str | None = Field(default=None, max_length=4096)
     workspace_access: Literal["read_only", "read_write"] = "read_write"
+    network_enabled: bool = False
+    memory_bytes: int = Field(default=512 * 1024 * 1024, ge=16 * 1024 * 1024, le=8 * 1024 * 1024 * 1024)
+    active_process_limit: int = Field(default=16, ge=1, le=256)
+    command_timeout: float = Field(default=60, gt=0, le=600)
+    presets: dict[str, str] = Field(default_factory=dict, max_length=30)
+
+    @field_validator("presets")
+    @classmethod
+    def validate_presets(cls, value):
+        if any(not k.strip() or len(k) > 80 or not v.strip() or len(v) > 32768 or "\0" in v for k, v in value.items()):
+            raise ValueError("Presets require names up to 80 characters and commands up to 32 KiB")
+        return value
+
 
     @field_validator("runtime", "workspace_path")
     @classmethod

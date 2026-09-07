@@ -258,7 +258,7 @@ class SandboxNodeBehavior(NodeLifecycleHandler):
         updated: Card, request: CardPatch,
     ) -> NodeLifecycleTransaction:
         del request
-        keys = ("runtime", "workspace_path", "workspace_access")
+        keys = ("runtime", "workspace_path", "workspace_access", "network_enabled", "memory_bytes", "active_process_limit", "command_timeout")
         if all(current.config.get(key) == updated.config.get(key) for key in keys):
             return NodeLifecycleTransaction()
         configured = False
@@ -678,6 +678,10 @@ async def _view_image(
     return context.view_image(capability.agent_id, capability.target_id)
 
 
+async def _copy_skill_resource(context, capability, arguments):
+    return await context.copy_skill_resource(capability.agent_id, capability.target_id, arguments)
+
+
 async def _run_skill_script(context, capability, arguments):
     return await context.run_skill_script(capability.agent_id, capability.target_id, arguments)
 
@@ -714,7 +718,8 @@ async def _execute_sandbox(
 
 
 def _register_builtin(registry: PluginRegistration) -> None:
-    from backend.execution_config import register_execution_configuration, EXECUTION_SELECTORS
+    from backend.execution_config import register_execution_configuration, EXECUTION_SELECTORS, EnvironmentProfile
+    from backend.plugins.documents import NodeDocumentDefinition
     register_execution_configuration(registry)
     for operation in ("read", "patch"):
         registry.register_capability(CapabilityDefinition(
@@ -929,6 +934,8 @@ def _register_builtin(registry: PluginRegistration) -> None:
         default_name="New Sandbox", default_size=(340, 220), default_status="stopped",
         statuses=frozenset({"stopped", "ready", "running", "error"}),
         config_model=SandboxConfig, traits=frozenset({"core.sandbox"}),
+        document=NodeDocumentDefinition(model=EnvironmentProfile),
+        surfaces={"preview": True, "inspector": True, "workspace": True},
         lifecycle=SandboxNodeBehavior(),
         templateable=True, template_status="stopped",
         template_handler=SandboxNodeTemplateHandler(),
@@ -974,12 +981,16 @@ def _register_builtin(registry: PluginRegistration) -> None:
         templateable=True,
         capabilities=(CapabilityGrantDefinition(kind='image.view'),),
     ))
+    registry.register_capability(CapabilityDefinition(kind="sandbox.copy_skill_resource", tool_name="copy_skill_resource",
+        description="Explicitly copy an authorized Skill resource to the writable workspace. Existing files require overwrite=true.",
+        target_parameter="sandbox", selectors=(SKILL_SELECTOR,), target_capabilities=frozenset({"sandbox.execute"}),
+        input_schema={"type": "object", "properties": {"source": {"type": "string"}, "destination": {"type": "string"}, "overwrite": {"type": "boolean", "default": False}}, "required": ["source", "destination"], "additionalProperties": False}), _copy_skill_resource)
     registry.register_relationship(RelationshipDefinition(
         id="execute", label="Execute", short_label="execute",
         description="The agent can run commands in this isolated workplace.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.sandbox"}),
         templateable=True,
-        capabilities=(CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect')),
+        capabilities=(CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="mount_read_only", label="Mount read-only", short_label="read-only",

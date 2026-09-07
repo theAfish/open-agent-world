@@ -76,6 +76,7 @@ class WindowsSandboxBackend(SandboxBackend):
     """
 
     supports_invocation_environment = True
+    supports_execution_policy = True
 
     def __init__(
         self,
@@ -218,11 +219,18 @@ class WindowsSandboxBackend(SandboxBackend):
         env: Any = None,
         invocation_env: Mapping[str, str] | None = None,
         runtime_mount: RuntimeMount | None = None,
+        execution_policy: Mapping[str, Any] | None = None,
     ) -> CommandResult:
         record = await self._record(sandbox_id)
+        policy = execution_policy or {}
+        if policy.get("network_enabled"):
+            raise SandboxValidationError("Windows runtime supports disabled networking only")
+        limits = SandboxLimits(memory_bytes=policy.get("memory_bytes", self._limits.memory_bytes),
+            active_process_limit=policy.get("active_process_limit", self._limits.active_process_limit),
+            default_timeout_seconds=policy.get("command_timeout", self._limits.default_timeout_seconds))
         command = self._validate_argv(argv)
         timeout = (
-            self._limits.default_timeout_seconds
+            limits.default_timeout_seconds
             if timeout_seconds is None
             else float(timeout_seconds)
         )
@@ -300,7 +308,7 @@ class WindowsSandboxBackend(SandboxBackend):
                 command,
                 cwd=record.workspace,
                 environment=environment,
-                limits=self._limits,
+                limits=limits,
                 timeout_seconds=timeout,
                 cancel_event=record.cancel_event,
                 on_stdout=lambda text: emit_stream(SandboxEventType.STDOUT, text),
@@ -354,7 +362,7 @@ class WindowsSandboxBackend(SandboxBackend):
             stderr=native_result.stderr,
             duration_seconds=native_result.duration_seconds,
             timed_out=native_result.timed_out,
-            cancelled=native_result.cancelled,
+            cancelled=native_result.cancelled or bool(record.cancel_event and record.cancel_event.is_set()),
         )
         async with record.lock:
             record.state = (
@@ -379,6 +387,30 @@ class WindowsSandboxBackend(SandboxBackend):
         )
         await self._emit_state(record)
         return result
+
+    async def bundle_status(self, sandbox_id, bundle):
+        from .materialization import bundle_status
+        record = await self._record(sandbox_id)
+        async with record.lock:
+            return await asyncio.to_thread(bundle_status, record.root, bundle)
+
+    async def reset_cache(self, sandbox_id):
+        record = await self._record(sandbox_id)
+        async with record.lock:
+            if record.state != SandboxState.STOPPED:
+                raise SandboxStateError("Stop the Sandbox before clearing its runtime cache")
+            cleanup_materializations(record.root)
+
+    async def cancel(self, sandbox_id):
+        record = await self._record(sandbox_id)
+        async with record.lock:
+            if record.cancel_event is not None:
+                record.cancel_event.set()
+            with record.thread_lock:
+                job = record.active_job
+        if job is not None:
+            await asyncio.to_thread(self._native.terminate_job, job)
+        await record.command_done.wait()
 
     async def terminate(self, sandbox_id: str) -> None:
         record = await self._record(sandbox_id)
@@ -607,6 +639,14 @@ class WindowsSandboxBackend(SandboxBackend):
         self._native.delete_appcontainer(record.identity)
         self._assert_within(record.root, self._sandboxes_root)
         shutil.rmtree(record.root)
+
+    async def file_operation(self, sandbox_id, operation, **options):
+        from .files import file_operation, run_file_operation
+        record = await self._record(sandbox_id)
+        async with record.lock:
+            return await run_file_operation(file_operation, record.workspace, record.workspace_access,
+                tuple(record.attachments.values()), operation,
+                runtime_pinned_root=record.workspace if record.workspace_handle is not None else None, **options)
 
     async def get(self, sandbox_id: str) -> SandboxInfo:
         return self._info(await self._record(sandbox_id))

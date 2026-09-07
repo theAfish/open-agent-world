@@ -15,7 +15,7 @@ export const NODE_SURFACE_SUPPORT: Record<CardType, NodeSurfaceSupport> = {
   conversation: { preview: true, inspector: true, workspace: true },
   text: { preview: true, inspector: true, workspace: false },
   image: { preview: true, inspector: true, workspace: false },
-  sandbox: { preview: true, inspector: true, workspace: false },
+  sandbox: { preview: true, inspector: true, workspace: true },
 };
 
 const GENERIC_SURFACE_SUPPORT: NodeSurfaceSupport = {

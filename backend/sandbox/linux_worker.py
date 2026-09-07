@@ -63,7 +63,7 @@ async def handle(request: dict[str, Any], *, stdin_pending: bool = False) -> Any
         await backend.start(sandbox_id)
         execution = asyncio.create_task(backend.execute(sandbox_id, request["argv"],
             timeout_seconds=request.get("timeout_seconds"), env=request.get("env"),
-            invocation_env=request.get("invocation_env"),
+            invocation_env=request.get("invocation_env"), execution_policy=request.get("execution_policy"),
             runtime_mount=RuntimeMount.from_wire(request["runtime_mount"]) if request.get("runtime_mount") is not None else None,
             _unit_name=request["unit"]))
         disconnected = asyncio.Event()
@@ -84,7 +84,7 @@ async def handle(request: dict[str, Any], *, stdin_pending: bool = False) -> Any
 
         async def cancel_on_disconnect() -> None:
             await disconnected.wait()
-            await backend.terminate(sandbox_id)
+            await backend.cancel(sandbox_id)
 
         # execute was scheduled first and establishes its running record before
         # this task can observe a disconnect, including a pre-spawn disconnect.
@@ -105,6 +105,13 @@ async def handle(request: dict[str, Any], *, stdin_pending: bool = False) -> Any
         return await backend.detach_resource(sandbox_id, request["resource_id"])
     if operation == "destroy":
         return await backend.destroy(sandbox_id)
+    if operation == "bundle_status":
+        from .materialization import RuntimeBundle
+        return await backend.bundle_status(sandbox_id, RuntimeBundle.from_wire(request["bundle"]))
+    if operation == "reset_cache":
+        return await backend.reset_cache(sandbox_id)
+    if operation == "files":
+        return await backend.file_operation(sandbox_id, request["file_operation"], **request.get("options", {}))
     if operation == "get":
         return await backend.get(sandbox_id)
     raise SandboxValidationError("unknown WSL sandbox operation")

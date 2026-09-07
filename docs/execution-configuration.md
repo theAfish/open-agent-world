@@ -3,7 +3,7 @@
 Environment Profiles and Compute Targets are ordinary registered nodes with
 editable, revisioned node documents. Connect them to an Agent, or equip them
 using the existing equipment controls. Access grants permission to select a
-resource; it never injects configuration into the Agent or subsequent commands.
+resource for explicit invocation; this Agent connection never injects configuration automatically. A separate `environment.default` connection from a Profile to a Sandbox establishes its live shared default, as described in [Sandbox configuration](sandbox-workspace.md).
 
 An Environment Profile (`environment`) contains a `variables` object. Each value
 is either an ordinary string or an object containing only `secret_ref`:
@@ -40,9 +40,8 @@ operation. Keep authentication in an Environment Profile.
 `execute_command(sandbox, argv, environment?, target?)` and
 `run_skill_script(sandbox, skill, script, argv?, interpreter?, environment?, target?)`
 retain one operation each. Arguments accept current aliases, unambiguous exact
-names, or node IDs. Omit optional selectors to preserve existing behavior. Null,
-arrays, ambiguous names and unauthorized selections fail; no profile merging or
-implicit defaults occur. Agents without either configuration grant retain their
+names, or node IDs. Omit optional selectors to use the Sandbox's linked default and local overrides. Null,
+arrays, ambiguous names and unauthorized selections fail. An explicit invocation profile replaces the linked layer; local overrides still apply. Arbitrary multi-profile inheritance is unsupported. Agents without either configuration grant retain their
 otherwise authorized execution tools.
 
 `CapabilitySelector.required=False` is the generic optional-resource contract.

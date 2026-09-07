@@ -29,6 +29,7 @@ class SandboxBackend(ABC):
     """
 
     supports_invocation_environment: bool = False
+    supports_execution_policy: bool = False
 
     @abstractmethod
     async def create(self, sandbox_id: str) -> SandboxInfo:
@@ -48,6 +49,7 @@ class SandboxBackend(ABC):
         env: Mapping[str, str] | None = None,
         invocation_env: Mapping[str, str] | None = None,
         runtime_mount: RuntimeMount | None = None,
+        execution_policy: Mapping[str, object] | None = None,
     ) -> CommandResult:
         """Run argv with an optional command-scoped, read-only runtime bundle.
 
@@ -57,6 +59,9 @@ class SandboxBackend(ABC):
         the reserved target JSON carrier. Validate it with the shared policy and
         apply it only to the isolated command, never to host helpers. Unsupported
         configuration must raise SandboxValidationError, never be ignored.
+        execution_policy is host-owned configuration captured at admission;
+        backends advertise support before it is passed. It is never an Agent
+        tool parameter and never changes process-global defaults.
         """
 
     @abstractmethod
@@ -94,6 +99,18 @@ class SandboxBackend(ABC):
         if workspace_path is not None or workspace_access != ResourceAccess.READ_WRITE:
             raise SandboxValidationError("this runtime does not support workspace configuration")
         return await self.get(sandbox_id)
+
+    async def bundle_status(self, sandbox_id, bundle):
+        return {"cached": False, "current": False}
+
+    async def reset_cache(self, sandbox_id):
+        raise SandboxValidationError("This runtime does not support cache reset")
+
+    async def cancel(self, sandbox_id):
+        raise SandboxValidationError("This runtime cannot cancel without stopping")
+
+    async def file_operation(self, sandbox_id, operation, **options):
+        raise SandboxValidationError("This runtime does not support scoped file operations")
 
     async def events(self, sandbox_id: str) -> AsyncIterator[SandboxEvent]:
         """Optional pull-style event stream.

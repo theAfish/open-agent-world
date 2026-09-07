@@ -53,7 +53,7 @@ sys.modules['oaw_sandbox.linux_worker'].main(payload['request'],stdin_pending=bo
 # source change the next unrestricted transport helper.
 _WORKER_MODULES = tuple(
     (name, (Path(__file__).parent / f"{name}.py").read_text(encoding="utf-8"))
-    for name in ("models", "materialization", "base", "environment", "linux", "linux_worker")
+    for name in ("models", "materialization", "base", "environment", "files", "linux", "linux_worker")
 )
 
 
@@ -91,11 +91,13 @@ class _Active:
     unit: str
     process: asyncio.subprocess.Process | None = None
     cancelled: bool = False
+    stop_requested: bool = False
     done: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 class WslSandboxBackend(SandboxBackend):
     supports_invocation_environment = True
+    supports_execution_policy = True
 
     def __init__(self, managed_root: Path, *, distribution: str,
         runtime_id: str | None = None, limits: SandboxLimits = SandboxLimits(),
@@ -235,6 +237,7 @@ class WslSandboxBackend(SandboxBackend):
                 ResourceAttachment(item["sandbox_id"], item["resource_id"], Path(item["source"]),
                     item["relative_path"], ResourceAccess(item["access"])) for item in raw["attachments"]),
             security_boundary=raw["security_boundary"], network_enabled=False,
+            supported_network_modes=tuple(raw.get("supported_network_modes", ("disabled",))), network_reason=raw.get("network_reason", ""),
             active_command=tuple(raw["active_command"]) if raw["active_command"] else None,
             runtime_id=self._runtime_id, platform="linux", shell=("/bin/sh", "-c"),
             workspace_path=path, workspace_access=ResourceAccess(raw["workspace_access"]),
@@ -261,6 +264,9 @@ class WslSandboxBackend(SandboxBackend):
                 workspace_path=workspace_path, workspace_access=ResourceAccess(workspace_access).value))
             return self._info(raw, workspace_path=workspace_path, preserve_workspace=False)
 
+    async def file_operation(self, sandbox_id, operation, **options):
+        return await self._request(self._payload("files", sandbox_id, file_operation=operation, options=options))
+
     async def start(self, sandbox_id: str) -> SandboxInfo:
         async with self._lock(sandbox_id):
             self._assert_idle(sandbox_id)
@@ -269,10 +275,16 @@ class WslSandboxBackend(SandboxBackend):
     async def execute(self, sandbox_id: str, argv: Sequence[str], *,
         timeout_seconds: float | None = None, env: Mapping[str, str] | None = None,
         invocation_env: Mapping[str, str] | None = None,
-        runtime_mount: RuntimeMount | None = None) -> CommandResult:
+        runtime_mount: RuntimeMount | None = None, execution_policy: Mapping[str, Any] | None = None) -> CommandResult:
+        policy = execution_policy or {}
+        if policy.get("network_enabled"):
+            raise SandboxSecurityError("Networking unavailable: isolated egress protecting host control services is not implemented")
+        limits = SandboxLimits(memory_bytes=policy.get("memory_bytes", self._limits.memory_bytes),
+            active_process_limit=policy.get("active_process_limit", self._limits.active_process_limit),
+            default_timeout_seconds=policy.get("command_timeout", self._limits.default_timeout_seconds))
         command = validate_argv(argv)
         minimal_linux_environment(env, invocation_env=invocation_env)
-        timeout = self._limits.default_timeout_seconds if timeout_seconds is None else float(timeout_seconds)
+        timeout = limits.default_timeout_seconds if timeout_seconds is None else float(timeout_seconds)
         if not math.isfinite(timeout) or timeout <= 0:
             raise SandboxValidationError("timeout_seconds must be finite and positive")
         async with self._lock(sandbox_id):
@@ -287,14 +299,14 @@ class WslSandboxBackend(SandboxBackend):
             raw = await self._request(self._payload("execute", sandbox_id, argv=list(command),
                 timeout_seconds=timeout, env=dict(env) if env is not None else None,
                 invocation_env=dict(invocation_env) if invocation_env is not None else None,
-                unit=active.unit, runtime_mount=runtime_mount.to_wire() if runtime_mount is not None else None),
+                unit=active.unit, execution_policy=policy, runtime_mount=runtime_mount.to_wire() if runtime_mount is not None else None),
                 timeout=timeout + 20, active=active)
             result = CommandResult(sandbox_id=raw["sandbox_id"], argv=tuple(raw["argv"]),
                 exit_code=raw["exit_code"], stdout=raw["stdout"], stderr=raw["stderr"],
                 duration_seconds=raw["duration_seconds"], timed_out=raw["timed_out"],
                 cancelled=raw["cancelled"] or active.cancelled)
             self._infos[sandbox_id] = replace(info,
-                state=SandboxState.STOPPED if result.cancelled else SandboxState.READY)
+                state=SandboxState.STOPPED if active.stop_requested else SandboxState.READY)
             return result
         except BaseException:
             self._infos[sandbox_id] = replace(info, state=SandboxState.ERROR)
@@ -303,10 +315,36 @@ class WslSandboxBackend(SandboxBackend):
             self._active.pop(sandbox_id, None)
             active.done.set()
 
+    async def bundle_status(self, sandbox_id, bundle):
+        return await self._request(self._payload("bundle_status", sandbox_id, bundle=bundle.to_wire()))
+
+    async def reset_cache(self, sandbox_id):
+        async with self._lock(sandbox_id):
+            self._assert_idle(sandbox_id)
+            info = await self.get(sandbox_id)
+            if info.state != SandboxState.STOPPED:
+                raise SandboxStateError("Stop before clearing runtime cache")
+            await self._request(self._payload("reset_cache", sandbox_id))
+
+    async def cancel(self, sandbox_id: str) -> None:
+        async with self._lock(sandbox_id):
+            active = self._active.get(sandbox_id)
+            if active is not None:
+                active.cancelled = True
+                if active.process is not None and active.process.stdin is not None:
+                    try:
+                        active.process.stdin.write(b'{"cancel":true}\n')
+                        await active.process.stdin.drain()
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+        if active is not None:
+            await active.done.wait()
+
     async def terminate(self, sandbox_id: str) -> None:
         async with self._lock(sandbox_id):
             active = self._active.get(sandbox_id)
             if active is not None:
+                active.stop_requested = True
                 active.cancelled = True
                 if active.process is not None and active.process.stdin is not None:
                     try:

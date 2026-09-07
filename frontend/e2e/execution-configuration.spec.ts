@@ -12,9 +12,13 @@ test("edit execution cards and bind secrets outside portable documents", async (
     await page.goto("/");
     const environment = page.locator(`[data-card-id="${nodes[0]}"]`);
     await environment.locator(".card-kind-icon").click();
-    const editor = environment.getByLabel("Execution configuration JSON");
-    await expect(editor).toHaveValue(/variables/);
-    await editor.fill(JSON.stringify({ variables: { DEMO_REGION: "local-test", API_TOKEN: { secret_ref: "token" } } }, null, 2));
+    await environment.getByRole("button", { name: "Add variable", exact: true }).click();
+    await environment.getByLabel("Environment variable 1 name").fill("DEMO_REGION");
+    await environment.getByLabel("Environment variable 1 value").fill("local-test");
+    await environment.getByRole("button", { name: "Add variable", exact: true }).click();
+    await environment.getByLabel("Environment variable 2 name").fill("API_TOKEN");
+    await environment.getByLabel("Environment variable 2 type").selectOption("secret");
+    await environment.getByLabel("Environment variable 2 value").fill("token");
     await environment.getByRole("button", { name: "Save configuration", exact: true }).click();
     await expect(environment.getByText("token · Unbound", { exact: true })).toBeVisible();
     await environment.getByLabel("Secret for token").fill("e2e-private-credential");
@@ -26,25 +30,60 @@ test("edit execution cards and bind secrets outside portable documents", async (
     expect(JSON.stringify(document)).not.toContain("e2e-private-credential");
     expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain("e2e-private-credential");
     await page.screenshot({ path: testInfo.outputPath("environment-profile.png") });
-    await editor.fill('{"variables":{"LD_PRELOAD":"unsafe"}}');
+    await environment.getByLabel("Environment variable 1 name").fill("LD_PRELOAD");
     await environment.getByRole("button", { name: "Save configuration", exact: true }).click();
     await expect(environment.getByRole("alert")).toContainText("reserved");
     await environment.getByRole("button", { name: "Reload", exact: true }).click();
-    await expect(editor).toHaveValue(/DEMO_REGION/);
+    await expect(environment.locator('input[value="DEMO_REGION"]')).toBeVisible();
     await environment.getByRole("button", { name: "Unbind", exact: true }).click();
     await expect(environment.getByText("token · Unbound", { exact: true })).toBeVisible();
     await environment.getByRole("button", { name: "Close Local environment inspector", exact: true }).click();
     const target = page.locator(`[data-card-id="${nodes[1]}"]`);
     await target.locator(".card-kind-icon").click();
     const config = { name: "Local test", provider_id: "example", config: { lanes: ["a", "b"], count: 2 } };
-    await target.getByLabel("Execution configuration JSON").fill(JSON.stringify(config, null, 2));
+    await target.getByLabel("Import execution configuration JSON").setInputFiles({ name: "target.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(config)) });
+    await expect(target.getByLabel("Provider ID", { exact: true })).toHaveValue("example");
     await target.getByRole("button", { name: "Save configuration", exact: true }).click();
     await expect.poll(async () => (await (await request.get(`/api/nodes/${nodes[1]}/document`)).json()).value).toEqual(config);
     await page.screenshot({ path: testInfo.outputPath("compute-target.png") });
     await page.reload();
-    await target.locator(".card-kind-icon").click();
-    await expect(target.getByLabel("Execution configuration JSON")).toHaveValue(/"lanes"/);
+    await expect(target.getByLabel("Provider ID", { exact: true })).toHaveValue("example");
   } finally {
     for (const id of nodes) await request.delete(`/api/nodes/${id}`);
+  }
+});
+
+test("Sandbox local settings reuse the environment editor and a live default profile", async ({ page, request }) => {
+  const profile = await (await request.post("/api/nodes", { data: { type: "environment", name: "Shared defaults", position: { x: 200, y: 200 } } })).json();
+  const sandbox = await (await request.post("/api/nodes", { data: { type: "sandbox", name: "Configured lab", position: { x: 500, y: 300 } } })).json();
+  async function profileValue(variables: Record<string, string>) {
+    const doc = await (await request.get(`/api/nodes/${profile.id}/document`)).json();
+    expect((await request.post(`/api/nodes/${profile.id}/actions/replace`, { data: { arguments: { variables }, expected_revision: doc.revision } })).ok()).toBeTruthy();
+  }
+  try {
+    await profileValue({ REGION: "base", SHARED: "one" });
+    await page.goto("/");
+    const card = page.locator(`[data-card-id="${sandbox.id}"]`);
+    await card.locator(".card-kind-icon").click();
+    await card.getByText("Environment variables & linked profile", { exact: true }).click();
+    await card.getByLabel("Default Environment Profile").selectOption(profile.id);
+    await card.getByRole("button", { name: "Add variable", exact: true }).click();
+    await card.getByLabel("Environment variable 1 name").fill("REGION");
+    await card.getByLabel("Environment variable 1 value").fill("local");
+    await card.getByRole("button", { name: "Save environment", exact: true }).click();
+    const effective = () => request.get(`/api/sandboxes/${sandbox.id}/configuration`).then(r => r.json());
+    await expect.poll(async () => (await effective()).variables.find((v: { name: string }) => v.name === "REGION")?.value).toBe("local");
+    await profileValue({ REGION: "changed-base", SHARED: "updated" });
+    await expect(card.locator(".sandbox-variable").filter({ hasText: "SHARED" })).toContainText("updated");
+    await card.getByLabel("Default Environment Profile").selectOption("");
+    await expect.poll(async () => (await effective()).profile_id).toBeNull();
+    await expect.poll(async () => (await effective()).variables.length).toBe(1);
+    expect((await (await request.get(`/api/sandboxes/${sandbox.id}/history`)).json()).length).toBe(0);
+    await expect(card.getByLabel("Command", { exact: true })).toHaveCount(0);
+    const world = await (await request.get("/api/world")).json();
+    expect(world.nodes.filter((n: { type: string }) => n.type === "environment")).toHaveLength(1);
+  } finally {
+    await request.delete(`/api/nodes/${sandbox.id}`);
+    await request.delete(`/api/nodes/${profile.id}`);
   }
 });

@@ -21,6 +21,7 @@ frontend/playwright-report/
 data/
 logs/
 .outputs/
+.tmp/
 
 # Editors and OS files
 .idea/

@@ -139,9 +139,16 @@ class _CapabilityContext:
             agent_id=agent_id, _skill_request=request, environment_id=request.environment_id, target_id=request.target_id)
         return asdict(result)
 
+    async def copy_skill_resource(self, agent_id, sandbox_id, arguments):
+        from backend.sandbox_workspace import copy_skill
+        return await copy_skill(self.services, sandbox_id, agent_id=agent_id, **arguments)
+
     async def inspect_sandbox(self, agent_id: str, sandbox_id: str) -> dict[str, Any]:
         self.services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
         info = await self.services.get_sandbox(sandbox_id)
+        self.services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
+        from backend.execution_config import configuration_summary
+        current = self.services._sandbox_commands.get(sandbox_id)
         return {
             "sandbox_id": sandbox_id, "state": info.state.value,
             "runtime_id": info.runtime_id, "platform": info.platform,
@@ -150,6 +157,11 @@ class _CapabilityContext:
             "resources_path": str(info.resources_path) if info.resources_path else None,
             "available": info.available, "unavailable_reason": info.unavailable_reason,
             "network_enabled": info.network_enabled,
+            "supported_network_modes": list(info.supported_network_modes),
+            "network_reason": info.network_reason,
+            "configuration": configuration_summary(self.services, sandbox_id),
+            "current_caller": current["caller"] if current else None,
+            "console_mode": "non-interactive; each command starts in the configured workspace",
             "attachments": [
                 {"resource_id": item.resource_id,
                  "path": str(info.resources_path / item.relative_path.replace("\\", "/")) if info.resources_path else None,

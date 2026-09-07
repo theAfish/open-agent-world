@@ -81,7 +81,7 @@ try:
     try:
         # Denying socket/connect also closes the WSL Windows-interop socket
         # transport, including AF_UNIX sockets placed in a selected workspace.
-        for name in ('socket', 'socketcall', 'connect', 'mount', 'umount2', 'pivot_root',
+        for name in ('socket', 'connect', 'socketcall', 'mount', 'umount2', 'pivot_root',
                      'setns', 'unshare', 'ptrace', 'process_vm_readv',
                      'process_vm_writev', 'bpf', 'perf_event_open', 'keyctl',
                      'add_key', 'request_key', 'userfaultfd', 'io_uring_setup',
@@ -176,8 +176,10 @@ def new_unit_name() -> str:
 
 
 def service_command(
-    command: Sequence[str], unit: str, limits: SandboxLimits, timeout: float,
+    command: Sequence[str], unit: str, limits: SandboxLimits, timeout: float, *, network_enabled=False,
 ) -> list[str]:
+    if network_enabled:
+        raise SandboxSecurityError("Networking unavailable: isolated egress protecting host control services is not implemented")
     if not _SAFE_UNIT.fullmatch(unit):
         raise SandboxValidationError("invalid sandbox service identity")
     payload = base64.b64encode(json.dumps({
@@ -201,7 +203,7 @@ def bubblewrap_command(
     workspace: Path, access: ResourceAccess,
     attachments: Sequence[ResourceAttachment], argv: Sequence[str],
     environment: Mapping[str, str],
-    runtime_mount: tuple[Path, str] | None = None,
+    runtime_mount: tuple[Path, str] | None = None, *, network_enabled=False,
 ) -> list[str]:
     result = [
         "/usr/bin/bwrap", "--unshare-all", "--unshare-user",
@@ -209,6 +211,8 @@ def bubblewrap_command(
         "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/tmp/home",
         "--dir", "/etc", "--dir", "/usr",
     ]
+    if network_enabled:
+        raise SandboxSecurityError("Networking unavailable: isolated egress protecting host control services is not implemented")
     # Distribution-owned tool trees only. No /home, /root, /run, /mnt, complete
     # /etc, /usr/local, or host sockets. Libraries remain shared and read-only.
     for name in ("/usr/bin", "/usr/lib", "/usr/lib64", "/usr/share"):
@@ -258,6 +262,7 @@ class _Record:
     done: asyncio.Event = field(default_factory=asyncio.Event)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     deleted: bool = False
+    stop_requested: bool = False
 
     def __post_init__(self) -> None:
         self.done.set()
@@ -269,6 +274,7 @@ class _Record:
 
 class LinuxSandboxBackend(SandboxBackend):
     supports_invocation_environment = True
+    supports_execution_policy = True
 
     def __init__(
         self, managed_root: Path, *, limits: SandboxLimits = SandboxLimits(),
@@ -362,6 +368,7 @@ class LinuxSandboxBackend(SandboxBackend):
                 raise SandboxSecurityError("Linux sandbox execution requires Linux")
             await asyncio.to_thread(self._validate_record_paths, record)
             record.cancelled.clear()
+            record.stop_requested = False
             record.state = SandboxState.READY
             self._save(record)
         await self._emit_state(record)
@@ -373,10 +380,17 @@ class LinuxSandboxBackend(SandboxBackend):
         _unit_name: str | None = None,
         invocation_env: Mapping[str, str] | None = None,
         runtime_mount: RuntimeMount | None = None,
+        execution_policy: Mapping[str, Any] | None = None,
     ) -> CommandResult:
+        policy = execution_policy or {}
+        if policy.get("network_enabled"):
+            raise SandboxSecurityError("Networking unavailable: isolated egress protecting host control services is not implemented")
+        limits = SandboxLimits(memory_bytes=policy.get("memory_bytes", self._limits.memory_bytes),
+            active_process_limit=policy.get("active_process_limit", self._limits.active_process_limit),
+            default_timeout_seconds=policy.get("command_timeout", self._limits.default_timeout_seconds))
         command = validate_argv(argv)
         environment = minimal_linux_environment(env, invocation_env=invocation_env)
-        timeout = self._limits.default_timeout_seconds if timeout_seconds is None else float(timeout_seconds)
+        timeout = limits.default_timeout_seconds if timeout_seconds is None else float(timeout_seconds)
         if not math.isfinite(timeout) or timeout <= 0:
             raise SandboxValidationError("timeout_seconds must be finite and positive")
         record = await self._record(sandbox_id)
@@ -393,11 +407,12 @@ class LinuxSandboxBackend(SandboxBackend):
                 source = materialize_bundle(record.root, runtime_mount.bundle)
                 mount = (source, runtime_mount.bundle.key)
             isolated = bubblewrap_command(record.host_workspace, record.workspace_access,
-                tuple(record.attachments.values()), command, environment, mount)
-            invocation = service_command(isolated, unit, self._limits, timeout)
+                tuple(record.attachments.values()), command, environment, mount, network_enabled=bool(policy.get("network_enabled")))
+            invocation = service_command(isolated, unit, limits, timeout, network_enabled=bool(policy.get("network_enabled")))
             record.state = SandboxState.RUNNING
             record.active_command, record.unit = command, unit
             record.cancelled.clear()
+            record.stop_requested = False
             record.done.clear()
             try:
                 self._save(record)
@@ -497,7 +512,7 @@ class LinuxSandboxBackend(SandboxBackend):
             await asyncio.gather(*waiters, *streams, return_exceptions=True)
             async with record.lock:
                 record.state = (SandboxState.ERROR if failure is not None
-                    else SandboxState.STOPPED if record.cancelled.is_set() else SandboxState.READY)
+                    else SandboxState.STOPPED if record.stop_requested else SandboxState.READY)
                 record.active_command = None
                 if cleanup_confirmed:
                     record.unit = None
@@ -533,9 +548,30 @@ class LinuxSandboxBackend(SandboxBackend):
         if process.returncode and b"not loaded" not in stderr and b"not found" not in stderr:
             raise SandboxSecurityError("Cannot stop sandbox cgroup: " + stderr.decode("utf-8", "replace")[:1000])
 
+    async def bundle_status(self, sandbox_id, bundle):
+        from .materialization import bundle_status
+        record = await self._record(sandbox_id, recover_active=False)
+        async with record.lock:
+            return await asyncio.to_thread(bundle_status, record.root, bundle)
+
+    async def reset_cache(self, sandbox_id):
+        record = await self._record(sandbox_id)
+        async with record.lock:
+            if record.state != SandboxState.STOPPED:
+                raise SandboxStateError("Stop the Sandbox before clearing its runtime cache")
+            cleanup_materializations(record.root)
+
+    async def cancel(self, sandbox_id):
+        record = await self._record(sandbox_id)
+        async with record.lock:
+            if record.state == SandboxState.RUNNING:
+                record.cancelled.set()
+        await record.done.wait()
+
     async def terminate(self, sandbox_id: str) -> None:
         record = await self._record(sandbox_id)
         async with record.lock:
+            record.stop_requested = True
             record.cancelled.set()
         # execute owns stopping its service. Waiting closes spawn-versus-stop
         # races: a stop requested before service creation still kills that unit.
@@ -610,10 +646,17 @@ class LinuxSandboxBackend(SandboxBackend):
         async with self._records_lock:
             self._records.pop(sandbox_id, None)
 
+    async def file_operation(self, sandbox_id, operation, **options):
+        from .files import file_operation, run_file_operation
+        record = await self._record(sandbox_id, recover_active=False)
+        async with record.lock:
+            return await run_file_operation(file_operation, record.host_workspace, record.workspace_access,
+                tuple(record.attachments.values()), operation, **options)
+
     async def get(self, sandbox_id: str) -> SandboxInfo:
         return self._info(await self._record(sandbox_id))
 
-    async def _record(self, sandbox_id: str) -> _Record:
+    async def _record(self, sandbox_id: str, *, recover_active: bool = True) -> _Record:
         self._validate_id(sandbox_id)
         async with self._records_lock:
             if sandbox_id in self._records:
@@ -629,17 +672,23 @@ class LinuxSandboxBackend(SandboxBackend):
                     raise ValueError("manifest runtime or identity mismatch")
                 # Reclaim a surviving command before inspecting user-mutable
                 # folders/resources: cleanup must work even if they vanished.
-                if raw.get("unit"):
+                if raw.get("unit") and recover_active:
                     await self.kill_unit(raw["unit"])
                 record = _Record(sandbox_id, root,
                     raw.get("workspace_path"), ResourceAccess(raw["workspace_access"]))
+                if raw.get("unit") and not recover_active:
+                    # File/metadata workers are not lifecycle recovery owners.
+                    # In WSL a separate worker can browse while the command's
+                    # existing worker still owns this live cgroup.
+                    record.unit = raw["unit"]
+                    record.state = SandboxState.RUNNING
                 for item in raw["attachments"]:
                     self._validate_id(item["resource_id"])
                     attachment = ResourceAttachment(sandbox_id, item["resource_id"],
                         self._validate_source(Path(item["source"]), must_exist=False),
                         validate_relative_path(item["relative_path"]), ResourceAccess(item["access"]))
                     record.attachments[attachment.resource_id] = attachment
-                if raw.get("unit"):
+                if raw.get("unit") and recover_active:
                     self._save(record)
             except (KeyError, TypeError, ValueError, OSError) as exc:
                 raise SandboxSecurityError(f"invalid sandbox manifest: {exc}") from exc
@@ -664,6 +713,7 @@ class LinuxSandboxBackend(SandboxBackend):
         return SandboxInfo(sandbox_id=record.sandbox_id, state=record.state,
             workspace=Path("/workspace"), attachments=tuple(record.attachments.values()),
             security_boundary="linux-bubblewrap+seccomp+cgroup-v2", network_enabled=False,
+            supported_network_modes=("disabled",), network_reason="Networking unavailable: isolated egress protecting host control services is not implemented",
             active_command=record.active_command, runtime_id=self._runtime_id, platform="linux",
             shell=("/bin/sh", "-c"), workspace_path=record.workspace_path,
             workspace_access=record.workspace_access, resources_path=Path("/sandbox"),

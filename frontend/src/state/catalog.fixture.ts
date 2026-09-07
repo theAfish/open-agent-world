@@ -69,7 +69,7 @@ export const TEST_CATALOG: PluginCatalog = {
     }),
     node("text", ["core.resource", "core.text"]),
     node("image", ["core.resource", "core.image"]),
-    node("sandbox", ["core.sandbox"], { default_status: "stopped" }),
+    node("sandbox", ["core.sandbox"], { default_status: "stopped", surfaces: { preview: true, inspector: true, workspace: true } }),
   ],
   relationships: [
     relationship("communicate", ["core.agent"], ["core.agent"], {

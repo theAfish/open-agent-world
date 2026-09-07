@@ -29,11 +29,15 @@ describe("sandbox configuration UI", () => {
       sandboxRuntimes: undefined, sandboxRuntimesLoading: false, sandboxRuntimesError: undefined,
       socketState: "closed", toasts: [], undoStack: [], redoStack: [],
     });
+    vi.spyOn(worldApi, "getNodeDocument").mockResolvedValue({ value: { variables: {} }, revision: 0, summary: {} });
+    vi.spyOn(worldApi, "getCredentialBindings").mockResolvedValue({});
+    vi.spyOn(worldApi, "sandboxWorkspace").mockResolvedValue({ profile_id: null, ready: true, variables: [] });
     vi.spyOn(worldApi, "getSandbox").mockResolvedValue(info);
     vi.spyOn(worldApi, "getSandboxRuntimes").mockResolvedValue({
       default_runtime: "wsl:Ubuntu",
       runtimes: [{ id: "wsl:Ubuntu", label: "WSL · Ubuntu", platform: "linux", available: true, reason: null,
-        shell: ["/bin/sh", "-c"], supports_workspace: true }],
+        shell: ["/bin/sh", "-c"], supports_workspace: true, supported_network_modes: ["disabled"],
+        network_reason: "Networking unavailable: isolated egress protecting host control services is not implemented" }],
     });
   });
   afterEach(() => cleanup());
@@ -46,6 +50,8 @@ describe("sandbox configuration UI", () => {
     expect(screen.getByText("/workspace")).toBeTruthy();
     expect(screen.queryByText("Native Windows boundary")).toBeNull();
     expect((screen.getByLabelText("Folder access") as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByRole("option", { name: "Enabled" }) as HTMLOptionElement).disabled).toBe(true);
+    expect(screen.getByText(/isolated egress protecting host control services/)).toBeTruthy();
   });
 
   it("keeps a rejected draft visible and blocks start until it is saved or reset", async () => {

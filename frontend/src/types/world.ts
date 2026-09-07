@@ -8,6 +8,11 @@ export interface SandboxConfig {
   runtime: string;
   workspace_path: string | null;
   workspace_access: SandboxWorkspaceAccess;
+  network_enabled?: boolean;
+  memory_bytes?: number;
+  active_process_limit?: number;
+  command_timeout?: number;
+  presets?: Record<string, string>;
 }
 
 export interface SandboxRuntime {
@@ -18,6 +23,8 @@ export interface SandboxRuntime {
   reason: string | null;
   shell: string[];
   supports_workspace: boolean;
+  supported_network_modes?: string[];
+  network_reason?: string;
 }
 
 export interface SandboxRuntimeCatalog {
@@ -39,6 +46,9 @@ export interface SandboxInfo {
   workspace: string | null;
   resources_path: string | null;
   security_boundary: string | null;
+  network_enabled?: boolean;
+  supported_network_modes?: string[];
+  network_reason?: string;
 }
 export type CardStatus = AgentStatus | SandboxStatus | "available" | "modified" | string;
 

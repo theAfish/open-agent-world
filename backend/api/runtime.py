@@ -5,6 +5,7 @@ from dataclasses import fields
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
+from fastapi.responses import Response
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -63,6 +64,8 @@ class SandboxExecuteRequest(BaseModel):
     command: Annotated[str, Field(min_length=1, max_length=32_768)] | None = None
     argv: Annotated[list[str], Field(min_length=1, max_length=256)] | None = None
     timeout_seconds: Annotated[float, Field(gt=0, le=600)] | None = None
+    environment_id: str | None = None
+    target_id: str | None = None
 
     @model_validator(mode="after")
     def validate_command_shape(self) -> "SandboxExecuteRequest":
@@ -249,5 +252,107 @@ async def execute_sandbox(
         sandbox_id,
         request.argv,
         command=request.command,
-        timeout_seconds=request.timeout_seconds,
+        timeout_seconds=request.timeout_seconds, environment_id=request.environment_id, target_id=request.target_id,
+        _keep_on_disconnect=True,
     )
+
+
+@router.get("/sandboxes/{sandbox_id}/configuration")
+async def sandbox_configuration(sandbox_id: str, services=Depends(get_services)):
+    from backend.execution_config import configuration_summary
+    async with services._node_mutation(read_only=True):
+        services._require_card_type(sandbox_id, "sandbox")
+        return configuration_summary(services, sandbox_id)
+
+
+@router.get("/sandboxes/{sandbox_id}/history")
+async def sandbox_history(sandbox_id: str, services=Depends(get_services)):
+    from backend.sandbox.history import read
+    services._require_card_type(sandbox_id, "sandbox")
+    return read(services, sandbox_id)
+
+
+@router.post("/sandboxes/{sandbox_id}/cancel")
+async def sandbox_cancel(sandbox_id: str, services=Depends(get_services)):
+    services._require_card_type(sandbox_id, "sandbox")
+    await services._require_sandbox_backend().cancel(sandbox_id)
+    return {"cancelled": True}
+
+
+@router.get("/sandboxes/{sandbox_id}/files")
+async def sandbox_files(sandbox_id: str, operation: str = "roots", root: str = "workspace", path: str = "", services=Depends(get_services)):
+    import base64
+    if operation not in {"roots", "list", "preview", "download"}:
+        raise SandboxValidationError("Unsupported read operation")
+    async with services._node_mutation(read_only=True):
+        services._require_card_type(sandbox_id, "sandbox")
+        try:
+            result = await services._require_sandbox_backend().file_operation(sandbox_id, operation, root=root, path=path)
+        except FileNotFoundError:
+            return {"state": "missing", "message": "File or directory no longer exists"}
+        except FileExistsError:
+            return {"state": "conflict", "message": "Destination exists"}
+        except (PermissionError, OSError):
+            return {"state": "permission_denied", "message": "Access denied or path is not a regular file/directory"}
+    if operation == "download" and result.get("state") == "ready":
+        return Response(base64.b64decode(result["data"]), media_type="application/octet-stream",
+            headers={"Content-Disposition": "attachment", "X-Content-Type-Options": "nosniff"})
+    return result
+
+
+class DiagnosticRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    destination: str | None = Field(default=None, max_length=2048)
+
+
+@router.post("/sandboxes/{sandbox_id}/diagnostics")
+async def sandbox_diagnostics(sandbox_id: str, request: DiagnosticRequest, services=Depends(get_services)):
+    from backend.sandbox_workspace import diagnostics
+    return await diagnostics(services, sandbox_id, request.destination)
+
+
+@router.get("/sandboxes/{sandbox_id}/skills/{skill_id}")
+async def sandbox_skill(sandbox_id: str, skill_id: str, services=Depends(get_services)):
+    from backend.sandbox_workspace import require_skill
+    from backend.sandbox.materialization import RuntimeBundle
+    import base64
+    from open_agent_world.skill_packages import SkillAsset
+    services._require_card_type(sandbox_id, "sandbox")
+    snapshot, skill = require_skill(services, skill_id)
+    files = [("SKILL.md", skill.instructions.encode()), *[(path, base64.b64decode(value.data_base64) if isinstance(value, SkillAsset) else value.encode()) for path, value in skill.files.items()]]
+    bundle = RuntimeBundle(f"skills/{skill_id}", tuple(files), tuple(skill.directories))
+    cache = await services._require_sandbox_backend().bundle_status(sandbox_id, bundle)
+    current = services._sandbox_commands.get(sandbox_id)
+    info = await services.get_sandbox(sandbox_id)
+    active = bool(current and current.get("skill_id") == skill_id and info.state.value == "running")
+    return {**cache, "revision": snapshot["revision"], "bundle_key": bundle.key, "files": [path for path, _ in files],
+        "active_execution": active,
+        "status": "active execution" if active else "bundle available",
+        "note": "Host-managed, read-only, command-scoped. Cached bundles grant no access; runtime readiness requires diagnostics."}
+
+
+class SkillCopyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    skill_id: str
+    source: str
+    destination: str
+    overwrite: bool = False
+
+
+@router.post("/sandboxes/{sandbox_id}/copy-skill-resource")
+async def sandbox_copy_skill(sandbox_id: str, request: SkillCopyRequest, services=Depends(get_services)):
+    from backend.sandbox_workspace import copy_skill
+    try:
+        return await copy_skill(services, sandbox_id, **request.model_dump())
+    except FileExistsError:
+        raise SandboxValidationError("Destination exists; explicitly enable overwrite") from None
+    except OSError:
+        raise SandboxValidationError("Destination is missing or not writable") from None
+
+
+@router.post("/sandboxes/{sandbox_id}/reset-cache")
+async def sandbox_reset_cache(sandbox_id: str, services=Depends(get_services)):
+    async with services._node_mutation():
+        services._require_card_type(sandbox_id, "sandbox")
+        await services._require_sandbox_backend().reset_cache(sandbox_id)
+    return {"reset": True, "note": "Runtime cache cleared. Workspace files and outputs preserved."}

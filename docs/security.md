@@ -13,8 +13,8 @@ Discovery probes are cached for the application lifetime so status polling does 
 ## Linux and WSL2 controls
 
 - Bubblewrap exposes a minimal root with read-only system tools, a selected `/workspace`, private temporary/home directories and only graph-authorized resource bind mounts.
-- User, mount, PID and network namespaces isolate execution. Host homes, application credentials, `/mnt/c`, `/run/WSL`, desktop sockets and service sockets are absent unless a specific ordinary project folder is explicitly selected.
-- Seccomp denies network socket creation/connections and privileged kernel operations, including Windows-interop socket access from WSL.
+- User, mount and PID namespaces isolate execution. Networking uses an isolated network namespace. Enabled networking is unsupported because sharing the host namespace would expose trusted host control services. Host homes, application credentials, `/mnt/c`, `/run/WSL`, desktop sockets and service sockets are absent unless a specific ordinary project folder is explicitly selected.
+- Seccomp denies socket creation/connections, including Unix/interop sockets. Privileged kernel operations stay blocked. There is no internet-only or destination-restricted mode. See [workspace configuration and file-operation boundaries](sandbox-workspace.md).
 - Every command joins a delegated cgroup-v2 subtree before untrusted work begins, with memory, swap and process limits checked by the trusted launcher. Full-tree termination and timeout cleanup use the runtime-owned cgroup.
 - Failure to provide the required namespace, seccomp or cgroup controls makes the runtime unavailable. A Linux process sandbox shares its host Linux kernel; it is not a separate-kernel VM.
 

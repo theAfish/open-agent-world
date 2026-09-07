@@ -76,6 +76,8 @@ class SandboxInfo:
     attachments: tuple[ResourceAttachment, ...] = ()
     security_boundary: str = "unknown"
     network_enabled: bool = False
+    supported_network_modes: tuple[str, ...] = ("disabled",)
+    network_reason: str = "This runtime only enforces disabled networking"
     active_command: tuple[str, ...] | None = None
     runtime_id: str = "unknown"
     platform: str = "unknown"

@@ -61,6 +61,9 @@ def _read_document(value, arguments):
 
 
 def register_execution_configuration(registry):
+    registry.register_relationship(RelationshipDefinition(id="environment.default", label="Default environment",
+        short_label="defaults", description="Live base profile shared with all executions authorized for this Sandbox; local values override it.",
+        source_traits=frozenset({"core.environment"}), target_traits=frozenset({"core.sandbox"}), templateable=True))
     for node_id, label, trait, model, kind, tool in (
         ("environment", "Environment Profile", "core.environment", EnvironmentProfile, "environment.use", "inspect_environment_profile"),
         ("compute-target", "Compute Target", "core.compute-target", ComputeTarget, "compute_target.read", "read_compute_target"),
@@ -98,3 +101,51 @@ def resolve_execution_configuration(services, environment_id, target_id):
         environment[TARGET_VARIABLE] = json.dumps(target, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
     validate_command_environment(environment)
     return environment, tuple(secrets)
+
+
+def linked_environment(services, sandbox_id):
+    profiles = [e.source for e in services.world.list_edges_to(sandbox_id) if e.relationship == "environment.default"]
+    if len(profiles) > 1:
+        raise ValueError("A Sandbox accepts at most one default Environment Profile")
+    return profiles[0] if profiles else None
+
+
+def effective_variables(services, sandbox_id, environment_id=None):
+    from backend.node_documents import read_document
+    profile_id = environment_id or linked_environment(services, sandbox_id)
+    layers = [(profile_id, "invocation" if environment_id else "linked"), (sandbox_id, "local")]
+    effective = {}
+    for node_id, source in layers:
+        if node_id is None:
+            continue
+        profile = EnvironmentProfile.model_validate(read_document(services, node_id)["value"])
+        for name, value in profile.variables.items():
+            # Overrides are portable and case insensitive, like validation.
+            effective[name.upper()] = (name, value, node_id, source)
+    return profile_id, list(effective.values())
+
+
+def resolve_sandbox_configuration(services, sandbox_id, environment_id=None, target_id=None):
+    _, variables = effective_variables(services, sandbox_id, environment_id)
+    environment, secrets = {}, []
+    for name, value, owner, _ in variables:
+        if isinstance(value, SecretRequirement):
+            value = services.execution_credentials.resolve(owner, value.secret_ref)
+            secrets.append(value)
+        environment[name] = value
+    if target_id:
+        target_env, _ = resolve_execution_configuration(services, None, target_id)
+        environment.update(target_env)
+    validate_command_environment(environment)
+    return environment, tuple(secrets)
+
+
+def configuration_summary(services, sandbox_id):
+    profile_id, variables = effective_variables(services, sandbox_id)
+    result = []
+    for name, value, owner, source in variables:
+        secret = isinstance(value, SecretRequirement)
+        result.append({"name": name, "source": source, "owner": owner, "secret": secret,
+            "value": None if secret else value,
+            "configured": services.execution_credentials.configured(owner, value.secret_ref) if secret else True})
+    return {"profile_id": profile_id, "variables": result, "ready": all(v["configured"] for v in result)}
