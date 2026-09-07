@@ -14,4 +14,5 @@ router = APIRouter(tags=["capabilities"])
 async def get_capabilities(
     agent_id: str, services: ApplicationServices = Depends(get_services)
 ) -> CapabilitySet:
-    return services.capabilities.derive(agent_id)
+    async with services._node_mutation(read_only=True):
+        return services.capabilities.derive(agent_id)

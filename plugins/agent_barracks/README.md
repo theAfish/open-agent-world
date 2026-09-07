@@ -10,7 +10,8 @@ entry-point distribution takes precedence.
    Agent and the equipped subgraph to copy. Original nodes stay in place.
 3. Give it a name and a useful **When to use** description. Decide which connected
    resources to copy, share, or omit. Copied Sandboxes start with fresh workspaces.
-4. Connect an Agent to the barracks using **Summon agents**. Its tool can list and
+4. Equip **Summoning** on an Agent, then connect that skill to the
+   barracks using **Summon agents**. The Agent receives a tool that can list and
    choose templates, summon them for a task, and follow up on retained instances.
    Connecting to one template card grants access only to that template.
 5. Use **Try a template** to run from the UI. Review results, continue with the

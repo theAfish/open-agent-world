@@ -5,7 +5,9 @@ import type {
   Relationship,
   RelationshipCatalogItem,
   WorldEdge,
+  WorldCard,
 } from "../types/world";
+import { isEquipmentConnection } from "./equipment";
 
 export interface RelationshipOption {
   value: Relationship;
@@ -57,6 +59,11 @@ export function getRelationshipOptions(
     .map(option);
 }
 
+export function getConnectionOptions(catalog: PluginCatalog, sourceType: CardType, targetType: CardType): RelationshipOption[] {
+  const forward = getRelationshipOptions(catalog, sourceType, targetType);
+  return forward.length ? forward : getRelationshipOptions(catalog, targetType, sourceType);
+}
+
 export function getRelationshipOption(
   catalog: PluginCatalog,
   relationship: Relationship,
@@ -86,6 +93,7 @@ export function validateConnection(
   sourceType: CardType | undefined,
   targetType: CardType | undefined,
   edges: WorldEdge[] = [],
+  cards: WorldCard[] = [],
 ): ConnectionValidation {
   if (!sourceId || !targetId || !sourceType || !targetType) {
     return { valid: false, reason: "Choose two world objects.", options: [] };
@@ -104,6 +112,9 @@ export function validateConnection(
       reason: `A ${sourceType} and ${targetType} cannot have a relationship.`,
       options: [],
     };
+  }
+  if (isEquipmentConnection(sourceId, targetId, cards)) {
+    return { valid: false, reason: "Equipment already belongs to this Agent. Unequip it before adding a world connection.", options: [] };
   }
 
   const canonicalSource = reversed ? targetId : sourceId;

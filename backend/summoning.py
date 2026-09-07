@@ -1,13 +1,14 @@
-"""Capture and invoke plugin-owned subgraph templates using the existing Run host."""
+"""Instantiate live configured Agents using the existing portable graph and Run host."""
 from dataclasses import dataclass
+from contextlib import nullcontext
 from datetime import datetime, timezone
 import json
 from uuid import uuid4
 
-from backend.errors import ConflictError, PermissionDeniedError, ResourceValidationError, RevisionConflictError, RuntimeUnavailableError
+from backend.errors import ConflictError, PermissionDeniedError, ResourceValidationError, RuntimeUnavailableError
 from backend.legions.models import LegionInstantiate, LegionRecord
-from backend.node_documents import read_document, write_document
-from backend.plugins.summoning import CallableTemplate, SharedBinding, SummoningPolicy
+from backend.node_documents import read_document
+from backend.plugins.summoning import SummoningPolicy
 from backend.runs.models import TERMINAL_RUN_STATUSES
 from backend.world.models import CardPatch
 
@@ -40,17 +41,42 @@ class SummoningService:
             connection.execute("INSERT INTO summoned_instances VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET record_json=excluded.record_json",
                                (record["id"], json.dumps(record)))
 
-    def templates(self, node_id):
-        spec = self.spec(node_id)
-        value = read_document(self.services, node_id)["value"]
-        items = value[spec.templates_field] if spec.templates_field else [{**value, "node_id": node_id}]
-        return [CallableTemplate.model_validate(item) for item in items]
+    def owned_ids(self, record):
+        """Current private ownership, including equipment attached after admission."""
+        world = self.services.world
+        return {node.id for key in record["root_node_ids"] if world.maybe_get_card(key)
+                for node in [world.get_card(key), *world.owned_descendants(key)]}
 
-    def describe(self, item):
-        return {"id": item.node_id or item.id, "name": item.name, "description": item.description,
-                "entry_agent_key": item.entry_agent_key,
-                "nodes": [{"key": n.key, "name": n.name, "type": n.type} for n in item.blueprint.nodes] if item.blueprint else [],
-                "shared_bindings": [b.model_dump() for b in item.bindings]}
+    def agents(self, node_id):
+        self.spec(node_id)
+        return [node for node in self.services.world.list_members(node_id)
+                if "core.agent" in self.services.plugins.node_type(node.type).traits]
+
+    def describe(self, agent):
+        return {"id": agent.id, "name": agent.name,
+                "description": agent.config.get("description", ""),
+                "equipment_count": len(self.services.world.equipment_for(agent.id))}
+
+    async def definition(self, agent):
+        # An in-memory portable snapshot of the live Agent, never a saved second definition.
+        from backend.legions.models import LegionCapture
+        request = LegionCapture.model_construct(name=agent.name, description="", node_ids=[agent.id])
+        blueprint, keys = await self.services._capture_subgraph_locked(request)
+        bindings = []
+        for edge in self.services.world.list_edges():
+            if (edge.source in keys) == (edge.target in keys):
+                continue
+            internal_source = edge.source in keys
+            internal = edge.source if internal_source else edge.target
+            external = self.services.world.get_card(edge.target if internal_source else edge.source)
+            if not self.services.plugins.relationship(edge.relationship).templateable:
+                raise ResourceValidationError("An external relationship does not support instantiation")
+            bindings.append(dict(internal_key=keys[internal], internal_is_source=internal_source,
+                external_id=external.id, external_type=external.type,
+                external_plugin_id=self.services.plugins.node_type_owner_id(external.type),
+                relationship=edge.relationship, plugin_id=self.services.plugins.relationship_owner_id(edge.relationship),
+                direction=edge.direction))
+        return blueprint, keys[agent.id], bindings
 
     def view(self, record):
         manager = self.services.run_manager
@@ -64,45 +90,9 @@ class SummoningService:
         self.authorize(node_id, capability)
         value = read_document(self.services, node_id)["value"]
         return {"instructions": value.get("instructions", ""), "policy": value.get("policy", {}),
-                "templates": [self.describe(item) for item in self.templates(node_id)],
+                "agents": [self.describe(item) for item in self.agents(node_id)],
                 "instances": [self.view(r) for r in self.records() if r["library_id"] == node_id
                               and (capability is None or r["caller_agent_id"] == capability.agent_id)]}
-
-    async def capture(self, node_id, request):
-        services = self.services
-        async with services._portable_state_gate.capture():
-            async with services._node_mutation():
-                spec = self.spec(node_id)
-                if not spec.templates_field:
-                    raise ResourceValidationError("Save templates into a library")
-                current = read_document(services, node_id)
-                if current["revision"] != request.expected_revision:
-                    raise RevisionConflictError("The library changed. Reload before saving.")
-                blueprint, keys = await services._capture_subgraph_locked(request)
-                if node_id in keys or set(keys) & set(request.shared_node_ids):
-                    raise ResourceValidationError("A shared library or resource cannot also be copied into the template")
-                if request.entry_agent_id not in keys or "core.agent" not in services.plugins.node_type(services.world.get_card(request.entry_agent_id).type).traits:
-                    raise ResourceValidationError("Choose an entry Agent inside the copied subgraph")
-                bindings = []
-                for edge in services.world.list_edges():
-                    internal = edge.source if edge.source in keys else edge.target if edge.target in keys else None
-                    external = edge.target if internal == edge.source else edge.source
-                    if internal is None or external not in request.shared_node_ids:
-                        continue
-                    node = services.world.get_card(external)
-                    if not services.plugins.relationship(edge.relationship).templateable:
-                        raise ResourceValidationError("This shared relationship does not support templates")
-                    bindings.append(SharedBinding(internal_key=keys[internal], internal_is_source=edge.source == internal,
-                        external_id="$library" if external == node_id else external,
-                        external_type=node.type, external_plugin_id=services.plugins.node_type_owner_id(node.type),
-                        relationship=edge.relationship, plugin_id=services.plugins.relationship_owner_id(edge.relationship), direction=edge.direction))
-                item = CallableTemplate(name=request.name, description=request.description, blueprint=blueprint,
-                    entry_agent_key=keys[request.entry_agent_id], bindings=bindings,
-                    policy=SummoningPolicy.model_validate(current["value"].get("policy", {})))
-                value = current["value"]
-                value[spec.templates_field].append(item.model_dump(mode="json"))
-                write_document(services, node_id, value, current["revision"])
-                return self.snapshot(node_id)
 
     def check_budget(self, root_id, policy, *, creating):
         records = [r for r in self.records() if r["created_root_id"] == root_id or any(a["root_run_id"] == root_id for a in r["attempts"])]
@@ -140,7 +130,7 @@ class SummoningService:
                     member["stopping"] = True
                     self.save(member)
             try:
-                owned = {key for member in family for key in member["node_ids"]}
+                owned = {key for member in family for key in self.owned_ids(member)}
                 for node in services.world.list_cards():
                     if node.id in owned and services.node_execution.active(node.id):
                         await services.node_execution.stop(node.id)
@@ -167,7 +157,7 @@ class SummoningService:
                     member["stopping"] = False
                     self.save(member)
             return self.view(record)
-        async with services._node_mutation():
+        async with (services._portable_state_gate.capture() if request.action == "summon" else nullcontext()), services._node_mutation():
             self.authorize(node_id, capability)
             if request.action == "inspect":
                 return self.view(self.find_instance(node_id, request.instance_id, capability))
@@ -192,33 +182,26 @@ class SummoningService:
             if depth > policy["max_depth"]:
                 raise ConflictError("This root task reached its summon depth limit")
             if request.action == "summon":
-                item = next((t for t in self.templates(node_id) if (t.node_id or t.id) == request.template_id), None)
-                if item is None or item.blueprint is None:
-                    raise ResourceValidationError("Choose an available template ID from this connection")
-                entry = next((n for n in item.blueprint.nodes if n.key == item.entry_agent_key), None)
-                if entry is None or "core.agent" not in services.plugins.node_type(entry.type).traits:
-                    raise ResourceValidationError("The template needs an entry Agent")
-                bindings = [b.model_dump() for b in item.bindings]
+                agent = next((a for a in self.agents(node_id) if a.id == request.agent_id), None)
+                if agent is None:
+                    raise ResourceValidationError("Choose an Agent currently in this Barracks")
+                blueprint, entry_key, bindings = await self.definition(agent)
                 library = services.world.get_card(node_id)
-                for binding in bindings:
-                    if binding["external_id"] == "$library":
-                        target = services.world.get_card(library.parent_id) if not self.spec(node_id).templates_field and library.parent_id else library
-                        binding.update(external_id=target.id, external_type=target.type,
-                                       external_plugin_id=services.plugins.node_type_owner_id(target.type))
                 now = datetime.now(timezone.utc)
-                portable = LegionRecord(id=item.id, name=item.name, description=item.description, blueprint=item.blueprint,
+                portable = LegionRecord(id=agent.id, name=agent.name, description="", blueprint=blueprint,
                                         created_at=now, updated_at=now, revision=1)
                 owned_ids = {key for r in self.records() if r["library_id"] == node_id and not r["reclaimed"] for key in r["node_ids"]}
                 previous = [node for node in services.world.list_cards() if node.id in owned_ids]
                 space = [library, *services.world.descendants(library.id)]
-                instance = await services.instantiate_legion(item.id, LegionInstantiate(position={
+                instance = await services.instantiate_legion(agent.id, LegionInstantiate(position={
                     "x": max(node.position.x + node.size.width for node in space) + 140,
                     "y": max([library.position.y, *[node.position.y + node.size.height + 100 for node in previous]]),
                 }), record=portable, bindings=bindings)
-                record = {"id": str(uuid4()), "library_id": node_id, "template_id": request.template_id,
-                          "name": item.name, "caller_agent_id": capability.agent_id if capability else None,
+                record = {"id": str(uuid4()), "library_id": node_id, "agent_id": request.agent_id,
+                          "name": agent.name, "caller_agent_id": capability.agent_id if capability else None,
                           "parent_instance_id": owner["id"] if owner else None,
-                          "entry_agent_id": instance.node_ids[item.entry_agent_key],
+                          "entry_agent_id": instance.node_ids[entry_key],
+                          "root_node_ids": [instance.node_ids[entry_key]],
                           "node_ids": [n.id for n in instance.nodes], "attempts": [],
                           "root_policy": policy, "created_root_id": root_id, "reclaimed": False, "stopping": False}
                 self.save(record)

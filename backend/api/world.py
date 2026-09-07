@@ -102,6 +102,11 @@ async def restore_card(
     return await services.restore_card(request)
 
 
+@router.post("/nodes/{card_id}/duplicate")
+async def duplicate_agent(card_id: str, services: ApplicationServices = Depends(get_services)):
+    return await services.duplicate_agent(card_id)
+
+
 @router.get("/nodes/{card_id}", response_model=Card)
 @router.get("/cards/{card_id}", response_model=Card, include_in_schema=False)
 async def get_card(

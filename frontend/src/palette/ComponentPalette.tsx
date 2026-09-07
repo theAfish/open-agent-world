@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type CSSProperties, type DragEvent, type FormEvent } from "react";
 import { useWorldStore } from "../state/worldStore";
+import { useEquipmentDrag } from "../state/equipment";
+import { buildCardDraft } from "../state/helpers";
 import type { CardType, LegionSummary, PluginCatalog } from "../types/world";
 import {
   LEGACY_NODE_DRAG_MIME,
@@ -56,6 +58,8 @@ interface StoredDeck {
   label: string;
   icon: DeckIconKey;
   cardTypes: CardType[];
+  /** Catalog revision recorded when each card was last assigned to this deck. */
+  catalogVersions?: Record<string, number>;
   custom?: boolean;
 }
 
@@ -108,16 +112,24 @@ const isDeckIcon = (value: unknown): value is DeckIconKey => (
   || value === "layers" || value === "sparkles" || value === "star" || value === "zap"
 );
 
+function deckRevision(catalog: PluginCatalog, type: CardType): number {
+  return catalog.node_types.find((definition) => definition.id === type)?.deck_revision ?? 1;
+}
+
 export function defaultDecks(catalog: PluginCatalog): StoredDeck[] {
   const decks = new Map<string, StoredDeck>();
   catalog.node_types.filter((definition) => definition.user_creatable !== false).forEach((definition) => {
     const current = decks.get(definition.deck_id);
-    if (current) current.cardTypes.push(definition.id);
+    if (current) {
+      current.cardTypes.push(definition.id);
+      current.catalogVersions![definition.id] = definition.deck_revision ?? 1;
+    }
     else decks.set(definition.deck_id, {
       id: definition.deck_id,
       label: definition.deck_label,
       icon: isDeckIcon(definition.deck_icon) ? definition.deck_icon : "folder",
       cardTypes: [definition.id],
+      catalogVersions: { [definition.id]: definition.deck_revision ?? 1 },
       custom: false,
     });
   });
@@ -133,12 +145,15 @@ export function normalizeDecks(candidates: StoredDeck[], catalog: PluginCatalog)
   const creatableTypes = catalog.node_types.filter((definition) => definition.user_creatable !== false);
   const validTypes = new Set(creatableTypes.map((definition) => definition.id));
   const defaultHome = new Map(creatableTypes.map((definition) => [definition.id, definition.deck_id]));
-  const decks = merged.map((deck) => ({ ...deck, cardTypes: [] as CardType[] }));
+  const decks = merged.map((deck) => ({ ...deck, cardTypes: [] as CardType[], catalogVersions: {} as Record<string, number> }));
   const claimed = new Set<CardType>();
   merged.forEach((candidate, index) => {
     candidate.cardTypes.forEach((type) => {
-      if (validTypes.has(type) && !claimed.has(type)) {
+      const revision = deckRevision(catalog, type);
+      const recordedRevision = candidate.catalogVersions?.[type] ?? 1;
+      if (validTypes.has(type) && !claimed.has(type) && revision <= recordedRevision) {
         decks[index].cardTypes.push(type);
+        decks[index].catalogVersions[type] = revision;
         claimed.add(type);
       }
     });
@@ -147,6 +162,7 @@ export function normalizeDecks(candidates: StoredDeck[], catalog: PluginCatalog)
     if (claimed.has(type)) return;
     const home = decks.find((deck) => deck.id === defaultHome.get(type)) ?? decks[0];
     home?.cardTypes.push(type);
+    if (home) home.catalogVersions[type] = deckRevision(catalog, type);
   });
   return decks;
 }
@@ -160,12 +176,17 @@ function parseStoredDecks(value: string | null): StoredDeck[] {
       if (!deck || typeof deck !== "object") return [];
       const candidate = deck as Partial<StoredDeck>;
       const cardTypes = Array.isArray(candidate.cardTypes) ? candidate.cardTypes.filter(isCardType) : [];
+      const catalogVersions = candidate.catalogVersions && typeof candidate.catalogVersions === "object"
+        ? Object.fromEntries(Object.entries(candidate.catalogVersions).flatMap(([type, revision]) => (
+          isCardType(type) && typeof revision === "number" && Number.isFinite(revision) ? [[type, revision]] : []
+        ))) : undefined;
       if (typeof candidate.id !== "string" || typeof candidate.label !== "string") return [];
       return [{
         id: candidate.id,
         label: candidate.label,
         icon: isDeckIcon(candidate.icon) ? candidate.icon : "folder",
         cardTypes,
+        catalogVersions,
         custom: candidate.custom ?? candidate.id.startsWith("custom-"),
       }];
     });
@@ -270,11 +291,20 @@ export function ComponentPalette() {
 
   const beginDrag = (event: DragEvent<HTMLButtonElement>, payload: PaletteDragPayload) => {
     writePaletteDrag(event.dataTransfer, payload);
+    if (payload.kind === "node") {
+      useEquipmentDrag.getState().set({ ...buildCardDraft(payload.type, { x: 0, y: 0 }, catalog.node_types.find((type) => type.id === payload.type)), id: "" });
+    }
   };
 
   const moveCardToDeck = (type: CardType, targetDeckId: string) => {
     setStoredDecks((current) => current.map((deck) => ({
       ...deck,
+      catalogVersions: (() => {
+        const versions = { ...deck.catalogVersions };
+        if (deck.id === targetDeckId) versions[type] = deckRevision(catalog, type);
+        else delete versions[type];
+        return versions;
+      })(),
       cardTypes: deck.id === targetDeckId
         ? Array.from(new Set([...deck.cardTypes, type]))
         : deck.cardTypes.filter((candidate) => candidate !== type),
@@ -301,6 +331,7 @@ export function ComponentPalette() {
       label,
       icon: deckIcon,
       cardTypes: [],
+      catalogVersions: {},
       custom: true,
     };
     setStoredDecks((current) => [...current, deck]);
@@ -474,6 +505,7 @@ export function ComponentPalette() {
                         style={deckCardFanStyle(index, activeDeck.cards.length)}
                         draggable
                         onDragStart={(event) => beginDrag(event, { version: 1, kind: "node", type: item.type })}
+                        onDragEnd={() => useEquipmentDrag.getState().set()}
                         onClick={() => void createCard(item.type)}
                         aria-label={`Create ${item.label}`}
                         title="Drag to the canvas to create, or onto a deck tab to move"

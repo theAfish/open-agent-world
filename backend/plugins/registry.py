@@ -23,7 +23,7 @@ from backend.plugins.documents import NodeDocumentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.6"
+PLUGIN_API_VERSION = "1.7"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -79,6 +79,7 @@ class NodeTypeCatalogItem(BaseModel):
     deck_id: str
     deck_label: str
     deck_icon: str
+    deck_revision: int = 1
     default_name: str
     default_size: dict[str, float]
     default_status: str
@@ -140,6 +141,9 @@ class NodeTypeDefinition:
     default_status: str
     statuses: frozenset[str]
     config_model: type[BaseModel]
+    # Bump this when a plugin intentionally changes a card's default deck.
+    # Clients use it to migrate old catalog-owned deck assignments once.
+    deck_revision: int = 1
     traits: frozenset[str] = frozenset()
     surfaces: Mapping[str, bool] = field(
         default_factory=lambda: {
@@ -173,6 +177,7 @@ class NodeTypeDefinition:
             deck_id=self.deck_id,
             deck_label=self.deck_label,
             deck_icon=self.deck_icon,
+            deck_revision=self.deck_revision,
             default_name=self.default_name,
             default_size={
                 "width": self.default_size[0],
@@ -189,7 +194,7 @@ class NodeTypeDefinition:
             has_document=self.document is not None,
             has_execution=self.execution is not None,
             container=self.container.catalog_item() if self.container else None,
-            summoning={"templates_field": self.summoning.templates_field} if self.summoning else None,
+            summoning={} if self.summoning else None,
             user_creatable=self.user_creatable,
             templateable=self.templateable,
         )
@@ -428,8 +433,8 @@ class PluginRegistry:
             if definition.summoning:
                 if definition.document is None or definition.summoning.capability_kind not in staged.capability_handlers:
                     raise ValueError("Summoning requires a document and a capability owned by the same plugin")
-                if definition.summoning.templates_field and definition.summoning.templates_field not in definition.document.model.model_fields:
-                    raise ValueError("Summoning templates_field must name a document field")
+                if definition.container is None:
+                    raise ValueError("Summoning catalogs require a container")
             if definition.container and definition.container.document_field:
                 member = staged.nodes.get(definition.container.member_type)
                 if member is None or member.document is None or member.lifecycle is not None:
@@ -609,6 +614,10 @@ class PluginRegistry:
         raise GraphValidationError(
             f"{source_type} and {target_type} do not allow {relationship_id!r}"
         )
+
+    def relationship_options(self, source_type: str, target_type: str) -> list[RelationshipDefinition]:
+        forward = [item for item in self._relationships.values() if self._matches(item, source_type, target_type)]
+        return forward or [item for item in self._relationships.values() if self._matches(item, target_type, source_type)]
 
     def validate_relationship_order(
         self, source_type: str, target_type: str, relationship_id: str

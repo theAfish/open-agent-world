@@ -72,6 +72,8 @@ class LegionTemplateNode(BaseModel):
 
     key: str
     parent_key: str | None = None
+    owner_key: str | None = None
+    equipment_relationship: str | None = None
     initial_document: dict[str, Any] | None = None
     initial_shared_state: dict[str, Any] | None = None
     type: str
@@ -123,8 +125,10 @@ class LegionBlueprint(BaseModel):
         if len(nodes) != len(self.nodes):
             raise ValueError("Template node keys must be unique")
         for node in self.nodes:
-            if node.parent_key is not None:
-                parent = nodes.get(node.parent_key)
+            if node.parent_key and node.owner_key:
+                raise ValueError("A node cannot be both a member and equipment")
+            if (node.owner_key or node.parent_key) is not None:
+                parent = nodes.get(node.owner_key or node.parent_key)
                 if parent is None or parent.key == node.key:
                     raise ValueError("Template parents must reference another container")
                 visited = {node.key}
@@ -132,7 +136,7 @@ class LegionBlueprint(BaseModel):
                     if parent.key in visited:
                         raise ValueError("Template memberships cannot form a cycle")
                     visited.add(parent.key)
-                    parent = nodes.get(parent.parent_key)
+                    parent = nodes.get(parent.owner_key or parent.parent_key)
         return self
 
 

@@ -9,6 +9,7 @@ from collections.abc import Coroutine, Mapping
 from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath, PurePosixPath
 from typing import Any, TypeVar
 from uuid import uuid4
@@ -946,7 +947,7 @@ class ApplicationServices:
     async def delete_cards(self, card_ids: list[str]) -> list[Card]:
         finish_committed_delete: Coroutine[Any, Any, None]
         async with self._node_mutation():
-            ids = list(dict.fromkeys(card_ids))
+            ids = list(dict.fromkeys([*card_ids, *[n.id for key in card_ids for item in self.world.equipment_for(key) for n in [item, *self.world.owned_descendants(item.id)]]]))
             cards = [self.world.get_card(card_id) for card_id in ids]
             for card in cards:
                 self.node_execution.assert_editable(card.id)
@@ -1483,6 +1484,15 @@ class ApplicationServices:
                         by_id[group.id] = group
                         by_id.update({m.id: m for m in members})
                 cards = list(by_id.values())
+                # Equipment travels with its owner even when its last world
+                # position lies outside the requested chunks.
+                for card in list(cards):
+                    for owner in self.world.ancestors(card):
+                        by_id[owner.id] = owner
+                for card in list(by_id.values()):
+                    for item in self.world.equipment_for(card.id):
+                        by_id.update({n.id: n for n in [item, *self.world.owned_descendants(item.id)]})
+                cards = list(by_id.values())
             enriched = [self.enrich_card(card) for card in cards]
             card_ids = [card.id for card in cards] if chunks is not None else None
             edges = (
@@ -1549,12 +1559,11 @@ class ApplicationServices:
     async def _capture_subgraph_locked(self, request):
         selected_ids = list(request.node_ids)
         for node_id in request.node_ids:
-            if self.world.is_container(self.world.get_card(node_id)):
-                selected_ids.extend(m.id for m in self.world.descendants(node_id))
+            selected_ids.extend(m.id for m in self.world.owned_descendants(node_id))
         request = request.model_copy(update={"node_ids": list(dict.fromkeys(selected_ids))})
         cards = [self.world.get_card(node_id) for node_id in request.node_ids]
         from backend.node_containers import parent_first
-        cards = parent_first(cards)
+        cards = parent_first(cards, parent=lambda n: n.equipment.owner_id if n.equipment else n.parent_id)
         edges = self.world.list_edges(request.node_ids)
         card_revisions = {card.id: card.revision for card in cards}
         edge_revisions = {edge.id: edge.revision for edge in edges}
@@ -1645,6 +1654,8 @@ class ApplicationServices:
             template_node = LegionTemplateNode(
                 key=node_keys[card.id],
                 parent_key=node_keys.get(card.parent_id),
+                owner_key=node_keys.get(card.equipment.owner_id) if card.equipment else None,
+                equipment_relationship=card.equipment.relationship if card.equipment else None,
                 initial_document=definition.document.remap_references(definition.document.capture(documents[card.id]["value"]), node_keys) if definition.document else None,
                 initial_shared_state=shared_states[card.id]["value"] if card.id in shared_states else None,
                 type=card.type,
@@ -1729,6 +1740,9 @@ class ApplicationServices:
                 direction=edge.direction,
             )
             for index, edge in enumerate(edges)
+            # Ownership restores these implicit capabilities. Older worlds can
+            # still contain explicit edges created before an item was equipped.
+            if not self.world.is_equipment_connection(edge.source, edge.target)
         ]
         return LegionBlueprint(
             bounds=LegionBounds(width=max_x - min_x, height=max_y - min_y),
@@ -1737,6 +1751,18 @@ class ApplicationServices:
 
     def list_legions(self) -> list[LegionSummary]:
         return [self._legion_summary(record) for record in self.legions.list()]
+
+    async def duplicate_agent(self, agent_id):
+        async with self._portable_state_gate.capture(), self._node_mutation():
+            agent = self.world.get_card(agent_id)
+            if "core.agent" not in self.plugins.node_type(agent.type).traits:
+                raise ResourceValidationError("Choose an Agent to duplicate")
+            blueprint, _, bindings = await self.summoning.definition(agent)
+            now = datetime.now(UTC)
+            record = LegionRecord(id=agent.id, name=agent.name, description="", blueprint=blueprint,
+                                 created_at=now, updated_at=now, revision=1)
+            return await self.instantiate_legion(agent.id, LegionInstantiate(position={
+                "x": agent.position.x + agent.size.width + 180, "y": agent.position.y}), record=record, bindings=bindings)
 
     async def delete_legion(self, legion_id: str) -> LegionSummary:
         async with self._node_mutation():
@@ -1797,11 +1823,12 @@ class ApplicationServices:
                 ), _creation_receipts=creation_receipts, _publish_event=False)
                 created_nodes.append(wrapper)
             from backend.node_containers import parent_first
-            for node in parent_first(record.blueprint.nodes, key=lambda n: n.key, parent=lambda n: n.parent_key):
+            for node in parent_first(record.blueprint.nodes, key=lambda n: n.key, parent=lambda n: n.owner_key or n.parent_key):
                 created_nodes.append(await self._create_card(
                     CardCreate(
                         id=node_ids[node.key],
-                        parent_id=node_ids[node.parent_key] if node.parent_key else (wrapper.id if wrapper else None),
+                        parent_id=node_ids[node.parent_key] if node.parent_key else (wrapper.id if wrapper and not node.owner_key else None),
+                        equipment={"owner_id": node_ids[node.owner_key], "relationship": node.equipment_relationship} if node.owner_key else None,
                         type=node.type,
                         name=node.name,
                         position={
@@ -2341,7 +2368,7 @@ class ApplicationServices:
         sessions = self.conversations.list_sessions(conversation_id)
         connected_ids = {
             edge.source
-            for edge in self.world.list_edges_to(conversation_id)
+            for edge in self.world.connections_to(conversation_id)
             if edge.relationship == Relationship.PARTICIPATE
         }
         agent_ids = connected_ids | {
@@ -2951,8 +2978,8 @@ class ApplicationServices:
     ) -> None:
         self._require_card_type(agent_id, CardType.AGENT)
         self._require_card_type(conversation_id, CardType.CONVERSATION)
-        edge = self.world.find_edge(agent_id, conversation_id)
-        if edge is None or edge.relationship != Relationship.PARTICIPATE:
+        if not any(edge.target == conversation_id and edge.relationship == Relationship.PARTICIPATE
+                   for edge in self.world.connections_from(agent_id)):
             raise PermissionDeniedError(
                 f"agent {agent_id!r} is not connected to conversation {conversation_id!r}"
             )
@@ -3078,6 +3105,8 @@ class ApplicationServices:
 
     def _affected_agents(self, edge: Edge) -> list[str]:
         source = self.world.maybe_get_card(edge.source)
+        if source is not None and source.equipment:
+            return [source.equipment.owner_id]
         if source is not None and source.type == CardType.AGENT:
             target = self.world.maybe_get_card(edge.target)
             if (
@@ -3251,6 +3280,8 @@ def create_services(
     plugin_registry = plugins or load_plugin_registry()
     world = WorldStore(database, plugin_registry, chunk_size=settings.chunk_size)
     try:
+        from backend.migrations.barracks import check_legacy
+        check_legacy(database)
         world.assert_plugin_availability()
     except BaseException:
         database.close()

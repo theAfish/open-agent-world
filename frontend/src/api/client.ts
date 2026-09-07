@@ -122,6 +122,7 @@ export function normalizeCard(input: unknown): WorldCard {
   }
   return {
     id: String(source.id),
+    equipment: source.equipment as WorldCard["equipment"] ?? null,
     parent_id: typeof source.parent_id === "string" ? source.parent_id : null,
     type,
     name: String(source.name ?? config.filename ?? type),
@@ -263,10 +264,6 @@ export const worldApi = {
     return request(`/nodes/${encodeURIComponent(id)}/summoning`);
   },
 
-  async captureSummoning(id: string, args: Record<string, unknown>): Promise<SummoningSnapshot> {
-    return request(`/nodes/${encodeURIComponent(id)}/summoning/capture`, { method: "POST", body: JSON.stringify(args) });
-  },
-
   async summoningAction(id: string, args: Record<string, unknown>): Promise<SummonedInstance> {
     return request(`/nodes/${encodeURIComponent(id)}/summoning/actions`, { method: "POST", body: JSON.stringify(args) });
   },
@@ -338,11 +335,20 @@ export const worldApi = {
     return normalizeLegionInstantiation(body);
   },
 
+  getAgentCapabilities(id: string): Promise<{ capabilities: { id: string; target_name: string; description: string; kind: string }[] }> {
+    return request(`/agents/${encodeURIComponent(id)}/capabilities`);
+  },
+
+  async duplicateAgent(id: string): Promise<LegionInstantiation> {
+    return normalizeLegionInstantiation(await request(`/nodes/${encodeURIComponent(id)}/duplicate`, { method: "POST" }));
+  },
+
   async createNode(node: CardCreateInput): Promise<WorldCard> {
     const payload = {
       ...("id" in node ? { id: node.id } : {}),
       type: node.type,
       parent_id: node.parent_id,
+      equipment: node.equipment,
       name: node.name,
       position: node.position,
       size: node.size,
@@ -382,6 +388,7 @@ export const worldApi = {
         id: node.id,
         type: node.type,
         parent_id: node.parent_id,
+      equipment: node.equipment,
         name: node.name,
         position: node.position,
         size: node.size,

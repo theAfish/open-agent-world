@@ -1,4 +1,3 @@
-import { useSummoningCaptureStore } from "../state/summoningCapture";
 import {
   Background,
   BackgroundVariant,
@@ -17,8 +16,10 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { EquipmentCardNode, EquipmentPanelNode, EquipmentInspector } from "../cards/Equipment";
+import { canEquip, equipmentOwner, useEquipmentDrag, useEquipmentPanel } from "../state/equipment";
 import { ContainerCardNode } from "../cards/ContainerCard";
-import { acceptsMember, ancestors, descendants, containerDefinition, containerSizes, dropContainer, isContainer, parentFirst } from "../state/containers";
+import { ancestors, containerDefinition, containerSizes, dropContainer, isContainer, parentFirst } from "../state/containers";
 import { WorldCardNode } from "../cards/CardFrame";
 import type { CanvasNode, CanvasNodeData } from "../cards/types";
 import { EdgeInspector } from "../edges/EdgeInspector";
@@ -26,8 +27,9 @@ import { RelationshipConnectionLine } from "../edges/RelationshipConnectionLine"
 import { SemanticEdge, type CanvasEdge } from "../edges/SemanticEdge";
 import { filterCardsToChunks } from "../state/chunks";
 import { getNodeType } from "../state/catalog";
+import { buildCardDraft } from "../state/helpers";
 import { hasPaletteDrag, readPaletteDrag } from "../palette/dragPayload";
-import { validateConnection } from "../state/relationships";
+import { getConnectionOptions, validateConnection } from "../state/relationships";
 import { useWorldStore } from "../state/worldStore";
 import { NODE_SURFACE_SIZE, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { ContourLayer } from "./ContourLayer";
@@ -38,7 +40,7 @@ import {
   type SurfaceObstacle,
 } from "./nodeDisplacement";
 
-const nodeTypes = { worldCard: WorldCardNode, container: ContainerCardNode };
+const nodeTypes = { worldCard: WorldCardNode, container: ContainerCardNode, equipment: EquipmentCardNode, equipmentPanel: EquipmentPanelNode };
 const edgeTypes = { semantic: SemanticEdge };
 
 function isScrollableArea(target: EventTarget | null, boundary: HTMLElement): boolean {
@@ -112,7 +114,11 @@ export function WorldCanvas() {
   const { getViewport, screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
 
   const renderCards = useMemo(
-    () => filterCardsToChunks([...cards, ...stressCards], activeChunkKeys, catalog),
+    () => {
+      const visible = filterCardsToChunks([...cards, ...stressCards].filter((c) => !equipmentOwner(c, cards)), activeChunkKeys, catalog);
+      const ids = new Set(visible.map((c) => c.id));
+      return [...visible, ...cards.filter((c) => { const owner = equipmentOwner(c, cards); return owner && ids.has(owner.id); })];
+    },
     [activeChunkKeys, cards, stressCards, catalog],
   );
   const surfaceLevels = useMemo(() => new Map(renderCards.map((card) => [
@@ -120,18 +126,19 @@ export function WorldCanvas() {
     surfaceLevelForNode(card.id, surfaceLevelsByNodeId),
   ])), [renderCards, surfaceLevelsByNodeId]);
   const surfaceObstacles = useMemo<SurfaceObstacle[]>(() => renderCards.flatMap<SurfaceObstacle>((card) => {
-    if (isContainer(card, catalog) || card.parent_id) return [];
+    if (isContainer(card, catalog) || card.parent_id || card.equipment) return [];
     const level = surfaceLevels.get(card.id);
     return level === "inspector" || level === "workspace" ? [{ card, level }] : [];
   }), [renderCards, surfaceLevels, catalog]);
   const displacedById = useMemo(
-    () => displacedPositions(renderCards.filter((c) => !isContainer(c, catalog) && !c.parent_id), surfaceObstacles, surfaceLevels),
+    () => displacedPositions(renderCards.filter((c) => !isContainer(c, catalog) && !c.parent_id && !c.equipment), surfaceObstacles, surfaceLevels),
     [renderCards, surfaceLevels, surfaceObstacles, catalog],
   );
+  const equipmentPanels = useEquipmentPanel((state) => state.openIds);
   const mappedNodes = useMemo(() => {
     const byId = new Map(renderCards.map((c) => [c.id, c]));
     const frameSizes = containerSizes(renderCards, catalog, surfaceLevels);
-    return parentFirst(renderCards).map((card) => {
+    return parentFirst(renderCards).map<CanvasNode>((card) => {
       const level = surfaceLevels.get(card.id) ?? "preview";
       const displaced = displacedById.get(card.id);
       let node = nodeFromCard(card, level, displaced?.displaced ?? false, displaced?.position ?? card.position);
@@ -140,13 +147,29 @@ export function WorldCanvas() {
         node = { ...node, type: "container", position: card.position, style: { width, height }, zIndex: 0,
           dragHandle: ".container-drag-region", connectable: containerDefinition(card, catalog)!.connectable };
       }
+      const equipmentAgent = equipmentOwner(card, cards);
+      if (equipmentAgent && byId.has(equipmentAgent.id)) {
+        const owner = equipmentAgent;
+        const ownerLevel = surfaceLevels.get(owner.id) ?? "preview";
+        const index = renderCards.filter((c) => equipmentOwner(c, cards)?.id === owner.id).findIndex((c) => c.id === card.id);
+        return { ...node, type: "equipment", parentId: owner.id, draggable: false, hidden: !equipmentPanels.includes(owner.id),
+          position: { x: 13, y: NODE_SURFACE_SIZE[ownerLevel].height + 51 + index * 48 },
+          style: { width: 294, height: 40 }, zIndex: 26 };
+      }
       if (card.parent_id && byId.has(card.parent_id)) {
         const parent = byId.get(card.parent_id)!;
         return { ...node, parentId: parent.id, position: { x: node.position.x - parent.position.x, y: node.position.y - parent.position.y } };
       }
       return node;
+    }).flatMap((node): CanvasNode[] => {
+      if (node.type === "equipment" || !catalog.node_types.find((type) => type.id === node.data.card.type)?.traits.includes("core.agent")) return [node];
+      const count = renderCards.filter((card) => equipmentOwner(card, cards)?.id === node.id).length;
+      return [node, { id: `${node.id}:equipment`, type: "equipmentPanel", data: node.data, parentId: node.id,
+        position: { x: 0, y: NODE_SURFACE_SIZE[node.data.surfaceLevel].height + 8 },
+        style: { width: 320, height: 46 + Math.max(2, count + 1) * 48 },
+        hidden: !equipmentPanels.includes(node.id), draggable: false, selectable: false, connectable: false, zIndex: 24 }];
     });
-  }, [displacedById, renderCards, surfaceLevels, catalog]);
+  }, [displacedById, renderCards, surfaceLevels, catalog, cards, equipmentPanels]);
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(mappedNodes);
   const nodesRef = useRef(nodes);
   const positionAnimation = useRef<number>();
@@ -233,15 +256,19 @@ export function WorldCanvas() {
   }, [selectedCardIds, selectionRevision, setNodes]);
 
   const visibleNodeIds = useMemo(() => new Set(renderCards.map((card) => card.id)), [renderCards]);
+  const displayEndpoint = useCallback((id: string) => {
+    const card = cards.find((item) => item.id === id);
+    return card && nodes.find((node) => node.id === id)?.hidden ? equipmentOwner(card, cards)?.id ?? id : id;
+  }, [cards, nodes]);
   const flowEdges = useMemo<CanvasEdge[]>(
     () => edges
       .filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target))
-      .map((edge) => ({
+      .map<CanvasEdge>((edge) => ({
         id: edge.id,
-        source: edge.source,
-        target: edge.target,
+        source: displayEndpoint(edge.source),
+        target: displayEndpoint(edge.target),
         type: "semantic",
-        data: { relationship: edge.relationship, direction: edge.direction },
+        data: { relationship: edge.relationship, direction: edge.direction, sourceCardId: edge.source, targetCardId: edge.target },
         selected: edge.id === selectedEdgeId,
         markerEnd: {
           type: MarkerType.ArrowClosed,
@@ -256,8 +283,8 @@ export function WorldCanvas() {
           color: "var(--edge-arrow)",
         } : undefined,
         interactionWidth: 24,
-      })),
-    [edges, selectedEdgeId, visibleNodeIds],
+      })).filter((edge) => edge.source !== edge.target),
+    [edges, selectedEdgeId, visibleNodeIds, displayEndpoint],
   );
 
   const dimensions = useCallback(() => ({
@@ -321,14 +348,38 @@ export function WorldCanvas() {
 
   const onNodeDragStart: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
     cancelPositionAnimation();
+    useEquipmentDrag.getState().set(draggedNodes.length <= 1 ? node.data.card : undefined);
     setDragging(true);
     activeDragIds.current.clear();
     activeDragIds.current.add(node.id);
     draggedNodes.forEach((draggedNode) => activeDragIds.current.add(draggedNode.id));
   }, [cancelPositionAnimation, setDragging]);
 
+  const equipmentDropOwner = useCallback((resource: CanvasNodeData["card"], x: number, y: number) => {
+    return cards.find((candidate) => {
+      if (activeDragIds.current.has(candidate.id) || !canEquip(resource, candidate, catalog, cards)) return false;
+      const box = wrapper.current?.querySelector(`[data-equip-target="${candidate.id}"]`)?.getBoundingClientRect();
+      return box && x > box.left && x < box.right && y > box.top && y < box.bottom;
+    });
+  }, [cards, catalog]);
+  const onNodeDrag: OnNodeDrag<CanvasNode> = useCallback((event, node) => {
+    const resource = useEquipmentDrag.getState().resource;
+    if (resource?.id !== node.id || !("clientX" in event)) return;
+    useEquipmentDrag.getState().set(resource, equipmentDropOwner(resource, event.clientX, event.clientY)?.id);
+  }, [equipmentDropOwner]);
+
   const onNodeDragStop: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
     cancelPositionAnimation();
+    const targetId = useEquipmentDrag.getState().targetId;
+    useEquipmentDrag.getState().set();
+    if (targetId) {
+      const owner = cards.find((card) => card.id === targetId)!;
+      const relationship = getConnectionOptions(catalog, owner.type, node.data.card.type)[0].value;
+      void updateCard(node.id, { parent_id: null, equipment: { owner_id: targetId, relationship } }).finally(() => {
+        activeDragIds.current.clear(); setDragging(false);
+      });
+      return;
+    }
     const moved = draggedNodes.length > 0 ? draggedNodes : [node];
     const movedIds = new Set(moved.map((n) => n.id));
     const updates = moved.filter((n) => !ancestors(cards, n.data.card).some((parent) => movedIds.has(parent.id))).map((draggedNode) => {
@@ -343,25 +394,6 @@ export function WorldCanvas() {
       };
     });
     const sizes = new Map(nodesRef.current.map((item) => [item.id, { width: Number(item.style?.width), height: Number(item.style?.height) }]));
-    const captureNodes = updates.flatMap((update) => [cards.find((card) => card.id === update.id)!, ...descendants(cards, update.id)]);
-    const callable = captureNodes.some((card) => catalog.node_types.find((type) => type.id === card.type)?.traits.includes("core.agent"));
-    const canCapture = (container: typeof cards[number]) => callable
-      && !!catalog.node_types.find((type) => type.id === container.type)?.summoning?.templates_field
-      && !captureNodes.some((card) => card.id === container.id)
-      && captureNodes.every((card) => !card.ephemeral && catalog.node_types.find((type) => type.id === card.type)?.templateable);
-    const dragged = updates.find((update) => update.id === node.id) ?? updates[0];
-    if (dragged) {
-      const member = cards.find((card) => card.id === dragged.id)!;
-      const destination = dropContainer(cards, member, { x: dragged.position.x + 48, y: dragged.position.y + 48 }, catalog, sizes,
-        (container, candidate) => acceptsMember(container, candidate, catalog, cards) || canCapture(container));
-      if (destination && canCapture(destination)) {
-        // Importing a saved template leaves the source graph in its original space.
-        activeDragIds.current.clear();
-        setDragging(false);
-        useSummoningCaptureStore.getState().open(destination.id, updates.map((update) => update.id));
-        return;
-      }
-    }
     void updateCardPositions(updates.map((update) => {
       const member = cards.find((card) => card.id === update.id)!;
       if (member.ephemeral || containerDefinition(member, catalog)?.parentable === false) return update;
@@ -371,7 +403,7 @@ export function WorldCanvas() {
       activeDragIds.current.clear();
       setDragging(false);
     });
-  }, [cancelPositionAnimation, cards, setDragging, updateCardPositions, catalog]);
+  }, [cancelPositionAnimation, cards, setDragging, updateCardPositions, updateCard, catalog]);
 
   const onConnect = useCallback((connection: Connection) => {
     requestConnection(connection.source, connection.target);
@@ -387,8 +419,9 @@ export function WorldCanvas() {
       source?.type,
       target?.type,
       edges,
+      cards,
     ).valid;
-  }, [catalog, edges, renderCards]);
+  }, [catalog, edges, renderCards, cards]);
 
   const onSelectionChange = useCallback(({ nodes: selectedNodes }: OnSelectionChangeParams<CanvasNode, CanvasEdge>) => {
     selectCards(selectedNodes.map((node) => node.id));
@@ -400,7 +433,15 @@ export function WorldCanvas() {
     if (!payload) return;
     const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
     if (payload.kind === "node") {
-      if (!getNodeType(catalog, payload.type)) return;
+      const definition = getNodeType(catalog, payload.type);
+      if (!definition) return;
+      const resource = { ...buildCardDraft(payload.type, position, definition), id: "" };
+      const owner = equipmentDropOwner(resource, event.clientX, event.clientY);
+      useEquipmentDrag.getState().set();
+      if (owner) {
+        void createCard(payload.type, position, { equipment: { owner_id: owner.id, relationship: getConnectionOptions(catalog, owner.type, payload.type)[0].value } });
+        return;
+      }
       const parent = dropContainer(cards, { id: "", type: payload.type } as typeof cards[number], position, catalog);
       void createCard(payload.type, position).then((created) => {
         if (created && parent) void updateCard(created.id, { parent_id: parent.id });
@@ -410,7 +451,7 @@ export function WorldCanvas() {
     const legion = legions.find((item) => item.id === payload.id);
     if (!legion || legion.revision !== payload.revision) return;
     void instantiateLegion(payload.id, position);
-  }, [cards, catalog, createCard, instantiateLegion, legions, screenToFlowPosition, updateCard]);
+  }, [cards, catalog, createCard, instantiateLegion, legions, screenToFlowPosition, updateCard, equipmentDropOwner]);
 
   return (
     <div
@@ -426,8 +467,11 @@ export function WorldCanvas() {
         if (!hasPaletteDrag(event.dataTransfer)) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "copy";
+        const resource = useEquipmentDrag.getState().resource;
+        if (resource) useEquipmentDrag.getState().set(resource, equipmentDropOwner(resource, event.clientX, event.clientY)?.id);
       }}
     >
+      <EquipmentInspector />
       <ReactFlow<CanvasNode, CanvasEdge>
         nodes={nodes}
         edges={flowEdges}
@@ -435,6 +479,7 @@ export function WorldCanvas() {
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onNodeDragStart={onNodeDragStart}
+        onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
         onConnect={onConnect}
         onConnectStart={(_event, params) => {

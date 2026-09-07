@@ -40,17 +40,23 @@ class CapabilityBroker:
     def derive(self, agent_id: str) -> CapabilitySet:
         agent = self._require_type(agent_id, CardType.AGENT)
         capabilities: list[Capability] = []
-        directed_edges = [(edge, edge.target) for edge in self.world.list_edges_from(agent_id)]
+        directed_edges = [(edge, edge.target) for edge in self.world.connections_from(agent_id)]
         directed_edges.extend(
             (edge, edge.source)
-            for edge in self.world.list_edges_to(agent_id)
+            for edge in self.world.connections_to(agent_id)
             if edge.direction == EdgeDirection.BIDIRECTIONAL
         )
         capability_ids: set[str] = set()
+        visited: set[tuple[str, str]] = set()
         for edge, target_id in directed_edges:
+            if (edge.relationship, target_id) in visited:
+                continue
+            visited.add((edge.relationship, target_id))
             target = self.world.get_card(target_id)
             suffix = _tool_suffix(target)
             relationship = self.plugins.relationship(edge.relationship)
+            if not relationship.capabilities:
+                directed_edges.extend((child, child.target) for child in self.world.connections_from(target_id))
             for grant in relationship.capabilities:
                 capability_id = f"{grant.kind}:{target.id}"
                 if capability_id in capability_ids:
@@ -90,57 +96,19 @@ class CapabilityBroker:
     def require_agent_communicate(self, agent_id: str, target_agent_id: str) -> None:
         self._require_type(agent_id, CardType.AGENT)
         self._require_type(target_agent_id, CardType.AGENT)
-        edge = self.world.find_edge(agent_id, target_agent_id)
-        reverse = self.world.find_edge(target_agent_id, agent_id)
-        allowed = edge is not None and edge.relationship == Relationship.COMMUNICATE
-        allowed = allowed or (
-            reverse is not None
-            and reverse.relationship == Relationship.COMMUNICATE
-            and reverse.direction == EdgeDirection.BIDIRECTIONAL
-        )
-        if not allowed:
-            raise PermissionDeniedError(
-                f"agent {agent_id!r} cannot communicate with agent {target_agent_id!r}"
-            )
+        self.capability_for_id(agent_id, f"agent.communicate:{target_agent_id}")
 
     def require_text_read(self, agent_id: str, resource_id: str) -> None:
-        self._require_type(agent_id, CardType.AGENT)
-        self._require_type(resource_id, CardType.TEXT)
-        edge = self.world.find_edge(agent_id, resource_id)
-        if edge is None or edge.relationship not in {
-            Relationship.READ,
-            Relationship.READ_EDIT,
-        }:
-            raise PermissionDeniedError(
-                f"agent {agent_id!r} has no read capability for text {resource_id!r}"
-            )
+        self.capability_for_id(agent_id, f"text.read:{resource_id}")
 
     def require_text_edit(self, agent_id: str, resource_id: str) -> None:
-        self._require_type(agent_id, CardType.AGENT)
-        self._require_type(resource_id, CardType.TEXT)
-        edge = self.world.find_edge(agent_id, resource_id)
-        if edge is None or edge.relationship != Relationship.READ_EDIT:
-            raise PermissionDeniedError(
-                f"agent {agent_id!r} has no edit capability for text {resource_id!r}"
-            )
+        self.capability_for_id(agent_id, f"text.edit:{resource_id}")
 
     def require_image_view(self, agent_id: str, resource_id: str) -> None:
-        self._require_type(agent_id, CardType.AGENT)
-        self._require_type(resource_id, CardType.IMAGE)
-        edge = self.world.find_edge(agent_id, resource_id)
-        if edge is None or edge.relationship != Relationship.VIEW:
-            raise PermissionDeniedError(
-                f"agent {agent_id!r} has no view capability for image {resource_id!r}"
-            )
+        self.capability_for_id(agent_id, f"image.view:{resource_id}")
 
     def require_sandbox_execute(self, agent_id: str, sandbox_id: str) -> None:
-        self._require_type(agent_id, CardType.AGENT)
-        self._require_type(sandbox_id, CardType.SANDBOX)
-        edge = self.world.find_edge(agent_id, sandbox_id)
-        if edge is None or edge.relationship != Relationship.EXECUTE:
-            raise PermissionDeniedError(
-                f"agent {agent_id!r} cannot execute in sandbox {sandbox_id!r}"
-            )
+        self.capability_for_id(agent_id, f"sandbox.execute:{sandbox_id}")
 
     def require_sandbox_resource(
         self, sandbox_id: str, resource_id: str, *, write: bool = False

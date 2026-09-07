@@ -758,94 +758,111 @@ omits projected entries because subgraph capture independently preserves childre
 and their relationships. See the skill helper for this specialization.
 
 
-## Callable subgraphs and Agent Barracks (Plugin API 1.6)
+## Agent equipment and Barracks (Plugin API 1.7)
 
-`plugins/agent_barracks` is an ordinary first-party plugin. It registers the
-`oaw.barracks` document collection, its `oaw.barracks.template` member cards, and
-an owned `oaw.barracks.summon` relationship. Both the library and its individual
-members are connectable. The common open-container frame handles drag membership,
-resizing, movement and dissolution; template cards can also stand alone.
+World edges describe shared relationships. `Card.parent_id` describes spatial
+container membership. `Card.equipment = {owner_id, relationship}` describes
+private ownership and an owner-to-resource capability binding. An equipped card
+keeps its ID, plugin, configuration, document and lifecycle. It cannot also be a
+container member. Ownership and membership together must remain acyclic.
 
-A callable template is a saved subgraph plus one entry Agent. A single Agent,
-an Agent with Skills and a Sandbox, and a Legion with multiple Agents all use
-the existing subgraph capture/restore pipeline. Plugin ownership, payloads,
-resource lifecycle compensation, membership, documents and internal relationships
-are preserved. Capturing does not add a record to the user's Legion preset list.
-Invoking a non-Legion template does not wrap it in a Legion or grant team powers.
+Equipment eligibility comes from the existing relationship registry: any card
+that can connect to an Agent can be owned by it. Plugins do not declare a separate
+equipment flag, whitelist, or portability requirement. Self-ownership, mixed
+container membership and ownership cycles remain invalid.
 
-The public contracts are available from `open_agent_world.plugin_api`:
+The binding selects an existing relationship. When omitted, it uses the first
+available connection option, just like the connection UI. Text therefore offers
+Read and Read/edit; Conversation uses Participate; Sandbox uses Execute.
+Reverse-oriented plugin relationships retain their endpoint order and direction.
+The same live connection resolver supplies world edges and owned bindings to
+capability checks and Conversation participant authorization.
 
-```python
-from open_agent_world.plugin_api import (
-    CallableTemplate, NodeSummoningDefinition, SummoningAction, SummoningPolicy,
-)
+A relationship with no direct capability grants delegates capability discovery
+to its target's outgoing relationships. This supports capability adapters through
+ordinary connections as well as equipment; visited relationships stop cycles.
+Relationships with direct grants stop traversal at their own scoped target.
 
-# Attached to the library's NodeTypeDefinition, with an owned capability handler:
-# summoning=NodeSummoningDefinition("acme.workers.summon", templates_field="templates")
-# An individual template omits templates_field and uses CallableTemplate as its document.
+Portability remains a separate capture/restore contract. Equipping a plugin node
+does not imply that its runtime state can be copied. Built-in Conversations
+instantiate as new empty sessions, without copying message history.
+Sandbox capture preserves the
+runtime choice but excludes the active workspace path and files, creating a fresh
+managed workspace. External graph connections continue to point at the original
+world resources. Equipping never silently deletes existing world edges.
 
-async def invoke(context, capability, arguments):
-    return await context.summoning_action(capability, arguments)
+Use the ordinary node create/update API to equip or unequip:
+
+```json
+{"parent_id": null, "equipment": {"owner_id": "agent-id", "relationship": "execute"}}
 ```
 
-`NodeSummoningDefinition` requires a document and a capability handler owned by
-the same plugin. The named collection field contains `CallableTemplate` documents;
-without a collection field the node document is one template. Libraries may use
-`instructions` and `policy` fields. `SummoningAction` provides the tool schema:
-`list`, `summon`, `inspect`, `message`, `stop`, and `reclaim`. `list` returns short
-names, descriptions, entry keys and copied/shared node summaries. `summon` accepts
-`template_id` and `prompt`; the remaining instance operations use `instance_id`.
-`message` also takes a prompt and reuses the instance's nodes and provider session.
+`{"equipment": null}` returns the card to world mode. Open the Agent backpack
+to reveal slots, then drop a card into the panel. Slots expose inspection,
+existing relationship options, unequip and connection controls. Nested
+toolbox members also retain connectors. Ports always create normal world edges.
+Equipment stays loaded with its owner across chunk boundaries and survives
+reload and undo/redo. Portable nodes also support graph capture and duplication. The duplicate
+endpoint is `POST /api/nodes/{agent_id}/duplicate`; it uses the same capture /
+restore pipeline without creating a Legion preset or starting a Run.
 
-Every operation rederives the caller's live graph capability. A direct template
-connection lists only that template. Agent-created instances are manageable only
-by their creating Agent, through the original connected library/template. Agents
-cannot capture or edit templates through this capability. The host API for humans
-provides `GET /api/nodes/{id}/summoning`, `POST .../summoning/capture` and
-`POST .../summoning/actions`; capture uses an expected document revision.
+`oaw.barracks` is an ordinary container accepting Agents. Dragging an Agent in or
+out changes membership only. The Agent in that container is the live blueprint;
+later configuration/equipment changes affect subsequent summons. There is no
+Agent Template card, template-save form, capture endpoint, copied-node picker,
+entry selector or copy/share dialog. Legion retains explicit team context and
+multi-Agent topology; it is not required to package one equipped Agent.
 
-Dropping an Agent, a selection containing Agents, or a Legion into a library opens
-the capture form with those nodes selected. It creates a saved copy; source node
-positions, membership and connections stay unchanged, including when cancelled.
-The catalog exposes `summoning.templates_field` so drop handling follows the host
-contract rather than a plugin ID. Existing template cards still use ordinary
-container membership when dragged in or out.
+The **Summoning** skill (`oaw.barracks.summoner`) connects to an Agent using
+`oaw.barracks.use`. Equip it or connect it as a shared card, then connect its
+own port to a Barracks using
+`oaw.barracks.summon`. It uses the same relationship traversal in both modes.
+Unequipping Summoning revokes its owner's derived summon capability while
+preserving the adapter's graph connection. A plain Agent has no inherent summon
+capability. A spawned Agent's copied Summoning skill retains its external Barracks edge,
+so recursive summoning uses the same mechanism.
 
-The capture form explicitly selects copied nodes, the entry Agent and existing
-connected resources to share. Unselected external edges are omitted. Copied
-Sandboxes get fresh managed workspaces; their old directory configuration and
-working files are not captured. Shared bindings retain their world IDs, node types,
-relationship directions and plugin owners. They must still exist when restored;
-an unavailable binding rolls back the whole restoration. This explicit sharing
-contract is distinct from ordinary document references which are cleared outside
-portable groups. Shared resources are never owned or deleted by the instance.
+`NodeSummoningDefinition(capability_kind)` declares a catalog container with a
+document and handler owned by its plugin. The document supplies `instructions`
+and `policy`. `SummoningAction` supports `list`, `summon`, `inspect`, `message`,
+`stop` and `reclaim`. Listing returns `agents` with ID, name, description and
+equipment count. Summon takes `agent_id` and `prompt`; instance operations take
+`instance_id`. Human APIs are `GET /api/nodes/{id}/summoning` and
+`POST /api/nodes/{id}/summoning/actions`.
 
-A binding to the destination library is stored as `$library`. It resolves to the
-current library at invocation, allowing recursive calls without embedding the
-library in itself. For a connected individual template this means its containing
-library, or the template itself when detached. A copied child Agent receives only
-the relationships explicitly included or shared in its saved graph.
+Admission takes a stable in-memory snapshot of the current Agent and its private
+equipment, then restores through existing plugin ownership validation and
+compensating resource lifecycles. Internal equipment bindings are remapped;
+external edges retain endpoint IDs, type and plugin ownership. No second durable
+blueprint is stored. Instantiation failures roll back created resources.
 
-Summoning starts an ordinary child Run with `caller_kind="summon"`, preserving
-parent/root lineage, state inheritance and cancellation propagation. Agent tools
-wait for the provider turn and return status, result, errors, Run ID, instance ID,
-entry Agent ID and owned node IDs. Human try returns immediately for interactive
-monitoring. Failed Runs retain their result/instance handles. An unfinished turn
-can return a waiting status; the instance remains available for inspection or stop.
+Each summon starts a normal child Run with `caller_kind="summon"`. All descendants
+share root depth, concurrent Run and total-instance limits (defaults 4, 4, 16).
+Libraries can tighten these limits. Completed/reclaimed instances still count
+toward the root total. Agent calls return the provider turn and instance handle;
+human test calls return immediately. Follow-up reuses the same nodes. Stop and
+reclaim cascade through summoned descendants. Reclaim removes the instance's
+current private equipment, including newly equipped resources, while preserving
+unequipped and shared world resources. Ownership roots are persisted separately
+from the initial node list. Each Agent can manage only its own summoned instances
+through its live capability. Run results and instance records survive restart.
 
-All summons in a root task share depth, concurrent Run and total instance limits
-(defaults 4, 4 and 16). Nested libraries can tighten the root limits. Completed or
-reclaimed instances still count toward that task's total. Admission is serialized
-with graph mutation; waiting and cancellation happen outside the mutation lock.
-Run ancestry remains independent of spatial membership.
+### Migrating retired Barracks data
 
-Instance records and Run results survive restart. Each new instance is placed
-beside the library and below its previous live instances. Stop settles the instance
-and its summoned descendants, including work-source batches and Runs on their owned
-Agents. Reclaim then deletes those nodes through their normal plugin lifecycle.
-User-owned cards moved into an instance are detached and preserved. Deleting a
-saved template or library does not delete already instantiated subgraphs.
+The old `CallableTemplate`, `SummoningCapture` and `templates_field` contracts are
+removed. Other earlier plugin contracts remain supported. Startup detects retired
+Barracks documents/cards/edges and provides an explicit migration command:
 
-The UI exposes settings as ordinary form fields and shows saved template contents,
-shared bindings, invocation results, follow-up and reclaim controls. Result details
-can be collapsed without changing the canvas subgraph or ending its Runs.
+```powershell
+backend/.venv/Scripts/python.exe -m backend.migrations.barracks OLD_DATA_ROOT NEW_DATA_ROOT
+```
+
+Stop the application first. The command copies into a new directory, keeps the
+source untouched, materializes supported single-Agent snapshots and equipment,
+converts legacy Agent-to-Barracks edges into equipped Summoning skills, and archives the
+old definitions in `legacy-barracks-archive.json`. Point the application at the
+new data root after reviewing it. A failed copy retains `MIGRATION_INCOMPLETE`.
+Existing Legion templates, multi-Agent snapshots, unsupported resource types,
+and direct-to-template capability scopes require restoration in the old version
+first; migration refuses to flatten team context or widen a capability scope.
+No migration has been run against the user's live data automatically.

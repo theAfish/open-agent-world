@@ -412,7 +412,7 @@ test("a detail card uses the same boundary-following connection hint", async ({ 
     await surface.click();
     await expect(surface).toHaveAttribute("data-surface-level", "inspector");
 
-    await page.waitForTimeout(350);
+    await page.waitForTimeout(450);
     const inspectorBox = await surface.boundingBox();
     if (!inspectorBox) throw new Error("Detail card geometry is unavailable");
     await page.mouse.move(inspectorBox.x + inspectorBox.width - 3, inspectorBox.y + inspectorBox.height / 2);
@@ -440,13 +440,13 @@ test("detail and workspace surfaces are draggable canvas nodes while controls re
     const surface = page.locator(`[data-card-id="${card.id}"]`);
     await surface.click();
     await expect(surface).toHaveAttribute("data-surface-level", "inspector");
-    const section = surface.locator(".card-section").first();
+    const section = surface.locator(".card-footer");
     const detailBefore = await surface.boundingBox();
     const sectionBox = await section.boundingBox();
     if (!detailBefore || !sectionBox) throw new Error("Detail drag geometry is unavailable");
-    await page.mouse.move(sectionBox.x + 18, sectionBox.y + 14);
+    await page.mouse.move(sectionBox.x + sectionBox.width / 2, sectionBox.y + 4);
     await page.mouse.down();
-    await page.mouse.move(sectionBox.x + 138, sectionBox.y + 52, { steps: 5 });
+    await page.mouse.move(sectionBox.x + sectionBox.width / 2 + 120, sectionBox.y + 42, { steps: 5 });
     await page.mouse.up();
     await expect.poll(async () => Math.abs(((await surface.boundingBox())?.x ?? detailBefore.x) - detailBefore.x)).toBeGreaterThan(50);
 

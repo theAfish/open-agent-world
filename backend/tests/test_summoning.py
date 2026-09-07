@@ -12,24 +12,27 @@ from backend.errors import ConflictError, PermissionDeniedError
 from backend.main import create_app
 from backend.node_documents import read_document, write_document
 from backend.plugins.loader import load_plugin_registry
-from backend.plugins.summoning import SummoningAction, SummoningCapture
+from backend.plugins.summoning import SummoningAction
 from backend.runs.models import RunStatus
 from backend.services import create_services
 from backend.tests.conftest import create_node
 from backend.tests.plugin_support import install_test_plugin
 from backend.tests.test_runs import RecordingProvider
 from backend.tests.test_skill_packages import edit
-from backend.world.models import CardCreate, EdgeCreate
+from backend.world.models import CardCreate, CardPatch, EdgeCreate
 
 
-def capture(client, box, nodes, entry, shared=(), name="Researcher"):
-    url = f"/api/nodes/{box['id']}"
-    revision = client.get(url + "/document").json()["revision"]
-    result = client.post(url + "/summoning/capture", json={"name": name, "description": "Research a specific topic",
-        "node_ids": [n["id"] for n in nodes], "entry_agent_id": entry["id"],
-        "shared_node_ids": [n["id"] for n in shared], "expected_revision": revision})
-    assert result.status_code == 200, result.text
-    return result.json()["templates"][-1]
+def equip(client, resource, owner):
+    response = client.patch(f"/api/nodes/{resource['id']}", json={"parent_id": None,
+        "equipment": {"owner_id": owner["id"], "relationship": None}})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def stock(client, box, agent):
+    response = client.patch(f"/api/nodes/{agent['id']}", json={"parent_id": box["id"]})
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 def invoke(client, box, **args):
@@ -57,15 +60,16 @@ def test_equipped_agent_snapshot_shared_library_fresh_sandbox_and_restart(tmp_pa
         from pathlib import Path
         Path(original_workspace).mkdir(parents=True, exist_ok=True)
         Path(original_workspace, "original.txt").write_text("Private work", encoding="utf-8")
-        template = capture(client, box, [entry, sandbox], entry, [skills])
+        template = stock(client, box, entry)
+        equip(client, sandbox, entry)
         assert client.get(f"/api/nodes/{template['id']}").json()["parent_id"] == box["id"]
         client.patch(f"/api/nodes/{entry['id']}", json={"config": {"system_instruction": "Changed later"}})
-        instance = settle(client, box, invoke(client, box, action="summon", template_id=template["id"], prompt="Inspect sources"))
+        instance = settle(client, box, invoke(client, box, action="summon", agent_id=template["id"], prompt="Inspect sources"))
         assert instance["status"] == "succeeded"
         assert instance["result"] == "Mock response: Inspect sources"
         nodes = [client.get(f"/api/nodes/{key}").json() for key in instance["node_ids"]]
         assert len(nodes) == 2
-        assert next(n for n in nodes if n["type"] == "agent")["config"]["system_instruction"] == "Original instructions"
+        assert next(n for n in nodes if n["type"] == "agent")["config"]["system_instruction"] == "Changed later"
         fresh_sandbox = next(n for n in nodes if n["type"] == "sandbox")
         fresh_path = client.get(f"/api/sandboxes/{fresh_sandbox['id']}").json()["workspace"]
         assert fresh_path != original_workspace and not Path(fresh_path, "original.txt").exists()
@@ -82,35 +86,41 @@ def test_equipped_agent_snapshot_shared_library_fresh_sandbox_and_restart(tmp_pa
         assert client.get(f"/api/nodes/{skills['id']}").status_code == 200
 
 
-def test_legion_and_single_template_use_same_scope_and_restore_contract(tmp_path):
-    settings = replace(Settings.for_data_root(tmp_path / "world"), agent_runtime="core.mock", sandbox_runtime="auto")
-    with TestClient(create_app(settings)) as client:
-        box = create_node(client, "oaw.barracks")
-        lead = create_node(client, "agent", name="Lead")
-        peer = create_node(client, "agent", name="Peer")
-        group = client.post("/api/legion-groups", json={"name": "Team", "node_ids": [lead["id"], peer["id"]]}).json()[0]
-        client.put(f"/api/legion-groups/{group['id']}/state", json={"value": {"brief": "Saved team"}, "expected_revision": 0})
-        team = capture(client, box, [group], lead, name="Team template")
-        solo = capture(client, box, [lead], lead, name="Solo template")
-        caller = create_node(client, "agent")
-        edge = client.post("/api/edges", json={"source": caller["id"], "target": solo["id"], "relationship": "oaw.barracks.summon"}).json()
-        provider = WorldAgentCapabilityProvider(client.app.state.services)
-        tool = client.portal.call(provider.list_tools, caller["id"])[0]
-        listing = client.portal.call(provider.invoke_tool, caller["id"], tool.capability_id, {})
-        assert [t["id"] for t in listing["templates"]] == [solo["id"]]
-        instance = settle(client, box, invoke(client, box, action="summon", template_id=team["id"], prompt="Work as a team"))
-        new_lead = client.get(f"/api/nodes/{instance['entry_agent_id']}").json()
-        assert new_lead["parent_id"] != group["id"]
-        assert client.get(f"/api/legion-groups/{new_lead['parent_id']}/state").json()["value"] == {"brief": "Saved team"}
-        solo_instance = settle(client, box, invoke(client, box, action="summon", template_id=solo["id"], prompt="Work alone"))
-        assert client.get(f"/api/nodes/{solo_instance['entry_agent_id']}").json()["parent_id"] is None
-        personal_note = create_node(client, "text", name="Keep my note", parent_id=new_lead["parent_id"])
-        invoke(client, box, action="reclaim", instance_id=instance["id"])
-        kept = client.get(f"/api/nodes/{personal_note['id']}").json()
-        assert kept["name"] == "Keep my note" and kept["parent_id"] is None
-        client.delete(f"/api/edges/{edge['id']}")
-        with pytest.raises(PermissionDeniedError):
-            client.portal.call(provider.invoke_tool, caller["id"], tool.capability_id, {})
+def test_membership_equipment_and_live_authorization(client):
+    box = create_node(client, "oaw.barracks")
+    worker = create_node(client, "agent")
+    resource = create_node(client, "text", content="private notes")
+    caller = create_node(client, "agent")
+    summoner = create_node(client, "oaw.barracks.summoner")
+    stock(client, box, worker)
+    equip(client, resource, worker)
+    equip(client, summoner, caller)
+    services = client.app.state.services
+    assert services.capabilities.read_text(worker["id"], resource["id"]).content == "private notes"
+    edge = client.post("/api/edges", json={"source": summoner["id"], "target": box["id"], "relationship": "oaw.barracks.summon"})
+    assert edge.status_code == 201, edge.text
+    caps = services.capabilities.derive(caller["id"]).capabilities
+    assert len(caps) == 1 and caps[0].target_id == box["id"]
+    assert client.patch(f"/api/nodes/{summoner['id']}", json={"equipment": None}).status_code == 200
+    with pytest.raises(PermissionDeniedError):
+        services.capabilities.capability_for_id(caller["id"], caps[0].id)
+    linked = client.post('/api/edges', json={'source': caller['id'], 'target': summoner['id'], 'relationship': 'oaw.barracks.use'})
+    assert linked.status_code == 201, linked.text
+    assert services.capabilities.derive(caller['id']).capabilities == caps
+    assert client.delete(f"/api/edges/{linked.json()['id']}").status_code == 200
+    assert services.capabilities.derive(caller['id']).capabilities == []
+    assert client.patch(f"/api/nodes/{resource['id']}", json={"equipment": None}).status_code == 200
+    assert services.capabilities.derive(worker["id"]).capabilities == []
+    assert client.post("/api/edges", json={"source": worker["id"], "target": resource["id"], "relationship": "read"}).status_code == 201
+    assert services.capabilities.read_text(worker["id"], resource["id"]).content == "private notes"
+    assert client.patch(f"/api/nodes/{worker['id']}", json={"parent_id": None}).status_code == 200
+    assert services.summoning.snapshot(box["id"])["agents"] == []
+    assert client.post(f"/api/nodes/{box['id']}/summoning/capture", json={}).status_code == 404
+    catalog = client.get("/api/catalog").json()["node_types"]
+    assert all(t["id"] != "oaw.barracks.template" for t in catalog)
+    skill = next(t for t in catalog if t["id"] == "oaw.barracks.summoner")
+    assert skill["label"] == "Summoning"
+    assert (skill["deck_id"], skill["deck_revision"]) == ("tools", 2)
 
 
 class Summoner(RecordingProvider):
@@ -136,7 +146,7 @@ class Summoner(RecordingProvider):
             for _ in range(2 if prompt.startswith("twice") else 1):
                 try:
                     result = await self.tools.invoke_tool(context.agent_id, tool.capability_id, {
-                        "action": "summon", "template_id": listing["templates"][0]["id"],
+                        "action": "summon", "agent_id": listing["agents"][0]["id"],
                         "prompt": "failure" if prompt.startswith("failchain") else (f"holdchain:{count - 1}" if count > 1 else "hold") if prompt.startswith("holdchain") else f"chain:{count - 1}"})
                     self.results.append(result)
                 except ConflictError as error:
@@ -151,12 +161,12 @@ async def recursive_world(tmp_path, policy):
     box = await services.create_card(CardCreate(type="oaw.barracks"))
     entry = await services.create_card(CardCreate(type="agent"))
     caller = await services.create_card(CardCreate(type="agent"))
+    await services.update_card(entry.id, CardPatch(parent_id=box.id))
     for node in [entry, caller]:
-        await services.create_edge(EdgeCreate(source=node.id, target=box.id, relationship="oaw.barracks.summon"))
+        adapter = await services.create_card(CardCreate(type="oaw.barracks.summoner", equipment={"owner_id": node.id}))
+        await services.create_edge(EdgeCreate(source=adapter.id, target=box.id, relationship="oaw.barracks.summon"))
     current = read_document(services, box.id)
     write_document(services, box.id, {**current["value"], "policy": policy}, current["revision"])
-    await services.summoning.capture(box.id, SummoningCapture(name="Recursive worker", node_ids=[entry.id], entry_agent_id=entry.id,
-        shared_node_ids=[box.id], expected_revision=read_document(services, box.id)["revision"]))
     return services, box, caller, services.run_manager.default_provider()
 
 
@@ -219,17 +229,11 @@ async def test_failed_child_returns_result_handle_only_its_caller_can_manage(tmp
         services.close()
 
 
-def test_removed_shared_binding_rolls_back_instantiation(tmp_path):
-    settings = replace(Settings.for_data_root(tmp_path / "world"), agent_runtime="core.mock")
-    with TestClient(create_app(settings)) as client:
-        box = create_node(client, "oaw.barracks")
-        entry = create_node(client, "agent")
-        reference = create_node(client, "text")
-        client.post("/api/edges", json={"source": entry["id"], "target": reference["id"], "relationship": "read"})
-        template = capture(client, box, [entry], entry, [reference])
-        client.delete(f"/api/nodes/{reference['id']}")
-        before = {node.id for node in client.app.state.services.world.list_cards()}
-        response = client.post(f"/api/nodes/{box['id']}/summoning/actions", json={"action": "summon", "template_id": template["id"], "prompt": "Read the reference"})
-        assert response.status_code == 404
-        assert {node.id for node in client.app.state.services.world.list_cards()} == before
-        assert client.app.state.services.summoning.records() == []
+def test_removing_a_shared_dependency_changes_the_live_blueprint(client):
+    box = create_node(client, "oaw.barracks")
+    entry = stock(client, box, create_node(client, "agent"))
+    reference = create_node(client, "text")
+    client.post("/api/edges", json={"source": entry["id"], "target": reference["id"], "relationship": "read"})
+    client.delete(f"/api/nodes/{reference['id']}")
+    instance = invoke(client, box, action="summon", agent_id=entry["id"], prompt="Work")
+    assert client.app.state.services.capabilities.derive(instance["entry_agent_id"]).capabilities == []

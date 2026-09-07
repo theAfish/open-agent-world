@@ -129,17 +129,61 @@ class WorldStore:
             raise GraphValidationError("A card parent must be a container")
         if not container.member_traits <= member_type.traits:
             raise GraphValidationError("This container does not accept that node type")
-        ancestor = parent
-        while ancestor.parent_id:
-            if ancestor.parent_id == card_id:
-                raise GraphValidationError("Container membership cannot form a cycle")
-            ancestor = self.get_card(ancestor.parent_id)
+        if any(ancestor.id == card_id for ancestor in [parent, *self.ancestors(parent)]):
+            raise GraphValidationError("Container membership and ownership cannot form a cycle")
         with self.database.locked() as connection:
             count = connection.execute(
                 "SELECT count(*) FROM cards WHERE parent_id = ? AND id <> ?", (parent_id, card_id)
             ).fetchone()[0]
         if count >= container.max_members:
             raise GraphValidationError(f"This container supports at most {container.max_members} members")
+
+    def validate_equipment(self, card_id, card_type, parent_id, binding):
+        if binding is None:
+            return
+        owner = self.get_card(binding.owner_id)
+        if parent_id or owner.id == card_id or "core.agent" not in self.registry.node_type(owner.type).traits:
+            raise GraphValidationError("Equipment must belong to an Agent and cannot also be a container member")
+        options = self.registry.relationship_options(owner.type, card_type)
+        if not options:
+            raise GraphValidationError("This card cannot connect to the Agent")
+        if any(n.id == card_id for n in self.ancestors(owner)):
+            raise GraphValidationError("Equipment ownership cannot form a containment cycle")
+        if binding.relationship:
+            self.registry.resolve_relationship(owner.type, card_type, binding.relationship)
+
+    def equipment_edge(self, card: Card) -> Edge | None:
+        if card.equipment is None:
+            return None
+        self.validate_equipment(card.id, card.type, card.parent_id, card.equipment)
+        owner = self.get_card(card.equipment.owner_id)
+        options = self.registry.relationship_options(owner.type, card.type)
+        relationship = card.equipment.relationship or options[0].id
+        definition, reversed_endpoints = self.registry.resolve_relationship(owner.type, card.type, relationship)
+        direction = "forward" if "forward" in definition.directions else sorted(definition.directions)[0]
+        return Edge(id=f"equipment:{card.id}", source=card.id if reversed_endpoints else owner.id, target=owner.id if reversed_endpoints else card.id,
+                    relationship=relationship, direction=direction,
+                    created_at=card.created_at, updated_at=card.updated_at, revision=card.revision)
+
+    def connections_from(self, node_id: str) -> list[Edge]:
+        """Resolve world connections and owned bindings through one contract."""
+        bindings = [self.equipment_edge(card) for card in [self.get_card(node_id), *self.equipment_for(node_id)]]
+        return [*self.list_edges_from(node_id), *[edge for edge in bindings if edge and edge.source == node_id]]
+
+    def connections_to(self, node_id: str) -> list[Edge]:
+        bindings = [self.equipment_edge(card) for card in [self.get_card(node_id), *self.equipment_for(node_id)]]
+        return [*self.list_edges_to(node_id), *[edge for edge in bindings if edge and edge.target == node_id]]
+
+    def equipment_for(self, owner_id):
+        with self.database.locked() as connection:
+            rows = connection.execute("SELECT * FROM cards WHERE json_extract(equipment_json, '$.owner_id') = ? ORDER BY created_at, id", (owner_id,)).fetchall()
+        return [self._card_from_row(row) for row in rows]
+
+    def owned_descendants(self, node_id):
+        result = []
+        for node in [*self.list_members(node_id), *self.equipment_for(node_id)]:
+            result.extend([node, *self.owned_descendants(node.id)])
+        return result
 
     def list_legion_groups(self) -> list[Card]:
         with self.database.locked() as connection:
@@ -150,10 +194,15 @@ class WorldStore:
         return self.registry.node_type(card.type).container is not None
 
     def ancestors(self, card: Card) -> list[Card]:
-        if card.parent_id is None:
-            return []
-        parent = self.get_card(card.parent_id)
-        return [parent, *self.ancestors(parent)]
+        result = []
+        seen = {card.id}
+        while parent_id := (card.equipment.owner_id if card.equipment else card.parent_id):
+            if parent_id in seen:
+                raise GraphValidationError("Container membership and ownership cannot form a cycle")
+            seen.add(parent_id)
+            card = self.get_card(parent_id)
+            result.append(card)
+        return result
 
     def descendants(self, parent_id: str) -> list[Card]:
         result = []
@@ -172,6 +221,7 @@ class WorldStore:
 
         resolved_id = _id_or_new(card_id if card_id is not None else request.id)
         self.validate_parent(resolved_id, request.type, request.parent_id)
+        self.validate_equipment(resolved_id, request.type, request.parent_id, request.equipment)
         now = utc_now()
         definition = self.registry.node_type(request.type)
         self.registry.validate_creation_fields(
@@ -189,6 +239,7 @@ class WorldStore:
         return Card(
             id=resolved_id,
             parent_id=request.parent_id,
+            equipment=request.equipment,
             type=request.type,
             name=request.name or definition.default_name,
             position=request.position,
@@ -220,6 +271,7 @@ class WorldStore:
             card.created_at.isoformat(),
             card.updated_at.isoformat(),
             card.parent_id,
+            card.equipment.model_dump_json() if card.equipment else None,
         )
         try:
             with (nullcontext(_connection) if _connection is not None else self.database.transaction(immediate=True)) as connection:
@@ -227,8 +279,8 @@ class WorldStore:
                     """
                     INSERT INTO cards (
                         id, type, plugin_id, name, x, y, width, height, expanded,
-                        config_json, chunk_x, chunk_y, created_at, updated_at, parent_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        config_json, chunk_x, chunk_y, created_at, updated_at, parent_id, equipment_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     values,
                 )
@@ -275,6 +327,8 @@ class WorldStore:
 
         parent_id = changes.get("parent_id", current.parent_id)
         self.validate_parent(card_id, current.type, parent_id)
+        equipment = request.equipment if "equipment" in request.model_fields_set else current.equipment
+        self.validate_equipment(card_id, current.type, parent_id, equipment)
         name = changes.get("name") or current.name
         position = request.position or current.position
         size = request.size or current.size
@@ -293,7 +347,7 @@ class WorldStore:
                 UPDATE cards
                 SET name = ?, x = ?, y = ?, width = ?, height = ?, expanded = ?,
                     config_json = ?, chunk_x = ?, chunk_y = ?, updated_at = ?,
-                    revision = revision + 1, parent_id = ?
+                    revision = revision + 1, parent_id = ?, equipment_json = ?
                 WHERE id = ?
                 """,
                 (
@@ -308,6 +362,7 @@ class WorldStore:
                     self._chunk(position.y),
                     now,
                     parent_id,
+                    equipment.model_dump_json() if equipment else None,
                     card_id,
                 ),
             )
@@ -337,7 +392,7 @@ class WorldStore:
                         UPDATE cards
                         SET name = ?, x = ?, y = ?, width = ?, height = ?, expanded = ?,
                             config_json = ?, chunk_x = ?, chunk_y = ?, updated_at = ?,
-                            revision = revision + 1, parent_id = ?
+                            revision = revision + 1, parent_id = ?, equipment_json = ?
                         WHERE id = ?
                         """,
                         (
@@ -352,6 +407,7 @@ class WorldStore:
                             preview.chunk[1],
                             preview.updated_at.isoformat(),
                             preview.parent_id,
+                            preview.equipment.model_dump_json() if preview.equipment else None,
                             item.node_id,
                         ),
                     )
@@ -362,6 +418,7 @@ class WorldStore:
                 # Validate the resulting membership graph, including cycles across a batch.
                 for _, preview in changed:
                     self.validate_parent(preview.id, preview.type, preview.parent_id)
+                    self.validate_equipment(preview.id, preview.type, preview.parent_id, preview.equipment)
         return [self.get_card(item.node_id) for item in items]
 
     def preview_update_card(self, card_id: str, request: CardPatch) -> Card:
@@ -373,6 +430,8 @@ class WorldStore:
             return current
         parent_id = changes.get("parent_id", current.parent_id)
         self.validate_parent(card_id, current.type, parent_id)
+        equipment = request.equipment if "equipment" in request.model_fields_set else current.equipment
+        self.validate_equipment(card_id, current.type, parent_id, equipment)
         name = changes.get("name") or current.name
         position = request.position or current.position
         size = request.size or current.size
@@ -386,6 +445,7 @@ class WorldStore:
         config = self._validate_config(current.type, config)
         return current.model_copy(update={
             "parent_id": parent_id,
+            "equipment": equipment,
             "name": name,
             "position": position,
             "size": size,
@@ -406,7 +466,7 @@ class WorldStore:
             return []
         cards = [self.get_card(card_id) for card_id in ids]
         for card in cards:
-            if self.is_container(card) and any(member.id not in ids for member in self.list_members(card.id)):
+            if any(member.id not in ids for member in [*self.list_members(card.id), *self.equipment_for(card.id)]):
                 raise GraphValidationError("Detach members before deleting their container")
         placeholders = ",".join("?" for _ in ids)
         with self.database.transaction(immediate=True) as connection:
@@ -606,9 +666,21 @@ class WorldStore:
                 raise NotFoundError(f"edge {edge_id!r} does not exist")
         return edge
 
+    def is_equipment_connection(self, source_id: str, target_id: str) -> bool:
+        for resource_id, owner_id in ((source_id, target_id), (target_id, source_id)):
+            current = self.get_card(resource_id)
+            while current:
+                if current.equipment and current.equipment.owner_id == owner_id:
+                    return True
+                parent_id = current.equipment.owner_id if current.equipment else current.parent_id
+                current = self.get_card(parent_id) if parent_id else None
+        return False
+
     def normalize_edge_request(self, request: EdgeCreate) -> EdgeCreate:
         source = self.get_card(request.source)
         target = self.get_card(request.target)
+        if self.is_equipment_connection(source.id, target.id):
+            raise GraphValidationError("Equipment already belongs to this Agent. Unequip it before adding a world connection.")
         _definition, reversed_endpoints = self.registry.resolve_relationship(
             source.type, target.type, request.relationship
         )
@@ -657,6 +729,7 @@ class WorldStore:
         return Card(
             id=row["id"],
             parent_id=row["parent_id"],
+            equipment=json.loads(row["equipment_json"]) if row["equipment_json"] else None,
             type=card_type,
             name=row["name"],
             position={"x": row["x"], "y": row["y"]},

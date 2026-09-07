@@ -7,23 +7,19 @@ import {
 } from "@xyflow/react";
 import { getRelationshipOption } from "../state/relationships";
 import { useWorldStore } from "../state/worldStore";
-import type { CanvasNodeData } from "../cards/types";
 import type { EdgeDirection, Relationship } from "../types/world";
 import { relationshipPath, type NodeRect } from "./geometry";
+import { nodeCornerRadius } from "./nodeGeometry";
+import type { CanvasNode } from "../cards/types";
 
 export interface SemanticEdgeData extends Record<string, unknown> {
   relationship: Relationship;
   direction: EdgeDirection;
+  sourceCardId?: string;
+  targetCardId?: string;
 }
 
 export type CanvasEdge = Edge<SemanticEdgeData, "semantic">;
-
-function nodeCornerRadius(node: ReturnType<typeof useInternalNode>): number {
-  const level = (node?.data as CanvasNodeData | undefined)?.surfaceLevel;
-  if (level === "node") return 48;
-  if (level === "preview") return 30;
-  return 24;
-}
 
 export function SemanticEdge({
   id,
@@ -39,8 +35,8 @@ export function SemanticEdge({
   data,
 }: EdgeProps<CanvasEdge>) {
   const catalog = useWorldStore((state) => state.catalog);
-  const sourceNode = useInternalNode(source);
-  const targetNode = useInternalNode(target);
+  const sourceNode = useInternalNode<CanvasNode>(source);
+  const targetNode = useInternalNode<CanvasNode>(target);
   const nodeRect = (node: typeof sourceNode, fallbackX: number, fallbackY: number): NodeRect => ({
     x: node?.internals.positionAbsolute.x ?? fallbackX,
     y: node?.internals.positionAbsolute.y ?? fallbackY,
@@ -66,8 +62,8 @@ export function SemanticEdge({
         markerStart={markerStart}
         className={`semantic-edge-path ${selected ? "is-selected" : ""}`}
         data-edge-id={id}
-        data-source-id={source}
-        data-target-id={target}
+        data-source-id={data?.sourceCardId ?? source}
+        data-target-id={data?.targetCardId ?? target}
       />
       <circle
         cx={geometry.source.x}
@@ -75,8 +71,8 @@ export function SemanticEdge({
         r={4.5}
         className="semantic-edge-endpoint semantic-edge-endpoint--source"
         data-edge-id={id}
-        data-source-id={source}
-        data-target-id={target}
+        data-source-id={data?.sourceCardId ?? source}
+        data-target-id={data?.targetCardId ?? target}
         data-edge-endpoint="source"
         aria-hidden="true"
       />
@@ -86,8 +82,8 @@ export function SemanticEdge({
         r={4.5}
         className="semantic-edge-endpoint semantic-edge-endpoint--target"
         data-edge-id={id}
-        data-source-id={source}
-        data-target-id={target}
+        data-source-id={data?.sourceCardId ?? source}
+        data-target-id={data?.targetCardId ?? target}
         data-edge-endpoint="target"
         aria-hidden="true"
       />

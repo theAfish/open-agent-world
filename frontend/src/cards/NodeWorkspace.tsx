@@ -20,12 +20,14 @@ import { TaskBoardBody } from "./TaskBoard";
 import { SkillToolboxBody, SkillNodeBody } from "./SkillToolbox";
 import { WorkSourceWorkspace } from "./NodeExecution";
 import { ConversationWorkspace } from "./ConversationWorkspace";
+import { AgentCardBody } from "./AgentCard";
 
 interface WorkspaceSurfaceProps {
   card: WorldCard;
+  onClose?: () => void;
 }
 
-function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
+function WorkspaceTitlebar({ card, onClose }: WorkspaceSurfaceProps) {
   const catalog = useWorldStore((state) => state.catalog);
   const closeWorkspace = useNodeSurfaceStore((state) => state.closeWorkspace);
 
@@ -37,7 +39,7 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
         <strong>{card.name}</strong>
       </div>
       <div className="workspace-window-actions">
-        <IconButton icon={X} size="sm" quiet onClick={() => closeWorkspace(card.id)} label="Close workspace" />
+        <IconButton icon={X} size="sm" quiet onClick={() => onClose ? onClose() : closeWorkspace(card.id)} label="Close workspace" />
       </div>
     </header>
   );
@@ -155,14 +157,23 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
   );
 }
 
-export function WorkspaceSurface({ card }: WorkspaceSurfaceProps) {
+export function WorkspaceSurface({ card, onClose }: WorkspaceSurfaceProps) {
   const catalog = useWorldStore((state) => state.catalog);
+  const [agentTab, setAgentTab] = useState("activity");
   return (
     <section className="node-workspace-window" role="dialog" aria-modal="false" aria-label={`${card.name} workspace`} data-workspace-node-id={card.id}>
-      <WorkspaceTitlebar card={card} />
+      <WorkspaceTitlebar card={card} onClose={onClose} />
       <div className="workspace-content">
-      {card.type === "agent" ? <AgentWorkspace card={card} />
-        : catalog.node_types.find((definition) => definition.id === card.type)?.traits.some((trait) => ["ui.agent-template.v1", "ui.agent-barracks.v1"].includes(trait)) ? <BarracksBody card={card} workspace />
+      {card.type === "agent" ? <>
+        <nav className="agent-window-tabs nodrag nopan" role="tablist" aria-label="Agent window">
+          <button role="tab" aria-selected={agentTab === "activity"} onClick={() => setAgentTab("activity")}>Activity</button>
+          <button role="tab" aria-selected={agentTab === "settings"} onClick={() => setAgentTab("settings")}>Settings</button>
+        </nav>
+        <div className="agent-window-body">{agentTab === "settings"
+          ? <div className="agent-settings-window nodrag nopan nowheel"><AgentCardBody card={card} level="workspace" /></div>
+          : <AgentWorkspace card={card} />}</div>
+        </>
+        : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.agent-barracks.v1") ? <BarracksBody card={card} workspace />
         : card.type === "conversation" ? <ConversationWorkspace card={card} />
         : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill-package.v1") ? <SkillToolboxBody card={card} workspace />
         : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill.v1") ? <SkillNodeBody card={card} workspace />

@@ -6,15 +6,10 @@
 .barracks-form input, .barracks-form textarea, .barracks-form select { width: 100%; padding: 8px; border: 1px solid #78967b66; border-radius: 6px; background: var(--surface-solid); color: inherit; font: inherit; }
 .barracks-form textarea { min-height: 78px; resize: vertical; }
 .barracks-form fieldset { min-width: 0; border: 1px solid #78967b44; border-radius: 8px; padding: 12px; }
-.barracks-node-picker { max-height: 180px; overflow-y: auto; display: grid; gap: 6px; }
-.barracks-node-picker label { display: flex; align-items: center; gap: 8px; }
-.barracks-node-picker input { width: auto; }
-.barracks-node-picker small { opacity: .65; }
 .barracks-policy { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.barracks-form .barracks-binding { grid-template-columns: 1fr 1fr; align-items: center; margin: 8px 0; }
-.barracks-templates, .barracks-instances { display: grid; gap: 10px; }
-.barracks-templates article, .barracks-instances article { padding: 14px; border: 1px solid #78967b44; border-radius: 8px; font-size: 12px; }
-.barracks-templates p { opacity: .8; }
+.barracks-agents, .barracks-instances { display: grid; gap: 10px; }
+.barracks-agents article, .barracks-instances article { padding: 14px; border: 1px solid #78967b44; border-radius: 8px; font-size: 12px; }
+.barracks-agents p { opacity: .8; }
 .barracks-body summary { cursor: pointer; padding: 6px 0; }
 .barracks-result { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow-y: auto; }
 .barracks-error { color: var(--danger); white-space: pre-wrap; }

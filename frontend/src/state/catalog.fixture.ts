@@ -65,7 +65,7 @@ export const TEST_CATALOG: PluginCatalog = {
     node("conversation", ["core.field", "core.conversation"], {
       default_status: "available",
       surfaces: { preview: true, inspector: true, workspace: true },
-      templateable: false,
+      templateable: true,
     }),
     node("text", ["core.resource", "core.text"]),
     node("image", ["core.resource", "core.image"]),

@@ -7,8 +7,11 @@ export const isContainer = (card: WorldCard, catalog: PluginCatalog) => containe
 export function descendants(cards: WorldCard[], id: string): WorldCard[] {
   return cards.filter((card) => card.parent_id === id).flatMap((card) => [card, ...descendants(cards, card.id)]);
 }
+export function ownedDescendants(cards: WorldCard[], id: string): WorldCard[] {
+  return cards.filter((c) => c.parent_id === id || c.equipment?.owner_id === id).flatMap((c) => [c, ...ownedDescendants(cards, c.id)]);
+}
 export function ancestors(cards: WorldCard[], card: WorldCard): WorldCard[] {
-  const parent = cards.find((candidate) => candidate.id === card.parent_id);
+  const parent = cards.find((candidate) => candidate.id === (card.equipment?.owner_id ?? card.parent_id));
   return parent ? [parent, ...ancestors(cards, parent)] : [];
 }
 export function parentFirst<T extends WorldCard>(cards: T[]): T[] {
@@ -16,7 +19,7 @@ export function parentFirst<T extends WorldCard>(cards: T[]): T[] {
 }
 export function acceptsMember(container: WorldCard, member: WorldCard, catalog: PluginCatalog, cards: WorldCard[] = []) {
   const spec = containerDefinition(container, catalog);
-  if (!spec || member.ephemeral || member.id === container.id || containerDefinition(member, catalog)?.parentable === false) return false;
+  if (!spec || member.equipment || member.ephemeral || member.id === container.id || containerDefinition(member, catalog)?.parentable === false) return false;
   if (ancestors(cards, container).some((parent) => parent.id === member.id)) return false;
   const traits = catalog.node_types.find((type) => type.id === member.type)?.traits ?? [];
   return spec.member_traits.every((trait) => traits.includes(trait));

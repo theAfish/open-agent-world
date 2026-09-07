@@ -1,3 +1,4 @@
+import { EquipmentToggle } from "./Equipment";
 import { BarracksBody } from "./Barracks";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Bot, Maximize2, Minus, ExternalLink, FileText, Image as ImageIcon, MessagesSquare, Puzzle, Sparkles, Trash2, Workflow, X, type LucideIcon } from "lucide-react";
@@ -41,7 +42,7 @@ const BODIES: Partial<Record<CardType, ComponentType<BodyProps>>> = {
   sandbox: SandboxCardBody,
 };
 
-const CATALOG_ICONS: Record<string, LucideIcon> = {
+export const CATALOG_ICONS: Record<string, LucideIcon> = {
   boxes: Boxes,
   wrench: Wrench,
   bot: Bot,
@@ -74,6 +75,13 @@ function GenericCardBody({ card }: BodyProps) {
   );
 }
 
+export function CardContent({ card, level }: BodyProps) {
+  const catalog = useWorldStore((s) => s.catalog);
+  const definition = catalog.node_types.find((t) => t.id === card.type);
+  const Body = definition?.traits.includes("ui.agent-barracks.v1") ? BarracksBody : definition?.traits.includes("ui.skill.v1") ? SkillNodeBody : definition?.traits.includes("ui.skill-package.v1") ? SkillToolboxBody : definition?.traits.includes("ui.task-board.v1") ? TaskBoardBody : BODIES[card.type] ?? GenericCardBody;
+  return <Body card={card} level={level} />;
+}
+
 function statusLabel(status: WorldCard["status"]): string {
   return status.replaceAll("_", " ");
 }
@@ -98,7 +106,7 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
   const definition = catalog.node_types.find((item) => item.id === card.type);
   const label = definition?.label ?? card.type;
   const Icon = ICONS[card.type] ?? CATALOG_ICONS[definition?.icon ?? ""] ?? Puzzle;
-  const Body = definition?.traits.some((trait) => ["ui.agent-template.v1", "ui.agent-barracks.v1"].includes(trait)) ? BarracksBody : definition?.traits.includes("ui.skill.v1") ? SkillNodeBody : definition?.traits.includes("ui.skill-package.v1") ? SkillToolboxBody : definition?.traits.includes("ui.task-board.v1") ? TaskBoardBody : BODIES[card.type] ?? GenericCardBody;
+
   const support = nodeSurfaceSupport(card.type, catalog);
 
   useEffect(() => {
@@ -186,6 +194,7 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
           aria-label={`Start a relationship from the ${side} edge of ${card.name}`} />
       )) : null}
 
+      {visualLevel !== "inspector" && <EquipmentToggle card={card} />}
       {visualLevel === "workspace" ? <WorkspaceSurface card={card} /> : <>
         <header className="card-header node-surface-header">
           <div className="card-kind-icon" aria-hidden="true"><Icon size={18} strokeWidth={1.7} /></div>
@@ -226,11 +235,12 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
         </div>
 
         <div className="card-body node-inspector-content" aria-hidden={visualLevel !== "inspector"}>
-          <Body card={card} level={level} />
+          <CardContent card={card} level={level} />
         </div>
 
         <footer className="card-footer node-inspector-footer">
-          <span className="card-id">{card.ephemeral ? "synthetic" : card.id.slice(0, 8)}</span>
+          {definition?.traits.includes("core.agent") && !card.ephemeral ? <EquipmentToggle card={card} />
+            : <span className="card-id">{card.ephemeral ? "synthetic" : card.id.slice(0, 8)}</span>}
           <div className="card-footer-actions nodrag nopan">
             {!card.ephemeral ? <IconButton icon={Trash2} danger
               onClick={() => { dismissSurface(card.id); void deleteCard(card.id); }} label={`Remove ${card.name}`}

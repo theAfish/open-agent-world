@@ -466,6 +466,25 @@ describe("authoritative world synchronization", () => {
     expect(useWorldStore.getState().edges).toEqual([]);
   });
 
+  it("deletes an Agent and its equipment atomically and restores the whole ownership tree", async () => {
+    const agent = card("owner", "agent");
+    const sandbox = { ...card("private", "sandbox"), equipment: { owner_id: agent.id, relationship: "execute" } };
+    const shared = card("shared", "sandbox");
+    useWorldStore.setState({ cards: [agent, sandbox, shared] });
+    const batch = vi.spyOn(worldApi, "deleteNodes").mockResolvedValue([agent, sandbox]);
+    const single = vi.spyOn(worldApi, "deleteNode").mockRejectedValue(new Error("already deleted"));
+    vi.spyOn(worldApi, "restoreNode").mockResolvedValueOnce(agent).mockResolvedValueOnce(sandbox);
+    await useWorldStore.getState().deleteCard(agent.id);
+    expect(batch).toHaveBeenCalledWith([agent.id, sandbox.id]);
+    expect(single).not.toHaveBeenCalled();
+    expect(useWorldStore.getState().cards).toEqual([shared]);
+    await useWorldStore.getState().undo();
+    expect(useWorldStore.getState().cards).toContainEqual(sandbox);
+    await useWorldStore.getState().redo();
+    expect(batch).toHaveBeenCalledTimes(2);
+    expect(useWorldStore.getState().cards).toEqual([shared]);
+  });
+
   it("returns a completed Sandbox command to ready state without a live socket", async () => {
     const sandbox = { ...card("sandbox", "sandbox"), status: "ready" as const };
     useWorldStore.setState({ cards: [sandbox], socketState: "closed" });

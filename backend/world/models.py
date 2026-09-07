@@ -139,6 +139,12 @@ class ResourceSummary(BaseModel):
     preview: str | None = None
 
 
+class EquipmentBinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    owner_id: str = Field(min_length=1, max_length=100)
+    relationship: str | None = None
+
+
 class CardCreate(BaseModel):
     """Wire model shared with the canvas.
 
@@ -150,6 +156,7 @@ class CardCreate(BaseModel):
 
     id: str | None = None
     parent_id: str | None = Field(default=None, max_length=100)
+    equipment: EquipmentBinding | None = None
     type: str = Field(min_length=1, max_length=128)
     name: str | None = Field(default=None, min_length=1, max_length=200)
     position: Point = Field(default_factory=Point)
@@ -165,6 +172,7 @@ class CardPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     parent_id: str | None = Field(default=None, max_length=100)
+    equipment: EquipmentBinding | None = None
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
     position: Point | None = None
@@ -213,6 +221,7 @@ class Card(BaseModel):
 
     id: str
     parent_id: str | None = None
+    equipment: EquipmentBinding | None = None
     type: str
     name: str
     position: Point

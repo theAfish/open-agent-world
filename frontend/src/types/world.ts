@@ -88,6 +88,7 @@ export interface CardConfig extends Record<string, unknown> {
 export interface WorldCard {
   id: string;
   parent_id?: string | null;
+  equipment?: { owner_id: string; relationship: string | null } | null;
   type: CardType;
   name: string;
   position: WorldPosition;
@@ -133,6 +134,8 @@ export interface NodeTypeCatalogItem {
   deck_id: string;
   deck_label: string;
   deck_icon: string;
+  /** Bumped by a plugin when its default card-deck placement changes. */
+  deck_revision?: number;
   default_name: string;
   default_size: WorldSize;
   default_status: CardStatus;
@@ -148,7 +151,7 @@ export interface NodeTypeCatalogItem {
   user_creatable: boolean;
   has_document?: boolean;
   has_execution?: boolean;
-  summoning?: { templates_field: string | null } | null;
+  summoning?: Record<string, never> | null;
   container?: ContainerDefinition | null;
   default_config: CardConfig;
 }

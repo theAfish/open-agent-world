@@ -23,7 +23,8 @@ import { getViewportChunkKeys, viewportCenterToWorld } from "./chunks";
 import { EMPTY_CATALOG, getNodeType } from "./catalog";
 import { buildCardDraft, makeStressCards, mergeCardPatch } from "./helpers";
 import { summarizeLegionSelection } from "./legions";
-import { ancestors, containerDefinition, descendants, isContainer, parentFirst } from "./containers";
+import { ancestors, containerDefinition, descendants, ownedDescendants, isContainer, parentFirst } from "./containers";
+import { isEquipmentConnection } from "./equipment";
 import { validateConnection, type RelationshipOption } from "./relationships";
 import { describeRuntimeError } from "./runtimeErrors";
 import {
@@ -91,6 +92,7 @@ function cardRestorePatch(card: WorldCard): Partial<Omit<WorldCard, "id" | "type
   return {
     name: card.name,
     parent_id: card.parent_id ?? null,
+    equipment: card.equipment ?? null,
     position: { ...card.position },
     size: { ...card.size },
     expanded: card.expanded,
@@ -281,7 +283,7 @@ interface WorldState {
   setViewport: (viewport: FlowViewportState) => void;
   formLegionGroup: (nodeIds: string[]) => Promise<void>;
   setContainerMembership: (ids: string[], parentId: string | null) => Promise<void>;
-  createCard: (type: CardType, position?: WorldPosition) => Promise<WorldCard | undefined>;
+  createCard: (type: CardType, position?: WorldPosition, placement?: Pick<WorldCard, "equipment" | "parent_id">) => Promise<WorldCard | undefined>;
   updateCard: (
     id: string,
     patch: Partial<Omit<WorldCard, "id" | "type">>,
@@ -564,7 +566,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     } catch (error) { get().pushToast({ tone: "error", title: "Membership was not changed", detail: apiErrorMessage(error) }); }
   }),
 
-  createCard: (type, position) => withHistoryTransaction(async () => {
+  createCard: (type, position, placement) => withHistoryTransaction(async () => {
     if (get().syncState === "offline") {
       get().pushToast({
         tone: "error",
@@ -597,7 +599,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       : draft;
     set({ syncState: "syncing" });
     try {
-      const card = await worldApi.createNode(configuredDraft);
+      const card = await worldApi.createNode({ ...configuredDraft, ...placement });
       markWorldMutation();
       set((state) => ({
         cards: mergeCards(state.cards, [card]),
@@ -972,7 +974,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     const requested = new Set(ids);
     for (const id of ids) {
       const card = get().cards.find((item) => item.id === id);
-      if (card && isContainer(card, get().catalog)) descendants(get().cards, id).forEach((member) => requested.add(member.id));
+      if (card) ownedDescendants(get().cards, id).forEach((member) => requested.add(member.id));
     }
     const cards = [...get().cards, ...get().stressCards].filter((card) => requested.has(card.id));
     if (cards.length === 0) return;
@@ -987,7 +989,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
 
     const attachedBefore = get().edges.filter((edge) => requested.has(edge.source) || requested.has(edge.target)).map(copyEdge);
     const removed: WorldCard[] = [];
-    if (cards.some((card) => isContainer(card, get().catalog))) {
+    if (cards.some((card) => card.equipment || isContainer(card, get().catalog))) {
       try {
         const persistent = cards.filter((card) => !card.ephemeral);
         if (persistent.length) await worldApi.deleteNodes(persistent.map((card) => card.id));
@@ -1057,6 +1059,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       sourceCard?.type,
       targetCard?.type,
       get().edges,
+      get().cards,
     );
     if (!validation.valid || !validation.source || !validation.target) {
       get().pushToast({
@@ -1672,9 +1675,9 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
           break;
         }
         case "card-created": {
-          const expanded = operation.cards.flatMap((card) => [card, ...descendants(get().cards, card.id)]);
+          const expanded = operation.cards.flatMap((card) => [card, ...ownedDescendants(get().cards, card.id)]);
           operation.cards = await Promise.all(parentFirst([...new Map(expanded.map((card) => [card.id, card])).values()]).map(snapshotCardForHistory));
-          if (operation.cards.some((card) => isContainer(card, get().catalog))) {
+          if (operation.cards.some((card) => card.equipment || isContainer(card, get().catalog))) {
             await worldApi.deleteNodes(operation.cards.filter((card) => !card.ephemeral).map((card) => card.id));
           } else {
             for (const card of operation.cards) if (!card.ephemeral) await worldApi.deleteNode(card.id);
@@ -1694,7 +1697,11 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
             restored.push(card.ephemeral ? copyCard(card) : await restoreCard(card));
           }
           const restoredEdges: WorldEdge[] = [];
-          for (const edge of operation.edges) restoredEdges.push(await worldApi.createEdge(copyEdge(edge)));
+          for (const edge of operation.edges) {
+            if (!isEquipmentConnection(edge.source, edge.target, [...get().cards, ...restored])) {
+              restoredEdges.push(await worldApi.createEdge(copyEdge(edge)));
+            }
+          }
           set((state) => ({
             cards: mergeCards(state.cards, restored.filter((card) => !card.ephemeral)),
             stressCards: mergeCards(state.stressCards, restored.filter((card) => card.ephemeral)),
@@ -1838,7 +1845,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
           break;
         }
         case "cards-deleted": {
-          if (operation.cards.some((card) => isContainer(card, get().catalog))) {
+          if (operation.cards.some((card) => card.equipment || isContainer(card, get().catalog))) {
             await worldApi.deleteNodes(operation.cards.filter((card) => !card.ephemeral).map((card) => card.id));
           } else {
             for (const card of operation.cards) if (!card.ephemeral) await worldApi.deleteNode(card.id);

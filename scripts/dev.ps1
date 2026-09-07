@@ -218,9 +218,14 @@ try {
         if (-not $detail) {
             $detail = Get-Content -Raw $backendOut -ErrorAction SilentlyContinue
         }
+        $failure = if ($backend.HasExited) {
+            "The backend exited before becoming available on $backendHttpUrl (exit code $($backend.ExitCode))."
+        } else {
+            "The backend did not become available on $backendHttpUrl within 10 seconds."
+        }
         Stop-RecordedProcessTree (Get-ProcessRecord $backend.Id)
         $backend = $null
-        throw "The backend did not become available on $backendHttpUrl within 10 seconds. $detail"
+        throw "$failure $detail"
     }
 
     $backendState = [pscustomobject]@{

@@ -480,6 +480,7 @@ class _CoreConfigProjection:
 
 class AgentNodeTemplateHandler(_CoreConfigProjection, NodeTemplateHandler):
     portable_config_fields = frozenset({
+        "description",
         "system_instruction",
         "model",
         "status",
@@ -497,7 +498,7 @@ class AgentNodeTemplateHandler(_CoreConfigProjection, NodeTemplateHandler):
 
 
 class SandboxNodeTemplateHandler(_CoreConfigProjection, NodeTemplateHandler):
-    portable_config_fields = frozenset({"status"})
+    portable_config_fields = frozenset({"status", "runtime"})
 
 
 class TextNodeTemplateHandler(_CoreConfigProjection, NodeTemplateHandler):
@@ -822,7 +823,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         traits=frozenset({"core.field", "core.conversation"}),
         surfaces={"preview": True, "inspector": True, "workspace": True},
         lifecycle=ConversationNodeBehavior(),
-        templateable=False,
+        templateable=True,
     ))
     registry.register_node_type(NodeTypeDefinition(
         id="text", label="Text file", description="Managed knowledge", icon="file-text",
