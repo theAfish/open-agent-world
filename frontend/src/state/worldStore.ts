@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useGenerationStore } from "../effects/generation";
 import { persist } from "zustand/middleware";
 import { apiErrorMessage, normalizeCard, resourceContentUrl, worldApi, type CardCreateInput } from "../api/client";
 import type {
@@ -1506,6 +1507,17 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   ingestEvent: (event) => {
     const nodeId = event.node_id ?? event.agent_id ?? event.sandbox_id ?? event.resource_id;
     const normalizedType = event.type.replace(/[.\s-]/g, "_").toLowerCase();
+    if (normalizedType === "nodes_generated") {
+      const { source_id, target_id, container_id, nodes } = event.payload;
+      if (typeof source_id === "string" && typeof target_id === "string" && Date.now() - Date.parse(event.timestamp) < 2400) {
+        useGenerationStore.getState().enqueue({ id: event.id, sourceId: source_id, targetId: target_id,
+          containerId: typeof container_id === "string" ? container_id : undefined });
+      }
+      if (Array.isArray(nodes)) {
+        worldMutationEpoch += 1;
+        set((state) => ({ cards: mergeCards(state.cards, nodes.map(normalizeCard)) }));
+      }
+    }
     if (normalizedType === "card_deleted" && nodeId) {
       worldMutationEpoch += 1;
       set((state) => ({

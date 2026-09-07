@@ -23,10 +23,6 @@
 .equipment-card .equipment-item-remove { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); color: var(--ink-faint); }
 .equipment-card select { position: absolute; right: 30px; top: 50%; transform: translateY(-50%); width: 74px; max-width: 74px; font-size: 9px; border: 0; background: var(--surface-soft); color: var(--ink-soft); }
 .equipment-card .react-flow__handle { width: 8px; height: 8px; background: var(--accent); }
-.equipment-inspector { position: fixed; z-index: 1000; top: 8vh; right: 3vw; width: min(600px, 90vw); max-height: 84vh; overflow: auto; padding: 24px; background: var(--surface-solid); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 14px; box-shadow: 0 18px 64px #0004; }
-.equipment-inspector > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
-.equipment-inspector.has-workspace { width: min(1080px, 94vw); height: 84vh; padding: 0; }
-.equipment-inspector.has-workspace > header { display: none; }
 .agent-settings-window { height: 100%; overflow: auto; padding: 24px; max-width: 720px; margin: auto; }
 .agent-window-tabs { display: flex; gap: 6px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
 .agent-window-tabs button { border: 0; border-radius: 6px; padding: 5px 12px; background: transparent; color: var(--ink-soft); cursor: pointer; }

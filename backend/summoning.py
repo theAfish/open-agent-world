@@ -12,6 +12,7 @@ from backend.plugins.summoning import SummoningPolicy
 from backend.runs.models import TERMINAL_RUN_STATUSES
 from backend.world.models import CardCreate, CardPatch, EdgeCreate, Point
 from backend.world.layout import WorldLayout
+from backend.events import EventType
 
 
 @dataclass
@@ -229,6 +230,12 @@ class SummoningService:
                           "node_ids": [n.id for n in instance.nodes], "attempts": [],
                           "root_policy": policy, "created_root_id": root_id, "reclaimed": False, "stopping": False}
                 self.save(record)
+                await services.events.publish(
+                    EventType.NODES_GENERATED, node_id=record["entry_agent_id"],
+                    payload={"source_id": agent.id, "target_id": record["entry_agent_id"],
+                             "container_id": workspace.id,
+                             "nodes": [services.get_card(key).model_dump(mode="json")
+                                       for key in [workspace.id, *record["node_ids"]]]})
             else:
                 record = self.find_instance(node_id, request.instance_id, capability)
                 if record["reclaimed"] or record["stopping"]:

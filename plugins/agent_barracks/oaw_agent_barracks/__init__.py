@@ -34,6 +34,7 @@ class AgentBarracksPlugin:
             surfaces={"preview": True, "inspector": True, "workspace": True}, templateable=True)
         barracks_card = dict(icon="bot", deck_id="agents", deck_label="Agents", deck_icon="bot", **common)
         skill_card = dict(icon="sparkles", deck_id="tools", deck_label="Tools", deck_icon="boxes", deck_revision=2, **common)
+        skill_card["surfaces"] = {"preview": True, "inspector": True, "workspace": False}
         registration.register_node_type(NodeTypeDefinition(id="oaw.barracks", label="Agent Barracks",
             description="Place configured Agents here to make them available for summoning.",
             default_name="Agent Barracks", default_size=(1100, 650), traits=frozenset({"ui.agent-barracks.v1"}),

@@ -104,16 +104,21 @@ test("deck cards drop straight into equipment and the whole slot opens a stable 
     await expect(slot).toHaveClass(/equipment-card/);
     // Empty space beside the title is an equally valid click target.
     await slot.click({ position: { x: 150, y: 30 } });
-    const dialog = page.getByRole("dialog", { name: `${item.name} workspace`, exact: true });
-    await expect(dialog).toBeVisible();
+    await expect(slot).toHaveAttribute("data-surface-level", "inspector");
+    await expect(page.locator(`[data-equipment-origin="${item.id}"]`)).toBeVisible();
+    await expect(page.locator(`[data-surface-bridge="${item.id}"]`)).toHaveCount(1);
     await toggle.click();
     await expect(slot).toHaveCount(0);
-    await expect(dialog).toBeVisible();
-    await page.getByRole("button", { name: "Close workspace", exact: true }).click();
     await toggle.click();
     await slot.click({ position: { x: 150, y: 30 } });
+    await expect(slot).toHaveAttribute("data-surface-level", "inspector");
+    await slot.getByRole("button", { name: "Open workspace", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: `${item.name} workspace`, exact: true });
     await expect(dialog).toBeVisible();
     await page.getByRole("button", { name: "Close workspace", exact: true }).click();
+    await expect(slot).toHaveAttribute("data-surface-level", "inspector");
+    await slot.getByRole("button", { name: `Close ${item.name} inspector`, exact: true }).click();
+    await expect(slot).toHaveClass(/equipment-card/);
     await page.keyboard.press("Control+z");
     await expect(slot).toHaveCount(0);
     await expect.poll(async () => (await request.get(`/api/nodes/${item.id}`)).status()).toBe(404);

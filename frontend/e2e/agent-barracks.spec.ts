@@ -1,5 +1,28 @@
 import { expect, test } from "@playwright/test";
 
+test("connectable containers use the shared boundary-following connection hint", async ({ page, request }) => {
+  await page.setViewportSize({ width: 1800, height: 1200 });
+  const box = await (await request.post("/api/nodes", { data: {
+    type: "oaw.barracks", name: "E2E Connection Hint", position: { x: 460, y: 220 },
+  } })).json();
+  try {
+    await page.goto("/");
+    const surface = page.locator(`[data-card-id="${box.id}"]`);
+    const hint = surface.locator("[data-connection-hover-hint]");
+    await expect(surface).toBeVisible();
+    await expect(hint).toBeAttached();
+    const frame = await surface.boundingBox();
+    if (!frame) throw new Error("Container geometry is unavailable");
+    await surface.hover({ position: { x: frame.width - 3, y: frame.height / 2 } });
+    await expect(surface).toHaveAttribute("data-connection-hot", "true");
+    const hintBox = await hint.boundingBox();
+    if (!hintBox) throw new Error("Container connection hint geometry is unavailable");
+    expect(Math.abs(hintBox.x + hintBox.width / 2 - (frame.x + frame.width))).toBeLessThanOrEqual(2);
+  } finally {
+    await request.delete(`/api/nodes/${box.id}`);
+  }
+});
+
 test("summoning streams a virtual workspace and generated connection onto the canvas", async ({ page, request }) => {
   await page.setViewportSize({ width: 1800, height: 1200 });
   const box = await (await request.post('/api/nodes', { data: {
@@ -73,8 +96,8 @@ test("multiple equipment drops and owner deletion stay synchronized through undo
   await expect(surface(first.id)).toHaveClass(/equipment-card/);
   await page.screenshot({ path: "../.open-agent-world/equipment-slots.png" });
   await surface(conversation.id).getByRole('button', { name: conversation.name, exact: true }).click();
-  await expect(page.getByRole('dialog', { name: `${conversation.name} workspace`, exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Close workspace', exact: true }).click();
+  await expect(surface(conversation.id)).toHaveAttribute('data-surface-level', 'inspector');
+  await surface(conversation.id).getByRole('button', { name: `Close ${conversation.name} inspector`, exact: true }).click();
   const source = (await surface(first.id).locator('[data-handleid="boundary-right"]').boundingBox())!;
   const target = (await surface(agent.id).locator('[data-handleid="boundary-right"]').boundingBox())!;
   await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
@@ -147,8 +170,8 @@ test("Barracks membership and explicit equipment drops preserve card identity", 
   await surface(agent.id).getByRole("button", { name: `Equipment for ${agent.name}`, exact: true }).click();
   await expect(surface(sandbox.id)).toHaveClass(/equipment-card/);
   await surface(sandbox.id).getByRole("button", { name: "Private environment", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Private environment equipment details" })).toBeVisible();
-  await page.getByRole("button", { name: "Close equipment", exact: true }).click();
+  await expect(surface(sandbox.id)).toHaveAttribute("data-surface-level", "inspector");
+  await surface(sandbox.id).getByRole("button", { name: "Close Private environment inspector", exact: true }).click();
   await surface(sandbox.id).getByRole("button", { name: "Unequip Private environment", exact: true }).click();
   await expect.poll(async () => (await read(sandbox.id)).equipment).toBeNull();
   await expect(surface(sandbox.id)).not.toHaveClass(/equipment-card/);

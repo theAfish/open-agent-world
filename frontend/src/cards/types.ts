@@ -6,6 +6,8 @@ export interface CanvasNodeData extends Record<string, unknown> {
   card: WorldCard;
   surfaceLevel: NodeSurfaceLevel;
   displaced: boolean;
+  equipmentDetail?: boolean;
+  equipmentOrigin?: boolean;
 }
 
 export type CanvasNode = Node<CanvasNodeData, "worldCard" | "container" | "equipment" | "equipmentPanel">;

@@ -16,7 +16,9 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { EquipmentCardNode, EquipmentPanelNode, EquipmentInspector } from "../cards/Equipment";
+import { EquipmentCardNode, EquipmentPanelNode } from "../cards/Equipment";
+import { equipmentOriginId, equipmentSurfaceNodes } from "./equipmentLayout";
+import { SurfaceBridge } from "../effects/SurfaceBridge";
 import { canEquip, equipmentOwner, useEquipmentDrag, useEquipmentPanel } from "../state/equipment";
 import { ContainerCardNode } from "../cards/ContainerCard";
 import { ancestors, containerDefinition, containerSizes, dropContainer, isContainer, memberSurfacePosition, parentFirst } from "../state/containers";
@@ -33,6 +35,7 @@ import { getConnectionOptions, validateConnection } from "../state/relationships
 import { useWorldStore } from "../state/worldStore";
 import { NODE_SURFACE_SIZE, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { ContourLayer } from "./ContourLayer";
+import { GenerationLayer } from "../effects/GenerationLayer";
 import {
   displacedPositions,
   nodePositionFromSurfacePosition,
@@ -135,10 +138,11 @@ export function WorldCanvas() {
     [renderCards, surfaceLevels, surfaceObstacles, catalog],
   );
   const equipmentPanels = useEquipmentPanel((state) => state.openIds);
+  const equipmentPositions = useEquipmentPanel((state) => state.positions);
   const mappedNodes = useMemo(() => {
     const byId = new Map(renderCards.map((c) => [c.id, c]));
     const frameSizes = containerSizes(renderCards, catalog, surfaceLevels);
-    return parentFirst(renderCards).map<CanvasNode>((card) => {
+    return parentFirst(renderCards).flatMap<CanvasNode>((card) => {
       const level = surfaceLevels.get(card.id) ?? "preview";
       const displaced = displacedById.get(card.id);
       let node = nodeFromCard(card, level, displaced?.displaced ?? false, displaced?.position ?? card.position);
@@ -152,9 +156,7 @@ export function WorldCanvas() {
         const owner = equipmentAgent;
         const ownerLevel = surfaceLevels.get(owner.id) ?? "preview";
         const index = renderCards.filter((c) => equipmentOwner(c, cards)?.id === owner.id).findIndex((c) => c.id === card.id);
-        return { ...node, type: "equipment", parentId: owner.id, draggable: false, hidden: !equipmentPanels.includes(owner.id),
-          position: { x: 13, y: NODE_SURFACE_SIZE[ownerLevel].height + 51 + index * 48 },
-          style: { width: 294, height: 40 }, zIndex: 26 };
+        return equipmentSurfaceNodes(node, owner.id, ownerLevel, index, equipmentPanels.includes(owner.id), equipmentPositions[card.id]);
       }
       if (card.parent_id && byId.has(card.parent_id)) {
         const parent = byId.get(card.parent_id)!;
@@ -163,14 +165,14 @@ export function WorldCanvas() {
       }
       return node;
     }).flatMap((node): CanvasNode[] => {
-      if (node.type === "equipment" || !catalog.node_types.find((type) => type.id === node.data.card.type)?.traits.includes("core.agent")) return [node];
+      if (node.type === "equipment" || node.data.equipmentDetail || !catalog.node_types.find((type) => type.id === node.data.card.type)?.traits.includes("core.agent")) return [node];
       const count = renderCards.filter((card) => equipmentOwner(card, cards)?.id === node.id).length;
       return [node, { id: `${node.id}:equipment`, type: "equipmentPanel", data: node.data, parentId: node.id,
         position: { x: 0, y: NODE_SURFACE_SIZE[node.data.surfaceLevel].height + 8 },
         style: { width: 320, height: 46 + Math.max(2, count + 1) * 48 },
         hidden: !equipmentPanels.includes(node.id), draggable: false, selectable: false, connectable: false, zIndex: 24 }];
     });
-  }, [displacedById, renderCards, surfaceLevels, catalog, cards, equipmentPanels]);
+  }, [displacedById, renderCards, surfaceLevels, catalog, cards, equipmentPanels, equipmentPositions]);
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(mappedNodes);
   const nodesRef = useRef(nodes);
   const positionAnimation = useRef<number>();
@@ -349,7 +351,7 @@ export function WorldCanvas() {
 
   const onNodeDragStart: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
     cancelPositionAnimation();
-    useEquipmentDrag.getState().set(draggedNodes.length <= 1 ? node.data.card : undefined);
+    useEquipmentDrag.getState().set(!node.data.equipmentDetail && draggedNodes.length <= 1 ? node.data.card : undefined);
     setDragging(true);
     activeDragIds.current.clear();
     activeDragIds.current.add(node.id);
@@ -383,7 +385,8 @@ export function WorldCanvas() {
     }
     const moved = draggedNodes.length > 0 ? draggedNodes : [node];
     const movedIds = new Set(moved.map((n) => n.id));
-    const updates = moved.filter((n) => !ancestors(cards, n.data.card).some((parent) => movedIds.has(parent.id))).map((draggedNode) => {
+    moved.filter((item) => item.data.equipmentDetail).forEach((item) => useEquipmentPanel.getState().move(item.id, item.position));
+    const updates = moved.filter((n) => !n.data.equipmentDetail && !ancestors(cards, n.data.card).some((parent) => movedIds.has(parent.id))).map((draggedNode) => {
       const parent = cards.find((c) => c.id === draggedNode.parentId);
       const surfacePosition = parent
         ? { x: draggedNode.position.x + parent.position.x, y: draggedNode.position.y + parent.position.y }
@@ -472,7 +475,6 @@ export function WorldCanvas() {
         if (resource) useEquipmentDrag.getState().set(resource, equipmentDropOwner(resource, event.clientX, event.clientY)?.id);
       }}
     >
-      <EquipmentInspector />
       <ReactFlow<CanvasNode, CanvasEdge>
         nodes={nodes}
         edges={flowEdges}
@@ -514,6 +516,9 @@ export function WorldCanvas() {
         aria-label="Open Agent World spatial canvas"
       >
         <ContourLayer />
+        <GenerationLayer />
+        {nodes.filter((node) => node.data.equipmentDetail && !node.hidden).map((node) =>
+          <SurfaceBridge key={node.id} sourceId={equipmentOriginId(node.id)} targetId={node.id} />)}
         <Background
           variant={BackgroundVariant.Dots}
           gap={24}

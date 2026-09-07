@@ -24,10 +24,9 @@ import { AgentCardBody } from "./AgentCard";
 
 interface WorkspaceSurfaceProps {
   card: WorldCard;
-  onClose?: () => void;
 }
 
-function WorkspaceTitlebar({ card, onClose }: WorkspaceSurfaceProps) {
+function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
   const catalog = useWorldStore((state) => state.catalog);
   const closeWorkspace = useNodeSurfaceStore((state) => state.closeWorkspace);
 
@@ -39,7 +38,7 @@ function WorkspaceTitlebar({ card, onClose }: WorkspaceSurfaceProps) {
         <strong>{card.name}</strong>
       </div>
       <div className="workspace-window-actions">
-        <IconButton icon={X} size="sm" quiet onClick={() => onClose ? onClose() : closeWorkspace(card.id)} label="Close workspace" />
+        <IconButton icon={X} size="sm" quiet onClick={() => closeWorkspace(card.id)} label="Close workspace" />
       </div>
     </header>
   );
@@ -157,12 +156,12 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
   );
 }
 
-export function WorkspaceSurface({ card, onClose }: WorkspaceSurfaceProps) {
+export function WorkspaceSurface({ card }: WorkspaceSurfaceProps) {
   const catalog = useWorldStore((state) => state.catalog);
   const [agentTab, setAgentTab] = useState("activity");
   return (
     <section className="node-workspace-window" role="dialog" aria-modal="false" aria-label={`${card.name} workspace`} data-workspace-node-id={card.id}>
-      <WorkspaceTitlebar card={card} onClose={onClose} />
+      <WorkspaceTitlebar card={card} />
       <div className="workspace-content">
       {card.type === "agent" ? <>
         <nav className="agent-window-tabs nodrag nopan" role="tablist" aria-label="Agent window">

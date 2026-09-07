@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { PluginCatalog, WorldCard } from "../types/world";
+import type { PluginCatalog, WorldCard, WorldPosition } from "../types/world";
 import { getConnectionOptions } from "./relationships";
 
 export function canEquip(resource: WorldCard, owner: WorldCard, catalog: PluginCatalog, cards: WorldCard[]): boolean {
@@ -23,10 +23,10 @@ export const useEquipmentDrag = create<{
 
 export const useEquipmentPanel = create<{
   openIds: string[];
-  inspectedId?: string;
-  inspect: (id?: string) => void;
+  positions: Record<string, WorldPosition>;
+  move: (id: string, position: WorldPosition) => void;
   toggle: (id: string) => void;
-}>((set) => ({ openIds: [], inspect: (inspectedId) => set({ inspectedId }), toggle: (id) => set((state) => ({
+}>((set) => ({ openIds: [], positions: {}, move: (id, position) => set((state) => ({ positions: { ...state.positions, [id]: position } })), toggle: (id) => set((state) => ({
   openIds: state.openIds.includes(id) ? state.openIds.filter((item) => item !== id) : [...state.openIds, id],
 })) }));
 

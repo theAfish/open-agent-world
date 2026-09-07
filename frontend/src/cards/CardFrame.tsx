@@ -3,7 +3,7 @@ import { BarracksBody } from "./Barracks";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Bot, Maximize2, Minus, ExternalLink, FileText, Image as ImageIcon, MessagesSquare, Puzzle, Sparkles, Trash2, Workflow, X, type LucideIcon } from "lucide-react";
 import { memo, type ComponentType, type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef } from "react";
-import { roundedRectAnchor } from "../edges/geometry";
+import { ConnectionHoverHint, clearConnectionHoverHint, updateConnectionHoverHint } from "./ConnectionHoverHint";
 import { IconButton } from "../components/IconButton";
 import { nodeSurfaceSupport, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
@@ -20,6 +20,9 @@ import { SandboxCardBody } from "./SandboxCard";
 import { TextCardBody } from "./TextCard";
 import { RelationshipList } from "./CardUtilities";
 import type { CanvasNode } from "./types";
+import { ActivityGlow } from "../effects/ActivityGlow";
+import { useNodeActivity } from "../effects/useNodeActivity";
+import { useNodeGeneration } from "../effects/generation";
 
 const DRAG_THRESHOLD_PX = 5;
 const NON_DRAG_SELECTOR = "button, input, textarea, select, label, a, [contenteditable='true'], .react-flow__handle";
@@ -88,6 +91,10 @@ function statusLabel(status: WorldCard["status"]): string {
 
 function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNode>) {
   const card = data.card;
+  const activity = useNodeActivity(card);
+  const generation = useNodeGeneration(card.id);
+  const generationPhase = generation?.targetId === card.id ? generation.phase : undefined;
+  const displayStatus = activity.phase === "idle" ? card.status : activity.phase;
   const catalog = useWorldStore((state) => state.catalog);
   const surfaceLevels = useNodeSurfaceStore((state) => state.surfaceLevels);
   const showPreview = useNodeSurfaceStore((state) => state.showPreview);
@@ -114,37 +121,12 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
   }, [dragging]);
 
   useEffect(() => {
-    if (connectingNodeId === card.id) cardRef.current?.removeAttribute("data-connection-hot");
+    if (connectingNodeId === card.id) clearConnectionHoverHint(cardRef.current);
   }, [card.id, connectingNodeId]);
 
   const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
     if (card.ephemeral || connectingNodeId === card.id) return;
-    const element = cardRef.current;
-    if (!element) return;
-    if ((event.target as Element).closest("button, input, textarea, select, a")) {
-      element.removeAttribute("data-connection-hot");
-      return;
-    }
-    const bounds = element.getBoundingClientRect();
-    const scaleX = element.offsetWidth / Math.max(bounds.width, 1);
-    const scaleY = element.offsetHeight / Math.max(bounds.height, 1);
-    const pointer = {
-      x: (event.clientX - bounds.left) * scaleX,
-      y: (event.clientY - bounds.top) * scaleY,
-    };
-    const cornerRadius = Number.parseFloat(window.getComputedStyle(element).borderTopLeftRadius) || 0;
-    const anchor = roundedRectAnchor(
-      { x: 0, y: 0, width: element.offsetWidth, height: element.offsetHeight },
-      pointer,
-      cornerRadius,
-    );
-    if (Math.hypot(pointer.x - anchor.x, pointer.y - anchor.y) > 20 * Math.max(scaleX, scaleY)) {
-      element.removeAttribute("data-connection-hot");
-      return;
-    }
-    element.style.setProperty("--connection-hint-x", `${anchor.x}px`);
-    element.style.setProperty("--connection-hint-y", `${anchor.y}px`);
-    element.dataset.connectionHot = "true";
+    updateConnectionHoverHint(event, cardRef.current);
   };
 
   const onPointerDownCapture = (event: ReactPointerEvent<HTMLElement>) => {
@@ -166,7 +148,11 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
       data-card-type={card.type}
       data-card-expanded={visualLevel === "inspector" || visualLevel === "workspace" ? "true" : "false"}
       data-surface-level={level}
-      onPointerLeave={() => cardRef.current?.removeAttribute("data-connection-hot")}
+      data-activity={activity.phase}
+      data-equipment-detail={data.equipmentDetail || undefined}
+      data-generation={generationPhase}
+      data-generation-source={generation?.sourceId === card.id && generation.phase === "flying" || undefined}
+      onPointerLeave={() => clearConnectionHoverHint(cardRef.current)}
       onPointerMoveCapture={(event) => {
         const start = pointerStart.current;
         if (start && event.buttons && Math.hypot(event.clientX - start.x, event.clientY - start.y) >= DRAG_THRESHOLD_PX) start.moved = true;
@@ -181,10 +167,9 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
         if (support.inspector && (visualLevel === "node" || visualLevel === "preview")) openInspector(card.id);
       }}
     >
+      <ActivityGlow phase={activity.phase} />
       {!card.ephemeral ? (
-        <svg className="connection-hover-hint" data-connection-hover-hint viewBox="0 0 12 12" aria-hidden="true">
-          <circle className="semantic-edge-endpoint" cx="6" cy="6" r="4.5" />
-        </svg>
+        <ConnectionHoverHint />
       ) : null}
       {!card.ephemeral ? ([
         [Position.Top, "top"], [Position.Right, "right"], [Position.Bottom, "bottom"], [Position.Left, "left"],
@@ -209,8 +194,8 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
               }}
               onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
           </div>
-          <div className="card-status" data-status={card.status} title={`Status: ${statusLabel(card.status)}`}>
-            <span aria-hidden="true" /><span>{statusLabel(card.status)}</span>
+          <div className="card-status" data-status={displayStatus} title={`Status: ${statusLabel(displayStatus)}`}>
+            <span aria-hidden="true" /><span>{statusLabel(displayStatus)}</span>
           </div>
           {(visualLevel === "node" || visualLevel === "preview") && support.preview ? (
             <IconButton

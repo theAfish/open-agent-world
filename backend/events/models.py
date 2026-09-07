@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class EventType(StrEnum):
     CONNECTION_READY = "connection_ready"
     CARD_CREATED = "card_created"
+    NODES_GENERATED = "nodes_generated"
     CARD_UPDATED = "card_updated"
     CARD_DELETED = "card_deleted"
     EDGE_CREATED = "edge_created"

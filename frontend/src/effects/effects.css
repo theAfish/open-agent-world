@@ -1,0 +1,76 @@
+@property --activity-angle { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+
+.activity-glow {
+  position: absolute; inset: -2px; border-radius: inherit; pointer-events: none; z-index: 3;
+  --activity-color: #7caa98; opacity: 0; transition: opacity 420ms ease;
+}
+.activity-glow::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 2px;
+  background: conic-gradient(from var(--activity-angle), transparent 0deg 210deg,
+    color-mix(in srgb, var(--activity-color) 25%, transparent) 265deg, var(--activity-color) 310deg, transparent 350deg);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+.activity-glow::after {
+  content: ""; position: absolute; inset: 1px; border-radius: inherit;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--activity-color) 22%, transparent), inset 0 0 12px color-mix(in srgb, var(--activity-color) 8%, transparent);
+}
+.activity-glow[data-phase="running"] { opacity: 0.95; }
+.activity-glow[data-phase="running"]::before { animation: activity-orbit 4s linear infinite; }
+.activity-glow[data-phase="waiting"] { opacity: 0.6; --activity-color: #b39861; }
+.activity-glow[data-phase="waiting"]::after { animation: activity-breathe 2.8s ease-in-out infinite; }
+.activity-glow[data-phase="failed"] { opacity: 0.8; --activity-color: var(--danger); }
+.activity-glow[data-phase="failed"]::before { background: color-mix(in srgb, var(--danger) 55%, transparent); }
+.activity-glow[data-finish="true"] { animation: activity-finish 750ms ease-out; --activity-color: #91aa89; }
+.activity-glow i {
+  position: absolute; width: 3px; height: 3px; border-radius: 50%; background: var(--activity-color);
+  box-shadow: 0 0 7px var(--activity-color); opacity: 0;
+  animation: activity-particle 2.8s ease-out infinite; animation-delay: calc(var(--particle) * -0.7s);
+}
+.activity-glow i:nth-child(1) { left: 24%; top: 0; }
+.activity-glow i:nth-child(2) { right: 0; top: 32%; }
+.activity-glow i:nth-child(3) { left: 65%; bottom: 0; }
+.activity-glow i:nth-child(4) { left: 0; top: 68%; }
+.activity-glow[data-visible="false"]::before,
+.activity-glow[data-visible="false"]::after,
+.activity-glow[data-visible="false"] i { animation-play-state: paused; }
+.container-activity {
+  position: absolute; right: 24px; bottom: 16px; display: flex; align-items: center; gap: 7px;
+  font-size: 10px; color: var(--ink-soft); pointer-events: none; letter-spacing: 0.04em;
+}
+.container-activity i { width: 5px; height: 5px; border-radius: 50%; background: var(--ink-faint); }
+.container-activity[data-phase="running"] i { background: #7caa98; box-shadow: 0 0 7px #7caa98; }
+.container-activity[data-phase="waiting"] i { background: #b39861; }
+.container-activity[data-phase="failed"] i { background: var(--danger); }
+.container-activity[data-phase="completed"] i { background: #91aa89; }
+.container-frame[data-activity="running"] { border-color: #7caa98aa; }
+.card-status[data-status="running"] > span:first-child { background: #7caa98; box-shadow: 0 0 0 3px #7caa9826; }
+.container-frame[data-activity="failed"] { border-color: color-mix(in srgb, var(--danger) 65%, transparent); }
+.container-frame.is-materializing { animation: region-materialize 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.world-card[data-generation="pending"], .world-card[data-generation="flying"] { opacity: 0; }
+.world-card[data-generation="settling"] { animation: generation-land 220ms ease-out both; }
+.world-card[data-generation-source="true"] { animation: generation-source 650ms ease-out; }
+.generation-flight { position: absolute; top: 0; left: 0; z-index: 70; pointer-events: none; }
+.generation-copy {
+  position: absolute !important; left: 0; top: 0; margin: 0; pointer-events: none !important;
+  transform-origin: top left; will-change: transform, opacity; overflow: hidden;
+  box-shadow: 0 0 24px var(--accent-soft), -14px 8px 22px color-mix(in srgb, var(--accent) 12%, transparent) !important;
+  transition: none !important;
+}
+.generation-copy * { pointer-events: none !important; animation: none !important; }
+
+@keyframes activity-orbit { to { --activity-angle: 360deg; } }
+@keyframes activity-breathe { 50% { opacity: 0.3; } }
+@keyframes activity-particle { 15% { opacity: 0.65; } 100% { opacity: 0; transform: translate(3px, -10px) scale(0.5); } }
+@keyframes activity-finish { 0%, 30% { opacity: 0.95; } 100% { opacity: 0; } }
+@keyframes region-materialize { from { opacity: 0; clip-path: inset(0 100% 0 0 round 24px); } to { opacity: 1; clip-path: inset(0 0 0 0 round 24px); } }
+@keyframes generation-land { from { opacity: 0.2; filter: drop-shadow(0 0 16px var(--accent)); } to { opacity: 1; filter: none; } }
+@keyframes generation-source { 20% { filter: drop-shadow(0 0 6px var(--accent)); } 100% { filter: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-glow::before, .activity-glow::after, .activity-glow i { animation: none !important; }
+  .activity-glow i, .generation-flight { display: none; }
+  .container-frame.is-materializing { animation: reduced-materialize 150ms ease-out both !important; }
+  .world-card[data-generation] { opacity: 1; animation: none !important; }
+}
+@keyframes reduced-materialize { from { opacity: 0; } to { opacity: 1; } }
