@@ -1521,6 +1521,13 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   box-shadow: 0 14px 24px var(--shadow-deep), 0 0 0 3px var(--accent-soft), inset 0 1px 0 var(--highlight);
   transform: translateY(-8px) rotate(0);
 }
+/* The resting tilt for one- and two-card decks is more specific than the
+   generic hover selector, so restore the shared lift on those cards here. */
+.component-palette .palette-items:not(.has-many) > .palette-item:hover,
+.component-palette .palette-items:not(.has-many) > .palette-item:focus-visible {
+  z-index: 20;
+  transform: translateY(-9px) rotate(0) scale(1.035);
+}
 .component-palette .palette-item:active { cursor: grabbing; }
 
 .palette-card-corner { position: absolute; top: 7px; left: 7px; color: var(--ink-faint); }
