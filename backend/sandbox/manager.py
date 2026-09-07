@@ -31,6 +31,8 @@ class _Binding:
 
 
 class SandboxManager(SandboxBackend):
+    supports_invocation_environment = True
+
     def __init__(self, root: Path, registry: SandboxRuntimeRegistry, *, preferred: str = "auto") -> None:
         self.root = root.resolve()
         self.registry = registry
@@ -205,12 +207,18 @@ class SandboxManager(SandboxBackend):
 
     async def execute(self, sandbox_id: str, argv: Sequence[str], *, timeout_seconds: float | None = None,
                       env: Mapping[str, str] | None = None,
+                      invocation_env: Mapping[str, str] | None = None,
                       runtime_mount: RuntimeMount | None = None) -> CommandResult:
         binding = self._binding(sandbox_id)
         if not binding.provisioned:
             raise SandboxStateError("Start the Sandbox before executing commands")
         options = {"runtime_mount": runtime_mount} if runtime_mount is not None else {}
-        return await self._backend(binding.resolved_runtime or "").execute(
+        backend = self._backend(binding.resolved_runtime or "")
+        if invocation_env is not None:
+            if not backend.supports_invocation_environment:
+                raise SandboxValidationError("This Sandbox runtime does not support invocation configuration")
+            options["invocation_env"] = invocation_env
+        return await backend.execute(
             sandbox_id, argv, timeout_seconds=timeout_seconds, env=env, **options)
 
     async def terminate(self, sandbox_id: str) -> None:

@@ -1,0 +1,6 @@
+.execution-config p { margin: 6px 0; font-size: 12px; line-height: 1.5; }
+.execution-config code { overflow-wrap: anywhere; font-size: 11px; }
+.execution-config .field-label textarea { font: 11px/1.55 "Cascadia Code", Consolas, monospace; min-height: 165px; }
+.execution-config .field-label input { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; }
+.execution-config .editor-actions { display: flex; gap: 8px; margin-top: 8px; }
+.execution-config [role="alert"] { color: var(--danger); overflow-wrap: anywhere; }

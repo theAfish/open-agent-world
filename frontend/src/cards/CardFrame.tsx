@@ -1,4 +1,5 @@
 import { EquipmentToggle } from "./Equipment";
+import { ExecutionConfigurationBody } from "./ExecutionConfiguration";
 import { BarracksBody } from "./Barracks";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Maximize2, Minus, ExternalLink, Trash2, X } from "lucide-react";
@@ -64,7 +65,8 @@ export function CardContent({ card, level }: BodyProps) {
   const catalog = useWorldStore((s) => s.catalog);
   const definition = catalog.node_types.find((t) => t.id === card.type);
   const Body = definition?.traits.includes("ui.agent-barracks.v1") ? BarracksBody : definition?.traits.includes("ui.skill.v1") ? SkillNodeBody : definition?.traits.includes("ui.skill-package.v1") ? SkillToolboxBody : definition?.traits.includes("ui.task-board.v1") ? TaskBoardBody : definition?.traits.includes("core.agent") ? AgentCardBody : BODIES[card.type] ?? GenericCardBody;
-  return <PluginSurface card={card} slot="body" level={level}><Body card={card} level={level} /></PluginSurface>;
+  return <PluginSurface card={card} slot="body" level={level}>{definition?.traits.includes("ui.execution-config.v1")
+    ? <ExecutionConfigurationBody key={card.id} card={card} /> : <Body card={card} level={level} />}</PluginSurface>;
 }
 
 function statusLabel(status: WorldCard["status"]): string {

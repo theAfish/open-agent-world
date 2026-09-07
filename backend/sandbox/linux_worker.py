@@ -63,6 +63,7 @@ async def handle(request: dict[str, Any], *, stdin_pending: bool = False) -> Any
         await backend.start(sandbox_id)
         execution = asyncio.create_task(backend.execute(sandbox_id, request["argv"],
             timeout_seconds=request.get("timeout_seconds"), env=request.get("env"),
+            invocation_env=request.get("invocation_env"),
             runtime_mount=RuntimeMount.from_wire(request["runtime_mount"]) if request.get("runtime_mount") is not None else None,
             _unit_name=request["unit"]))
         disconnected = asyncio.Event()

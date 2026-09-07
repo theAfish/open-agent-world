@@ -339,6 +339,16 @@ export const worldApi = {
     return request(`/agents/${encodeURIComponent(id)}/capabilities`);
   },
 
+  async getCredentialBindings(id: string): Promise<Record<string, boolean>> {
+    return request(`/nodes/${encodeURIComponent(id)}/credentials`);
+  },
+
+  async bindCredential(id: string, reference: string, value: string | null, expectedRevision: number): Promise<{ configured: boolean }> {
+    return request(`/nodes/${encodeURIComponent(id)}/credentials/${encodeURIComponent(reference)}`, {
+      method: "PUT", body: JSON.stringify({ value, expected_revision: expectedRevision }),
+    });
+  },
+
   getAgentInfo(id: string): Promise<{ session_id: string; details?: Record<string, unknown> }> {
     return request(`/agents/${encodeURIComponent(id)}`);
   },

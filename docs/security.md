@@ -27,6 +27,7 @@ Discovery probes are cached for the application lifetime so status polling does 
 - Read-only and read/write attachments receive distinct grants. A read-only hard link has inheritance protected before the package's inherited workspace write grant is removed and replaced with read access.
 - No Internet, private-network, or server capability is granted.
 - The child receives a small allowlisted environment; credentials, tokens, SSH variables, cloud variables, and the application environment are not inherited.
+- Explicitly selected [Environment Profiles and Compute Targets](execution-configuration.md) can add validated command-only variables. Authorization is rechecked before resolving secrets; loader and host startup overrides remain prohibited. Receiving code can read injected secrets. Output redaction does not replace isolation or authorization.
 - The process is assigned to a Job Object before it can execute untrusted work.
 - Kill-on-close, command timeout, process-count, and memory limits apply to the entire Job Object.
 - Stop and destroy terminate the complete process tree.

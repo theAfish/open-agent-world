@@ -13,6 +13,7 @@ class NodeDocumentDownload:
 
 @dataclass(frozen=True, slots=True)
 class NodeDocumentAction:
+    """Writes own their capability; reads may reuse an installed document read capability."""
     handler: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
     capability_kind: str | None = None
     read_only: bool = False

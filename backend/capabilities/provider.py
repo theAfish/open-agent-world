@@ -115,7 +115,7 @@ class _CapabilityContext:
         }
 
     async def execute_sandbox(
-        self, agent_id: str, sandbox_id: str, argv: list[str]
+        self, agent_id: str, sandbox_id: str, argv: list[str], *, environment_id: str | None = None, target_id: str | None = None
     ) -> dict[str, Any]:
         self.services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
         if self.services.sandbox_backend is None:
@@ -123,7 +123,7 @@ class _CapabilityContext:
                 "sandbox execution is not configured on this host"
             )
         result = await self.services.execute_sandbox(
-            sandbox_id, argv, agent_id=agent_id
+            sandbox_id, argv, agent_id=agent_id, environment_id=environment_id, target_id=target_id
         )
         return asdict(result)
 
@@ -136,7 +136,7 @@ class _CapabilityContext:
             raise ResourceValidationError(validation_message(exc)) from exc
         result = await self.services.execute_sandbox(sandbox_id,
             [*request.interpreter, request.script_path, *request.argv],
-            agent_id=agent_id, _skill_request=request)
+            agent_id=agent_id, _skill_request=request, environment_id=request.environment_id, target_id=request.target_id)
         return asdict(result)
 
     async def inspect_sandbox(self, agent_id: str, sandbox_id: str) -> dict[str, Any]:

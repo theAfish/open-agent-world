@@ -144,7 +144,8 @@ def validate_relative_path(raw: str) -> str:
     return str(path)
 
 
-def minimal_linux_environment(extra: Mapping[str, str] | None = None) -> dict[str, str]:
+def minimal_linux_environment(extra: Mapping[str, str] | None = None, *, invocation_env: Mapping[str, str] | None = None) -> dict[str, str]:
+    from .environment import validate_command_environment, apply_invocation_environment
     environment = {
         "PATH": "/usr/bin:/bin", "HOME": "/tmp/home", "TMPDIR": "/tmp",
         "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "SHELL": "/bin/sh",
@@ -156,9 +157,9 @@ def minimal_linux_environment(extra: Mapping[str, str] | None = None) -> dict[st
         for key, value in extra.items():
             if key not in {"LANG", "LC_ALL", "TZ", "TERM"}:
                 raise SandboxValidationError(f"environment key is outside the allowlist: {key}")
-            if not isinstance(value, str) or "\0" in value:
-                raise SandboxValidationError("environment values must be NUL-free strings")
+            validate_command_environment({key: value})
             environment[key] = value
+    apply_invocation_environment(environment, invocation_env, extra)
     return environment
 
 
@@ -267,6 +268,8 @@ class _Record:
 
 
 class LinuxSandboxBackend(SandboxBackend):
+    supports_invocation_environment = True
+
     def __init__(
         self, managed_root: Path, *, limits: SandboxLimits = SandboxLimits(),
         event_sink: SandboxEventSink | None = None, runtime_id: str = "linux",
@@ -368,10 +371,11 @@ class LinuxSandboxBackend(SandboxBackend):
         self, sandbox_id: str, argv: Sequence[str], *,
         timeout_seconds: float | None = None, env: Mapping[str, str] | None = None,
         _unit_name: str | None = None,
+        invocation_env: Mapping[str, str] | None = None,
         runtime_mount: RuntimeMount | None = None,
     ) -> CommandResult:
         command = validate_argv(argv)
-        environment = minimal_linux_environment(env)
+        environment = minimal_linux_environment(env, invocation_env=invocation_env)
         timeout = self._limits.default_timeout_seconds if timeout_seconds is None else float(timeout_seconds)
         if not math.isfinite(timeout) or timeout <= 0:
             raise SandboxValidationError("timeout_seconds must be finite and positive")

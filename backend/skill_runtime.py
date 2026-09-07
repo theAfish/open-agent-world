@@ -18,6 +18,8 @@ SKILL_SELECTOR = CapabilitySelector(parameter="skill", argument="skill_id", targ
 
 class RunSkillScript(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    environment_id: StrictStr | None = None
+    target_id: StrictStr | None = None
     skill_id: StrictStr = Field(description="World node ID returned by reading an authorized Skill or listing its Toolbox.")
     script_path: StrictStr = Field(validation_alias=AliasChoices("script", "script_path"),
         description="Relative bundled file, for example scripts/check.py.")
@@ -35,6 +37,8 @@ class RunSkillScript(BaseModel):
 def skill_script_schema():
     schema = RunSkillScript.model_json_schema()
     del schema["properties"]["skill_id"]
+    del schema["properties"]["environment_id"]
+    del schema["properties"]["target_id"]
     schema["required"].remove("skill_id")
     return schema
 

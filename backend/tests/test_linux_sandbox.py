@@ -172,7 +172,7 @@ def test_wsl_bridge_never_interpolates_user_commands_into_launcher() -> None:
     decoded = json.loads(_envelope(request))
     assert decoded["request"] == request
     assert "echo $HOME" not in command[-1]
-    assert [item[0] for item in decoded["modules"]] == ["models", "materialization", "base", "linux", "linux_worker"]
+    assert [item[0] for item in decoded["modules"]] == ["models", "materialization", "base", "environment", "linux", "linux_worker"]
     with pytest.raises(SandboxValidationError):
         wsl_command("--terminate")
 

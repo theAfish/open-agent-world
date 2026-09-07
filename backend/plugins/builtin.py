@@ -699,7 +699,7 @@ async def _execute_sandbox(
 ) -> Any:
     argv = values.get("argv")
     if (
-        set(values) != {"argv"}
+        set(values) - {"argv", "environment_id", "target_id"}
         or not isinstance(argv, list)
         or not argv
         or not all(isinstance(item, str) and item for item in argv)
@@ -708,11 +708,14 @@ async def _execute_sandbox(
             "sandbox execute capability requires a non-empty argv array"
         )
     return await context.execute_sandbox(
-        capability.agent_id, capability.target_id, argv
+        capability.agent_id, capability.target_id, argv,
+        **{key: values[key] for key in ("environment_id", "target_id") if key in values}
     )
 
 
 def _register_builtin(registry: PluginRegistration) -> None:
+    from backend.execution_config import register_execution_configuration, EXECUTION_SELECTORS
+    register_execution_configuration(registry)
     for operation in ("read", "patch"):
         registry.register_capability(CapabilityDefinition(
             kind=f"legion.state.{operation}", tool_name=f"{operation}_legion_state", target_parameter="legion",
@@ -846,12 +849,13 @@ def _register_builtin(registry: PluginRegistration) -> None:
         input_schema={"type": "object", "properties": {}, "additionalProperties": False}), _view_image)
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.execute', tool_name='execute_command', target_parameter='sandbox',
+        selectors=EXECUTION_SELECTORS,
         description='Execute an argv command in the selected sandbox. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES.',
         input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}}, "required": ["argv"], "additionalProperties": False}), _execute_sandbox)
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.run_skill_script', tool_name='run_skill_script', target_parameter='sandbox',
         description='Run a file from the selected Skill in the selected sandbox. Both resources require independent live authorization. The current bundle is mounted read-only outside the workspace; cwd and generated outputs use the sandbox workspace.',
-        input_schema=skill_script_schema(), selectors=(SKILL_SELECTOR,), target_capabilities=frozenset({"sandbox.execute"})), _run_skill_script)
+        input_schema=skill_script_schema(), selectors=(SKILL_SELECTOR, *EXECUTION_SELECTORS), target_capabilities=frozenset({"sandbox.execute"})), _run_skill_script)
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.inspect', tool_name='inspect_sandbox', target_parameter='sandbox',
         description='Inspect the selected sandbox before executing: returns its operating system, shell argv prefix, cwd, read/write access, resource directory and availability.',

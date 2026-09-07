@@ -24,7 +24,7 @@ from backend.plugins.documents import NodeDocumentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.10"
+PLUGIN_API_VERSION = "1.11"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -141,6 +141,7 @@ class CapabilitySelector:
     target_traits: frozenset[str] = frozenset()
     document_action: str | None = None
     include_members: bool = False
+    required: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -523,8 +524,12 @@ class PluginRegistry:
                 for name, action in document.actions.items():
                     if not name or name == "replace" or not callable(action.handler):
                         raise ValueError("document actions require a handler and cannot use reserved name 'replace'")
-                    if action.capability_kind and action.capability_kind not in staged.capability_handlers:
-                        raise ValueError("document action capabilities must be owned by the same plugin")
+                    if (action.capability_kind and action.capability_kind not in staged.capability_handlers
+                        and not (action.read_only and any(
+                            existing_action.read_only and existing_action.capability_kind == action.capability_kind
+                            for existing_node in self._nodes.values() if existing_node.document
+                            for existing_action in existing_node.document.actions.values()))):
+                        raise ValueError("document action capabilities must be owned by the same plugin, or reuse an installed read-only operation")
             if definition.summoning:
                 if definition.document is None or definition.summoning.capability_kind not in staged.capability_handlers:
                     raise ValueError("Summoning requires a document and a capability owned by the same plugin")
@@ -570,6 +575,8 @@ class PluginRegistry:
                 raise ValueError("Selector destination arguments must not overwrite other selectors")
             if any(s.include_members and not s.document_action for s in definition.selectors):
                 raise ValueError("Member selectors require an authorized document action")
+            if any(not isinstance(s.required, bool) for s in definition.selectors):
+                raise ValueError("Selector required must be a boolean")
             if definition.kind in staged.capabilities and definition.kind not in staged.capability_handlers:
                 raise ValueError("Capability definitions must own their handlers")
             previous = operations.get(definition.tool_name)

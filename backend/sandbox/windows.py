@@ -14,6 +14,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 from typing import Any
+from collections.abc import Mapping
 
 from .base import SandboxBackend, SandboxEventSink
 from .materialization import RuntimeMount, materialize_bundle, runtime_tree, cleanup_materializations
@@ -73,6 +74,8 @@ class WindowsSandboxBackend(SandboxBackend):
     or unavailable security primitives.  There is intentionally no subprocess
     or path-only fallback.
     """
+
+    supports_invocation_environment = True
 
     def __init__(
         self,
@@ -213,6 +216,7 @@ class WindowsSandboxBackend(SandboxBackend):
         *,
         timeout_seconds: float | None = None,
         env: Any = None,
+        invocation_env: Mapping[str, str] | None = None,
         runtime_mount: RuntimeMount | None = None,
     ) -> CommandResult:
         record = await self._record(sandbox_id)
@@ -235,7 +239,7 @@ class WindowsSandboxBackend(SandboxBackend):
                 await asyncio.to_thread(self._validate_workspace, record.workspace_path)
             storage = record.root / "workspace"
             environment = minimal_windows_environment(
-                record.workspace, env, storage_directory=storage
+                record.workspace, env, storage_directory=storage, invocation_env=invocation_env
             )
             mount_root = None
             if runtime_mount is not None:

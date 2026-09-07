@@ -97,9 +97,10 @@ class ProjectedOperation:
         schema = deepcopy(dict(self.definition.input_schema))
         schema.setdefault("type", "object")
         schema["properties"] = {self.definition.target_parameter: selector_schema(self.resources),
-            **{s.parameter: selector_schema(self.selectors[s.parameter]) for s in self.definition.selectors},
+            **{s.parameter: selector_schema(self.selectors[s.parameter]) for s in self.definition.selectors
+               if s.required or self.selectors[s.parameter]},
             **schema.get("properties", {})}
-        schema["required"] = [self.definition.target_parameter, *(s.parameter for s in self.definition.selectors),
+        schema["required"] = [self.definition.target_parameter, *(s.parameter for s in self.definition.selectors if s.required),
                               *schema.get("required", [])]
         schema.setdefault("additionalProperties", False)
         return schema
@@ -119,7 +120,8 @@ def project_operations(services, agent_id):
         group = groups[definition.tool_name]
         group.capabilities.append(capability)
         group.resources[capability.target_id] = services.world.get_card(capability.target_id)
-    return [group for group in groups.values() if all(group.selectors.values())]
+    return [group for group in groups.values() if all(
+        group.selectors[s.parameter] for s in group.definition.selectors if s.required)]
 
 
 def resolve_operation(services, agent_id, operation_id, arguments):
@@ -136,6 +138,8 @@ def resolve_operation(services, agent_id, operation_id, arguments):
     for selector in definition.selectors:
         if selector.argument in values and selector.argument != selector.parameter:
             raise ResourceValidationError(f"Use {selector.parameter}, not the internal {selector.argument} field")
+        if not selector.required and selector.parameter not in values:
+            continue
         values[selector.argument] = resolve_target(values.pop(selector.parameter, None), operation.selectors[selector.parameter], selector.parameter)
     return authorize_invocation(services, agent_id, selected.id, values), values
 
@@ -148,6 +152,8 @@ def authorize_invocation(services, agent_id, capability_id, values):
         services.capabilities.capability_for_id(agent_id, f"{kind}:{live.target_id}")
     current = services.capabilities.derive(agent_id).capabilities
     for selector in definition.selectors:
+        if not selector.required and selector.argument not in values:
+            continue
         value = values.get(selector.argument)
         if not isinstance(value, str) or value not in authorized_resources(services, current, selector):
             raise PermissionDeniedError(f"Access to {selector.parameter} was revoked")

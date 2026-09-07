@@ -8,7 +8,7 @@ import math
 from collections.abc import Coroutine, Mapping
 from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath, PurePosixPath
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -94,6 +94,7 @@ from backend.sandbox import (
     SandboxBackend,
     SandboxEvent,
     SandboxEventType,
+    SandboxError,
     SandboxNotFoundError,
     SandboxStateError,
     SandboxValidationError,
@@ -522,6 +523,8 @@ class ApplicationServices:
     state: StateStore
     legions: LegionStore
     llm_settings: LlmSettingsStore
+    _execution_secrets: ContextVar[tuple[str, ...]] = field(
+        default_factory=lambda: ContextVar("execution_secrets", default=()), init=False, repr=False)
     run_manager: RunManager | None = None
     node_execution: NodeExecutionService | None = None
     summoning: SummoningService | None = None
@@ -552,6 +555,11 @@ class ApplicationServices:
     _lifecycle_startup_cleanup_budget_seconds: float = field(
         default=30.0, init=False, repr=False
     )
+
+    @property
+    def execution_credentials(self):
+        from backend.security.execution_credentials import ExecutionCredentialStore
+        return ExecutionCredentialStore(self.llm_settings, self.world)
 
     @asynccontextmanager
     async def _node_mutation(self, *, read_only: bool = False):
@@ -2753,6 +2761,8 @@ class ApplicationServices:
         timeout_seconds: float | None = None,
         agent_id: str | None = None,
         _skill_request: RunSkillScript | None = None,
+        environment_id: str | None = None,
+        target_id: str | None = None,
     ) -> CommandResult:
         async with self._portable_state_gate.execution():
             # Validate graph authority against a complete formation, but do
@@ -2773,23 +2783,57 @@ class ApplicationServices:
             command_finished = asyncio.Event()
 
             async def execute_and_refresh() -> CommandResult:
+                secret_token = None
                 try:
                     execution_argv = argv
                     options = {}
                     # Re-check after scheduling, immediately before dispatch.
                     async with self._node_mutation():
                         if agent_id is not None:
-                            self.capabilities.require_sandbox_execute(agent_id, sandbox_id)
+                            from backend.capabilities.projection import authorize_invocation
+                            values = {key: value for key, value in {"environment_id": environment_id, "target_id": target_id}.items() if value is not None}
+                            kind = "sandbox.execute"
+                            if _skill_request is not None:
+                                values["skill_id"] = _skill_request.skill_id
+                                kind = "sandbox.run_skill_script"
+                            authorize_invocation(self, agent_id, f"{kind}:{sandbox_id}", values)
+                        elif environment_id is not None or target_id is not None:
+                            raise ResourceValidationError("Configuration selection requires an authorized Agent")
                         if _skill_request is not None:
                             from backend.skill_runtime import resolve_skill_mount
                             if agent_id is None:
                                 raise ResourceValidationError("Skill execution requires an Agent")
                             execution_argv, mount = resolve_skill_mount(self, agent_id, sandbox_id, _skill_request)
                             options["runtime_mount"] = mount
-                    return await backend.execute(
+                        if environment_id is not None or target_id is not None:
+                            if not backend.supports_invocation_environment:
+                                raise SandboxValidationError("This Sandbox backend does not support invocation configuration")
+                            from backend.execution_config import resolve_execution_configuration
+                            injected, secrets = resolve_execution_configuration(self, environment_id, target_id)
+                            options["invocation_env"] = injected
+                            secret_token = self._execution_secrets.set(secrets)
+                    result = await backend.execute(
                         sandbox_id, execution_argv, timeout_seconds=timeout_seconds, **options
                     )
+                    if self._execution_secrets.get():
+                        from backend.security.redaction import redact
+                        result = replace(result, stdout=redact(result.stdout, self._execution_secrets.get()),
+                            stderr=redact(result.stderr, self._execution_secrets.get()),
+                            argv=tuple(redact(list(result.argv), self._execution_secrets.get())))
+                        for event_type, output in ((SandboxEventType.STDOUT, result.stdout), (SandboxEventType.STDERR, result.stderr)):
+                            if output:
+                                await self._emit_sandbox_event(SandboxEvent(sandbox_id, event_type, {"text": output}))
+                    return result
+                except Exception as error:
+                    if self._execution_secrets.get():
+                        from backend.errors import DomainError
+                        from backend.security.redaction import redact
+                        error_type = type(error) if isinstance(error, (DomainError, SandboxError)) else SandboxError
+                        raise error_type(redact(str(error), self._execution_secrets.get())) from None
+                    raise
                 finally:
+                    if secret_token is not None:
+                        self._execution_secrets.reset(secret_token)
                     command_finished.set()
                     await self._refresh_sandbox_write_mounts(
                         sandbox_id, agent_id=agent_id
@@ -2850,6 +2894,13 @@ class ApplicationServices:
         return {"runtimes": [], "default_runtime": None}
 
     async def publish_sandbox_event(self, event: SandboxEvent) -> None:
+        if self._execution_secrets.get() and event.type in {SandboxEventType.STDOUT, SandboxEventType.STDERR}:
+            # Suppress raw fragments; the bounded command result is redacted as
+            # a whole, so secrets split across streaming chunks cannot escape.
+            return
+        if self._execution_secrets.get():
+            from backend.security.redaction import redact
+            event = replace(event, payload=redact(dict(event.payload), self._execution_secrets.get()))
         transaction = self._sandbox_event_transaction.get()
         if transaction is not None:
             if transaction.state in {"open", "committing"}:
@@ -2860,6 +2911,7 @@ class ApplicationServices:
         await self._emit_sandbox_event(event)
 
     async def _emit_sandbox_event(self, event: SandboxEvent) -> None:
+        from backend.security.redaction import redact
         await self.events.publish(
             _SANDBOX_EVENT_TYPES[event.type],
             node_id=event.sandbox_id,
@@ -2869,7 +2921,7 @@ class ApplicationServices:
                 if "resource_id" in event.payload
                 else None
             ),
-            payload=dict(event.payload),
+            payload=redact(dict(event.payload), self._execution_secrets.get()),
         )
 
     def _emit_sandbox_event_nowait(self, event: SandboxEvent) -> None:

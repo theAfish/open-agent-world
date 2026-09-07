@@ -222,7 +222,9 @@ reference remapping.
 Use `"1.4"` for document seeds or document downloads. Use `"1.5"` for
 `NodeContainerDefinition`. The current skill toolbox helper requires `"1.10"`.
 Use `"1.10"` for `CapabilityDefinition`, `CapabilitySelector`, and operation tools
-with target selectors. Open containers retain
+with target selectors. Use `"1.11"` for optional selectors (`required=False`),
+shared read-only document capabilities, and execution configuration models.
+Open containers retain
 ordinary child nodes and their external relationships; see
 [Skill Toolboxes](../plugins/skill_packages/README.md#independent-cards-and-open-spaces).
 
@@ -585,7 +587,9 @@ Runs, processes, and transient provider state are not copied.
 Pydantic `model` (constructible with defaults), an action map, optional `summarize`,
 and optional portable `capture` transformation. `NodeDocumentAction` contains a
 pure synchronous `(value, arguments) -> value` handler, `read_only`, and an optional
-`capability_kind` owned by the same plugin. Handlers validate their own argument
+`capability_kind` owned by the same plugin. API 1.11 also permits a read-only
+action to reuse a capability already declared by an installed read-only document
+action. Writes retain the ownership requirement. Handlers validate their own argument
 models. They receive JSON data copies, never host databases or service containers.
 
 The host stores one validated document per node in StateStore, outside Card config.
@@ -721,6 +725,12 @@ current members. `target_capabilities` requires additional kinds on the primary
 target. For example, `run_skill_script(sandbox, skill, script, argv)` requires
 Sandbox execution and independently resolves the selected Skill's current read
 access. These independent selectors avoid generating tools for every resource pair.
+
+With API 1.11, `required=False` permits omission of a selector without suppressing
+the operation when no matching resources exist. Only explicitly supplied optional
+selectors are resolved and authorized. See [execution configuration](execution-configuration.md)
+for Environment Profiles, plugin-defined Compute Target fields, credential
+boundaries, and the command-only Sandbox injection contract.
 
 Kinds can share an operation name when their descriptions, schemas and selector
 contracts are identical; the selected target determines the handler. Conflicting

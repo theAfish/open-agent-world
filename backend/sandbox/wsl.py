@@ -53,7 +53,7 @@ sys.modules['oaw_sandbox.linux_worker'].main(payload['request'],stdin_pending=bo
 # source change the next unrestricted transport helper.
 _WORKER_MODULES = tuple(
     (name, (Path(__file__).parent / f"{name}.py").read_text(encoding="utf-8"))
-    for name in ("models", "materialization", "base", "linux", "linux_worker")
+    for name in ("models", "materialization", "base", "environment", "linux", "linux_worker")
 )
 
 
@@ -95,6 +95,8 @@ class _Active:
 
 
 class WslSandboxBackend(SandboxBackend):
+    supports_invocation_environment = True
+
     def __init__(self, managed_root: Path, *, distribution: str,
         runtime_id: str | None = None, limits: SandboxLimits = SandboxLimits(),
         event_sink: SandboxEventSink | None = None) -> None:
@@ -266,9 +268,10 @@ class WslSandboxBackend(SandboxBackend):
 
     async def execute(self, sandbox_id: str, argv: Sequence[str], *,
         timeout_seconds: float | None = None, env: Mapping[str, str] | None = None,
+        invocation_env: Mapping[str, str] | None = None,
         runtime_mount: RuntimeMount | None = None) -> CommandResult:
         command = validate_argv(argv)
-        minimal_linux_environment(env)
+        minimal_linux_environment(env, invocation_env=invocation_env)
         timeout = self._limits.default_timeout_seconds if timeout_seconds is None else float(timeout_seconds)
         if not math.isfinite(timeout) or timeout <= 0:
             raise SandboxValidationError("timeout_seconds must be finite and positive")
@@ -283,6 +286,7 @@ class WslSandboxBackend(SandboxBackend):
         try:
             raw = await self._request(self._payload("execute", sandbox_id, argv=list(command),
                 timeout_seconds=timeout, env=dict(env) if env is not None else None,
+                invocation_env=dict(invocation_env) if invocation_env is not None else None,
                 unit=active.unit, runtime_mount=runtime_mount.to_wire() if runtime_mount is not None else None),
                 timeout=timeout + 20, active=active)
             result = CommandResult(sandbox_id=raw["sandbox_id"], argv=tuple(raw["argv"]),

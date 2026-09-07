@@ -257,6 +257,7 @@ def test_plugin_composite_scopes_are_enforced_for_operation_and_legacy_ids(clien
     ((CapabilitySelector("source", "target"),), frozenset()),
     ((CapabilitySelector("source", "destination"), CapabilitySelector("destination", "dest_id")), frozenset()),
     ((CapabilitySelector("source", "source_id", include_members=True),), frozenset()),
+    ((CapabilitySelector("source", "source_id", required="false"),), frozenset()),
     ((CapabilitySelector("source", "source_id", capability_kinds=frozenset({"missing.kind"})),), frozenset()),
     ((), frozenset({"missing.kind"})),
 ])

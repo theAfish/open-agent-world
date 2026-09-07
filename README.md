@@ -60,6 +60,11 @@ Application data defaults to `%LOCALAPPDATA%/OpenAgentWorld` on Windows, `$XDG_D
 
 ## Sandbox working folders
 
+Environment Profile and Compute Target cards provide optional per-command
+configuration for Sandbox commands and Skill scripts. See
+[execution configuration](docs/execution-configuration.md) for credential binding,
+selectors, plugin-defined target fields, and security boundaries.
+
 Use **Browse…** next to the default Workspace location or a Sandbox's Working folder to open the operating system's folder picker on the backend computer. Selection fills the draft; click Save to apply it. Cancelling preserves the existing path. Desktop browsing is available for local connections; remote/headless deployments can still enter paths manually. Windows uses its built-in folder dialog; Linux/macOS desktop selection requires Python Tk support.
 
 In **Settings → Sandbox**, set a default Workspace location (an existing absolute folder on the backend host, such as `D:\Workspaces`) and a default runtime. New Sandboxes receive separate subfolders there; existing cards keep their settings. These defaults are saved in the backend database and survive restarts. Clear the location to restore system-managed workspaces for new cards. Folders created under a custom location are retained when their Sandbox cards are deleted.
