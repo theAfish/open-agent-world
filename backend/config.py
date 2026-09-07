@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -29,6 +29,7 @@ class Settings:
     agent_runtime: str | None = None
     sandbox_runtime: str | None = None
     run_inactivity_timeout_seconds: float | None = 300.0
+    control_plane_token: str | None = field(default=None, repr=False)
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -43,6 +44,11 @@ class Settings:
         if not sandbox_runtime.strip() or "\x00" in sandbox_runtime:
             raise ValueError("OPEN_AGENT_WORLD_SANDBOX_RUNTIME must be a non-empty runtime ID")
         configured_timeout = os.environ.get("OPEN_AGENT_WORLD_RUN_INACTIVITY_TIMEOUT")
+        control_plane_token = os.environ.get("OPEN_AGENT_WORLD_CONTROL_PLANE_TOKEN")
+        if control_plane_token is not None and (
+            len(control_plane_token) < 32 or any(not 33 <= ord(char) <= 126 for char in control_plane_token)
+        ):
+            raise ValueError("OPEN_AGENT_WORLD_CONTROL_PLANE_TOKEN must contain at least 32 printable non-whitespace ASCII characters")
         inactivity_timeout: float | None = 300.0
         if configured_timeout is not None:
             try:
@@ -58,6 +64,7 @@ class Settings:
             agent_runtime=runtime,
             sandbox_runtime=sandbox_runtime,
             run_inactivity_timeout_seconds=inactivity_timeout,
+            control_plane_token=control_plane_token,
         )
 
     @classmethod

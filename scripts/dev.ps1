@@ -195,7 +195,7 @@ try {
     }
     $backendArguments += @(
         "uvicorn", "backend.main:app",
-        "--host", "127.0.0.1", "--port", $backendPort
+        "--host", "127.0.0.1", "--port", $backendPort, "--no-proxy-headers"
     )
 
     $existingListener = Get-BackendListener -Port $backendPort

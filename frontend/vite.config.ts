@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath, URL } from "node:url";
+import { localControlPlaneProxy, localManagementProxy } from "./server/control-plane.mjs";
 
 const backendHttpUrl = process.env.OAW_DEV_BACKEND_HTTP_URL ?? "http://127.0.0.1:8000";
 const backendWsUrl = process.env.OAW_DEV_BACKEND_WS_URL ?? "ws://127.0.0.1:8000";
@@ -14,11 +15,11 @@ export default defineConfig({
       "react-dom": fileURLToPath(new URL("./node_modules/react-dom", import.meta.url)),
     },
   },
-  plugins: [react()],
+  plugins: [localControlPlaneProxy(), react()],
   server: {
     proxy: {
-      "/api": backendHttpUrl,
-      "/ws": { target: backendWsUrl, ws: true },
+      "/api": localManagementProxy(backendHttpUrl),
+      "/ws": localManagementProxy(backendWsUrl, true),
     },
   },
 });

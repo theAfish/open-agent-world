@@ -10,6 +10,18 @@ from backend.config import Settings
 from backend.main import create_app
 
 
+@pytest.fixture(autouse=True)
+def desktop_test_client_peer(monkeypatch):
+    """API tests model the local desktop; security tests set an explicit peer."""
+    original_init = TestClient.__init__
+
+    def initialize(self, *args, **kwargs):
+        kwargs.setdefault("client", ("127.0.0.1", 50000))
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(TestClient, "__init__", initialize)
+
+
 @pytest.fixture
 def data_root(tmp_path: Path) -> Path:
     return tmp_path / "managed"

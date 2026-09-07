@@ -43,12 +43,12 @@ The Skill panel distinguishes the selected document revision, available files, c
 
 | Backend | Modes | Enforcement |
 | --- | --- | --- |
-| Windows AppContainer | Disabled | No network capabilities; the enabled option is unavailable |
-| Linux / WSL2 | Disabled | Network namespace isolation and seccomp block IP and Unix/interop sockets. Enabled is unavailable because an isolated egress mechanism protecting host control services is not implemented |
+| Windows AppContainer | Disabled (default), Enabled | Outbound Internet capability plus fixed per-profile WFP destination blocks; requires the narrow elevated broker, with no private/server capability or loopback exemption |
+| Linux / WSL2 | Disabled (default), Enabled | slirp4netns in an isolated network namespace with public IPv4 egress enforcement; retained seccomp, host/alias denial and cgroup cleanup |
 
-All currently bundled backends support **offline execution only**. Both the UI and backend reject unsupported enabled policies; a shared host network is not a safe substitute because it exposes the trusted local API. This change does not implement an internet-only mode or destination allowlist. Mount isolation, dropped capabilities, cgroup memory/process limits and deadlines remain enforced. No privileged host socket is mounted. The execution contract remains arbitrary executable/argv, independent of network protocol.
+Enable public outbound networking using **Stop → Save → Start**. Missing networking components are reported separately from offline runtime availability. Mount isolation, dropped capabilities, resource limits and deadlines remain enforced. No privileged host socket is mounted. The execution contract remains arbitrary executable/argv, independent of network protocol. See [network policies, prerequisites, lifecycle and real acceptance results](sandbox-networking.md).
 
-**Check execution environment** runs through the selected Sandbox and reports working directory, configured access, configuration readiness, common tool availability/versions and network policy. **Test connectivity** explicitly probes a user-entered HTTP(S) destination with `curl`, without credentials in the URL. It distinguishes connection failure, HTTP authentication refusal and missing tools. On the current offline backends it reports networking disabled without making a request. Its result classifier supports HTTP(S) for future capable runtimes; the general execution API remains protocol-neutral. Diagnostics never install packages or modify system settings.
+**Check execution environment** runs through the selected Sandbox and reports working directory, configured access, configuration readiness, common tool availability/versions and network policy. **Test connectivity** probes a user-entered HTTP(S) destination with `curl` through that same Sandbox policy, without URL credentials or disabling certificate verification. It distinguishes setup failure, DNS failure, TLS verification failure, connection failure, HTTP authentication refusal and missing tools. Offline mode reports disabled without making a request. Diagnostics never install packages or modify system settings.
 
 ## Console and recovery
 
@@ -61,6 +61,8 @@ One command occupies a Sandbox at a time. The window and inspect tool show its c
 The host retains the latest 20 command receipts, with at most 64 KiB per output stream, exit code, duration, caller and terminal status. Live backend output remains bounded by the existing 2 MiB limit. Drafts and sidebar width use the existing surface store. Receipts belong to the live node identity and are not portable state. Copies/templates carry requirements, never credential bindings or past executions. A disconnected manual HTTP request does not stop its admitted command; explicit cancellation remains separate. Backend restart recovery marks unrecoverable running receipts interrupted, without resubmission.
 
 ## Validation performed on 2026-09-07
+
+This section records the earlier workspace update, before enabled networking was implemented. Current networking acceptance and remaining platform verification gaps are in [Sandbox networking](sandbox-networking.md#real-runtime-acceptance).
 
 All commands ran from the repository root. No packages or runtime dependencies were installed.
 

@@ -67,7 +67,7 @@ def main() -> None:
     processes = []
     try:
         backend = subprocess.Popen([str(python), "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1",
-                                    "--port", str(backend_port)], cwd=root, env=env, **options)
+                                    "--port", str(backend_port), "--no-proxy-headers"], cwd=root, env=env, **options)
         processes.append(backend)
         for _ in range(100):
             if backend.poll() is not None:

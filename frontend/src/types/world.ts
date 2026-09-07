@@ -25,6 +25,8 @@ export interface SandboxRuntime {
   supports_workspace: boolean;
   supported_network_modes?: string[];
   network_reason?: string;
+  network_available?: boolean;
+  network_status?: string;
 }
 
 export interface SandboxRuntimeCatalog {
@@ -49,6 +51,8 @@ export interface SandboxInfo {
   network_enabled?: boolean;
   supported_network_modes?: string[];
   network_reason?: string;
+  network_available?: boolean;
+  network_status?: string;
 }
 export type CardStatus = AgentStatus | SandboxStatus | "available" | "modified" | string;
 

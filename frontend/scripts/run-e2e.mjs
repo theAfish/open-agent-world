@@ -75,7 +75,7 @@ try {
   await resetDataRoot();
   start(
     path.join(projectRoot, "backend", ".venv", "Scripts", "python.exe"),
-    ["-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8017"],
+    ["-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8017", "--no-proxy-headers"],
     {
       cwd: projectRoot,
       env: {

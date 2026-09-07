@@ -91,7 +91,7 @@ export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeS
           className={canStop ? "secondary-button" : "primary-button"}
           disabled={canStop
             ? !!busy && busy !== "executing"
-            : !!busy || pickingFolder || dirty || !info?.available || !stopped}
+            : !!busy || pickingFolder || dirty || !info?.available || !stopped || (network && !selectedRuntime?.network_available)}
           onClick={() => void (canStop ? stopSandbox(card.id) : startSandbox(card.id))}
         >
           {canStop ? <CircleStop size={14} /> : <Play size={14} fill="currentColor" />}
@@ -163,9 +163,9 @@ export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeS
           </select>
         </label>
         <label className="field-label"><span>Networking</span><select aria-label="Networking" value={network ? "enabled" : "disabled"} disabled={!canConfigure} onChange={e => setNetwork(e.target.value === "enabled")}>
-          <option value="disabled">Disabled (default)</option><option value="enabled" disabled={!selectedRuntime?.supported_network_modes?.includes("enabled")}>Enabled</option>
+          <option value="disabled">Disabled (default)</option><option value="enabled" disabled={!selectedRuntime?.supported_network_modes?.includes("enabled") || !selectedRuntime?.network_available}>Enabled</option>
         </select></label>
-        <p className="sandbox-help">{selectedRuntime?.network_reason ?? "This runtime supports offline execution only."} Restart required for runtime settings: stop, save changes, then start.</p>
+        <p className="sandbox-help">{selectedRuntime?.network_reason ?? "Refresh to check networking support and prerequisites."} Restart required for runtime settings: stop, save changes, then start.</p>
         <details><summary>Advanced settings</summary>
           <label className="field-label">Memory (MiB)<input type="number" min={16} max={8192} disabled={!canConfigure} value={memory / 1048576} onChange={e => setMemory(Number(e.target.value) * 1048576)} /></label>
           <label className="field-label">Process limit<input type="number" min={1} max={256} disabled={!canConfigure} value={processes} onChange={e => setProcesses(Number(e.target.value))} /></label>

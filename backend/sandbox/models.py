@@ -88,6 +88,8 @@ class SandboxInfo:
     available: bool = True
     unavailable_reason: str | None = None
     runtime_locked: bool = True
+    network_available: bool = False
+    network_status: str = "not_implemented"
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +126,12 @@ class SandboxStateError(SandboxError):
 
 class SandboxSecurityError(SandboxError):
     """A required native security primitive could not be established."""
+
+
+class SandboxNetworkError(SandboxSecurityError):
+    """The isolated egress path failed before the workload could be admitted."""
+
+    code = "network_setup_failed"
 
 
 class SandboxValidationError(SandboxError, ValueError):

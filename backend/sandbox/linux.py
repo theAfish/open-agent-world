@@ -30,10 +30,11 @@ from typing import Any
 
 from .base import SandboxBackend, SandboxEventSink
 from .materialization import RuntimeMount, materialize_bundle, cleanup_materializations
+from .linux_network import NETWORK_ERROR_MARKER, ca_bundle, network_payload, network_prerequisites
 from .models import (
     CommandResult, ResourceAccess, ResourceAttachment, SandboxEvent,
     SandboxEventType, SandboxInfo, SandboxLimits, SandboxNotFoundError,
-    SandboxSecurityError, SandboxState, SandboxStateError, SandboxValidationError,
+    SandboxNetworkError, SandboxSecurityError, SandboxState, SandboxStateError, SandboxValidationError,
 )
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -79,9 +80,13 @@ try:
     if not context:
         raise RuntimeError('seccomp allocation failed')
     try:
-        # Denying socket/connect also closes the WSL Windows-interop socket
-        # transport, including AF_UNIX sockets placed in a selected workspace.
-        for name in ('socket', 'connect', 'socketcall', 'mount', 'umount2', 'pivot_root',
+        # Networking only opens IPv4 TCP/UDP. Unix sockets (including WSL
+        # interop), netlink administration, packet/raw and IPv6 stay closed.
+        blocked_sockets = ('socket', 'connect') if not data.get('network_enabled') else ()
+        # socketpair creates anonymous local IPC with no external address; keep
+        # it for threaded resolvers (curl) and subprocess libraries. socket()
+        # still cannot create AF_UNIX endpoints or reach host socket paths.
+        for name in (*blocked_sockets, 'socketcall', 'mount', 'umount2', 'pivot_root',
                      'setns', 'unshare', 'ptrace', 'process_vm_readv',
                      'process_vm_writev', 'bpf', 'perf_event_open', 'keyctl',
                      'add_key', 'request_key', 'userfaultfd', 'io_uring_setup',
@@ -90,6 +95,17 @@ try:
             number = lib.seccomp_syscall_resolve_name(name.encode())
             if number >= 0 and lib.seccomp_rule_add(context, 0x50000 | errno.EPERM, number, 0) != 0:
                 raise RuntimeError('cannot restrict ' + name)
+        if data.get('network_enabled'):
+            number = lib.seccomp_syscall_resolve_name(b'socket')
+            family = ArgCompare(0, 1, 2, 0)  # SCMP_CMP_NE: domain != AF_INET.
+            if number < 0 or lib.seccomp_rule_add_array(context, 0x50000 | errno.EPERM,
+                    number, 1, ctypes.byref(family)) != 0:
+                raise RuntimeError('cannot restrict socket families')
+            for kind in (0, *range(3, 16)):
+                comparison = ArgCompare(1, 7, 15, kind)
+                if lib.seccomp_rule_add_array(context, 0x50000 | errno.EPERM,
+                        number, 1, ctypes.byref(comparison)) != 0:
+                    raise RuntimeError('cannot restrict socket types')
         # Prevent further namespaces without requiring recent bubblewrap
         # --disable-userns support. clone3 has pointer-based flags, so return
         # ENOSYS (allowing libc to use clone for ordinary threads/processes).
@@ -115,6 +131,8 @@ try:
     os.set_inheritable(descriptor, True)
     command = data['command']
     command[1:1] = ['--seccomp', str(descriptor)]
+    if data.get('network_enabled'):
+        exec(compile(data['network_supervisor'], '<oaw-network-supervisor>', 'exec'))
     os.execve(command[0], command, {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'})
 except BaseException as exc:
     print('OAW_SANDBOX_SECURITY: ' + str(exc), file=sys.stderr, flush=True)
@@ -178,13 +196,12 @@ def new_unit_name() -> str:
 def service_command(
     command: Sequence[str], unit: str, limits: SandboxLimits, timeout: float, *, network_enabled=False,
 ) -> list[str]:
-    if network_enabled:
-        raise SandboxSecurityError("Networking unavailable: isolated egress protecting host control services is not implemented")
     if not _SAFE_UNIT.fullmatch(unit):
         raise SandboxValidationError("invalid sandbox service identity")
     payload = base64.b64encode(json.dumps({
         "memory": limits.memory_bytes, "pids": limits.active_process_limit,
-        "command": list(command),
+        "command": list(command), "network_enabled": bool(network_enabled),
+        **(network_payload() if network_enabled else {}),
     }, ensure_ascii=True).encode()).decode()
     return [
         "/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect", f"--unit={unit}",
@@ -212,7 +229,11 @@ def bubblewrap_command(
         "--dir", "/etc", "--dir", "/usr",
     ]
     if network_enabled:
-        raise SandboxSecurityError("Networking unavailable: isolated egress protecting host control services is not implemented")
+        certificate = ca_bundle()
+        if certificate is None:
+            raise SandboxSecurityError("Missing Linux networking component: ca-certificates; install the distribution ca-certificates package")
+        result.extend(("--ro-bind", certificate, "/etc/ssl/certs/ca-certificates.crt",
+            "--setenv", "SSL_CERT_FILE", "/etc/ssl/certs/ca-certificates.crt"))
     # Distribution-owned tool trees only. No /home, /root, /run, /mnt, complete
     # /etc, /usr/local, or host sockets. Libraries remain shared and read-only.
     for name in ("/usr/bin", "/usr/lib", "/usr/lib64", "/usr/share"):
@@ -275,6 +296,7 @@ class _Record:
 class LinuxSandboxBackend(SandboxBackend):
     supports_invocation_environment = True
     supports_execution_policy = True
+    _network_ready = False
 
     def __init__(
         self, managed_root: Path, *, limits: SandboxLimits = SandboxLimits(),
@@ -287,6 +309,44 @@ class LinuxSandboxBackend(SandboxBackend):
         self._runtime_id = runtime_id
         self._records: dict[str, _Record] = {}
         self._records_lock = asyncio.Lock()
+
+    @classmethod
+    async def probe_network(cls, *, _unit_name: str | None = None) -> tuple[bool, str | None]:
+        cls._network_ready = False
+        if sys.platform != "linux":
+            return False, "Linux networking requires a Linux kernel (native or WSL2)."
+        _, reason = network_prerequisites()
+        if reason:
+            return False, reason
+        unit = _unit_name or new_unit_name()
+        if not _SAFE_UNIT.fullmatch(unit):
+            raise SandboxValidationError("invalid sandbox service identity")
+        process = None
+        try:
+            with tempfile.TemporaryDirectory(prefix="oaw-network-probe-") as directory:
+                script = ("import socket,ssl,pathlib; assert 'tap0' in pathlib.Path('/proc/net/route').read_text(); "
+                    "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM); "
+                    "s.close(); assert ssl.create_default_context().cert_store_stats()['x509_ca']>0; "
+                    "print('oaw-network-ready')")
+                command = bubblewrap_command(Path(directory), ResourceAccess.READ_ONLY, (),
+                    ("/usr/bin/python3", "-I", "-c", script), minimal_linux_environment(), network_enabled=True)
+                process = await asyncio.create_subprocess_exec(
+                    *service_command(command, unit, SandboxLimits(), 10, network_enabled=True),
+                    stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE, env=_host_control_environment())
+                stdout, stderr = await asyncio.wait_for(process.communicate(), 12)
+                if process.returncode or stdout.strip() != b"oaw-network-ready":
+                    raise SandboxNetworkError("Networking setup failed: " + stderr.decode("utf-8", "replace")[:1800])
+                cls._network_ready = True
+                return True, None
+        except (OSError, TimeoutError) as exc:
+            raise SandboxNetworkError(f"Networking setup failed: {exc}") from exc
+        finally:
+            if process is not None:
+                if process.returncode is None:
+                    process.kill()
+                await asyncio.shield(cls.kill_unit(unit))
+                await process.communicate()
 
     @classmethod
     async def probe(cls) -> tuple[bool, str | None]:
@@ -383,8 +443,8 @@ class LinuxSandboxBackend(SandboxBackend):
         execution_policy: Mapping[str, Any] | None = None,
     ) -> CommandResult:
         policy = execution_policy or {}
-        if policy.get("network_enabled"):
-            raise SandboxSecurityError("Networking unavailable: isolated egress protecting host control services is not implemented")
+        if type(policy.get("network_enabled", False)) is not bool:
+            raise SandboxValidationError("network_enabled must be a boolean")
         limits = SandboxLimits(memory_bytes=policy.get("memory_bytes", self._limits.memory_bytes),
             active_process_limit=policy.get("active_process_limit", self._limits.active_process_limit),
             default_timeout_seconds=policy.get("command_timeout", self._limits.default_timeout_seconds))
@@ -487,8 +547,12 @@ class LinuxSandboxBackend(SandboxBackend):
             await asyncio.wait_for(asyncio.shield(exited), 5)
             await asyncio.wait_for(asyncio.gather(*streams), 5)
             stderr = "".join(outputs["stderr"])
+            if NETWORK_ERROR_MARKER in stderr:
+                raise SandboxNetworkError(stderr.strip())
             if _ERROR_MARKER in stderr:
                 raise SandboxSecurityError(stderr.strip())
+            if policy.get("network_enabled"):
+                self._network_ready = True
             result = CommandResult(sandbox_id, command, process.returncode or 0,
                 "".join(outputs["stdout"]), stderr, time.monotonic() - started,
                 timed_out, record.cancelled.is_set())
@@ -713,7 +777,9 @@ class LinuxSandboxBackend(SandboxBackend):
         return SandboxInfo(sandbox_id=record.sandbox_id, state=record.state,
             workspace=Path("/workspace"), attachments=tuple(record.attachments.values()),
             security_boundary="linux-bubblewrap+seccomp+cgroup-v2", network_enabled=False,
-            supported_network_modes=("disabled",), network_reason="Networking unavailable: isolated egress protecting host control services is not implemented",
+            supported_network_modes=("disabled", "enabled"), network_reason="Public IPv4 TCP/UDP egress; private networks, host services and IPv6 are blocked.",
+            network_available=self._network_ready,
+            network_status="available" if self._network_ready else "unprobed",
             active_command=record.active_command, runtime_id=self._runtime_id, platform="linux",
             shell=("/bin/sh", "-c"), workspace_path=record.workspace_path,
             workspace_access=record.workspace_access, resources_path=Path("/sandbox"),

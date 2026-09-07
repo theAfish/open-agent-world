@@ -53,7 +53,7 @@ sys.modules['oaw_sandbox.linux_worker'].main(payload['request'],stdin_pending=bo
 # source change the next unrestricted transport helper.
 _WORKER_MODULES = tuple(
     (name, (Path(__file__).parent / f"{name}.py").read_text(encoding="utf-8"))
-    for name in ("models", "materialization", "base", "environment", "files", "linux", "linux_worker")
+    for name in ("models", "materialization", "base", "environment", "files", "linux_network", "linux", "linux_worker")
 )
 
 
@@ -77,7 +77,9 @@ def _envelope(request: dict[str, Any]) -> bytes:
 
 
 def _error(raw: dict[str, str]) -> Exception:
+    from .models import SandboxNetworkError
     kind = {
+        "SandboxNetworkError": SandboxNetworkError,
         "SandboxNotFoundError": SandboxNotFoundError,
         "SandboxValidationError": SandboxValidationError,
         "SandboxStateError": SandboxStateError,
@@ -111,6 +113,22 @@ class WslSandboxBackend(SandboxBackend):
         self._infos: dict[str, SandboxInfo] = {}
         self._active: dict[str, _Active] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+
+    @classmethod
+    async def probe_network(cls, distribution: str) -> tuple[bool, str | None]:
+        from .models import SandboxNetworkError
+        try:
+            backend = cls(Path.cwd(), distribution=distribution)
+            active = _Active(new_unit_name())
+            result = await backend._request({"operation": "probe_network", "unit": active.unit},
+                timeout=16, active=active)
+            if not isinstance(result, list) or len(result) != 2 or not isinstance(result[0], bool):
+                return False, "WSL networking probe returned an invalid result"
+            return result[0], result[1]
+        except SandboxNetworkError:
+            raise
+        except (OSError, TimeoutError, SandboxSecurityError, SandboxValidationError) as exc:
+            return False, f"WSL2 networking setup failed: {exc}"
 
     @classmethod
     async def probe(cls, distribution: str) -> tuple[bool, str | None]:
@@ -238,6 +256,7 @@ class WslSandboxBackend(SandboxBackend):
                     item["relative_path"], ResourceAccess(item["access"])) for item in raw["attachments"]),
             security_boundary=raw["security_boundary"], network_enabled=False,
             supported_network_modes=tuple(raw.get("supported_network_modes", ("disabled",))), network_reason=raw.get("network_reason", ""),
+            network_available=raw.get("network_available", False), network_status=raw.get("network_status", "unprobed"),
             active_command=tuple(raw["active_command"]) if raw["active_command"] else None,
             runtime_id=self._runtime_id, platform="linux", shell=("/bin/sh", "-c"),
             workspace_path=path, workspace_access=ResourceAccess(raw["workspace_access"]),
@@ -277,8 +296,8 @@ class WslSandboxBackend(SandboxBackend):
         invocation_env: Mapping[str, str] | None = None,
         runtime_mount: RuntimeMount | None = None, execution_policy: Mapping[str, Any] | None = None) -> CommandResult:
         policy = execution_policy or {}
-        if policy.get("network_enabled"):
-            raise SandboxSecurityError("Networking unavailable: isolated egress protecting host control services is not implemented")
+        if type(policy.get("network_enabled", False)) is not bool:
+            raise SandboxValidationError("network_enabled must be a boolean")
         limits = SandboxLimits(memory_bytes=policy.get("memory_bytes", self._limits.memory_bytes),
             active_process_limit=policy.get("active_process_limit", self._limits.active_process_limit),
             default_timeout_seconds=policy.get("command_timeout", self._limits.default_timeout_seconds))

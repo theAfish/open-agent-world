@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 from .base import SandboxBackend, SandboxEventSink
-from .models import SandboxSecurityError
+from .models import SandboxSecurityError, SandboxNetworkError
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +24,8 @@ class SandboxRuntime:
     supports_workspace: bool = True
     supported_network_modes: tuple[str, ...] = ("disabled",)
     network_reason: str = "Networking unavailable: isolated egress protecting host control services is not implemented"
+    network_available: bool = False
+    network_status: str = "not_implemented"
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +34,7 @@ class SandboxRuntimeRegistration:
     factory: Callable[[], SandboxBackend]
     probe: Callable[[], Awaitable[tuple[bool, str | None]]]
     priority: int = 0
+    network_probe: Callable[[], Awaitable[tuple[bool, str | None]]] | None = None
 
 
 class SandboxRuntimeRegistry:
@@ -65,7 +68,23 @@ class SandboxRuntimeRegistry:
                     available, reason = await asyncio.wait_for(registration.probe(), 15)
                 except (OSError, SandboxSecurityError, TimeoutError) as exc:
                     available, reason = False, str(exc) or "Runtime probe timed out"
-                return replace(registration.runtime, available=available, reason=reason)
+                runtime = replace(registration.runtime, available=available, reason=reason)
+                if registration.network_probe is not None:
+                    network_status = "missing_component"
+                    try:
+                        network_available, network_reason = await asyncio.wait_for(registration.network_probe(), 20)
+                    except SandboxNetworkError as exc:
+                        network_available, network_reason = False, str(exc)
+                        network_status = "setup_failed"
+                    except TimeoutError:
+                        network_available, network_reason = False, "Networking setup failed: prerequisite probe timed out"
+                        network_status = "setup_failed"
+                    except (OSError, SandboxSecurityError) as exc:
+                        network_available, network_reason = False, str(exc)
+                    runtime = replace(runtime, network_available=network_available,
+                        network_status="available" if network_available else network_status,
+                        network_reason=network_reason or runtime.network_reason)
+                return runtime
 
             results = await asyncio.gather(*(probe(item) for item in self._registrations.values()))
             self._results = {item.id: item for item in results}
@@ -96,15 +115,23 @@ class SandboxRuntimeRegistry:
         except KeyError as exc:
             raise SandboxSecurityError(f"sandbox runtime {runtime_id!r} is unavailable") from exc
 
+    def registration(self, runtime_id: str) -> SandboxRuntimeRegistration:
+        try:
+            return self._registrations[runtime_id]
+        except KeyError as exc:
+            raise SandboxSecurityError(f"sandbox runtime {runtime_id!r} is unavailable") from exc
+
 
 def builtin_sandbox_registry(root: Path, event_sink: SandboxEventSink | None) -> SandboxRuntimeRegistry:
     registry = SandboxRuntimeRegistry()
     if sys.platform == "linux":
         from .linux import LinuxSandboxBackend
         registry.register(SandboxRuntimeRegistration(
-            SandboxRuntime("linux", "Linux · Bubblewrap", "linux", ("/bin/sh", "-c")),
+            SandboxRuntime("linux", "Linux · Bubblewrap", "linux", ("/bin/sh", "-c"),
+                supported_network_modes=("disabled", "enabled"),
+                network_reason="Public outbound IPv4 only; private networks, host services and IPv6 are blocked."),
             lambda: LinuxSandboxBackend(root, event_sink=event_sink),
-            LinuxSandboxBackend.probe, 100,
+            LinuxSandboxBackend.probe, 100, LinuxSandboxBackend.probe_network,
         ))
     elif os.name == "nt":
         from .windows import WindowsSandboxBackend
@@ -119,8 +146,10 @@ def builtin_sandbox_registry(root: Path, event_sink: SandboxEventSink | None) ->
                 return False, str(exc)
 
         registry.register(SandboxRuntimeRegistration(
-            SandboxRuntime("windows", "Windows · AppContainer", "windows", shell, network_reason="Windows AppContainer has no network capabilities; enabled networking is unsupported"),
-            lambda: WindowsSandboxBackend(root, event_sink=event_sink), windows_probe, 50,
+            SandboxRuntime("windows", "Windows · AppContainer", "windows", shell,
+                supported_network_modes=("disabled", "enabled"),
+                network_reason="Public outbound IPv4 with AppContainer and enforced destination restrictions; private networks, host services and IPv6 are blocked."),
+            lambda: WindowsSandboxBackend(root, event_sink=event_sink), windows_probe, 50, WindowsSandboxBackend.probe_network,
         ))
 
         async def discover_wsl() -> None:
@@ -147,11 +176,15 @@ def builtin_sandbox_registry(root: Path, event_sink: SandboxEventSink | None) ->
                     continue
                 async def probe(name: str = distribution) -> tuple[bool, str | None]:
                     return await WslSandboxBackend.probe(name)
+                async def network_probe(name: str = distribution) -> tuple[bool, str | None]:
+                    return await WslSandboxBackend.probe_network(name)
                 registry.register(SandboxRuntimeRegistration(
-                    SandboxRuntime(runtime_id, f"WSL2 · {distribution}", "linux", ("/bin/sh", "-c")),
+                    SandboxRuntime(runtime_id, f"WSL2 · {distribution}", "linux", ("/bin/sh", "-c"),
+                        supported_network_modes=("disabled", "enabled"),
+                        network_reason="Public outbound IPv4 only; private networks, host services and IPv6 are blocked."),
                     lambda name=distribution, key=runtime_id: WslSandboxBackend(
                         root, distribution=name, runtime_id=key, event_sink=event_sink,
-                    ), probe, 100,
+                    ), probe, 100, network_probe,
                 ))
         registry.discovery = discover_wsl
     return registry

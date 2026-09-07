@@ -82,10 +82,12 @@ class FakeWindowsNativeApi:
         on_stderr: Callable[[str], None],
         on_job_open: Callable[[int], None],
         on_job_close: Callable[[], None],
+        network_enabled: bool = False,
     ) -> NativeCommandResult:
         del profile, limits, timeout_seconds, cancel_event
         self.last_argv = tuple(argv)
         self.last_environment = dict(environment)
+        self.last_network_enabled = network_enabled
         on_job_open(41)
         try:
             if any("write-mounted" in item for item in argv):

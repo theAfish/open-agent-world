@@ -13,7 +13,7 @@ from .materialization import RuntimeMount
 from .models import (
     CommandResult, ResourceAccess, ResourceAttachment, SandboxInfo,
     SandboxError, SandboxNotFoundError, SandboxSecurityError, SandboxState,
-    SandboxStateError, SandboxValidationError,
+    SandboxStateError, SandboxValidationError, SandboxNetworkError,
 )
 from .registry import SandboxRuntimeRegistry
 
@@ -29,6 +29,7 @@ class _Binding:
     policy: dict = field(default_factory=dict)
     attachments: dict[str, ResourceAttachment] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    network_error: str | None = None
 
 
 class SandboxManager(SandboxBackend):
@@ -121,6 +122,8 @@ class SandboxManager(SandboxBackend):
         selected = await self.registry.select(binding.resolved_runtime or (self.preferred if runtime == "auto" else runtime))
         if policy.get("network_enabled") and "enabled" not in selected.supported_network_modes:
             raise SandboxValidationError(selected.network_reason)
+        if policy.get("network_enabled") and not selected.network_available:
+            raise SandboxValidationError(selected.network_reason or "Networking prerequisites are missing; refresh runtime discovery after setup")
         policy_changed = policy != binding.policy
         unchanged = not policy_changed and (binding.runtime, binding.workspace_path, binding.workspace_access) == (runtime, config.get("workspace_path"), access)
         if unchanged and not binding.provisioned:
@@ -141,11 +144,12 @@ class SandboxManager(SandboxBackend):
                 if unchanged and (info.workspace_path, info.workspace_access) == (binding.workspace_path, access):
                     return
                 if info.state != SandboxState.STOPPED:
-                    raise SandboxStateError("Stop the Sandbox before changing its workspace settings")
+                    raise SandboxStateError("Stop the Sandbox before changing its runtime, network or workspace settings")
             workspace = await asyncio.to_thread(self.validate_workspace, config.get("workspace_path"))
             if backend is not None:
                 await backend.configure(sandbox_id, workspace_path=workspace, workspace_access=access)
             binding.policy = policy
+            binding.network_error = None
             binding.runtime, binding.workspace_path, binding.workspace_access = runtime, workspace, access
             try:
                 self._write(binding)
@@ -189,6 +193,26 @@ class SandboxManager(SandboxBackend):
             runtime = await self.registry.select(binding.resolved_runtime or (self.preferred if binding.runtime == "auto" else binding.runtime))
             if not runtime.available:
                 raise SandboxSecurityError(runtime.reason or "sandbox runtime unavailable")
+            if binding.policy.get("network_enabled"):
+                if "enabled" not in runtime.supported_network_modes or not runtime.network_available:
+                    if runtime.network_status == "setup_failed":
+                        binding.network_error = runtime.network_reason
+                        raise SandboxNetworkError(runtime.network_reason)
+                    raise SandboxSecurityError(runtime.network_reason or "Networking is unavailable for the pinned runtime")
+                # Discovery is cached for UI polling. Recheck enabled prerequisites
+                # at admission without selecting or switching to another runtime.
+                registration = self.registry.registration(runtime.id)
+                if registration.network_probe is not None:
+                    try:
+                        available, reason = await asyncio.wait_for(registration.network_probe(), 20)
+                    except TimeoutError as exc:
+                        binding.network_error = "Networking setup failed: prerequisite check timed out"
+                        raise SandboxNetworkError(binding.network_error) from exc
+                    except SandboxNetworkError as exc:
+                        binding.network_error = str(exc)
+                        raise
+                    if not available:
+                        raise SandboxSecurityError(reason or "Networking prerequisites are missing")
             backend = self._backend(runtime.id)
             created = False
             if not binding.provisioned:
@@ -213,13 +237,21 @@ class SandboxManager(SandboxBackend):
                 await backend.attach_resource(sandbox_id, attachment.resource_id, attachment.source,
                                               attachment.relative_path, attachment.access)
             info = await backend.start(sandbox_id)
+            binding.network_error = None
             return replace(info, **self._policy_info(binding, runtime), runtime_id=runtime.id, runtime_locked=True)
 
     @staticmethod
     def _policy_info(binding, runtime):
+        status = runtime.network_status
+        if runtime.network_available:
+            status = "enabled" if binding.policy.get("network_enabled") else "disabled"
+        if binding.network_error:
+            status = "setup_failed"
         return {"network_enabled": binding.policy.get("network_enabled", False),
             "supported_network_modes": runtime.supported_network_modes,
-            "network_reason": runtime.network_reason}
+            "network_available": runtime.network_available,
+            "network_status": status,
+            "network_reason": binding.network_error or runtime.network_reason}
 
     async def execute(self, sandbox_id: str, argv: Sequence[str], *, timeout_seconds: float | None = None,
                       env: Mapping[str, str] | None = None,
@@ -238,8 +270,14 @@ class SandboxManager(SandboxBackend):
             if not backend.supports_invocation_environment:
                 raise SandboxValidationError("This Sandbox runtime does not support invocation configuration")
             options["invocation_env"] = invocation_env
-        return await backend.execute(
-            sandbox_id, argv, timeout_seconds=timeout_seconds, env=env, **options)
+        try:
+            result = await backend.execute(
+                sandbox_id, argv, timeout_seconds=timeout_seconds, env=env, **options)
+        except SandboxNetworkError as exc:
+            binding.network_error = str(exc)
+            raise
+        binding.network_error = None
+        return result
 
     async def bundle_status(self, sandbox_id, bundle):
         binding = self._binding(sandbox_id)

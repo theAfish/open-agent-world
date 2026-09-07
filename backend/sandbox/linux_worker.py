@@ -38,6 +38,8 @@ def _linux_path(raw: str) -> str:
 
 async def handle(request: dict[str, Any], *, stdin_pending: bool = False) -> Any:
     operation = request["operation"]
+    if operation == "probe_network":
+        return await LinuxSandboxBackend.probe_network(_unit_name=request.get("unit"))
     if operation == "probe":
         version = Path("/proc/sys/kernel/osrelease").read_text().lower()
         if "microsoft" not in version or "wsl2" not in version:

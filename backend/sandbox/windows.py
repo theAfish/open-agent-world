@@ -34,6 +34,8 @@ from .models import (
     SandboxValidationError,
 )
 from .win32 import AppContainerProfile, NativeCommandResult, WindowsNativeApi
+from .windows_network import WindowsNetworkIsolation
+from .windows_network_broker import probe_network_broker, release_public_egress
 
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -58,6 +60,7 @@ class _SandboxRecord:
     active_job: int | None = None
     cancel_event: threading.Event | None = None
     stop_requested: bool = False
+    network_filters_installed: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     command_done: asyncio.Event = field(default_factory=asyncio.Event)
     thread_lock: threading.Lock = field(default_factory=threading.Lock)
@@ -94,6 +97,17 @@ class WindowsSandboxBackend(SandboxBackend):
         self._native = native_api if native_api is not None else WindowsNativeApi()
         self._records: dict[str, _SandboxRecord] = {}
         self._records_lock = asyncio.Lock()
+        self._network_available = False
+        self._network_reason = "Windows network prerequisites have not been checked"
+
+    @staticmethod
+    async def probe_network() -> tuple[bool, str | None]:
+        """Check native networking independently of offline runtime availability."""
+        try:
+            await asyncio.to_thread(lambda: WindowsNetworkIsolation().probe())
+            return await asyncio.to_thread(probe_network_broker)
+        except (AttributeError, OSError, SandboxSecurityError) as exc:
+            return False, str(exc)
 
     async def create(self, sandbox_id: str) -> SandboxInfo:
         self._validate_id(sandbox_id, "sandbox_id")
@@ -223,8 +237,9 @@ class WindowsSandboxBackend(SandboxBackend):
     ) -> CommandResult:
         record = await self._record(sandbox_id)
         policy = execution_policy or {}
-        if policy.get("network_enabled"):
-            raise SandboxValidationError("Windows runtime supports disabled networking only")
+        network_enabled = policy.get("network_enabled", False)
+        if type(network_enabled) is not bool:
+            raise SandboxValidationError("network_enabled must be a boolean")
         limits = SandboxLimits(memory_bytes=policy.get("memory_bytes", self._limits.memory_bytes),
             active_process_limit=policy.get("active_process_limit", self._limits.active_process_limit),
             default_timeout_seconds=policy.get("command_timeout", self._limits.default_timeout_seconds))
@@ -255,6 +270,10 @@ class WindowsSandboxBackend(SandboxBackend):
                 self._revoke_runtime_access(record)
                 mount_root = materialize_bundle(record.root, runtime_mount.bundle)
             record.state = SandboxState.RUNNING
+            # Persist cleanup ownership before the broker may install filters.
+            # A crash at any subsequent point must not forget retained policy.
+            if network_enabled:
+                record.network_filters_installed = True
             record.active_command = command
             record.cancel_event = threading.Event()
             record.stop_requested = False
@@ -309,6 +328,7 @@ class WindowsSandboxBackend(SandboxBackend):
                 cwd=record.workspace,
                 environment=environment,
                 limits=limits,
+                network_enabled=network_enabled,
                 timeout_seconds=timeout,
                 cancel_event=record.cancel_event,
                 on_stdout=lambda text: emit_stream(SandboxEventType.STDOUT, text),
@@ -629,6 +649,9 @@ class WindowsSandboxBackend(SandboxBackend):
             self._records.pop(sandbox_id, None)
 
     def _destroy_sync(self, record: _SandboxRecord) -> None:
+        if record.network_filters_installed:
+            release_public_egress(record.identity)
+            record.network_filters_installed = False
         self._revoke_runtime_access(record)
         cleanup_materializations(record.root)
         for attachment in tuple(record.attachments.values()):
@@ -649,6 +672,10 @@ class WindowsSandboxBackend(SandboxBackend):
                 runtime_pinned_root=record.workspace if record.workspace_handle is not None else None, **options)
 
     async def get(self, sandbox_id: str) -> SandboxInfo:
+        self._network_available, reason = await self.probe_network()
+        self._network_reason = reason or (
+            "Public IPv4 outbound access via AppContainer and fixed WFP deny filters; private networks, IPv6 and inbound servers are blocked"
+        )
         return self._info(await self._record(sandbox_id))
 
     async def _record(self, sandbox_id: str) -> _SandboxRecord:
@@ -688,6 +715,9 @@ class WindowsSandboxBackend(SandboxBackend):
             workspace_path = data.get("workspace_path")
             workspace_access = ResourceAccess(data.get("workspace_access", "read_write"))
             workspace_authorized = data.get("workspace_authorized", False)
+            network_filters_installed = data.get("network_filters_installed", False)
+            if type(network_filters_installed) is not bool:
+                raise SandboxValidationError("invalid persisted network filter ownership")
             identity_data = data.get("workspace_identity")
             if type(workspace_authorized) is not bool or (
                 identity_data is not None and (
@@ -731,6 +761,7 @@ class WindowsSandboxBackend(SandboxBackend):
             workspace_path=workspace_path,
             workspace_access=workspace_access,
             workspace_authorized=workspace_authorized,
+            network_filters_installed=network_filters_installed,
             workspace_identity=(
                 tuple(identity_data) if identity_data is not None else None
             ),
@@ -755,6 +786,7 @@ class WindowsSandboxBackend(SandboxBackend):
             "workspace_path": record.workspace_path,
             "workspace_access": record.workspace_access.value,
             "workspace_authorized": record.workspace_authorized,
+            "network_filters_installed": record.network_filters_installed,
             "workspace_identity": record.workspace_identity,
             "attachments": [
                 {
@@ -784,6 +816,10 @@ class WindowsSandboxBackend(SandboxBackend):
             ),
             security_boundary="windows-appcontainer+ntfs-acl+job-object",
             network_enabled=False,
+            supported_network_modes=("disabled", "enabled"),
+            network_reason=self._network_reason,
+            network_available=self._network_available,
+            network_status="available" if self._network_available else "missing_component",
             active_command=record.active_command,
             runtime_id="windows",
             platform="windows",

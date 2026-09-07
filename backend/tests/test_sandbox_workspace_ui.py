@@ -286,21 +286,21 @@ def test_network_enforcement_preserves_other_boundaries(tmp_path):
     assert "--share-net" not in offline
     for flag in ("--unshare-all", "--cap-drop", "--remount-ro", "--ro-bind"):
         assert flag in offline
-    with pytest.raises(SandboxSecurityError, match="isolated egress"):
-        bubblewrap_command(tmp_path, ResourceAccess.READ_ONLY, [], ["true"], {}, network_enabled=True)
-    with pytest.raises(SandboxSecurityError, match="isolated egress"):
-        service_command(offline, "oaw-sandbox-" + "a" * 32 + ".scope", SandboxLimits(), 60, network_enabled=True)
     command = service_command(offline, "oaw-sandbox-" + "a" * 32 + ".scope", SandboxLimits(), 60)
     assert "--property=TasksMax=16" in command and "--property=MemoryMax=536870912" in command
     compile(_SERVICE_GUARD, "guard", "exec")
 
 
 @pytest.mark.asyncio
-async def test_network_policy_rejected_before_linux_or_wsl_dispatch(tmp_path):
+async def test_enabled_policy_does_not_bypass_sandbox_identity(tmp_path, monkeypatch):
     from backend.sandbox.linux import LinuxSandboxBackend
     from backend.sandbox.wsl import WslSandboxBackend
+    from backend.sandbox.models import SandboxNotFoundError
+    async def missing(*args, **kwargs):
+        raise SandboxNotFoundError("not-created")
+    monkeypatch.setattr(WslSandboxBackend, "get", missing)
     for backend in (LinuxSandboxBackend(tmp_path / "linux"), WslSandboxBackend(tmp_path / "wsl", distribution="unused")):
-        with pytest.raises(SandboxSecurityError, match="isolated egress"):
+        with pytest.raises(SandboxNotFoundError):
             await backend.execute("not-created", ["true"], execution_policy={"network_enabled": True})
 
 
@@ -313,7 +313,9 @@ def test_explicit_interactive_requests_are_rejected(command):
 
 
 @pytest.mark.parametrize("exit_code,stdout,stderr,expected", [(0, "401", "", "authentication_failed"),
-    (1, "", "execvp curl: No such file or directory", "missing_tool"), (7, "000", "connect failed", "connection_failed"), (0, "200", "", "connected")])
+    (1, "", "execvp curl: No such file or directory", "missing_tool"), (7, "000", "connect failed", "connection_failed"),
+    (6, "000", "Could not resolve host", "dns_failed"), (60, "000", "Certificate verification failed", "tls_verification_failed"),
+    (0, "503", "", "http_error"), (0, "200", "", "connected")])
 def test_connectivity_diagnostics_classify_results(runtime_client, monkeypatch, exit_code, stdout, stderr, expected):
     from dataclasses import replace
     from backend.sandbox.models import CommandResult
@@ -344,8 +346,8 @@ async def test_real_wsl_network_policy_blocks_control_plane_access(tmp_path):
         script = "import socket; socket.socket(socket.AF_INET); print('IP available')"
         offline = await backend.execute("network-check", ["python3", "-c", script])
         assert offline.exit_code != 0
-        with pytest.raises(SandboxSecurityError, match="isolated egress"):
-            await backend.execute("network-check", ["python3", "-c", script], execution_policy={"network_enabled": True})
+        enabled = await backend.execute("network-check", ["python3", "-c", script], execution_policy={"network_enabled": True})
+        assert enabled.exit_code == 0, enabled
         unix = await backend.execute("network-check", ["python3", "-c", "import socket; socket.socket(socket.AF_UNIX)"])
         assert unix.exit_code != 0
         isolated = await backend.execute("network-check", ["python3", "-c", "from pathlib import Path; assert not Path('/run/WSL').exists(); assert not Path('/mnt/c').exists(); print('isolated')"])

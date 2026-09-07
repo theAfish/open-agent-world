@@ -11,6 +11,7 @@ from backend import __version__
 from backend.api import api_router
 from backend.api.websocket import websocket_route
 from backend.config import Settings
+from backend.control_plane import ControlPlaneMiddleware
 from backend.errors import (
     ConflictError,
     DomainError,
@@ -33,6 +34,7 @@ from backend.sandbox import (
     SandboxValidationError,
 )
 from backend.services import ApplicationServices, create_services
+from backend.sandbox.models import SandboxNetworkError
 
 
 def create_app(
@@ -70,6 +72,7 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    application.add_middleware(ControlPlaneMiddleware, token=selected_settings.control_plane_token)
     application.include_router(api_router)
     application.add_api_websocket_route("/ws/events", websocket_route)
 
@@ -123,6 +126,8 @@ def create_app(
             status_code, code = 409, "sandbox_state_error"
         elif isinstance(exc, SandboxValidationError):
             status_code, code = 422, "sandbox_validation_error"
+        elif isinstance(exc, SandboxNetworkError):
+            status_code, code = 503, "network_setup_failed"
         elif isinstance(exc, SandboxSecurityError):
             status_code, code = 503, "sandbox_security_error"
         return JSONResponse(

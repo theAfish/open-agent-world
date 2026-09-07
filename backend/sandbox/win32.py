@@ -4,8 +4,8 @@ The implementation intentionally uses the stable AppContainer launch path
 (``PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES``), rather than the experimental
 ``Experimental_CreateProcessInSandbox`` API.  The latter currently requires an
 unpublished FlatBuffer schema/header and is explicitly subject to change.  This
-module still provides the same properties: an AppContainer token with no network
-capabilities, explicit NTFS grants, a scrubbed Unicode environment, and a Job
+module provides an AppContainer token with opt-in outbound-only network
+capability, explicit NTFS grants, a scrubbed Unicode environment, and a Job
 Object that owns the complete process tree.
 
 There is no ordinary ``subprocess`` launch path in this module.
@@ -24,7 +24,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .environment import windows_environment_block
-from .models import SandboxLimits, SandboxSecurityError, SandboxValidationError
+from .models import SandboxLimits, SandboxNetworkError, SandboxSecurityError, SandboxValidationError
+from .windows_network import WindowsNetworkIsolation
+from .windows_network_broker import ensure_public_egress
 
 
 # Access masks used for explicit AppContainer SID grants.
@@ -720,8 +722,30 @@ class WindowsNativeApi:
         on_stderr: Callable[[str], None],
         on_job_open: Callable[[int], None],
         on_job_close: Callable[[], None],
+        network_enabled: bool = False,
     ) -> NativeCommandResult:
         """Launch and wait for an AppContainer process under a kill-on-close job."""
+
+        if cancel_event.is_set():
+            return NativeCommandResult(0xC000013A, "", "", 0.0, False, True)
+        capability_sid = None
+        capabilities = None
+        if network_enabled:
+            try:
+                isolation = WindowsNetworkIsolation()
+                isolation.require_services()
+                isolation.require_no_loopback_exemption(profile.sid)
+                ensure_public_egress(profile.name)
+                capability_sid = isolation.internet_client_sid()
+            except (AttributeError, OSError, SandboxSecurityError) as exc:
+                raise SandboxNetworkError(f"Windows networking setup failed: {exc}") from exc
+            capabilities = (_SID_AND_ATTRIBUTES * 1)(
+                _SID_AND_ATTRIBUTES(ctypes.addressof(capability_sid), 0x4),  # SE_GROUP_ENABLED
+            )
+        if cancel_event.is_set():
+            # Setup may have waited for the trusted broker. Cancellation must
+            # not admit a workload after that wait; retained denies stay safe.
+            return NativeCommandResult(0xC000013A, "", "", 0.0, False, True)
 
         executable = self._resolve_executable(argv[0], cwd, environment)
         command_line = subprocess.list2cmdline([str(executable), *argv[1:]])
@@ -739,8 +763,8 @@ class WindowsNativeApi:
             handles = (wintypes.HANDLE * 3)(stdin_handle, stdout_write, stderr_write)
             security = _SECURITY_CAPABILITIES(
                 AppContainerSid=profile.sid,
-                Capabilities=None,
-                CapabilityCount=0,
+                Capabilities=capabilities,
+                CapabilityCount=1 if network_enabled else 0,
                 Reserved=0,
             )
             mitigation = ctypes.c_ulonglong(
@@ -821,7 +845,9 @@ class WindowsNativeApi:
 
             job_value = int(job) if isinstance(job, int) else int(job.value)
             on_job_open(job_value)
-            if self._kernel32.ResumeThread(process_info.hThread) == 0xFFFFFFFF:
+            if cancel_event.is_set():
+                self._kernel32.TerminateJobObject(job, 0xC000013A)
+            elif self._kernel32.ResumeThread(process_info.hThread) == 0xFFFFFFFF:
                 self._kernel32.TerminateJobObject(job, 0xC0000022)
                 self._raise_last_error("ResumeThread")
 

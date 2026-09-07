@@ -73,6 +73,10 @@ Open a Sandbox inspector, choose its runtime, enter an existing absolute **Worki
 
 Use **Open Window** for the resizable file sidebar, non-interactive console, previews, downloads and execution history. The inspector also supports local environment variables/private secret references, a live default Environment Profile, networking and advanced process limits. See [Sandbox workspace usage, security boundaries and validation results](docs/sandbox-workspace.md).
 
+Networking is disabled by default. Select **Enabled** using **Stop → Save → Start** for public outbound DNS, verified HTTPS and ordinary TCP. Windows combines AppContainer outbound capability with a narrowly scoped elevated policy broker; Linux and WSL use slirp4netns with a private network namespace and enforced egress restrictions. Networking prerequisites are separate from offline runtime availability. See [setup, network policy and real-runtime acceptance](docs/sandbox-networking.md).
+
+The management API and development proxy accept local host connections by default. Remote integrations require an explicitly configured host-private control-plane credential; custom ASGI servers must preserve socket peers with `--no-proxy-headers`. See [management ingress protection](docs/security.md#trust-zones).
+
 Writes in the selected folder change real files immediately. Stop revokes active execution/access; deleting a card removes sandbox-owned storage and permissions, never the selected folder. Working folders can be changed while stopped. The chosen execution runtime is pinned on first start, so automatic discovery cannot silently move an existing card to a different filesystem. Use a new card to change runtime.
 
 Automatic selection prefers a usable existing WSL2 environment on Windows, otherwise native Windows; native Linux uses its own kernel. Linux/WSL requires Bubblewrap, libseccomp, Python 3.10+ for the small trusted worker, and a systemd user manager supporting scopes with cgroup-v2 memory and process limits. The backend itself still requires Python 3.11+. Runtime discovery reports missing prerequisites; **Refresh** explicitly checks again after environment changes. No ordinary host-process execution is substituted when isolation is unavailable. See [the sandbox contract](docs/security.md).
@@ -89,7 +93,7 @@ Connected agents receive both inspect and execute tools. Inspection reports the 
 - Managed UTF-8 text read/replace/patch operations and image import/inspection; resources never retain arbitrary host paths.
 - Scoped Google ADK tools rebuilt for every run, with authorization checked again at tool invocation.
 - Durable, provider-neutral Runs with explicit lifecycle transitions, nested lineage, per-Agent concurrency policy, and cancellation by Run ID. See [Runs and runtime providers](docs/runs.md).
-- A per-card runtime registry with lazy provisioning, live host folders, native Windows and Linux isolation, a WSL2 bridge, minimal environments, network denial and process-tree limits behind `SandboxBackend`.
+- A per-card runtime registry with lazy provisioning, live host folders, native Windows and Linux isolation, a WSL2 bridge, minimal environments, default network denial, opt-in public outbound networking and process-tree limits behind `SandboxBackend`.
 - Typed runtime activity over WebSocket without exposing hidden model reasoning.
 - 2048-unit chunk indexing, viewport prefetch, distant-card unloading, and a developer stress generator.
 

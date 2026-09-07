@@ -71,6 +71,37 @@ describe("sandbox configuration UI", () => {
     expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("saves enabled networking when the runtime reports its prerequisites ready", async () => {
+    vi.mocked(worldApi.getSandboxRuntimes).mockResolvedValue({ default_runtime: "wsl:Ubuntu", runtimes: [{
+      id: "wsl:Ubuntu", label: "WSL Ubuntu", platform: "linux", available: true, reason: null,
+      shell: ["/bin/sh", "-c"], supports_workspace: true, supported_network_modes: ["disabled", "enabled"],
+      network_available: true, network_status: "available", network_reason: "Public outbound IPv4 only",
+    }] });
+    vi.spyOn(worldApi, "updateNode").mockResolvedValue({ ...sandbox, config: { ...sandbox.config, network_enabled: true } });
+    render(<Card />);
+    await screen.findByText(/Public outbound IPv4 only/);
+    expect((screen.getByRole("option", { name: "Enabled" }) as HTMLOptionElement).disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText("Networking"), { target: { value: "enabled" } });
+    expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(worldApi.updateNode).toHaveBeenCalledWith(sandbox.id, {
+      config: { runtime: "auto", workspace_path: null, workspace_access: "read_write", network_enabled: true },
+    }));
+  });
+
+  it("keeps offline start available when only networking dependencies are missing", async () => {
+    vi.mocked(worldApi.getSandboxRuntimes).mockResolvedValue({ default_runtime: "wsl:Ubuntu", runtimes: [{
+      id: "wsl:Ubuntu", label: "WSL Ubuntu", platform: "linux", available: true, reason: null,
+      shell: ["/bin/sh", "-c"], supports_workspace: true, supported_network_modes: ["disabled", "enabled"],
+      network_available: false, network_status: "missing_component", network_reason: "Install slirp4netns, then refresh",
+    }] });
+    render(<Card />);
+    await screen.findByText(/Install slirp4netns/);
+    expect((screen.getByRole("option", { name: "Enabled" }) as HTMLOptionElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole("status").textContent).toBe("Stopped");
+  });
+
   it("clears an external read-only binding back to a writable managed workspace", async () => {
     useWorldStore.setState({ cards: [{ ...sandbox, config: { ...sandbox.config, workspace_path: "D:\\project", workspace_access: "read_only" } }] });
     vi.spyOn(worldApi, "updateNode").mockResolvedValue(sandbox);

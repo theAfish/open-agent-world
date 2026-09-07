@@ -329,6 +329,8 @@ class _LifecycleSandboxes:
             info = await self.backend.get(node_id)
             if config.get("network_enabled") and "enabled" not in info.supported_network_modes:
                 raise SandboxValidationError("This runtime supports disabled networking only")
+            if config.get("network_enabled") and not info.network_available:
+                raise SandboxValidationError(info.network_reason)
             await self.backend.configure(
                 node_id, workspace_path=config.get("workspace_path"),
                 workspace_access=ResourceAccess(config.get("workspace_access", "read_write")),

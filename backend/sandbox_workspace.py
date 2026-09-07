@@ -8,6 +8,7 @@ from backend.node_documents import read_document
 from backend.skill_runtime import SKILL_SELECTOR
 from backend.capabilities.projection import authorized_resources
 from open_agent_world.skill_packages import Skill, SkillAsset
+from backend.sandbox.models import SandboxNetworkError
 
 
 def require_skill(services, skill_id, agent_id=None):
@@ -45,11 +46,23 @@ async def diagnostics(services, sandbox_id, destination=None):
             raise ResourceValidationError("Use an HTTP(S) destination without credentials, query or fragment")
         if not info.network_enabled:
             raise ResourceValidationError("Networking is disabled; enable a supported mode in settings first")
-        argv = ["curl", "--silent", "--show-error", "--output", "/dev/null", "--max-time", "8", "--write-out", "%{http_code}", "--", destination]
-        result = await services.execute_sandbox(sandbox_id, argv, timeout_seconds=12, _keep_on_disconnect=True)
+        argv = ["curl", "--disable", "--noproxy", "*", "--silent", "--show-error", "--output",
+            "NUL" if info.platform == "windows" else "/dev/null", "--max-time", "8",
+            "--write-out", "%{http_code}", "--", destination]
+        try:
+            result = await services.execute_sandbox(sandbox_id, argv, timeout_seconds=12, _keep_on_disconnect=True)
+        except SandboxNetworkError as exc:
+            return {"status": "network_setup_failed", "configuration": summary,
+                "workspace_access": str(info.workspace_access), "network_enabled": info.network_enabled,
+                "network_reason": str(exc), "stdout": "", "stderr": "", "exit_code": None}
         code = result.stdout.strip()
         missing = result.exit_code in {127, 9009} or (result.exit_code != 0 and any(text in result.stderr.lower() for text in ("no such file", "not found")))
-        status = "authentication_failed" if code in {"401", "403", "407"} else "missing_tool" if missing else "connection_failed" if result.exit_code else "connected"
+        status = ("missing_tool" if missing else
+            "dns_failed" if result.exit_code == 6 else
+            "tls_verification_failed" if result.exit_code in {51, 60, 77, 83, 90, 91} else
+            "connection_failed" if result.exit_code else
+            "authentication_failed" if code in {"401", "403", "407"} else
+            "http_error" if code.isdecimal() and int(code) >= 400 else "connected")
     else:
         command = ('ver & echo Workspace & cd & ' + ' & '.join(
             f'(where {tool} >nul 2>nul && {tool} --version || echo {tool}: missing)' for tool in ("python", "python3", "node", "curl", "git"))
