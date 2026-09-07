@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 
 from backend.plugins.documents import NodeDocumentAction, NodeDocumentDefinition
@@ -19,6 +19,7 @@ EXECUTION_SELECTORS = (ENVIRONMENT_SELECTOR, TARGET_SELECTOR)
 
 class EmptyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    status: Literal["available"] = "available"
 
 
 class SecretRequirement(BaseModel):

@@ -31,6 +31,13 @@ def profile(client, variables=None, name="Environment"):
     return card
 
 
+@pytest.mark.parametrize("node_type", ["environment", "compute-target"])
+def test_execution_configuration_nodes_accept_their_default_status(client, node_type):
+    card = create_node(client, node_type, status="available")
+    assert card["status"] == "available"
+    assert card["config"]["status"] == "available"
+
+
 def bind(client, card, value="test-private-token-742"):
     doc = client.get(f"/api/nodes/{card['id']}/document").json()
     response = client.put(f"/api/nodes/{card['id']}/credentials/token", json={"value": value, "expected_revision": doc["revision"]})

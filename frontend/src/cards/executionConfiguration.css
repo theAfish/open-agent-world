@@ -1,6 +1,19 @@
 .execution-config p { margin: 6px 0; font-size: 12px; line-height: 1.5; }
 .execution-config code { overflow-wrap: anywhere; font-size: 11px; }
-.execution-config .field-label textarea { font: 11px/1.55 "Cascadia Code", Consolas, monospace; min-height: 165px; }
 .execution-config .field-label input { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; }
 .execution-config .editor-actions { display: flex; gap: 8px; margin-top: 8px; }
 .execution-config [role="alert"] { color: var(--danger); overflow-wrap: anywhere; }
+.execution-config-heading { gap: 8px; }
+.execution-config-heading > span { margin-right: auto; }
+.execution-config-file { display: none; }
+.execution-config .compact-button { min-height: 28px; padding: 5px 8px; font-size: 10px; }
+.execution-config .compact-button, .environment-variables-editor .secondary-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.environment-variables-editor, .execution-target-settings { border: 0; padding: 0; margin: 14px 0 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.environment-variable-row { border: 1px solid var(--line); background: var(--surface-soft); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 7px; }
+.execution-config .variable-name-row input, .execution-config .variable-value-row input { min-width: 0; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; }
+.execution-config .variable-value-row > select { width: 112px; flex-shrink: 0; box-sizing: border-box; padding: 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; }
+.execution-config .variable-value-row > input { flex: 1; }
+.execution-target-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 14px; }
+.execution-target-settings legend { padding: 0 0 8px; font-size: 11px; font-weight: 600; }
+.execution-target-settings .skill-setting input, .execution-target-settings .skill-setting select { min-width: 0; }
+.execution-config-notice { color: var(--accent-strong); }
