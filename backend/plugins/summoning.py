@@ -22,4 +22,5 @@ class SummoningAction(BaseModel):
     action: Literal["list", "summon", "inspect", "message", "stop", "reclaim"] = "list"
     agent_id: str | None = None
     instance_id: str | None = None
-    prompt: str | None = Field(default=None, min_length=1, max_length=100000)
+    prompt: str | None = Field(default=None, max_length=100000,
+                              description="Non-empty task text for summon or message. Omit for list, inspect, stop, or reclaim.")

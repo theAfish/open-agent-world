@@ -12,6 +12,7 @@ import "./barracks.css";
 export interface SummonedInstance {
   id: string; name: string; status: string; result: string; error: string | null;
   entry_agent_id: string; node_ids: string[]; run_id: string | null; reclaimed: boolean;
+  workspace_id?: string;
 }
 export interface SummonableAgent { id: string; name: string; description: string; equipment_count: number }
 export interface SummoningSnapshot {
@@ -110,6 +111,7 @@ export function BarracksBody({ card, workspace = false }: { card: WorldCard; wor
       </details>
       {!instance.reclaimed && <div className="toolbox-toolbar">
         <button className="secondary-button" onClick={() => selectCards(instance.node_ids)}>Select nodes</button>
+        {instance.workspace_id && <button className="secondary-button" onClick={() => selectCards([instance.workspace_id!])}>Select workspace</button>}
         <button className="secondary-button" disabled={busy || !task.trim() || instance.status === "running"} onClick={() => act("message", instance)}>Follow up</button>
         <button className="secondary-button" disabled={busy || !["running", "waiting", "paused"].includes(instance.status)} onClick={() => act("stop", instance)}>Stop</button>
         <button className="secondary-button" disabled={busy} onClick={() => act("reclaim", instance)}>Reclaim instance</button>

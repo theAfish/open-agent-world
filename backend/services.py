@@ -1564,7 +1564,8 @@ class ApplicationServices:
         cards = [self.world.get_card(node_id) for node_id in request.node_ids]
         from backend.node_containers import parent_first
         cards = parent_first(cards, parent=lambda n: n.equipment.owner_id if n.equipment else n.parent_id)
-        edges = self.world.list_edges(request.node_ids)
+        edges = [edge for edge in self.world.list_edges(request.node_ids)
+                 if not self.plugins.relationship(edge.relationship).generated]
         card_revisions = {card.id: card.revision for card in cards}
         edge_revisions = {edge.id: edge.revision for edge in edges}
         resource_revisions = {
@@ -1705,7 +1706,8 @@ class ApplicationServices:
             raise RevisionConflictError(
                 "the world changed while the Legion was being captured; retry"
             ) from error
-        current_edges = self.world.list_edges(request.node_ids)
+        current_edges = [edge for edge in self.world.list_edges(request.node_ids)
+                         if not self.plugins.relationship(edge.relationship).generated]
         current_resource_revisions = {
             card.id: (
                 record.revision
@@ -2206,6 +2208,9 @@ class ApplicationServices:
 
     async def _update_edge_locked(self, edge_id: str, request: EdgePatch) -> Edge:
         old = self.world.get_edge(edge_id)
+        if (self.plugins.relationship(old.relationship).generated
+                or self.plugins.relationship(request.relationship or old.relationship).generated):
+            raise GraphValidationError("Generated connections cannot change relationship")
         previously_affected = self._affected_agents(old)
         source = self.world.get_card(old.source)
         target = self.world.get_card(old.target)

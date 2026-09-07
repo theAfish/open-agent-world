@@ -157,6 +157,7 @@ export interface NodeTypeCatalogItem {
 }
 
 export interface RelationshipCatalogItem {
+  generated?: boolean;
   id: Relationship;
   plugin_id: string;
   label: string;
@@ -283,6 +284,7 @@ export interface ConversationSummary {
 }
 
 export interface ContainerDefinition {
+  virtual?: boolean;
   member_traits: string[];
   parentable: boolean;
   connectable: boolean;

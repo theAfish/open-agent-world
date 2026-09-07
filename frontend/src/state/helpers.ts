@@ -62,7 +62,7 @@ export function buildCardDraft(
     type,
     name: definition?.default_name ?? DEFAULT_NAME[type] ?? `New ${type}`,
     position,
-    size: { width: 96, height: 96 },
+    size: definition?.container ? { ...definition.default_size } : { width: 96, height: 96 },
     expanded: false,
     status: definition?.default_status ?? DEFAULT_STATUS[type] ?? "available",
     config: {

@@ -41,6 +41,11 @@ from backend.world.models import (
     SandboxConfig,
     TextConfig,
 )
+from pydantic import BaseModel
+
+
+class VirtualWorkspaceConfig(BaseModel):
+    pass
 
 
 class _LifecycleOperation(NodeLifecycleTransaction):
@@ -804,6 +809,18 @@ def _register_builtin(registry: PluginRegistration) -> None:
         lifecycle=AgentNodeBehavior(),
         templateable=True, template_status="idle",
         template_handler=AgentNodeTemplateHandler(),
+    ))
+    registry.register_node_type(NodeTypeDefinition(
+        id="core.virtual-workspace", label="Virtual workspace", description="Temporary space for generated cards",
+        icon="boxes", color="#697c78", deck_id="fields", deck_label="Fields", deck_icon="workflow",
+        default_name="Workspace", default_size=(800, 500), default_status="available",
+        statuses=frozenset({"available"}), config_model=VirtualWorkspaceConfig,
+        container=NodeContainerDefinition(virtual=True), user_creatable=False,
+    ))
+    registry.register_relationship(RelationshipDefinition(
+        id="core.generated", label="Generated workspace", short_label="generated",
+        description="Created by an Agent or tool; retained until its workspace is reclaimed.",
+        target_types=frozenset({"core.virtual-workspace"}), generated=True,
     ))
     registry.register_node_type(NodeTypeDefinition(
         id="legion", label="Legion", description="Team space with shared context and settings",

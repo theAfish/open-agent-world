@@ -12,7 +12,7 @@ export function ContainerFrame({ card, selected, className, label, header, child
   const catalog = useWorldStore((state) => state.catalog);
   const update = useWorldStore((state) => state.updateCard);
   const spec = containerDefinition(card, catalog)!;
-  return <section className={`container-frame ${className} ${selected ? "is-selected" : ""}`} data-card-id={card.id} data-card-type={card.type} aria-label={label}>
+  return <section className={`container-frame ${className} ${spec.virtual ? "virtual-workspace" : ""} ${selected ? "is-selected" : ""}`} data-card-id={card.id} data-card-type={card.type} aria-label={label}>
     {selected && <NodeResizeControl position="bottom-right" minWidth={spec.min_size[0]} minHeight={spec.min_size[1]} maxWidth={4096} maxHeight={4096}
       onResizeEnd={(_event, size) => void update(card.id, { size: { width: size.width, height: size.height } })} />}
     {spec.connectable && ([[Position.Top, "top"], [Position.Right, "right"], [Position.Bottom, "bottom"], [Position.Left, "left"]] as const).map(([position, side]) =>

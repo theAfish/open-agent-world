@@ -4,6 +4,13 @@ import { positionSurfaceAtNodeCenter } from "../canvas/nodeDisplacement";
 
 export const containerDefinition = (card: WorldCard, catalog: PluginCatalog) => catalog.node_types.find((type) => type.id === card.type)?.container;
 export const isContainer = (card: WorldCard, catalog: PluginCatalog) => containerDefinition(card, catalog) != null;
+
+/** Expanded member surfaces stay below the header and inside the left border. */
+export function memberSurfacePosition(card: WorldCard, parent: WorldCard, level: NodeSurfaceLevel, catalog: PluginCatalog) {
+  const position = positionSurfaceAtNodeCenter(card.position, level);
+  const [left, top] = containerDefinition(parent, catalog)!.content_inset;
+  return { x: Math.max(position.x, parent.position.x + left), y: Math.max(position.y, parent.position.y + top) };
+}
 export function descendants(cards: WorldCard[], id: string): WorldCard[] {
   return cards.filter((card) => card.parent_id === id).flatMap((card) => [card, ...descendants(cards, card.id)]);
 }
@@ -35,7 +42,7 @@ export function containerSizes(cards: WorldCard[], catalog: PluginCatalog, level
       const level = levels.get(member.id) ?? "preview";
       const nested = sizes.get(member.id);
       const memberSize = nested ?? NODE_SURFACE_SIZE[level];
-      const position = nested ? member.position : positionSurfaceAtNodeCenter(member.position, level);
+      const position = nested ? member.position : memberSurfacePosition(member, card, level, catalog);
       size.width = Math.max(size.width, position.x - card.position.x + memberSize.width + spec.content_inset[2]);
       size.height = Math.max(size.height, position.y - card.position.y + memberSize.height + spec.content_inset[3]);
     }

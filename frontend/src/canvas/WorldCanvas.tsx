@@ -19,7 +19,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { EquipmentCardNode, EquipmentPanelNode, EquipmentInspector } from "../cards/Equipment";
 import { canEquip, equipmentOwner, useEquipmentDrag, useEquipmentPanel } from "../state/equipment";
 import { ContainerCardNode } from "../cards/ContainerCard";
-import { ancestors, containerDefinition, containerSizes, dropContainer, isContainer, parentFirst } from "../state/containers";
+import { ancestors, containerDefinition, containerSizes, dropContainer, isContainer, memberSurfacePosition, parentFirst } from "../state/containers";
 import { WorldCardNode } from "../cards/CardFrame";
 import type { CanvasNode, CanvasNodeData } from "../cards/types";
 import { EdgeInspector } from "../edges/EdgeInspector";
@@ -158,7 +158,8 @@ export function WorldCanvas() {
       }
       if (card.parent_id && byId.has(card.parent_id)) {
         const parent = byId.get(card.parent_id)!;
-        return { ...node, parentId: parent.id, position: { x: node.position.x - parent.position.x, y: node.position.y - parent.position.y } };
+        const position = isContainer(card, catalog) ? node.position : memberSurfacePosition(card, parent, level, catalog);
+        return { ...node, parentId: parent.id, position: { x: position.x - parent.position.x, y: position.y - parent.position.y } };
       }
       return node;
     }).flatMap((node): CanvasNode[] => {

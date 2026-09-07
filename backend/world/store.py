@@ -216,6 +216,10 @@ class WorldStore:
             rows = connection.execute("SELECT * FROM cards WHERE parent_id = ? ORDER BY created_at, id", (parent_id,)).fetchall()
         return [self._card_from_row(row) for row in rows]
 
+    def _container_size(self, card_type: str, size: Size) -> Size:
+        spec = self.registry.node_type(card_type).container
+        return Size(width=max(size.width, spec.min_size[0]), height=max(size.height, spec.min_size[1])) if spec else size
+
     def preview_card(self, request: CardCreate, *, card_id: str | None = None) -> Card:
         """Validate a create request and materialize its node without persistence."""
 
@@ -232,6 +236,7 @@ class WorldStore:
         size = request.size or Size(
             width=definition.default_size[0], height=definition.default_size[1]
         )
+        size = self._container_size(request.type, size)
         raw_config = dict(request.config)
         if request.status is not None:
             raw_config["status"] = request.status
@@ -331,7 +336,7 @@ class WorldStore:
         self.validate_equipment(card_id, current.type, parent_id, equipment)
         name = changes.get("name") or current.name
         position = request.position or current.position
-        size = request.size or current.size
+        size = self._container_size(current.type, request.size or current.size)
         expanded = current.expanded if request.expanded is None else request.expanded
         config = current.config
         if request.config is not None:
@@ -434,7 +439,7 @@ class WorldStore:
         self.validate_equipment(card_id, current.type, parent_id, equipment)
         name = changes.get("name") or current.name
         position = request.position or current.position
-        size = request.size or current.size
+        size = self._container_size(current.type, request.size or current.size)
         expanded = current.expanded if request.expanded is None else request.expanded
         config = current.config
         if request.config is not None:

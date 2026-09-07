@@ -13,9 +13,10 @@ class NodeContainerDefinition:
     max_members: int = 100
     document_field: str | None = None
     member_type: str | None = None
+    virtual: bool = False
 
     def catalog_item(self):
         return {"member_traits": sorted(self.member_traits), "parentable": self.parentable,
                 "connectable": self.connectable, "min_size": self.min_size,
                 "content_inset": self.content_inset, "max_members": self.max_members,
-                "document_field": self.document_field}
+                "document_field": self.document_field, "virtual": self.virtual}

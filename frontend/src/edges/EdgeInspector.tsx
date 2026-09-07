@@ -16,6 +16,7 @@ export function EdgeInspector() {
   if (!edge || !source || !target) return null;
   const options = getRelationshipOptions(catalog, source.type, target.type);
   const activeOption = getRelationshipOption(catalog, edge.relationship);
+  const generated = catalog.relationships.find((item) => item.id === edge.relationship)?.generated;
 
   return (
     <aside className="edge-inspector" aria-label="Selected relationship">
@@ -24,7 +25,7 @@ export function EdgeInspector() {
         <ArrowRight size={14} aria-hidden="true" />
         <span title={target.name}>{target.name}</span>
       </div>
-      {options.length > 1 ? (
+      {!generated && options.length > 1 ? (
         <label>
           <span className="sr-only">Permission</span>
           <select
@@ -63,7 +64,7 @@ export function EdgeInspector() {
         </label>
       )}
       <button type="button" className="revoke-button" onClick={() => void deleteSelectedEdge()}>
-        <ShieldOff size={14} /> Revoke
+        <ShieldOff size={14} /> {generated ? "Disconnect" : "Revoke"}
       </button>
       <button type="button" className="icon-button" onClick={() => selectEdge(undefined)} aria-label="Close relationship controls">
         <X size={14} />

@@ -69,6 +69,11 @@ def test_equipped_agent_snapshot_shared_library_fresh_sandbox_and_restart(tmp_pa
         assert instance["result"] == "Mock response: Inspect sources"
         nodes = [client.get(f"/api/nodes/{key}").json() for key in instance["node_ids"]]
         assert len(nodes) == 2
+        workspace = client.get(f"/api/nodes/{instance['workspace_id']}").json()
+        assert workspace["type"] == "core.virtual-workspace"
+        assert next(n for n in nodes if n["type"] == "agent")["parent_id"] == workspace["id"]
+        generated = [e for e in client.app.state.services.world.list_edges() if e.relationship == "core.generated"]
+        assert [(e.source, e.target) for e in generated] == [(box["id"], workspace["id"])]
         assert next(n for n in nodes if n["type"] == "agent")["config"]["system_instruction"] == "Changed later"
         fresh_sandbox = next(n for n in nodes if n["type"] == "sandbox")
         fresh_path = client.get(f"/api/sandboxes/{fresh_sandbox['id']}").json()["workspace"]
@@ -80,9 +85,14 @@ def test_equipped_agent_snapshot_shared_library_fresh_sandbox_and_restart(tmp_pa
     with TestClient(create_app(settings)) as client:
         saved = invoke(client, box, action="inspect", instance_id=instance["id"])
         assert saved["result"] == "Mock response: Continue"
+        assert client.get(f"/api/nodes/{saved['workspace_id']}").status_code == 200
+        visitor = create_node(client, "text", parent_id=saved["workspace_id"])
         reclaimed = invoke(client, box, action="reclaim", instance_id=instance["id"])
         assert reclaimed["status"] == "reclaimed" and reclaimed["result"] == saved["result"]
         assert not Path(fresh_path).exists()
+        assert client.get(f"/api/nodes/{saved['workspace_id']}").status_code == 404
+        assert client.get(f"/api/nodes/{visitor['id']}").json()["parent_id"] is None
+        assert not any(e.relationship == "core.generated" for e in client.app.state.services.world.list_edges())
         assert client.get(f"/api/nodes/{skills['id']}").status_code == 200
 
 
@@ -185,6 +195,10 @@ async def test_recursive_summons_share_root_budget(tmp_path, policy, prompt, exp
         assert len(records) == expected
         assert all(r["created_root_id"] == root.run_id for r in records)
         assert all(r["status"] == "succeeded" for r in records)
+        for record in records:
+            link = next(e for e in services.world.list_edges() if e.target == record["workspace_id"])
+            assert link.relationship == "core.generated"
+            assert services.world.get_card(link.source).equipment.owner_id == record["caller_agent_id"]
         assert any(limit in error for error in runtime.limit_errors)
         assert all(r["result"].startswith("Finished") for r in runtime.results)
         children = services.run_manager.list_child_runs(root.run_id)
@@ -237,3 +251,33 @@ def test_removing_a_shared_dependency_changes_the_live_blueprint(client):
     client.delete(f"/api/nodes/{reference['id']}")
     instance = invoke(client, box, action="summon", agent_id=entry["id"], prompt="Work")
     assert client.app.state.services.capabilities.derive(instance["entry_agent_id"]).capabilities == []
+
+
+def test_summoning_avoids_other_cards_and_empty_management_prompts(client):
+    from backend.world.layout import WorldLayout
+    box = create_node(client, "oaw.barracks", size={"width": 96, "height": 96})
+    assert box["size"] == {"width": 800, "height": 500}
+    # Older palette-created containers may still have compact persisted sizes.
+    with client.app.state.services.database.transaction() as connection:
+        connection.execute("UPDATE cards SET width=96,height=96 WHERE id=?", (box["id"],))
+    agent = stock(client, box, create_node(client, "agent", config={"runtime_provider_id": "core.mock"}))
+    create_node(client, "text", position={"x": box["size"]["width"] + 200, "y": 150})
+    assert invoke(client, box, action="list", prompt="")["agents"]
+    for action in ("summon", "message"):
+        response = client.post(f"/api/nodes/{box['id']}/summoning/actions", json={
+            "action": action, "agent_id": agent["id"], "prompt": ""})
+        assert response.status_code == 422 and "Supply a task prompt" in response.text
+    for _ in range(2):
+        obstacles = WorldLayout.capture(client.app.state.services.world).footprints.values()
+        instance = settle(client, box, invoke(client, box, action="summon", agent_id=agent["id"], prompt="Work"))
+        region = client.app.state.services.world.get_card(instance["workspace_id"])
+        assert (region.position.x >= box["position"]["x"] + 800
+                or region.position.x + region.size.width <= box["position"]["x"]
+                or region.position.y >= box["position"]["y"] + 500
+                or region.position.y + region.size.height <= box["position"]["y"])
+        assert all(region.position.x + region.size.width <= rect.x or rect.x + rect.width <= region.position.x
+                   or region.position.y + region.size.height <= rect.y or rect.y + rect.height <= region.position.y
+                   for rect in obstacles)
+        assert invoke(client, box, action="inspect", instance_id=instance["id"], prompt="")["id"] == instance["id"]
+    assert invoke(client, box, action="stop", instance_id=instance["id"], prompt="")["id"] == instance["id"]
+    assert invoke(client, box, action="reclaim", instance_id=instance["id"], prompt="")["reclaimed"]

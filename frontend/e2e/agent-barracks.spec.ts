@@ -1,5 +1,54 @@
 import { expect, test } from "@playwright/test";
 
+test("summoning streams a virtual workspace and generated connection onto the canvas", async ({ page, request }) => {
+  await page.setViewportSize({ width: 1800, height: 1200 });
+  const box = await (await request.post('/api/nodes', { data: {
+    type: 'oaw.barracks', name: 'Summon source', position: { x: 0, y: 0 },
+    size: { width: 96, height: 96 },
+  } })).json();
+  const agent = await (await request.post('/api/nodes', { data: {
+    type: 'agent', name: 'Worker', parent_id: box.id, position: { x: 850, y: 150 },
+  } })).json();
+  await page.goto('/');
+  await expect(page.locator(`[data-card-id="${box.id}"]`)).toBeVisible();
+  const response = await request.post(`/api/nodes/${box.id}/summoning/actions`, { data: {
+    action: 'summon', agent_id: agent.id, prompt: 'Hello',
+  } });
+  expect(response.ok()).toBeTruthy();
+  const instance = await response.json();
+  const workspace = page.locator(`[data-card-id="${instance.workspace_id}"]`);
+  await expect(workspace).toHaveClass(/virtual-workspace/);
+  await expect(workspace).toHaveCSS('border-top-style', 'dashed');
+  await expect.poll(async () => {
+    const source = await page.locator(`[data-card-id="${box.id}"]`).boundingBox();
+    const region = await workspace.boundingBox();
+    return !!source && !!region && (source.x + source.width <= region.x || region.x + region.width <= source.x
+      || source.y + source.height <= region.y || region.y + region.height <= source.y);
+  }).toBeTruthy();
+  await expect(page.locator(`[data-card-id="${instance.entry_agent_id}"]`)).toBeAttached();
+  const worker = page.locator(`[data-card-id="${instance.entry_agent_id}"]`);
+  const expectContained = async () => {
+    await expect.poll(async () => {
+      const frame = await workspace.boundingBox();
+      const member = await worker.boundingBox();
+      return !!frame && !!member && member.x >= frame.x && member.y >= frame.y
+        && member.x + member.width <= frame.x + frame.width
+        && member.y + member.height <= frame.y + frame.height;
+    }).toBeTruthy();
+  };
+  await expectContained();
+  await worker.click({ position: { x: 140, y: 75 } });
+  await expect(worker).toHaveAttribute('data-surface-level', 'inspector');
+  await expectContained();
+  await expect(page.locator(`.semantic-edge-path.is-generated[data-target-id="${instance.workspace_id}"]`)).toHaveCSS('stroke-dasharray', '8px, 6px');
+  await request.post(`/api/nodes/${box.id}/summoning/actions`, { data: {
+    action: 'reclaim', instance_id: instance.id,
+  } });
+  await expect(workspace).toHaveCount(0);
+  await expect(page.locator(`.semantic-edge-path.is-generated[data-target-id="${instance.workspace_id}"]`)).toHaveCount(0);
+  expect((await request.post('/api/nodes/batch-delete', { data: { node_ids: [agent.id, box.id] } })).ok()).toBeTruthy();
+});
+
 test("multiple equipment drops and owner deletion stay synchronized through undo and redo", async ({ page, request }) => {
   await page.setViewportSize({ width: 1800, height: 1200 });
   const create = async (type: string, x: number, y: number) => (await request.post('/api/nodes', { data: { type, position: { x, y } } })).json();

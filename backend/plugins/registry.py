@@ -108,6 +108,7 @@ class RelationshipCatalogItem(BaseModel):
     target_traits: list[str]
     directions: list[str]
     templateable: bool
+    generated: bool = False
 
 
 class PluginCatalog(BaseModel):
@@ -213,6 +214,8 @@ class RelationshipDefinition:
     directions: frozenset[str] = frozenset({"forward"})
     capabilities: tuple[CapabilityGrantDefinition, ...] = ()
     templateable: bool = False
+    # Runtime provenance only: never traversed for capabilities or copied into templates.
+    generated: bool = False
 
     def catalog_item(self, plugin_id: str) -> RelationshipCatalogItem:
         return RelationshipCatalogItem(
@@ -227,6 +230,7 @@ class RelationshipDefinition:
             target_traits=sorted(self.target_traits),
             directions=sorted(self.directions),
             templateable=self.templateable,
+            generated=self.generated,
         )
 
 

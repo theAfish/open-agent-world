@@ -24,6 +24,7 @@ class Capability(BaseModel):
     target_id: str
     target_type: str
     target_name: str
+    source_node_id: str | None = None
     description: str
     input_schema: dict[str, Any] = Field(default_factory=dict)
 

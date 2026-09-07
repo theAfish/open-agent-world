@@ -55,7 +55,7 @@ export function getRelationshipOptions(
   targetType: CardType,
 ): RelationshipOption[] {
   return catalog.relationships
-    .filter((definition) => relationshipMatches(catalog, definition, sourceType, targetType))
+    .filter((definition) => !definition.generated && relationshipMatches(catalog, definition, sourceType, targetType))
     .map(option);
 }
 

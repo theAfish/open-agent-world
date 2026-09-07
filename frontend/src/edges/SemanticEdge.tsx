@@ -52,6 +52,7 @@ export function SemanticEdge({
   const relationship = data?.relationship ?? "read";
   const bidirectional = data?.direction === "bidirectional";
   const option = getRelationshipOption(catalog, relationship);
+  const generated = catalog.relationships.find((item) => item.id === relationship)?.generated;
 
   return (
     <>
@@ -60,7 +61,7 @@ export function SemanticEdge({
         path={bidirectional ? geometry.bidirectionalMarkerPath : geometry.markerPath}
         markerEnd={markerEnd}
         markerStart={markerStart}
-        className={`semantic-edge-path ${selected ? "is-selected" : ""}`}
+        className={`semantic-edge-path ${generated ? "is-generated" : ""} ${selected ? "is-selected" : ""}`}
         data-edge-id={id}
         data-source-id={data?.sourceCardId ?? source}
         data-target-id={data?.targetCardId ?? target}

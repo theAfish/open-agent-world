@@ -55,6 +55,8 @@ class CapabilityBroker:
             target = self.world.get_card(target_id)
             suffix = _tool_suffix(target)
             relationship = self.plugins.relationship(edge.relationship)
+            if relationship.generated:
+                continue
             if not relationship.capabilities:
                 directed_edges.extend((child, child.target) for child in self.world.connections_from(target_id))
             for grant in relationship.capabilities:
@@ -71,6 +73,7 @@ class CapabilityBroker:
                         target_id=target.id,
                         target_type=target.type,
                         target_name=target.name,
+                        source_node_id=edge.source if edge.target == target_id else edge.target,
                         description=grant.description.format(target_name=target.name),
                         input_schema=dict(grant.input_schema),
                     )

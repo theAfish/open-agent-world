@@ -1506,6 +1506,16 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   ingestEvent: (event) => {
     const nodeId = event.node_id ?? event.agent_id ?? event.sandbox_id ?? event.resource_id;
     const normalizedType = event.type.replace(/[.\s-]/g, "_").toLowerCase();
+    if (normalizedType === "card_deleted" && nodeId) {
+      worldMutationEpoch += 1;
+      set((state) => ({
+        cards: state.cards.filter((card) => card.id !== nodeId),
+        edges: state.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId),
+        selectedCardIds: state.selectedCardIds.filter((id) => id !== nodeId),
+        selectedEdgeId: state.edges.some((edge) => edge.id === state.selectedEdgeId
+          && (edge.source === nodeId || edge.target === nodeId)) ? undefined : state.selectedEdgeId,
+      }));
+    }
     const outputText = String(
       event.payload.error ?? event.payload.text ?? event.payload.output ?? event.message ?? "",
     );

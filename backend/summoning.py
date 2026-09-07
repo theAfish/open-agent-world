@@ -10,7 +10,8 @@ from backend.legions.models import LegionInstantiate, LegionRecord
 from backend.node_documents import read_document
 from backend.plugins.summoning import SummoningPolicy
 from backend.runs.models import TERMINAL_RUN_STATUSES
-from backend.world.models import CardPatch
+from backend.world.models import CardCreate, CardPatch, EdgeCreate, Point
+from backend.world.layout import WorldLayout
 
 
 @dataclass
@@ -44,8 +45,11 @@ class SummoningService:
     def owned_ids(self, record):
         """Current private ownership, including equipment attached after admission."""
         world = self.services.world
-        return {node.id for key in record["root_node_ids"] if world.maybe_get_card(key)
-                for node in [world.get_card(key), *world.owned_descendants(key)]}
+        owned = {node.id for key in record["root_node_ids"] if world.maybe_get_card(key)
+                 for node in [world.get_card(key), *world.owned_descendants(key)]}
+        if record.get("workspace_id") and world.maybe_get_card(record["workspace_id"]):
+            owned.add(record["workspace_id"])
+        return owned
 
     def agents(self, node_id):
         self.spec(node_id)
@@ -64,6 +68,8 @@ class SummoningService:
         blueprint, keys = await self.services._capture_subgraph_locked(request)
         bindings = []
         for edge in self.services.world.list_edges():
+            if self.services.plugins.relationship(edge.relationship).generated:
+                continue
             if (edge.source in keys) == (edge.target in keys):
                 continue
             internal_source = edge.source in keys
@@ -186,18 +192,36 @@ class SummoningService:
                 if agent is None:
                     raise ResourceValidationError("Choose an Agent currently in this Barracks")
                 blueprint, entry_key, bindings = await self.definition(agent)
-                library = services.world.get_card(node_id)
                 now = datetime.now(timezone.utc)
                 portable = LegionRecord(id=agent.id, name=agent.name, description="", blueprint=blueprint,
                                         created_at=now, updated_at=now, revision=1)
-                owned_ids = {key for r in self.records() if r["library_id"] == node_id and not r["reclaimed"] for key in r["node_ids"]}
-                previous = [node for node in services.world.list_cards() if node.id in owned_ids]
-                space = [library, *services.world.descendants(library.id)]
+                layout = WorldLayout.capture(services.world)
+                library_bounds = layout.footprints[node_id]
+                spec = services.plugins.node_type("core.virtual-workspace").container
+                preferred = Point(x=library_bounds.x + library_bounds.width + 140, y=library_bounds.y)
                 instance = await services.instantiate_legion(agent.id, LegionInstantiate(position={
-                    "x": max(node.position.x + node.size.width for node in space) + 140,
-                    "y": max([library.position.y, *[node.position.y + node.size.height + 100 for node in previous]]),
+                    "x": preferred.x + spec.content_inset[0],
+                    "y": preferred.y + spec.content_inset[1],
                 }), record=portable, bindings=bindings)
+                workspace = None
+                try:
+                    placement = layout.plan_container(instance.nodes, spec, preferred=preferred)
+                    workspace = await services._create_card(CardCreate(
+                        type="core.virtual-workspace", name=f"{agent.name} workspace",
+                        position=placement.position, size=placement.size))
+                    for node in instance.nodes:
+                        await services.update_card(node.id, CardPatch(
+                            position=Point(x=node.position.x + placement.offset.x, y=node.position.y + placement.offset.y),
+                            **({"parent_id": workspace.id} if node.id in placement.root_node_ids else {})))
+                    source_id = (services.capabilities.capability_for_id(capability.agent_id, capability.id).source_node_id
+                                 if capability else node_id)
+                    await services.create_edge(EdgeCreate(
+                        source=source_id, target=workspace.id, relationship="core.generated"))
+                except Exception:
+                    await services.delete_cards([n.id for n in instance.nodes] + ([workspace.id] if workspace else []))
+                    raise
                 record = {"id": str(uuid4()), "library_id": node_id, "agent_id": request.agent_id,
+                          "workspace_id": workspace.id,
                           "name": agent.name, "caller_agent_id": capability.agent_id if capability else None,
                           "parent_instance_id": owner["id"] if owner else None,
                           "entry_agent_id": instance.node_ids[entry_key],

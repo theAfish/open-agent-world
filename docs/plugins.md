@@ -847,6 +847,33 @@ unequipped and shared world resources. Ownership roots are persisted separately
 from the initial node list. Each Agent can manage only its own summoned instances
 through its live capability. Run results and instance records survive restart.
 
+Each new instance also receives a `core.virtual-workspace` container, returned as
+`workspace_id`. Its Agent appears inside a dashed frame; equipment remains attached
+to that Agent. A dashed `core.generated` edge connects the granting Summoning card
+to the workspace (or the Barracks for human calls). Workspace membership grants no
+capabilities. Follow-up keeps the same workspace, and Reclaim removes the frame and
+its incident connections while detaching unrelated cards the user moved inside.
+Existing instances without a workspace retain their previous layout.
+New workspaces choose a nearby free region against existing world footprints,
+including other libraries and their instances. Placement reserves a gap between
+regions; later manual moves or local panel expansion do not rearrange other cards.
+Member surfaces stay inside the container's content inset as they expand.
+Only `summon` and `message` require non-empty `prompt`; management operations accept
+an omitted or empty prompt.
+
+These visuals use catalog contracts: `NodeContainerDefinition.virtual` selects a
+dashed spatial frame, while `RelationshipDefinition.generated` marks runtime-created
+provenance connections. Generated connections are excluded from manual connection
+choices, capability traversal, and template capture. Tools create them through the
+same `create_edge` operation as other connections, also allowing undo to restore
+a disconnected edge. Existing edges cannot convert to or from generated relations.
+They persist with the world until disconnected or their endpoint is deleted; they
+do not expire when a Run finishes. This virtual workspace is a canvas grouping,
+separate from a Sandbox filesystem workspace.
+
+The reusable rectangle solver and world/container placement interfaces are
+documented in [Canvas placement](layout.md).
+
 ### Migrating retired Barracks data
 
 The old `CallableTemplate`, `SummoningCapture` and `templates_field` contracts are
