@@ -79,6 +79,8 @@ class ManagedResourceStore:
         self.text_root.mkdir(parents=True, exist_ok=True)
         self.image_root.mkdir(parents=True, exist_ok=True)
         self._write_lock = threading.RLock()
+        from .artifacts import ArtifactStore
+        self.artifacts = ArtifactStore(database, self.assets_root / 'artifacts')
 
     def create_text(self, card_id: str, filename: str, content: str = "") -> ResourceRecord:
         filename = validate_filename(filename)

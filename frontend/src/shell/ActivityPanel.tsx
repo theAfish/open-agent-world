@@ -1,6 +1,7 @@
 import { Activity, CircleDot, Radio, X } from "lucide-react";
 import { useWorldStore } from "../state/worldStore";
 import type { RuntimeEvent } from "../types/world";
+import { LifecycleStatus } from "../cards/LifecycleStatus";
 
 function eventLabel(type: string): string {
   return type.replace(/[._-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -37,6 +38,7 @@ export function ActivityPanel() {
       </div>
 
       <div className="event-list" role="log" aria-live="polite">
+        {open && <LifecycleStatus />}
         {events.length > 0 ? events.map((event) => (
           <article key={event.id} className={event.type.toLowerCase().includes("error") ? "is-error" : ""}>
             <div className="event-rail"><CircleDot size={12} /><i /></div>

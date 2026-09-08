@@ -1053,3 +1053,10 @@ Existing Legion templates, multi-Agent snapshots, unsupported resource types,
 and direct-to-template capability scopes require restoration in the old version
 first; migration refuses to flatten team context or widen a capability scope.
 No migration has been run against the user's live data automatically.
+## Durable outputs
+
+Plugin API 1.12 adds scoped artifact publication, inspection, working-copy
+materialization and explicit retention release. See [lifecycle and artifact
+contracts](lifecycle-artifacts.md) for authorization, idempotency, migration and
+recovery guarantees. Ordinary document `artifacts` metadata does not grant access
+or retain file bytes.

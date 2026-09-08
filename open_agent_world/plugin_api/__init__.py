@@ -1,5 +1,6 @@
 """Stable contracts for trusted Open Agent World Python plugins."""
 from backend.execution_config import ComputeTarget, EnvironmentProfile, SecretRequirement
+from backend.resources.artifact_models import ArtifactPublish, ArtifactMaterialize
 
 from backend.plugins.builtin import AgentNodeBehavior, AgentNodeTemplateHandler
 from backend.plugins.registry import PluginAsset
@@ -74,6 +75,8 @@ from backend.runs import InvocationContext, RuntimeInput
 from backend.world.models import Card, CardCreate, CardPatch, Edge
 
 __all__ = [
+    "ArtifactPublish",
+    "ArtifactMaterialize",
     "ComputeTarget", "EnvironmentProfile", "SecretRequirement",
     "PluginAsset",
     "AgentNodeBehavior", "AgentNodeTemplateHandler",

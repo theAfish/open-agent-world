@@ -19,6 +19,7 @@ class EventType(StrEnum):
     EDGE_DELETED = "edge_deleted"
     PERMISSION_CHANGED = "permission_changed"
     RESOURCE_MODIFIED = "resource_modified"
+    ARTIFACT_UPDATED = "artifact_updated"
     CONVERSATION_SESSION_CREATED = "conversation_session_created"
     CONVERSATION_SESSION_UPDATED = "conversation_session_updated"
     CONVERSATION_SESSION_DELETED = "conversation_session_deleted"

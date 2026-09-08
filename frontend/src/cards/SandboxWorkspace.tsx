@@ -6,6 +6,7 @@ import { useNodeSurfaceStore } from "../state/nodeSurfaces";
 import type { WorldCard } from "../types/world";
 import { IconButton } from "../components/IconButton";
 import { SandboxRuntimeControls, SandboxSettings } from "./SandboxCard";
+import { PublishFiles } from "./Artifacts";
 import "./sandboxWorkspace.css";
 
 interface Root { id: string; label: string; access: string; directory: boolean }
@@ -69,6 +70,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const [history, setHistory] = useState<Receipt[]>([]);
   const [error, setError] = useState("");
   const [filesError, setFilesError] = useState("");
+  const [publishPaths, setPublishPaths] = useState<string[]>([]);
   const binding = JSON.stringify([card.id, card.config.runtime, card.config.workspace_path, card.config.workspace_access,
     info?.runtime_id, info?.workspace_path, info?.workspace_access, info?.workspace]);
   const fileContext = useRef({ binding, live: true, generation: 0, requests: new Map<string, number>() });
@@ -125,6 +127,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     context.live = true;
     setRoots([]); setTree({}); setLoading({}); setFilesError("");
     setSelection(undefined); setPreview(undefined); expandedRef.current = {}; setExpanded({});
+    setPublishPaths([]);
     void refreshFiles();
     return () => { context.live = false; context.generation++; context.requests.clear(); };
   }, [context]);
@@ -170,6 +173,8 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     return <ul>{loading[key] && !value ? <li className="sandbox-tree-note">Loading…</li> : value?.state ? <li className="sandbox-tree-note">{value.message ?? value.state}</li> : <>
       {value?.entries?.length === 0 && <li className="sandbox-tree-note">Empty folder</li>}
       {value?.entries?.map(e => { const next = path ? `${path}/${e.name}` : e.name; return <li key={e.name}>
+        {root === "workspace" && !e.blocked && <input type="checkbox" aria-label={`Select ${next} for publication`} checked={publishPaths.includes(next)}
+          onChange={event => setPublishPaths(current => event.target.checked ? [...current, next] : current.filter(p => p !== next))} />}
         <button className="sandbox-tree-entry" disabled={e.blocked} title={e.blocked ? "Links are blocked" : next}
           aria-expanded={e.directory ? !!expanded[`${root}:${next}`] : undefined}
           aria-current={!e.directory && selection?.root === root && selection.path === next ? "true" : undefined}
@@ -272,6 +277,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
         onKeyDown={e => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); e.stopPropagation(); saveSidebarWidth(sidebarWidth + (e.key === "ArrowRight" ? 16 : -16)); } }} />
       <main ref={workArea} className="sandbox-work-area">
         <section className="sandbox-preview" aria-label="File preview">
+          <PublishFiles card={card} paths={publishPaths.length ? publishPaths : selection?.root === "workspace" ? [selection.path] : []} />
           <header className="sandbox-pane-heading">
             <span title={selection?.path}><FileText size={13} />{selection?.label ?? "File preview"}</span>
             {selection && <div className="sandbox-pane-actions">

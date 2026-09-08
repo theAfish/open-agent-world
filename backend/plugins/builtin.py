@@ -818,6 +818,8 @@ def _register_builtin(registry: PluginRegistration) -> None:
         ),
     )
     from backend.skill_runtime import SKILL_SELECTOR, skill_script_schema
+    from backend.resources.artifact_capabilities import register as register_artifacts
+    register_artifacts(registry)
     registry.register_capability(CapabilityDefinition(
         kind='agent.communicate', tool_name='send_message', target_parameter='target',
         description='Send a message to the selected Agent and receive its response.',

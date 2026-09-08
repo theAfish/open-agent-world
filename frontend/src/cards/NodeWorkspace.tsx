@@ -1,4 +1,6 @@
 import { SandboxWorkspace } from "./SandboxWorkspace";
+import { ArtifactCollection } from "./Artifacts";
+import { LifecycleStatus } from "./LifecycleStatus";
 import { BarracksBody } from "./Barracks";
 import {
   Bot,
@@ -108,6 +110,7 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
           <span className="agent-runtime-badge"><Radio size={12} /> {card.status}</span>
         </header>
         <div className="agent-run-timeline">
+          <LifecycleStatus agentId={card.id} />
           {events.length > 0 ? events.slice(0, 40).map((event) => (
             <article key={event.id} className={`agent-run-event is-${event.type}`}>
               <span><Clock3 size={12} /></span>
@@ -175,6 +178,7 @@ export function WorkspaceSurface({ card }: WorkspaceSurfaceProps) {
         </>
         : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.agent-barracks.v1") ? <BarracksBody card={card} workspace />
         : card.type === "sandbox" ? <SandboxWorkspace card={card} />
+        : card.type === "core.artifact-collection" ? <ArtifactCollection card={card} />
         : card.type === "conversation" ? <ConversationWorkspace card={card} />
         : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill-package.v1") ? <SkillToolboxBody card={card} workspace />
         : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("ui.skill.v1") ? <SkillNodeBody card={card} workspace />

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import json
 from uuid import uuid4
 
 from backend.errors import NotFoundError
@@ -140,6 +141,14 @@ class RunStore:
             )
         return [self.get(str(row["run_id"])) for row in rows]
 
+    def update_lifecycle(self, run_id: str, **changes) -> RunRecord:
+        with self.database.transaction(immediate=True) as connection:
+            current = self.get(run_id)
+            value = {**current.lifecycle, **changes}
+            connection.execute('UPDATE runs SET lifecycle_json = ?, updated_at = ? WHERE run_id = ?',
+                               (json.dumps(value), _now(), run_id))
+        return self.get(run_id)
+
     @staticmethod
     def _record(row: object) -> RunRecord:
         return RunRecord(
@@ -164,4 +173,5 @@ class RunStore:
                 if row["finished_at"] is not None else None
             ),
             error=row["error"],
+            lifecycle=json.loads(row['lifecycle_json']),
         )

@@ -7,12 +7,14 @@ import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
 import { AddSelectedMembers, ContainerActions, ContainerFrame } from "./ContainerFrame";
 import type { CanvasNode } from "./types";
+import { PublishedReferences, type ArtifactReference } from "./Artifacts";
 import "./barracks.css";
 
 export interface SummonedInstance {
   id: string; name: string; status: string; result: string; error: string | null;
   entry_agent_id: string; node_ids: string[]; run_id: string | null; reclaimed: boolean;
   workspace_id?: string;
+  artifacts?: ArtifactReference[];
 }
 export interface SummonableAgent { id: string; name: string; description: string; equipment_count: number }
 export interface SummoningSnapshot {
@@ -107,6 +109,7 @@ export function BarracksBody({ card, workspace = false }: { card: WorldCard; wor
     <div className="barracks-instances">{snapshot?.instances.slice().reverse().map((instance) => <article key={instance.id}>
       <details open={instance.status === "running"}><summary>{instance.name} · {instance.status}</summary>
         <p className="barracks-result">{instance.result || instance.error || "No result yet."}</p>
+        <PublishedReferences references={instance.artifacts} />
         <small>Run: {instance.run_id || "Not started"}</small>
       </details>
       {!instance.reclaimed && <div className="toolbox-toolbar">

@@ -20,6 +20,38 @@ from backend.sandbox.models import SandboxValidationError
 router = APIRouter(tags=["runtime"])
 
 
+@router.get('/lifecycle')
+async def lifecycle_snapshot(services=Depends(get_services)):
+    from backend.sandbox.history import lifecycle_records
+    runs = []
+    artifacts = services.resources.artifacts.all()
+    for run in services.run_manager.list_runs():
+        item = run.model_dump(mode='json')
+        item['lifecycle']['holds_capacity'] = services.run_manager.holds_agent_slot(run.run_id)
+        item['artifacts'] = [{'version_id': r['version_id'], 'artifact_id': r['artifact_id'], 'name': r['name'], 'state': r['state'],
+                             'collection_id': r.get('collection_id') if services.world.maybe_get_card(r.get('collection_id', '')) else None}
+                             for r in artifacts if r['provenance']['run_id'] == run.run_id]
+        runs.append(item)
+    with services.database.locked() as db:
+        cleanup = [dict(row) for row in db.execute('SELECT node_id, batch_id, attempts, last_error, commit_state FROM pending_node_deletions ORDER BY batch_id, sequence')]
+    command_records = {r['id']: r for r in lifecycle_records(services) if r.get('cleanup') in {'pending', 'failed', 'uncertain'}}
+    command_records.update({r['id']: r for r in services._sandbox_commands.values()})
+    return {'runs': runs, 'commands': list(command_records.values()), 'node_cleanup': cleanup,
+            'instances': [services.summoning.view(r) for r in services.summoning.records()],
+            'transfers': list(services.resources.artifacts.source_leases),
+            'artifact_cleanup': [r for r in artifacts if r.get('cleanup') in {'pending', 'failed'}]}
+
+
+@router.post('/lifecycle/retry-cleanup')
+async def retry_cleanup(services=Depends(get_services)):
+    await services._retry_pending_node_deletions()
+    await services.resources.artifacts.recover(interrupted=False)
+    await services.summoning.recover()
+    from backend.sandbox.history import recover as recover_commands
+    await recover_commands(services)
+    return await lifecycle_snapshot(services)
+
+
 class AgentRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -274,9 +306,8 @@ async def sandbox_history(sandbox_id: str, services=Depends(get_services)):
 
 @router.post("/sandboxes/{sandbox_id}/cancel")
 async def sandbox_cancel(sandbox_id: str, services=Depends(get_services)):
-    services._require_card_type(sandbox_id, "sandbox")
-    await services._require_sandbox_backend().cancel(sandbox_id)
-    return {"cancelled": True}
+    from backend.sandbox.history import stop
+    return await stop(services, sandbox_id)
 
 
 @router.get("/sandboxes/{sandbox_id}/files")

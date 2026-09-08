@@ -55,6 +55,8 @@ function DefaultNodePreview({ card }: { card: WorldCard }) {
     );
   }
 
+  if (card.type === "core.artifact-collection") return <div className="node-preview-summary"><p>Retained file versions</p><small>Open workspace to inspect, copy, or release published content.</small></div>;
+
   if (card.type === "text") {
     return (
       <div className="node-preview-summary">

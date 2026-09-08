@@ -66,6 +66,8 @@ class NodeExecutionService:
     def snapshot(self, node_id):
         items = self.items(node_id, read_document(self.services, node_id)["value"])
         return {**self.state(node_id), "active": self.active(node_id), "executors": self.executors(node_id),
+                'attempts': [{**attempt, 'artifacts': self.services.resources.artifacts.run_references(attempt.get('run_id'))}
+                             for attempt in self.state(node_id)['attempts']],
                 "items": [item.model_dump(exclude={"prompt"}) for item in items]}
 
     def authorize(self, node_id, capability):
@@ -194,6 +196,7 @@ class NodeExecutionService:
                                 stored.update(status=status, error=record.error)
                         self.save(node_id, state)
                         self.apply(node_id, WorkOutcome(item_id=entry["item_id"], run_id=record.run_id,
+                            artifacts=self.services.resources.artifacts.run_references(record.run_id),
                             status=status, text=manager.final_text(record.run_id), error=record.error))
                         for stored in state["attempts"]:
                             if stored.get("run_id") == record.run_id:
@@ -228,6 +231,7 @@ class NodeExecutionService:
             attempt.update(run_id=run_id, status=outcome_status, error=error or (record.error if record else "Admission interrupted"))
             try:
                 self.apply(node_id, WorkOutcome(item_id=attempt["item_id"], run_id=run_id, status=outcome_status,
+                    artifacts=self.services.resources.artifacts.run_references(run_id),
                     text=self.services.run_manager.final_text(run_id) if run_id else "", error=attempt["error"]))
                 attempt["applied"] = True
             except Exception as callback_error:

@@ -8,7 +8,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from backend.state.context import StateContext
 
@@ -53,6 +53,7 @@ class RunRecord(BaseModel):
     updated_at: datetime
     finished_at: datetime | None = None
     error: str | None = None
+    lifecycle: dict[str, Any] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

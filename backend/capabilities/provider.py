@@ -18,6 +18,30 @@ if TYPE_CHECKING:
 class _CapabilityContext:
     services: ApplicationServices
 
+    async def artifact_action(self, capability, arguments):
+        from backend.resources.artifact_models import ArtifactPublish, ArtifactMaterialize
+        from backend.errors import ResourceValidationError
+        store = self.services.resources.artifacts
+        agent, collection = capability.agent_id, capability.target_id
+        args = dict(arguments)
+        # Projected operations have already reauthorized independent selectors.
+        if capability.kind == 'artifact.publish':
+            return await store.publish(self.services, collection, ArtifactPublish.model_validate(args), agent)
+        version = args.pop('version_id', None)
+        if capability.kind == 'artifact.manage':
+            return await store.release(self.services, collection, version, agent)
+        if capability.kind == 'artifact.materialize':
+            return await store.materialize(self.services, collection, version, ArtifactMaterialize.model_validate(args), agent)
+        if args.get('path') is not None:
+            if not version:
+                raise ResourceValidationError('Preview requires a version_id')
+            return await store.preview(self.services, collection, version, args['path'], agent)
+        records = store.listing(self.services, collection, agent)
+        if version:
+            store.authorize(self.services, collection, agent, version_id=version)
+            return store.get(version)
+        return records
+
     async def legion_state_action(self, capability, arguments):
         from backend.legions.runtime import LegionStateWrite, read_shared_state, write_shared_state
         from pydantic import ValidationError

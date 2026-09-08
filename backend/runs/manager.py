@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
+import logging
 from collections.abc import Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
@@ -36,6 +36,8 @@ from .models import (
 )
 from .store import RunStore
 
+logger = logging.getLogger(__name__)
+
 
 _VALID_TRANSITIONS: Mapping[RunStatus, frozenset[RunStatus]] = {
     RunStatus.CREATED: frozenset({RunStatus.RUNNING, RunStatus.CANCELLED}),
@@ -64,10 +66,7 @@ _current_invocation: ContextVar[InvocationContext | None] = ContextVar(
     "current_invocation", default=None
 )
 
-# Temporary provider event-stream inactivity policy. Silence is not proof that
-# the underlying task failed, but without a formal provider liveness signal the
-# runtime must bound how long an inactive stream occupies a Run.
-# TODO: Replace this heuristic with a provider liveness/heartbeat contract.
+# Silence bounds an unobservable provider wait, not a registered tool execution.
 DEFAULT_INACTIVITY_TIMEOUT_SECONDS: float = 300.0
 
 
@@ -96,6 +95,15 @@ class RunManager:
     _transition_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     _cancel_locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     _deleting_agents: set[str] = field(default_factory=set)
+    cleanup_timeout_seconds: float = 10.0
+    execution_deadline_seconds: float = 3600.0
+    _cleanup_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
+    admission_check: Any = None
+
+    def __post_init__(self):
+        import math
+        if any(not math.isfinite(value) or value <= 0 for value in (self.cleanup_timeout_seconds, self.execution_deadline_seconds)):
+            raise ValueError('Run execution and cleanup deadlines must be finite positive seconds')
 
     @property
     def current_context(self) -> InvocationContext | None:
@@ -156,16 +164,28 @@ class RunManager:
 
     async def startup(self) -> None:
         for record in self.store.interrupt_incomplete():
+            record = self.store.update_lifecycle(record.run_id, execution='interrupted',
+                holds_capacity=False, cleanup='uncertain', session_lost=True,
+                cleanup_reason='Backend restarted; provider execution cannot be reattached or external termination verified')
             self._terminal_done.setdefault(record.run_id, asyncio.Event()).set()
             await self._publish_run(record, EventType.RUN_INTERRUPTED)
+        for record in self.list_runs():
+            if record.lifecycle.get('cleanup') in {'pending', 'failed'}:
+                self.store.update_lifecycle(record.run_id, cleanup='uncertain', holds_capacity=False, session_lost=True,
+                    cleanup_reason='Backend restarted during cancellation; external termination is unconfirmed')
 
     async def shutdown(self) -> None:
-        for record in self.list_runs():
-            if record.status not in TERMINAL_RUN_STATUSES:
-                await self.cancel_run(record.run_id)
+        records = [record for record in self.list_runs() if record.status not in TERMINAL_RUN_STATUSES
+                   or record.lifecycle.get('cleanup') in {'pending', 'failed'}]
+        results = await asyncio.gather(*(self.cancel_run(record.run_id) for record in records), return_exceptions=True)
+        for record, result in zip(records, results):
+            if isinstance(result, BaseException):
+                logger.error('Run %s retains cleanup debt at shutdown: %s', record.run_id, result)
         tasks = tuple(self._runtime_tasks.values())
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            _, pending = await asyncio.wait(tasks, timeout=self.cleanup_timeout_seconds)
+            for task in pending:
+                task.cancel()
 
     def install_provider(self, provider_id: str, provider: RuntimeProvider) -> None:
         """Install an already-created provider instance, primarily for embedding/tests."""
@@ -215,6 +235,8 @@ class RunManager:
                 parent_run_id = self.current_context.run_id
             if parent_run_id is not None:
                 parent = self.get_run(parent_run_id)
+                if parent.status in {RunStatus.CANCELLED, RunStatus.INTERRUPTED, RunStatus.FAILED} or parent.lifecycle.get('cancellation_requested'):
+                    raise RuntimeUnavailableError('The parent Run has ended; dependent work cannot be admitted')
                 task_id = task_id or parent.task_id
                 context_id = context_id or parent.context_id
             record = self.store.create(
@@ -226,6 +248,10 @@ class RunManager:
                 task_id=task_id,
                 context_id=context_id,
             )
+            record = self.store.update_lifecycle(record.run_id,
+                owner_kind='agent', owner_id=agent_id,
+                cancellation_policy='independent' if detached or parent_run_id is None else 'dependent',
+                execution='running', holds_capacity=True, cleanup='none')
             team = group_context(self.world, self.state, card)
             state_context = self._state_context(record)
             self.state.set(state_context.local_scope, "legion_context", team or {})
@@ -317,6 +343,7 @@ class RunManager:
         self._suspensions[run_id] = RunSuspension(
             reason=reason.strip(), release_agent_slot=release_agent_slot
         )
+        self.store.update_lifecycle(run_id, awaiting=reason.strip(), holds_capacity=not release_agent_slot)
         if release_agent_slot:
             self._release_agent_slot(run_id)
             await self._publish_agent_operational(
@@ -379,6 +406,7 @@ class RunManager:
             self._release_agent_slot(run_id)
             self._suspensions.pop(run_id, None)
             self._terminal_done.setdefault(run_id, asyncio.Event()).set()
+            record = self.store.update_lifecycle(run_id, holds_capacity=False, awaiting=None)
         await self._publish_run(record, event_type)
         if current.status is RunStatus.WAITING and target is RunStatus.RUNNING:
             await self._publish_agent_operational(record.agent_id, "running", run_id)
@@ -399,20 +427,23 @@ class RunManager:
         self, run_id: str, *, propagate: bool
     ) -> RunRecord:
         current = self.store.get(run_id)
-        if current.status in TERMINAL_RUN_STATUSES:
+        if current.status in TERMINAL_RUN_STATUSES and current.lifecycle.get('cleanup') not in {'pending', 'failed', 'uncertain'}:
             # A provider can emit a terminal status before its local stream has
             # finished unwinding. Agent deletion must join that tail before it
             # removes provider state.
             await self._join_runtime_task(run_id)
+            if propagate:
+                for child in self.list_child_runs(run_id):
+                    if child.lifecycle.get('cancellation_policy', 'dependent') == 'dependent':
+                        await self.cancel_run(child.run_id)
             return current
-        try:
-            record = await self.transition_run(run_id, RunStatus.CANCELLED)
-        except ValueError:
-            latest = self.get_run(run_id)
-            if latest.status in TERMINAL_RUN_STATUSES:
-                await self._join_runtime_task(run_id)
-                return latest
-            raise
+        self.store.update_lifecycle(run_id, cancellation_requested=True, cleanup='pending', cleanup_reason=None)
+        if current.status not in TERMINAL_RUN_STATUSES:
+            try:
+                await self.transition_run(run_id, RunStatus.CANCELLED)
+            except ValueError:
+                if self.get_run(run_id).status not in TERMINAL_RUN_STATUSES:
+                    raise
         task = self._runtime_tasks.get(run_id)
         task_to_wait = (
             task
@@ -427,19 +458,47 @@ class RunManager:
         if task_to_wait is not None:
             task_to_wait.cancel()
         provider = self._providers.get(current.runtime_provider_id)
-        try:
+        async def cleanup():
             # Settle the parent first: a cancelled child wakes synchronous tool
             # waiters, which otherwise could finish the parent as succeeded.
             if propagate:
                 for child in self.list_child_runs(run_id):
-                    await self.cancel_run(child.run_id, propagate=True)
+                    if child.lifecycle.get('cancellation_policy', 'dependent') == 'dependent':
+                        await self.cancel_run(child.run_id, propagate=True)
             if provider is not None:
                 await provider.stop(run_id)
-        finally:
             if task_to_wait is not None:
-                task_to_wait.cancel()
                 await asyncio.gather(task_to_wait, return_exceptions=True)
-        return record
+            self.store.update_lifecycle(run_id, cleanup='uncertain' if current.lifecycle.get('session_lost') or provider is None else 'complete',
+                termination_scope='provider-owned execution; remote side effects are not inferred')
+        pending = self._cleanup_tasks.get(run_id)
+        if pending is not None and pending.done() and (pending.cancelled() or pending.exception() is not None):
+            self._cleanup_tasks.pop(run_id, None)
+            pending = None
+        if pending is None:
+            async def tracked_cleanup():
+                try:
+                    await cleanup()
+                except BaseException as error:
+                    self.store.update_lifecycle(run_id, cleanup='failed', cleanup_reason=f'{type(error).__name__}: {error}')
+                    raise
+            pending = asyncio.create_task(tracked_cleanup(), name=f'run-cleanup:{run_id}')
+            pending.add_done_callback(lambda task: None if task.cancelled() else task.exception())
+            self._cleanup_tasks[run_id] = pending
+        done, _ = await asyncio.wait({pending}, timeout=self.cleanup_timeout_seconds)
+        if not done:
+            self.store.update_lifecycle(run_id, cleanup='pending',
+                cleanup_reason='Termination is still running; retry cancellation to join it')
+            raise RuntimeUnavailableError('Run cancellation requested; provider cleanup is still pending')
+        try:
+            pending.result()
+        except BaseException as error:
+            self.store.update_lifecycle(run_id, cleanup='failed', cleanup_reason=f'{type(error).__name__}: {error}')
+            raise
+        self._cleanup_tasks.pop(run_id, None)
+        confirmed = provider is not None and not current.lifecycle.get('session_lost')
+        return self.store.update_lifecycle(run_id, cleanup='complete' if confirmed else 'uncertain',
+            cleanup_reason=None if confirmed else 'Original provider session is unavailable; external termination cannot be verified')
 
     async def cancel_agent_runs(self, agent_id: str) -> list[RunRecord]:
         runs = self.list_runs(agent_id=agent_id)
@@ -471,7 +530,10 @@ class RunManager:
         task = self._runtime_tasks.get(run_id)
         if task is None or task is asyncio.current_task() or task.done():
             return
-        await asyncio.gather(task, return_exceptions=True)
+        done, _ = await asyncio.wait({task}, timeout=self.cleanup_timeout_seconds)
+        if not done:
+            self.store.update_lifecycle(run_id, cleanup='pending', cleanup_reason='Provider coroutine has not finished unwinding')
+            raise RuntimeUnavailableError('Provider cleanup is still pending; retry cancellation')
 
     async def register_agent(self, card: Card) -> None:
         self.state.ensure_scope("agent", card.id, schema_id="core.agent")
@@ -561,27 +623,54 @@ class RunManager:
             stream = aiter(
                 provider.execute(self._execution_config(card, team), context, runtime_input)
             )
+            deadline = asyncio.get_running_loop().time() + self.execution_deadline_seconds
+            active_tools = 0
+            pending_event = None
             try:
                 while True:
                     try:
-                        if timeout is None:
-                            event = await anext(stream)
-                        else:
-                            event = await asyncio.wait_for(anext(stream), timeout)
+                        pending_event = asyncio.ensure_future(anext(stream))
+                        while True:
+                            remaining = deadline - asyncio.get_running_loop().time()
+                            if remaining <= 0:
+                                raise TimeoutError('execution deadline exceeded')
+                            done, _ = await asyncio.wait({pending_event}, timeout=min(timeout or remaining, remaining))
+                            if done:
+                                event = pending_event.result()
+                                break
+                            if not active_tools and record.run_id not in self._suspensions:
+                                raise TimeoutError('provider liveness is unknown')
                     except StopAsyncIteration:
                         break
                     except TimeoutError:
-                        await provider.stop(record.run_id)
+                        self.store.update_lifecycle(record.run_id, cleanup='pending',
+                            cleanup_reason='Provider liveness unknown or execution deadline exceeded')
+                        if self.get_run(record.run_id).status not in TERMINAL_RUN_STATUSES:
+                            await self.transition_run(record.run_id, RunStatus.FAILED,
+                                error='Provider produced no activity or exceeded execution deadline; liveness unknown')
+                        stop_task = asyncio.create_task(provider.stop(record.run_id))
+                        self._cleanup_tasks[record.run_id] = stop_task
+                        done, _ = await asyncio.wait({stop_task}, timeout=self.cleanup_timeout_seconds)
+                        if done:
+                            stop_task.result()
+                            self.store.update_lifecycle(record.run_id, cleanup='complete')
                         raise RuntimeError(
                             "runtime provider produced no activity for "
-                            f"{timeout:g} seconds; the Run was failed instead of "
-                            "stalling silently"
+                            f"{timeout or self.execution_deadline_seconds:g} seconds or exceeded its execution deadline; "
+                            "liveness could not be established"
                         ) from None
                     if event.agent_id != record.agent_id or event.run_id != record.run_id:
                         raise RuntimeError(
                             "runtime provider emitted an event for a different Agent or Run"
                         )
                     await self._publish_provider_event(event, record)
+                    if event.type.value == 'tool_started':
+                        active_tools += 1
+                    elif event.type.value == 'tool_completed':
+                        active_tools = max(0, active_tools - 1)
+                    self.store.update_lifecycle(record.run_id, active_tools=active_tools,
+                        awaiting=str(event.payload.get('name', 'tool execution')) if active_tools else None,
+                        last_signal=event.type.value)
                     text = event.payload.get("text")
                     if isinstance(text, str):
                         self._final_text[record.run_id] = text
@@ -593,10 +682,17 @@ class RunManager:
                         if self.get_run(record.run_id).status in TERMINAL_RUN_STATUSES:
                             break
             finally:
+                if pending_event is not None and not pending_event.done():
+                    pending_event.cancel()
+                    await asyncio.gather(pending_event, return_exceptions=True)
                 closer = getattr(stream, "aclose", None)
                 if closer is not None:
-                    with contextlib.suppress(Exception):
+                    try:
                         await closer()
+                    except Exception as error:
+                        self.store.update_lifecycle(record.run_id, cleanup='failed',
+                            cleanup_reason=f'Provider stream cleanup failed: {error}')
+                        raise
             current = self.get_run(record.run_id)
             if current.status is RunStatus.RUNNING:
                 # Stream exhaustion means the provider turn ended. It is not
@@ -615,6 +711,7 @@ class RunManager:
                     record.run_id, RunStatus.FAILED, error=str(exc)
                 )
         finally:
+            self.store.update_lifecycle(record.run_id, execution='finished', active_tools=0)
             _current_invocation.reset(token)
             self._runtime_tasks.pop(record.run_id, None)
             execution_done = self._execution_done.get(record.run_id)
@@ -717,6 +814,8 @@ class RunManager:
         return self.inactivity_timeout_seconds
 
     def _check_concurrency(self, card: Card) -> None:
+        if any(r.lifecycle.get('cleanup') in {'pending', 'failed'} for r in self.list_runs(agent_id=card.id)):
+            raise RuntimeUnavailableError('Agent admission is closed until its pending Run cleanup is resolved')
         if card.parent_id and self.world.get_card(card.parent_id).type == "legion" and self.world.get_card(card.parent_id).config.get("paused"):
             raise RuntimeUnavailableError("Legion is paused; its members cannot start new Runs")
         configured = card.config.get("max_concurrent_runs", 1)
@@ -738,6 +837,8 @@ class RunManager:
         self._occupied_runs.pop(run_id, None)
 
     def _assert_agent_accepts_runs(self, agent_id: str) -> None:
+        if self.admission_check is not None:
+            self.admission_check(agent_id)
         if agent_id in self._deleting_agents:
             raise RuntimeUnavailableError(
                 f"agent {agent_id!r} is being deleted and cannot accept Runs"

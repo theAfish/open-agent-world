@@ -31,6 +31,7 @@ class WorkOutcome(BaseModel):
     status: Literal["running", "succeeded", "failed", "cancelled", "interrupted"]
     text: str = ""
     error: str | None = None
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)

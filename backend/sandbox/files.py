@@ -174,6 +174,9 @@ def file_operation(workspace, access, attachments, operation, root="workspace", 
         return [{"id": "workspace", "label": "Workspace", "access": str(access), "directory": True},
             *[{"id": "resource:" + a.resource_id, "label": a.relative_path, "access": str(a.access), "directory": False} for a in attachments]]
     if root == "workspace":
+        if operation in {'capture_manifest', 'read_chunk', 'write_chunk', 'transfer_mkdir'}:
+            from .transfers import transfer
+            return transfer(workspace, operation, path=path, read_only=str(access) == 'read_only', **options)
         return operate(Path(workspace), path, operation, read_only=str(access) == "read_only", **options)
     for attachment in attachments:
         if root == "resource:" + attachment.resource_id and not path:

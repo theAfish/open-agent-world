@@ -29,6 +29,8 @@ class Settings:
     agent_runtime: str | None = None
     sandbox_runtime: str | None = None
     run_inactivity_timeout_seconds: float | None = 300.0
+    run_execution_deadline_seconds: float = 3600.0
+    run_cleanup_timeout_seconds: float = 10.0
     control_plane_token: str | None = field(default=None, repr=False)
 
     @classmethod
@@ -64,6 +66,8 @@ class Settings:
             agent_runtime=runtime,
             sandbox_runtime=sandbox_runtime,
             run_inactivity_timeout_seconds=inactivity_timeout,
+            run_execution_deadline_seconds=float(os.environ.get('OPEN_AGENT_WORLD_RUN_DEADLINE', 3600)),
+            run_cleanup_timeout_seconds=float(os.environ.get('OPEN_AGENT_WORLD_RUN_CLEANUP_TIMEOUT', 10)),
             control_plane_token=control_plane_token,
         )
 

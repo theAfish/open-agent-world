@@ -1,5 +1,6 @@
 """Instantiate live configured Agents using the existing portable graph and Run host."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import asyncio
 from contextlib import nullcontext
 from datetime import datetime, timezone
 import json
@@ -18,6 +19,71 @@ from backend.events import EventType
 @dataclass
 class SummoningService:
     services: object
+    _cleanup_locks: dict = field(default_factory=dict)
+
+    def assert_admission(self, node_id):
+        if any(r.get('stopping') and node_id in self.owned_ids(r) for r in self.records()):
+            raise ConflictError('Summoned instance admission is closed while cleanup is pending')
+
+    async def recover(self):
+        for record in self.records():
+            if record.get('stopping'):
+                try:
+                    await self.teardown(record, record.get('cleanup_action', 'stop'))
+                except Exception as error:
+                    record.update(cleanup='failed', cleanup_error=str(error))
+                    self.save(record)
+
+    async def teardown(self, record, action):
+        async with self._cleanup_locks.setdefault(record['id'], asyncio.Lock()):
+            record = next(r for r in self.records() if r['id'] == record['id'])
+            if record['reclaimed']:
+                return self.view(record)
+            services = self.services
+            manager = services.run_manager
+            async with services._node_mutation():
+                family = [record]
+                for candidate in self.records():
+                    if candidate['parent_instance_id'] in {r['id'] for r in family}:
+                        family.append(candidate)
+                for member in family:
+                    member.update(stopping=True, cleanup='pending', cleanup_action=action, cleanup_error=None)
+                    member['cleanup_node_ids'] = sorted(set(member.get('cleanup_node_ids', [])) | self.owned_ids(member))
+                    self.save(member)
+            try:
+                owned = {key for member in family for key in self.owned_ids(member)}
+                for node in services.world.list_cards():
+                    if node.id in owned and services.node_execution.active(node.id):
+                        await services.node_execution.stop(node.id)
+                for member in family:
+                    for attempt in member['attempts']:
+                        await manager.cancel_run(attempt['run_id'])
+                for node in services.world.list_cards():
+                    if node.id in owned and 'core.agent' in services.plugins.node_type(node.type).traits:
+                        await manager.cancel_agent_runs(node.id)
+                if action == 'reclaim':
+                    async with services._node_mutation():
+                        for node in services.world.list_cards():
+                            if node.parent_id in owned and node.id not in owned:
+                                await services.update_card(node.id, CardPatch(parent_id=None))
+                        live = [node.id for node in services.world.list_cards() if node.id in owned]
+                        if live:
+                            await services.delete_cards(live)
+                    # Graph removal and completed physical cleanup are distinct.
+                    debt = [key for member in family for key in member.get('cleanup_node_ids', []) if services._has_pending_node_deletion(key)]
+                    if debt:
+                        raise ConflictError('Graph reclaimed; resource cleanup is pending. Retry lifecycle cleanup.')
+                    for member in family:
+                        member['reclaimed'] = True
+                for member in family:
+                    member.update(stopping=False, cleanup='complete', cleanup_error=None)
+                    self.save(member)
+            except BaseException as error:
+                for member in family:
+                    member.update(cleanup='failed', cleanup_error=f'{type(error).__name__}: {error}')
+                    self.save(member)
+                raise
+            return self.view(record)
 
     def spec(self, node_id):
         node = self.services.world.get_card(node_id)
@@ -91,7 +157,8 @@ class SummoningService:
         return {**record, "status": "reclaimed" if record["reclaimed"] else "failed" if record.get("admission_error") else runs[-1].status.value if runs else "ready",
                 "result": manager.final_text(runs[-1].run_id) if runs else "",
                 "error": record.get("admission_error") or (runs[-1].error if runs else None),
-                "run_id": runs[-1].run_id if runs else None}
+                "run_id": runs[-1].run_id if runs else None,
+                "artifacts": self.services.resources.artifacts.run_references(runs[-1].run_id if runs else None)}
 
     def snapshot(self, node_id, capability=None):
         self.authorize(node_id, capability)
@@ -123,47 +190,9 @@ class SummoningService:
         if request.action == "list":
             return self.snapshot(node_id, capability)
         if request.action in {"stop", "reclaim"}:
-            async with services._node_mutation():
-                self.authorize(node_id, capability)
-                record = self.find_instance(node_id, request.instance_id, capability)
-                if record["stopping"]:
-                    raise ConflictError("This instance is already stopping")
-                family = [record]
-                for candidate in self.records():
-                    if candidate["parent_instance_id"] in {r["id"] for r in family}:
-                        family.append(candidate)
-                # Reserve the whole family before joining provider cleanup.
-                for member in family:
-                    member["stopping"] = True
-                    self.save(member)
-            try:
-                owned = {key for member in family for key in self.owned_ids(member)}
-                for node in services.world.list_cards():
-                    if node.id in owned and services.node_execution.active(node.id):
-                        await services.node_execution.stop(node.id)
-                for member in family:
-                    for attempt in member["attempts"]:
-                        await manager.cancel_run(attempt["run_id"])
-                for node in services.world.list_cards():
-                    if node.id in owned and "core.agent" in services.plugins.node_type(node.type).traits:
-                        await manager.cancel_agent_runs(node.id)
-                if request.action == "reclaim":
-                    async with services._node_mutation():
-                        # Cards the user moved into the instance remain their own resources.
-                        for node in services.world.list_cards():
-                            if node.parent_id in owned and node.id not in owned:
-                                await services.update_card(node.id, CardPatch(parent_id=None))
-                        live = [node.id for node in services.world.list_cards() if node.id in owned]
-                        if live:
-                            await services.delete_cards(live)
-                    for member in family:
-                        member["reclaimed"] = True
-                        self.save(member)
-            finally:
-                for member in family:
-                    member["stopping"] = False
-                    self.save(member)
-            return self.view(record)
+            self.authorize(node_id, capability)
+            record = self.find_instance(node_id, request.instance_id, capability)
+            return await self.teardown(record, request.action)
         async with (services._portable_state_gate.capture() if request.action == "summon" else nullcontext()), services._node_mutation():
             self.authorize(node_id, capability)
             if request.action == "inspect":

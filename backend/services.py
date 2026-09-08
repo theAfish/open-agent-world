@@ -530,6 +530,7 @@ class ApplicationServices:
     legions: LegionStore
     llm_settings: LlmSettingsStore
     _sandbox_commands: dict[str, dict] = field(default_factory=dict, init=False, repr=False)
+    _sandbox_stopping: set[str] = field(default_factory=set, init=False, repr=False)
     _execution_secrets: ContextVar[tuple[str, ...]] = field(
         default_factory=lambda: ContextVar("execution_secrets", default=()), init=False, repr=False)
     run_manager: RunManager | None = None
@@ -640,9 +641,11 @@ class ApplicationServices:
         raise TimeoutError("plugin lifecycle cleanup exceeded its deadline")
 
     async def startup(self) -> None:
+        await self.resources.artifacts.recover()
         from backend.node_containers import migrate_collections
         migrate_collections(self)
         manager = self._require_run_manager()
+        manager.admission_check = self.summoning.assert_admission
         await manager.startup()
         await self.node_execution.startup()
         await self._retry_pending_node_deletions()
@@ -651,6 +654,9 @@ class ApplicationServices:
             lifecycle = self.plugins.node_type(card.type).lifecycle
             if lifecycle is not None:
                 await lifecycle.on_startup(context, card)
+        await self.summoning.recover()
+        from backend.sandbox.history import recover as recover_commands
+        await recover_commands(self)
 
     async def shutdown(self) -> None:
         await self.node_execution.shutdown()
@@ -862,6 +868,8 @@ class ApplicationServices:
 
     async def update_card(self, card_id: str, request: CardPatch) -> Card:
         async with self._node_mutation():
+            if request.config is not None:
+                self.resources.artifacts.assert_source_idle(card_id)
             current = self.world.get_card(card_id)
             if self.world.is_container(current) and request.position is not None:
                 return (await self.update_cards([CardBatchPatch(node_id=card_id, patch=request)]))[0]
@@ -914,6 +922,8 @@ class ApplicationServices:
             previous_parents = {item.node_id: self.world.get_card(item.node_id).parent_id for item in updates}
             prepared: list[tuple[CardBatchPatch, NodeLifecycleTransaction]] = []
             for item in updates:
+                if item.patch.config is not None:
+                    self.resources.artifacts.assert_source_idle(item.node_id)
                 current = self.world.get_card(item.node_id)
                 updated = self.world.preview_update_card(item.node_id, item.patch)
                 self._validate_membership_change(current, updated)
@@ -967,6 +977,8 @@ class ApplicationServices:
         async with self._node_mutation():
             ids = list(dict.fromkeys([*card_ids, *[n.id for key in card_ids for item in self.world.equipment_for(key) for n in [item, *self.world.owned_descendants(item.id)]]]))
             cards = [self.world.get_card(card_id) for card_id in ids]
+            for card in cards:
+                self.resources.artifacts.assert_source_idle(card.id)
             for card in cards:
                 self.node_execution.assert_editable(card.id)
             for card in cards:
@@ -2760,10 +2772,16 @@ class ApplicationServices:
         return info
 
     async def stop_sandbox(self, sandbox_id: str) -> Any:
+        from backend.sandbox.history import stop
+        await stop(self, sandbox_id, terminate=True)
+        info = await self._require_sandbox_backend().get(sandbox_id)
         async with self._node_mutation():
-            return await self._stop_sandbox_locked(sandbox_id)
+            if self.world.maybe_get_card(sandbox_id):
+                self.world.update_card(sandbox_id, CardPatch(status=info.state.value))
+        return info
 
     async def _stop_sandbox_locked(self, sandbox_id: str) -> Any:
+        self.resources.artifacts.assert_source_idle(sandbox_id)
         self._require_card_type(sandbox_id, CardType.SANDBOX)
         backend = self._require_sandbox_backend()
         await backend.terminate(sandbox_id)
@@ -2842,11 +2860,19 @@ class ApplicationServices:
                             options["invocation_env"] = injected
                             secret_token = self._execution_secrets.set(secrets)
                         current = self._sandbox_commands.get(sandbox_id)
+                        self.resources.artifacts.assert_source_idle(sandbox_id)
+                        self.summoning.assert_admission(sandbox_id)
+                        if sandbox_id in self._sandbox_stopping:
+                            raise SandboxStateError('Sandbox admission is closed while termination cleanup is pending')
+                        self._require_card_type(sandbox_id, CardType.SANDBOX)
                         if current:
                             raise SandboxStateError(f"Sandbox busy: {current['caller']} owns command {current['id']}")
-                        from backend.sandbox.history import save
+                        from backend.sandbox.history import save, key as command_history_key
                         from backend.security.redaction import redact
                         receipt = {"id": uuid4().hex, "caller": agent_id or "user", "state": "running",
+                            "sandbox_id": sandbox_id,
+                            "history_key": command_history_key(self, sandbox_id),
+                            "run_id": self.run_manager.current_context.run_id if self.run_manager.current_context else None,
                             "started_at": datetime.now(UTC).isoformat(), "argv": redact(list(execution_argv), secrets),
                             "skill_id": _skill_request.skill_id if _skill_request else None}
                         self._sandbox_commands[sandbox_id] = receipt
@@ -2902,6 +2928,12 @@ class ApplicationServices:
                         try:
                             await backend.terminate(sandbox_id)
                         except BaseException as error:
+                            current = self._sandbox_commands.get(sandbox_id)
+                            if current is not None:
+                                from backend.sandbox.history import save
+                                current.update(cleanup='failed', cancellation_requested=True,
+                                    termination_confirmed=False, cleanup_error=f'{type(error).__name__}: {error}')
+                                save(self, sandbox_id, current)
                             logger.error(
                                 "failed to terminate cancelled sandbox command %s",
                                 sandbox_id,
@@ -3498,6 +3530,8 @@ def create_services(
         ),
         provider_options={"google.adk": {"app_name": "open-agent-world"}},
         inactivity_timeout_seconds=settings.run_inactivity_timeout_seconds,
+        execution_deadline_seconds=settings.run_execution_deadline_seconds,
+        cleanup_timeout_seconds=settings.run_cleanup_timeout_seconds,
     )
     for provider_id, runtime_provider in (runtime_providers or {}).items():
         services.install_runtime_provider(provider_id, runtime_provider)

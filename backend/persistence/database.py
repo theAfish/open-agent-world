@@ -204,6 +204,23 @@ CREATE TABLE IF NOT EXISTS resource_history (
 
 CREATE INDEX IF NOT EXISTS resource_history_card_idx
     ON resource_history (card_id, revision DESC);
+
+-- Artifact versions and retention deliberately have no producer/card foreign key.
+CREATE TABLE IF NOT EXISTS artifact_versions (
+    version_id TEXT PRIMARY KEY,
+    artifact_id TEXT NOT NULL,
+    request_owner TEXT NOT NULL,
+    request_key TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('staging','ready','failed','deleting','deleted')),
+    record_json TEXT NOT NULL,
+    UNIQUE(request_owner, request_key)
+);
+CREATE TABLE IF NOT EXISTS artifact_references (
+    collection_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    version_id TEXT NOT NULL REFERENCES artifact_versions(version_id),
+    PRIMARY KEY(collection_id, version_id)
+);
 """
 
 
@@ -235,6 +252,9 @@ class Database:
         with self._lock:
             self._connection.executescript(SCHEMA)
             self._migrate_open_card_types()
+            run_columns = {row['name'] for row in self._connection.execute('PRAGMA table_info(runs)')}
+            if 'lifecycle_json' not in run_columns:
+                self._connection.execute("ALTER TABLE runs ADD COLUMN lifecycle_json TEXT NOT NULL DEFAULT '{}'")
             card_columns = {
                 row["name"] for row in self._connection.execute("PRAGMA table_info(cards)")
             }

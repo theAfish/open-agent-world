@@ -1,0 +1,47 @@
+import { expect, test } from "@playwright/test";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+test("publish files, reclaim producer, and recover retained versions and lifecycle after refresh", async ({ page, request }) => {
+  await page.setViewportSize({ width: 1600, height: 1100 });
+  const source = path.resolve('..', '.tmp', `artifact-ui-${Date.now()}`);
+  await mkdir(path.join(source, 'bundle'), { recursive: true });
+  await writeFile(path.join(source, 'bundle', 'report.txt'), 'Durable UI result');
+  const sandbox = await (await request.post('/api/nodes', { data: { type: 'sandbox', name: 'Producer workspace',
+    position: { x: 500, y: 330 }, config: { workspace_path: source } } })).json();
+  const collection = await (await request.post('/api/nodes', { data: { type: 'core.artifact-collection', name: 'Retained outputs', position: { x: 1000, y: 330 } } })).json();
+  const agent = await (await request.post('/api/nodes', { data: { type: 'agent', name: 'Durable worker', position: { x: 200, y: 600 } } })).json();
+  await request.post(`/api/agents/${agent.id}/run`, { data: { prompt: 'One durable attempt' } });
+  await page.goto('/');
+  const card = page.locator(`[data-card-id="${sandbox.id}"]`);
+  await card.locator('.card-kind-icon').click();
+  await card.getByRole('button', { name: 'Open workspace', exact: true }).click();
+  let workspace = page.getByRole('dialog', { name: 'Producer workspace workspace', exact: true });
+  await workspace.getByLabel('Select bundle for publication').check();
+  await workspace.getByText('Publish selected files (1)', { exact: true }).click();
+  await workspace.getByLabel('Publication collection').selectOption(collection.id);
+  await workspace.getByLabel('Files are finalized; external writers are paused').check();
+  await workspace.getByRole('button', { name: 'Publish retained version', exact: true }).click();
+  await expect(workspace.getByRole('status').filter({ hasText: 'Published bundle' })).toBeVisible();
+  const versions = await (await request.get(`/api/artifact-collections/${collection.id}/versions`)).json();
+  expect(versions).toHaveLength(1);
+  await workspace.getByRole('button', { name: 'Inspect collection' }).click();
+  let artifacts = page.getByRole('dialog', { name: 'Retained outputs workspace', exact: true });
+  await expect(artifacts.getByRole('heading', { name: 'bundle · ready' })).toBeVisible();
+  await artifacts.getByText('Content manifest (2)', { exact: true }).click();
+  await artifacts.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(artifacts.locator('.artifact-preview')).toContainText('Durable UI result');
+  await request.delete(`/api/nodes/${sandbox.id}`);
+  await page.reload();
+  artifacts = page.getByRole('dialog', { name: 'Retained outputs workspace', exact: true });
+  await expect(artifacts.getByRole('heading', { name: 'bundle · ready' })).toBeVisible();
+  expect((await (await request.get('/api/lifecycle')).json()).runs.filter((r: { agent_id: string }) => r.agent_id === agent.id)).toHaveLength(1);
+  await page.screenshot({ path: '../.tmp/artifacts-ui.png', fullPage: true });
+  await artifacts.getByRole('button', { name: 'Remove reference', exact: true }).click();
+  await expect(artifacts.getByRole('heading', { name: 'bundle · ready' })).toHaveCount(0);
+  expect((await (await request.get('/api/artifacts/retained')).json()).find((v: { version_id: string }) => v.version_id === versions[0].version_id).state).toBe('ready');
+  await artifacts.getByText('Restore retained references', { exact: true }).click();
+  await artifacts.getByRole('button', { name: 'Browse retained versions' }).click();
+  await artifacts.getByRole('button', { name: 'Add reference', exact: true }).click();
+  await expect(artifacts.getByRole('heading', { name: 'bundle · ready' })).toBeVisible();
+});

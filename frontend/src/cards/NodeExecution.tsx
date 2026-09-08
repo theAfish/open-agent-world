@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Play, Square } from "lucide-react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
+import { PublishedReferences, type ArtifactReference } from "./Artifacts";
 
 export interface ExecutionSnapshot {
   status: string;
@@ -9,7 +10,7 @@ export interface ExecutionSnapshot {
   error: string | null;
   executors: { id: string; name: string }[];
   items: { id: string; ready: boolean; retryable: boolean; agent_id: string | null }[];
-  attempts: { item_id: string; agent_id: string; run_id: string | null; status: string; error: string | null }[];
+  attempts: { item_id: string; agent_id: string; run_id: string | null; status: string; error: string | null; artifacts?: ArtifactReference[] }[];
 }
 
 /** Shared host UI: no assumptions about DAGs, task fields or acceptance rules. */
@@ -57,6 +58,7 @@ export function NodeExecutionControls({ execution, revision, readyCount, disable
     </div>
     {unassigned && !!state?.executors.length && <p className="task-board-help">Assign connected executors to ready work before running.</p>}
     {(error || state?.error) && <p role="alert" className="task-board-error">{error || state?.error}</p>}
+    {state?.attempts.map(attempt => <PublishedReferences key={attempt.run_id ?? attempt.item_id} references={attempt.artifacts} />)}
     {!!state?.attempts.length && <details className="execution-history"><summary>Execution history ({state.attempts.length})</summary>
       <ol>{state.attempts.slice(-30).reverse().map((attempt, index) => <li key={attempt.run_id ?? index}>
         <strong>{titleForItem(attempt.item_id)}</strong><span>{attempt.status} · {state.executors.find((agent) => agent.id === attempt.agent_id)?.name ?? "Previous executor"}</span>

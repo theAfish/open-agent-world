@@ -559,6 +559,21 @@ export const worldApi = {
     });
   },
 
+  artifacts<T>(collectionId: string, action = "versions", body?: unknown, method?: string): Promise<T> {
+    return request(`/artifact-collections/${encodeURIComponent(collectionId)}/${action}`, {
+      method: method ?? (body === undefined ? "GET" : "POST"),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  },
+  retainedArtifacts<T>(): Promise<T> { return request("/artifacts/retained"); },
+  artifactDownloadUrl(collectionId: string, versionId: string, path: string): string {
+    return `${API_BASE}/artifact-collections/${encodeURIComponent(collectionId)}/versions/${encodeURIComponent(versionId)}/content?${new URLSearchParams({ path })}`;
+  },
+  lifecycle<T>(retry = false): Promise<T> {
+    return request(`/lifecycle${retry ? "/retry-cleanup" : ""}`, retry ? { method: "POST" } : undefined);
+  },
+  cancelRun(runId: string): Promise<unknown> { return request(`/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" }); },
+
   stopAgent(nodeId: string): Promise<Record<string, unknown>> {
     return request<Record<string, unknown>>(`/agents/${encodeURIComponent(nodeId)}/stop`, {
       method: "POST",
