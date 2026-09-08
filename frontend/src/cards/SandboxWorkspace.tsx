@@ -66,11 +66,23 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const [terminalTab, setTerminalTab] = useState("terminal");
   const [selection, setSelection] = useState<{ root: string; path: string; label: string }>();
   const [preview, setPreview] = useState<Files>();
-  const previewRequest = useRef(0);
   const [history, setHistory] = useState<Receipt[]>([]);
   const [error, setError] = useState("");
   const [filesError, setFilesError] = useState("");
-  const filesRequest = useRef(0);
+  const binding = JSON.stringify([card.id, card.config.runtime, card.config.workspace_path, card.config.workspace_access,
+    info?.runtime_id, info?.workspace_path, info?.workspace_access, info?.workspace]);
+  const fileContext = useRef({ binding, live: true, generation: 0, requests: new Map<string, number>() });
+  if (fileContext.current.binding !== binding) {
+    fileContext.current.live = false;
+    fileContext.current = { binding, live: true, generation: 0, requests: new Map() };
+  }
+  const context = fileContext.current;
+  function fileRequest(key: string) {
+    const generation = context.generation;
+    const sequence = (context.requests.get(key) ?? 0) + 1;
+    context.requests.set(key, sequence);
+    return () => context.live && context.generation === generation && fileContext.current === context && context.requests.get(key) === sequence;
+  }
   const [notice, setNotice] = useState("");
   const [destination, setDestination] = useState("");
   const [diagnosticBusy, setDiagnosticBusy] = useState(false);
@@ -90,46 +102,39 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     : latest?.error || [latest?.stdout, latest?.stderr].filter(Boolean).join("\n");
   async function refreshHistory() { setHistory(await worldApi.sandboxWorkspace<Receipt[]>(card.id, "history")); }
   async function refreshFiles() {
-    const request = ++filesRequest.current;
+    const current = fileRequest("roots");
     setLoading(s => ({ ...s, roots: true }));
     try {
       const value = await worldApi.sandboxWorkspace<Root[]>(card.id, "files");
+      if (!current()) return;
       if (!Array.isArray(value)) throw new Error((value as Files).message ?? "Workspace unavailable");
       const open = { ...expandedRef.current };
       if (!("workspace:" in open) && value.some(root => root.id === "workspace" && root.directory)) open["workspace:"] = true;
       const directories = value.flatMap(root => Object.entries(open)
         .filter(([key, visible]) => visible && root.directory && key.startsWith(`${root.id}:`))
         .map(([key]) => ({ key, root: root.id, path: key.slice(root.id.length + 1) })));
-      const entries = await Promise.all(directories.map(async ({ key, root, path }) => {
-        try { return [key, await worldApi.sandboxWorkspace<Files>(card.id, fileQuery("list", root, path))] as const; }
-        catch (e) { return [key, { state: "permission_denied", message: apiErrorMessage(e) }] as const; }
-      }));
-      if (request !== filesRequest.current) return;
       setRoots(value);
-      setTree(current => ({
-        ...Object.fromEntries(Object.entries(current).filter(([key]) => expandedRef.current[key]
-          && value.some(root => key.startsWith(`${root.id}:`)))),
-        ...Object.fromEntries(entries),
-      }));
+      setTree(tree => Object.fromEntries(Object.entries(tree).filter(([key]) => expandedRef.current[key]
+        && value.some(root => key.startsWith(`${root.id}:`)))));
       setExpanded(current => ({ ...open, ...current })); setFilesError("");
-    } catch (e) { if (request === filesRequest.current) { setFilesError(apiErrorMessage(e)); setRoots([]); setTree({}); } }
-    finally { if (request === filesRequest.current) setLoading(s => ({ ...s, roots: false })); }
+      await Promise.all(directories.map(({ root, path }) => loadDirectory(root, path)));
+    } catch (e) { if (current()) { setFilesError(apiErrorMessage(e)); setRoots([]); setTree({}); } }
+    finally { if (current()) setLoading(s => ({ ...s, roots: false })); }
   }
-  useEffect(() => { void loadRuntimes(); void refreshSandbox(card.id); void refreshFiles(); void refreshHistory().catch(e => setError(apiErrorMessage(e))); }, [card.id, socket]);
-  useEffect(() => () => { previewRequest.current++; filesRequest.current++; }, [card.id]);
-  const previousWorkspace = useRef(card.config.workspace_path);
+  useEffect(() => {
+    context.live = true;
+    setRoots([]); setTree({}); setLoading({}); setFilesError("");
+    setSelection(undefined); setPreview(undefined); expandedRef.current = {}; setExpanded({});
+    void refreshFiles();
+    return () => { context.live = false; context.generation++; context.requests.clear(); };
+  }, [context]);
+  useEffect(() => { void loadRuntimes(); void refreshSandbox(card.id); void refreshHistory().catch(e => setError(apiErrorMessage(e))); }, [card.id, socket]);
   const previousStatus = useRef(card.status);
   useEffect(() => {
-    const workspaceChanged = previousWorkspace.current !== card.config.workspace_path;
     const becameReady = previousStatus.current !== "ready" && card.status === "ready";
-    previousWorkspace.current = card.config.workspace_path;
     previousStatus.current = card.status;
-    if (workspaceChanged) {
-      previewRequest.current++; setSelection(undefined); setPreview(undefined);
-      expandedRef.current = {}; setExpanded({});
-    }
-    if (workspaceChanged || becameReady) void refreshFiles();
-  }, [card.status, card.config.workspace_path]);
+    if (becameReady) void refreshFiles();
+  }, [card.status]);
   useEffect(() => { void refreshHistory().catch(e => setError(apiErrorMessage(e))); }, [card.status, busy]);
   // Poll receipts only while a command is active, never the file tree.
   useEffect(() => {
@@ -142,23 +147,27 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     if (expanded[key]) { setExpanded(s => ({ ...s, [key]: false })); return; }
     setExpanded(s => ({ ...s, [key]: true }));
     if (tree[key]) return;
+    await loadDirectory(root, path);
+  }
+  async function loadDirectory(root: string, path: string) {
+    const key = `${root}:${path}`, current = fileRequest(`directory:${key}`);
     setLoading(s => ({ ...s, [key]: true }));
-    try { const value = await worldApi.sandboxWorkspace<Files>(card.id, fileQuery("list", root, path)); setTree(s => ({ ...s, [key]: value })); }
-    catch (e) { setTree(s => ({ ...s, [key]: { state: "permission_denied", message: apiErrorMessage(e) } })); }
-    finally { setLoading(s => ({ ...s, [key]: false })); }
+    try { const value = await worldApi.sandboxWorkspace<Files>(card.id, fileQuery("list", root, path)); if (current()) setTree(s => ({ ...s, [key]: value })); }
+    catch (e) { if (current()) setTree(s => ({ ...s, [key]: { state: "permission_denied", message: apiErrorMessage(e) } })); }
+    finally { if (current()) setLoading(s => ({ ...s, [key]: false })); }
   }
   async function select(root: string, path: string, label: string) {
-    const request = ++previewRequest.current;
+    const current = fileRequest("preview");
     setSelection({ root, path, label }); setPreview(undefined);
     try {
       const value = await worldApi.sandboxWorkspace<Files>(card.id, fileQuery("preview", root, path));
-      if (request === previewRequest.current) setPreview(value);
-    } catch (e) { if (request === previewRequest.current) setPreview({ state: "permission_denied", message: apiErrorMessage(e) }); }
+      if (current()) setPreview(value);
+    } catch (e) { if (current()) setPreview({ state: "permission_denied", message: apiErrorMessage(e) }); }
   }
   function directory(root: string, path: string): React.ReactNode {
     const key = `${root}:${path}`, value = tree[key];
     if (!expanded[key]) return null;
-    return <ul>{loading[key] ? <li className="sandbox-tree-note">Loading…</li> : value?.state ? <li className="sandbox-tree-note">{value.message ?? value.state}</li> : <>
+    return <ul>{loading[key] && !value ? <li className="sandbox-tree-note">Loading…</li> : value?.state ? <li className="sandbox-tree-note">{value.message ?? value.state}</li> : <>
       {value?.entries?.length === 0 && <li className="sandbox-tree-note">Empty folder</li>}
       {value?.entries?.map(e => { const next = path ? `${path}/${e.name}` : e.name; return <li key={e.name}>
         <button className="sandbox-tree-entry" disabled={e.blocked} title={e.blocked ? "Links are blocked" : next}

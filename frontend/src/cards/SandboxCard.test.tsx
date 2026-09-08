@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { worldApi } from "../api/client";
@@ -27,6 +27,7 @@ function Card() {
 describe("sandbox configuration UI", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    useNodeSurfaceStore.setState({ drafts: {} });
     useWorldStore.setState({
       cards: [sandbox], edges: [], sandboxInfo: {}, sandboxBusy: {}, sandboxErrors: {}, sandboxRevisions: {},
       sandboxRuntimes: undefined, sandboxRuntimesLoading: false, sandboxRuntimesError: undefined,
@@ -100,7 +101,7 @@ describe("sandbox configuration UI", () => {
     }] });
     render(<Card />);
     await screen.findByText(/Install slirp4netns/);
-    expect((screen.getByRole("option", { name: "Enabled" }) as HTMLOptionElement).disabled).toBe(true);
+    expect((screen.getByRole("option", { name: "Enabled" }) as HTMLOptionElement).disabled).toBe(false);
     expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByRole("status").textContent).toBe("Stopped");
   });
@@ -150,13 +151,112 @@ describe("sandbox configuration UI", () => {
     render(<SandboxCardBody card={sandbox} level="inspector" />);
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Stopped"));
     expect(screen.getByText("Managed workspace")).toBeTruthy();
-    expect(screen.queryByLabelText("Working folder")).toBeNull();
-    expect(screen.queryByText("Environment variables")).toBeNull();
+    expect(screen.getByText("Configuration").parentElement?.hasAttribute("open")).toBe(false);
+    expect(screen.getByText("Environment variables")).toBeTruthy();
+    expect(screen.queryByLabelText("Command")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     expect(useNodeSurfaceStore.getState().surfaceLevels[sandbox.id]).toBe("workspace");
     expect(useNodeSurfaceStore.getState().drafts[`sandbox-tab:${sandbox.id}`]).toBe("settings");
     fireEvent.click(screen.getByRole("button", { name: "Open Window" }));
     expect(useNodeSurfaceStore.getState().drafts[`sandbox-tab:${sandbox.id}`]).toBe("workspace");
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it("retries saved enabled policy with stale discovery, shows current failure and clears it on recovery", async () => {
+    const enabled = { ...sandbox, config: { ...sandbox.config, network_enabled: true } };
+    const unavailable = { ...info, network_enabled: true, supported_network_modes: ["disabled", "enabled"], network_available: false,
+      network_status: "missing_component", network_reason: "Broker unavailable" };
+    useWorldStore.setState({ cards: [enabled] });
+    vi.mocked(worldApi.getSandbox).mockResolvedValue(unavailable);
+    const catalog = { default_runtime: info.runtime_id, runtimes: [{ ...unavailable, id: info.runtime_id!, platform: "linux", label: "WSL Ubuntu", reason: null, supports_workspace: true }] };
+    vi.mocked(worldApi.getSandboxRuntimes).mockResolvedValue(catalog);
+    const start = vi.spyOn(worldApi, "startSandbox").mockRejectedValueOnce(new Error("Current broker failure"));
+    render(<Card />);
+    const retry = await screen.findByRole("button", { name: "Retry / Recheck" });
+    expect((retry as HTMLButtonElement).disabled).toBe(false);
+    vi.mocked(worldApi.getSandbox).mockResolvedValue({ ...unavailable, network_reason: "Current broker failure" });
+    fireEvent.click(retry);
+    await screen.findByRole("alert");
+    expect(screen.queryByText("Broker unavailable")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toBe("Current broker failure");
+    await waitFor(() => expect(useWorldStore.getState().sandboxBusy[sandbox.id]).toBeUndefined());
+    start.mockResolvedValue({ ...unavailable, state: "ready", network_available: true, network_status: "available", network_reason: "Public IPv4 only" });
+    fireEvent.click(screen.getByRole("button", { name: "Retry / Recheck" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Ready"));
+    expect(screen.queryByText("Current broker failure")).toBeNull();
+    expect(screen.queryByText("Broker unavailable")).toBeNull();
+    expect(useWorldStore.getState().cards[0].config.network_enabled).toBe(true);
+    expect(worldApi.getSandboxRuntimes).toHaveBeenCalledWith(false);
+  });
+
+  it("shares inspector settings drafts and saved configuration with the Window editor", async () => {
+    function Surface({ inspector }: { inspector: boolean }) {
+      const card = useWorldStore(s => s.cards[0]);
+      return inspector ? <SandboxCardBody card={card} level="inspector" /> : <SandboxSettings card={card} />;
+    }
+    const { rerender } = render(<Surface inspector />);
+    await waitFor(() => expect((screen.getByLabelText("Working folder") as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(screen.getByText("Configuration"));
+    fireEvent.change(screen.getByLabelText("Working folder"), { target: { value: "D:\\shared" } });
+    rerender(<Surface inspector={false} />);
+    expect((screen.getByLabelText("Working folder") as HTMLInputElement).value).toBe("D:\\shared");
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+    const saved = { ...sandbox, config: { ...sandbox.config, workspace_path: "D:\\shared" } };
+    vi.spyOn(worldApi, "updateNode").mockResolvedValue(saved);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    rerender(<Surface inspector />);
+    expect((screen.getByLabelText("Working folder") as HTMLInputElement).value).toBe("D:\\shared");
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
+    expect(screen.queryByRole("log")).toBeNull();
+  });
+
+  it("explicit recheck replaces a failed prerequisite reason without changing the saved policy", async () => {
+    useWorldStore.setState({ cards: [{ ...sandbox, config: { ...sandbox.config, network_enabled: true } }],
+      sandboxErrors: { [sandbox.id]: "Previous startup failure" } });
+    vi.mocked(worldApi.getSandbox).mockResolvedValue({ ...info, supported_network_modes: ["disabled", "enabled"],
+      network_enabled: true, network_available: false, network_status: "missing_component", network_reason: "Broker missing" });
+    render(<Card />);
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Broker missing"));
+    vi.mocked(worldApi.getSandbox).mockResolvedValue({ ...info, supported_network_modes: ["disabled", "enabled"],
+      network_enabled: true, network_available: true, network_status: "available", network_reason: "Public IPv4 only" });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh sandbox environment" }));
+    await waitFor(() => expect(worldApi.getSandboxRuntimes).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.queryByText("Broker missing")).toBeNull();
+    expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(useWorldStore.getState().cards[0].config.network_enabled).toBe(true);
+  });
+
+  it("keeps an unsaved environment draft and its revision across surfaces", async () => {
+    const { rerender } = render(<SandboxCardBody card={sandbox} level="inspector" />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Save environment", hidden: true }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByText("Configuration"));
+    fireEvent.click(screen.getByText("Environment variables"));
+    fireEvent.click(screen.getByRole("button", { name: "Add variable" }));
+    fireEvent.change(screen.getByLabelText("Environment variable 1 name"), { target: { value: "REGION" } });
+    fireEvent.change(screen.getByLabelText("Environment variable 1 value"), { target: { value: "draft-region" } });
+    vi.mocked(worldApi.getNodeDocument).mockResolvedValue({ value: { variables: { EXTERNAL: "new" } }, revision: 2, summary: {} });
+    rerender(<SandboxSettings card={sandbox} />);
+    fireEvent.click(screen.getByText("Environment variables"));
+    expect((screen.getByLabelText("Environment variable 1 value") as HTMLInputElement).value).toBe("draft-region");
+    const save = vi.spyOn(worldApi, "nodeDocumentAction").mockRejectedValue(new Error("Document revision conflict"));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Save environment" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Save environment" }));
+    await screen.findByText("Document revision conflict");
+    expect(save).toHaveBeenCalledWith(sandbox.id, "replace", { variables: { REGION: "draft-region" } }, 0);
+    expect(screen.getByText("Unsaved environment changes")).toBeTruthy();
+  });
+
+  it("uses current Sandbox capabilities when discovery is unavailable", async () => {
+    useWorldStore.setState({ cards: [{ ...sandbox, config: { ...sandbox.config, network_enabled: true } }] });
+    vi.mocked(worldApi.getSandboxRuntimes).mockRejectedValue(new Error("Discovery failed"));
+    vi.mocked(worldApi.getSandbox).mockResolvedValue({ ...info, network_enabled: true,
+      supported_network_modes: ["disabled", "enabled"], network_available: false,
+      network_status: "missing_component", network_reason: "Restore broker" });
+    render(<Card />);
+    const retry = await screen.findByRole("button", { name: "Retry / Recheck" });
+    expect((retry as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText("Discovery failed")).toBeNull();
+    expect((screen.getByRole("option", { name: "Enabled" }) as HTMLOptionElement).disabled).toBe(false);
   });
 });

@@ -319,7 +319,7 @@ interface WorldState {
   runAgent: (id: string, prompt: string) => Promise<void>;
   stopAgent: (id: string) => Promise<void>;
   loadSandboxRuntimes: (refresh?: boolean) => Promise<void>;
-  refreshSandbox: (id: string) => Promise<void>;
+  refreshSandbox: (id: string, clearError?: boolean) => Promise<void>;
   saveSandboxConfig: (id: string, config: SandboxConfig) => Promise<boolean>;
   startSandbox: (id: string) => Promise<boolean>;
   stopSandbox: (id: string) => Promise<boolean>;
@@ -1325,7 +1325,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
   },
 
-  refreshSandbox: async (id) => {
+  refreshSandbox: async (id, clearError = false) => {
     if (get().sandboxBusy[id]) return;
     const hadInfo = !!get().sandboxInfo[id];
     const revision = (get().sandboxRevisions[id] ?? 0) + 1;
@@ -1335,7 +1335,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       if (get().sandboxRevisions[id] !== revision) return;
       set((state) => ({
         sandboxInfo: { ...state.sandboxInfo, [id]: info },
-        ...(!hadInfo ? { sandboxErrors: { ...state.sandboxErrors, [id]: undefined } } : {}),
+        ...(clearError || !hadInfo || (info.network_available && info.state === "ready") ? { sandboxErrors: { ...state.sandboxErrors, [id]: undefined } } : {}),
         cards: state.cards.map((card) => card.id === id ? mergeCardPatch(card, {
           status: info.state,
           ...(info.state !== "running" ? { config: { active_command: "" } } : {}),
@@ -1414,6 +1414,10 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     } finally {
       set((state) => ({ sandboxBusy: { ...state.sandboxBusy, [id]: undefined } }));
       if (failed) await get().refreshSandbox(id);
+      // Startup refreshed backend prerequisites. Read its current cached catalog;
+      // do not run another expensive discovery probe or keep the old UI snapshot.
+      try { set({ sandboxRuntimes: await worldApi.getSandboxRuntimes(false), sandboxRuntimesError: undefined }); }
+      catch (error) { set({ sandboxRuntimesError: apiErrorMessage(error) }); }
     }
   },
 

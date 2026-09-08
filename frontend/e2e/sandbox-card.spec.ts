@@ -2,6 +2,53 @@ import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { TEST_CATALOG } from "../src/state/catalog.fixture";
 
+test("saved networking retries stale broker discovery without reloading (mock API)", async ({ page }) => {
+  let failure = "Broker unavailable", starts = 0;
+  let state = "stopped";
+  const card = { id: "network-retry", type: "sandbox", name: "Retry lab", position: { x: 550, y: 340 },
+    size: { width: 96, height: 96 }, expanded: false, status: "stopped", config: { runtime: "windows", network_enabled: true } };
+  const network = () => ({ supported_network_modes: ["disabled", "enabled"], network_available: !failure,
+    network_status: failure ? "missing_component" : "available", network_reason: failure || "Public IPv4 only" });
+  await page.routeWebSocket("**/ws/events", () => {});
+  await page.route(/^https?:\/\/[^/]+\/api\//, async route => {
+    const path = new URL(route.request().url()).pathname;
+    const reply = (json: unknown, status = 200) => route.fulfill({ json, status });
+    if (path === "/api/catalog") return reply(TEST_CATALOG);
+    if (path === "/api/world") return reply({ nodes: [card], edges: [], chunks: ["0:0"] });
+    if (path === "/api/legions") return reply([]);
+    if (path === "/api/sandbox/runtimes") return reply({ default_runtime: "windows", runtimes: [{
+      ...network(), id: "windows", label: "Windows", available: true, platform: "windows", shell: ["cmd.exe"], supports_workspace: true,
+      // Simulate an older discovery snapshot even after successful Start.
+      network_available: false, network_reason: "Broker unavailable", network_status: "missing_component",
+    }] });
+    if (path.endsWith("/document")) return reply({ value: { variables: {} }, revision: 0, summary: {} });
+    if (path.endsWith("/credentials")) return reply({});
+    if (path.endsWith("/configuration")) return reply({ ready: true, profile_id: null, variables: [] });
+    if (path.endsWith("/start")) {
+      starts++;
+      if (starts === 1) { failure = "Broker authorization check failed"; return reply({ detail: failure }, 503); }
+      failure = ""; state = "ready";
+    }
+    if (path.endsWith(card.id) || path.endsWith("/start")) return reply({ ...network(), sandbox_id: card.id, state,
+      runtime_id: "windows", runtime_locked: state === "ready", network_enabled: true, available: true, shell: ["cmd.exe"],
+      workspace_path: null, workspace: "C:\\test", workspace_access: "read_write", security_boundary: "AppContainer" });
+    return reply({ detail: path }, 404);
+  });
+  await page.goto("/");
+  const panel = page.locator(`[data-card-id="${card.id}"]`);
+  await panel.locator(".card-kind-icon").click();
+  await expect(panel.locator(".sandbox-summary-list")).toContainText("Requested · prerequisites unavailable");
+  await panel.getByRole("button", { name: "Retry / Recheck" }).click();
+  await expect(panel.locator(".sandbox-summary-list")).toContainText("Requested · prerequisites unavailable");
+  await expect(panel.getByRole("alert")).toHaveText("Broker authorization check failed");
+  await panel.getByRole("button", { name: "Retry / Recheck" }).click();
+  await expect(panel.getByRole("status")).toHaveText("Ready");
+  await expect(panel.locator(".sandbox-summary-list")).toContainText("Enabled · runtime ready");
+  await expect(panel.getByRole("alert")).toHaveCount(0);
+  expect(card.config.network_enabled).toBe(true);
+  expect(starts).toBe(2);
+});
+
 test("sandbox window keeps files, preview and terminal together with separate settings (mock API)", async ({ page }, testInfo) => {
   test.setTimeout(60_000);
   let card = {
@@ -73,7 +120,7 @@ test("sandbox window keeps files, preview and terminal together with separate se
   await panel.locator(".card-kind-icon").click();
   await expect(panel).toHaveAttribute("data-surface-level", "inspector");
   await expect(panel.getByRole("status")).toHaveText("Stopped");
-  await expect(panel.getByLabel("Working folder", { exact: true })).toHaveCount(0);
+  await expect(panel.getByLabel("Working folder", { exact: true })).toBeHidden();
   await expect(panel.getByLabel("Command", { exact: true })).toHaveCount(0);
   await panel.getByRole("button", { name: "Open Window", exact: true }).click();
 

@@ -165,4 +165,83 @@ describe("Sandbox workspace interaction", () => {
     expect(screen.getByRole("button", { name: "src" }).getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByRole("button", { name: "index.ts" })).toBeTruthy();
   });
+
+  it.each(["binding", "sandbox"])("ignores an old expansion after switching %s and completing the new refresh", async change => {
+    const original = vi.mocked(worldApi.sandboxWorkspace).getMockImplementation()!;
+    let resolveOld!: (value: unknown) => void;
+    let childRequests = 0;
+    vi.mocked(worldApi.sandboxWorkspace).mockImplementation(async <T,>(id: string, action: string): Promise<T> => {
+      const query = new URLSearchParams(action.split("?")[1]);
+      if (query.get("operation") !== "list") return await original(id, action) as T;
+      if (query.get("path") === "src") {
+        childRequests++;
+        if (childRequests === 1) return await new Promise<unknown>(resolve => { resolveOld = resolve; }) as T;
+        return { entries: [{ name: "from-B.txt", directory: false }] } as T;
+      }
+      return { entries: [{ name: "src", directory: true }] } as T;
+    });
+    render(<Workspace />);
+    fireEvent.click(await screen.findByRole("button", { name: "src" }));
+    await waitFor(() => expect(childRequests).toBe(1));
+    const next = { ...card, id: change === "sandbox" ? "sandbox-B" : card.id, config: { ...card.config, workspace_path: "D:\\B" } };
+    vi.mocked(worldApi.getSandbox).mockResolvedValue({ ...info, sandbox_id: next.id, workspace_path: "D:\\B" });
+    act(() => useWorldStore.setState({ cards: [next], sandboxInfo: { [next.id]: { ...info, workspace_path: "D:\\B" } } }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Refresh files" }) as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => resolveOld({ entries: [{ name: "from-A.txt", directory: false }] }));
+    fireEvent.click(screen.getByRole("button", { name: "src" }));
+    await screen.findByRole("button", { name: "from-B.txt" });
+    expect(childRequests).toBe(2);
+    expect(screen.queryByText("from-A.txt")).toBeNull();
+  });
+
+  it("does not let an older expansion overwrite a newer refresh in the same workspace", async () => {
+    const original = vi.mocked(worldApi.sandboxWorkspace).getMockImplementation()!;
+    let resolveOld!: (value: unknown) => void;
+    let count = 0;
+    vi.mocked(worldApi.sandboxWorkspace).mockImplementation(async <T,>(id: string, action: string): Promise<T> => {
+      const query = new URLSearchParams(action.split("?")[1]);
+      if (query.get("operation") !== "list") return await original(id, action) as T;
+      if (query.get("path") !== "src") return { entries: [{ name: "src", directory: true }] } as T;
+      if (++count === 1) return await new Promise<unknown>(resolve => { resolveOld = resolve; }) as T;
+      return { entries: [{ name: "new.txt", directory: false }] } as T;
+    });
+    render(<Workspace />);
+    fireEvent.click(await screen.findByRole("button", { name: "src" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh files" }));
+    await screen.findByRole("button", { name: "new.txt" });
+    await act(async () => resolveOld({ entries: [{ name: "old.txt", directory: false }] }));
+    expect(screen.getByRole("button", { name: "new.txt" })).toBeTruthy();
+    expect(screen.queryByText("old.txt")).toBeNull();
+  });
+
+  it.each(["roots", "preview"])("ignores obsolete %s responses after rebinding and unmount", async operation => {
+    const original = vi.mocked(worldApi.sandboxWorkspace).getMockImplementation()!;
+    let delayed = false;
+    const pending: ((value: unknown) => void)[] = [];
+    vi.mocked(worldApi.sandboxWorkspace).mockImplementation(async <T,>(id: string, action: string): Promise<T> => {
+      if (delayed && (operation === "roots" ? action === "files" : action.includes("operation=preview"))) {
+        return await new Promise<unknown>(resolve => pending.push(resolve)) as T;
+      }
+      return await original(id, action) as T;
+    });
+    const { unmount } = render(<Workspace />);
+    await screen.findByRole("button", { name: "first.txt" });
+    delayed = true;
+    fireEvent.click(screen.getByRole("button", { name: operation === "roots" ? "Refresh files" : "first.txt" }));
+    await waitFor(() => expect(pending.length).toBe(1));
+    delayed = false;
+    act(() => useWorldStore.setState({ cards: [{ ...card, config: { ...card.config, workspace_path: "D:\\B" } }] }));
+    await screen.findByRole("button", { name: "second.txt" });
+    const obsolete = operation === "roots" ? [{ id: "obsolete", label: "Old root", directory: false }] : { state: "text", text: "Old preview" };
+    await act(async () => pending[0](obsolete));
+    expect(screen.queryByText("Old root")).toBeNull();
+    expect(screen.queryByText("Old preview")).toBeNull();
+    delayed = true;
+    fireEvent.click(screen.getByRole("button", { name: operation === "roots" ? "Refresh files" : "second.txt" }));
+    await waitFor(() => expect(pending.length).toBe(2));
+    const calls = vi.mocked(worldApi.sandboxWorkspace).mock.calls.length;
+    unmount();
+    await act(async () => pending[1](obsolete));
+    expect(vi.mocked(worldApi.sandboxWorkspace).mock.calls.length).toBe(calls);
+  });
 });

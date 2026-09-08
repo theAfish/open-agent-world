@@ -1,6 +1,6 @@
 # Sandbox configuration and window workspace
 
-The compact card and inspector report runtime, readiness, folder, access and network policy, with Start/Stop and shortcuts to the window's Workspace and Settings tabs. Workspace shows Files on the left, a file preview at upper right and the terminal at lower right. Both dividers support pointer dragging and arrow keys. History is a tab inside the terminal; configuration, environment variables, presets, Skill resources, diagnostics and recovery live in Settings. Switching tabs preserves the selected file and unsaved inputs. Opening, closing or reopening a window never submits a command or changes runtime lifecycle.
+The compact card and inspector report runtime, readiness, folder, access and network policy, with Start/Stop and shortcuts to the window's Workspace and Settings tabs. The inspector's collapsed Configuration section provides the same runtime/workspace, resource-limit and environment editors as Window settings. Unsaved settings and environment drafts follow the Sandbox between these surfaces; they are transient and are not saved to browser storage. Save commits through the same authoritative API, while Reset or Reload discards the corresponding draft. Workspace shows Files on the left, a file preview at upper right and the terminal at lower right. Both dividers support pointer dragging and arrow keys. History stays inside the terminal; presets, Skill resources, diagnostics and recovery remain in Window settings. Opening, closing or reopening a window never submits a command or changes runtime lifecycle.
 
 New, copied and summoned Sandboxes start stopped. Managed storage is prepared through the existing Start lifecycle. The selected runtime remains pinned after first start. Runtime, workspace, network and resource-limit changes require Stop → Save → Start. Ordinary environment changes apply to the next command without a restart.
 
@@ -60,39 +60,19 @@ One command occupies a Sandbox at a time. The window and inspect tool show its c
 
 The host retains the latest 20 command receipts, with at most 64 KiB per output stream, exit code, duration, caller and terminal status. Live backend output remains bounded by the existing 2 MiB limit. Drafts and sidebar width use the existing surface store. Receipts belong to the live node identity and are not portable state. Copies/templates carry requirements, never credential bindings or past executions. A disconnected manual HTTP request does not stop its admitted command; explicit cancellation remains separate. Backend restart recovery marks unrecoverable running receipts interrupted, without resubmission.
 
-## Validation performed on 2026-09-07
+## Validation
 
-This section records the earlier workspace update, before enabled networking was implemented. Current networking acceptance and remaining platform verification gaps are in [Sandbox networking](sandbox-networking.md#real-runtime-acceptance).
+From the repository root, run focused API/status tests with
+`backend/.venv/Scripts/python -m pytest backend/tests/test_sandbox_workspace_ui.py backend/tests/test_sandbox_network_contract.py -k 'not real_'`.
+From `frontend`, run `npm test`, `npm run build`, and
+`npm run test:e2e -- sandbox-card.spec.ts execution-configuration.spec.ts`.
+The Sandbox layout browser scenario mocks runtime/file responses; configuration
+scenarios use the isolated local API. Neither proves a native isolation boundary.
 
-All commands ran from the repository root. No packages or runtime dependencies were installed.
-
-The final combined backend suite passed **408 tests, with no skips**:
-
-```powershell
-$env:OAW_TEST_SANDBOX_RUNTIME='windows'
-$env:OAW_TEST_WSL_DISTRO='Ubuntu-24.04'
-$env:OPEN_AGENT_WORLD_RUN_NATIVE_SANDBOX_TESTS='1'
-backend/.venv/Scripts/python -m pytest backend/tests tests -o addopts='' -ra -q -p no:cacheprovider --basetemp .tmp/pytest-all-native-security-final
-```
-
-This includes mock/API coverage, real Windows filesystem handles/junctions/hardlinks, disposable Windows AppContainer execution, environment/secret propagation, scoped Skill materialization, process limits, timeout and cancellation. It also includes the existing real WSL filesystem/resource-limit test and the new WSL test proving IP/Unix sockets stay blocked and enabled networking is rejected before dispatch. Ordinary runs leave the native tests opt-in; an earlier default run passed 396 tests with 11 native cases skipped, before the final extra network rejection regression was added.
-
-The local workflow also passed separately against the existing **Ubuntu-24.04 WSL2** distribution:
-
-```powershell
-$env:OAW_TEST_SANDBOX_RUNTIME='wsl:Ubuntu-24.04'
-backend/.venv/Scripts/python -m pytest backend/tests/test_sandbox_workspace_ui.py::test_real_local_workspace_scenario -o addopts='' -q -p no:cacheprovider --basetemp .tmp/pytest-wsl-final-scenario
-```
-
-This scenario configures an external workspace and linked/local defaults, browses its roots, runs diagnostics, executes a manual command and a Skill through live Agent capabilities, previews/downloads both generated files, reconnects to unchanged receipts, browses during a running command, cancels while retaining readiness, and clears cache without deleting outputs. The Windows variant passed in the combined suite. No LLM was used to choose the Agent tool invocation.
-
-Frontend validation:
-
-- `npm --prefix frontend test -- --reporter=dot`: **152 passed** across 27 files.
-- `npm --prefix frontend run build`: passed TypeScript checking and Vite production build.
-- With `PLAYWRIGHT_CHANNEL=msedge`, `npm --prefix frontend run test:e2e -- sandbox-card.spec.ts execution-configuration.spec.ts equipment-surfaces.spec.ts`: **4 passed**. The Sandbox runtime/file responses in `sandbox-card.spec.ts` are mocked; configuration and equipment cases use the real local API. The browser test verifies inspector/window separation, actual downloaded bytes, pointer resizing, preview error states, console preservation, close/reopen and browser reload without re-execution. Light/dark screenshots were inspected.
-- `git diff --check`: passed.
-
-Native tests ran outside the tool's restricted token so disposable AppContainer profiles and the existing WSL distribution were accessible. No separate native Linux host was available: the Linux implementation was exercised inside real WSL. HTTP authentication/failure classification uses mocked command results; the bundled backends remain offline and no external service authentication was attempted. Vite reports its existing large-bundle warning and Python reports dependency deprecation warnings.
-
-Real tests found and verified fixes for Windows workspace-handle sharing and cancellation status, and WSL file-worker recovery during concurrent browsing. Enabled networking remains unsupported because a shared host namespace would expose trusted control services. The implementation does not add PTY/ConPTY, remote-job orchestration, dependency installation, a provider framework or an IDE.
+Real workspace tests require `OPEN_AGENT_WORLD_RUN_NATIVE_SANDBOX_TESTS=1` and
+`OAW_TEST_SANDBOX_RUNTIME=windows` or `wsl:<installed distribution>`; select
+`backend/tests/test_sandbox_workspace_ui.py::test_real_local_workspace_scenario`.
+Run native tests with an ordinary user token outside restricted tool sandboxes.
+See [network acceptance setup](sandbox-networking.md#real-runtime-acceptance)
+for the separate networking prerequisites and verification boundaries. Preserve
+per-run logs, failures, skips and unresolved platform evidence in `.outputs/` or CI.

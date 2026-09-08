@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { worldApi, apiErrorMessage } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
+import { useNodeSurfaceStore } from "../state/nodeSurfaces";
 import type { WorldCard } from "../types/world";
 import { CredentialBinding, EnvironmentVariablesEditor, environmentVariablesFromValue, environmentVariablesToValue, type EnvironmentVariableRow } from "./ExecutionConfiguration";
 
@@ -16,8 +17,13 @@ export function SandboxEnvironment({ card }: { card: WorldCard }) {
   const link = edges.find(e => e.target === card.id && e.relationship === "environment.default");
   const configurationEvent = useWorldStore(s => s.events.find(e => e.payload?.scope_kind === "node_document"
     && (e.payload.owner_id === card.id || e.payload.owner_id === link?.source))?.id);
-  const [rows, setRows] = useState<EnvironmentVariableRow[]>([]);
+  const [savedRows, setSavedRows] = useState<EnvironmentVariableRow[]>([]);
   const [revision, setRevision] = useState<number>();
+  const draftKey = `sandbox-environment:${card.id}`;
+  const rawDraft = useNodeSurfaceStore(s => s.drafts[draftKey]);
+  const draft = rawDraft ? JSON.parse(rawDraft) as { rows: EnvironmentVariableRow[]; revision: number } : undefined;
+  const rows = draft?.rows ?? savedRows;
+  const setRows = (rows: EnvironmentVariableRow[]) => useNodeSurfaceStore.getState().setDraft(draftKey, JSON.stringify({ rows, revision: draft?.revision ?? revision }));
   const [bindings, setBindings] = useState<Record<string, boolean>>({});
   const [effective, setEffective] = useState<EffectiveEnvironment>();
   const [busy, setBusy] = useState(false);
@@ -30,7 +36,7 @@ export function SandboxEnvironment({ card }: { card: WorldCard }) {
   async function reload() {
     try {
       const doc = await worldApi.getNodeDocument(card.id);
-      setRows(environmentVariablesFromValue(doc.value)); setRevision(doc.revision);
+      setSavedRows(environmentVariablesFromValue(doc.value)); setRevision(doc.revision);
       await refresh(); setError("");
     } catch (e) { setError(apiErrorMessage(e)); }
   }
@@ -39,8 +45,10 @@ export function SandboxEnvironment({ card }: { card: WorldCard }) {
   async function save() {
     setBusy(true); setError("");
     try {
-      const doc = await worldApi.nodeDocumentAction(card.id, "replace", environmentVariablesToValue(rows), revision);
-      setRevision(doc.revision); await refresh(); setNotice("Applies to the next command.");
+      const doc = await worldApi.nodeDocumentAction(card.id, "replace", environmentVariablesToValue(rows), draft?.revision ?? revision);
+      setRevision(doc.revision); setSavedRows(environmentVariablesFromValue(doc.value));
+      useNodeSurfaceStore.getState().setDraft(draftKey, "");
+      await refresh(); setNotice("Applies to the next command.");
     } catch (e) { setError(apiErrorMessage(e)); }
     finally { setBusy(false); }
   }
@@ -71,7 +79,8 @@ export function SandboxEnvironment({ card }: { card: WorldCard }) {
       <p className="sandbox-help" title="A command-specific profile replaces the linked profile. Private Agent equipment is never shared automatically.">Shared by executions in this Sandbox. Local values override the profile.</p>
       <EnvironmentVariablesEditor rows={rows} onChange={setRows} disabled={busy || revision === undefined} />
       <div className="editor-actions"><button className="primary-button" disabled={busy || revision === undefined} onClick={() => void save()}>Save environment</button>
-        <button className="secondary-button" disabled={busy} onClick={() => void reload()}>Reload environment</button></div>
+        <button className="secondary-button" disabled={busy} onClick={() => { useNodeSurfaceStore.getState().setDraft(draftKey, ""); void reload(); }}>Reload environment</button></div>
+      {draft && <p className="sandbox-help">Unsaved environment changes</p>}
       {notice && <p className="sandbox-help" role="status">{notice}</p>}
       {error && <p className="sandbox-error" role="alert">{error}</p>}
       {Object.keys(bindings).length > 0 && <p className="sandbox-help">Secrets stay on this host and are readable by authorized commands.</p>}
