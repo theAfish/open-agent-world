@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,7 +14,7 @@ from backend.tests.artifact_crash_worker import services_for
 
 
 @pytest.mark.parametrize('phase', ['publication', 'publication_rename', 'ready', 'deletion', 'reclamation'])
-def test_backend_process_restart(tmp_path, phase):
+def test_backend_process_restart(tmp_path, phase, monkeypatch):
     root = tmp_path / 'persistent'
     process = subprocess.Popen([sys.executable, '-m', 'backend.tests.artifact_crash_worker', str(root), phase],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=Path(__file__).resolve().parents[2],
@@ -35,8 +36,19 @@ def test_backend_process_restart(tmp_path, phase):
     async def recover():
         services = services_for(root)
         try:
-            await services.startup()
             store = services.resources.artifacts
+            if phase == 'ready':
+                # A large canonical file must not be opened or hashed on startup.
+                target = store.path(saved['versions'][0]['version_id']) / 'output.bin'
+                with target.open('r+b') as output:
+                    output.truncate(2 * 1024 ** 3)
+            def unexpected_content_io(*args, **kwargs):
+                raise AssertionError('Startup must not inspect ready artifact bytes')
+            with monkeypatch.context() as startup_patch:
+                startup_patch.setattr(store, 'validate', unexpected_content_io)
+                startup_patch.setattr('backend.resources.artifacts.pinned', unexpected_content_io)
+                startup_patch.setattr('backend.resources.artifacts.hashlib', SimpleNamespace(sha256=unexpected_content_io))
+                await services.startup()
             version = store.get(saved['versions'][0]['version_id'])
             assert len(store.all()) == 1
             if phase.startswith('publication'):
@@ -48,6 +60,9 @@ def test_backend_process_restart(tmp_path, phase):
                 assert not store.path(version['version_id']).exists()
             else:
                 assert version['state'] == 'ready'
+                if phase == 'ready':
+                    with target.open('r+b') as output:
+                        output.truncate(len(b'\0durable\xff' * 10000))
                 content = b''.join([chunk async for chunk in store.read(services, saved['collection'], version['version_id'], 'output.bin')])
                 assert content == b'\0durable\xff' * 10000
             if phase == 'reclamation':

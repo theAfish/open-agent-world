@@ -54,24 +54,25 @@ async def release(collection_id: str, version_id: str, services=Depends(get_serv
 
 @router.delete('/artifact-collections/{collection_id}/references/{version_id}')
 async def remove_reference(collection_id: str, version_id: str, services=Depends(get_services)):
-    store = services.resources.artifacts
-    store.authorize(services, collection_id, None, 'artifact.manage', version_id)
-    with services.database.transaction(immediate=True) as db:
-        db.execute('DELETE FROM artifact_references WHERE collection_id=? AND version_id=?', (collection_id, version_id))
-    return {'removed': True, 'retained': store.get(version_id)['retention']['retained']}
+    return services.resources.artifacts.remove_reference(services, collection_id, version_id)
 
 
 @router.get('/artifacts/retained')
 async def retained(services=Depends(get_services)):
     # The local user owns retention even if every display reference is removed.
+    return services.resources.artifacts.retained()
+
+
+@router.get('/artifacts/history')
+async def history(services=Depends(get_services)):
     return services.resources.artifacts.all()
+
+
+@router.post('/artifact-collections/{collection_id}/versions/{version_id}/verify')
+async def verify(collection_id: str, version_id: str, services=Depends(get_services)):
+    return await services.resources.artifacts.verify(services, collection_id, version_id)
 
 
 @router.put('/artifact-collections/{collection_id}/references/{version_id}')
 async def add_reference(collection_id: str, version_id: str, services=Depends(get_services)):
-    store = services.resources.artifacts
-    store.authorize(services, collection_id, None, 'artifact.manage')
-    record = store.get(version_id)
-    with services.database.transaction(immediate=True) as db:
-        db.execute('INSERT OR IGNORE INTO artifact_references VALUES (?,?)', (collection_id, version_id))
-    return record
+    return services.resources.artifacts.add_reference(services, collection_id, version_id)

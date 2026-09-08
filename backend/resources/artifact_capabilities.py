@@ -23,8 +23,10 @@ def register(registry):
         ('materialize', 'materialize_artifact', 'Copy an immutable version into a new mutable workspace directory.',
             {**ArtifactMaterialize.model_json_schema(), 'properties': {**ArtifactMaterialize.model_json_schema()['properties'], 'version_id': {'type': 'string'}},
              'required': ['sandbox_id', 'destination', 'version_id']}, (sandbox,)),
-        ('manage', 'release_artifact', 'Explicitly release retention and delete the stored bytes; removing a collection reference is separate.',
-            {'type': 'object', 'properties': {'version_id': {'type': 'string'}}, 'required': ['version_id'], 'additionalProperties': False}, ()),
+        ('manage', 'manage_artifact_references', 'Add or remove collection references; retained content is preserved. Adding requires read access through source_collection_id.',
+            {'type': 'object', 'properties': {'version_id': {'type': 'string'},
+                'action': {'type': 'string', 'enum': ['add', 'remove'], 'default': 'remove'},
+                'source_collection_id': {'type': 'string'}}, 'required': ['version_id'], 'additionalProperties': False}, ()),
     ]
     for kind, name, description, schema, selectors in operations:
         if selectors:

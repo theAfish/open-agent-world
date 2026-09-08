@@ -83,6 +83,74 @@ def test_idempotency_limits_and_permissions(runtime_client):
     assert all(r['state'] != 'staging' for r in services.resources.artifacts.all())
 
 
+def test_collection_management_cannot_release_shared_user_retention(runtime_client):
+    client, _, agent, sandbox, collection, workspace, _ = setup(runtime_client)
+    other = create_node(client, 'core.artifact-collection')
+    (workspace / 'file').write_bytes(b'shared retained bytes')
+    version = publish(client, sandbox, collection, ['file']).json()['version_id']
+    assert client.put(f"/api/artifact-collections/{other['id']}/references/{version}").status_code == 200
+    services = client.app.state.services
+    store = services.resources.artifacts
+    provider = WorldAgentCapabilityProvider(services)
+    with pytest.raises(PermissionDeniedError, match='trusted user'):
+        client.portal.call(store.release, services, collection['id'], version, agent['id'])
+    with pytest.raises(PermissionDeniedError):
+        client.portal.call(provider.invoke_tool, agent['id'], 'operation:manage_artifact_references',
+            {'collection': other['id'], 'version_id': version})
+    removed = client.portal.call(provider.invoke_tool, agent['id'], 'operation:manage_artifact_references',
+        {'collection': collection['id'], 'version_id': version})
+    assert removed == {'removed': True, 'retained': True}
+    assert store.listing(services, collection['id']) == []
+    with pytest.raises(PermissionDeniedError):
+        client.portal.call(provider.invoke_tool, agent['id'], 'operation:manage_artifact_references',
+            {'collection': collection['id'], 'version_id': version, 'action': 'add', 'source_collection_id': other['id']})
+    assert client.post('/api/edges', json={'source': agent['id'], 'target': other['id'], 'relationship': 'artifact.read'}).status_code == 201
+    added = client.portal.call(provider.invoke_tool, agent['id'], 'operation:manage_artifact_references',
+        {'collection': collection['id'], 'version_id': version, 'action': 'add', 'source_collection_id': other['id']})
+    assert added['version_id'] == version
+    base = f"/api/artifact-collections/{other['id']}/versions/{version}"
+    assert client.get(base + '/content', params={'path': 'file'}).content == b'shared retained bytes'
+    assert client.post(base + '/materialize', json={'sandbox_id': sandbox['id'], 'destination': 'shared-copy'}).status_code == 200
+    assert (workspace / 'shared-copy/file').read_bytes() == b'shared retained bytes'
+    assert client.delete(base).json()['state'] == 'deleted'
+    assert not store.path(version).exists()
+    assert client.get('/api/artifacts/retained').json() == []
+    assert client.get('/api/artifacts/history').json()[0]['state'] == 'deleted'
+
+
+def test_retained_listing_excludes_inactive_and_historical_states(runtime_client):
+    client, _, _, sandbox, collection, workspace, _ = setup(runtime_client)
+    (workspace / 'file').write_bytes(b'data')
+    record = publish(client, sandbox, collection, ['file']).json()
+    store = client.app.state.services.resources.artifacts
+    for state, retained in [('staging', True), ('failed', True), ('deleting', False),
+                            ('deleted', False), ('ready', False), ('ready', True)]:
+        record.update(state=state)
+        record['retention']['retained'] = retained
+        store.save(record)
+        assert len(client.get('/api/artifacts/retained').json()) == int(state == 'ready' and retained)
+        assert len(client.get('/api/artifacts/history').json()) == 1
+
+
+def test_explicit_integrity_verification_distinguishes_unavailability(runtime_client, monkeypatch):
+    client, _, _, sandbox, collection, workspace, _ = setup(runtime_client)
+    (workspace / 'file').write_bytes(b'hello')
+    record = publish(client, sandbox, collection, ['file']).json()
+    store = client.app.state.services.resources.artifacts
+    endpoint = f"/api/artifact-collections/{collection['id']}/versions/{record['version_id']}/verify"
+    assert client.post(endpoint).json()['integrity'] == 'verified'
+    original = store.validate
+    def unavailable(record):
+        raise PermissionError('temporary storage access failure')
+    monkeypatch.setattr(store, 'validate', unavailable)
+    assert client.post(endpoint).json()['integrity'] == 'unavailable'
+    assert store.get(record['version_id']) == record
+    monkeypatch.setattr(store, 'validate', original)
+    (store.path(record['version_id']) / 'file').write_bytes(b'wrong')
+    assert client.post(endpoint).json()['integrity'] == 'corrupt'
+    assert store.get(record['version_id']) == record
+
+
 def test_new_version_and_input_provenance_are_independent_of_retention(runtime_client):
     client, _, _, sandbox, collection, workspace, _ = setup(runtime_client)
     (workspace / 'file').write_text('first', encoding='utf-8')

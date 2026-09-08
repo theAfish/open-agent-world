@@ -111,9 +111,13 @@ This is **not** a transactional snapshot of arbitrary concurrently mutating
 directories: a finalized-input contract is required. Captured bytes are streamed
 into a staging directory, flushed, checksummed and renamed before the ready record
 commits. Restart never promotes an incomplete staging intent; it records failure
-and retries staging removal. Already committed versions are integrity-checked on
-startup outside database transactions. Corruption is visible as failure and retained
-bytes are preserved for operator inspection, rather than silently reported ready.
+and retries staging removal. Startup leaves ready versions unchanged and does not
+open or hash their content. The local control plane can explicitly run full verification
+with `POST /api/artifact-collections/{collection_id}/versions/{version_id}/verify`.
+It holds a consumption lease and reports `verified`, `corrupt` (size/checksum mismatch),
+or `unavailable` (filesystem error). Diagnostic results do not rewrite lifecycle state
+or remove bytes; temporary storage failures are never persisted as corruption.
+Full streamed reads and materialization retain their existing checksum checks.
 
 | Limit | Default |
 | --- | --- |
@@ -143,8 +147,12 @@ Create one explicitly and grant `artifact.read`, `artifact.publish`, or
 `artifact.manage` connections. The normal selector projection exposes one
 `inspect_artifacts`, `publish_artifact`, `materialize_artifact`, and
 `release_artifact` operation regardless of artifact count. Publication and
-materialization independently require a Sandbox execute selector. Release requires
-the manage grant. Inspection and consumption require a current reference in an
+materialization independently require a Sandbox execute selector. The manage grant
+allows collection reference changes through `manage_artifact_references`, never global
+release. Adding a reference also requires current read access through a source collection;
+knowing a version ID alone is insufficient. Only the trusted local user control plane
+can release user-owned retention.
+Inspection and consumption require a current reference in an
 authorized collection. Guessing a version ID grants nothing.
 
 Trusted plugins use `CapabilityContext.artifact_action` and the public
@@ -160,6 +168,11 @@ control-plane listing to bypass graph grants. Release explicitly drops retention
 records deletion intent, prevents new reads, and removes bytes idempotently. Active
 read/copy leases cause release to return a retryable conflict. No garbage collector
 or canonical writable Sandbox mount is introduced.
+
+`GET /api/artifacts/retained` lists only ready versions with active retention, including
+those with no collection references. `GET /api/artifacts/history` provides all historical
+records, including staging, failed, released and deleted versions. No migration or
+reference-count-based retention rule is introduced.
 
 Materialization creates a new destination directory exclusively and streams a
 working copy into it. It never overwrites an existing directory or maps canonical

@@ -49,6 +49,27 @@ class ArtifactStore:
         with self.database.locked() as db:
             return [json.loads(row[0]) for row in db.execute('SELECT record_json FROM artifact_versions ORDER BY rowid')]
 
+    def retained(self):
+        return [record for record in self.all()
+                if record['state'] == 'ready' and record.get('retention', {}).get('retained') is True]
+
+    def remove_reference(self, services, collection_id, version_id, agent_id=None):
+        self.authorize(services, collection_id, agent_id, 'artifact.manage', version_id)
+        with self.database.transaction(immediate=True) as db:
+            db.execute('DELETE FROM artifact_references WHERE collection_id=? AND version_id=?', (collection_id, version_id))
+        return {'removed': True, 'retained': self.get(version_id)['retention']['retained']}
+
+    def add_reference(self, services, collection_id, version_id, agent_id=None, source_collection_id=None):
+        self.authorize(services, collection_id, agent_id, 'artifact.manage')
+        if agent_id is not None:
+            if not source_collection_id:
+                raise PermissionDeniedError('Adding a reference requires an authorized source collection')
+            self.authorize(services, source_collection_id, agent_id, 'artifact.read', version_id)
+        record = self.get(version_id)
+        with self.database.transaction(immediate=True) as db:
+            db.execute('INSERT OR IGNORE INTO artifact_references VALUES (?,?)', (collection_id, version_id))
+        return record
+
     def run_references(self, run_id):
         if run_id is None:
             return []
@@ -256,12 +277,8 @@ class ArtifactStore:
     async def recover(self, *, interrupted=True):
         async with self._lock:
             for record in self.all():
-                if interrupted and record['state'] == 'ready':
-                    try:
-                        await run_file_operation(self.validate, record)
-                    except Exception as error:
-                        record.update(state='failed', error=f'Retained content integrity check failed: {error}', integrity='failed')
-                        self.save(record)
+                # Ready versions have no recovery intent. Full verification is explicit
+                # (and streamed consumption still checks file sizes and checksums).
                 if record['state'] == 'staging':
                     if not interrupted:
                         continue
@@ -273,6 +290,16 @@ class ArtifactStore:
                     except Exception as error:
                         record.update(cleanup='failed', cleanup_error=str(error)[:4096])
                         self.save(record)
+
+    async def verify(self, services, collection_id, version_id):
+        async with self.consume(services, collection_id, version_id) as record:
+            try:
+                await run_file_operation(self.validate, record)
+            except ResourceValidationError as error:
+                return {'version_id': version_id, 'integrity': 'corrupt', 'error': str(error)}
+            except OSError as error:
+                return {'version_id': version_id, 'integrity': 'unavailable', 'error': str(error)}
+            return {'version_id': version_id, 'integrity': 'verified'}
 
     def validate(self, record):
         for entry in record['manifest']:
@@ -302,9 +329,13 @@ class ArtifactStore:
             self.consumers[version_id] -= 1
 
     async def release(self, services, collection_id, version_id, agent_id=None):
+        if agent_id is not None:
+            raise PermissionDeniedError('Only the trusted user control plane can release retained content')
         async with self._lock:
             self.authorize(services, collection_id, agent_id, 'artifact.manage', version_id)
             record = self.get(version_id)
+            if record.get('retention', {}).get('owner') != 'user':
+                raise PermissionDeniedError('Content release requires its retention owner authority')
             if record['state'] == 'deleted':
                 return record
             if record['state'] == 'staging' or self.consumers.get(version_id):

@@ -29,7 +29,11 @@ class _CapabilityContext:
             return await store.publish(self.services, collection, ArtifactPublish.model_validate(args), agent)
         version = args.pop('version_id', None)
         if capability.kind == 'artifact.manage':
-            return await store.release(self.services, collection, version, agent)
+            if args.get('action', 'remove') == 'add':
+                return store.add_reference(self.services, collection, version, agent, args.get('source_collection_id'))
+            if args.get('action', 'remove') != 'remove':
+                raise ResourceValidationError('Choose add or remove for collection references')
+            return store.remove_reference(self.services, collection, version, agent)
         if capability.kind == 'artifact.materialize':
             return await store.materialize(self.services, collection, version, ArtifactMaterialize.model_validate(args), agent)
         if args.get('path') is not None:
