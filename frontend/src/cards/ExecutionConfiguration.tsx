@@ -61,14 +61,14 @@ export function CredentialBinding({ id, reference, configured, revision, changed
     catch (reason) { setError(apiErrorMessage(reason)); }
     finally { setBusy(false); }
   }
-  return <div className="card-section">
+  return <div className="card-section credential-binding">
     <label className="field-label"><span>{reference} · {configured ? "Configured" : "Unbound"}</span>
       <input aria-label={`Secret for ${reference}`} type="password" autoComplete="new-password" value={value}
         onChange={(event) => setValue(event.target.value)} disabled={busy} />
     </label>
     <div className="editor-actions">
-      <button type="button" className="primary-button" disabled={busy || !value} onClick={() => void bind(value)}>Bind secret</button>
       <button type="button" className="secondary-button" disabled={busy || !configured} onClick={() => void bind(null)}>Unbind</button>
+      <button type="button" className="primary-button" disabled={busy || !value} onClick={() => void bind(value)}>Bind secret</button>
     </div>
     {error && <p role="alert">{error}</p>}
   </div>;
@@ -79,10 +79,10 @@ export function EnvironmentVariablesEditor({ rows, onChange, disabled }: {
 }) {
   const patch = (id: number, change: Partial<EnvironmentVariableRow>) => onChange(rows.map((row) => row.id === id ? { ...row, ...change } : row));
   return <fieldset className="environment-variables-editor" disabled={disabled}>
-    {rows.length === 0 && <p className="variables-empty">No variables yet. Add a normal value or a reference to a private credential.</p>}
+    {rows.length === 0 && <p className="variables-empty">No variables.</p>}
     {rows.map((row, index) => <div className="environment-variable-row" key={row.id}>
       <div className="variable-name-row">
-        <input aria-label={`Environment variable ${index + 1} name`} value={row.name} placeholder="Variable name, e.g. REGION"
+        <input aria-label={`Environment variable ${index + 1} name`} value={row.name} placeholder="Name, e.g. REGION"
           onChange={(event) => patch(row.id, { name: event.target.value })} />
         <button type="button" className="variable-remove" aria-label={`Remove environment variable ${index + 1}`}
           onClick={() => onChange(rows.filter((item) => item.id !== row.id))}><X size={14} /></button>
@@ -93,7 +93,7 @@ export function EnvironmentVariablesEditor({ rows, onChange, disabled }: {
           <option value="value">Value</option><option value="secret">Secret reference</option>
         </select>
         <input aria-label={`Environment variable ${index + 1} value`} value={row.value}
-          placeholder={row.kind === "secret" ? "Reference name, e.g. api-token" : "Value"}
+          placeholder={row.kind === "secret" ? "Reference, e.g. api-token" : "Value"}
           onChange={(event) => patch(row.id, { value: event.target.value })} />
       </div>
     </div>)}
@@ -148,7 +148,7 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
     setError(""); setNotice("");
     try {
       applyValue(JSON.parse(await file.text()));
-      setNotice(`Imported ${file.name}. Review the fields, then save.`);
+      setNotice(`Imported ${file.name}. Save to apply.`);
     } catch (reason) { setError(apiErrorMessage(reason)); }
     finally { if (importInput.current) importInput.current.value = ""; }
   }
@@ -174,12 +174,9 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
         <input ref={importInput} className="execution-config-file" type="file" accept="application/json,.json"
           aria-label="Import execution configuration JSON" onChange={(event) => void importJson(event.target.files?.[0])} />
       </div>
-      <p>Select this card explicitly for each command. Connecting or equipping it grants access.</p>
       {environment ? <>
-        <p>Add ordinary values here. For sensitive values, choose Secret reference, save, then bind the credential below.</p>
         <EnvironmentVariablesEditor rows={environmentRows} onChange={setEnvironmentRows} disabled={busy || !document} />
       </> : <>
-        <p>Authentication belongs in an Environment Profile. Add provider-specific options as named settings.</p>
         <div className="execution-target-fields">
           <label className="field-label"><span>Name</span><input value={targetName} disabled={busy || !document} placeholder="Display name"
             onChange={(event) => setTargetName(event.target.value)} /></label>
@@ -191,16 +188,23 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
           <SkillDefaultsEditor rows={targetRows} onChange={setTargetRows} />
         </fieldset>
       </>}
+      <details className="execution-config-help">
+        <summary>Usage details</summary>
+        <p>Select this card for each command. Connecting or equipping it grants access.</p>
+        <p>{environment
+          ? "For credentials, choose Secret reference, save, then bind the secret below."
+          : "Keep credentials in an Environment Profile. Add provider options as named settings."}</p>
+      </details>
       <div className="editor-actions">
-        <button type="button" className="primary-button" disabled={busy || !document} onClick={() => void save()}>Save configuration</button>
         <button type="button" className="secondary-button" disabled={busy} onClick={() => void reload()}>Reload</button>
+        <button type="button" className="primary-button" disabled={busy || !document} onClick={() => void save()}>Save</button>
       </div>
       {notice && <p className="execution-config-notice" role="status">{notice}</p>}
       {error && <p role="alert">{error}</p>}
     </section>
-    {environment && <section className="card-section">
-      <div className="section-heading"><span>Private credential bindings</span></div>
-      <p>Bindings belong to this card on this host. Copies require rebinding. Command code can read injected secrets.</p>
+    {environment && Object.keys(bindings).length > 0 && <section className="card-section">
+      <div className="section-heading"><span>Credentials</span></div>
+      <p>Stored on this host; rebind copies. Commands can read injected secrets.</p>
       {Object.entries(bindings).map(([reference, configured]) => <CredentialBinding key={`${card.id}:${reference}`}
         id={card.id} reference={reference} configured={configured} revision={document?.revision ?? 0} changed={refreshBindings} />)}
     </section>}

@@ -27,6 +27,9 @@ from backend.sandbox import win32, windows
 from backend.sandbox import windows_network_broker
 from backend.sandbox import windows_wfp
 from backend.tests.test_sandbox_runtime import FakeWindowsNativeApi
+from backend.tests.windows_network_acceptance import (
+    WfpAudit, acceptance_root, profile_sid, private_url, host_get, evidence,
+)
 
 
 @pytest.mark.asyncio
@@ -264,7 +267,10 @@ async def test_windows_real_enabled_skill_acl_credentials_and_process_limit(tmp_
     monkeypatch.setenv("OAW_PRIVATE_SECRET", "host-private-value")
     info = await backend.create("skill-egress")
     script = (
-        '@echo off\r\necho tampered 2>nul>>"%~f0"\r\n'
+        # COPY sets ERRORLEVEL on access denial; ECHO redirection in a batch
+        # file can leave the previous ERRORLEVEL unchanged despite denial.
+        '@echo off\r\necho tampered>mutation.txt\r\n'
+        'copy /y mutation.txt "%~f0" >nul 2>&1\r\n'
         'if not errorlevel 1 exit /b 90\r\n'
         'if defined OAW_PRIVATE_SECRET exit /b 91\r\n'
         'curl.exe --disable --noproxy "*" --fail --silent --show-error --max-time 12 '
@@ -309,17 +315,28 @@ async def test_windows_real_network_broker_pipe_denies_appcontainer(tmp_path):
                     reason="set OAW_TEST_PRIVATE_URL to a controlled reachable private-network HTTP peer")
 @pytest.mark.asyncio
 async def test_windows_real_private_peer_is_blocked_independent_of_interface_profile(tmp_path):
-    url = os.environ["OAW_TEST_PRIVATE_URL"]
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with opener.open(url, timeout=3) as host:
-        assert host.status == 200
+    import uuid
+    url = private_url()
+    token = uuid.uuid4().hex
+    assert host_get(url + "?host-before=" + token)
     backend = WindowsSandboxBackend(tmp_path)
     await backend.create("private-peer")
     try:
         await backend.start("private-peer")
-        response = await backend.execute("private-peer", _curl(url, 3),
+        response = await backend.execute("private-peer", _curl(url + "?guest=" + token, 3),
             execution_policy={"network_enabled": True}, timeout_seconds=5)
         assert response.exit_code in {7, 28} and not response.stdout, response
+        assert host_get(url + "?host-after=" + token)
+        peer_evidence = None
+        if os.environ.get("OAW_TEST_PRIVATE_EVIDENCE_URL"):
+            import json
+            peer_evidence = json.loads(host_get(os.environ["OAW_TEST_PRIVATE_EVIDENCE_URL"]))
+            paths = [r["path"] for r in peer_evidence]
+            assert any("host-before=" + token in p for p in paths)
+            assert any("host-after=" + token in p for p in paths)
+            assert not any("guest=" + token in p for p in paths)
+        evidence("private-peer", {"profile": backend._records["private-peer"].identity,
+            "url": url, "guest_exit_code": response.exit_code, "server_requests": peer_evidence})
     finally:
         await backend.destroy("private-peer")
 
@@ -364,19 +381,51 @@ class _ReadOnlyWfpFilters:
 
 @native_windows
 @pytest.mark.asyncio
-async def test_windows_real_owned_wfp_filters_exist_during_workload_and_are_removed_on_destroy(tmp_path):
+async def test_windows_real_enabled_timeout_and_launch_failure_cleanup(tmp_path):
     backend = WindowsSandboxBackend(tmp_path)
+    assert await backend.probe_network() == (True, None)
+    await backend.create("timeout-egress")
+    record = backend._records["timeout-egress"]
+    keys = windows_wfp.filter_keys(record.identity)
+    try:
+        await backend.start("timeout-egress")
+        result = await backend.execute("timeout-egress",
+            ["cmd.exe", "/d", "/c", "for /L %i in (1,1,2147483647) do @rem"],
+            execution_policy={"network_enabled": True}, timeout_seconds=0.2)
+        assert result.timed_out and record.active_job is None
+        assert (await backend.get("timeout-egress")).state == SandboxState.READY
+        with pytest.raises(FileNotFoundError, match="nonexistent.exe"):
+            await backend.execute("timeout-egress", [str(tmp_path / "nonexistent.exe")],
+                execution_policy={"network_enabled": True})
+        assert record.active_job is None
+        assert (await backend.get("timeout-egress")).state == SandboxState.ERROR
+        await backend.start("timeout-egress")
+        followup = await backend.execute("timeout-egress", ["cmd.exe", "/d", "/c", "echo recovered"],
+            execution_policy={"network_enabled": True})
+        assert followup.exit_code == 0 and "recovered" in followup.stdout
+    finally:
+        await backend.destroy("timeout-egress")
+    assert record.active_job is None and not record.root.exists()
+    inspector = _ReadOnlyWfpFilters()
+    try:
+        assert all(inspector.flags(key) is None for key in keys)
+    finally:
+        inspector.close()
+
+
+@native_windows
+@pytest.mark.asyncio
+async def test_windows_real_owned_wfp_filters_exist_during_workload_and_are_removed_on_destroy(tmp_path):
+    backend = WindowsSandboxBackend(acceptance_root())
     assert await backend.probe_network() == (True, None)
     await backend.create("filter-lifecycle")
     inspector = None
     workload = None
     destroyed = False
     try:
-        inspector = _ReadOnlyWfpFilters()
         record = backend._records["filter-lifecycle"]
-        keys = windows_wfp.filter_keys(record.identity)
-        assert len(keys) == 17
-        assert all(inspector.flags(key) is None for key in keys)
+        inspector = WfpAudit(record.identity, profile_sid(record))
+        inspector.absent("before-admission")
         await backend.start("filter-lifecycle")
         workload = asyncio.create_task(backend.execute("filter-lifecycle",
             ["cmd.exe", "/d", "/c", "for /L %i in (1,1,2147483647) do @rem"],
@@ -388,20 +437,17 @@ async def test_windows_real_owned_wfp_filters_exist_during_workload_and_are_remo
                 await workload  # Surface actual setup failure instead of a polling assertion.
             await asyncio.sleep(0.02)
         assert record.active_job is not None and not workload.done()
-        for key in keys:
-            flags = inspector.flags(key)
-            assert flags is not None and flags & 0x9 == 0x9, key
+        inspector.installed("during-workload")
         await backend.destroy("filter-lifecycle")
         destroyed = True
         assert (await asyncio.wait_for(workload, timeout=10)).cancelled
         assert record.active_job is None
-        assert all(inspector.flags(key) is None for key in keys)
+        inspector.absent("after-destruction")
     finally:
-        try:
-            if not destroyed:
-                await backend.destroy("filter-lifecycle")
-            if workload is not None:
-                await asyncio.wait_for(workload, timeout=10)
-        finally:
-            if inspector is not None:
-                inspector.close()
+        if not destroyed:
+            await backend.destroy("filter-lifecycle")
+        if workload is not None:
+            await asyncio.wait_for(workload, timeout=10)
+        if inspector is not None:
+            assert record.active_job is None
+            inspector.absent("teardown")

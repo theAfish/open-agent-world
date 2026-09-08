@@ -2,11 +2,13 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import { worldApi } from "../api/client";
 import { buildCardDraft } from "../state/helpers";
 import { useWorldStore } from "../state/worldStore";
 import type { SandboxInfo, WorldCard } from "../types/world";
-import { SandboxCardBody } from "./SandboxCard";
+import { useNodeSurfaceStore } from "../state/nodeSurfaces";
+import { SandboxCardBody, SandboxRuntimeControls, SandboxSettings } from "./SandboxCard";
 
 const sandbox: WorldCard = { id: "lab", ...buildCardDraft("sandbox", { x: 0, y: 0 }) };
 const info: SandboxInfo = {
@@ -18,7 +20,8 @@ const info: SandboxInfo = {
 
 function Card() {
   const card = useWorldStore((state) => state.cards[0]);
-  return <SandboxCardBody card={card} level="inspector" />;
+  const [dirty, setDirty] = useState(false);
+  return <><SandboxRuntimeControls card={card} disabled={dirty} /><SandboxSettings card={card} onDirtyChange={setDirty} /></>;
 }
 
 describe("sandbox configuration UI", () => {
@@ -59,7 +62,7 @@ describe("sandbox configuration UI", () => {
     render(<Card />);
     await screen.findByText("Linux namespaces in WSL2");
     fireEvent.change(screen.getByLabelText("Working folder"), { target: { value: "D:\\missing" } });
-    expect(screen.getByText(/Agent edits change the files/)).toBeTruthy();
+    expect(screen.getByText(/Edits change files in this folder directly/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Working folder does not exist.");
@@ -79,7 +82,7 @@ describe("sandbox configuration UI", () => {
     }] });
     vi.spyOn(worldApi, "updateNode").mockResolvedValue({ ...sandbox, config: { ...sandbox.config, network_enabled: true } });
     render(<Card />);
-    await screen.findByText(/Public outbound IPv4 only/);
+    await waitFor(() => expect((screen.getByRole("option", { name: "Enabled" }) as HTMLOptionElement).disabled).toBe(false));
     expect((screen.getByRole("option", { name: "Enabled" }) as HTMLOptionElement).disabled).toBe(false);
     fireEvent.change(screen.getByLabelText("Networking"), { target: { value: "enabled" } });
     expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(true);
@@ -117,7 +120,7 @@ describe("sandbox configuration UI", () => {
   it("locks a provisioned runtime while allowing stopped workspace edits", async () => {
     vi.mocked(worldApi.getSandbox).mockResolvedValue({ ...info, runtime_locked: true });
     render(<Card />);
-    await screen.findByText(/Runtime fixed for this sandbox/);
+    await screen.findByText(/Runtime fixed after first start/);
     expect((screen.getByLabelText("Runtime") as HTMLSelectElement).disabled).toBe(true);
     expect((screen.getByLabelText("Working folder") as HTMLInputElement).disabled).toBe(false);
   });
@@ -128,5 +131,32 @@ describe("sandbox configuration UI", () => {
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Install bubblewrap in this WSL distribution.");
     expect(screen.getByRole("status").textContent).toBe("Runtime unavailable");
     expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("blocks Start while the working folder picker is open", async () => {
+    let chooseFolder!: (value: { path: string | null }) => void;
+    vi.spyOn(worldApi, "pickFolder").mockImplementation(() => new Promise(resolve => { chooseFolder = resolve; }));
+    render(<Card />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Browse for Working folder" }));
+    expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(true);
+    chooseFolder({ path: null });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Start" }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("keeps the card compact and opens Settings in the sandbox window without starting", async () => {
+    const start = vi.spyOn(worldApi, "startSandbox");
+    useNodeSurfaceStore.setState({ surfaceLevels: {}, baseLevels: {}, drafts: {}, dragging: false, connectingNodeId: undefined });
+    render(<SandboxCardBody card={sandbox} level="inspector" />);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Stopped"));
+    expect(screen.getByText("Managed workspace")).toBeTruthy();
+    expect(screen.queryByLabelText("Working folder")).toBeNull();
+    expect(screen.queryByText("Environment variables")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(useNodeSurfaceStore.getState().surfaceLevels[sandbox.id]).toBe("workspace");
+    expect(useNodeSurfaceStore.getState().drafts[`sandbox-tab:${sandbox.id}`]).toBe("settings");
+    fireEvent.click(screen.getByRole("button", { name: "Open Window" }));
+    expect(useNodeSurfaceStore.getState().drafts[`sandbox-tab:${sandbox.id}`]).toBe("workspace");
+    expect(start).not.toHaveBeenCalled();
   });
 });

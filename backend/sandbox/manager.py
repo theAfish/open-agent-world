@@ -194,25 +194,15 @@ class SandboxManager(SandboxBackend):
             if not runtime.available:
                 raise SandboxSecurityError(runtime.reason or "sandbox runtime unavailable")
             if binding.policy.get("network_enabled"):
+                # Recheck even a cached failure so restored prerequisites can
+                # recover without switching runtimes or editing saved policy.
+                if "enabled" in runtime.supported_network_modes:
+                    runtime = await self.registry.refresh_network(runtime.id)
                 if "enabled" not in runtime.supported_network_modes or not runtime.network_available:
                     if runtime.network_status == "setup_failed":
-                        binding.network_error = runtime.network_reason
                         raise SandboxNetworkError(runtime.network_reason)
                     raise SandboxSecurityError(runtime.network_reason or "Networking is unavailable for the pinned runtime")
-                # Discovery is cached for UI polling. Recheck enabled prerequisites
-                # at admission without selecting or switching to another runtime.
-                registration = self.registry.registration(runtime.id)
-                if registration.network_probe is not None:
-                    try:
-                        available, reason = await asyncio.wait_for(registration.network_probe(), 20)
-                    except TimeoutError as exc:
-                        binding.network_error = "Networking setup failed: prerequisite check timed out"
-                        raise SandboxNetworkError(binding.network_error) from exc
-                    except SandboxNetworkError as exc:
-                        binding.network_error = str(exc)
-                        raise
-                    if not available:
-                        raise SandboxSecurityError(reason or "Networking prerequisites are missing")
+                binding.network_error = None
             backend = self._backend(runtime.id)
             created = False
             if not binding.provisioned:
@@ -245,13 +235,13 @@ class SandboxManager(SandboxBackend):
         status = runtime.network_status
         if runtime.network_available:
             status = "enabled" if binding.policy.get("network_enabled") else "disabled"
-        if binding.network_error:
+        if binding.network_error and runtime.network_available:
             status = "setup_failed"
         return {"network_enabled": binding.policy.get("network_enabled", False),
             "supported_network_modes": runtime.supported_network_modes,
             "network_available": runtime.network_available,
             "network_status": status,
-            "network_reason": binding.network_error or runtime.network_reason}
+            "network_reason": (binding.network_error if runtime.network_available else None) or runtime.network_reason}
 
     async def execute(self, sandbox_id: str, argv: Sequence[str], *, timeout_seconds: float | None = None,
                       env: Mapping[str, str] | None = None,

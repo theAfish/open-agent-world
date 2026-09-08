@@ -40,7 +40,7 @@ export function SandboxEnvironment({ card }: { card: WorldCard }) {
     setBusy(true); setError("");
     try {
       const doc = await worldApi.nodeDocumentAction(card.id, "replace", environmentVariablesToValue(rows), revision);
-      setRevision(doc.revision); await refresh(); setNotice("Applies to the next command. Running commands keep their admitted configuration.");
+      setRevision(doc.revision); await refresh(); setNotice("Applies to the next command.");
     } catch (e) { setError(apiErrorMessage(e)); }
     finally { setBusy(false); }
   }
@@ -59,27 +59,28 @@ export function SandboxEnvironment({ card }: { card: WorldCard }) {
     } catch (e) { setError(apiErrorMessage(e)); }
     finally { setBusy(false); }
   }
-  return <details className="sandbox-settings"><summary>Environment variables & linked profile</summary>
+  return <details className="sandbox-settings card-section"><summary>Environment variables</summary>
     <div className="sandbox-config-form execution-config">
-      <label className="field-label">Default Environment Profile
+      <label className="field-label">Default profile
         <select value={link?.source ?? ""} disabled={busy} onChange={e => void changeProfile(e.target.value)}>
           <option value="">No linked profile</option>
           {link && !cards.some(c => c.id === link.source) && <option value={link.source}>Linked profile · {link.source}</option>}
           {cards.filter(c => catalog.node_types.find(d => d.id === c.type)?.traits.includes("core.environment") && !c.equipment).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </label>
-      <p className="sandbox-help">The linked profile is shared with every execution authorized for this Sandbox. Local values override it. An invocation profile replaces the linked layer. Private Agent equipment is never shared automatically.</p>
+      <p className="sandbox-help" title="A command-specific profile replaces the linked profile. Private Agent equipment is never shared automatically.">Shared by executions in this Sandbox. Local values override the profile.</p>
       <EnvironmentVariablesEditor rows={rows} onChange={setRows} disabled={busy || revision === undefined} />
       <div className="editor-actions"><button className="primary-button" disabled={busy || revision === undefined} onClick={() => void save()}>Save environment</button>
         <button className="secondary-button" disabled={busy} onClick={() => void reload()}>Reload environment</button></div>
-      {notice && <p>{notice}</p>}
-      {error && <p role="alert">{error}</p>}
-      <p className="sandbox-help">Secret bindings stay on this host. Executed code receiving a secret can read it; output masking does not prevent that access.</p>
+      {notice && <p className="sandbox-help" role="status">{notice}</p>}
+      {error && <p className="sandbox-error" role="alert">{error}</p>}
+      {Object.keys(bindings).length > 0 && <p className="sandbox-help">Secrets stay on this host and are readable by authorized commands.</p>}
       {Object.entries(bindings).map(([reference, configured]) => <CredentialBinding key={reference} id={card.id} reference={reference}
         configured={configured} revision={revision ?? 0} changed={refresh} />)}
-      <strong>Effective configuration · {effective?.ready ? "Ready" : "Needs attention"}</strong>
-      {effective?.variables.map(v => <div key={v.name} className="sandbox-variable"><code>{v.name}</code> = {v.secret ? (v.configured ? "•••• · bound" : "Unbound secret") : v.value} <small>{v.source}</small></div>)}
-      {effective?.variables.length === 0 && <p>No application variables.</p>}
+      <details className="sandbox-settings"><summary>Effective values · {effective ? (effective.ready ? "Ready" : "Needs attention") : "Loading…"}</summary>
+        {effective?.variables.map(v => <div key={v.name} className="sandbox-variable"><code>{v.name}</code> = {v.secret ? (v.configured ? "•••• · bound" : "Unbound secret") : v.value} <small>{v.source}</small></div>)}
+        {effective?.variables.length === 0 && <p className="sandbox-help">No variables configured.</p>}
+      </details>
     </div>
   </details>;
 }

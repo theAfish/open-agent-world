@@ -5,6 +5,7 @@ runtime. HTTPS uses example.com unless OAW_TEST_HTTPS_URL names a controlled
 public endpoint. OS-specific tests separately exercise raw non-HTTP TCP.
 """
 import asyncio
+import json
 import os
 from dataclasses import replace
 
@@ -17,6 +18,63 @@ from backend.sandbox.manager import SandboxManager
 from backend.sandbox.models import SandboxNetworkError, SandboxSecurityError, SandboxStateError, SandboxValidationError
 from backend.sandbox.registry import SandboxRuntime, SandboxRuntimeRegistration, SandboxRuntimeRegistry
 from backend.tests.test_sandbox_manager import RecordingBackend
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provisioned", [False, True])
+@pytest.mark.parametrize("failure", ["false", "network_error", "os_error", "unexpected", "timeout"])
+async def test_failed_start_refreshes_network_status_and_recovers(tmp_path, monkeypatch, provisioned, failure):
+    backend = RecordingBackend(tmp_path / "runtime")
+    registry = SandboxRuntimeRegistry()
+    failing = False
+
+    async def probe():
+        return True, None
+
+    async def network_probe():
+        if not failing:
+            return True, None
+        if failure == "false":
+            return False, "broker unavailable"
+        if failure == "timeout":
+            await asyncio.Event().wait()
+        errors = {"network_error": SandboxNetworkError, "os_error": OSError, "unexpected": RuntimeError}
+        raise errors[failure]("broker unavailable")
+
+    registry.register(SandboxRuntimeRegistration(
+        SandboxRuntime("isolated", "Isolated", "windows", ("cmd.exe",),
+            supported_network_modes=("disabled", "enabled"), network_reason="Public IPv4 only"),
+        lambda: backend, probe, network_probe=network_probe))
+    manager = SandboxManager(tmp_path / "data", registry)
+    await manager.create("lab")
+    await manager.configure_options("lab", {"network_enabled": True})
+    if provisioned:
+        await manager.start("lab")
+        await manager.terminate("lab")
+    assert (await registry.catalog())[0].network_available
+    failing = True
+    wait_for = asyncio.wait_for
+
+    async def short_wait(awaitable, timeout):
+        return await wait_for(awaitable, 0.01 if timeout == 20 else timeout)
+
+    monkeypatch.setattr(asyncio, "wait_for", short_wait)
+    with pytest.raises(SandboxSecurityError):
+        await manager.start("lab")
+    info = await manager.get("lab")
+    assert info.network_enabled is True
+    assert info.network_available is False
+    assert info.network_status in {"missing_component", "setup_failed"}
+    assert ("timed out" if failure == "timeout" else "broker unavailable") in info.network_reason
+    assert info.state.value == "stopped"
+    assert json.loads(manager._manifest("lab").read_text())["policy"]["network_enabled"] is True
+    runtime = (await registry.catalog())[0]
+    assert not runtime.network_available and runtime.network_reason == info.network_reason
+    failing = False
+    recovered = await manager.start("lab")
+    assert recovered.network_enabled and recovered.network_available
+    assert recovered.network_status == "enabled" and recovered.network_reason == "Public IPv4 only"
+    assert (await manager.get("lab")).network_reason == "Public IPv4 only"
 
 
 @pytest.mark.asyncio
@@ -190,6 +248,8 @@ def test_real_saved_policy_routes_manual_agent_skill_and_diagnostics(tmp_path):
         assert client.post(base + "/start").status_code == 200
         offline_again = client.post(base + "/execute", json={"argv": argv})
         assert offline_again.status_code == 200 and offline_again.json()["exit_code"] != 0, offline_again.text
+        denied_agent = client.portal.call(provider.invoke_tool, agent["id"], f"sandbox.execute:{sandbox['id']}", {"argv": argv})
+        assert denied_agent["exit_code"] != 0, denied_agent
         denied_skill = run(client, agent, sandbox, skill, script_path=script,
             interpreter=["cmd.exe", "/d", "/c", "call"] if windows else ["/bin/sh"], argv=[url])
         assert denied_skill["exit_code"] != 0, denied_skill

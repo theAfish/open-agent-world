@@ -1,28 +1,101 @@
-import { SandboxEnvironment } from "./SandboxEnvironment";
-import { useNodeSurfaceStore } from "../state/nodeSurfaces";
+import { CircleStop, Folder, Play, RefreshCw, Settings2, SquareArrowOutUpRight } from "lucide-react";
+import { useEffect, useState } from "react";
 import { worldApi, apiErrorMessage } from "../api/client";
-import { CircleStop, Folder, Play, RefreshCw, ShieldCheck } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
 import type { SandboxWorkspaceAccess, WorldCard } from "../types/world";
-import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
-import { RelationshipList } from "./CardUtilities";
 import { FolderPathInput } from "../shell/FolderPathInput";
+import { RelationshipList } from "./CardUtilities";
+import { SandboxEnvironment } from "./SandboxEnvironment";
 
-export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeSurfaceLevel }) {
-  const edges = useWorldStore((state) => state.edges);
-  const startSandbox = useWorldStore((state) => state.startSandbox);
-  const stopSandbox = useWorldStore((state) => state.stopSandbox);
-  const saveConfig = useWorldStore((state) => state.saveSandboxConfig);
-  const refreshSandbox = useWorldStore((state) => state.refreshSandbox);
-  const loadRuntimes = useWorldStore((state) => state.loadSandboxRuntimes);
+function useSandboxRuntime(card: WorldCard) {
   const info = useWorldStore((state) => state.sandboxInfo[card.id]);
   const busy = useWorldStore((state) => state.sandboxBusy[card.id]);
   const error = useWorldStore((state) => state.sandboxErrors[card.id]);
   const runtimes = useWorldStore((state) => state.sandboxRuntimes);
-  const runtimesLoading = useWorldStore((state) => state.sandboxRuntimesLoading);
   const runtimesError = useWorldStore((state) => state.sandboxRuntimesError);
+  const runtime = card.config.runtime ?? "auto";
+  const selectedRuntime = runtimes?.runtimes.find((item) => item.id === (
+    info?.runtime_locked ? info.runtime_id : runtime === "auto" ? runtimes.default_runtime : runtime
+  ));
+  const ready = card.status === "ready" || card.status === "running";
+  const stopped = card.status === "stopped";
+  const statusLabel = busy === "starting" ? "Starting…"
+    : busy === "stopping" ? "Stopping…"
+    : busy === "executing" || card.status === "running" ? "Command running"
+    : !info ? "Status unavailable"
+    : !info.available ? "Runtime unavailable"
+    : card.status === "error" ? "Needs attention"
+    : card.status === "ready" ? "Ready"
+    : stopped ? "Stopped"
+    : card.status;
+  const runtimeIssue = selectedRuntime && !selectedRuntime.available ? selectedRuntime.reason : undefined;
+  return {
+    info, busy, selectedRuntime, ready, stopped, statusLabel,
+    runtimeLabel: selectedRuntime?.label ?? info?.runtime_id ?? "Sandbox",
+    issue: error ?? runtimesError ?? runtimeIssue ?? info?.unavailable_reason,
+  };
+}
+
+export function SandboxRuntimeControls({ card, disabled = false }: { card: WorldCard; disabled?: boolean }) {
+  const startSandbox = useWorldStore((state) => state.startSandbox);
+  const stopSandbox = useWorldStore((state) => state.stopSandbox);
+  const { info, busy, selectedRuntime, ready, stopped, statusLabel, runtimeLabel } = useSandboxRuntime(card);
+  const canStop = ready || card.status === "error" || busy === "executing";
+  return <div className="sandbox-status-panel">
+    <div className="instrument-gauge" data-active={ready && info?.available === true} aria-hidden="true"><i /><i /><i /></div>
+    <div><span>{runtimeLabel}</span><strong role="status">{statusLabel}</strong></div>
+    <button type="button" className={canStop ? "secondary-button" : "primary-button"}
+      disabled={canStop ? !!busy && busy !== "executing"
+        : disabled || !!busy || !info?.available || !stopped || (Boolean(card.config.network_enabled) && !selectedRuntime?.network_available)}
+      title={!canStop && disabled ? "Save or reset settings before starting" : undefined}
+      onClick={() => void (canStop ? stopSandbox(card.id) : startSandbox(card.id))}>
+      {canStop ? <CircleStop size={14} /> : <Play size={14} fill="currentColor" />}
+      {canStop ? "Stop" : "Start"}
+    </button>
+  </div>;
+}
+
+export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeSurfaceLevel }) {
+  const loadRuntimes = useWorldStore((state) => state.loadSandboxRuntimes);
+  const refreshSandbox = useWorldStore((state) => state.refreshSandbox);
   const socketState = useWorldStore((state) => state.socketState);
+  const { info, issue } = useSandboxRuntime(card);
+  useEffect(() => {
+    if (level !== "inspector") return;
+    void loadRuntimes();
+    void refreshSandbox(card.id);
+  }, [card.id, level, loadRuntimes, refreshSandbox, socketState]);
+  const workspace = card.config.workspace_path ?? "Managed workspace";
+  const openWindow = (tab: "workspace" | "settings") => {
+    useNodeSurfaceStore.getState().setDraft(`sandbox-tab:${card.id}`, tab);
+    useNodeSurfaceStore.getState().openWorkspace(card.id);
+  };
+  return <div className="expanded-stack sandbox-card-summary nodrag nowheel">
+    <SandboxRuntimeControls card={card} />
+    <dl className="sandbox-summary-list">
+      <div><dt><Folder size={12} /> Folder</dt><dd title={workspace}>{workspace}</dd></div>
+      <div><dt>Access</dt><dd>{(info?.workspace_access ?? card.config.workspace_access) === "read_only" ? "Read only" : "Read & write"}</dd></div>
+      <div><dt>Network</dt><dd>{(info?.network_enabled ?? card.config.network_enabled) ? "Enabled" : "Disabled"}</dd></div>
+    </dl>
+    {card.config.active_command && <code className="sandbox-current-command" title={card.config.active_command}>{card.config.active_command}</code>}
+    {issue && <p className="sandbox-error" role="alert">{issue}</p>}
+    <div className="action-row">
+      <button type="button" className="primary-button" onClick={() => openWindow("workspace")}><SquareArrowOutUpRight size={14} /> Open Window</button>
+      <button type="button" className="secondary-button" onClick={() => openWindow("settings")}><Settings2 size={14} /> Settings</button>
+    </div>
+  </div>;
+}
+
+export function SandboxSettings({ card, onDirtyChange }: { card: WorldCard; onDirtyChange?: (dirty: boolean) => void }) {
+  const edges = useWorldStore((state) => state.edges);
+  const saveConfig = useWorldStore((state) => state.saveSandboxConfig);
+  const refreshSandbox = useWorldStore((state) => state.refreshSandbox);
+  const loadRuntimes = useWorldStore((state) => state.loadSandboxRuntimes);
+  const runtimes = useWorldStore((state) => state.sandboxRuntimes);
+  const runtimesLoading = useWorldStore((state) => state.sandboxRuntimesLoading);
+  const socketState = useWorldStore((state) => state.socketState);
+  const { info, busy, stopped, issue } = useSandboxRuntime(card);
   const [network, setNetwork] = useState(Boolean(card.config.network_enabled));
   const [memory, setMemory] = useState(Number(card.config.memory_bytes ?? 536870912));
   const [processes, setProcesses] = useState(Number(card.config.active_process_limit ?? 16));
@@ -34,11 +107,9 @@ export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeS
   const [access, setAccess] = useState<SandboxWorkspaceAccess>(card.config.workspace_access ?? "read_write");
 
   useEffect(() => {
-    if (level !== "inspector") return;
     void loadRuntimes();
     void refreshSandbox(card.id);
-  }, [card.id, level, loadRuntimes, refreshSandbox, socketState]);
-
+  }, [card.id, loadRuntimes, refreshSandbox, socketState]);
   useEffect(() => {
     setNetwork(Boolean(card.config.network_enabled)); setMemory(Number(card.config.memory_bytes ?? 536870912));
     setProcesses(Number(card.config.active_process_limit ?? 16)); setTimeoutValue(Number(card.config.command_timeout ?? 60));
@@ -47,163 +118,121 @@ export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeS
   useEffect(() => setWorkspace(card.config.workspace_path ?? ""), [card.config.workspace_path]);
   useEffect(() => setAccess(card.config.workspace_access ?? "read_write"), [card.config.workspace_access]);
 
-  const connectionCount = useMemo(
-    () => edges.filter((edge) => edge.target === card.id || edge.source === card.id).length,
-    [card.id, edges],
-  );
-  const activeCommand = String(card.config.active_command ?? "");
   const dirty = runtime !== (card.config.runtime ?? "auto")
     || (workspace.trim() || null) !== (card.config.workspace_path ?? null)
     || access !== (card.config.workspace_access ?? "read_write")
     || network !== Boolean(card.config.network_enabled) || memory !== Number(card.config.memory_bytes ?? 536870912)
     || processes !== Number(card.config.active_process_limit ?? 16) || timeout !== Number(card.config.command_timeout ?? 60);
-  const ready = card.status === "ready" || card.status === "running";
-  const stopped = card.status === "stopped";
+  useEffect(() => { onDirtyChange?.(dirty || pickingFolder); }, [dirty, pickingFolder, onDirtyChange]);
   const canConfigure = stopped && !busy && !pickingFolder && !!info;
-  const canStop = ready || card.status === "error" || busy === "executing";
   const selectedRuntime = runtimes?.runtimes.find((item) => item.id === (
     info?.runtime_locked ? info.runtime_id : runtime === "auto" ? runtimes.default_runtime : runtime
   ));
-  const runtimeLabel = selectedRuntime?.label ?? info?.runtime_id ?? "Execution environment";
-  const statusLabel = busy === "starting" ? "Starting…"
-    : busy === "stopping" ? "Stopping…"
-    : busy === "executing" || card.status === "running" ? "Command running"
-    : !info ? "Status unavailable"
-    : !info.available ? "Runtime unavailable"
-    : card.status === "error" ? "Needs attention"
-    : card.status === "ready" ? "Ready"
-    : stopped ? "Stopped"
-    : card.status;
-  const runtimeIssue = selectedRuntime && !selectedRuntime.available ? selectedRuntime.reason : undefined;
-  const issue = error ?? runtimesError ?? runtimeIssue ?? info?.unavailable_reason;
-  const shellLabel = info?.shell.length ? info.shell.join(" ") : "Runtime shell";
+  const connectionCount = edges.filter((edge) => edge.target === card.id || edge.source === card.id).length;
+  const selectedRuntimeIssue = selectedRuntime && !selectedRuntime.available ? selectedRuntime.reason : undefined;
+  const settingsIssue = issue ?? selectedRuntimeIssue;
 
-  return (
-    <div className="expanded-stack sandbox-controls nodrag nowheel">
-      <div className="sandbox-status-panel">
-        <div className="instrument-gauge" data-active={ready && info?.available === true} aria-hidden="true"><i /><i /><i /></div>
-        <div>
-          <span>{runtimeLabel}</span>
-          <strong role="status">{statusLabel}</strong>
-        </div>
-        <button
-          type="button"
-          className={canStop ? "secondary-button" : "primary-button"}
-          disabled={canStop
-            ? !!busy && busy !== "executing"
-            : !!busy || pickingFolder || dirty || !info?.available || !stopped || (network && !selectedRuntime?.network_available)}
-          onClick={() => void (canStop ? stopSandbox(card.id) : startSandbox(card.id))}
-        >
-          {canStop ? <CircleStop size={14} /> : <Play size={14} fill="currentColor" />}
-          {canStop ? "Stop" : "Start"}
-        </button>
-      </div>
-
-      <details className="sandbox-settings" open={!ready || dirty}>
-        <summary>Workspace settings <span>{card.config.workspace_path ?? "Managed workspace"}</span></summary>
+  return <div className="expanded-stack sandbox-controls sandbox-settings-page nodrag nowheel">
+    <section className="sandbox-settings-section">
       <form className="sandbox-config-form" onSubmit={(event) => {
         event.preventDefault();
-        if (canConfigure && dirty) {
-          void saveConfig(card.id, {
-            runtime,
-            workspace_path: workspace.trim() || null,
-            workspace_access: workspace.trim() ? access : "read_write",
-            ...(network !== Boolean(card.config.network_enabled) ? { network_enabled: network } : {}),
-            ...(memory !== Number(card.config.memory_bytes ?? 536870912) ? { memory_bytes: memory } : {}),
-            ...(processes !== Number(card.config.active_process_limit ?? 16) ? { active_process_limit: processes } : {}),
-            ...(timeout !== Number(card.config.command_timeout ?? 60) ? { command_timeout: timeout } : {}),
-          });
-        }
+        if (canConfigure && dirty) void saveConfig(card.id, {
+          runtime,
+          workspace_path: workspace.trim() || null,
+          workspace_access: workspace.trim() ? access : "read_write",
+          ...(network !== Boolean(card.config.network_enabled) ? { network_enabled: network } : {}),
+          ...(memory !== Number(card.config.memory_bytes ?? 536870912) ? { memory_bytes: memory } : {}),
+          ...(processes !== Number(card.config.active_process_limit ?? 16) ? { active_process_limit: processes } : {}),
+          ...(timeout !== Number(card.config.command_timeout ?? 60) ? { command_timeout: timeout } : {}),
+        });
       }}>
         <div className="section-heading">
-          <span>Environment & workspace</span>
+          <span>Runtime & workspace</span>
           <button type="button" className="sandbox-refresh" aria-label="Refresh sandbox environment"
             disabled={!!busy || runtimesLoading}
             onClick={() => { void loadRuntimes(true); void refreshSandbox(card.id); }}>
             <RefreshCw size={12} /> {runtimesLoading ? "Checking…" : "Refresh"}
           </button>
         </div>
-        <label className="field-label">
-          <span>Runtime</span>
-          <select value={runtime} disabled={!canConfigure || info?.runtime_locked} onChange={(event) => setRuntime(event.target.value)}>
-            <option value="auto">Automatic{runtimes?.default_runtime
-              ? ` · ${runtimes.runtimes.find((item) => item.id === runtimes.default_runtime)?.label ?? runtimes.default_runtime}` : ""}</option>
-            {runtime !== "auto" && !runtimes?.runtimes.some((item) => item.id === runtime)
-              && <option value={runtime}>{runtime} · unavailable</option>}
-            {runtimes?.runtimes.map((item) => <option key={item.id} value={item.id} disabled={!item.available}>
-              {item.label}{item.available ? "" : " · unavailable"}
-            </option>)}
-          </select>
-        </label>
-        {info?.runtime_locked && <p className="sandbox-help">Runtime fixed for this sandbox. Create another card to use a different environment.</p>}
-
-        <div className="field-label">
-          <span><Folder size={12} /> Working folder</span>
-          <FolderPathInput label="Working folder" value={workspace} disabled={!canConfigure}
-            onPickingChange={setPickingFolder}
-            onChange={(path) => {
-              setWorkspace(path);
-              if (!path.trim()) setAccess("read_write");
-            }}
-            placeholder="Leave empty for a managed workspace"
-            describedBy={`workspace-help-${card.id}`} />
+        <div className="sandbox-settings-grid">
+          <label className="field-label sandbox-setting-wide">
+            <span>Runtime</span>
+            <select value={runtime} disabled={!canConfigure || info?.runtime_locked} onChange={(event) => setRuntime(event.target.value)}>
+              <option value="auto">Automatic{runtimes?.default_runtime
+                ? ` · ${runtimes.runtimes.find((item) => item.id === runtimes.default_runtime)?.label ?? runtimes.default_runtime}` : ""}</option>
+              {runtime !== "auto" && !runtimes?.runtimes.some((item) => item.id === runtime)
+                && <option value={runtime}>{runtime} · unavailable</option>}
+              {runtimes?.runtimes.map((item) => <option key={item.id} value={item.id} disabled={!item.available}>
+                {item.label}{item.available ? "" : " · unavailable"}
+              </option>)}
+            </select>
+          </label>
+          {info?.runtime_locked && <p className="sandbox-help sandbox-setting-wide">Runtime fixed after first start.</p>}
+          <div className="field-label sandbox-setting-wide">
+            <span title="Absolute folder path on the server. When using WSL from Windows, enter a Windows path."><Folder size={12} /> Working folder</span>
+            <FolderPathInput label="Working folder" value={workspace} disabled={!canConfigure}
+              onPickingChange={setPickingFolder}
+              onChange={(path) => { setWorkspace(path); if (!path.trim()) setAccess("read_write"); }}
+              placeholder="Managed workspace (default)" describedBy={`workspace-help-${card.id}`} />
+          </div>
+          <p className="sandbox-help sandbox-setting-wide" id={`workspace-help-${card.id}`}>
+            {workspace.trim() ? (access === "read_write" ? "Edits change files in this folder directly." : "Files in this folder are read only.")
+              : "Leave empty to create a managed workspace."}
+          </p>
+          <label className="field-label"><span>Folder access</span>
+            <select value={access} disabled={!canConfigure || !workspace.trim()} onChange={(event) => setAccess(event.target.value as SandboxWorkspaceAccess)}>
+              <option value="read_write">Read & write</option><option value="read_only">Read only</option>
+            </select>
+          </label>
+          <label className="field-label"><span>Networking</span>
+            <select aria-label="Networking" value={network ? "enabled" : "disabled"} disabled={!canConfigure} onChange={event => setNetwork(event.target.value === "enabled")}>
+              <option value="disabled">Disabled</option>
+              <option value="enabled" disabled={!selectedRuntime?.supported_network_modes?.includes("enabled") || !selectedRuntime?.network_available}>Enabled</option>
+            </select>
+          </label>
+          {selectedRuntime?.network_reason && (network || !selectedRuntime.network_available)
+            && <details className="sandbox-settings sandbox-setting-wide">
+              <summary>{selectedRuntime.network_available ? "Network details" : "Networking unavailable"}</summary>
+              <p className="sandbox-help">{selectedRuntime.network_reason}</p>
+            </details>}
         </div>
-        <p className="sandbox-help" id={`workspace-help-${card.id}`}>
-          Absolute folder path on the machine running the server. For WSL launched from Windows, use a Windows path.
-          {workspace.trim() ? (access === "read_write"
-            ? " Agent edits change the files in this folder directly."
-            : " The sandbox can read this folder; edits are blocked.")
-            : " A managed workspace is created on first start."}
-        </p>
-        <label className="field-label">
-          <span>Folder access</span>
-          <select value={access} disabled={!canConfigure || !workspace.trim()} onChange={(event) => setAccess(event.target.value as SandboxWorkspaceAccess)}>
-            <option value="read_write">Read & write</option>
-            <option value="read_only">Read only</option>
-          </select>
-        </label>
-        <label className="field-label"><span>Networking</span><select aria-label="Networking" value={network ? "enabled" : "disabled"} disabled={!canConfigure} onChange={e => setNetwork(e.target.value === "enabled")}>
-          <option value="disabled">Disabled (default)</option><option value="enabled" disabled={!selectedRuntime?.supported_network_modes?.includes("enabled") || !selectedRuntime?.network_available}>Enabled</option>
-        </select></label>
-        <p className="sandbox-help">{selectedRuntime?.network_reason ?? "Refresh to check networking support and prerequisites."} Restart required for runtime settings: stop, save changes, then start.</p>
-        <details><summary>Advanced settings</summary>
-          <label className="field-label">Memory (MiB)<input type="number" min={16} max={8192} disabled={!canConfigure} value={memory / 1048576} onChange={e => setMemory(Number(e.target.value) * 1048576)} /></label>
-          <label className="field-label">Process limit<input type="number" min={1} max={256} disabled={!canConfigure} value={processes} onChange={e => setProcesses(Number(e.target.value))} /></label>
-          <label className="field-label">Command timeout (seconds)<input type="number" min={1} max={600} disabled={!canConfigure} value={timeout} onChange={e => setTimeoutValue(Number(e.target.value))} /></label>
+        <details className="sandbox-settings"><summary>Resource limits</summary>
+          <div className="sandbox-limits-grid">
+            <label className="field-label">Memory (MiB)<input type="number" min={16} max={8192} disabled={!canConfigure} value={memory / 1048576} onChange={event => setMemory(Number(event.target.value) * 1048576)} /></label>
+            <label className="field-label">Process limit<input type="number" min={1} max={256} disabled={!canConfigure} value={processes} onChange={event => setProcesses(Number(event.target.value))} /></label>
+            <label className="field-label">Command timeout (seconds)<input type="number" min={1} max={600} disabled={!canConfigure} value={timeout} onChange={event => setTimeoutValue(Number(event.target.value))} /></label>
+          </div>
         </details>
         <div className="sandbox-config-actions">
           <span>{busy === "saving" ? "Saving…" : dirty ? "Unsaved changes" : stopped ? "Settings saved" : "Stop to edit settings"}</span>
           <button type="button" className="secondary-button" disabled={!canConfigure || !dirty} onClick={() => {
             setNetwork(Boolean(card.config.network_enabled)); setMemory(Number(card.config.memory_bytes ?? 536870912));
             setProcesses(Number(card.config.active_process_limit ?? 16)); setTimeoutValue(Number(card.config.command_timeout ?? 60));
-            setRuntime(card.config.runtime ?? "auto");
-            setWorkspace(card.config.workspace_path ?? "");
+            setRuntime(card.config.runtime ?? "auto"); setWorkspace(card.config.workspace_path ?? "");
             setAccess(card.config.workspace_access ?? "read_write");
           }}>Reset</button>
           <button type="submit" className="primary-button" disabled={!canConfigure || !dirty}>Save</button>
         </div>
       </form>
-      </details>
-
-      {issue && <p className="sandbox-error" role="alert">{issue}</p>}
-
-      <div className="sandbox-help"><span>{shellLabel}</span> · <span>{info?.workspace}</span><p>Network {info?.network_enabled ? "enabled" : "disabled"} · {activeCommand ? `Running: ${activeCommand}` : "No current activity"}</p></div>
-      <button className="primary-button" onClick={() => useNodeSurfaceStore.getState().openWorkspace(card.id)}>Open Window</button>
-      <SandboxEnvironment card={card} />
-      <details className="sandbox-settings"><summary>Recovery</summary><p className="sandbox-help">Stop terminates the process tree. Reset clears host-managed Skill cache while preserving workspace files and outputs. New, copied and summoned Sandboxes start stopped. Opening a window never starts them.</p>
-        <button className="secondary-button" disabled={!stopped || !!busy} onClick={() => void worldApi.sandboxWorkspace(card.id, "reset-cache", {}).then(() => setCacheMessage("Runtime cache cleared; workspace preserved.")).catch(e => setCacheMessage(apiErrorMessage(e)))}>Reset runtime cache</button>
-        {cacheMessage && <p>{cacheMessage}</p>}
-      </details>
-
-      <section className="card-section">
-        <div className="section-heading"><span>Attached objects</span><small>{connectionCount} total</small></div>
-        <RelationshipList card={card} empty="Connect an agent or resource to make it available here." />
-      </section>
-
-      <div className="security-strip sandbox-security">
-        <ShieldCheck size={16} />
-        <div><strong>Isolation</strong><span>{info?.security_boundary ?? "Start after an available runtime is selected."}</span></div>
-      </div>
-    </div>
-  );
+    </section>
+    {settingsIssue && <p className="sandbox-error" role="alert">{settingsIssue}</p>}
+    <SandboxEnvironment card={card} />
+    <details className="sandbox-settings card-section"><summary>Attached objects <span>{connectionCount} connected</span></summary>
+      <RelationshipList card={card} empty="No objects connected." />
+    </details>
+    <details className="sandbox-settings card-section"><summary>Runtime details</summary>
+      <dl className="sandbox-runtime-details">
+        <div><dt>Shell</dt><dd>{info?.shell.length ? info.shell.join(" ") : "Unavailable"}</dd></div>
+        <div><dt>Runtime folder</dt><dd>{info?.workspace ?? "Created on first start"}</dd></div>
+        <div><dt>Isolation</dt><dd>{info?.security_boundary ?? "Select an available runtime."}</dd></div>
+      </dl>
+    </details>
+    <details className="sandbox-settings card-section"><summary>Recovery</summary>
+      <p className="sandbox-help">Clear the runtime cache. Workspace files are preserved.</p>
+      <button type="button" className="secondary-button" disabled={!stopped || !!busy} onClick={() => void worldApi.sandboxWorkspace(card.id, "reset-cache", {})
+        .then(() => setCacheMessage("Runtime cache cleared."))
+        .catch(error => setCacheMessage(apiErrorMessage(error)))}>Reset runtime cache</button>
+      {cacheMessage && <p className="sandbox-help" role="status">{cacheMessage}</p>}
+    </details>
+  </div>;
 }

@@ -69,26 +69,42 @@ class SandboxRuntimeRegistry:
                 except (OSError, SandboxSecurityError, TimeoutError) as exc:
                     available, reason = False, str(exc) or "Runtime probe timed out"
                 runtime = replace(registration.runtime, available=available, reason=reason)
-                if registration.network_probe is not None:
-                    network_status = "missing_component"
-                    try:
-                        network_available, network_reason = await asyncio.wait_for(registration.network_probe(), 20)
-                    except SandboxNetworkError as exc:
-                        network_available, network_reason = False, str(exc)
-                        network_status = "setup_failed"
-                    except TimeoutError:
-                        network_available, network_reason = False, "Networking setup failed: prerequisite probe timed out"
-                        network_status = "setup_failed"
-                    except (OSError, SandboxSecurityError) as exc:
-                        network_available, network_reason = False, str(exc)
-                    runtime = replace(runtime, network_available=network_available,
-                        network_status="available" if network_available else network_status,
-                        network_reason=network_reason or runtime.network_reason)
-                return runtime
+                return await self._probe_network(registration, runtime)
 
             results = await asyncio.gather(*(probe(item) for item in self._registrations.values()))
             self._results = {item.id: item for item in results}
             return results
+
+    @staticmethod
+    async def _probe_network(registration: SandboxRuntimeRegistration, runtime: SandboxRuntime) -> SandboxRuntime:
+        if registration.network_probe is None:
+            return runtime
+        status = "missing_component"
+        try:
+            available, reason = await asyncio.wait_for(registration.network_probe(), 20)
+        except TimeoutError:
+            available, reason = False, "Networking setup failed: prerequisite probe timed out"
+            status = "setup_failed"
+        except SandboxNetworkError as exc:
+            available, reason = False, str(exc) or "Networking setup failed"
+            status = "setup_failed"
+        except (OSError, SandboxSecurityError) as exc:
+            available, reason = False, str(exc) or "Networking prerequisites are missing"
+        except Exception as exc:
+            available, reason = False, str(exc) or "Networking prerequisite probe failed"
+            status = "setup_failed"
+        return replace(runtime, network_available=available,
+            network_status="available" if available else status,
+            network_reason=(reason or registration.runtime.network_reason if available
+                            else reason or "Networking prerequisites are missing"))
+
+    async def refresh_network(self, runtime_id: str) -> SandboxRuntime:
+        """Publish admission checks to the same cache used by inspection/discovery."""
+        async with self._lock:
+            registration = self.registration(runtime_id)
+            runtime = await self._probe_network(registration, self._results[runtime_id])
+            self._results[runtime_id] = runtime
+            return runtime
 
     async def select(self, requested: str) -> SandboxRuntime:
         runtimes = await self.catalog()

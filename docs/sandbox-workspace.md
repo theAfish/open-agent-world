@@ -1,12 +1,12 @@
 # Sandbox configuration and window workspace
 
-The compact card reports runtime, readiness, network policy and current activity/error. The inspector contains configuration, Start/Stop, Open Window and recovery controls. The window contains the resizable Files sidebar, non-interactive console, previews and command history. Opening, closing or reopening a window never submits a command or changes runtime lifecycle.
+The compact card and inspector report runtime, readiness, folder, access and network policy, with Start/Stop and shortcuts to the window's Workspace and Settings tabs. Workspace shows Files on the left, a file preview at upper right and the terminal at lower right. Both dividers support pointer dragging and arrow keys. History is a tab inside the terminal; configuration, environment variables, presets, Skill resources, diagnostics and recovery live in Settings. Switching tabs preserves the selected file and unsaved inputs. Opening, closing or reopening a window never submits a command or changes runtime lifecycle.
 
 New, copied and summoned Sandboxes start stopped. Managed storage is prepared through the existing Start lifecycle. The selected runtime remains pinned after first start. Runtime, workspace, network and resource-limit changes require Stop → Save → Start. Ordinary environment changes apply to the next command without a restart.
 
 ## Configuration and authority
 
-Sandbox-local variables use the existing `EnvironmentProfile` document model, editor and private credential bindings, scoped directly to the Sandbox node. No hidden Environment cards are created. Add ordinary values or secret references, save, then bind secrets in the inspector.
+Sandbox-local variables use the existing `EnvironmentProfile` document model, editor and private credential bindings, scoped directly to the Sandbox node. No hidden Environment cards are created. Add ordinary values or secret references, save, then bind secrets under Settings → Environment variables.
 
 An `environment.default` connection points from an Environment Profile to a Sandbox. At most one default is allowed. It remains a live reference. The resolution order is:
 
@@ -31,7 +31,7 @@ Commands capture current documents, configuration and secret values at admission
 | `resource:<node-id>` | A currently attached resource, with its mount access mode |
 | Skill bundle | Inspected separately from its authorized node document; not a general filesystem root |
 
-Directory expansion is lazy and explicit refresh invalidates the visible tree. Responses contain at most 300 entries, with truncation reported. Previews are limited to 1 MiB and downloads/copies to 16 MiB. UTF-8 text and PNG/JPEG/GIF previews are supported; other content has an unsupported state. Loading, empty, denied, missing and oversized states are explicit. The file tree is never continuously polled. Attached resources can open their existing resource editor.
+The workspace root expands automatically; nested directory expansion is lazy. Refresh reloads visible directories while retaining expansion and selection. Starting the Sandbox, completing a command or changing its folder also refreshes files. Responses contain at most 300 entries, with truncation reported. Previews are limited to 1 MiB and downloads/copies to 16 MiB. UTF-8 text and PNG/JPEG/GIF previews are supported; other content has an unsupported state. Loading, empty, denied, missing and oversized states are explicit. The file tree is never continuously polled. Attached resources can open their existing resource editor.
 
 POSIX operations walk no-follow directory descriptors. Windows operations hold non-delete-sharing handles to path components and reject reparse points, junctions, device/ADS paths and ambiguous names. While an external workspace is running, browsing respects the existing backend workspace pin. Ordinary workspace hardlinks are rejected; explicitly attached resources retain their established hardlink contract. Backend locks and pins outlive cancelled filesystem-worker requests. WSL filesystem workers read the runtime's effective Linux roots and never reclaim another worker's live cgroup.
 
@@ -52,7 +52,7 @@ Enable public outbound networking using **Stop → Save → Start**. Missing net
 
 ## Console and recovery
 
-The console uses multiline input and closed stdin, not a PTY. Separate commands do not retain `cd`, `export` or shell-session state. Explicit interactive requests such as `read`, `set /p`, terminal editors and `ssh -tt` are rejected; other commands that require prompts may fail on EOF or reach the configured timeout. Full interactive-session detection is not possible for arbitrary programs.
+The terminal uses multiline input and closed stdin, not a PTY. Run submits the current command; Ctrl/Cmd+Enter is its keyboard shortcut. Separate commands do not retain `cd`, `export` or shell-session state. Explicit interactive requests such as `read`, `set /p`, terminal editors and `ssh -tt` are rejected; other commands that require prompts may fail on EOF or reach the configured timeout. Full interactive-session detection is not possible for arbitrary programs.
 
 Named presets load ordinary command text and use the same execution path. They never execute on opening a card/window. Do not put secret values into command text or presets. Use environment references.
 

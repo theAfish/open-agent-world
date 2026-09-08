@@ -1,19 +1,31 @@
-.execution-config p { margin: 6px 0; font-size: 12px; line-height: 1.5; }
-.execution-config code { overflow-wrap: anywhere; font-size: 11px; }
-.execution-config .field-label input { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; }
-.execution-config .editor-actions { display: flex; gap: 8px; margin-top: 8px; }
+.execution-config { min-width: 0; color: var(--ink-soft); font-size: 10px; }
+.execution-config p { margin: 0; color: var(--ink-faint); font-size: 9px; line-height: 1.5; }
+.execution-config code { overflow-wrap: anywhere; font-size: 10px; }
+.execution-config .editor-actions { flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 4px; }
 .execution-config [role="alert"] { color: var(--danger); overflow-wrap: anywhere; }
 .execution-config-heading { gap: 8px; }
 .execution-config-heading > span { margin-right: auto; }
 .execution-config-file { display: none; }
 .execution-config .compact-button { min-height: 28px; padding: 5px 8px; font-size: 10px; }
 .execution-config .compact-button, .environment-variables-editor .secondary-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
-.environment-variables-editor, .execution-target-settings { border: 0; padding: 0; margin: 14px 0 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-.environment-variable-row { border: 1px solid var(--line); background: var(--surface-soft); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 7px; }
-.execution-config .variable-name-row input, .execution-config .variable-value-row input { min-width: 0; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; }
-.execution-config .variable-value-row > select { width: 112px; flex-shrink: 0; box-sizing: border-box; padding: 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; }
+.environment-variables-editor, .execution-target-settings { border: 0; padding: 0; margin: 4px 0 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.environment-variables-editor > .secondary-button { align-self: flex-start; }
+.environment-variable-row { border: 1px solid var(--line); background: var(--card-soft); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.execution-config .variable-name-row input,
+.execution-config .variable-value-row input,
+.execution-config .variable-value-row > select,
+.execution-target-settings .skill-setting input:not([type="checkbox"]),
+.execution-target-settings .skill-setting select { min-width: 0; height: 32px; padding: 0 9px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--surface-soft) 88%, transparent); color: var(--ink); font-size: 10px; box-shadow: inset 0 1px 3px color-mix(in srgb, var(--shadow) 55%, transparent), inset 0 1px 0 var(--highlight); }
+.execution-config .variable-value-row > select { width: 110px; flex-shrink: 0; }
 .execution-config .variable-value-row > input { flex: 1; }
-.execution-target-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 14px; }
-.execution-target-settings legend { padding: 0 0 8px; font-size: 11px; font-weight: 600; }
+.execution-config .variable-remove { flex-shrink: 0; display: grid; place-items: center; width: 24px; height: 32px; padding: 0; border-radius: 6px; }
+.execution-config .variable-remove:hover:enabled { color: var(--danger); background: var(--danger-soft); }
+.execution-config :is(input, select, textarea, button):disabled { opacity: 0.65; }
+.execution-target-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 4px; }
+.execution-target-settings legend { padding: 0 0 6px; color: var(--ink-soft); font-size: 9px; font-weight: 650; }
 .execution-target-settings .skill-setting input, .execution-target-settings .skill-setting select { min-width: 0; }
-.execution-config-notice { color: var(--accent-strong); }
+.execution-config-help { margin-top: 4px; color: var(--ink-faint); font-size: 9px; }
+.execution-config-help summary { width: fit-content; padding-block: 3px; cursor: pointer; }
+.execution-config-help p { margin-top: 6px; }
+.execution-config .execution-config-notice { color: var(--accent-strong); }
+.credential-binding .field-label > span { text-transform: none; letter-spacing: normal; overflow-wrap: anywhere; }

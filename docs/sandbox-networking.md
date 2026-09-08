@@ -130,12 +130,18 @@ both configured resolvers need a separately designed DNS policy.
 ## Real-runtime acceptance
 
 Networking acceptance is explicitly opted in; skipped native tests are not
-positive evidence. Run from the repository root with the backend Python:
+positive evidence. Keep the application, pytest and Sandbox workloads
+unelevated. The Windows WFP lifecycle test uses an explicitly approved,
+test-only elevated read-only auditor with a startup-frozen profile allowlist;
+the test fails when the auditor is unavailable. The broker-loss test uses a
+separate approved controller for a test-owned broker and an existing-process
+native probe. It never adopts or controls an unrelated broker. Run from the
+repository root with the backend Python:
 
 ```powershell
 $env:OPEN_AGENT_WORLD_RUN_NATIVE_SANDBOX_TESTS='1'
 $env:OAW_TEST_NETWORK_RUNTIME='windows'
-backend/.venv/Scripts/python -m pytest backend/tests/test_windows_network.py backend/tests/test_sandbox_network_contract.py
+backend/.venv/Scripts/python -m pytest backend/tests/test_windows_network.py backend/tests/test_sandbox_network_contract.py backend/tests/test_windows_broker_loss.py
 
 $env:OAW_TEST_WSL_DISTRO='Ubuntu'
 $env:OAW_TEST_NETWORK_RUNTIME='wsl:Ubuntu'
@@ -157,46 +163,21 @@ Agent commands, an Agent-invoked Skill, diagnostics, cancellation, a rejected li
 policy edit and returning both manual and Skill execution to offline. Backend
 native tests cover protocol traffic, host/IPv6 denial and retained isolation.
 
-## Validation snapshot: 2026-09-08
+### Windows acceptance boundary
 
-| Backend | Real tests executed | Remaining verification |
-| --- | --- | --- |
-| Ubuntu WSL2 | Public DNS, verified HTTPS, non-HTTP SSH TCP exchange, manual/Agent/Skill/diagnostic policy routing, offline return, controlled host listener denial, alias/IPv6/Unix/raw denial, read-only Skill and credential isolation, memory limits, setup failure and cancellation with observed helper/namespace/cgroup cleanup | Public tests depend on external DNS, example.com and ssh.github.com. |
-| Native Linux | Implementation shared with and exercised through WSL | No standalone Linux host was available; native Linux remains unverified. |
-| Windows AppContainer | Retained offline filesystem/Skill/environment/Job/cancellation checks; real SID equivalence; an earlier capability-only prototype also completed DNS, verified HTTPS and SSH TCP | Final AppContainer + persistent WFP + elevated broker path is **not yet natively verified**. Administrator consent for the broker is pending. Earlier prototype connectivity is not final policy validation. |
+The Windows AppContainer path has been exercised with the elevated networking
+broker, persistent Sandbox-scoped WFP deny rules, and ordinary unprivileged
+application and workload processes. It covers offline restoration, verified
+public HTTPS and non-HTTP TCP, manual/Agent/Skill policy routing, protected
+host and private-network denial, broker access denial, graceful and abnormal
+broker loss, and cleanup.
 
-Executed checks (overlapping suites are not added together):
+The private-peer test requires `OAW_TEST_PRIVATE_URL` to name a controlled,
+reachable remote RFC1918 HTTP service and may set `OAW_TEST_PRIVATE_EVIDENCE_URL`
+for server-side request evidence. The host controls disable proxy use; an
+unreachable address, public endpoint or loopback listener is not acceptable.
 
-- Whole default backend suite: **483 passed, 19 skipped**. Skips include explicitly
-  opted-in native acceptance; this total is not an OS-isolation claim.
-- Combined WSL networking/contract/Linux tests: **47 passed, 1 skipped**. The skipped
-  old workspace scenario was then covered by the three existing real WSL Skill,
-  environment and workspace scenarios: **3 passed, 1 skipped** (the separate WSL
-  network flag was unset for that second selection).
-- Retained Windows native/Skill/environment/workspace suites: **124 passed,
-  1 skipped** (the WSL-specific scenario).
-- Final focused Windows policy/broker suite: **48 passed, 7 skipped**. It includes
-  an additional native lifecycle test, added after the whole-suite run, which
-  reads all 17 owned filter keys during an enabled workload, verifies persistent
-  hard-block flags and checks their removal after Sandbox destruction. This test
-  awaits the same administrator consent as the other final native networking cases.
-- Frontend: **173 passed** across 28 files; production TypeScript/Vite build passed.
-- Browser: **4 passed** across Sandbox card, execution configuration and equipment
-  scenarios. Sandbox card/runtime/file responses in that browser scenario are
-  mocked; the separate API networking acceptance above uses real isolation.
-- `git diff --check` passed. Existing dependency-deprecation and Vite bundle-size
-  warnings remain.
-
-The existing Ubuntu WSL distribution received `slirp4netns` 1.0.1 and its
-`libslirp0` dependency through an approved package install. No distribution,
-global firewall/sysctl policy, loopback exemption or Windows service was installed.
-The first public resolver was unavailable on this network; the second resolved
-successfully. Temporary controlled listeners and test profiles were cleaned up.
-
-After approving Windows administrator consent, rerun the native Windows command
-above and the API workflow with `OAW_TEST_NETWORK_RUNTIME=windows`. The private-peer
-negative test additionally accepts `OAW_TEST_PRIVATE_URL`: provide a controlled
-reachable private HTTP listener and first verify its response from the host. The
-test requires host success, Sandbox refusal and no host state change. This approval
-is a Windows OS requirement for the scoped WFP writes, not an application API
-permission or a reason to report Windows validation as complete.
+Native Linux has not been exercised on a standalone Linux host. WSL acceptance
+remains separately opt-in and depends on its installed distribution and public
+test endpoints. Store per-run logs, XML, filter snapshots and cleanup evidence
+under `.outputs/` or in CI artifacts rather than this documentation.
