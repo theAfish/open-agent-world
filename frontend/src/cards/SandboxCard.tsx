@@ -82,7 +82,7 @@ export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeS
     useNodeSurfaceStore.getState().setDraft(`sandbox-tab:${card.id}`, tab);
     useNodeSurfaceStore.getState().openWorkspace(card.id);
   };
-  return <div className="expanded-stack sandbox-card-summary nodrag nowheel">
+  return <div className="expanded-stack sandbox-card-summary nowheel">
     <SandboxRuntimeControls card={card} disabled={dirty} />
     <dl className="sandbox-summary-list">
       <div><dt><Folder size={12} /> Folder</dt><dd title={workspace}>{workspace}</dd></div>
@@ -145,7 +145,7 @@ export function SandboxSettings({ card, onDirtyChange, compact = false }: { card
   const settingsIssue = issue ?? selectedRuntimeIssue;
   const selectedNetwork = info && info.network_status && (info.runtime_locked || runtime === (card.config.runtime ?? "auto")) ? info : selectedRuntime;
 
-  return <div className="expanded-stack sandbox-controls sandbox-settings-page nodrag nowheel">
+  return <div className="expanded-stack sandbox-controls sandbox-settings-page nowheel">
     <section className="sandbox-settings-section">
       <form className="sandbox-config-form" onSubmit={(event) => {
         event.preventDefault();

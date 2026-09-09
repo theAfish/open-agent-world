@@ -39,7 +39,7 @@ export function PublishFiles({ card, paths, children }: { card: WorldCard; paths
     } catch (error) { setMessage(apiErrorMessage(error)); }
     finally { setBusy(false); }
   }
-  return <details className="artifact-publish nodrag nopan">
+  return <details className="artifact-publish">
     <summary>Publish selected files ({paths.length})</summary>
     {children}
     <p>{paths.join(", ") || "Select files or directories in the file tree."}</p>
@@ -82,7 +82,7 @@ export function ArtifactCollection({ card }: { card: WorldCard }) {
     catch (e) { setError(apiErrorMessage(e)); }
     finally { setBusy(false); }
   }
-  return <div className="artifact-collection nodrag nopan nowheel">
+  return <div className="artifact-collection nowheel">
     <header><h3>Published versions</h3><button className="secondary-button" onClick={() => void action(refresh)}>Refresh</button></header>
     <p>Retained independently of producers. Removing a reference preserves its stored content.</p>
     {error && <p role="alert">{error}</p>}

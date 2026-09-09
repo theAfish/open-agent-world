@@ -167,7 +167,7 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
     finally { setBusy(false); }
   }
 
-  return <div className="expanded-stack execution-config nodrag nopan">
+  return <div className="expanded-stack execution-config">
     <section className="card-section">
       <div className="section-heading execution-config-heading">
         <span>{environment ? "Environment variables" : "Destination configuration"}</span>

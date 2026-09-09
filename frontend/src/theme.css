@@ -434,7 +434,13 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .card-status[data-status="error"] > span:first-child { background: var(--danger); }
 
 .card-body { flex: 1; min-height: 0; padding-top: 11px; }
-.world-card, .container-plugin-workspace, .equipment-card {
+.world-card.is-node, .world-card.is-preview {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.world-card.is-inspector .node-inspector-content,
+.world-card.is-inspector .node-inspector-footer,
+.world-card.is-workspace, .container-plugin-workspace, .equipment-card {
   -webkit-user-select: text;
   user-select: text;
 }
@@ -461,6 +467,10 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .semantic-handle--right { top: 10px !important; width: 18px !important; height: calc(100% - 20px) !important; }
 .semantic-handle--left { left: 0 !important; }
 .semantic-handle--right { left: auto !important; right: 0 !important; }
+.world-card.is-inspector .semantic-handle--left,
+.world-card.is-inspector .semantic-handle--right { width: 10px !important; }
+.world-card.is-inspector .semantic-handle--top,
+.world-card.is-inspector .semantic-handle--bottom { height: 10px !important; }
 
 .connection-hover-hint {
   position: absolute;

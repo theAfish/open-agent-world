@@ -99,7 +99,7 @@ export function SkillToolboxBody({ card, workspace = false, single = false }: { 
     try { patch({ instructions: await file.text() }); }
     catch (error) { setError(apiErrorMessage(error)); }
   };
-  return <div className={`skill-toolbox nodrag nopan nowheel ${workspace ? "is-workspace" : ""}`}>
+  return <div className={`skill-toolbox nowheel ${workspace ? "is-workspace" : ""}`}>
     <header className="toolbox-heading"><div><span className="toolbox-eyebrow">{single ? "SKILL" : "SKILL TOOLBOX"}</span><h3>{box?.value.name ?? "Loading toolbox…"}</h3></div>{single ? <Wrench size={28} strokeWidth={1.3} /> : <Boxes size={28} strokeWidth={1.3} />}</header>
     <p className="toolbox-help">{box?.value.description || (single ? "Connect an Agent with Use skill to share these instructions, settings and files." : "Collect the tools you use together. Connect an Agent with “Use skills” to let it open the right tool for the job.")}</p>
     {box?.value.source && <p className="toolbox-origin">From {box.value.author || box.value.source.plugin_id} · v{box.value.source.version} · Editable local copy</p>}

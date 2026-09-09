@@ -27,7 +27,19 @@ import { PluginSurface } from "../plugins/PluginSurface";
 import { CatalogIcon } from "../components/CatalogIcon";
 
 const DRAG_THRESHOLD_PX = 5;
-const NON_DRAG_SELECTOR = "button, input, textarea, select, label, a, [contenteditable='true'], .react-flow__handle";
+const NON_DRAG_SELECTOR = "button, input, textarea, select, label, a, summary, [role='button'], [role='separator'], [contenteditable='true'], .react-flow__handle";
+
+// Element boxes include padding and empty line space. Only rendered text should
+// take a mouse gesture away from dragging the surrounding inspector.
+function hitsText(target: Element, x: number, y: number): boolean {
+  const range = document.createRange();
+  return Array.from(target.childNodes).some(node => {
+    if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) return false;
+    range.selectNodeContents(node);
+    return Array.from(range.getClientRects()).some(rect =>
+      x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom);
+  });
+}
 
 interface BodyProps { card: WorldCard; level: NodeSurfaceLevel }
 
@@ -142,9 +154,18 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
       }}
       onPointerMove={onPointerMove}
       onPointerDownCapture={onPointerDownCapture}
+      onMouseDownCapture={event => {
+        const target = event.target as Element;
+        if (visualLevel === "inspector" && target.closest(".node-inspector-content, .node-inspector-footer")
+          && !target.closest(NON_DRAG_SELECTOR)
+          && hitsText(target, event.clientX, event.clientY)) event.stopPropagation();
+      }}
+      onMouseDown={event => {
+        if ((event.target as Element).closest(NON_DRAG_SELECTOR)) event.stopPropagation();
+      }}
       onClick={(event) => {
         const start = pointerStart.current;
-        if (window.getSelection()?.toString()) return;
+        if ((visualLevel === "inspector" || visualLevel === "workspace") && window.getSelection()?.toString()) return;
         if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || connectingNodeId || dragging) return;
         if (event.detail !== 0 && start && (start.moved || Math.hypot(event.clientX - start.x, event.clientY - start.y) >= DRAG_THRESHOLD_PX)) return;
         if ((event.target as HTMLElement).closest("button, input, textarea, select, label, a, [contenteditable='true'], .react-flow__handle")) return;
@@ -198,19 +219,19 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
             onClick={() => closeInspector(card.id)} label={`Close ${card.name} inspector`} />
         </header>
 
-        <div className="node-preview-content nodrag nopan" aria-hidden={visualLevel !== "preview"}>
+        <div className="node-preview-content" aria-hidden={visualLevel !== "preview"}>
           <NodePreview card={card} />
           <span className="node-preview-hint">Click for details</span>
         </div>
 
-        <div className="card-body node-inspector-content nodrag nopan" aria-hidden={visualLevel !== "inspector"}>
+        <div className="card-body node-inspector-content" aria-hidden={visualLevel !== "inspector"}>
           <CardContent card={card} level={level} />
         </div>
 
-        <footer className="card-footer node-inspector-footer nodrag nopan">
+        <footer className="card-footer node-inspector-footer">
           {definition?.traits.includes("core.agent") && !card.ephemeral ? <EquipmentToggle card={card} />
             : <span className="card-id">{card.ephemeral ? "synthetic" : card.id.slice(0, 8)}</span>}
-          <div className="card-footer-actions nodrag nopan">
+          <div className="card-footer-actions">
             {!card.ephemeral ? <IconButton icon={Trash2} danger
               onClick={() => { dismissSurface(card.id); void deleteCard(card.id); }} label={`Remove ${card.name}`}
               title="Remove object (Ctrl+Z to undo)" /> : null}
