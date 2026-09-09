@@ -53,7 +53,7 @@ sys.modules['oaw_sandbox.linux_worker'].main(payload['request'],stdin_pending=bo
 # source change the next unrestricted transport helper.
 _WORKER_MODULES = tuple(
     (name, (Path(__file__).parent / f"{name}.py").read_text(encoding="utf-8"))
-    for name in ("models", "materialization", "base", "environment", "files", "transfers", "python_runtime", "linux_network", "linux", "linux_worker")
+    for name in ("models", "materialization", "base", "environment", "files", "transfers", "python_launchers", "python_runtime", "linux_network", "linux", "linux_worker")
 )
 
 

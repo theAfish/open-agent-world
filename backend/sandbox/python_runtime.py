@@ -16,12 +16,15 @@ import subprocess
 import sys
 import time
 
+from .python_launchers import repair_python_launchers
+
 
 # Scientific wheels can exceed the old ten-minute wall-clock limit on a slow
 # connection. uv still enforces its own connect/read timeouts for stalled I/O.
 PACKAGE_INSTALL_TIMEOUT = 1800
 RUNTIME_SETUP_TIMEOUT = 600
 PREPARATION_TIMEOUT = 60 + RUNTIME_SETUP_TIMEOUT + 2 * PACKAGE_INSTALL_TIMEOUT + 120
+LAUNCHER_VERSION = 1
 
 
 def validate_requirements(requirements):
@@ -162,11 +165,14 @@ class SharedPythonRuntime:
 
     def prepare_sync(self, requirements=(), bootstrap_key=None):
         requirements = validate_requirements(requirements)
-        if not requirements and (self.root / "ready.json").is_file() and self.python.is_file():
+        ready = self.root / "ready.json"
+        if (not requirements and ready.is_file() and self.python.is_file()
+            and json.loads(ready.read_text(encoding="utf-8")).get("launcher_version") == LAUNCHER_VERSION):
             return {"kind": self.kind, "python": str(self.python), "requirements": []}
         with mutation_lock(self.root):
             existed = self.python.is_file()
             self._ensure()
+            self._repair_launchers()
             receipts_path = self.root / "bootstrap.json"
             receipts = json.loads(receipts_path.read_text()) if existed and receipts_path.exists() else {}
             if requirements and (bootstrap_key is None or receipts.get(bootstrap_key) != requirements):
@@ -174,9 +180,15 @@ class SharedPythonRuntime:
                 if uv:
                     # Probe only the clean base interpreter. Querying the shared
                     # venv could execute a package's .pth/sitecustomize on the host.
-                    self._run([uv, "--no-config", "--cache-dir", self.root / "cache", "pip", "install", "--python", self.installer_python,
-                        "--prefix", self.venv,
-                        "--only-binary", ":all:", *requirements])
+                    # A crash mid-install must trigger repair on the next call.
+                    self._write_ready(launchers_ready=False)
+                    try:
+                        self._run([uv, "--no-config", "--cache-dir", self.root / "cache", "pip", "install", "--python", self.installer_python,
+                            "--prefix", self.venv,
+                            "--only-binary", ":all:", *requirements])
+                    finally:
+                        # A failed install may still have written some launchers.
+                        self._repair_launchers()
                 else:
                     raise RuntimeError("Install uv on the execution platform to manage shared Python packages safely")
                 if bootstrap_key is not None:
@@ -185,6 +197,17 @@ class SharedPythonRuntime:
                     temporary.write_text(json.dumps(receipts), encoding="utf-8")
                     temporary.replace(receipts_path)
         return {"kind": self.kind, "python": str(self.python), "requirements": requirements}
+
+    def _repair_launchers(self):
+        repair_python_launchers(self.bin, self.installer_python, self.python)
+        self._write_ready(launchers_ready=True)
+
+    def _write_ready(self, *, launchers_ready):
+        ready = self.root / "ready.json"
+        temporary = ready.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"python": str(self.python),
+            "launcher_version": LAUNCHER_VERSION if launchers_ready else 0}), encoding="utf-8")
+        temporary.replace(ready)
 
     async def prepare(self, requirements=(), bootstrap_key=None):
         from .models import SandboxSecurityError
