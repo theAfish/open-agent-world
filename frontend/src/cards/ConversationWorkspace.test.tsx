@@ -88,6 +88,38 @@ describe("ConversationWorkspace snapshots", () => {
     });
   });
 
+  it("keeps intermediate bubbles after final persistence and event buffer eviction", async () => {
+    vi.mocked(worldApi.getConversation).mockResolvedValue({
+      conversation_id: card.id, sessions: [session], agents: [],
+    });
+    const { container } = render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    const event = (id: string, type: string, payload: Record<string, unknown>) => ({
+      id, type, payload, agent_id: "agent-1", run_id: "run-1",
+      conversation_id: card.id, session_id: session.id,
+      timestamp: `2026-09-04T00:00:0${id}Z`,
+    });
+    act(() => useWorldStore.setState({ events: [
+      event("4", "agent_message", { text: "Final answer" }),
+      event("3", "tool_completed", { name: "read_file" }),
+      event("2", "agent_message", { text: "Checking the file" }),
+    ] }));
+    await screen.findByText("Checking the file");
+    expect(screen.getByText("Finished read_file.")).toBeTruthy();
+    vi.mocked(worldApi.getConversationMessages).mockResolvedValue([
+      historicalMessage,
+      { ...historicalMessage, id: "final", sender_kind: "agent", run_id: "run-1",
+        content: "Final answer", created_at: "2026-09-04T00:00:05Z" },
+    ]);
+    act(() => useWorldStore.setState({ events: [event("5", "conversation_message", {})] }));
+    await waitFor(() => expect(container.querySelector('[data-message-id="final"]')).toBeTruthy());
+    expect(screen.getAllByText("Final answer")).toHaveLength(1);
+    expect([...container.querySelectorAll(".workspace-message p, .conversation-live-activity")]
+      .map((element) => element.textContent)).toEqual([
+      historicalMessage.content, "Checking the file", "Finished read_file.", "Final answer",
+    ]);
+  });
+
   it("follows messages inside the transcript and preserves a reader's scroll position", async () => {
     const { container } = render(<ConversationWorkspace card={card} />);
     await screen.findByText(historicalMessage.content);

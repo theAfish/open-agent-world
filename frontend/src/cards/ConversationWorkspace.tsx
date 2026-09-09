@@ -1,7 +1,7 @@
 import { AlertTriangle, Bot, Info, MessageSquare, Plus, Send, Trash2, UserMinus, UserRound, Users, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
-import { activeConversationAgentIds, conversationLiveUpdates } from "../state/conversationActivity";
+import { activeConversationAgentIds, conversationLiveUpdates, type ConversationLiveUpdate } from "../state/conversationActivity";
 import {
   appendMention,
   completeMention,
@@ -69,11 +69,26 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     runtimeEvents, card.id, activeSessionId,
   ), [activeSessionId, card.id, runtimeEvents]);
   const respondingAgents = participants.filter((agent) => respondingAgentIds.includes(agent.id));
-  const liveUpdates = useMemo(() => conversationLiveUpdates(
-    runtimeEvents, card.id, activeSessionId,
-  ).filter((update) => !messages.some((message) => message.run_id === update.runId)), [
-    activeSessionId, card.id, messages, runtimeEvents,
-  ]);
+  const [activityHistory, setActivityHistory] = useState<{
+    scope: string; entries: ConversationLiveUpdate[];
+  }>({ scope: "", entries: [] });
+  const activityScope = `${card.id}/${activeSessionId ?? ""}`;
+  useEffect(() => {
+    const incoming = conversationLiveUpdates(runtimeEvents, card.id, activeSessionId);
+    setActivityHistory((current) => {
+      const entries = new Map((current.scope === activityScope ? current.entries : [])
+        .map((entry) => [entry.id, entry]));
+      for (const entry of incoming) entries.set(entry.id, entry);
+      return { scope: activityScope, entries: [...entries.values()] };
+    });
+  }, [runtimeEvents, card.id, activeSessionId, activityScope]);
+  const liveUpdates = activityHistory.scope === activityScope ? activityHistory.entries : [];
+  const timeline = [
+    ...messages.map((message) => ({ id: message.id, timestamp: message.created_at, message, update: undefined })),
+    ...liveUpdates.filter((update) => !messages.some((message) => (
+      message.run_id === update.runId && message.content === update.text
+    ))).map((update) => ({ id: update.id, timestamp: update.timestamp, message: undefined, update })),
+  ].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
   const availableAgents = connectedAgents.filter((agent) => (
     !activeSession?.participant_ids.includes(agent.id)
   ));
@@ -132,7 +147,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     // Keep auto-follow inside the transcript. scrollIntoView also scrolls the
     // canvas ancestors when a virtualized workspace enters the viewport.
     if (followTranscript.current && element) element.scrollTop = element.scrollHeight;
-  }, [messages.length, respondingAgentIds.join("|"), runtimeEvents]);
+  }, [messages.length, respondingAgentIds.join("|"), runtimeEvents, activityHistory]);
 
   useEffect(() => {
     setMentionIndex(0);
@@ -348,27 +363,28 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
           {error ? <div className="workspace-welcome"><strong>Conversation unavailable</strong><p>{error}</p></div> : null}
           {!error && messages.length === 0 && respondingAgents.length === 0 && liveUpdates.length === 0 ? (
             <div className="workspace-welcome"><span><MessageSquare size={22} /></span><strong>This session is ready</strong><p>Select a participant, type an explicit @name, or keep an unaddressed note.</p></div>
-          ) : messages.map((message) => (
+          ) : null}
+          {!error ? timeline.map(({ message, update }) => message ? (
             <article className={`workspace-message is-${message.sender_kind}`} key={message.id} data-message-id={message.id}>
               <span>{message.sender_kind === "agent" ? <Bot size={13} /> : message.sender_kind === "system" ? <Info size={13} /> : <UserRound size={13} />}</span>
               <div><strong>{message.sender_name}</strong><p>{message.content}</p></div>
             </article>
-          ))}
-          {!error ? liveUpdates.map((update) => {
+          ) : (() => {
+            if (!update) return null;
             const agent = agents.find((item) => item.id === update.agentId);
-            if (!agent) return null;
+
             return (
-              <article className={`workspace-message is-agent is-live${update.notice ? ` is-notice is-${update.tone ?? "info"}` : ""}`} key={`live-${update.runId}`} data-live-run-id={update.runId}>
+              <article className={`workspace-message is-agent is-live${update.notice ? ` is-notice is-${update.tone ?? "info"}` : ""}`} key={`live-${update.id}`} data-live-run-id={update.runId}>
                 <span>{update.notice ? (update.tone === "error" ? <AlertTriangle size={13} /> : <Info size={13} />) : <Bot size={13} />}</span>
                 <div>
-                  <strong>{agent.name}</strong>
+                  <strong>{agent?.name ?? update.agentId}</strong>
                   {update.notice
                     ? <div className={`conversation-live-notice${update.tone === "error" ? " is-error" : ""}`}>{update.notice}</div>
                     : update.text ? <p>{update.text}</p> : <div className="conversation-live-activity">{update.activity}</div>}
                 </div>
               </article>
             );
-          }) : null}
+          })()) : null}
           {!error ? respondingAgents.map((agent) => (
             <article className="workspace-message is-agent is-responding" key={`responding-${agent.id}`} data-responding-agent-id={agent.id} aria-label={`${agent.name} is responding`}>
               <span><Bot size={13} /></span>

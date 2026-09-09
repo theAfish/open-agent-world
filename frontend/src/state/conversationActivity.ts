@@ -1,6 +1,8 @@
 import type { RuntimeEvent } from "../types/world";
 
 export interface ConversationLiveUpdate {
+  id: string;
+  timestamp: string;
   agentId: string;
   runId: string;
   text?: string;
@@ -58,65 +60,45 @@ function runId(event: RuntimeEvent): string | undefined {
   return typeof nested === "string" ? nested : undefined;
 }
 
-/**
- * The runtime stream is plugin-neutral: providers may emit text and/or tool
- * lifecycle events.  Surface the newest useful event per Run while its durable
- * conversation message is still being saved.
- */
+/** Project newest-first runtime events into an ordered, append-only transcript. */
 export function conversationLiveUpdates(
   events: RuntimeEvent[],
   conversationId: string,
   sessionId?: string,
 ): ConversationLiveUpdate[] {
   if (!sessionId) return [];
-  const updates = new Map<string, ConversationLiveUpdate>();
-  const stoppedRuns = new Set<string>();
-  for (const event of events) {
-    if (
-      scopeValue(event, "conversation_id") !== conversationId
+  const updates: ConversationLiveUpdate[] = [];
+  const seen = new Set<string>();
+  for (const event of [...events].reverse()) {
+    if (scopeValue(event, "conversation_id") !== conversationId
       || scopeValue(event, "session_id") !== sessionId
-      || !event.agent_id
-    ) continue;
+      || !event.agent_id || seen.has(event.id)) continue;
     const id = runId(event);
     if (!id) continue;
+    seen.add(event.id);
+    const update: ConversationLiveUpdate = {
+      id: event.id, timestamp: event.timestamp, agentId: event.agent_id, runId: id,
+    };
     const type = normalizedType(event);
-    if (type === "runtime_error" || type === "agent_stopped") {
-      stoppedRuns.add(id);
-      updates.delete(id);
-      continue;
-    }
-    if (stoppedRuns.has(id) || updates.has(id)) continue;
-    if (type === "run_failed") {
-      const error = typeof event.payload.error === "string" && event.payload.error
-        ? event.payload.error
-        : "The run failed without an error detail.";
-      updates.set(id, { agentId: event.agent_id, runId: id, notice: error, tone: "error" });
-    } else if (type === "run_cancelled") {
-      updates.set(id, {
-        agentId: event.agent_id,
-        runId: id,
-        notice: "The response was stopped before completion.",
-        tone: "info",
-      });
-    } else if (type === "run_interrupted") {
-      updates.set(id, {
-        agentId: event.agent_id,
-        runId: id,
-        notice: "The response was interrupted by a backend restart.",
-        tone: "info",
-      });
-    } else if (type === "agent_message" && typeof event.payload.text === "string") {
-      updates.set(id, { agentId: event.agent_id, runId: id, text: event.payload.text });
+    if (type === "agent_message" && typeof event.payload.text === "string" && event.payload.text) {
+      update.text = event.payload.text;
     } else if (type === "tool_started" || type === "tool_completed") {
       const name = typeof event.payload.name === "string" ? event.payload.name : "tool";
-      updates.set(id, {
-        agentId: event.agent_id,
-        runId: id,
-        activity: type === "tool_started" ? `Using ${name}…` : `Finished ${name}.`,
-      });
-    }
+      update.activity = type === "tool_started" ? `Using ${name}\u2026` : `Finished ${name}.`;
+    } else if (type === "run_failed" || type === "runtime_error") {
+      update.notice = typeof event.payload.error === "string" && event.payload.error
+        ? event.payload.error : "The run failed without an error detail.";
+      update.tone = "error";
+    } else if (type === "run_cancelled" || type === "agent_stopped") {
+      update.notice = "The response was stopped before completion.";
+      update.tone = "info";
+    } else if (type === "run_interrupted") {
+      update.notice = "The response was interrupted by a backend restart.";
+      update.tone = "info";
+    } else continue;
+    updates.push(update);
   }
-  return [...updates.values()];
+  return updates;
 }
 
 /** Events are stored newest-first; the first lifecycle state wins per Agent. */

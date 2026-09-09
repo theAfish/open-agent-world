@@ -55,18 +55,22 @@ describe("conversation response activity", () => {
       .toEqual(["atlas"]);
   });
 
-  it("exposes the newest provider update for a conversation run", () => {
+  it("retains every provider update in chronological order", () => {
     const tool = runtimeEvent("1", "tool_started", "atlas", "session-a", { name: "read_file", run_id: "run-1" });
     const text = runtimeEvent("2", "agent_message", "atlas", "session-a", { text: "I found the notes.", run_id: "run-1" });
     expect(conversationLiveUpdates([text, tool], "conversation-a", "session-a")).toEqual([
-      { agentId: "atlas", runId: "run-1", text: "I found the notes." },
+      expect.objectContaining({ activity: expect.stringContaining("Using read_file") }),
+      expect.objectContaining({ text: "I found the notes." }),
     ]);
   });
 
-  it("does not retain a live update after a failed or stopped run", () => {
+  it("retains partial text after a failed run", () => {
     const failed = runtimeEvent("2", "runtime_error", "atlas", "session-a", { run_id: "run-1" });
     const text = runtimeEvent("1", "agent_message", "atlas", "session-a", { text: "partial", run_id: "run-1" });
-    expect(conversationLiveUpdates([failed, text], "conversation-a", "session-a")).toEqual([]);
+    expect(conversationLiveUpdates([failed, text], "conversation-a", "session-a")).toEqual([
+      expect.objectContaining({ text: "partial" }),
+      expect.objectContaining({ tone: "error" }),
+    ]);
   });
 });
 
@@ -75,7 +79,8 @@ describe("run lifecycle reliability", () => {
     const failed = runtimeEvent("2", "run_failed", "atlas", "session-a", { run_id: "run-1", error: "model endpoint rejected the request" });
     const text = runtimeEvent("1", "agent_message", "atlas", "session-a", { text: "partial", run_id: "run-1" });
     expect(conversationLiveUpdates([failed, text], "conversation-a", "session-a")).toEqual([
-      { agentId: "atlas", runId: "run-1", notice: "model endpoint rejected the request", tone: "error" },
+      expect.objectContaining({ text: "partial" }),
+      expect.objectContaining({ notice: "model endpoint rejected the request", tone: "error" }),
     ]);
   });
 
@@ -83,7 +88,8 @@ describe("run lifecycle reliability", () => {
     const cancelled = runtimeEvent("2", "run_cancelled", "atlas", "session-a", { run_id: "run-1" });
     const text = runtimeEvent("1", "agent_message", "atlas", "session-a", { text: "partial", run_id: "run-1" });
     expect(conversationLiveUpdates([cancelled, text], "conversation-a", "session-a")).toEqual([
-      { agentId: "atlas", runId: "run-1", notice: "The response was stopped before completion.", tone: "info" },
+      expect.objectContaining({ text: "partial" }),
+      expect.objectContaining({ notice: "The response was stopped before completion.", tone: "info" }),
     ]);
   });
 
