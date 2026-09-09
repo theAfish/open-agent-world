@@ -2808,6 +2808,10 @@ class ApplicationServices:
         environment_id: str | None = None,
         target_id: str | None = None,
     ) -> CommandResult:
+        if timeout_seconds is not None:
+            import math
+            if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)) or not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= 3600:
+                raise SandboxValidationError("timeout_seconds must be finite and between 0 (exclusive) and 3600 seconds")
         async with self._portable_state_gate.execution():
             # Validate graph authority against a complete formation, but do
             # not hold the graph barrier while an arbitrary command runs.
@@ -2894,9 +2898,10 @@ class ApplicationServices:
                         for event_type, output in ((SandboxEventType.STDOUT, result.stdout), (SandboxEventType.STDERR, result.stderr)):
                             if output:
                                 await self._emit_sandbox_event(SandboxEvent(sandbox_id, event_type, {"text": output}))
-                    receipt.update(state="cancelled" if result.cancelled else "timed_out" if result.timed_out else "finished",
+                    receipt.update(state="timed_out" if result.timed_out else "cancelled" if result.cancelled else "finished",
                         stdout=result.stdout[-65536:], stderr=result.stderr[-65536:], exit_code=result.exit_code,
-                        duration_seconds=result.duration_seconds)
+                        duration_seconds=result.duration_seconds, timed_out=result.timed_out, cancelled=result.cancelled,
+                        termination_reason="timeout" if result.timed_out else "cancelled" if result.cancelled else "exit")
                     return result
                 except Exception as error:
                     if receipt is not None:
@@ -2931,6 +2936,9 @@ class ApplicationServices:
             except asyncio.CancelledError:
                 async def stop_and_finish() -> None:
                     if not command_finished.is_set() and not _keep_on_disconnect:
+                        current = self._sandbox_commands.get(sandbox_id)
+                        if current is not None:
+                            current.update(cancellation_requested=True, cancellation_reason="caller_cancelled")
                         try:
                             await backend.terminate(sandbox_id)
                         except BaseException as error:
@@ -3024,6 +3032,11 @@ class ApplicationServices:
 
     async def _emit_sandbox_event(self, event: SandboxEvent) -> None:
         from backend.security.redaction import redact
+        current = self._sandbox_commands.get(event.sandbox_id)
+        if current is not None and event.type in {SandboxEventType.STDOUT, SandboxEventType.STDERR}:
+            label = "stdout" if event.type == SandboxEventType.STDOUT else "stderr"
+            text = redact(str(event.payload.get("text", "")), self._execution_secrets.get())
+            current[label] = (current.get(label, "") + text)[-65536:]
         await self.events.publish(
             _SANDBOX_EVENT_TYPES[event.type],
             node_id=event.sandbox_id,

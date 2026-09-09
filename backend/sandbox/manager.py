@@ -254,7 +254,7 @@ class SandboxManager(SandboxBackend):
         backend = self._backend(binding.resolved_runtime or "")
         if binding.policy and backend.supports_execution_policy:
             options["execution_policy"] = dict(binding.policy)
-        elif any(binding.policy.get(k, v) != v for k, v in {"network_enabled": False, "memory_bytes": 536870912, "active_process_limit": 16, "command_timeout": 60}.items()):
+        elif any(binding.policy.get(k, v) != v for k, v in {"network_enabled": False, "memory_bytes": 536870912, "active_process_limit": 64, "command_timeout": 60}.items()):
             raise SandboxValidationError("This runtime does not support configurable execution policy")
         if invocation_env is not None:
             if not backend.supports_invocation_environment:

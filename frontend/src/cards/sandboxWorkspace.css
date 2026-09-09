@@ -57,14 +57,9 @@
 .sandbox-terminal-output > span { color: var(--ink-faint); }
 .sandbox-command-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 3px 14px; color: var(--ink-faint); font-size: 9px; }
 .sandbox-command-meta > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.sandbox-command-form { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: start; flex-shrink: 0; column-gap: 7px; margin: 0 10px 9px; padding: 8px 9px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--card-surface); }
-.sandbox-command-form:focus-within { border-color: var(--accent); }
-.sandbox-prompt { padding-top: 1px; color: var(--accent); font: 17px/1.4 Consolas, monospace; }
-.sandbox-command-form textarea { width: 100%; min-width: 0; padding: 2px 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--ink); font: 11px/1.5 "Cascadia Code", Consolas, monospace; }
-.sandbox-command-form textarea::placeholder { color: var(--ink-faint); }
-.sandbox-command-options { grid-column: 2 / -1; display: flex; align-items: center; gap: 10px; min-height: 26px; }
-.sandbox-command-options select { min-width: 0; max-width: 150px; border: 0; padding: 2px 0; color: var(--ink-soft); background: var(--card-surface); font-size: 9px; cursor: pointer; }
-.sandbox-command-options > span { margin-left: auto; white-space: nowrap; font-size: 8px; color: var(--ink-faint); }
+.sandbox-command-form { display: flex; align-items: baseline; gap: 8px; margin: 0; padding: 0; border: 0; background: transparent; font: inherit; }
+.sandbox-prompt { color: var(--accent); font: inherit; }
+.sandbox-command-form textarea { flex: 1; width: 100%; min-width: 0; min-height: 0; margin: 0; padding: 0; resize: none; border: 0; border-radius: 0; outline: 0; box-shadow: none; background: transparent; color: var(--ink); font: inherit; }
 .sandbox-history { flex: 1; min-height: 0; overflow: auto; padding: 0 14px; }
 .sandbox-history article { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .sandbox-history article > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 10px; }

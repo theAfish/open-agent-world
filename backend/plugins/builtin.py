@@ -703,7 +703,7 @@ async def _execute_sandbox(
 ) -> Any:
     argv = values.get("argv")
     if (
-        set(values) - {"argv", "environment_id", "target_id"}
+        set(values) - {"argv", "environment_id", "target_id", "timeout_seconds"}
         or not isinstance(argv, list)
         or not argv
         or not all(isinstance(item, str) and item for item in argv)
@@ -713,8 +713,15 @@ async def _execute_sandbox(
         )
     return await context.execute_sandbox(
         capability.agent_id, capability.target_id, argv,
-        **{key: values[key] for key in ("environment_id", "target_id") if key in values}
+        **{key: values[key] for key in ("environment_id", "target_id", "timeout_seconds") if key in values}
     )
+
+
+async def _cancel_sandbox_command(context, capability, values):
+    command_id = values.get("command_id")
+    if set(values) != {"command_id"} or not isinstance(command_id, str) or not command_id:
+        raise ResourceValidationError("command_id is required; inspect the Sandbox first")
+    return await context.cancel_sandbox_command(capability.agent_id, capability.target_id, command_id)
 
 
 async def _install_python_packages(context, capability, values):
@@ -861,8 +868,12 @@ def _register_builtin(registry: PluginRegistration) -> None:
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.execute', tool_name='execute_command', target_parameter='sandbox',
         selectors=EXECUTION_SELECTORS,
-        description='Execute an argv command in the selected sandbox. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES.',
-        input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}}, "required": ["argv"], "additionalProperties": False}), _execute_sandbox)
+        description='Execute an argv command in the selected sandbox. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES. Calls use fresh non-interactive processes: cd/export/venv activation do not carry over. For installations set timeout_seconds explicitly and keep progress visible; do not pipe installers to tail. Shell pipelines report the final command status: use bash -o pipefail or download with curl -f to a file and only execute it after success. Use install_python_packages for shared Python dependencies.',
+        input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}, "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 3600, "description": "Command wall-clock budget in seconds. Omit to use Sandbox settings; set explicitly for slow installs."}}, "required": ["argv"], "additionalProperties": False}), _execute_sandbox)
+    registry.register_capability(CapabilityDefinition(
+        kind='sandbox.cancel_command', tool_name='cancel_command', target_parameter='sandbox',
+        description='Cancel the current Sandbox command and wait for process cleanup. First inspect the Sandbox and supply its current_command_id. A stale ID cannot cancel a newer command.',
+        input_schema={"type": "object", "properties": {"command_id": {"type": "string", "minLength": 1}}, "required": ["command_id"], "additionalProperties": False}), _cancel_sandbox_command)
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.install_python_packages', tool_name='install_python_packages', target_parameter='sandbox',
         description='Install missing Python packages into the persistent shared sandbox Python environment, then retry execution. Packages become available to all sandboxes on this execution platform. Supply index package names with optional extras/version constraints. Installation is serialized by the environment manager; source builds, paths and URLs are unsupported.',
@@ -1000,7 +1011,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         description="The agent can run commands in this isolated workplace.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.sandbox"}),
         templateable=True,
-        capabilities=(CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
+        capabilities=(CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.cancel_command'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="mount_read_only", label="Mount read-only", short_label="read-only",

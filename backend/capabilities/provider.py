@@ -143,7 +143,7 @@ class _CapabilityContext:
         }
 
     async def execute_sandbox(
-        self, agent_id: str, sandbox_id: str, argv: list[str], *, environment_id: str | None = None, target_id: str | None = None
+        self, agent_id: str, sandbox_id: str, argv: list[str], *, environment_id: str | None = None, target_id: str | None = None, timeout_seconds: float | None = None
     ) -> dict[str, Any]:
         self.services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
         if self.services.sandbox_backend is None:
@@ -151,7 +151,7 @@ class _CapabilityContext:
                 "sandbox execution is not configured on this host"
             )
         result = await self.services.execute_sandbox(
-            sandbox_id, argv, agent_id=agent_id, environment_id=environment_id, target_id=target_id
+            sandbox_id, argv, agent_id=agent_id, environment_id=environment_id, target_id=target_id, timeout_seconds=timeout_seconds
         )
         return asdict(result)
 
@@ -164,7 +164,7 @@ class _CapabilityContext:
             raise ResourceValidationError(validation_message(exc)) from exc
         result = await self.services.execute_sandbox(sandbox_id,
             [*request.interpreter, request.script_path, *request.argv],
-            agent_id=agent_id, _skill_request=request, environment_id=request.environment_id, target_id=request.target_id)
+            agent_id=agent_id, _skill_request=request, environment_id=request.environment_id, target_id=request.target_id, timeout_seconds=request.timeout_seconds)
         return asdict(result)
 
     async def copy_skill_resource(self, agent_id, sandbox_id, arguments):
@@ -174,12 +174,17 @@ class _CapabilityContext:
     async def install_python_packages(self, agent_id, sandbox_id, requirements):
         return await self.services.install_python_packages(sandbox_id, requirements, agent_id=agent_id)
 
+    async def cancel_sandbox_command(self, agent_id: str, sandbox_id: str, command_id: str) -> dict[str, Any]:
+        from backend.sandbox.history import stop
+        return await stop(self.services, sandbox_id, agent_id=agent_id, command_id=command_id)
+
     async def inspect_sandbox(self, agent_id: str, sandbox_id: str) -> dict[str, Any]:
         self.services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
         info = await self.services.get_sandbox(sandbox_id)
         self.services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
         from backend.execution_config import configuration_summary
         current = self.services._sandbox_commands.get(sandbox_id)
+        from backend.sandbox.history import recent_summaries
         return {
             "sandbox_id": sandbox_id, "state": info.state.value,
             "runtime_id": info.runtime_id, "platform": info.platform,
@@ -192,7 +197,11 @@ class _CapabilityContext:
             "network_reason": info.network_reason,
             "configuration": configuration_summary(self.services, sandbox_id),
             "current_caller": current["caller"] if current else None,
-            "console_mode": "non-interactive; each command starts in the configured workspace",
+            "current_command_id": current["id"] if current else None,
+            "recent_commands": recent_summaries(self.services, sandbox_id),
+            "console_mode": "non-interactive; each command starts in the configured workspace; cd/export/activation do not persist",
+            "command_timeout": self.services.world.get_card(sandbox_id).config.get("command_timeout", 60),
+            "installation": "Use install_python_packages for the shared read-only Python environment. On Linux/WSL, HOME=/sandbox/home persists; use $HOME/.local/bin or $HOME/bin for local CLI tools, or create a private venv in HOME/workspace and invoke its interpreter explicitly. npm -g defaults to $HOME/.local, with bins on PATH. /tmp is ephemeral.",
             "attachments": [
                 {"resource_id": item.resource_id,
                  "path": str(info.resources_path / item.relative_path.replace("\\", "/")) if info.resources_path else None,

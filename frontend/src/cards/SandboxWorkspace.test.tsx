@@ -85,7 +85,7 @@ describe("Sandbox workspace interaction", () => {
     expect((screen.getByRole("textbox", { name: "Command" }) as HTMLTextAreaElement).value).toBe("echo keep this draft");
   });
 
-  it("uses Ctrl or Cmd + Enter to run and prevents blank or duplicate submissions while busy", async () => {
+  it("uses Enter to run and prevents blank or duplicate submissions while busy", async () => {
     let finishCommand!: (value: Record<string, unknown>) => void;
     const execute = vi.spyOn(worldApi, "executeSandbox")
       .mockImplementationOnce(() => new Promise(resolve => { finishCommand = resolve; }))
@@ -96,21 +96,30 @@ describe("Sandbox workspace interaction", () => {
     fireEvent.keyDown(command, { key: "Enter", ctrlKey: true });
     expect(execute).not.toHaveBeenCalled();
     fireEvent.change(command, { target: { value: "  printf first  " } });
-    fireEvent.keyDown(command, { key: "Enter" });
+    fireEvent.keyDown(command, { key: "Enter", shiftKey: true });
     expect(execute).not.toHaveBeenCalled();
-    fireEvent.keyDown(command, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(command, { key: "Enter" });
     expect(execute).toHaveBeenCalledWith(card.id, "printf first");
-    expect((screen.getByRole("button", { name: "Run command" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((command as HTMLTextAreaElement).readOnly).toBe(true);
+    expect(screen.getByRole("log").textContent).toContain("$ printf first");
+    expect((command as HTMLTextAreaElement).value).toBe("");
     fireEvent.keyDown(command, { key: "Enter", metaKey: true });
     expect(execute).toHaveBeenCalledTimes(1);
 
     await act(async () => finishCommand({ stdout: "first output", stderr: "", exit_code: 0 }));
-    await waitFor(() => expect((screen.getByRole("button", { name: "Run command" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect((command as HTMLTextAreaElement).readOnly).toBe(false));
     fireEvent.change(command, { target: { value: "printf second" } });
     fireEvent.keyDown(command, { key: "Enter", metaKey: true });
     await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
     expect(execute).toHaveBeenLastCalledWith(card.id, "printf second");
     await waitFor(() => expect(screen.getByRole("log").textContent).toContain("second output"));
+    expect(screen.getByRole("log").textContent).toContain("first output");
+    expect(command.closest(".sandbox-terminal-output")?.contains(screen.getByRole("log"))).toBe(true);
+    fireEvent.change(command, { target: { value: "unfinished" } });
+    fireEvent.keyDown(command, { key: "ArrowUp" });
+    expect((command as HTMLTextAreaElement).value).toBe("printf second");
+    fireEvent.keyDown(command, { key: "ArrowDown" });
+    expect((command as HTMLTextAreaElement).value).toBe("unfinished");
   });
 
   it("refreshes files after starting and rebinding the workspace without a socket event", async () => {

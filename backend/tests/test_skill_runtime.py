@@ -355,3 +355,30 @@ def test_materialization_publication_retries_only_bounded_windows_denials(tmp_pa
         assert len(calls) == (5 if winerror is not None else 1)
         assert not (tmp_path / ".oaw/skills/test").exists()
     assert not list((tmp_path / ".oaw").glob(".materializing-*"))
+
+
+def test_agent_and_skill_timeout_reach_backend(runtime_client, monkeypatch):
+    client, backend, native = runtime_client
+    agent, sandbox, skill, _, _ = setup_skill(client)
+    observed = []
+    original = native.run_appcontainer
+    def capture(*args, **kwargs):
+        observed.append(kwargs["timeout_seconds"])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(native, "run_appcontainer", capture)
+    provider = WorldAgentCapabilityProvider(client.app.state.services)
+    result = client.portal.call(provider.invoke_tool, agent["id"], "operation:execute_command",
+        {"sandbox": sandbox["id"], "argv": ["python", "-V"], "timeout_seconds": 1200})
+    assert result["exit_code"] == 0
+    run(client, agent, sandbox, skill, timeout_seconds=900)
+    assert observed == [1200, 900]
+
+
+@pytest.mark.parametrize("value", [0, -1, 3601, float("inf"), float("nan"), True])
+def test_invalid_agent_timeout_rejected(runtime_client, value):
+    client, backend, native = runtime_client
+    agent, sandbox, skill, _, _ = setup_skill(client)
+    from functools import partial
+    with pytest.raises((SandboxValidationError, ResourceValidationError)):
+        client.portal.call(partial(client.app.state.services.execute_sandbox,
+            sandbox["id"], ["python", "-V"], agent_id=agent["id"], timeout_seconds=value))

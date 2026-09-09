@@ -1476,7 +1476,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       sandboxErrors: { ...state.sandboxErrors, [id]: undefined },
       sandboxRevisions: { ...state.sandboxRevisions, [id]: revision },
       cards: state.cards.map((card) => card.id === id
-        ? mergeCardPatch(card, { config: { active_command: command } }) : card),
+        ? mergeCardPatch(card, { config: { active_command: command, output: [...(Array.isArray(card.config.output) ? card.config.output : []), `$ ${command}`].slice(-100) } }) : card),
       activityOpen: true,
     }));
     try {

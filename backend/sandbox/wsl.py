@@ -334,7 +334,7 @@ class WslSandboxBackend(SandboxBackend):
             result = CommandResult(sandbox_id=raw["sandbox_id"], argv=tuple(raw["argv"]),
                 exit_code=raw["exit_code"], stdout=raw["stdout"], stderr=raw["stderr"],
                 duration_seconds=raw["duration_seconds"], timed_out=raw["timed_out"],
-                cancelled=raw["cancelled"] or active.cancelled)
+                cancelled=raw["cancelled"])
             self._infos[sandbox_id] = replace(info,
                 state=SandboxState.STOPPED if active.stop_requested else SandboxState.READY)
             return result

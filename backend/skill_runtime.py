@@ -20,6 +20,7 @@ class RunSkillScript(BaseModel):
     model_config = ConfigDict(extra="forbid")
     environment_id: StrictStr | None = None
     target_id: StrictStr | None = None
+    timeout_seconds: float | None = Field(default=None, gt=0, le=3600, strict=True, allow_inf_nan=False)
     skill_id: StrictStr = Field(description="World node ID returned by reading an authorized Skill or listing its Toolbox.")
     script_path: StrictStr = Field(validation_alias=AliasChoices("script", "script_path"),
         description="Relative bundled file, for example scripts/check.py.")

@@ -117,7 +117,7 @@ export function SandboxSettings({ card, onDirtyChange, compact = false }: { card
   const edit = (patch: typeof draft) => useNodeSurfaceStore.getState().setDraft(draftKey, JSON.stringify({ ...draft, ...patch }));
   const network = draft.network ?? Boolean(card.config.network_enabled), setNetwork = (network: boolean) => edit({ network });
   const memory = draft.memory ?? Number(card.config.memory_bytes ?? 536870912), setMemory = (memory: number) => edit({ memory });
-  const processes = draft.processes ?? Number(card.config.active_process_limit ?? 16), setProcesses = (processes: number) => edit({ processes });
+  const processes = draft.processes ?? Number(card.config.active_process_limit ?? 64), setProcesses = (processes: number) => edit({ processes });
   const timeout = draft.timeout ?? Number(card.config.command_timeout ?? 60), setTimeoutValue = (timeout: number) => edit({ timeout });
   const [cacheMessage, setCacheMessage] = useState("");
   const [pickingFolder, setPickingFolder] = useState(false);
@@ -134,7 +134,7 @@ export function SandboxSettings({ card, onDirtyChange, compact = false }: { card
     || (workspace.trim() || null) !== (card.config.workspace_path ?? null)
     || access !== (card.config.workspace_access ?? "read_write")
     || network !== Boolean(card.config.network_enabled) || memory !== Number(card.config.memory_bytes ?? 536870912)
-    || processes !== Number(card.config.active_process_limit ?? 16) || timeout !== Number(card.config.command_timeout ?? 60);
+    || processes !== Number(card.config.active_process_limit ?? 64) || timeout !== Number(card.config.command_timeout ?? 60);
   useEffect(() => { onDirtyChange?.(dirty || pickingFolder); }, [dirty, pickingFolder, onDirtyChange]);
   const canConfigure = stopped && !busy && !pickingFolder && !!info;
   const selectedRuntime = runtimes?.runtimes.find((item) => item.id === (
@@ -155,7 +155,7 @@ export function SandboxSettings({ card, onDirtyChange, compact = false }: { card
           workspace_access: workspace.trim() ? access : "read_write",
           ...(network !== Boolean(card.config.network_enabled) ? { network_enabled: network } : {}),
           ...(memory !== Number(card.config.memory_bytes ?? 536870912) ? { memory_bytes: memory } : {}),
-          ...(processes !== Number(card.config.active_process_limit ?? 16) ? { active_process_limit: processes } : {}),
+          ...(processes !== Number(card.config.active_process_limit ?? 64) ? { active_process_limit: processes } : {}),
           ...(timeout !== Number(card.config.command_timeout ?? 60) ? { command_timeout: timeout } : {}),
         }).then(saved => { if (saved) useNodeSurfaceStore.getState().setDraft(draftKey, ""); });
       }}>
@@ -215,6 +215,7 @@ export function SandboxSettings({ card, onDirtyChange, compact = false }: { card
             <label className="field-label">Process limit<input type="number" min={1} max={256} disabled={!canConfigure} value={processes} onChange={event => setProcesses(Number(event.target.value))} /></label>
             <label className="field-label">Command timeout (seconds)<input type="number" min={1} max={600} disabled={!canConfigure} value={timeout} onChange={event => setTimeoutValue(Number(event.target.value))} /></label>
           </div>
+          <p className="sandbox-help">On Linux/WSL, the process limit includes threads. npm installers may need 64 or more.</p>
         </details>
         <div className="sandbox-config-actions">
           <span>{busy === "saving" ? "Saving…" : dirty ? "Unsaved changes" : stopped ? "Settings saved" : "Stop to edit settings"}</span>

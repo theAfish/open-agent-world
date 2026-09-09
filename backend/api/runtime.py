@@ -116,7 +116,7 @@ class SandboxExecuteRequest(BaseModel):
 
     command: Annotated[str, Field(min_length=1, max_length=32_768)] | None = None
     argv: Annotated[list[str], Field(min_length=1, max_length=256)] | None = None
-    timeout_seconds: Annotated[float, Field(gt=0, le=600)] | None = None
+    timeout_seconds: Annotated[float, Field(gt=0, le=3600, strict=True, allow_inf_nan=False)] | None = None
     environment_id: str | None = None
     target_id: str | None = None
 

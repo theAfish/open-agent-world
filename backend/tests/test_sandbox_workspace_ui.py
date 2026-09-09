@@ -287,7 +287,7 @@ def test_network_enforcement_preserves_other_boundaries(tmp_path):
     for flag in ("--unshare-all", "--cap-drop", "--remount-ro", "--ro-bind"):
         assert flag in offline
     command = service_command(offline, "oaw-sandbox-" + "a" * 32 + ".scope", SandboxLimits(), 60)
-    assert "--property=TasksMax=16" in command and "--property=MemoryMax=536870912" in command
+    assert "--property=TasksMax=64" in command and "--property=MemoryMax=536870912" in command
     compile(_SERVICE_GUARD, "guard", "exec")
 
 
@@ -421,3 +421,44 @@ def test_real_local_workspace_scenario(tmp_path):
         assert client.post(base + "/stop").status_code == 200
         assert client.post(base + "/reset-cache").status_code == 200
         assert (folder / "skill-result.txt").read_text().strip() == "local-shared"
+
+
+def test_agent_observes_live_output_and_cancels_only_matching_command(runtime_client, monkeypatch):
+    from backend.sandbox.models import CommandResult, SandboxEvent, SandboxEventType, SandboxStateError
+    client, backend, _ = runtime_client
+    agent, sandbox, _, _, edges = setup_skill(client)
+    services = client.app.state.services
+    provider = WorldAgentCapabilityProvider(services)
+    async def scenario():
+        started, release = asyncio.Event(), asyncio.Event()
+        async def execute(sandbox_id, argv, **kwargs):
+            await services.publish_sandbox_event(SandboxEvent(sandbox_id, SandboxEventType.STDOUT, {"text": "install progress"}))
+            started.set()
+            await release.wait()
+            return CommandResult(sandbox_id, tuple(argv), -9, "install progress", "", 1, cancelled=True)
+        async def cancel(sandbox_id):
+            release.set()
+        monkeypatch.setattr(backend, "execute", execute)
+        monkeypatch.setattr(backend, "cancel", cancel)
+        task = asyncio.create_task(services.execute_sandbox(sandbox["id"], ["installer"], agent_id=agent["id"]))
+        await started.wait()
+        try:
+            info = await provider.invoke_tool(agent["id"], "operation:inspect_sandbox", {"sandbox": sandbox["id"]})
+            assert info["recent_commands"][-1]["stdout"] == "install progress"
+            with pytest.raises(SandboxStateError):
+                await provider.invoke_tool(agent["id"], "operation:cancel_command", {"sandbox": sandbox["id"], "command_id": "stale"})
+            assert not release.is_set()
+            await provider.invoke_tool(agent["id"], "operation:cancel_command", {"sandbox": sandbox["id"], "command_id": info["current_command_id"]})
+            result = await task
+            assert result.cancelled
+            from backend.sandbox.history import read
+            receipt = read(services, sandbox["id"])[-1]
+            assert receipt["cancelled"] and not receipt["timed_out"]
+            assert receipt["cancellation_reason"] == "command_cancel"
+        finally:
+            release.set()
+            await task
+    client.portal.call(scenario)
+    assert client.delete(f"/api/edges/{edges[0]['id']}").status_code == 200
+    with pytest.raises(PermissionDeniedError):
+        client.portal.call(provider.invoke_tool, agent["id"], f"sandbox.cancel_command:{sandbox['id']}", {"command_id": "any"})

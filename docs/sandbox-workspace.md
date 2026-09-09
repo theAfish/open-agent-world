@@ -76,3 +76,55 @@ Run native tests with an ordinary user token outside restricted tool sandboxes.
 See [network acceptance setup](sandbox-networking.md#real-runtime-acceptance)
 for the separate networking prerequisites and verification boundaries. Preserve
 per-run logs, failures, skips and unresolved platform evidence in `.outputs/` or CI.
+
+
+## Execution continuity and installation
+
+Linux/WSL Sandboxes have a private persistent `HOME=/sandbox/home`, stored under
+that Sandbox's managed root. `$HOME/.local/bin` and `$HOME/bin` are on PATH.
+CLI installations and private venvs there survive commands, Stop/Start and backend
+restart, independently of the selected workspace. Destroy removes this home;
+resetting the Skill cache does not. `/tmp` remains command-local. The host's home,
+credentials and system directories are not made writable or exposed.
+
+Commands remain non-interactive independent processes. `cd`, `export`, and shell
+activation do not carry into another call. Invoke a private venv's interpreter by
+path, or use the existing Environment configuration for repeatable variables.
+Use `install_python_packages` to mutate the managed shared Python environment;
+it is read-only inside workloads. Download standalone CLI tools into the private
+home. Do not assume system package installation or interactive prompts work.
+
+Manual, Agent `execute_command`, and `run_skill_script` requests accept optional
+`timeout_seconds` up to 3600 seconds. Omission uses the saved Sandbox budget.
+Inspect returns that default, the active command ID and the last three command
+receipts with bounded output tails. `cancel_command` requires the current command
+ID and live Sandbox execution authority; a stale ID cannot cancel its successor.
+History preserves `timed_out`, `cancelled`, termination reason and explicit
+cancellation source. Ordinary nonzero exits remain command results, not runtime
+setup errors. Live output is available through the existing event/history path;
+secret-bearing output is withheld until whole-output redaction completes.
+
+Keep installer output visible. Shell pipelines such as `curl ... | sh` can return
+zero when the download fails because the last program succeeds. Download with
+`curl -f` to a file and execute only after a successful download, or explicitly
+use a shell with `pipefail`. Avoid `tail` pipelines during long installations.
+This API does not provide a persistent shell, PTY, stdin writes or detached jobs.
+
+Cancellation ownership is established before asynchronous Python preparation.
+A cancellation during that phase prevents workload launch. The WSL bridge reports
+actual worker cancellation, rather than converting a late cancellation request
+into a claim that an already completed command was cancelled.
+
+
+Linux/WSL sets `NPM_CONFIG_PREFIX=/sandbox/home/.local`, so ordinary `npm install
+-g <package>` uses the Sandbox's persistent home and places commands on its PATH.
+It does not require writes to `/usr/lib/node_modules` or `/usr/local`. Existing
+running backend processes must be restarted to pick up the frozen worker update.
+For an older backend, `npm install -g --prefix "$HOME/.local" <package>` selects
+the same destination explicitly.
+
+New Sandboxes default to a process limit of 64. On Linux/WSL this is a cgroup task
+limit, counting threads and command helpers as well as processes. The previous
+16-task default can prevent npm install scripts from forking. Existing saved
+limits are preserved: Stop, set Process limit to 64 (or a suitable explicit
+budget), Save, then Start. The cap remains enforced.
