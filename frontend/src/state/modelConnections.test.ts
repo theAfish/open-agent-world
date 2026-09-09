@@ -16,6 +16,7 @@ describe("model connection migration", () => {
   it("keeps identical model names in different connections distinct and excludes disabled entries", () => {
     const draft = importLegacyModels({ revision: 0, connections: [], default_model: null }, DEFAULT_MODEL_SETTINGS);
     const c = draft.connections[0];
+    expect(c.auth_mode).toBe("api_key");
     draft.connections.push({ ...c, id: "second", name: "Second", models: c.models.map(m => ({ ...m, id: "second-" + m.id })) });
     expect(new Set(availableModels(draft).map(m => m.value)).size).toBe(c.models.length * 2);
     c.enabled = false;

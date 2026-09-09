@@ -96,7 +96,7 @@ describe("Application settings", () => {
     render(<SettingsPanel />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Remove saved key" }));
-    expect(screen.getByText("The saved key will be removed when you save.")).toBeTruthy();
+    expect(screen.getByText(/The saved key will be removed when you save/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => expect(saveModel).toHaveBeenCalled());
@@ -111,13 +111,53 @@ describe("Application settings", () => {
     expect((screen.getByLabelText("Authentication source") as HTMLSelectElement).value).toBe("api_key");
     fireEvent.change(screen.getByLabelText("New connection type"), { target: { value: "local" } });
     fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
-    expect(screen.queryByLabelText("API key")).toBeNull();
-    expect(screen.getByText("This local service does not require an API key.")).toBeTruthy();
+    expect((screen.getByLabelText("API key") as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByText(/Optional for this connection/)).toBeTruthy();
     fireEvent.click(screen.getAllByRole("button", { name: "Advanced connection options" }).at(-1)!);
     fireEvent.change(screen.getAllByLabelText("Authentication source").at(-1)!, { target: { value: "environment" } });
-    expect(screen.queryByLabelText("API key")).toBeNull();
+    expect((screen.getByLabelText("API key") as HTMLInputElement).disabled).toBe(false);
     expect((screen.getByLabelText("Backend environment variable") as HTMLInputElement).placeholder).toBe("OPENAI_API_KEY");
     expect(screen.getByText(/managed deployments/)).toBeTruthy();
+  });
+
+  it.each(["none", "environment"] as const)("accepts a key directly from %s without opening advanced options", async (auth_mode) => {
+    const initial = savedCatalog();
+    vi.mocked(worldApi.getModelConnections).mockResolvedValue({ ...initial, connections: [{ ...initial.connections[0],
+      id: "legacy", adapter: "legacy", auth_mode, api_key_configured: false,
+    }] });
+    const save = vi.spyOn(worldApi, "saveModelConnections").mockResolvedValue(initial);
+    render(<SettingsPanel />);
+    const key = await screen.findByLabelText("API key") as HTMLInputElement;
+    expect(key.disabled).toBe(false);
+    expect(screen.queryByLabelText("Authentication source")).toBeNull();
+    fireEvent.change(key, { target: { value: "direct-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].connections[0]).toMatchObject({ auth_mode: "api_key", api_key: "direct-key", clear_api_key: false });
+  });
+
+  it("changing credential sources does not delete the saved key", async () => {
+    const save = vi.spyOn(worldApi, "saveModelConnections").mockResolvedValue(savedCatalog());
+    render(<SettingsPanel />);
+    await screen.findByLabelText("API key");
+    fireEvent.click(screen.getByRole("button", { name: "Advanced connection options" }));
+    fireEvent.change(screen.getByLabelText("Authentication source"), { target: { value: "environment" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].connections[0].auth_mode).toBe("environment");
+    expect(save.mock.calls[0][0].connections[0].clear_api_key).toBeUndefined();
+  });
+
+  it("entering a replacement cancels pending key removal", async () => {
+    const save = vi.spyOn(worldApi, "saveModelConnections").mockResolvedValue(savedCatalog());
+    render(<SettingsPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "Remove saved key" }));
+    const key = screen.getByLabelText("API key") as HTMLInputElement;
+    expect(key.disabled).toBe(false);
+    fireEvent.change(key, { target: { value: "replacement-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].connections[0]).toMatchObject({ api_key: "replacement-key", clear_api_key: false });
   });
   it("keeps separate connection drafts and preserves them across tabs", async () => {
     const save = vi.spyOn(worldApi, "saveModelConnections").mockImplementation(async v => v);

@@ -698,6 +698,18 @@ async def _inspect_sandbox(
     return await context.inspect_sandbox(capability.agent_id, capability.target_id)
 
 
+async def _start_sandbox(context, capability, values):
+    if values:
+        raise ResourceValidationError("sandbox start takes no arguments")
+    return await context.start_sandbox(capability.agent_id, capability.target_id)
+
+
+async def _stop_sandbox(context, capability, values):
+    if values:
+        raise ResourceValidationError("sandbox stop takes no arguments")
+    return await context.stop_sandbox(capability.agent_id, capability.target_id)
+
+
 async def _execute_sandbox(
     context: CapabilityContext, capability: Any, values: dict[str, Any]
 ) -> Any:
@@ -865,6 +877,12 @@ def _register_builtin(registry: PluginRegistration) -> None:
         kind='image.view', tool_name='view_image', target_parameter='target',
         description='Inspect the selected managed image.',
         input_schema={"type": "object", "properties": {}, "additionalProperties": False}), _view_image)
+    for operation, handler in (("start", _start_sandbox), ("stop", _stop_sandbox)):
+        registry.register_capability(CapabilityDefinition(
+            kind=f"sandbox.{operation}", tool_name=f"{operation}_sandbox", target_parameter="sandbox",
+            description=("Start the selected Sandbox using its saved runtime, workspace and network settings. Inspect it before executing commands."
+                         if operation == "start" else "Stop the selected Sandbox, terminating any active command and waiting for cleanup. This affects every agent sharing this Sandbox."),
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False}), handler)
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.execute', tool_name='execute_command', target_parameter='sandbox',
         selectors=EXECUTION_SELECTORS,
@@ -1008,10 +1026,17 @@ def _register_builtin(registry: PluginRegistration) -> None:
         input_schema={"type": "object", "properties": {"source": {"type": "string"}, "destination": {"type": "string"}, "overwrite": {"type": "boolean", "default": False}}, "required": ["source", "destination"], "additionalProperties": False}), _copy_skill_resource)
     registry.register_relationship(RelationshipDefinition(
         id="execute", label="Execute", short_label="execute",
-        description="The agent can run commands in this isolated workplace.",
+        description="The agent can run commands in this isolated workplace. Starting and stopping require manual control.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.sandbox"}),
         templateable=True,
         capabilities=(CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.cancel_command'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
+    ))
+    registry.register_relationship(RelationshipDefinition(
+        id="execute_manage", label="Execute + Start/Stop", short_label="execute + manage",
+        description="The agent can run commands, start this Sandbox and stop it, including active commands.",
+        source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.sandbox"}),
+        templateable=True,
+        capabilities=(CapabilityGrantDefinition(kind='sandbox.start'), CapabilityGrantDefinition(kind='sandbox.stop'), CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.cancel_command'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="mount_read_only", label="Mount read-only", short_label="read-only",

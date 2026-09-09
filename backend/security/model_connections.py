@@ -70,6 +70,10 @@ class CatalogEdit(ModelCatalog):
         if self.default_model is not None and self.default_model not in available:
             raise ValueError("Choose an enabled model as the default")
         for connection in self.connections:
+            if connection.api_key and not connection.clear_api_key:
+                # Entering a key is sufficient; callers need not also change
+                # an old environment/no-key selection to activate that key.
+                connection.auth_mode = "api_key"
             if connection.id == "legacy" and connection.adapter != "legacy":
                 raise ValueError("The previous connection must retain automatic routing. Add a new connection for a different API format.")
             if connection.auth_mode == "none" and not connection.base_url:
@@ -93,7 +97,7 @@ class ModelConnectionStore:
         legacy = self.secrets.read()
         connections = []
         if legacy.base_url or legacy.api_key:
-            connections = [dict(id="legacy", name="Default connection", adapter="legacy", auth_mode="api_key" if legacy.api_key else "environment",
+            connections = [dict(id="legacy", name="Default connection", adapter="legacy", auth_mode="api_key",
                                 base_url=legacy.base_url, enabled=True, models=[],
                                 api_key_encrypted=self.secrets._fernet(create=True).encrypt(legacy.api_key.encode()).decode() if legacy.api_key else None)]
         return dict(revision=0, connections=connections, default_model=None)
@@ -127,11 +131,6 @@ class ModelConnectionStore:
                 elif item.api_key:
                     encrypted = self.secrets._fernet(create=True).encrypt(item.api_key.encode()).decode()
                 connection = item.model_dump(exclude={"api_key", "clear_api_key", "api_key_configured"})
-                # Before the catalog existed, clearing its only key restored
-                # provider environment resolution for raw model names. Keep
-                # that migration behavior for the legacy connection alone.
-                if item.id == "legacy" and item.clear_api_key:
-                    connection["auth_mode"] = "environment"
                 connection["api_key_encrypted"] = encrypted
                 connections.append(connection)
             raw = dict(revision=old["revision"] + 1, connections=connections, default_model=edit.default_model)

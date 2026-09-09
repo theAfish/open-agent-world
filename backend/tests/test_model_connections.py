@@ -103,7 +103,21 @@ def test_legacy_migration_preserves_native_routing_and_clears_old_key(tmp_path):
         draft["connections"][0]["clear_api_key"] = True
         store.save(CatalogEdit.model_validate(draft))
         assert secrets.read().api_key is None
-        assert "api_key" not in runtime._adk_model("openai/old-model")._additional_args
+        assert store.read().connections[0].auth_mode == "api_key"
+        with pytest.raises(ResourceValidationError, match="needs an API key"):
+            runtime._adk_model("openai/old-model")
+    finally:
+        db.close()
+
+
+def test_legacy_connection_without_a_key_defaults_to_key_entry(tmp_path):
+    db = Database(tmp_path / "state.db")
+    try:
+        secrets = LlmSettingsStore(db, tmp_path)
+        secrets.save(base_url="https://legacy.example/v1")
+        connection = ModelConnectionStore(secrets).read().connections[0]
+        assert connection.auth_mode == "api_key"
+        assert not connection.api_key_configured
     finally:
         db.close()
 
@@ -142,6 +156,29 @@ def test_environment_authentication_uses_the_connection_variable_not_a_saved_key
         adapter, model_id, base_url, api_key = store.resolve("oaw:model:work")
         assert (adapter, model_id, base_url) == ("openai", "same-model", "https://work.example/v1")
         assert api_key == "server-only-secret"
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("auth_mode", ["none", "environment"])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_entered_key_activates_without_a_separate_mode_change(tmp_path, auth_mode, legacy):
+    db = Database(tmp_path / "state.db")
+    try:
+        store = ModelConnectionStore(LlmSettingsStore(db, tmp_path))
+        item = connection("legacy" if legacy else "work", auth_mode=auth_mode)
+        item.pop("api_key")
+        if legacy:
+            item["adapter"] = "legacy"
+        store.save(CatalogEdit(connections=[item]))
+        edit = store.read().model_dump()
+        edit["connections"][0]["api_key"] = "entered-directly"
+        saved = store.save(CatalogEdit.model_validate(edit))
+        assert saved.connections[0].auth_mode == "api_key"
+        assert store.resolve("oaw:model:" + item["id"])[3] == "entered-directly"
+        assert "entered-directly" not in saved.model_dump_json()
+        if legacy:
+            assert store.legacy_options()["api_key"] == "entered-directly"
     finally:
         db.close()
 

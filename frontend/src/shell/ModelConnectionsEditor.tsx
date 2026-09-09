@@ -77,30 +77,36 @@ export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
         </select></label>
         <label className="field-label"><span>Base URL</span><input type="url" value={connection.base_url} onChange={e => update({ base_url: e.target.value })} placeholder="Use provider default" spellCheck={false} />
           <small>Use the service’s API address, including /v1 if required. Leave blank for the provider default.</small></label>
-        {connection.auth_mode === "api_key" && <div className="field-label connection-key-field">
+        <div className="field-label connection-key-field">
           <label htmlFor="connection-key">API key</label><input id="connection-key" type="password" value={connection.api_key ?? ""}
-            disabled={connection.clear_api_key} autoComplete="new-password" spellCheck={false} data-1p-ignore
+            autoComplete="new-password" spellCheck={false} data-1p-ignore
             placeholder={connection.api_key_configured && !connection.clear_api_key ? "Saved securely — leave blank to keep" : "Enter API key"}
-            onChange={e => update({ api_key: e.target.value })} />
-          <small>{connection.clear_api_key ? "The saved key will be removed when you save." : "Keys are encrypted on the backend. Their values are never returned to the browser."}</small>
+            onChange={e => {
+              const api_key = e.target.value;
+              update({ api_key, ...(api_key.trim() ? { auth_mode: "api_key", clear_api_key: false } : {}) });
+            }} />
+          <small>{connection.clear_api_key ? "The saved key will be removed when you save. Enter a new key to replace it instead."
+            : connection.auth_mode === "none" ? "Optional for this connection. Leave blank to use no key, or enter a key to use it."
+            : connection.auth_mode === "environment" ? "Using backend credentials. Enter a key here to use it instead."
+            : "Keys are encrypted on the backend. Their values are never returned to the browser."}</small>
           {connection.api_key_configured && <button type="button" className="secondary-button" onClick={() => update({ clear_api_key: !connection.clear_api_key, api_key: "" })}>{connection.clear_api_key ? "Keep saved key" : "Remove saved key"}</button>}
-        </div>}
-        {connection.auth_mode === "none" && <p className="settings-description connection-key-field">This local service does not require an API key.</p>}
-        {connection.auth_mode === "environment" && <p className="settings-description connection-key-field">This connection uses credentials from the backend environment.</p>}
+        </div>
         </div>
         <div className="connection-advanced">
           <button type="button" className="text-button" aria-expanded={advancedConnectionIds.has(connection.id)} onClick={() => setAdvancedConnectionIds(current => {
             const next = new Set(current); if (next.has(connection.id)) next.delete(connection.id); else next.add(connection.id); return next;
           })}>Advanced connection options</button>
-          {advancedConnectionIds.has(connection.id) && <label className="field-label"><span>Authentication source</span><select aria-label="Authentication source" value={connection.auth_mode} onChange={e => {
+          {advancedConnectionIds.has(connection.id) && <div className="field-label"><label htmlFor="connection-auth-source">Authentication source</label><select id="connection-auth-source" value={connection.auth_mode} onChange={e => {
             const auth_mode = e.target.value as ModelConnection["auth_mode"];
-            update({ auth_mode, api_key: "", clear_api_key: auth_mode !== "api_key" });
+            update({ auth_mode, api_key: "" });
           }}>
             <option value="api_key">API key entered here</option><option value="none">No API key</option><option value="environment">Backend environment</option>
-          </select><small>Use backend environment only for managed deployments. OAW reads this connection’s key from the backend process environment.</small>
-            {connection.auth_mode === "environment" && <input aria-label="Backend environment variable" value={connection.environment_variable ?? ""} maxLength={128} spellCheck={false}
-              placeholder={defaultEnvironmentVariable(connection.adapter)} onChange={e => update({ environment_variable: e.target.value || null })} />}
-          </label>}
+          </select>
+            {connection.auth_mode === "environment" && <label className="field-label"><span>Environment variable name</span><input aria-label="Backend environment variable" aria-describedby="connection-environment-help" value={connection.environment_variable ?? ""} maxLength={128} spellCheck={false}
+              placeholder={defaultEnvironmentVariable(connection.adapter)} onChange={e => update({ environment_variable: e.target.value || null })} />
+              <small id="connection-environment-help">Enter a variable name, not an API key. For managed deployments, set its value on the server before starting OAW. Leave blank to use {defaultEnvironmentVariable(connection.adapter)}.</small>
+            </label>}
+          </div>}
         </div>
         <div className="connection-model-heading"><h4>Models</h4><button type="button" className="secondary-button" disabled={connection.models.length >= 100} onClick={() => update({ models: [...connection.models, { id: crypto.randomUUID(), name: "", model_id: "", enabled: true }] })}><Plus size={13} /> Add model</button></div>
         {!connection.models.length && <p className="settings-description">Add a model using the model ID supplied by your service.</p>}

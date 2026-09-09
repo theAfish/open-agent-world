@@ -18,7 +18,7 @@ export function importLegacyModels(catalog: ModelCatalog, legacy: ModelSettings)
   if (catalog.revision > 0 || catalog.connections.some(c => c.models.length)) return catalog;
   const connection: ModelConnection = catalog.connections[0] ?? {
     id: "legacy", name: "Previous models", adapter: "legacy", base_url: "", enabled: true,
-    auth_mode: "environment", api_key_configured: false, models: [],
+    auth_mode: "api_key", api_key_configured: false, models: [],
   };
   return { ...catalog, connections: [{ ...connection, models: legacy.models.map(model => ({
     id: crypto.randomUUID(), name: model, model_id: model, enabled: true,

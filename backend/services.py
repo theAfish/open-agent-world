@@ -2762,8 +2762,10 @@ class ApplicationServices:
     def get_llm_connection_settings(self) -> LlmPublicSettings:
         return self.llm_settings.read().public()
 
-    async def start_sandbox(self, sandbox_id: str) -> Any:
+    async def start_sandbox(self, sandbox_id: str, *, agent_id: str | None = None) -> Any:
         async with self._node_mutation():
+            if agent_id is not None:
+                self.capabilities.capability_for_id(agent_id, f"sandbox.start:{sandbox_id}")
             return await self._start_sandbox_locked(sandbox_id)
 
     async def _start_sandbox_locked(self, sandbox_id: str) -> Any:
@@ -2780,9 +2782,9 @@ class ApplicationServices:
         self.world.update_card(sandbox_id, CardPatch(status=info.state.value))
         return info
 
-    async def stop_sandbox(self, sandbox_id: str) -> Any:
+    async def stop_sandbox(self, sandbox_id: str, *, agent_id: str | None = None) -> Any:
         from backend.sandbox.history import stop
-        await stop(self, sandbox_id, terminate=True)
+        await stop(self, sandbox_id, terminate=True, agent_id=agent_id)
         info = await self._require_sandbox_backend().get(sandbox_id)
         async with self._node_mutation():
             if self.world.maybe_get_card(sandbox_id):
@@ -3322,7 +3324,7 @@ class ApplicationServices:
             return sorted(
                 candidate.source
                 for candidate in self.world.list_edges_to(target.id)
-                if candidate.relationship == Relationship.EXECUTE
+                if any(grant.kind == "sandbox.execute" for grant in self.plugins.relationship(candidate.relationship).capabilities)
             )
         return []
 

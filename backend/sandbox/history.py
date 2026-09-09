@@ -61,7 +61,8 @@ async def stop(services, sandbox_id, *, terminate=False, agent_id=None, command_
     async with services._node_mutation():
         services._require_card_type(sandbox_id, 'sandbox')
         if agent_id is not None:
-            services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
+            kind = "sandbox.stop" if terminate else "sandbox.execute"
+            services.capabilities.capability_for_id(agent_id, f"{kind}:{sandbox_id}")
         if command_id is not None:
             from backend.sandbox.models import SandboxStateError
             current = services._sandbox_commands.get(sandbox_id)

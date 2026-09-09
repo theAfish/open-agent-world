@@ -4,6 +4,8 @@ The compact card and inspector report runtime, readiness, folder, access and net
 
 New, copied and summoned Sandboxes start stopped. Managed storage is prepared through the existing Start lifecycle. The selected runtime remains pinned after first start. Runtime, workspace, network and resource-limit changes require Stop → Save → Start. Ordinary environment changes apply to the next command without a restart.
 
+Agent-to-Sandbox connections offer **Execute** (the default) or **Execute + Start/Stop**. Both grant the existing command and inspection tools; the latter also grants `start_sandbox` and `stop_sandbox`. Start uses saved configuration, and stop terminates active commands through the same cleanup lifecycle as the UI, affecting all agents sharing the Sandbox. Downgrading or removing the connection revokes lifecycle access immediately. Existing Execute connections retain their permissions.
+
 ## Configuration and authority
 
 Sandbox-local variables use the existing `EnvironmentProfile` document model, editor and private credential bindings, scoped directly to the Sandbox node. No hidden Environment cards are created. Under Settings → Environment variables, choose Value or Secret, enter the value, and save. Secret references and encrypted bindings are managed automatically in the same save. Configured secrets stay unchanged when their input is blank. Secret input is local to the mounted editor and is cleared on reload or closing it; ordinary drafts still follow the Sandbox across surfaces.

@@ -178,6 +178,14 @@ class _CapabilityContext:
         from backend.sandbox.history import stop
         return await stop(self.services, sandbox_id, agent_id=agent_id, command_id=command_id)
 
+    async def start_sandbox(self, agent_id: str, sandbox_id: str) -> dict[str, Any]:
+        info = await self.services.start_sandbox(sandbox_id, agent_id=agent_id)
+        return {"sandbox_id": sandbox_id, "state": info.state.value}
+
+    async def stop_sandbox(self, agent_id: str, sandbox_id: str) -> dict[str, Any]:
+        info = await self.services.stop_sandbox(sandbox_id, agent_id=agent_id)
+        return {"sandbox_id": sandbox_id, "state": info.state.value}
+
     async def inspect_sandbox(self, agent_id: str, sandbox_id: str) -> dict[str, Any]:
         self.services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
         info = await self.services.get_sandbox(sandbox_id)
