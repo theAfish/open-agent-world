@@ -1,4 +1,4 @@
-import { Plus, Server, Trash2 } from "lucide-react";
+import { Plus, Server, Star, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { availableModels, modelRef, type ModelCatalog, type ModelConnection } from "../state/modelConnections";
 
@@ -105,14 +105,14 @@ export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
         <div className="connection-model-heading"><h4>Models</h4><button type="button" className="secondary-button" disabled={connection.models.length >= 100} onClick={() => update({ models: [...connection.models, { id: crypto.randomUUID(), name: "", model_id: "", enabled: true }] })}><Plus size={13} /> Add model</button></div>
         {!connection.models.length && <p className="settings-description">Add a model using the model ID supplied by your service.</p>}
         {connection.models.map((model, index) => <div className="connection-model-row" key={model.id}>
-          <label className="field-label"><span>Display name</span><input aria-label={`Model ${index + 1} display name`} required maxLength={120} value={model.name}
+          <label className="field-label"><span>Display name{value.default_model === modelRef(model.id) && <Star className="model-default-icon" size={12} role="img" aria-label="Default for new agents"><title>Default for new agents</title></Star>}</span><input aria-label={`Model ${index + 1} display name`} required maxLength={120} value={model.name}
             placeholder="Code assistant" onChange={e => update({ models: connection.models.map(m => m.id === model.id ? { ...m, name: e.target.value } : m) })} /></label>
           <label className="field-label"><span>Model ID</span><input aria-label={`Model ${index + 1} ID`} required maxLength={200} value={model.model_id}
             placeholder="Service model ID" spellCheck={false} onChange={e => update({ models: connection.models.map(m => m.id === model.id ? { ...m, model_id: e.target.value } : m) })} /></label>
-          <label className="settings-check"><input type="checkbox" aria-label={`Enable model ${index + 1}`} checked={model.enabled}
+          <div className="connection-model-actions"><label className="settings-check"><input type="checkbox" aria-label={`Enable model ${index + 1}`} checked={model.enabled}
             onChange={e => update({ models: connection.models.map(m => m.id === model.id ? { ...m, enabled: e.target.checked } : m) })} />On</label>
           {!saved.connections.some(c => c.models.some(m => m.id === model.id)) && <button type="button" className="icon-button" aria-label={`Remove model ${index + 1}`} onClick={() => update({ models: connection.models.filter(m => m.id !== model.id) })}><Trash2 size={13} /></button>}
-          {value.default_model === modelRef(model.id) && <small className="model-default-badge">Default</small>}
+          </div>
         </div>)}
         <p className="settings-description">Changes apply to new runs. Disable saved models or connections to preserve existing agent references.</p>
       </div> : <div className="connection-empty"><Server size={32} /><h4>Your models, your accounts</h4><p>Add multiple accounts from the same provider, or connect your own service.</p></div>}

@@ -926,7 +926,9 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .connection-detail-title, .connection-model-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .connection-detail h4 { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
 .connection-model-heading { margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
-.connection-model-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; gap: 8px; align-items: end; }
+.connection-model-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px; gap: 8px; align-items: end; }
+.connection-model-actions { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-height: 34px; }
+.model-default-icon { flex-shrink: 0; color: var(--accent); fill: var(--accent-soft); }
 .settings-form .settings-check { display: flex; align-items: center; gap: 5px; font-size: 11px; white-space: nowrap; min-height: 34px; }
 .settings-form .settings-check input { width: 14px; height: 14px; box-shadow: none; accent-color: var(--accent); }
 .connection-empty { display: grid; place-content: center; justify-items: center; text-align: center; padding: 30px; color: var(--ink-faint); font-size: 12px; line-height: 1.6; }
