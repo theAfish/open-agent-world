@@ -49,7 +49,15 @@ async def handle(request: dict[str, Any], *, stdin_pending: bool = False) -> Any
         await LinuxSandboxBackend.kill_unit(request["unit"])
         return None
     managed = _linux_path(request["managed_root"])
+    from .python_runtime import SharedPythonRuntime
+    import hashlib
+    # Windows and Linux venvs are not binary-compatible. Each distro shares one.
+    runtime_root = Path(managed) / "runtime" / "platforms" / hashlib.sha256(request["runtime_id"].encode()).hexdigest()[:16]
+    python_runtime = SharedPythonRuntime(runtime_root)
+    if operation == "prepare_python":
+        return await python_runtime.prepare(request.get("requirements", []), request.get("bootstrap_key"))
     backend = LinuxSandboxBackend(Path(managed), limits=SandboxLimits(**request["limits"]),
+        python_runtime=python_runtime,
         runtime_id=request["runtime_id"], event_sink=lambda event: _write({"event": asdict(event)}))
     sandbox_id = request["sandbox_id"]
     if operation == "create":

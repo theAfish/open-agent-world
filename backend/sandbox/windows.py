@@ -88,8 +88,10 @@ class WindowsSandboxBackend(SandboxBackend):
         limits: SandboxLimits = SandboxLimits(),
         event_sink: SandboxEventSink | None = None,
         native_api: WindowsNativeApi | None = None,
+        python_runtime=None,
     ) -> None:
         self._managed_root = Path(managed_root).resolve()
+        self.python_runtime = python_runtime
         self._sandboxes_root = self._managed_root / "sandboxes"
         self._sandboxes_root.mkdir(parents=True, exist_ok=True)
         self._limits = limits
@@ -244,6 +246,9 @@ class WindowsSandboxBackend(SandboxBackend):
             active_process_limit=policy.get("active_process_limit", self._limits.active_process_limit),
             default_timeout_seconds=policy.get("command_timeout", self._limits.default_timeout_seconds))
         command = self._validate_argv(argv)
+        if self.python_runtime is not None:
+            await self.python_runtime.prepare()
+            command = self.python_runtime.command(command)
         timeout = (
             limits.default_timeout_seconds
             if timeout_seconds is None
@@ -264,6 +269,8 @@ class WindowsSandboxBackend(SandboxBackend):
             environment = minimal_windows_environment(
                 record.workspace, env, storage_directory=storage, invocation_env=invocation_env
             )
+            if self.python_runtime is not None:
+                self.python_runtime.environment(environment)
             mount_root = None
             if runtime_mount is not None:
                 command = runtime_mount.command(command, record.root / ".oaw" / runtime_mount.bundle.key)
@@ -625,7 +632,12 @@ class WindowsSandboxBackend(SandboxBackend):
         # Clear stale grants after an interrupted host process, including for
         # ordinary commands which have no runtime mount at all.
         self._revoke_runtime_access(record)
+        shared_paths = []
         try:
+            if self.python_runtime is not None:
+                shared_paths = [self.python_runtime.venv, self.python_runtime.base]
+                for path in shared_paths:
+                    self._native.grant_runtime_path(path, record.profile.sid)
             if mount_root is not None:
                 paths = runtime_tree(mount_root)
                 for path in paths:
@@ -638,6 +650,8 @@ class WindowsSandboxBackend(SandboxBackend):
                     parent = parent.parent
             return self._native.run_appcontainer(record.profile, command, **options)
         finally:
+            for path in shared_paths:
+                self._native.revoke_path(path, record.profile.sid)
             self._revoke_runtime_access(record)
 
     async def destroy(self, sandbox_id: str) -> None:
@@ -976,7 +990,7 @@ class WindowsSandboxBackend(SandboxBackend):
         except OSError as exc:
             raise SandboxValidationError(f"managed resource does not exist: {source}") from exc
         self._assert_within(resolved, self._managed_root)
-        if self._is_within(resolved, self._sandboxes_root):
+        if self._is_within(resolved, self._sandboxes_root) or self._is_within(resolved, self._managed_root / "runtime"):
             raise SandboxValidationError("sandbox files cannot be mounted as managed resources")
         if not resolved.is_file():
             raise SandboxValidationError("only regular managed files can be attached")

@@ -275,6 +275,21 @@ class SandboxManager(SandboxBackend):
             return {"cached": False, "current": False}
         return await self._backend(binding.resolved_runtime or "").bundle_status(sandbox_id, bundle)
 
+    async def prepare_python(self, runtime_id, requirements=(), bootstrap_key=None):
+        backend = self._backend(runtime_id)
+        if hasattr(backend, "prepare_python"):
+            return await backend.prepare_python(requirements, bootstrap_key=bootstrap_key)
+        runtime = getattr(backend, "python_runtime", None)
+        if runtime is None:
+            raise SandboxValidationError("This execution platform has no managed Python runtime")
+        return await runtime.prepare(requirements, bootstrap_key=bootstrap_key)
+
+    async def install_python_packages(self, sandbox_id, requirements):
+        binding = self._binding(sandbox_id)
+        if not binding.provisioned:
+            raise SandboxStateError("Start the Sandbox before installing packages")
+        return await self.prepare_python(binding.resolved_runtime, requirements)
+
     async def reset_cache(self, sandbox_id):
         binding = self._binding(sandbox_id)
         if binding.provisioned:
@@ -315,7 +330,7 @@ class SandboxManager(SandboxBackend):
         except OSError as exc:
             raise SandboxValidationError("managed attachment does not exist") from exc
         if (source.is_symlink() or not resolved.is_file() or not resolved.is_relative_to(self.root)
-            or any(resolved.is_relative_to(self.root / name) for name in ("sandbox-bindings", "sandboxes", "sandbox-runtimes"))):
+            or any(resolved.is_relative_to(self.root / name) for name in ("sandbox-bindings", "sandboxes", "sandbox-runtimes", "runtime"))):
             raise SandboxValidationError("attachment must be a regular managed resource")
         source = resolved
         attachment = ResourceAttachment(sandbox_id, resource_id, source, relative_path, access)

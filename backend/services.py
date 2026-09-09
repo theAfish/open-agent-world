@@ -537,6 +537,7 @@ class ApplicationServices:
     node_execution: NodeExecutionService | None = None
     summoning: SummoningService | None = None
     sandbox_backend: SandboxBackend | None = None
+    plugin_bootstrap: Any = None
     _node_mutation_lock: asyncio.Lock = field(
         default_factory=asyncio.Lock, init=False, repr=False
     )
@@ -658,7 +659,12 @@ class ApplicationServices:
         from backend.sandbox.history import recover as recover_commands
         await recover_commands(self)
 
+        if self.plugin_bootstrap is not None:
+            self.plugin_bootstrap.enqueue()
+
     async def shutdown(self) -> None:
+        if self.plugin_bootstrap is not None:
+            await self.plugin_bootstrap.shutdown()
         await self.node_execution.shutdown()
         context = self._node_lifecycle_context()
         for card in self.world.list_cards():
@@ -2979,6 +2985,26 @@ class ApplicationServices:
             return await self.sandbox_backend.registry.describe(self.sandbox_backend.preferred, refresh=refresh)
         return {"runtimes": [], "default_runtime": None}
 
+    async def install_python_packages(self, sandbox_id, requirements, *, agent_id=None):
+        from backend.sandbox.python_runtime import validate_requirements
+        from backend.sandbox.models import SandboxValidationError
+        self._require_card_type(sandbox_id, CardType.SANDBOX)
+        if agent_id is not None:
+            self.capabilities.require_sandbox_execute(agent_id, sandbox_id)
+        try:
+            requirements = validate_requirements(requirements)
+            if not requirements:
+                raise ValueError("At least one package is required")
+        except ValueError as exc:
+            raise SandboxValidationError(str(exc)) from exc
+        backend = self._require_sandbox_backend()
+        if not isinstance(backend, SandboxManager):
+            raise SandboxValidationError("Managed Python installation is unavailable on this backend")
+        try:
+            return await backend.install_python_packages(sandbox_id, requirements)
+        except RuntimeError as exc:
+            raise SandboxValidationError(str(exc)) from exc
+
     async def publish_sandbox_event(self, event: SandboxEvent) -> None:
         if self._execution_secrets.get() and event.type in {SandboxEventType.STDOUT, SandboxEventType.STDERR}:
             # Suppress raw fragments; the bounded command result is redacted as
@@ -3443,7 +3469,7 @@ def create_services(
     for directory in ("projects", "assets", "sandboxes", "database", "logs"):
         (settings.data_root / directory).mkdir(parents=True, exist_ok=True)
     database = Database(settings.database_path)
-    plugin_registry = plugins or load_plugin_registry()
+    plugin_registry = plugins or load_plugin_registry(plugin_directories=settings.plugin_directories)
     world = WorldStore(database, plugin_registry, chunk_size=settings.chunk_size)
     try:
         from backend.migrations.barracks import check_legacy
@@ -3554,4 +3580,7 @@ def create_services(
             builtin_sandbox_registry(settings.data_root, services.publish_sandbox_event),
             preferred=settings.sandbox_runtime,
         )
+    from backend.plugins.bootstrap import PluginEnvironmentBootstrap
+    services.plugin_bootstrap = PluginEnvironmentBootstrap(settings.data_root, plugin_registry,
+        services.sandbox_backend if isinstance(services.sandbox_backend, SandboxManager) else None)
     return services

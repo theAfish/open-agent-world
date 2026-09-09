@@ -53,7 +53,7 @@ sys.modules['oaw_sandbox.linux_worker'].main(payload['request'],stdin_pending=bo
 # source change the next unrestricted transport helper.
 _WORKER_MODULES = tuple(
     (name, (Path(__file__).parent / f"{name}.py").read_text(encoding="utf-8"))
-    for name in ("models", "materialization", "base", "environment", "files", "transfers", "linux_network", "linux", "linux_worker")
+    for name in ("models", "materialization", "base", "environment", "files", "transfers", "python_runtime", "linux_network", "linux", "linux_worker")
 )
 
 
@@ -143,6 +143,16 @@ class WslSandboxBackend(SandboxBackend):
 
     def _lock(self, sandbox_id: str) -> asyncio.Lock:
         return self._locks.setdefault(sandbox_id, asyncio.Lock())
+
+    async def prepare_python(self, requirements=(), bootstrap_key=None):
+        from .python_runtime import PREPARATION_TIMEOUT
+        task = asyncio.create_task(self._request(self._payload("prepare_python", "runtime",
+            requirements=list(requirements), bootstrap_key=bootstrap_key), timeout=PREPARATION_TIMEOUT))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            await task
+            raise
 
     def _payload(self, operation: str, sandbox_id: str, **values: Any) -> dict[str, Any]:
         return {"operation": operation, "sandbox_id": sandbox_id,
@@ -311,6 +321,7 @@ class WslSandboxBackend(SandboxBackend):
             info = await self.get(sandbox_id)
             if info.state != SandboxState.READY:
                 raise SandboxStateError("sandbox must be ready before executing a command")
+            await self.prepare_python()
             active = _Active(new_unit_name())
             self._active[sandbox_id] = active
             self._infos[sandbox_id] = replace(info, state=SandboxState.RUNNING, active_command=command)

@@ -220,7 +220,7 @@ def bubblewrap_command(
     workspace: Path, access: ResourceAccess,
     attachments: Sequence[ResourceAttachment], argv: Sequence[str],
     environment: Mapping[str, str],
-    runtime_mount: tuple[Path, str] | None = None, *, network_enabled=False,
+    runtime_mount: tuple[Path, str] | None = None, *, network_enabled=False, python_runtime=None,
 ) -> list[str]:
     result = [
         "/usr/bin/bwrap", "--unshare-all", "--unshare-user",
@@ -260,6 +260,8 @@ def bubblewrap_command(
             "--ro-bind" if item.access == ResourceAccess.READ_ONLY else "--bind",
             str(item.source), f"/sandbox/{item.relative_path}",
         ))
+    if python_runtime is not None:
+        result.extend(("--ro-bind", str(python_runtime.venv), str(python_runtime.venv)))
     if runtime_mount is not None:
         source, key = runtime_mount
         result.extend(("--ro-bind", str(source), f"/.oaw/{key}"))
@@ -301,8 +303,10 @@ class LinuxSandboxBackend(SandboxBackend):
     def __init__(
         self, managed_root: Path, *, limits: SandboxLimits = SandboxLimits(),
         event_sink: SandboxEventSink | None = None, runtime_id: str = "linux",
+        python_runtime=None,
     ) -> None:
         self._managed_root = Path(managed_root).resolve()
+        self.python_runtime = python_runtime
         self._root = self._managed_root / "sandbox-runtimes" / hashlib.sha256(runtime_id.encode()).hexdigest()[:16] / "sandboxes"
         self._limits = limits
         self._event_sink = event_sink
@@ -450,6 +454,10 @@ class LinuxSandboxBackend(SandboxBackend):
             default_timeout_seconds=policy.get("command_timeout", self._limits.default_timeout_seconds))
         command = validate_argv(argv)
         environment = minimal_linux_environment(env, invocation_env=invocation_env)
+        if self.python_runtime is not None:
+            await self.python_runtime.prepare()
+            self.python_runtime.environment(environment)
+            command = self.python_runtime.command(command)
         timeout = limits.default_timeout_seconds if timeout_seconds is None else float(timeout_seconds)
         if not math.isfinite(timeout) or timeout <= 0:
             raise SandboxValidationError("timeout_seconds must be finite and positive")
@@ -467,7 +475,7 @@ class LinuxSandboxBackend(SandboxBackend):
                 source = materialize_bundle(record.root, runtime_mount.bundle)
                 mount = (source, runtime_mount.bundle.key)
             isolated = bubblewrap_command(record.host_workspace, record.workspace_access,
-                tuple(record.attachments.values()), command, environment, mount, network_enabled=bool(policy.get("network_enabled")))
+                tuple(record.attachments.values()), command, environment, mount, network_enabled=bool(policy.get("network_enabled")), python_runtime=self.python_runtime)
             invocation = service_command(isolated, unit, limits, timeout, network_enabled=bool(policy.get("network_enabled")))
             record.state = SandboxState.RUNNING
             record.active_command, record.unit = command, unit
@@ -833,7 +841,7 @@ class LinuxSandboxBackend(SandboxBackend):
             raise SandboxValidationError("managed resource does not exist") from exc
         self._assert_within(resolved, self._managed_root)
         if (any(resolved.is_relative_to(self._managed_root / name)
-                for name in ("sandbox-runtimes", "sandboxes", "sandbox-bindings"))
+                for name in ("sandbox-runtimes", "sandboxes", "sandbox-bindings", "runtime"))
                 or (must_exist and not resolved.is_file())):
             raise SandboxValidationError("only regular managed resource files can be attached")
         return resolved

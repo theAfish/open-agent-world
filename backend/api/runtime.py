@@ -20,6 +20,27 @@ from backend.sandbox.models import SandboxValidationError
 router = APIRouter(tags=["runtime"])
 
 
+class PythonPackagesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    requirements: list[str] = Field(min_length=1, max_length=100)
+
+
+@router.post('/sandboxes/{sandbox_id}/python/packages')
+async def install_python_packages(sandbox_id: str, request: PythonPackagesRequest, services=Depends(get_services)):
+    return await services.install_python_packages(sandbox_id, request.requirements)
+
+
+@router.get('/runtime/python/plugins')
+async def plugin_environments(services=Depends(get_services)):
+    return services.plugin_bootstrap.records()
+
+
+@router.post('/runtime/python/plugins/reconcile')
+async def reconcile_plugin_environments(services=Depends(get_services)):
+    services.plugin_bootstrap.enqueue()
+    return services.plugin_bootstrap.records()
+
+
 @router.get('/lifecycle')
 async def lifecycle_snapshot(services=Depends(get_services)):
     from backend.sandbox.history import lifecycle_records

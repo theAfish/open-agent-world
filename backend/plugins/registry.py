@@ -49,6 +49,7 @@ class PluginDescriptor(BaseModel):
     plugin_api_version: str = Field(min_length=1, max_length=32)
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=500)
+    python_requirements: tuple[str, ...] = ()
 
 
 class Plugin(Protocol):
@@ -345,6 +346,7 @@ class PluginRegistry:
     """Authoritative registry of installed plugins and their owned contributions."""
 
     def __init__(self) -> None:
+        self.runtime_requirements: dict[str, tuple[str, ...]] = {}
         self._plugins: dict[str, PluginDescriptor] = {}
         self._nodes: dict[str, NodeTypeDefinition] = {}
         self._relationships: dict[str, RelationshipDefinition] = {}

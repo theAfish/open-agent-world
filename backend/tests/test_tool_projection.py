@@ -146,7 +146,27 @@ def test_sandbox_alone_does_not_expose_composite_tool(client):
     agent = create_node(client, "agent")
     sandbox = create_node(client, "sandbox")
     connect(client, agent, sandbox, "execute")
-    assert set(tools(client, agent)[1]) == {"execute_command", "inspect_sandbox"}
+    assert set(tools(client, agent)[1]) == {"execute_command", "inspect_sandbox", "install_python_packages"}
+
+
+def test_python_install_tool_requires_live_sandbox_authority(client, monkeypatch):
+    from backend.services import ApplicationServices
+    agent = create_node(client, "agent")
+    sandbox = create_node(client, "sandbox")
+    edge = connect(client, agent, sandbox, "execute")
+    calls = []
+    async def install(self, sandbox_id, requirements, *, agent_id=None):
+        calls.append((sandbox_id, requirements, agent_id))
+        return {"requirements": requirements}
+    monkeypatch.setattr(ApplicationServices, 'install_python_packages', install)
+    provider, definitions = tools(client, agent)
+    definition = definitions['install_python_packages']
+    assert invoke(client, provider, agent, definition, sandbox=sandbox['id'], requirements=['numpy']) == {'requirements': ['numpy']}
+    assert calls == [(sandbox['id'], ['numpy'], agent['id'])]
+    assert client.delete('/api/edges/' + edge['id']).status_code == 200
+    with pytest.raises((PermissionDeniedError, ResourceValidationError)):
+        invoke(client, provider, agent, definition, sandbox=sandbox['id'], requirements=['numpy'])
+    assert len(calls) == 1
 
 
 def test_shared_plugin_operation_dispatches_the_selected_kind_and_preserves_schema(tmp_path):
