@@ -3,7 +3,7 @@ import { worldApi, apiErrorMessage } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import { useNodeSurfaceStore } from "../state/nodeSurfaces";
 import type { WorldCard } from "../types/world";
-import { CredentialBinding, EnvironmentVariablesEditor, environmentVariablesFromValue, environmentVariablesToValue, type EnvironmentVariableRow } from "./ExecutionConfiguration";
+import { EnvironmentVariablesEditor, environmentVariablesFromValue, saveEnvironmentRows, type EnvironmentVariableRow } from "./ExecutionConfiguration";
 
 export interface EffectiveEnvironment {
   profile_id: string | null; ready: boolean;
@@ -25,6 +25,8 @@ export function SandboxEnvironment({ card }: { card: WorldCard }) {
   const rows = draft?.rows ?? savedRows;
   const setRows = (rows: EnvironmentVariableRow[]) => useNodeSurfaceStore.getState().setDraft(draftKey, JSON.stringify({ rows, revision: draft?.revision ?? revision }));
   const [bindings, setBindings] = useState<Record<string, boolean>>({});
+  // Secret input stays in this mounted editor, never in shared surface drafts.
+  const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [effective, setEffective] = useState<EffectiveEnvironment>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -34,6 +36,7 @@ export function SandboxEnvironment({ card }: { card: WorldCard }) {
     setBindings(status); setEffective(resolved);
   }
   async function reload() {
+    setSecrets({});
     try {
       const doc = await worldApi.getNodeDocument(card.id);
       setSavedRows(environmentVariablesFromValue(doc.value)); setRevision(doc.revision);
@@ -45,7 +48,8 @@ export function SandboxEnvironment({ card }: { card: WorldCard }) {
   async function save() {
     setBusy(true); setError("");
     try {
-      const doc = await worldApi.nodeDocumentAction(card.id, "replace", environmentVariablesToValue(rows), draft?.revision ?? revision);
+      const doc = await saveEnvironmentRows(card.id, rows, secrets, bindings, (draft?.revision ?? revision)!);
+      setSecrets({});
       setRevision(doc.revision); setSavedRows(environmentVariablesFromValue(doc.value));
       useNodeSurfaceStore.getState().setDraft(draftKey, "");
       await refresh(); setNotice("Applies to the next command.");
@@ -77,15 +81,14 @@ export function SandboxEnvironment({ card }: { card: WorldCard }) {
         </select>
       </label>
       <p className="sandbox-help" title="A command-specific profile replaces the linked profile. Private Agent equipment is never shared automatically.">Shared by executions in this Sandbox. Local values override the profile.</p>
-      <EnvironmentVariablesEditor rows={rows} onChange={setRows} disabled={busy || revision === undefined} />
+      <EnvironmentVariablesEditor rows={rows} onChange={setRows} disabled={busy || revision === undefined}
+        secrets={secrets} onSecretsChange={setSecrets} bindings={bindings} />
       <div className="editor-actions"><button className="primary-button" disabled={busy || revision === undefined} onClick={() => void save()}>Save environment</button>
         <button className="secondary-button" disabled={busy} onClick={() => { useNodeSurfaceStore.getState().setDraft(draftKey, ""); void reload(); }}>Reload environment</button></div>
       {draft && <p className="sandbox-help">Unsaved environment changes</p>}
       {notice && <p className="sandbox-help" role="status">{notice}</p>}
       {error && <p className="sandbox-error" role="alert">{error}</p>}
       {Object.keys(bindings).length > 0 && <p className="sandbox-help">Secrets stay on this host and are readable by authorized commands.</p>}
-      {Object.entries(bindings).map(([reference, configured]) => <CredentialBinding key={reference} id={card.id} reference={reference}
-        configured={configured} revision={revision ?? 0} changed={refresh} />)}
       <details className="sandbox-settings"><summary>Effective values · {effective ? (effective.ready ? "Ready" : "Needs attention") : "Loading…"}</summary>
         {effective?.variables.map(v => <div key={v.name} className="sandbox-variable"><code>{v.name}</code> = {v.secret ? (v.configured ? "•••• · bound" : "Unbound secret") : v.value} <small>{v.source}</small></div>)}
         {effective?.variables.length === 0 && <p className="sandbox-help">No variables configured.</p>}

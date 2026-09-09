@@ -559,6 +559,12 @@ export const worldApi = {
     });
   },
 
+  async saveEnvironment(id: string, value: Record<string, unknown>, secrets: Record<string, string>, expectedRevision: number): Promise<{ value: Record<string, unknown>; revision: number; summary: Record<string, unknown> }> {
+    return request(`/nodes/${encodeURIComponent(id)}/environment`, {
+      method: "PUT", body: JSON.stringify({ value, secrets, expected_revision: expectedRevision }),
+    });
+  },
+
   async transformDocument(id: string, operation: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
     return request(`/nodes/${encodeURIComponent(id)}/transformations/${encodeURIComponent(operation)}`, { method: "POST", body: JSON.stringify(body) });
   },

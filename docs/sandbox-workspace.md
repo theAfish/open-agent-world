@@ -6,7 +6,7 @@ New, copied and summoned Sandboxes start stopped. Managed storage is prepared th
 
 ## Configuration and authority
 
-Sandbox-local variables use the existing `EnvironmentProfile` document model, editor and private credential bindings, scoped directly to the Sandbox node. No hidden Environment cards are created. Add ordinary values or secret references, save, then bind secrets under Settings → Environment variables.
+Sandbox-local variables use the existing `EnvironmentProfile` document model, editor and private credential bindings, scoped directly to the Sandbox node. No hidden Environment cards are created. Under Settings → Environment variables, choose Value or Secret, enter the value, and save. Secret references and encrypted bindings are managed automatically in the same save. Configured secrets stay unchanged when their input is blank. Secret input is local to the mounted editor and is cleared on reload or closing it; ordinary drafts still follow the Sandbox across surfaces.
 
 An `environment.default` connection points from an Environment Profile to a Sandbox. At most one default is allowed. It remains a live reference. The resolution order is:
 

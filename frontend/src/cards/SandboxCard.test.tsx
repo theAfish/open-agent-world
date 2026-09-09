@@ -239,11 +239,11 @@ describe("sandbox configuration UI", () => {
     rerender(<SandboxSettings card={sandbox} />);
     fireEvent.click(screen.getByText("Environment variables"));
     expect((screen.getByLabelText("Environment variable 1 value") as HTMLInputElement).value).toBe("draft-region");
-    const save = vi.spyOn(worldApi, "nodeDocumentAction").mockRejectedValue(new Error("Document revision conflict"));
+    const save = vi.spyOn(worldApi, "saveEnvironment").mockRejectedValue(new Error("Document revision conflict"));
     await waitFor(() => expect((screen.getByRole("button", { name: "Save environment" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "Save environment" }));
     await screen.findByText("Document revision conflict");
-    expect(save).toHaveBeenCalledWith(sandbox.id, "replace", { variables: { REGION: "draft-region" } }, 0);
+    expect(save).toHaveBeenCalledWith(sandbox.id, { variables: { REGION: "draft-region" } }, {}, 0);
     expect(screen.getByText("Unsaved environment changes")).toBeTruthy();
   });
 
