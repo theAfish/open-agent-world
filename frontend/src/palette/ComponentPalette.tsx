@@ -383,9 +383,8 @@ export function ComponentPalette() {
                   ? `${deck.label}: ${deck.cards.length} reusable formations.`
                   : `${deck.label}: ${deck.cards.length} cards. Drop a card here to move it.`}
               >
-                <DeckIcon size={15} />
-                <span>{deck.label}</span>
-                <small>{deck.cards.length}</small>
+                <span className="deck-tab-summary"><DeckIcon size={15} /><small>{deck.cards.length}</small></span>
+                <span className="deck-tab-label">{deck.label}</span>
               </button>
             );
           })}

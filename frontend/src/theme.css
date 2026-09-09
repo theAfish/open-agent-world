@@ -1367,7 +1367,9 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .deck-tab-scroll {
   min-width: 0;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
   gap: 4px;
 }
 
@@ -1390,8 +1392,10 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   transition: color 150ms ease, border-color 150ms ease, background 150ms ease, transform 150ms ease;
 }
 
-.deck-tab-scroll > button { flex: 1 0 104px; }
-.deck-add-button { width: 34px; min-width: 34px; flex: 0 0 34px; padding: 0; box-shadow: none; }
+.deck-tab-scroll > button { flex: 1 0 64px; height: 44px; flex-direction: column; gap: 3px; padding: 4px; }
+.deck-tab-summary { display: flex; align-items: center; justify-content: center; gap: 5px; }
+.deck-tab-label { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 13px; }
+.deck-add-button { align-self: center; width: 34px; min-width: 34px; flex: 0 0 34px; padding: 0; box-shadow: none; }
 
 .deck-tab-scroll > button:hover,
 .deck-add-button:hover { color: var(--ink); background: var(--surface-soft); }
@@ -1817,20 +1821,19 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
     padding: 7px;
     transform: translateX(-50%);
   }
-  .top-bar { top: auto; right: auto; bottom: 62px; left: 10px; transition: bottom 260ms cubic-bezier(0.22, 1, 0.36, 1); }
-  .world-controls.react-flow__controls { right: 10px; bottom: 62px; transition: bottom 260ms cubic-bezier(0.22, 1, 0.36, 1); }
+  .top-bar { top: auto; right: auto; bottom: 82px; left: 10px; transition: bottom 260ms cubic-bezier(0.22, 1, 0.36, 1); }
+  .world-controls.react-flow__controls { right: 10px; bottom: 82px; transition: bottom 260ms cubic-bezier(0.22, 1, 0.36, 1); }
   .edge-inspector { top: 62px; bottom: auto; }
   .world-shell:has(.component-palette:is(:hover, :focus-within)) .top-bar,
   .world-shell:has(.component-palette:is(:hover, :focus-within)) .world-controls.react-flow__controls,
-  .world-shell:has(.component-palette:is(:hover, :focus-within)) .edge-inspector { bottom: 202px; }
+  .world-shell:has(.component-palette:is(:hover, :focus-within)) .edge-inspector { bottom: 222px; }
 }
 
 @media (max-width: 620px) {
   .top-bar { width: 222px; }
   .top-bar .top-icon-button { width: 36px; height: 31px; }
   .deck-tabs { grid-template-columns: minmax(0, 1fr) 30px; }
-  .deck-tab-scroll > button { flex-basis: 92px; gap: 4px; padding: 0 5px; }
-  .deck-tab-scroll > button small { display: none; }
+  .deck-tab-scroll > button { flex-basis: 60px; }
   .deck-add-button { width: 30px; min-width: 30px; flex-basis: 30px; }
   .deck-stage { grid-template-columns: 84px minmax(0, 1fr); padding-inline: 9px; }
   .deck-caption small { max-width: 72px; }
@@ -1856,7 +1859,7 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   .component-palette .palette-item-icon { width: 38px; height: 38px; }
   .world-shell:has(.component-palette:is(:hover, :focus-within)) .top-bar,
   .world-shell:has(.component-palette:is(:hover, :focus-within)) .world-controls.react-flow__controls,
-  .world-shell:has(.component-palette:is(:hover, :focus-within)) .edge-inspector { bottom: 180px; }
+  .world-shell:has(.component-palette:is(:hover, :focus-within)) .edge-inspector { bottom: 200px; }
 }
 .legion-container { width: 100%; height: 100%; border: 1px solid #82958c; border-radius: 24px; background: color-mix(in srgb, var(--surface, #f6f4ec) 82%, transparent); box-shadow: inset 0 0 0 7px #82958c0c; position: relative; }
 .legion-container.is-selected { outline: 2px solid #698b7d; outline-offset: 4px; }
