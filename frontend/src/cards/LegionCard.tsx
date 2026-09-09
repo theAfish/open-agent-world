@@ -1,3 +1,4 @@
+import { ModelSelect } from "./ModelSelect";
 import { type NodeProps } from "@xyflow/react";
 import { Layers3, Pause, Play, RefreshCw, Save } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -82,8 +83,9 @@ export function LegionCardNode({ data, selected }: NodeProps<CanvasNode>) {
       <label className="field-label"><span>Team instruction</span><textarea rows={4} value={instruction} maxLength={16000}
         placeholder="Shared purpose and coordination rules"
         onChange={(e) => setInstruction(e.target.value)} onBlur={() => { if (instruction !== card.config.instruction) void updateCard(card.id, { config: { instruction } }); }} /></label>
-      <label className="field-label"><span>Team model override</span><input value={model} placeholder="Use each agent’s model" maxLength={200}
-        onChange={(e) => setModel(e.target.value)} onBlur={() => { if (model !== card.config.model_override) void updateCard(card.id, { config: { model_override: model.trim() } }); }} /></label>
+      <label className="field-label"><span>Team model override</span><ModelSelect label="Team model override" value={model} allowEmpty onChange={value => {
+        setModel(value); if (value !== card.config.model_override) void updateCard(card.id, { config: { model_override: value } });
+      }} /></label>
       <p className="legion-help">Settings apply when a member starts its next Run.</p>
       <label className="field-label"><span>Member state access</span><select value={String(card.config.shared_state_access ?? "read_write")}
         onChange={(e) => void updateCard(card.id, { config: { shared_state_access: e.target.value } })}>

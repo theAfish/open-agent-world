@@ -660,6 +660,14 @@ export const worldApi = {
     return request<ConversationSession[]>(`/agents/${encodeURIComponent(agentId)}/conversation-sessions`);
   },
 
+  getModelConnections(): Promise<import("../state/modelConnections").ModelCatalog> {
+    return request("/settings/models");
+  },
+
+  saveModelConnections(settings: import("../state/modelConnections").ModelCatalog): Promise<import("../state/modelConnections").ModelCatalog> {
+    return request("/settings/models", { method: "PUT", body: JSON.stringify(settings) });
+  },
+
   getLlmSettings(): Promise<{ base_url: string; api_key_configured: boolean }> {
     return request("/settings/llm");
   },

@@ -38,6 +38,7 @@ function deferred<T>() {
 describe("authoritative world synchronization", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(worldApi, "getModelConnections").mockResolvedValue({ revision: 0, connections: [], default_model: null });
     vi.spyOn(worldApi, "getCatalog").mockResolvedValue(TEST_CATALOG);
     vi.spyOn(worldApi, "getLegions").mockResolvedValue([]);
     useWorldStore.setState({

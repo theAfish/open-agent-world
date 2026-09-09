@@ -2742,6 +2742,9 @@ class ApplicationServices:
         api_key: str | None,
         clear_api_key: bool = False,
     ) -> LlmPublicSettings:
+        from backend.security.model_connections import ModelConnectionStore
+        if ModelConnectionStore(self.llm_settings).read().revision:
+            raise ResourceValidationError("Model connections are managed through Settings / Models. Reload your client to edit them.")
         runtime = self._require_run_manager().default_provider()
         if not isinstance(runtime, GoogleAdkAgentRuntime):
             raise RuntimeUnavailableError("ADK agent runtime is not configured")
@@ -3462,6 +3465,9 @@ class ApplicationServices:
         default: bool = False,
     ) -> None:
         manager = self._require_run_manager()
+        if isinstance(provider, GoogleAdkAgentRuntime):
+            from backend.security.model_connections import ModelConnectionStore
+            provider.model_connections = ModelConnectionStore(self.llm_settings)
         manager.install_provider(provider_id, provider)
         if default:
             manager.default_runtime_provider_id = provider_id
@@ -3555,6 +3561,7 @@ def create_services(
     provider = WorldAgentCapabilityProvider(services)
     services.node_execution = NodeExecutionService(services)
     services.summoning = SummoningService(services)
+    from backend.security.model_connections import ModelConnectionStore
     services.run_manager = RunManager(
         store=RunStore(database),
         world=world,
@@ -3567,7 +3574,7 @@ def create_services(
             if default_runtime_provider_id is not None
             else settings.agent_runtime
         ),
-        provider_options={"google.adk": {"app_name": "open-agent-world"}},
+        provider_options={"google.adk": {"app_name": "open-agent-world", "model_connections": ModelConnectionStore(services.llm_settings)}},
         inactivity_timeout_seconds=settings.run_inactivity_timeout_seconds,
         execution_deadline_seconds=settings.run_execution_deadline_seconds,
         cleanup_timeout_seconds=settings.run_cleanup_timeout_seconds,

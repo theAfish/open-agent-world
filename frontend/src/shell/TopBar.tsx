@@ -45,7 +45,7 @@ export function TopBar() {
       </div>
 
       <div className="top-actions">
-        <button type="button" className="top-icon-button" onClick={toggleSettings} aria-label="Open ADK model settings" title="ADK model settings">
+        <button type="button" className="top-icon-button" onClick={toggleSettings} aria-label="Open settings" title="Settings">
           <Settings2 size={16} />
         </button>
         <button

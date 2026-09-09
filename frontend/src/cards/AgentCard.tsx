@@ -1,3 +1,4 @@
+import { ModelSelect } from "./ModelSelect";
 import { AgentSchemaSettings } from "./AgentSchemaSettings";
 import { PluginSurface } from "../plugins/PluginSurface";
 import { worldApi, apiErrorMessage } from "../api/client";
@@ -17,7 +18,6 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
   const updateCard = useWorldStore((state) => state.updateCard);
   const runAgent = useWorldStore((state) => state.runAgent);
   const stopAgent = useWorldStore((state) => state.stopAgent);
-  const modelSettings = useWorldStore((state) => state.modelSettings);
   const [instruction, setInstruction] = useState(String(card.config.system_instruction ?? ""));
   const [model, setModel] = useState(String(card.config.model ?? "gemini-3.7-flash"));
   const prompt = useNodeSurfaceStore((state) => state.drafts[card.id] ?? String(card.config.prompt ?? ""));
@@ -42,7 +42,6 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
   const output = Array.isArray(card.config.output)
     ? card.config.output.map(String)
     : [];
-  const modelOptions = [...new Set([model, ...modelSettings.models].filter(Boolean))];
 
   return (
     <div className="expanded-stack">
@@ -62,18 +61,11 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
       <div className="field-row">
         <label>
           <span>Model</span>
-          <select
-            value={model}
-            onChange={(event) => {
-              const value = event.target.value;
-              setModel(value);
-              if (value !== card.config.model) {
-                void updateCard(card.id, { config: { model: value } });
-              }
-            }}
-          >
-            {modelOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-          </select>
+          <ModelSelect value={model} onChange={value => {
+            setModel(value);
+            if (value !== card.config.model) void updateCard(card.id, { config: { model: value } });
+          }} />
+          <button type="button" className="secondary-button" onClick={() => useWorldStore.getState().toggleSettings()}>Manage models</button>
         </label>
         <div className="live-readout">
           <Radio size={13} aria-hidden="true" />

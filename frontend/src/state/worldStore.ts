@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { EMPTY_MODEL_CATALOG, type ModelCatalog } from "./modelConnections";
 import { useGenerationStore } from "../effects/generation";
 import { persist } from "zustand/middleware";
 import { apiErrorMessage, normalizeCard, resourceContentUrl, worldApi, type CardCreateInput } from "../api/client";
@@ -29,8 +30,6 @@ import { isEquipmentConnection } from "./equipment";
 import { validateConnection, type RelationshipOption } from "./relationships";
 import { describeRuntimeError } from "./runtimeErrors";
 import {
-  normalizeModelList,
-  persistModelSettings,
   readModelSettings,
   type ModelSettings,
 } from "./modelSettings";
@@ -263,6 +262,7 @@ interface WorldState {
   activityOpen: boolean;
   settingsOpen: boolean;
   modelSettings: ModelSettings;
+  modelCatalog: ModelCatalog;
   paletteCollapsed: boolean;
   theme: "light" | "dark";
   toasts: ToastMessage[];
@@ -329,7 +329,6 @@ interface WorldState {
   toggleActivity: () => void;
   setActivityOpen: (open: boolean) => void;
   toggleSettings: () => void;
-  saveModelSettings: (settings: ModelSettings, clearApiKey?: boolean) => Promise<boolean>;
   togglePalette: () => void;
   toggleTheme: () => void;
   generateStressWorld: (count?: number) => void;
@@ -392,6 +391,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   activityOpen: false,
   settingsOpen: false,
   modelSettings: readModelSettings(),
+  modelCatalog: EMPTY_MODEL_CATALOG,
   paletteCollapsed: false,
   theme: preferredTheme(),
   toasts: [],
@@ -406,6 +406,8 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   sandboxRuntimesLoading: false,
 
   initialize: async () => {
+    const modelsLoaded = worldApi.getModelConnections().then(modelCatalog => set(state => modelCatalog.revision >= state.modelCatalog.revision ? { modelCatalog } : {}))
+      .catch(error => get().pushToast({ tone: "error", title: "Model settings unavailable", detail: apiErrorMessage(error) }));
     const keys = getViewportChunkKeys(get().viewport);
     set({ activeChunkKeys: keys });
     set({ syncState: "loading", syncError: undefined, legionError: undefined });
@@ -416,6 +418,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         loadLegionLibrary(),
       ]);
       const legionError = library.ok ? undefined : apiErrorMessage(library.error);
+      await modelsLoaded;
       set({
         catalog,
         cards: snapshot.nodes,
@@ -445,6 +448,8 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   },
 
   refreshWorld: async () => {
+    void worldApi.getModelConnections().then(modelCatalog => set(state => modelCatalog.revision >= state.modelCatalog.revision ? { modelCatalog } : {}))
+      .catch(error => get().pushToast({ tone: "error", title: "Model settings unavailable", detail: apiErrorMessage(error) }));
     const refreshId = ++refreshSequence;
     set({ syncState: "syncing" });
     try {
@@ -595,8 +600,9 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
     const finalPosition = position ?? viewportCenterToWorld(get().viewport);
     const draft = buildCardDraft(type, finalPosition, definition);
-    const configuredDraft = type === "agent" && get().modelSettings.models[0]
-      ? { ...draft, config: { ...draft.config, model: get().modelSettings.models[0] } }
+    const defaultModel = get().modelCatalog.default_model ?? (!get().modelCatalog.revision ? get().modelSettings.models[0] : undefined);
+    const configuredDraft = type === "agent" && defaultModel
+      ? { ...draft, config: { ...draft.config, model: defaultModel } }
       : draft;
     set({ syncState: "syncing" });
     try {
@@ -1618,39 +1624,6 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   toggleActivity: () => set((state) => ({ activityOpen: !state.activityOpen })),
   setActivityOpen: (activityOpen) => set({ activityOpen }),
   toggleSettings: () => set((state) => ({ settingsOpen: !state.settingsOpen })),
-
-  saveModelSettings: async (settings, clearApiKey = false) => {
-    const normalized: ModelSettings = {
-      baseUrl: settings.baseUrl.trim(),
-      apiKey: settings.apiKey,
-      apiKeyConfigured: settings.apiKeyConfigured,
-      models: normalizeModelList(settings.models),
-    };
-    if (normalized.models.length === 0) {
-      get().pushToast({ tone: "error", title: "Add at least one model", detail: "Agent cards need a model to call." });
-      return false;
-    }
-    try {
-      const saved = await worldApi.configureLlm({
-        base_url: normalized.baseUrl,
-        api_key: normalized.apiKey || null,
-        clear_api_key: clearApiKey,
-      });
-      const persisted = {
-        ...normalized,
-        baseUrl: saved.base_url,
-        apiKey: "",
-        apiKeyConfigured: saved.api_key_configured,
-      };
-      set({ modelSettings: persisted });
-      persistModelSettings(persisted);
-      get().pushToast({ tone: "success", title: "Model connection saved securely", detail: "The backend will restore this connection automatically after restarts." });
-      return true;
-    } catch (error) {
-      get().pushToast({ tone: "error", title: "Model connection was not applied", detail: apiErrorMessage(error) });
-      return false;
-    }
-  },
 
   togglePalette: () => set((state) => ({ paletteCollapsed: !state.paletteCollapsed })),
 
