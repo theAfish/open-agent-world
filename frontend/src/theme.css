@@ -434,6 +434,10 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .card-status[data-status="error"] > span:first-child { background: var(--danger); }
 
 .card-body { flex: 1; min-height: 0; padding-top: 11px; }
+.world-card, .container-plugin-workspace, .equipment-card {
+  -webkit-user-select: text;
+  user-select: text;
+}
 .card-footer { min-height: 27px; margin-top: 8px; padding-top: 8px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); }
 .card-id { max-width: 90px; color: var(--ink-faint); font-size: 8px; font-family: "Cascadia Code", Consolas, monospace; letter-spacing: 0.05em; overflow: hidden; text-overflow: ellipsis; }
 .card-footer-actions { display: flex; align-items: center; gap: 5px; }

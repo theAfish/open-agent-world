@@ -144,6 +144,7 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
       onPointerDownCapture={onPointerDownCapture}
       onClick={(event) => {
         const start = pointerStart.current;
+        if (window.getSelection()?.toString()) return;
         if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || connectingNodeId || dragging) return;
         if (event.detail !== 0 && start && (start.moved || Math.hypot(event.clientX - start.x, event.clientY - start.y) >= DRAG_THRESHOLD_PX)) return;
         if ((event.target as HTMLElement).closest("button, input, textarea, select, label, a, [contenteditable='true'], .react-flow__handle")) return;
@@ -197,16 +198,16 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
             onClick={() => closeInspector(card.id)} label={`Close ${card.name} inspector`} />
         </header>
 
-        <div className="node-preview-content" aria-hidden={visualLevel !== "preview"}>
+        <div className="node-preview-content nodrag nopan" aria-hidden={visualLevel !== "preview"}>
           <NodePreview card={card} />
           <span className="node-preview-hint">Click for details</span>
         </div>
 
-        <div className="card-body node-inspector-content" aria-hidden={visualLevel !== "inspector"}>
+        <div className="card-body node-inspector-content nodrag nopan" aria-hidden={visualLevel !== "inspector"}>
           <CardContent card={card} level={level} />
         </div>
 
-        <footer className="card-footer node-inspector-footer">
+        <footer className="card-footer node-inspector-footer nodrag nopan">
           {definition?.traits.includes("core.agent") && !card.ephemeral ? <EquipmentToggle card={card} />
             : <span className="card-id">{card.ephemeral ? "synthetic" : card.id.slice(0, 8)}</span>}
           <div className="card-footer-actions nodrag nopan">

@@ -173,8 +173,6 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     return <ul>{loading[key] && !value ? <li className="sandbox-tree-note">Loading…</li> : value?.state ? <li className="sandbox-tree-note">{value.message ?? value.state}</li> : <>
       {value?.entries?.length === 0 && <li className="sandbox-tree-note">Empty folder</li>}
       {value?.entries?.map(e => { const next = path ? `${path}/${e.name}` : e.name; return <li key={e.name}>
-        {root === "workspace" && !e.blocked && <input type="checkbox" aria-label={`Select ${next} for publication`} checked={publishPaths.includes(next)}
-          onChange={event => setPublishPaths(current => event.target.checked ? [...current, next] : current.filter(p => p !== next))} />}
         <button className="sandbox-tree-entry" disabled={e.blocked} title={e.blocked ? "Links are blocked" : next}
           aria-expanded={e.directory ? !!expanded[`${root}:${next}`] : undefined}
           aria-current={!e.directory && selection?.root === root && selection.path === next ? "true" : undefined}
@@ -277,7 +275,16 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
         onKeyDown={e => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); e.stopPropagation(); saveSidebarWidth(sidebarWidth + (e.key === "ArrowRight" ? 16 : -16)); } }} />
       <main ref={workArea} className="sandbox-work-area">
         <section className="sandbox-preview" aria-label="File preview">
-          <PublishFiles card={card} paths={publishPaths.length ? publishPaths : selection?.root === "workspace" ? [selection.path] : []} />
+          <PublishFiles card={card} paths={publishPaths.length ? publishPaths : selection?.root === "workspace" ? [selection.path] : []}>
+            {Object.entries(tree).filter(([key]) => key.startsWith("workspace:")).flatMap(([key, value]) =>
+              (value.entries ?? []).filter(entry => !entry.blocked).map(entry => {
+                const parent = key.slice("workspace:".length);
+                const path = parent ? `${parent}/${entry.name}` : entry.name;
+                return <label key={path} className="sandbox-checkbox"><input type="checkbox"
+                  aria-label={`Select ${path} for publication`} checked={publishPaths.includes(path)}
+                  onChange={event => setPublishPaths(current => event.target.checked ? [...current, path] : current.filter(p => p !== path))} />{path}</label>;
+              }))}
+          </PublishFiles>
           <header className="sandbox-pane-heading">
             <span title={selection?.path}><FileText size={13} />{selection?.label ?? "File preview"}</span>
             {selection && <div className="sandbox-pane-actions">

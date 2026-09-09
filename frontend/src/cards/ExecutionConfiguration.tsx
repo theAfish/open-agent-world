@@ -93,6 +93,7 @@ export function EnvironmentVariablesEditor({ rows, onChange, disabled }: {
           <option value="value">Value</option><option value="secret">Secret reference</option>
         </select>
         <input aria-label={`Environment variable ${index + 1} value`} value={row.value}
+          type={row.kind === "secret" ? "password" : "text"} autoComplete="off"
           placeholder={row.kind === "secret" ? "Reference, e.g. api-token" : "Value"}
           onChange={(event) => patch(row.id, { value: event.target.value })} />
       </div>
