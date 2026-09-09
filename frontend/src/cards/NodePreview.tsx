@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
 import { PluginSurface } from "../plugins/PluginSurface";
+import { modelRef } from "../state/modelConnections";
 
 function compactText(value: unknown, fallback: string): string {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
@@ -20,6 +21,7 @@ function DefaultNodePreview({ card }: { card: WorldCard }) {
   const sandboxError = useWorldStore(s => s.sandboxErrors[card.id]);
   const edges = useWorldStore((state) => state.edges);
   const catalog = useWorldStore((state) => state.catalog);
+  const modelCatalog = useWorldStore((state) => state.modelCatalog);
   const connectionCount = useMemo(
     () => edges.filter((edge) => edge.source === card.id || edge.target === card.id).length,
     [card.id, edges],
@@ -32,11 +34,16 @@ function DefaultNodePreview({ card }: { card: WorldCard }) {
 
 
   if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("core.agent")) {
+    const reference = String(card.config.model ?? "");
+    const configuredModel = modelCatalog.connections.flatMap(connection => connection.models)
+      .find(model => modelRef(model.id) === reference);
+    const modelName = configuredModel?.name || (reference.startsWith("oaw:model:")
+      ? "Unavailable model" : reference || "Default model");
     return (
       <div className="node-preview-summary">
         <p>{compactText(card.config.system_instruction, "Ready for a scoped instruction.")}</p>
         <div className="node-preview-metadata">
-          <span><Bot size={12} /> {String(card.config.model ?? "Default model")}</span>
+          <span title={modelName}><Bot size={12} /> {modelName}</span>
           <span>{connectionCount} world connections</span>
         </div>
       </div>

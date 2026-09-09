@@ -271,7 +271,14 @@ class WorldAgentCapabilityProvider:
                 from backend.capabilities.projection import authorize_invocation
                 capability = authorize_invocation(self.services, agent_id, capability_id, arguments)
         handler = self.services.plugins.capability_handler(capability.kind)
-        return await handler(_CapabilityContext(self.services), capability, dict(arguments))
+        from backend.sandbox.models import SandboxValidationError
+        try:
+            return await handler(_CapabilityContext(self.services), capability, dict(arguments))
+        except SandboxValidationError as exc:
+            # All Agent runtimes already return domain errors as tool feedback.
+            # Validation can also fail during bundle construction/materialization,
+            # after the handler has validated the initial request model.
+            raise ResourceValidationError(str(exc)) from exc
 
 
 def _python_type(schema_type: object) -> type[Any]:

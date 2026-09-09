@@ -69,14 +69,17 @@ class MatCreatorPlugin:
                 transformations={"assimilate": NodeDocumentTransformation("Assimilate Toolset", frozenset({"oaw.skill-package"}), k.assimilate)},
                 downloads={"snapshots": lambda value: NodeDocumentDownload("knowledge-packages.json", json.dumps(value["snapshots"], ensure_ascii=False, indent=2).encode(), "application/json")})))
         registration.register_relationship(RelationshipDefinition(id="matcreator.kdg.use", label="Use knowledge", short_label="knowledge",
+            templateable=True,
             description="Retrieve knowledge and read its resources. Execution requires a separate Sandbox grant.",
             source_traits=frozenset({"core.agent"}), target_types=frozenset({"matcreator.kdg"}),
             capabilities=tuple(CapabilityGrantDefinition(kind=kind) for kind in [READ, *["matcreator.kdg." + key for key in reads]])))
         registration.register_relationship(RelationshipDefinition(id="matcreator.kdg.learn", label="Use and learn", short_label="learn",
+            templateable=True,
             description="Retrieve knowledge and record execution memories; durable review stays explicit.",
             source_traits=frozenset({"core.agent"}), target_types=frozenset({"matcreator.kdg"}),
             capabilities=tuple(CapabilityGrantDefinition(kind=kind) for kind in [READ, *["matcreator.kdg." + key for key in reads], "matcreator.kdg.save_memory"])))
         registration.register_relationship(RelationshipDefinition(id="matcreator.kdg.curate", label="Curate knowledge", short_label="curate",
+            templateable=True,
             description="Explicitly authorize editing user-owned knowledge and reviewing memories.",
             source_traits=frozenset({"core.agent"}), target_types=frozenset({"matcreator.kdg"}),
             capabilities=tuple(CapabilityGrantDefinition(kind=kind) for kind in [READ, *["matcreator.kdg." + key for key in [*reads, *writes]]])))

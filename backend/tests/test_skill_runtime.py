@@ -242,6 +242,37 @@ def test_script_paths_cannot_escape_or_select_unlisted_files(runtime_client, pat
     assert not (backend._sandboxes_root / sandbox["id"] / ".oaw").exists()
 
 
+def test_agent_receives_late_bundle_validation_error_and_can_retry(runtime_client, monkeypatch):
+    from backend.agents.tools import build_scoped_tool_callables
+    import backend.skill_runtime as skill_runtime
+
+    client, backend, native = runtime_client
+    agent, sandbox, skill, _, _ = setup_skill(client)
+    provider = WorldAgentCapabilityProvider(client.app.state.services)
+    definitions = client.portal.call(provider.list_tools, agent["id"])
+    definition = next(d for d in definitions if d.capability_id == "operation:run_skill_script")
+    tool = build_scoped_tool_callables(provider, agent["id"], [definition])[0]
+    original = skill_runtime.resolve_skill_mount
+
+    def invalid_bundle(*args, **kwargs):
+        return RuntimeBundle("skills/example", (("scripts\\check.py", b""),))
+
+    monkeypatch.setattr(skill_runtime, "resolve_skill_mount", invalid_bundle)
+
+    async def call_tool():
+        return await tool(sandbox=sandbox["id"], skill=skill["id"],
+                          script="scripts/check.py", interpreter=["python"])
+
+    result = client.portal.call(call_tool)
+    assert result["ok"] is False
+    assert result["error"]["code"] == "invalid_resource"
+    assert "safe portable relative paths" in result["error"]["message"]
+    assert "scripts" in result["error"]["message"]
+    assert native.last_argv == ()
+    monkeypatch.setattr(skill_runtime, "resolve_skill_mount", original)
+    assert client.portal.call(call_tool)["exit_code"] == 0
+
+
 @pytest.mark.parametrize("operation", ["duplicate", "summon"])
 def test_copied_agents_have_fresh_runtime_and_workspace(runtime_client, operation):
     client, backend, _ = runtime_client

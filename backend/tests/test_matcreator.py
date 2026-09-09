@@ -9,6 +9,54 @@ def action(client, node, name, args):
     current = client.get(f"/api/nodes/{node['id']}/document").json()
     return client.post(f"/api/nodes/{node['id']}/actions/{name}", json={"arguments": args, "expected_revision": current['revision']})
 
+
+@pytest.fixture
+def summoning_client(tmp_path):
+    from dataclasses import replace
+    from fastapi.testclient import TestClient
+    from backend.config import Settings
+    from backend.main import create_app
+
+    settings = replace(Settings.for_data_root(tmp_path / "world"), agent_runtime="core.mock")
+    with TestClient(create_app(settings)) as client:
+        yield client
+
+
+@pytest.mark.parametrize("relationship", ["matcreator.kdg.use", "matcreator.kdg.learn", "matcreator.kdg.curate"])
+def test_summoned_agent_keeps_shared_graph_and_sandbox_connections(summoning_client, relationship):
+    from backend.tests.test_summoning import stock, invoke, settle
+
+    client = summoning_client
+    box = create_node(client, "oaw.barracks")
+    agent = create_node(client, "agent")
+    graph = create_node(client, "matcreator.kdg")
+    sandbox = create_node(client, "sandbox")
+    stock(client, box, agent)
+    for target, relation in [(graph, relationship), (sandbox, "execute")]:
+        response = client.post("/api/edges", json={"source": agent["id"],
+            "target": target["id"], "relationship": relation})
+        assert response.status_code == 201, response.text
+    services = client.app.state.services
+    original_caps = {(c.kind, c.target_id) for c in services.capabilities.derive(agent["id"]).capabilities}
+    instance = settle(client, box, invoke(client, box, action="summon", agent_id=agent["id"], prompt="Inspect knowledge"))
+    assert instance["status"] == "succeeded"
+    summoned = instance["entry_agent_id"]
+    assert instance["node_ids"] == [summoned]
+    assert {(c.kind, c.target_id) for c in services.capabilities.derive(summoned).capabilities} == original_caps
+    edges = [e for e in services.world.list_edges() if e.source == summoned]
+    assert {(e.target, e.relationship) for e in edges} == {(graph["id"], relationship), (sandbox["id"], "execute")}
+    provider = WorldAgentCapabilityProvider(services)
+    result = client.portal.call(provider.invoke_tool, summoned, "operation:knowledge_search", {"knowledge": graph["id"]})
+    assert result["value"]["nodes"] == []
+    graph_edge = next(e for e in edges if e.target == graph["id"])
+    assert client.delete(f"/api/edges/{graph_edge.id}").status_code == 200
+    with pytest.raises(PermissionDeniedError):
+        client.portal.call(provider.invoke_tool, summoned, "operation:knowledge_search", {"knowledge": graph["id"]})
+    invoke(client, box, action="reclaim", instance_id=instance["id"])
+    for shared in [graph, sandbox]:
+        assert client.get(f"/api/nodes/{shared['id']}").status_code == 200
+    assert {(c.kind, c.target_id) for c in services.capabilities.derive(agent["id"]).capabilities} == original_caps
+
 def test_palette_assimilation_has_no_temporary_source_and_preview_is_read_only(client):
     target = create_node(client, 'matcreator.kdg')
     before = client.get('/api/world').json()['nodes']
