@@ -118,7 +118,7 @@ function Wait-BackendListener {
     param(
         [System.Diagnostics.Process]$Backend,
         [int]$Port,
-        [int]$TimeoutMilliseconds = 10000
+        [int]$TimeoutMilliseconds = 30000
     )
 
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
@@ -221,7 +221,7 @@ try {
         $failure = if ($backend.HasExited) {
             "The backend exited before becoming available on $backendHttpUrl (exit code $($backend.ExitCode))."
         } else {
-            "The backend did not become available on $backendHttpUrl within 10 seconds."
+            "The backend did not become available on $backendHttpUrl within 30 seconds."
         }
         Stop-RecordedProcessTree (Get-ProcessRecord $backend.Id)
         $backend = $null

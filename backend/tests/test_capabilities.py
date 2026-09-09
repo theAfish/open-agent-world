@@ -11,6 +11,27 @@ from backend.errors import PermissionDeniedError
 from backend.tests.conftest import create_node
 
 
+def test_conversation_notes_share_only_with_participants_and_revoke(client: TestClient) -> None:
+    agent = create_node(client, "agent", name="Secretary")
+    outsider = create_node(client, "agent", name="Outsider")
+    conversation = create_node(client, "conversation", name="Meeting")
+    notes = create_node(client, "text", name="Minutes", content="Draft")
+    join = client.post("/api/edges", json={"source": agent["id"], "target": conversation["id"], "relationship": "participate"})
+    assert join.status_code == 201
+    attach = client.post("/api/edges", json={"source": conversation["id"], "target": notes["id"], "relationship": "conversation_notes"})
+    assert attach.status_code == 201
+    path = f"/api/agents/{agent['id']}/resources/{notes['id']}/text"
+    assert client.get(path).json()["content"] == "Draft"
+    assert client.put(path, json={"content": "Meeting minutes"}).status_code == 200
+    assert client.get(f"/api/agents/{outsider['id']}/resources/{notes['id']}/text").status_code == 403
+    assert client.delete(f"/api/edges/{attach.json()['id']}").status_code == 200
+    assert client.get(path).status_code == 403
+    assert client.post("/api/edges", json={"source": conversation["id"], "target": notes["id"], "relationship": "conversation_notes"}).status_code == 201
+    assert client.get(path).status_code == 200
+    assert client.delete(f"/api/edges/{join.json()['id']}").status_code == 200
+    assert client.put(path, json={"content": "Forbidden"}).status_code == 403
+
+
 def test_capability_derivation_permission_changes_and_revocation(
     client: TestClient,
 ) -> None:

@@ -49,6 +49,13 @@ class CapabilityBroker:
             relationship = self.plugins.relationship(edge.relationship)
             if relationship.generated:
                 continue
+            # Participation explicitly shares only attached meeting-note resources,
+            # not arbitrary capabilities belonging to other participants.
+            if edge.relationship == "participate" and self.plugins.has_trait(target.type, "core.conversation"):
+                directed_edges.extend(
+                    (child, child.target) for child in self.world.connections_from(target_id)
+                    if child.relationship == "conversation_notes"
+                )
             if not relationship.capabilities:
                 directed_edges.extend((child, child.target) for child in self.world.connections_from(target_id))
             for grant in relationship.capabilities:

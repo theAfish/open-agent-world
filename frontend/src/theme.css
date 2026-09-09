@@ -454,6 +454,13 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .semantic-handle--left { left: 0 !important; }
 .semantic-handle--right { left: auto !important; right: 0 !important; }
 
+/* Expanded surfaces reserve their interior for reading and editing. */
+.world-card[data-card-expanded="true"] { --connection-boundary-width: 6px; }
+.world-card[data-card-expanded="true"] > .semantic-handle--top,
+.world-card[data-card-expanded="true"] > .semantic-handle--bottom { height: var(--connection-boundary-width) !important; }
+.world-card[data-card-expanded="true"] > .semantic-handle--left,
+.world-card[data-card-expanded="true"] > .semantic-handle--right { width: var(--connection-boundary-width) !important; }
+
 .connection-hover-hint {
   position: absolute;
   z-index: 13;
@@ -1132,6 +1139,40 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .workspace-window-actions { display: flex; gap: 5px; }
 .workspace-window-actions .icon-button { width: 29px; height: 29px; border-radius: 9px; }
 .workspace-content { min-height: 0; }
+
+/* Membership preview only; no overlay can intercept the existing drag gesture. */
+.container-frame[data-member-drop] { --drop-color:#7edbc1; outline:1px solid color-mix(in srgb,var(--drop-color) 65%,transparent); outline-offset:2px; box-shadow:0 0 12px color-mix(in srgb,var(--drop-color) 28%,transparent),0 0 36px color-mix(in srgb,var(--drop-color) 15%,transparent),inset 0 0 20px color-mix(in srgb,var(--drop-color) 8%,transparent); }
+/* Port the legacy Library corner grip without changing native resize behavior. */
+.react-flow__resize-control.container-resize-arc {
+  z-index:33;
+  width:22px;
+  height:22px;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  box-shadow:none;
+  cursor:nwse-resize;
+}
+.react-flow__resize-control.container-resize-arc::after {
+  content:"";
+  position:absolute;
+  inset:5px;
+  border-right:2px solid #4f957d;
+  border-bottom:2px solid #4f957d;
+  border-radius:0 0 7px;
+  opacity:0;
+  transition:opacity 130ms ease;
+  pointer-events:none;
+}
+.react-flow__resize-control.container-resize-arc:hover::after,
+.react-flow__resize-control.container-resize-arc:active::after { opacity:1; }
+.container-frame[data-member-drop="enter"] { --drop-color:#79baff; }
+.container-frame[data-member-drop="leave"] { --drop-color:#efb17f; }
+.container-frame[data-member-drop]::after { content:"";position:absolute;inset:-2px;border:3px solid transparent;border-radius:inherit;pointer-events:none;z-index:2;filter:drop-shadow(0 0 5px var(--drop-color)) drop-shadow(0 0 12px color-mix(in srgb,var(--drop-color) 45%,transparent)); }
+.container-frame[data-member-drop-side="top"]::after { border-top-color:var(--drop-color); }
+.container-frame[data-member-drop-side="right"]::after { border-right-color:var(--drop-color); }
+.container-frame[data-member-drop-side="bottom"]::after { border-bottom-color:var(--drop-color); }
+.container-frame[data-member-drop-side="left"]::after { border-left-color:var(--drop-color); }
 
 .agent-workspace-grid { height: 100%; display: grid; grid-template-columns: 190px minmax(300px, 1fr) 220px; }
 .conversation-workspace-grid { height: 100%; display: grid; grid-template-columns: 210px minmax(320px, 1fr) 220px; }

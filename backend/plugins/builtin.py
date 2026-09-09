@@ -960,6 +960,13 @@ def _register_builtin(registry: PluginRegistration) -> None:
         capabilities=(CapabilityGrantDefinition(kind='conversation.request_turn'),),
     ))
     registry.register_relationship(RelationshipDefinition(
+        id="conversation_notes", label="Meeting notes", short_label="notes",
+        description="Attach meeting notes. Participating agents can read and edit this text; disconnect to revoke access.",
+        source_traits=frozenset({"core.conversation"}), target_traits=frozenset({"core.text"}),
+        templateable=True,
+        capabilities=(CapabilityGrantDefinition(kind='text.read'), CapabilityGrantDefinition(kind='text.edit')),
+    ))
+    registry.register_relationship(RelationshipDefinition(
         id="read", label="Read", short_label="read",
         description="The agent can inspect this text through a scoped tool.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.text"}),

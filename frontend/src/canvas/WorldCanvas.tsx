@@ -314,7 +314,8 @@ export function WorldCanvas() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target?.matches("input, textarea, select, [contenteditable='true']")) return;
+      // Modal workspaces and embedded readers own their keyboard shortcuts.
+      if (event.defaultPrevented || document.querySelector("dialog:modal") || target?.closest(".library-reader, input, textarea, select, [contenteditable='true']")) return;
       const modifier = event.ctrlKey || event.metaKey;
       if (modifier && event.key.toLowerCase() === "z") {
         event.preventDefault();
@@ -365,13 +366,52 @@ export function WorldCanvas() {
       return box && x > box.left && x < box.right && y > box.top && y < box.bottom;
     });
   }, [cards, catalog]);
+  const clearContainerDropHint = useCallback(() => {
+    wrapper.current?.querySelectorAll<HTMLElement>("[data-member-drop]").forEach((frame) => {
+      delete frame.dataset.memberDrop;
+      delete frame.dataset.memberDropSide;
+    });
+  }, []);
+  useEffect(() => {
+    window.addEventListener("blur", clearContainerDropHint);
+    window.addEventListener("pointercancel", clearContainerDropHint);
+    return () => {
+      clearContainerDropHint();
+      window.removeEventListener("blur", clearContainerDropHint);
+      window.removeEventListener("pointercancel", clearContainerDropHint);
+    };
+  }, [clearContainerDropHint]);
   const onNodeDrag: OnNodeDrag<CanvasNode> = useCallback((event, node) => {
+    clearContainerDropHint();
+    const member = node.data.card;
+    if (!node.data.equipmentDetail && !member.ephemeral) {
+      const parent = cards.find((c) => c.id === node.parentId);
+      const surface = parent ? { x: node.position.x + parent.position.x, y: node.position.y + parent.position.y } : node.position;
+      const position = isContainer(member, catalog) ? surface : nodePositionFromSurfacePosition(surface, node.data.surfaceLevel);
+      const point = { x: position.x + 48, y: position.y + 48 };
+      const sizes = new Map(nodesRef.current.map((item) => [item.id, { width: Number(item.style?.width), height: Number(item.style?.height) }]));
+      const destination = dropContainer(cards, member, point, catalog, sizes);
+      const paint = (id: string, mode: string) => {
+        const frame = wrapper.current?.querySelector<HTMLElement>(`.container-frame[data-card-id="${id}"]`);
+        const container = cards.find((c) => c.id === id);
+        if (!frame || !container) return;
+        const size = sizes.get(id) ?? container.size;
+        const distances = [Math.abs(point.y-container.position.y), Math.abs(point.x-container.position.x-size.width), Math.abs(point.y-container.position.y-size.height), Math.abs(point.x-container.position.x)];
+        frame.dataset.memberDrop = mode;
+        frame.dataset.memberDropSide = ["top","right","bottom","left"][distances.indexOf(Math.min(...distances))];
+      };
+      if (destination?.id !== member.parent_id) {
+        if (member.parent_id) paint(member.parent_id, "leave");
+        if (destination) paint(destination.id, "enter");
+      }
+    }
     const resource = useEquipmentDrag.getState().resource;
     if (resource?.id !== node.id || !("clientX" in event)) return;
     useEquipmentDrag.getState().set(resource, equipmentDropOwner(resource, event.clientX, event.clientY)?.id);
-  }, [equipmentDropOwner]);
+  }, [equipmentDropOwner, clearContainerDropHint, cards, catalog]);
 
   const onNodeDragStop: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
+    clearContainerDropHint();
     cancelPositionAnimation();
     const targetId = useEquipmentDrag.getState().targetId;
     useEquipmentDrag.getState().set();
@@ -407,7 +447,7 @@ export function WorldCanvas() {
       activeDragIds.current.clear();
       setDragging(false);
     });
-  }, [cancelPositionAnimation, cards, setDragging, updateCardPositions, updateCard, catalog]);
+  }, [cancelPositionAnimation, cards, setDragging, updateCardPositions, updateCard, catalog, clearContainerDropHint]);
 
   const onConnect = useCallback((connection: Connection) => {
     requestConnection(connection.source, connection.target);

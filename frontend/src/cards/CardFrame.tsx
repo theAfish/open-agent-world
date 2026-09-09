@@ -214,8 +214,11 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
               onClick={() => { dismissSurface(card.id); void deleteCard(card.id); }} label={`Remove ${card.name}`}
               title="Remove object (Ctrl+Z to undo)" /> : null}
             {support.workspace ? (
-              <button type="button" className="card-expand-button" onClick={() => openWorkspace(card.id)}>
-                Open workspace <ExternalLink size={13} />
+              <button type="button" className="card-expand-button" onClick={() => {
+                if (definition?.traits.includes("library.readable")) cardRef.current?.dispatchEvent(new Event("oaw:expand-reader"));
+                else openWorkspace(card.id);
+              }}>
+                {definition?.traits.includes("library.readable") ? "全屏显示" : "Open workspace"} <ExternalLink size={13} />
               </button>
             ) : null}
           </div>

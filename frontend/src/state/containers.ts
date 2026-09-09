@@ -55,9 +55,10 @@ export function containerSizes(cards: WorldCard[], catalog: PluginCatalog, level
 export function dropContainer(cards: WorldCard[], member: WorldCard, point: WorldPosition, catalog: PluginCatalog, sizes = new Map<string, WorldSize>(), accepts = acceptsMember) {
   return cards.filter((card) => {
     if (!containerDefinition(card, catalog) || !accepts(card, member, catalog, cards)) return false;
-    const [left, top, right, bottom] = containerDefinition(card, catalog)!.content_inset;
     const size = sizes.get(card.id) ?? card.size;
-    return point.x >= card.position.x + left && point.x <= card.position.x + size.width - right
-      && point.y >= card.position.y + top && point.y <= card.position.y + size.height - bottom;
+    // Membership follows the visible frame; insets only govern member layout.
+    // Use the same boundary for the drag hint and the final drop.
+    return point.x >= card.position.x && point.x <= card.position.x + size.width
+      && point.y >= card.position.y && point.y <= card.position.y + size.height;
   }).sort((a, b) => ancestors(cards, b).length - ancestors(cards, a).length || a.size.width * a.size.height - b.size.width * b.size.height)[0];
 }

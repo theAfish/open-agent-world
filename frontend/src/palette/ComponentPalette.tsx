@@ -151,7 +151,8 @@ export function normalizeDecks(candidates: StoredDeck[], catalog: PluginCatalog)
     home?.cardTypes.push(type);
     if (home) home.catalogVersions[type] = deckRevision(catalog, type);
   });
-  return decks;
+  // Retain custom folders, but remove retired catalog decks once their cards move.
+  return decks.filter((deck) => deck.custom || deck.cardTypes.length > 0 || defaults.some((item) => item.id === deck.id));
 }
 
 function parseStoredDecks(value: string | null): StoredDeck[] {

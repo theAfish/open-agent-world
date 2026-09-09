@@ -7,6 +7,7 @@ import { worldApi } from "../api/client";
 import type { SandboxSettings } from "../api/client";
 import type { SandboxRuntime } from "../types/world";
 import { FolderPathInput } from "./FolderPathInput";
+import { DeepLSettings } from "./DeepLSettings";
 
 export function SettingsPanel() {
   const open = useWorldStore((state) => state.settingsOpen);
@@ -18,7 +19,7 @@ export function SettingsPanel() {
   const [modelError, setModelError] = useState("");
   const [modelRetry, setModelRetry] = useState(0);
   const [clearApiKey, setClearApiKey] = useState(false);
-  const [section, setSection] = useState<"model" | "sandbox">("model");
+  const [section, setSection] = useState<"model" | "sandbox" | "deepl">("model");
   const [sandbox, setSandbox] = useState<SandboxSettings>({ workspace_root: null, runtime: "auto" });
   const [runtimes, setRuntimes] = useState<SandboxRuntime[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -74,6 +75,7 @@ export function SettingsPanel() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (section === "deepl") return;
     if (busy || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)) return;
     setBusy(true);
     setError("");
@@ -107,11 +109,12 @@ export function SettingsPanel() {
         </header>
 
         <nav className="settings-sections" aria-label="Settings sections">
+          <button type="button" className="secondary-button" aria-pressed={section === "deepl"} disabled={busy} onClick={() => setSection("deepl")}>DeepL</button>
           <button type="button" className="secondary-button" aria-pressed={section === "model"} disabled={busy} onClick={() => setSection("model")}>Models</button>
           <button type="button" className="secondary-button" aria-pressed={section === "sandbox"} disabled={busy} onClick={() => setSection("sandbox")}>Sandbox</button>
         </nav>
 
-        {section === "model" ? <div className="settings-form">
+        {section === "deepl" ? <DeepLSettings /> : section === "model" ? <div className="settings-form">
           {!modelLoaded && !modelError && <p role="status">Loading model settings…</p>}
           <label className="field-label">
             <span><Server size={11} /> OpenAI-compatible base URL</span>
@@ -169,7 +172,7 @@ export function SettingsPanel() {
 
         <footer>
           <button type="button" className="secondary-button" onClick={setOpen} disabled={busy}>Cancel</button>
-          <button type="submit" className="primary-button" disabled={busy || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)}>{saving ? "Saving…" : "Save settings"}</button>
+          {section !== "deepl" && <button type="submit" className="primary-button" disabled={busy || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)}>{saving ? "Saving…" : "Save settings"}</button>}
         </footer>
       </form>
     </div>
