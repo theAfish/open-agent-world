@@ -1586,21 +1586,9 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
 
-.component-palette .palette-items:not(.has-many) > .palette-item:nth-child(1) { transform: rotate(-3deg); }
-.component-palette .palette-items:not(.has-many) > .palette-item:nth-child(2) { transform: rotate(3deg); }
-.component-palette .palette-item:hover {
-  z-index: 3;
+.deck-hover-slot[data-active] .palette-item {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-  background: linear-gradient(155deg, var(--card-surface), var(--card-soft));
   box-shadow: 0 14px 24px var(--shadow-deep), 0 0 0 3px var(--accent-soft), inset 0 1px 0 var(--highlight);
-  transform: translateY(-8px) rotate(0);
-}
-/* The resting tilt for one- and two-card decks is more specific than the
-   generic hover selector, so restore the shared lift on those cards here. */
-.component-palette .palette-items:not(.has-many) > .palette-item:hover,
-.component-palette .palette-items:not(.has-many) > .palette-item:focus-visible {
-  z-index: 20;
-  transform: translateY(-9px) rotate(0) scale(1.035);
 }
 .component-palette .palette-item:active { cursor: grabbing; }
 
@@ -1629,31 +1617,6 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   min-height: 122px;
   margin: 0 -3px;
   transform-origin: 50% 110%;
-}
-.palette-items:not(.has-many) > .legion-palette-entry:nth-child(1) { transform: rotate(-3deg); }
-.palette-items:not(.has-many) > .legion-palette-entry:nth-child(2) { transform: rotate(3deg); }
-.legion-palette-entry:hover { z-index: 4; transform: translateY(-8px) rotate(0); }
-
-.component-palette .palette-items.has-many > .palette-item,
-.component-palette .palette-items.has-many > .legion-palette-entry {
-  transform: rotate(var(--fan-angle));
-}
-
-.component-palette .palette-items.has-many > .palette-item:hover,
-.component-palette .palette-items.has-many > .palette-item:focus-visible,
-.component-palette .palette-items.has-many > .legion-palette-entry:hover,
-.component-palette .palette-items.has-many > .legion-palette-entry:focus-within {
-  z-index: 20;
-  transform: translateY(-9px) rotate(0) scale(1.035);
-}
-.legion-palette-entry .palette-item,
-.legion-palette-entry .palette-item:hover {
-  width: 100%;
-  min-width: 0;
-  height: 122px;
-  min-height: 122px;
-  margin: 0;
-  transform: none;
 }
 .palette-item--legion .palette-item-icon {
   color: var(--accent-strong);
@@ -2139,3 +2102,50 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 
 .container-plugin-workspace { position: absolute; inset: 90px 16px 16px; display: flex; flex-direction: column; overflow: hidden; border-radius: 16px; }
 .container-plugin-workspace > * { flex: 1; min-height: 0; }
+
+/* Stable, contiguous hit slots are independent of spring-driven card surfaces. */
+.component-palette .deck-hover-slot {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: 122px;
+}
+.component-palette .palette-items:not(.has-many) > .deck-hover-slot { flex: 0 1 100px; }
+.component-palette .deck-hover-button {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+}
+.component-palette .deck-hover-button:active { cursor: grabbing; }
+.component-palette .deck-hover-button:disabled { cursor: default; }
+.component-palette .deck-hover-slot .palette-item {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  margin: 0 0 0 -53px;
+  height: 122px;
+  pointer-events: none;
+  transition: box-shadow 160ms ease, border-color 160ms ease;
+}
+.component-palette .deck-hover-slot .legion-palette-entry {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  transform: none;
+}
+.deck-hover-slot[data-active] .legion-card-delete,
+.deck-hover-slot:focus-within .legion-card-delete { opacity: 1; }
+@media (max-width: 620px) {
+  .component-palette .deck-hover-slot .palette-item { margin-left: -48px; }
+}
+@media (max-height: 650px) {
+  .component-palette .deck-hover-slot { height: 101px; }
+  .component-palette .deck-hover-slot .palette-item { height: 101px; }
+}

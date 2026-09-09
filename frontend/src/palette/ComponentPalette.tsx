@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useState, type CSSProperties, type DragEvent, type FormEvent } from "react";
+import { DeckHand } from "./DeckHand";
 import { useWorldStore } from "../state/worldStore";
 import { CatalogIcon } from "../components/CatalogIcon";
 import { useEquipmentDrag } from "../state/equipment";
@@ -68,16 +69,6 @@ interface CardDeck extends StoredDeck {
 const DECKS_KEY = "open-agent-world.decks.v2";
 const LEGACY_CUSTOM_DECKS_KEY = "open-agent-world.custom-decks.v1";
 const LEGIONS_DECK_ID = "__open-agent-world-legions__";
-
-type FanStyle = CSSProperties & {
-  "--fan-angle": string;
-};
-
-function deckCardFanStyle(index: number, count: number): FanStyle {
-  const distanceFromCenter = count > 1 ? (index / (count - 1)) * 2 - 1 : 0;
-  const spread = Math.min(10, 3 + count * 0.8);
-  return { "--fan-angle": `${distanceFromCenter * spread}deg` };
-}
 
 const DECK_ICONS: Record<DeckIconKey, LucideIcon> = {
   bot: Bot,
@@ -475,18 +466,18 @@ export function ComponentPalette() {
               ) : null}
             </div>
             {activeDeck?.cards.length ? (
-              <div
+              <DeckHand
+                key={activeDeck.id}
                 className={`palette-items ${activeDeck.cards.length > 2 ? "has-many" : ""}`}
                 style={{ "--deck-card-count": activeDeck.cards.length } as CSSProperties}
               >
-                {activeDeck.cards.map((item, index) => {
+                {activeDeck.cards.map((item) => {
                   if (item.kind === "node") {
                     return (
                       <button
                         type="button"
                         key={`node:${item.type}`}
-                        className={`palette-item palette-item--${item.type}`}
-                        style={deckCardFanStyle(index, activeDeck.cards.length)}
+                        className="deck-hover-button"
                         draggable
                         onDragStart={(event) => beginDrag(event, { version: 1, kind: "node", type: item.type })}
                         onDragEnd={() => useEquipmentDrag.getState().set()}
@@ -494,10 +485,12 @@ export function ComponentPalette() {
                         aria-label={`Create ${item.label}`}
                         title="Drag to the canvas to create, or onto a deck tab to move"
                       >
+                        <span className={`palette-item palette-item--${item.type}`} data-deck-visual>
                         <span className="palette-card-corner"><CatalogIcon definition={catalog.node_types.find((d) => d.id === item.type)} size={15} /></span>
                         <span className="palette-item-icon"><CatalogIcon definition={catalog.node_types.find((d) => d.id === item.type)} size={25} /></span>
                         <span className="palette-item-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>
                         <span className="palette-draw"><Plus size={12} /> Draw</span>
+                        </span>
                       </button>
                     );
                   }
@@ -507,11 +500,10 @@ export function ComponentPalette() {
                     <div
                       className="legion-palette-entry"
                       key={`legion:${item.id}`}
-                      style={deckCardFanStyle(index, activeDeck.cards.length)}
                     >
                       <button
                         type="button"
-                        className={`palette-item palette-item--legion ${item.compatible ? "" : "is-incompatible"}`}
+                        className="deck-hover-button"
                         draggable={item.compatible}
                         onDragStart={(event) => {
                           if (item.compatible) beginDrag(event, {
@@ -526,12 +518,14 @@ export function ComponentPalette() {
                         aria-label={`Deploy Legion ${item.label}`}
                         title={item.compatible ? "Drag to deploy this complete formation" : issueText}
                       >
+                        <span className={`palette-item palette-item--legion ${item.compatible ? "" : "is-incompatible"}`} data-deck-visual>
                         <span className="palette-card-corner">
                           {item.compatible ? <Icon size={15} /> : <AlertTriangle size={15} />}
                         </span>
                         <span className="palette-item-icon"><Icon size={25} /></span>
                         <span className="palette-item-copy"><strong>{item.label}</strong><small>{item.detail}</small></span>
                         <span className="palette-draw"><Plus size={12} /> Deploy</span>
+                        </span>
                       </button>
                       <button
                         type="button"
@@ -549,7 +543,7 @@ export function ComponentPalette() {
                     </div>
                   );
                 })}
-              </div>
+              </DeckHand>
             ) : (
               <div className="deck-empty">
                 {activeDeck?.legionDeck
