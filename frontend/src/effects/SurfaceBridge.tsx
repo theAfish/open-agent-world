@@ -1,5 +1,6 @@
 import { useId } from "react";
-import { useStore, ViewportPortal } from "@xyflow/react";
+import { useStore } from "@xyflow/react";
+import { ViewportPortal } from "../canvas/FlowPortal";
 import "./surfaceBridge.css";
 
 /** A pointer-inert area between two canvas surfaces, independent of graph relationships. */

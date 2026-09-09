@@ -50,6 +50,8 @@ def write_document(services, node_id, value, expected_revision, *, actor_id=None
     spec = definition(services, node_id)
     try:
         value = spec.model.model_validate(value).model_dump(mode="json")
+        if spec.validate_update is not None:
+            spec.validate_update(read_document(services, node_id)["value"], value)
     except (ValidationError, ValueError) as exc:
         raise ResourceValidationError(validation_message(exc)) from exc
     if len(json.dumps(value).encode("utf-8")) > spec.max_size_bytes:
@@ -95,7 +97,7 @@ async def invoke_document_action(services, node_id, action, request, *, capabili
         except (ValidationError, ValueError) as exc:
             raise ResourceValidationError(validation_message(exc)) from exc
         if handler.read_only:
-            return current
+            return {"value": value, "revision": current["revision"]} if handler.project else current
         context = services.run_manager.current_context if services.run_manager else None
         return write_document(services, node_id, value, request.expected_revision,
             actor_id=capability.agent_id if capability else None, run_id=context.run_id if context else None)

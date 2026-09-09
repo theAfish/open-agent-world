@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { useReactFlow, ViewportPortal } from "@xyflow/react";
+import { useReactFlow } from "@xyflow/react";
+import { ViewportPortal } from "../canvas/FlowPortal";
 import { flightPosition, useGenerationStore, type NodeGeneration } from "./generation";
 import "./effects.css";
 

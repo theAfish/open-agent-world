@@ -87,6 +87,10 @@
 
 * { box-sizing: border-box; }
 
+a, a:visited { color: var(--warning); text-decoration-color: currentColor; text-underline-offset: 3px; }
+a:hover { color: color-mix(in srgb, var(--warning) 80%, var(--ink)); }
+a:focus-visible { color: var(--warning); outline: 1px solid var(--warning); outline-offset: 3px; border-radius: 2px; }
+
 /* Keep every scrollable surface quiet and consistent across themes. */
 * {
   scrollbar-width: thin;
@@ -1363,13 +1367,9 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .deck-tab-scroll {
   min-width: 0;
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  scroll-behavior: smooth;
 }
-
-.deck-tab-scroll::-webkit-scrollbar { display: none; }
 
 .deck-tab-scroll > button,
 .deck-add-button {
@@ -2081,3 +2081,10 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .artifact-collection input, .artifact-collection select, .artifact-publish select { box-sizing: border-box; padding: 7px 9px; color: var(--ink); background: var(--surface-soft); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
 .lifecycle-status { padding: 12px; font-size: 11px; overflow-wrap: anywhere; }
 .lifecycle-status article { padding: 10px 0; border-bottom: 1px solid var(--line); }
+/* Declarative document transformations use the body, never connection ports. */
+.react-flow__node[data-transformation-hint]{outline:3px solid #b6ab83;outline-offset:6px}
+.react-flow__node[data-transformation-hint]::after{content:attr(data-transformation-hint);position:absolute;top:75px;left:28px;padding:10px 14px;background:#263139;color:#f0e5c7;border:1px solid #b6ab83;border-radius:6px;pointer-events:none;z-index:100}
+.plugin-resource-window{inset:5vh max(24px,calc((100vw - 1440px)/2));display:flex;flex-direction:column}.plugin-resource-window>header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)}.plugin-resource-window-body{flex:1;min-height:0;overflow:hidden}
+
+.container-plugin-workspace { position: absolute; inset: 90px 16px 16px; display: flex; flex-direction: column; overflow: hidden; border-radius: 16px; }
+.container-plugin-workspace > * { flex: 1; min-height: 0; }

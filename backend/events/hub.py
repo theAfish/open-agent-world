@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from backend.events.models import EventType, RuntimeEvent
@@ -15,6 +17,28 @@ class EventHub:
         self.queue_size = queue_size
         self._subscribers: set[asyncio.Queue[RuntimeEvent]] = set()
         self._lock = asyncio.Lock()
+        self._buffer: ContextVar[list[RuntimeEvent] | None] = ContextVar("event_buffer", default=None)
+
+    @contextmanager
+    def committed_batch(self):
+        """Buffer synchronous mutation events until their transaction commits."""
+        if self._buffer.get() is not None:
+            yield
+            return
+        events: list[RuntimeEvent] = []
+        token = self._buffer.set(events)
+        try:
+            yield
+        except BaseException:
+            raise
+        else:
+            self._buffer.reset(token)
+            token = None
+            for event in events:
+                self.publish_event_nowait(event)
+        finally:
+            if token is not None:
+                self._buffer.reset(token)
 
     async def publish(
         self,
@@ -65,6 +89,10 @@ class EventHub:
         event delivery part of the database transaction.
         """
 
+        pending = self._buffer.get()
+        if pending is not None:
+            pending.append(event)
+            return
         for queue in tuple(self._subscribers):
             if queue.full():
                 queue.get_nowait()

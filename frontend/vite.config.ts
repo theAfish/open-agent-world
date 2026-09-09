@@ -11,6 +11,7 @@ export default defineConfig({
     dedupe: ["react", "react-dom"],
     alias: {
       "@oaw/plugin-api": fileURLToPath(new URL("./src/plugins/sdk.ts", import.meta.url)),
+      "@xyflow/react": fileURLToPath(new URL("./node_modules/@xyflow/react", import.meta.url)),
       "react": fileURLToPath(new URL("./node_modules/react", import.meta.url)),
       "react-dom": fileURLToPath(new URL("./node_modules/react-dom", import.meta.url)),
     },

@@ -17,6 +17,19 @@ class NodeDocumentAction:
     handler: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
     capability_kind: str | None = None
     read_only: bool = False
+    project: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class NodeDocumentTransformation:
+    """Pure conversion of an inert document collection into another document.
+
+    The host checks revisions and consumes the source only in the same database
+    transaction as the target update. This is never a relationship operation.
+    """
+    label: str
+    source_traits: frozenset[str]
+    handler: Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], dict[str, Any]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,3 +46,5 @@ class NodeDocumentDefinition:
     initial_value: Mapping[str, Any] | None = None
     downloads: Mapping[str, Callable[[dict[str, Any]], NodeDocumentDownload]] = field(default_factory=dict)
     max_size_bytes: int = 256 * 1024
+    transformations: Mapping[str, NodeDocumentTransformation] = field(default_factory=dict)
+    validate_update: Callable[[dict[str, Any], dict[str, Any]], None] | None = None

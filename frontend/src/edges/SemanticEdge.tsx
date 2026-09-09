@@ -1,6 +1,5 @@
 import {
   BaseEdge,
-  EdgeLabelRenderer,
   useInternalNode,
   type Edge,
   type EdgeProps,
@@ -11,6 +10,7 @@ import type { EdgeDirection, Relationship } from "../types/world";
 import { relationshipPath, type NodeRect } from "./geometry";
 import { nodeCornerRadius } from "./nodeGeometry";
 import type { CanvasNode } from "../cards/types";
+import { EdgeLabelRenderer } from "../canvas/FlowPortal";
 
 export interface SemanticEdgeData extends Record<string, unknown> {
   relationship: Relationship;

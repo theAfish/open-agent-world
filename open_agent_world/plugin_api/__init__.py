@@ -7,6 +7,7 @@ from backend.plugins.registry import PluginAsset
 
 from backend.plugins.summoning import NodeSummoningDefinition, SummoningAction, SummoningPolicy
 from backend.plugins.documents import NodeDocumentAction, NodeDocumentDefinition, NodeDocumentDownload
+from backend.plugins.documents import NodeDocumentTransformation
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import ExecutionPolicy, NodeExecutionDefinition, WorkItem, WorkOutcome
 
@@ -75,6 +76,7 @@ from backend.runs import InvocationContext, RuntimeInput
 from backend.world.models import Card, CardCreate, CardPatch, Edge
 
 __all__ = [
+    "NodeDocumentTransformation",
     "ArtifactPublish",
     "ArtifactMaterialize",
     "ComputeTarget", "EnvironmentProfile", "SecretRequirement",

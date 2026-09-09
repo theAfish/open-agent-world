@@ -24,7 +24,7 @@ from backend.plugins.documents import NodeDocumentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.12"
+PLUGIN_API_VERSION = "1.13"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -89,6 +89,7 @@ class NodeTypeCatalogItem(BaseModel):
     traits: list[str]
     surfaces: dict[str, bool]
     has_document: bool = False
+    transformations: dict[str, dict[str, Any]] = Field(default_factory=dict)
     has_execution: bool = False
     container: dict[str, Any] | None = None
     summoning: dict[str, Any] | None = None
@@ -240,6 +241,7 @@ class NodeTypeDefinition:
             default_config=default_config,
             config_schema=self.config_model.model_json_schema(),
             has_document=self.document is not None,
+            transformations={key: {"label": item.label, "source_traits": sorted(item.source_traits)} for key, item in self.document.transformations.items()} if self.document else {},
             has_execution=self.execution is not None,
             container=self.container.catalog_item() if self.container else None,
             summoning={} if self.summoning else None,
