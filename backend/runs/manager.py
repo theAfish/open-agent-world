@@ -763,6 +763,7 @@ class RunManager:
         return StateContext(tuple(scopes))
 
     def _provider(self, provider_id: str) -> RuntimeProvider:
+        self.plugins.assert_runtime_provider_enabled(provider_id)
         existing = self._providers.get(provider_id)
         if existing is not None:
             return existing
@@ -793,6 +794,7 @@ class RunManager:
         provider_id = provider_id or self.default_runtime_provider_id
         if provider_id is None:
             return None
+        self.plugins.assert_runtime_provider_enabled(provider_id)
         if (
             not self.plugins.has_runtime_provider(provider_id)
             and provider_id not in self._providers

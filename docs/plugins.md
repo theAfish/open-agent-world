@@ -1,5 +1,11 @@
 # Plugin development
 
+Plugin API 1.14 adds `PackDefinition` and `registration.register_pack(...)`.
+Every card definition belongs to a pack. Opening an owned pack collects its cards;
+users then choose cards for persistent named decks. Registration alone never adds
+cards to a user's collection or tray. See [Packs, Card Library and Decks](card-library.md)
+for manifests, migration, persistence and disable semantics.
+
 Plugin API 1.13 adds projected read-only document actions (`project=True`),
 document update validators and declarative `NodeDocumentTransformation`s.
 Projected actions return bounded plugin query results through the same revision
@@ -847,6 +853,12 @@ plugin-owned data and delete every node owned by that plugin. Node deletion remo
 its edges and immediately revokes derived capabilities. If persisted nodes or edges
 remain, startup fails with an ownership-aware unavailable-plugin diagnostic. The
 host never loads an unknown object under a generic fallback behavior.
+
+The Pack Library can disable an installed plugin after its world instances,
+relationships and dependent Agent runtimes have been removed. Pack ownership,
+collected cards and deck references survive disable and uninstall. Re-enabling or
+reinstalling the same stable IDs restores availability. Installation and package
+removal still use the existing discovery mechanism and require a restart.
 
 ## Trust and security boundary
 

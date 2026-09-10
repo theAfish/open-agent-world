@@ -1,4 +1,5 @@
 """PyWPEM runs through the OAW runtime protocol, in its own Python environment."""
+from open_agent_world.plugin_api import PackDefinition
 from typing import Literal
 from pydantic import BaseModel, Field
 from open_agent_world.plugin_api import AgentNodeBehavior, NodeTypeDefinition, PluginDescriptor
@@ -20,7 +21,7 @@ class XRDConfig(BaseModel):
     demo: bool = True
 
 class XRDPlugin:
-    descriptor = PluginDescriptor(id="research.xrd",version="0.1.0",plugin_api_version="1.9",
+    descriptor = PluginDescriptor(id="research.xrd",version="0.1.0",plugin_api_version="1.14",
         name="XRD / PyWPEM",description="Candidate-CIF whole-pattern fitting in an isolated local interpreter")
     def register(self, registration):
         registration.register_runtime_provider("research.xrd",XRDRuntime)
@@ -30,6 +31,8 @@ class XRDPlugin:
             config_model=XRDConfig,traits=frozenset({"core.agent","ui.schema-agent.v1"}),
             lifecycle=AgentNodeBehavior(),frontend={"settings":"settings"},
             surfaces={"preview":True,"inspector":True,"workspace":True}))
+        registration.register_pack(PackDefinition(id='research.xrd.default', name='XRD analysis',
+            description='Whole-pattern diffraction fitting.', cards=tuple(registration.nodes)))
 
 def create_plugin():
     return XRDPlugin()

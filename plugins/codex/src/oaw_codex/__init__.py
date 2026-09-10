@@ -1,5 +1,6 @@
 """Trusted, instance-scoped OAW runtime integration; import has no side effects."""
 
+from open_agent_world.plugin_api import PackDefinition
 from importlib.resources import files
 
 from open_agent_world.plugin_api import AgentNodeBehavior, NodeTypeDefinition, PluginAsset, PluginDescriptor, PluginRegistration
@@ -10,7 +11,7 @@ from .card import CodexCardConfig, CodexCardTemplate
 
 class CodexPlugin:
     descriptor = PluginDescriptor(
-        id="openai.codex", version="0.3.0", plugin_api_version="1.10",
+        id="openai.codex", version="0.3.0", plugin_api_version="1.14",
         name="Codex", description="Run Codex in a local project with OAW graph tools.",
     )
 
@@ -31,6 +32,8 @@ class CodexPlugin:
             lifecycle=AgentNodeBehavior(), templateable=True, template_status="idle",
             template_handler=CodexCardTemplate(),
         ))
+        registration.register_pack(PackDefinition(id='openai.codex.default', name='Codex Agent',
+            description='A Codex worker with connected OAW tools.', cards=tuple(registration.nodes)))
 
 
 def create_plugin() -> CodexPlugin:

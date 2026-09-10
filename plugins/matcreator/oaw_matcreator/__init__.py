@@ -1,7 +1,7 @@
 from importlib.resources import files
 import json
 from open_agent_world.plugin_api import (
-    PluginDescriptor, NodeTypeDefinition, NodeDocumentDefinition, NodeDocumentAction,
+    PackDefinition, PluginDescriptor, NodeTypeDefinition, NodeDocumentDefinition, NodeDocumentAction,
     NodeDocumentTransformation, NodeDocumentDownload, CapabilityDefinition,
     CapabilityGrantDefinition, RelationshipDefinition,
 )
@@ -11,7 +11,7 @@ from . import knowledge as k
 READ = "matcreator.kdg.read"
 
 class MatCreatorPlugin:
-    descriptor = PluginDescriptor(id="matcreator", version="0.1.0", plugin_api_version="1.13", name="MatCreator")
+    descriptor = PluginDescriptor(id="matcreator", version="0.1.0", plugin_api_version="1.14", name="MatCreator")
 
     def register(self, registration):
         for name in ("core", "simulation", "ai", "research"):
@@ -83,6 +83,8 @@ class MatCreatorPlugin:
             description="Explicitly authorize editing user-owned knowledge and reviewing memories.",
             source_traits=frozenset({"core.agent"}), target_types=frozenset({"matcreator.kdg"}),
             capabilities=tuple(CapabilityGrantDefinition(kind=kind) for kind in [READ, *["matcreator.kdg." + key for key in [*reads, *writes]]])))
+        registration.register_pack(PackDefinition(id='matcreator.default', name='MatCreator',
+            description='Scientific skills and a Know-Do Graph.', cards=tuple(registration.nodes)))
 
 def create_plugin():
     return MatCreatorPlugin()

@@ -609,7 +609,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       : draft;
     set({ syncState: "syncing" });
     try {
-      const card = await worldApi.createNode({ ...configuredDraft, ...placement });
+      const card = await worldApi.createNode({ ...configuredDraft, ...placement }, true);
       markWorldMutation();
       set((state) => ({
         cards: mergeCards(state.cards, [card]),

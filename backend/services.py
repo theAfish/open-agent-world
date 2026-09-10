@@ -24,6 +24,7 @@ from backend.agents import (
     RuntimeProvider,
 )
 from backend.capabilities.broker import CapabilityBroker
+from backend.card_library import CardLibraryStore
 from backend.config import Settings
 from backend.sandbox.settings import SandboxSettingsStore
 from backend.security import LlmPublicSettings, LlmSettingsStore
@@ -530,6 +531,7 @@ class ApplicationServices:
     state: StateStore
     legions: LegionStore
     llm_settings: LlmSettingsStore
+    card_library: CardLibraryStore
     _sandbox_commands: dict[str, dict] = field(default_factory=dict, init=False, repr=False)
     _sandbox_stopping: set[str] = field(default_factory=set, init=False, repr=False)
     _execution_secrets: ContextVar[tuple[str, ...]] = field(
@@ -2007,10 +2009,13 @@ class ApplicationServices:
                     f"node type {node.type!r} requires missing plugin {node.plugin_id!r}"
                 )
                 continue
+            if not self.plugins.is_enabled(node.plugin_id):
+                issues.append(f"node type {node.type!r} requires disabled plugin {node.plugin_id!r}")
+                continue
             try:
                 definition = self.plugins.node_type(node.type)
                 owner = self.plugins.node_type_owner_id(node.type)
-            except (GraphValidationError, ValueError) as error:
+            except (GraphValidationError, PluginUnavailableError, ValueError) as error:
                 issues.append(str(error))
                 continue
             if owner != node.plugin_id:
@@ -2119,11 +2124,11 @@ class ApplicationServices:
                         f"is now owned by {dependency_owner!r}, not "
                         f"{dependency.plugin_id!r}"
                     )
-                elif not self.plugins.has_plugin(dependency.plugin_id):
+                elif not self.plugins.is_enabled(dependency.plugin_id):
                     issues.append(
                         f"node type {node.type!r} template dependency "
                         f"{dependency.kind.replace('_', ' ')} {dependency.id!r} "
-                        f"requires missing plugin {dependency.plugin_id!r}"
+                        f"requires unavailable plugin {dependency.plugin_id!r}"
                     )
             if node.payload is None and handler is not None:
                 issues.append(
@@ -2180,7 +2185,7 @@ class ApplicationServices:
                 self.plugins.validate_direction(
                     edge.relationship, edge.direction.value
                 )
-            except (GraphValidationError, ValueError) as error:
+            except (GraphValidationError, PluginUnavailableError, ValueError) as error:
                 issues.append(str(error))
         return list(dict.fromkeys(issues))
 
@@ -3545,6 +3550,7 @@ def create_services(
     plugin_registry = plugins or load_plugin_registry(plugin_directories=settings.plugin_directories)
     world = WorldStore(database, plugin_registry, chunk_size=settings.chunk_size)
     try:
+        card_library = CardLibraryStore(database, plugin_registry)
         from backend.migrations.barracks import check_legacy
         check_legacy(database)
         world.assert_plugin_availability()
@@ -3608,6 +3614,7 @@ def create_services(
         state=state,
         legions=legions,
         llm_settings=LlmSettingsStore(database, settings.data_root),
+        card_library=card_library,
         sandbox_backend=sandbox_backend,
     )
     from backend.capabilities.provider import WorldAgentCapabilityProvider

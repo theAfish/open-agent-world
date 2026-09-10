@@ -3,7 +3,7 @@ from backend.execution_config import ComputeTarget, EnvironmentProfile, SecretRe
 from backend.resources.artifact_models import ArtifactPublish, ArtifactMaterialize
 
 from backend.plugins.builtin import AgentNodeBehavior, AgentNodeTemplateHandler
-from backend.plugins.registry import PluginAsset
+from backend.plugins.registry import PluginAsset, PackDefinition
 
 from backend.plugins.summoning import NodeSummoningDefinition, SummoningAction, SummoningPolicy
 from backend.plugins.documents import NodeDocumentAction, NodeDocumentDefinition, NodeDocumentDownload
@@ -76,6 +76,7 @@ from backend.runs import InvocationContext, RuntimeInput
 from backend.world.models import Card, CardCreate, CardPatch, Edge
 
 __all__ = [
+    "PackDefinition",
     "NodeDocumentTransformation",
     "ArtifactPublish",
     "ArtifactMaterialize",

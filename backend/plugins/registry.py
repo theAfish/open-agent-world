@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from backend.errors import GraphValidationError, PluginCompatibilityError
+from backend.errors import GraphValidationError, PluginCompatibilityError, PluginUnavailableError
 from backend.plugins.lifecycle import NodeLifecycleHandler
 from backend.plugins.template import NodeTemplateHandler
 
@@ -24,7 +24,7 @@ from backend.plugins.documents import NodeDocumentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.13"
+PLUGIN_API_VERSION = "1.14"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -50,6 +50,21 @@ class PluginDescriptor(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=500)
     python_requirements: tuple[str, ...] = ()
+
+
+class PackDefinition(BaseModel):
+    """A stable distribution manifest referencing canonical node type IDs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: str
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=1000)
+    cards: tuple[str, ...] = Field(min_length=1)
+
+
+class PackCatalogItem(PackDefinition):
+    plugin_id: str
+    compatibility: bool = False
 
 
 class Plugin(Protocol):
@@ -123,6 +138,7 @@ class PluginCatalog(BaseModel):
     plugins: list[PluginDescriptor]
     node_types: list[NodeTypeCatalogItem]
     relationships: list[RelationshipCatalogItem]
+    packs: list[PackCatalogItem] = Field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,8 +202,8 @@ class NodeTypeDefinition:
     default_status: str
     statuses: frozenset[str]
     config_model: type[BaseModel]
-    # Bump this when a plugin intentionally changes a card's default deck.
-    # Clients use it to migrate old catalog-owned deck assignments once.
+    # Legacy category revision, used only when importing pre-Pack browser decks.
+    # Collected decks are user-owned and are never reassigned by the catalog.
     deck_revision: int = 1
     icon_asset: str | None = None
     frontend: Mapping[str, str] = field(default_factory=dict)
@@ -302,6 +318,12 @@ class PluginRegistration:
         self.runtime_provider_factories: dict[str, RuntimeProviderFactory] = {}
         self.state_schemas: dict[str, StateSchema] = {}
         self.assets: dict[str, PluginAsset] = {}
+        self.packs: dict[str, PackDefinition] = {}
+
+    def register_pack(self, definition: PackDefinition) -> None:
+        if not isinstance(definition, PackDefinition):
+            raise TypeError("pack must be a PackDefinition")
+        self._add(self.packs, definition.id, definition, "pack")
 
     def register_asset(self, asset: PluginAsset) -> None:
         if not isinstance(asset, PluginAsset):
@@ -356,6 +378,8 @@ class PluginRegistry:
         self._state_schemas: dict[str, StateSchema] = {}
         self._owners: dict[tuple[str, str], str] = {}
         self._assets: dict[tuple[str, str], PluginAsset] = {}
+        self._packs: dict[str, PackCatalogItem] = {}
+        self._disabled: set[str] = set()
 
     def install(self, plugin: Plugin) -> None:
         descriptor = getattr(plugin, "descriptor", None)
@@ -375,10 +399,20 @@ class PluginRegistry:
 
         staged = PluginRegistration(descriptor)
         register(staged)
+        compatibility = bool(staged.nodes) and not staged.packs
+        if compatibility:
+            staged.register_pack(PackDefinition(
+                id=f"{descriptor.id}.default", name=descriptor.name or descriptor.id,
+                description=descriptor.description or "", cards=tuple(staged.nodes),
+            ))
         self._normalize_capabilities(staged)
         self._validate_registration(staged)
 
         self._plugins[descriptor.id] = descriptor
+        self._commit_owned("pack", descriptor.id, self._packs, {
+            key: PackCatalogItem(**pack.model_dump(), plugin_id=descriptor.id, compatibility=compatibility)
+            for key, pack in staged.packs.items()
+        })
         self._assets.update({(descriptor.id, key): asset for key, asset in staged.assets.items()})
         self._commit_owned("node_type", descriptor.id, self._nodes, staged.nodes)
         self._commit_owned("capability", descriptor.id, self._capabilities, staged.capabilities)
@@ -427,6 +461,7 @@ class PluginRegistry:
                 raise ValueError("unsupported public asset media type")
 
         contribution_sets = (
+            ("pack", "pack", self._packs, staged.packs),
             ("capability", "capability", self._capabilities, staged.capabilities),
             ("node_type", "node type", self._nodes, staged.nodes),
             (
@@ -461,6 +496,16 @@ class PluginRegistry:
                 raise ValueError(
                     f"{label} {duplicate!r} is already owned by plugin {owner!r}"
                 )
+
+        covered = set()
+        for pack in staged.packs.values():
+            if len(set(pack.cards)) != len(pack.cards):
+                raise ValueError(f"pack {pack.id!r} contains duplicate cards")
+            if not set(pack.cards) <= staged.nodes.keys():
+                raise ValueError(f"pack {pack.id!r} may reference only this plugin's node types")
+            covered.update(pack.cards)
+        if staged.nodes.keys() - covered:
+            raise ValueError("Every registered node type must belong to a pack")
 
         for schema in staged.state_schemas.values():
             if not isinstance(schema, StateSchema):
@@ -640,6 +685,25 @@ class PluginRegistry:
     def has_plugin(self, plugin_id: str) -> bool:
         return plugin_id in self._plugins
 
+    def is_enabled(self, plugin_id: str) -> bool:
+        return self.has_plugin(plugin_id) and plugin_id not in self._disabled
+
+    def set_enabled(self, plugin_id: str, enabled: bool) -> None:
+        if not self.has_plugin(plugin_id):
+            raise PluginUnavailableError(f"Plugin {plugin_id!r} is not installed")
+        if enabled:
+            self._disabled.discard(plugin_id)
+        else:
+            self._disabled.add(plugin_id)
+
+    def _assert_enabled(self, kind: str, identifier: str) -> None:
+        owner = self._owners.get((kind, identifier))
+        if owner in self._disabled:
+            raise PluginUnavailableError(f"Plugin {owner!r} is disabled")
+
+    def assert_runtime_provider_enabled(self, provider_id: str) -> None:
+        self._assert_enabled("runtime_provider", provider_id)
+
     def has_trait(self, type_id: str, trait: str) -> bool:
         return trait in self.node_type(type_id).traits
 
@@ -681,6 +745,7 @@ class PluginRegistry:
         capability_provider: AgentCapabilityProvider,
         **options: Any,
     ) -> RuntimeProvider:
+        self._assert_enabled("runtime_provider", provider_id)
         try:
             factory = self._runtime_provider_factories[provider_id]
         except KeyError as exc:
@@ -697,15 +762,17 @@ class PluginRegistry:
         return provider
 
     def has_runtime_provider(self, provider_id: str) -> bool:
-        return provider_id in self._runtime_provider_factories
+        return provider_id in self._runtime_provider_factories and self.is_enabled(self.runtime_provider_owner_id(provider_id))
 
     def node_type(self, type_id: str) -> NodeTypeDefinition:
+        self._assert_enabled("node_type", type_id)
         try:
             return self._nodes[type_id]
         except KeyError as exc:
             raise GraphValidationError(f"node type {type_id!r} is not registered") from exc
 
     def relationship(self, relationship_id: str) -> RelationshipDefinition:
+        self._assert_enabled("relationship", relationship_id)
         try:
             return self._relationships[relationship_id]
         except KeyError as exc:
@@ -714,6 +781,7 @@ class PluginRegistry:
             ) from exc
 
     def capability_handler(self, kind: str) -> CapabilityHandler:
+        self._assert_enabled("capability_handler", kind)
         try:
             return self._capability_handlers[kind]
         except KeyError as exc:
@@ -722,6 +790,7 @@ class PluginRegistry:
             ) from exc
 
     def capability_definition(self, kind: str) -> CapabilityDefinition:
+        self._assert_enabled("capability", kind)
         try:
             return self._capabilities[kind]
         except KeyError as exc:
@@ -766,8 +835,9 @@ class PluginRegistry:
         )
 
     def relationship_options(self, source_type: str, target_type: str) -> list[RelationshipDefinition]:
-        forward = [item for item in self._relationships.values() if self._matches(item, source_type, target_type)]
-        return forward or [item for item in self._relationships.values() if self._matches(item, target_type, source_type)]
+        available = [item for item in self._relationships.values() if self.is_enabled(self.relationship_owner_id(item.id))]
+        forward = [item for item in available if self._matches(item, source_type, target_type)]
+        return forward or [item for item in available if self._matches(item, target_type, source_type)]
 
     def validate_relationship_order(
         self, source_type: str, target_type: str, relationship_id: str
@@ -788,16 +858,19 @@ class PluginRegistry:
                 f"allowed directions: {allowed}"
             )
 
-    def catalog(self) -> PluginCatalog:
+    def catalog(self, *, include_disabled: bool = False) -> PluginCatalog:
         return PluginCatalog(
             plugins=list(self._plugins.values()),
+            packs=list(self._packs.values()),
             node_types=[
                 item.catalog_item(self.node_type_owner_id(item.id))
                 for item in self._nodes.values()
+                if include_disabled or self.is_enabled(self.node_type_owner_id(item.id))
             ],
             relationships=[
                 item.catalog_item(self.relationship_owner_id(item.id))
                 for item in self._relationships.values()
+                if include_disabled or self.is_enabled(self.relationship_owner_id(item.id))
             ],
         )
 

@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class EventType(StrEnum):
+    CARD_LIBRARY_UPDATED = "card_library_updated"
     CONNECTION_READY = "connection_ready"
     CARD_CREATED = "card_created"
     NODES_GENERATED = "nodes_generated"

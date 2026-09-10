@@ -14,7 +14,7 @@ from backend.plugins.registry import (
     CapabilityGrantDefinition,
     CapabilityDefinition,
     NodeTypeDefinition,
-    PluginDescriptor,
+    PackDefinition, PluginDescriptor,
     PluginRegistration,
     PluginRegistry,
     RelationshipDefinition,
@@ -1082,6 +1082,8 @@ class CorePlugin:
 
     def register(self, registration: PluginRegistration) -> None:
         _register_builtin(registration)
+        registration.register_pack(PackDefinition(id='open-agent-world.core.default', name='Core essentials',
+            description='Agents, resources and workspaces for your world.', cards=tuple(registration.nodes)))
 
 
 def create_builtin_registry() -> PluginRegistry:

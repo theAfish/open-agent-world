@@ -1,5 +1,6 @@
 """Task planning and dependency rules; no host-private services or UI code."""
 from __future__ import annotations
+from open_agent_world.plugin_api import PackDefinition
 from typing import Literal
 import json
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -165,7 +166,7 @@ def execution_policy(value):
     return ExecutionPolicy(max_parallel=settings.max_parallel, pause_on_failure=settings.pause_on_failure)
 
 class TaskBoardPlugin:
-    descriptor = PluginDescriptor(id=PREFIX, version="0.2.0", plugin_api_version="1.3", name="Task Board", description="Shared planning with optional Agent execution.")
+    descriptor = PluginDescriptor(id=PREFIX, version="0.2.0", plugin_api_version="1.14", name="Task Board", description="Shared planning with optional Agent execution.")
 
     def register(self, registration):
         actions = {"read": (read, Empty), "upsert": (upsert, Upsert), "progress": (progress, Progress), "remove": (remove, Remove)}
@@ -229,6 +230,8 @@ class TaskBoardPlugin:
         ]:
             registration.register_relationship(RelationshipDefinition(id=f"{PREFIX}.{access}", label=label, short_label=label.lower(), description=description,
                 source_traits=frozenset({"core.agent"}), target_traits=frozenset({"oaw.task-board"}), templateable=True, capabilities=tuple(grants[a] for a in allowed)))
+        registration.register_pack(PackDefinition(id='oaw.tasks.default', name='Task Board',
+            description='Shared planning and Agent execution.', cards=tuple(registration.nodes)))
 
 def create_plugin():
     return TaskBoardPlugin()

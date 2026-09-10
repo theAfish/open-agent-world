@@ -191,6 +191,7 @@ export interface RelationshipCatalogItem {
 }
 
 export interface PluginCatalog {
+  packs?: Array<{ id: string; plugin_id: string; name: string; description: string; cards: string[]; compatibility: boolean }>;
   plugins: Array<{
     id: string;
     version: string;

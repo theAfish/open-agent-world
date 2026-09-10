@@ -1405,6 +1405,7 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 }
 
 .top-bar .topology-summary {
+  min-width: 0;
   flex: 1;
   display: flex;
   justify-content: flex-end;
@@ -1425,8 +1426,10 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 }
 
 .top-bar .connection-status:hover { background: var(--chrome-raised); }
-.top-bar .top-actions { width: 100%; display: flex; gap: 5px; }
-.top-bar .top-icon-button { width: 39px; height: 32px; flex: 1; border-radius: 9px; }
+.top-bar .top-actions { width: 100%; min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
+.top-bar .top-icon-button { width: 100%; min-width: 0; height: 32px; border-radius: 9px; }
+.top-bar .world-status { justify-content: space-between; gap: 4px; }
+.top-bar .topology-summary > span { white-space: nowrap; }
 
 /* Bottom-center card deck library */
 .component-palette {
@@ -1707,6 +1710,10 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 }
 
 .deck-stage.is-editor { grid-template-columns: 1fr; }
+.deck-quick-create { grid-column: 2 / 4; grid-row: 2; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.deck-quick-create > label { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; color: var(--ink-soft); }
+.deck-quick-create select { min-width: 0; width: 100%; height: 29px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); color: var(--ink); font-size: 10px; padding: 0 6px; }
+.deck-quick-create .deck-create-button { flex: 0 0 auto; }
 .deck-editor {
   min-width: 0;
   grid-column: 1 / -1;

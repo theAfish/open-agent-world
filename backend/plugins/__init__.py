@@ -13,6 +13,7 @@ from backend.plugins.lifecycle import (
 )
 from backend.plugins.registry import (
     PLUGIN_API_VERSION,
+    PackDefinition,
     CapabilityGrantDefinition,
     CapabilityDefinition,
     CapabilitySelector,
@@ -39,6 +40,7 @@ from backend.plugins.template import (
 )
 
 __all__ = [
+    "PackDefinition",
     "CapabilityGrantDefinition",
     "CapabilityDefinition",
     "CapabilitySelector",

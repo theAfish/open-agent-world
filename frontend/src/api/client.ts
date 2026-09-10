@@ -250,6 +250,12 @@ function unwrap<T>(input: unknown, key: string): T {
 }
 
 export const worldApi = {
+  getCardLibrary(): Promise<import("../state/cardLibrary").LibrarySnapshot> {
+    return request("/card-library");
+  },
+  editCardLibrary(edit: import("../state/cardLibrary").LibraryEdit & { expected_revision: number }): Promise<import("../state/cardLibrary").LibrarySnapshot> {
+    return request("/card-library/actions", { method: "POST", body: JSON.stringify(edit) });
+  },
   pickFolder(initialPath: string | null): Promise<{ path: string | null }> {
     return request<{ path: string | null }>("/desktop/pick-folder", {
       method: "POST", body: JSON.stringify({ initial_path: initialPath }),
@@ -361,7 +367,7 @@ export const worldApi = {
     return normalizeLegionInstantiation(await request(`/nodes/${encodeURIComponent(id)}/duplicate`, { method: "POST" }));
   },
 
-  async createNode(node: CardCreateInput): Promise<WorldCard> {
+  async createNode(node: CardCreateInput, fromCollection = false): Promise<WorldCard> {
     const payload = {
       ...("id" in node ? { id: node.id } : {}),
       type: node.type,
@@ -377,7 +383,7 @@ export const worldApi = {
       data_base64: node.data_base64,
       media_type: node.media_type,
     };
-    const body = await request<unknown>("/nodes", {
+    const body = await request<unknown>(fromCollection ? "/card-library/nodes" : "/nodes", {
       method: "POST",
       body: JSON.stringify(payload),
     });

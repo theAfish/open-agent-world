@@ -1,5 +1,10 @@
 # Open Agent World
 
+Use the **Pack & Card Library** button to open installed packs, collect cards and
+choose a named deck for the bottom tray. Decks and collection state persist with
+your world. See [Packs, Card Library and Decks](docs/card-library.md) for the flow,
+plugin manifest API, upgrade migration and availability rules.
+
 Open Agent World is a spatial environment for agents, managed resources, and isolated workplaces. Cards are persisted world objects. Edges are live permissions: changing the graph changes what an Agent or Sandbox can do.
 
 The application uses React, TypeScript, Vite, React Flow, Zustand, FastAPI, SQLite and Google ADK. Sandbox execution supports Windows AppContainer/Job Objects, native Linux isolation, and the same Linux isolation inside an existing WSL2 distribution. Docker and VM images are not required.

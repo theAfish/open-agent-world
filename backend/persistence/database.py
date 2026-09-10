@@ -250,6 +250,9 @@ class Database:
             self._connection.execute("PRAGMA journal_mode = WAL")
             self._connection.execute("PRAGMA synchronous = NORMAL")
         with self._lock:
+            self.preexisting_world = self._connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='cards'"
+            ).fetchone() is not None
             self._connection.executescript(SCHEMA)
             self._migrate_open_card_types()
             with self.transaction(immediate=True):
