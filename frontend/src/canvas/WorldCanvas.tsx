@@ -97,6 +97,8 @@ export function WorldCanvas() {
   const glueBonds = useGlueStore(s => s.bonds);
   const glueDrag = useRef<{ origin: { x: number; y: number }; boxes: Record<string, GlueBox>; latest: Record<string, GlueBox>; candidate?: GlueCandidate }>();
   const wrapper = useRef<HTMLDivElement>(null);
+  const clipboardTask = useRef<Promise<unknown>>(Promise.resolve());
+  const clipboardPending = useRef(false);
   const cards = useWorldStore((state) => state.cards);
   const catalog = useWorldStore((state) => state.catalog);
   const stressCards = useWorldStore((state) => state.stressCards);
@@ -363,6 +365,24 @@ export function WorldCanvas() {
       // Modal workspaces and embedded readers own their keyboard shortcuts.
       if (event.defaultPrevented || document.querySelector("dialog:modal") || target?.closest(".library-reader, input, textarea, select, [contenteditable='true']")) return;
       const modifier = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+      if (modifier && !event.altKey && !event.shiftKey && ["c", "x", "v"].includes(key)) {
+        if (event.isComposing || target?.isContentEditable || target?.closest("[contenteditable], [role='textbox'], .xterm")
+          || window.getSelection()?.toString() || useNodeSurfaceStore.getState().dragging) return;
+        const state = useWorldStore.getState();
+        if (key === "v" ? !state.clipboard && !clipboardPending.current : !state.selectedCardIds.length) return;
+        event.preventDefault();
+        if (event.repeat) return;
+        if (key === "v") clipboardTask.current = clipboardTask.current.then(() => state.pasteSelection());
+        else {
+          const ids = [...state.selectedCardIds];
+          clipboardPending.current = true;
+          clipboardTask.current = state.copySelection().then(async copied => {
+            if (copied && key === "x") await state.deleteCards(ids);
+          }).finally(() => { clipboardPending.current = false; });
+        }
+        return;
+      }
       if (!modifier && !event.altKey && event.key.toLowerCase() === "f") {
         if (event.defaultPrevented || event.isComposing || event.repeat
           || target?.isContentEditable

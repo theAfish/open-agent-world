@@ -57,7 +57,7 @@ type RestorableCard = WorldCard & {
 export type WorldHistoryOperation =
   | { id: number; label: string; kind: "group-dissolved"; group: RestorableCard; members: WorldCard[]; edges: WorldEdge[] }
   | { id: number; label: string; kind: "group-formed"; group: RestorableCard; before: WorldCard[]; after: WorldCard[] }
-  | { id: number; label: string; kind: "card-created"; cards: RestorableCard[] }
+  | { id: number; label: string; kind: "card-created"; cards: RestorableCard[]; edges?: WorldEdge[] }
   | { id: number; label: string; kind: "cards-deleted"; cards: RestorableCard[]; edges: WorldEdge[] }
   | { id: number; label: string; kind: "card-updated"; before: WorldCard; after: WorldCard }
   | { id: number; label: string; kind: "cards-updated"; before: WorldCard[]; after: WorldCard[]; membership?: boolean; sizes?: boolean }
@@ -147,7 +147,7 @@ async function restoreCard(card: RestorableCard): Promise<WorldCard> {
   return restored;
 }
 
-async function snapshotCardForHistory(card: WorldCard): Promise<RestorableCard> {
+async function snapshotCardForHistory(card: WorldCard, strict = false): Promise<RestorableCard> {
   const snapshot = copyCard(card);
   if (useWorldStore.getState().catalog.node_types.find((definition) => definition.id === card.type)?.has_document) {
     snapshot.restoreDocument = (await worldApi.getNodeDocument(card.id)).value;
@@ -158,20 +158,21 @@ async function snapshotCardForHistory(card: WorldCard): Promise<RestorableCard> 
     if (card.type === "legion") snapshot.restoreLegionState = (await worldApi.getLegionState(card.id)).value;
     if (card.type === "text") {
       const content = await worldApi.getTextContent(card.id);
-      if (new TextEncoder().encode(content).byteLength <= RESOURCE_HISTORY_LIMIT_BYTES) {
+      if (new TextEncoder().encode(content).byteLength <= RESOURCE_HISTORY_LIMIT_BYTES || strict) {
         snapshot.restoreContent = content;
       }
     }
     if (
       card.type === "image"
       && Number(card.config.revision ?? 0) > 0
-      && Number(card.config.bytes ?? 0) <= RESOURCE_HISTORY_LIMIT_BYTES
+      && (strict || Number(card.config.bytes ?? 0) <= RESOURCE_HISTORY_LIMIT_BYTES)
     ) {
       const image = await worldApi.getImageRestoreData(card.id);
       snapshot.restoreImageData = image.data_base64;
       snapshot.restoreImageMediaType = image.media_type;
     }
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     // A stale resource must not prevent removal; its card configuration is still restorable.
   }
   return snapshot;
@@ -259,6 +260,9 @@ interface WorldState {
   socketState: SocketState;
   selectedEdgeId?: string;
   selectedCardIds: string[];
+  clipboard?: { cards: RestorableCard[]; edges: WorldEdge[]; offset: number };
+  copySelection: () => Promise<boolean>;
+  pasteSelection: () => Promise<void>;
   selectionRevision: number;
   pendingConnection?: PendingConnection;
   events: RuntimeEvent[];
@@ -1175,6 +1179,61 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
   }),
 
+  copySelection: () => {
+    const state = get();
+    const selected = state.cards.filter(card => state.selectedCardIds.includes(card.id) && !card.ephemeral);
+    const expanded = parentFirst([...new Map(selected.flatMap(card => [card, ...ownedDescendants(state.cards, card.id)]).map(card => [card.id, card])).values()]);
+    const ids = new Set(expanded.map(card => card.id));
+    const edges = structuredClone(state.edges.filter(edge => ids.has(edge.source) && ids.has(edge.target)));
+    return withHistoryTransaction(async () => {
+      if (!expanded.length) return false;
+      try {
+        const cards = await Promise.all(expanded.map(card => snapshotCardForHistory(card, true)));
+        set({ clipboard: { cards: structuredClone(cards), edges, offset: 0 } });
+        return true;
+      } catch (error) {
+        get().pushToast({ tone: "error", title: "Copy failed", detail: apiErrorMessage(error) });
+        return false;
+      }
+    });
+  },
+
+  pasteSelection: () => withHistoryTransaction(async () => {
+    const clipboard = get().clipboard;
+    if (!clipboard) return;
+    const offset = clipboard.offset + 48;
+    const ids = new Map(clipboard.cards.map(card => [card.id, crypto.randomUUID()]));
+    const drafts = clipboard.cards.map(card => ({
+      ...structuredClone(card), id: ids.get(card.id)!,
+      parent_id: card.parent_id ? ids.get(card.parent_id) ?? null : null,
+      equipment: card.equipment && ids.has(card.equipment.owner_id)
+        ? { ...card.equipment, owner_id: ids.get(card.equipment.owner_id)! } : null,
+      position: { x: card.position.x + offset, y: card.position.y + offset },
+    }));
+    const created: WorldCard[] = [];
+    const edges: WorldEdge[] = [];
+    try {
+      for (const card of parentFirst(drafts)) created.push(await restoreCard(card));
+      for (const edge of clipboard.edges) {
+        const draft = { ...edge, id: crypto.randomUUID(), source: ids.get(edge.source)!, target: ids.get(edge.target)! };
+        if (!isEquipmentConnection(draft.source, draft.target, created)) edges.push(await worldApi.createEdge(draft));
+      }
+      markWorldMutation();
+      set(state => ({
+        cards: mergeCards(state.cards, created), edges: mergeEdges(state.edges, edges),
+        selectedCardIds: created.map(card => card.id), selectedEdgeId: undefined,
+        selectionRevision: state.selectionRevision + 1,
+        clipboard: { ...clipboard, offset },
+        undoStack: appendHistory(state.undoStack, { id: ++historySequence, kind: "card-created", label: "Paste cards", cards: drafts, edges }),
+        redoStack: [],
+      }));
+    } catch (error) {
+      try { if (created.length) await worldApi.deleteNodes(created.map(card => card.id)); }
+      catch { await get().refreshWorld(); }
+      get().pushToast({ tone: "error", title: "Paste failed", detail: apiErrorMessage(error) });
+    }
+  }),
+
   selectEdge: (id) => set({ selectedEdgeId: id }),
   selectCards: (ids) => set({ selectedCardIds: [...new Set(ids)] }),
 
@@ -1723,7 +1782,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         }
         case "card-created": {
           const expanded = operation.cards.flatMap((card) => [card, ...ownedDescendants(get().cards, card.id)]);
-          operation.cards = await Promise.all(parentFirst([...new Map(expanded.map((card) => [card.id, card])).values()]).map(snapshotCardForHistory));
+          operation.cards = await Promise.all(parentFirst([...new Map(expanded.map((card) => [card.id, card])).values()]).map((card) => snapshotCardForHistory(card)));
           if (operation.cards.some((card) => card.equipment || isContainer(card, get().catalog))) {
             await worldApi.deleteNodes(operation.cards.filter((card) => !card.ephemeral).map((card) => card.id));
           } else {
@@ -1885,7 +1944,10 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
           for (const card of parentFirst(operation.cards)) {
             restored.push(card.ephemeral ? copyCard(card) : await restoreCard(card));
           }
+          const restoredEdges: WorldEdge[] = [];
+          for (const edge of operation.edges ?? []) restoredEdges.push(await worldApi.createEdge(copyEdge(edge)));
           set((state) => ({
+            edges: mergeEdges(state.edges, restoredEdges),
             cards: mergeCards(state.cards, restored.filter((card) => !card.ephemeral)),
             stressCards: mergeCards(state.stressCards, restored.filter((card) => card.ephemeral)),
           }));

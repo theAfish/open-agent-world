@@ -65,6 +65,33 @@ describe("authoritative world synchronization", () => {
     });
   });
 
+  it("copies a selection snapshot with internal links and supports paste undo/redo", async () => {
+    const a = card("a", "agent");
+    const b = { ...card("b", "agent"), position: { x: 200, y: 100 } };
+    const edge: WorldEdge = { id: "ab", source: "a", target: "b", relationship: "related", direction: "forward" };
+    useWorldStore.setState({ cards: [a, b], edges: [edge, { ...edge, id: "external", target: "outside" }], selectedCardIds: ["a", "b"], clipboard: undefined });
+    vi.spyOn(worldApi, "restoreNode").mockImplementation(async input => input as WorldCard);
+    vi.spyOn(worldApi, "createEdge").mockImplementation(async input => input as WorldEdge);
+    vi.spyOn(worldApi, "deleteNode").mockResolvedValue(undefined);
+    expect(await useWorldStore.getState().copySelection()).toBe(true);
+    a.config.changed = true;
+    await useWorldStore.getState().pasteSelection();
+    const pasted = useWorldStore.getState().cards.slice(2);
+    expect(pasted).toHaveLength(2);
+    expect(pasted[0].config.changed).toBeUndefined();
+    expect(pasted[0].position).toEqual({ x: 48, y: 48 });
+    expect(pasted[1].position).toEqual({ x: 248, y: 148 });
+    expect(useWorldStore.getState().edges.at(-1)).toMatchObject({ source: pasted[0].id, target: pasted[1].id });
+    expect(useWorldStore.getState().selectedCardIds).toEqual(pasted.map(c => c.id));
+    await useWorldStore.getState().undo();
+    expect(useWorldStore.getState().cards).toHaveLength(2);
+    await useWorldStore.getState().redo();
+    expect(useWorldStore.getState().cards).toHaveLength(4);
+    expect(useWorldStore.getState().edges).toHaveLength(3);
+    await useWorldStore.getState().pasteSelection();
+    expect(useWorldStore.getState().cards.at(-2)?.position).toEqual({ x: 96, y: 96 });
+  });
+
   it("loads server-created toolbox members and includes missing members when deleting", async () => {
     const definition = { ...TEST_CATALOG.node_types.find((node) => node.id === 'legion')!, id: 'test.toolbox', user_creatable: true, traits: [] };
     const toolbox = { ...card('toolbox', 'test.toolbox') };
