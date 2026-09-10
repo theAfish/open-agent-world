@@ -65,8 +65,8 @@ export function GlueLayer({ nodes, preview }: { nodes: CanvasNode[]; preview?: G
         </button>)}
       </div>;
     })}
-    {nodes.filter(n => n.selected && boxes[n.id]).flatMap(node => freeCorners(node.id, boxes, bonds).map(corner => {
-      const box = boxes[node.id];
+    {nodes.filter(n => n.selected && !n.hidden && boxes[n.id]).flatMap(node => freeCorners(node.id, live, bonds).map(corner => {
+      const box = { ...live[node.id], level: boxes[node.id].level };
       return <button key={`${node.id}-${corner}`} className={`glue-resize nodrag nopan ${corner}`} aria-label={`缩放 ${node.data.card.name} ${corner}`}
         style={{ left: box.x + (corner.endsWith('right') ? box.width : 0) - 7, top: box.y + (corner.startsWith('bottom') ? box.height : 0) - 7 }}
         onPointerDown={event => { event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); drag.current = { id: node.id, corner, x: event.clientX, y: event.clientY, box }; }}

@@ -18,7 +18,16 @@ test('glue joins cards, moves the group, resizes from a free corner and survives
     const glued1 = (await first.boundingBox())!, glued2 = (await second.boundingBox())!;
     expect(Math.abs(glued1.x + glued1.width - glued2.x)).toBeLessThan(2);
     await page.mouse.move(glued1.x + 35, glued1.y + 25); await page.mouse.down();
-    await page.mouse.move(glued1.x + 65, glued1.y + 55, { steps: 10 }); await page.mouse.up();
+    for (const offset of [15, 30]) {
+      await page.mouse.move(glued1.x + 35 + offset, glued1.y + 25 + offset, { steps: 5 });
+      // Check while the mouse is held: persisted layout only changes on release.
+      await expect.poll(async () => {
+        const card = (await first.boundingBox())!;
+        const grip = (await page.locator('.glue-resize.bottom-left').boundingBox())!;
+        return Math.hypot(grip.x + grip.width / 2 - card.x, grip.y + grip.height / 2 - card.y - card.height);
+      }).toBeLessThan(2);
+    }
+    await page.mouse.up();
     await expect.poll(async () => (await second.boundingBox())!.x - glued2.x).toBeGreaterThan(20);
     expect(Math.abs(((await second.boundingBox())!.x - glued2.x) - ((await first.boundingBox())!.x - glued1.x))).toBeLessThan(2);
     const handle = page.locator('.glue-resize.bottom-left');
