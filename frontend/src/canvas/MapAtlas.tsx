@@ -1,5 +1,5 @@
 import { Panel, useReactFlow, useStore } from '@xyflow/react';
-import { MapPin, Trash2, X } from 'lucide-react';
+import { MapPin, Trash2, X, Droplets } from 'lucide-react';
 import { useCallback, useEffect } from 'react';
 import { shallow } from 'zustand/shallow';
 import { useWorldStore } from '../state/worldStore';
@@ -7,7 +7,7 @@ import { useNodeSurfaceStore } from '../state/nodeSurfaces';
 
 export interface MapPinLocation { id: string; name: string; x: number; y: number; zoom: number }
 
-export function MapAtlas({ active, onActiveChange }: { active: boolean; onActiveChange: (active: boolean) => void }) {
+export function MapAtlas({ active, onActiveChange, glueActive, onGlueChange }: { active: boolean; onActiveChange: (active: boolean) => void; glueActive: boolean; onGlueChange: (active: boolean) => void }) {
   const pins = useWorldStore(state => state.mapPins);
   const { setCenter } = useReactFlow();
   const transform = useStore(state => state.transform, shallow);
@@ -21,10 +21,11 @@ export function MapAtlas({ active, onActiveChange }: { active: boolean; onActive
       if (event.defaultPrevented || event.isComposing || event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
         || target?.isContentEditable || target?.closest('input, textarea, select, [role="textbox"], .xterm, [role="dialog"]')
         || useNodeSurfaceStore.getState().dragging) return;
-      if (event.key === 'Escape' && active) {
+      if (event.key === 'Escape' && (active || glueActive)) {
         event.preventDefault();
         event.stopImmediatePropagation();
         onActiveChange(false);
+        onGlueChange(false);
       }
       if (!/^[1-9]$/.test(event.key)) return;
       const pin = pins[Number(event.key) - 1];
@@ -32,7 +33,7 @@ export function MapAtlas({ active, onActiveChange }: { active: boolean; onActive
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [active, jump, onActiveChange, pins]);
+  }, [active, glueActive, jump, onActiveChange, onGlueChange, pins]);
 
   return <>
     {active && <div className="map-pin-layer" aria-hidden="true">
@@ -55,8 +56,10 @@ export function MapAtlas({ active, onActiveChange }: { active: boolean; onActive
           </div>)}
         </div>
       </section>}
+      {glueActive && <div className="glue-tool-hint">万能胶已开启 · 拖动卡片靠近另一张卡片的边缘，出现胶水时松手粘合。选中后可从自由角缩放，或解除粘连。</div>}
       <div className="map-toolbar" role="toolbar" aria-label="画布工具">
         <button className="icon-button" aria-label="图钉" aria-pressed={active} aria-expanded={active} title="图钉 / 地图册" onClick={() => onActiveChange(!active)}><MapPin size={18} /></button>
+        <button className="icon-button" aria-label="万能胶" aria-pressed={glueActive} title="万能胶 · 靠近边缘并松手粘合" onClick={() => onGlueChange(!glueActive)}><Droplets size={18} /></button>
       </div>
     </Panel>
   </>;

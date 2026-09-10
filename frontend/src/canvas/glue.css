@@ -1,0 +1,18 @@
+.glue-seam { position: absolute; z-index: 30; pointer-events: none; background: transparent; display: flex; }
+.glue-seam.horizontal { flex-direction: column; }
+.glue-seam.is-preview { background: color-mix(in srgb, var(--accent) 65%, transparent); filter: blur(1px); animation: glue-pulse .8s ease-in-out infinite alternate; }
+.glue-stitch { position: relative; pointer-events: auto; flex: 1; min-width: 8px; min-height: 8px; border: 0; padding: 0; cursor: pointer; background: transparent; color: var(--ink-faint); }
+.glue-stitch:hover, .glue-stitch.is-selected { color: var(--ink); background: transparent; }
+.glue-stitch:focus-visible { outline: 1px dashed var(--ink-faint); outline-offset: 2px; }
+.glue-stitch-marks { position: absolute; left: 50%; top: 50%; width: 12px; height: 56px; max-height: 70%; transform: translate(-50%, -50%); pointer-events: none; overflow: visible; }
+.horizontal .glue-stitch-marks { width: 56px; height: 12px; max-height: none; max-width: 70%; }
+.glue-stitch-marks path { fill: none; stroke: currentColor; stroke-width: 1; stroke-linecap: round; }
+.glue-stitch-marks circle { fill: currentColor; }
+.glue-resize { position: absolute; z-index: 40; pointer-events: auto; width: 14px; height: 14px; padding: 0; border: 2px solid var(--accent); background: var(--chrome); border-radius: 50%; touch-action: none; cursor: nwse-resize; }
+.glue-resize.top-right, .glue-resize.bottom-left { cursor: nesw-resize; }
+.glue-detach { position: absolute; z-index: 40; pointer-events: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--chrome); color: var(--text); padding: 3px 9px; cursor: pointer; }
+.react-flow__node.is-glued .world-card { box-shadow: none; width: 100%; height: 100%; }
+.react-flow__node.is-glued .container-resize-arc { display: none; }
+.glue-tool-hint { max-width: 260px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--chrome); color: var(--text); font-size: 12px; line-height: 1.7; }
+@keyframes glue-pulse { to { box-shadow: 0 0 18px var(--accent); opacity: .65; } }
+@media (prefers-reduced-motion: reduce) { .glue-seam.is-preview { animation: none; } }

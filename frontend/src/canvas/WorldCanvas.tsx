@@ -1,3 +1,5 @@
+import { GlueLayer } from "./GlueLayer";
+import { findGlue, glueGroup, useGlueStore, type GlueBox, type GlueCandidate } from "../state/glue";
 import { MapAtlas } from "./MapAtlas";
 import {
   Background,
@@ -89,6 +91,11 @@ function nodeFromCard(
 
 export function WorldCanvas() {
   const [pinToolActive, setPinToolActive] = useState(false);
+  const [glueActive, setGlueActive] = useState(false);
+  const [gluePreview, setGluePreview] = useState<GlueCandidate>();
+  const glueBoxes = useGlueStore(s => s.boxes);
+  const glueBonds = useGlueStore(s => s.bonds);
+  const glueDrag = useRef<{ origin: { x: number; y: number }; boxes: Record<string, GlueBox>; latest: Record<string, GlueBox>; candidate?: GlueCandidate }>();
   const wrapper = useRef<HTMLDivElement>(null);
   const cards = useWorldStore((state) => state.cards);
   const catalog = useWorldStore((state) => state.catalog);
@@ -172,6 +179,9 @@ export function WorldCanvas() {
         const position = isContainer(card, catalog) ? node.position : memberSurfacePosition(card, parent, level, catalog);
         return { ...node, parentId: parent.id, position: { x: position.x - parent.position.x, y: position.y - parent.position.y } };
       }
+      const glued = glueBoxes[card.id];
+      if (glued && node.type === 'worldCard' && !node.parentId) node = { ...node, position: { x: glued.x, y: glued.y },
+        width: glued.width, height: glued.height, style: { width: glued.width, height: glued.height }, className: 'is-glued', data: { ...node.data, displaced: false } };
       return node;
     }).flatMap((node): CanvasNode[] => {
       if (node.type === "equipment" || node.data.equipmentDetail || !catalog.node_types.find((type) => type.id === node.data.card.type)?.traits.includes("core.agent")) return [node];
@@ -181,7 +191,7 @@ export function WorldCanvas() {
         style: { width: 320, height: 46 + Math.max(2, count + 1) * 48 },
         hidden: !equipmentPanels.includes(node.id), draggable: false, selectable: false, connectable: false, zIndex: 24 }];
     });
-  }, [displacedById, renderCards, surfaceLevels, catalog, cards, equipmentPanels, equipmentPositions, workspaceSizes]);
+  }, [displacedById, renderCards, surfaceLevels, catalog, cards, equipmentPanels, equipmentPositions, workspaceSizes, glueBoxes]);
   const [nodes, setNodes] = useNodesState<CanvasNode>(mappedNodes);
   const onNodesChange = useCallback((changes: NodeChange<CanvasNode>[]) => {
     setNodes(current => {
@@ -260,7 +270,7 @@ export function WorldCanvas() {
     };
 
     const moving = mappedNodes.some((node) => {
-      if (activeDragIds.current.has(node.id)) return false;
+      if (activeDragIds.current.has(node.id) || glueBoxes[node.id]) return false;
       const start = starts.get(node.id) ?? node.position;
       return Math.abs(node.position.x - start.x) > 0.1
         || Math.abs(node.position.y - start.y) > 0.1;
@@ -280,7 +290,7 @@ export function WorldCanvas() {
     };
     positionAnimation.current = requestAnimationFrame(tick);
     return cancelPositionAnimation;
-  }, [cancelPositionAnimation, connectingNodeId, dragging, mappedNodes, setNodes]);
+  }, [cancelPositionAnimation, connectingNodeId, dragging, mappedNodes, setNodes, glueBoxes]);
 
   useEffect(() => {
     if (appliedSelectionRevision.current === selectionRevision) return;
@@ -300,6 +310,7 @@ export function WorldCanvas() {
   }, [cards, nodes, displayOwners]);
   const flowEdges = useMemo<CanvasEdge[]>(
     () => edges
+      .filter(edge => !glueBonds.some(b => glueBoxes[b.a] && glueBoxes[b.b] && (b.a === edge.source && b.b === edge.target || b.b === edge.source && b.a === edge.target)))
       .filter((edge) => visibleNodeIds.has(displayEndpoint(edge.source)) && visibleNodeIds.has(displayEndpoint(edge.target)))
       .map<CanvasEdge>((edge) => ({
         id: edge.id,
@@ -322,7 +333,7 @@ export function WorldCanvas() {
         } : undefined,
         interactionWidth: 24,
       })).filter((edge) => edge.source !== edge.target),
-    [edges, selectedEdgeId, visibleNodeIds, displayEndpoint],
+    [edges, selectedEdgeId, visibleNodeIds, displayEndpoint, glueBonds, glueBoxes],
   );
 
   const dimensions = useCallback(() => ({
@@ -405,12 +416,23 @@ export function WorldCanvas() {
 
   const onNodeDragStart: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
     cancelPositionAnimation();
+    if ((glueActive || glueBoxes[node.id]) && node.type === 'worldCard' && !node.parentId && !node.data.card.ephemeral && !node.data.equipmentDetail) {
+      const ids = glueGroup(node.id, glueBonds);
+      draggedNodes.forEach(n => glueGroup(n.id, glueBonds).forEach(id => ids.add(id)));
+      const boxes = Object.fromEntries(nodesRef.current.filter(n => ids.has(n.id) && n.type === 'worldCard' && !n.parentId).map(n => [n.id,
+        { x: n.position.x, y: n.position.y, width: Number(n.style?.width), height: Number(n.style?.height), level: n.data.surfaceLevel }]));
+      glueDrag.current = { origin: { x: boxes[node.id].x, y: boxes[node.id].y }, boxes, latest: boxes };
+      useEquipmentDrag.getState().set();
+      setDragging(true);
+      activeDragIds.current = ids;
+      return;
+    }
     useEquipmentDrag.getState().set(!node.data.equipmentDetail && draggedNodes.length <= 1 ? node.data.card : undefined);
     setDragging(true);
     activeDragIds.current.clear();
     activeDragIds.current.add(node.id);
     draggedNodes.forEach((draggedNode) => activeDragIds.current.add(draggedNode.id));
-  }, [cancelPositionAnimation, setDragging]);
+  }, [cancelPositionAnimation, setDragging, glueActive, glueBoxes, glueBonds]);
 
   const equipmentDropOwner = useCallback((resource: CanvasNodeData["card"], x: number, y: number) => {
     return cards.find((candidate) => {
@@ -451,6 +473,18 @@ export function WorldCanvas() {
   const onNodeDrag: OnNodeDrag<CanvasNode> = useCallback((event, node) => {
     clearContainerDropHint();
     clearTransformationHints();
+    const gluing = glueDrag.current;
+    if (gluing) {
+      const dx = node.position.x - gluing.origin.x, dy = node.position.y - gluing.origin.y;
+      const moved = Object.fromEntries(Object.entries(gluing.boxes).map(([id, b]) => [id, { ...b, x: b.x + dx, y: b.y + dy }]));
+      const targets = Object.fromEntries(nodesRef.current.filter(n => !gluing.boxes[n.id] && n.type === 'worldCard' && !n.parentId && !n.hidden && !n.data.card.ephemeral && !n.data.equipmentDetail).map(n => [n.id,
+        { x: n.position.x, y: n.position.y, width: Number(n.style?.width), height: Number(n.style?.height), level: n.data.surfaceLevel }]));
+      gluing.latest = moved;
+      gluing.candidate = glueActive ? findGlue(moved, targets, 16 / getViewport().zoom) : undefined;
+      setGluePreview(gluing.candidate);
+      setNodes(current => current.map(n => moved[n.id] ? { ...n, position: { x: moved[n.id].x, y: moved[n.id].y } } : n));
+      return;
+    }
     const transformation = transformationTarget(event, node);
     transformation?.element?.setAttribute("data-transformation-hint", `${transformation.option[1].label}: ${node.data.card.name}`);
     const member = node.data.card;
@@ -478,12 +512,28 @@ export function WorldCanvas() {
     const resource = useEquipmentDrag.getState().resource;
     if (resource?.id !== node.id || !("clientX" in event)) return;
     useEquipmentDrag.getState().set(resource, equipmentDropOwner(resource, event.clientX, event.clientY)?.id);
-  }, [equipmentDropOwner, clearContainerDropHint, cards, catalog, transformationTarget]);
+  }, [equipmentDropOwner, clearContainerDropHint, cards, catalog, transformationTarget, glueActive, getViewport, setNodes]);
 
   const onNodeDragStop: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
     clearContainerDropHint();
     cancelPositionAnimation();
     clearTransformationHints();
+    const gluing = glueDrag.current;
+    if (gluing) {
+      const candidate = gluing.candidate;
+      const layout = Object.fromEntries(Object.entries(gluing.latest).map(([id, b]) => [id, { ...b, x: b.x + (candidate?.dx ?? 0), y: b.y + (candidate?.dy ?? 0) }]));
+      if (candidate) {
+        const target = nodesRef.current.find(n => n.id === candidate.b)!;
+        layout[target.id] = { x: target.position.x, y: target.position.y, width: Number(target.style?.width), height: Number(target.style?.height), level: target.data.surfaceLevel };
+      }
+      if (candidate || Object.keys(layout).some(id => glueBoxes[id])) useGlueStore.getState().setLayout(layout, candidate);
+      glueDrag.current = undefined;
+      setGluePreview(undefined);
+      void updateCardPositions(Object.entries(layout).map(([id, b]) => ({ id, position: nodePositionFromSurfacePosition(b, b.level) }))).finally(() => {
+        activeDragIds.current.clear(); setDragging(false);
+      });
+      return;
+    }
     const transformation = draggedNodes.length <= 1 ? transformationTarget(_event, node) : undefined;
     if (transformation) {
       useEquipmentDrag.getState().set();
@@ -535,7 +585,7 @@ export function WorldCanvas() {
       activeDragIds.current.clear();
       setDragging(false);
     });
-  }, [cancelPositionAnimation, cards, setDragging, updateCardPositions, updateCard, catalog, clearContainerDropHint, transformationTarget]);
+  }, [cancelPositionAnimation, cards, setDragging, updateCardPositions, updateCard, catalog, clearContainerDropHint, transformationTarget, glueBoxes]);
 
   const onConnect = useCallback((connection: Connection) => {
     requestConnection(connection.source, connection.target);
@@ -685,6 +735,7 @@ export function WorldCanvas() {
         aria-label="Open Agent World spatial canvas"
       >
         <ContourLayer />
+        <GlueLayer nodes={nodes} preview={gluePreview} />
         <GenerationLayer />
         {nodes.filter((node) => node.data.equipmentDetail && !node.hidden).map((node) =>
           <SurfaceBridge key={node.id} sourceId={equipmentOriginId(node.id)} targetId={node.id} />)}
@@ -695,7 +746,7 @@ export function WorldCanvas() {
           color="var(--grid-dot)"
         />
         <LocalMiniMap />
-        <MapAtlas active={pinToolActive} onActiveChange={setPinToolActive} />
+        <MapAtlas active={pinToolActive} onActiveChange={active => { setPinToolActive(active); if (active) setGlueActive(false); }} glueActive={glueActive} onGlueChange={active => { setGlueActive(active); if (active) setPinToolActive(false); }} />
         <Controls
           className="world-controls"
           position="bottom-right"
