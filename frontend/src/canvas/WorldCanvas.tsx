@@ -37,7 +37,7 @@ import { buildCardDraft } from "../state/helpers";
 import { hasPaletteDrag, readPaletteDrag } from "../palette/dragPayload";
 import { getConnectionOptions, validateConnection } from "../state/relationships";
 import { useWorldStore } from "../state/worldStore";
-import { NODE_SURFACE_SIZE, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
+import { NODE_SURFACE_SIZE, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel, type SurfaceSize } from "../state/nodeSurfaces";
 import { ContourLayer } from "./ContourLayer";
 import { LocalMiniMap } from "./LocalMiniMap";
 import { GenerationLayer } from "../effects/GenerationLayer";
@@ -68,8 +68,9 @@ function nodeFromCard(
   surfaceLevel: NodeSurfaceLevel,
   displaced: boolean,
   position: ReturnType<typeof useWorldStore.getState>["cards"][number]["position"],
+  windowSize?: SurfaceSize,
 ): CanvasNode {
-  const size = NODE_SURFACE_SIZE[surfaceLevel];
+  const size = windowSize ?? NODE_SURFACE_SIZE[surfaceLevel];
   return {
     id: card.id,
     type: "worldCard",
@@ -100,6 +101,7 @@ export function WorldCanvas() {
   const selectedCardIds = useWorldStore((state) => state.selectedCardIds);
   const selectionRevision = useWorldStore((state) => state.selectionRevision);
   const surfaceLevelsByNodeId = useNodeSurfaceStore((state) => state.surfaceLevels);
+  const workspaceSizes = useNodeSurfaceStore((state) => state.workspaceSizes);
   const connectingNodeId = useNodeSurfaceStore((state) => state.connectingNodeId);
   const dragging = useNodeSurfaceStore((state) => state.dragging);
   const setDragging = useNodeSurfaceStore((state) => state.setDragging);
@@ -138,8 +140,8 @@ export function WorldCanvas() {
   const surfaceObstacles = useMemo<SurfaceObstacle[]>(() => renderCards.flatMap<SurfaceObstacle>((card) => {
     if (isContainer(card, catalog) || card.parent_id || card.equipment) return [];
     const level = surfaceLevels.get(card.id);
-    return level === "inspector" || level === "workspace" ? [{ card, level }] : [];
-  }), [renderCards, surfaceLevels, catalog]);
+    return level === "inspector" || level === "workspace" ? [{ card, level, size: level === "workspace" ? workspaceSizes[card.id] : undefined }] : [];
+  }), [renderCards, surfaceLevels, catalog, workspaceSizes]);
   const displacedById = useMemo(
     () => displacedPositions(renderCards.filter((c) => !isContainer(c, catalog) && !c.parent_id && !c.equipment), surfaceObstacles, surfaceLevels),
     [renderCards, surfaceLevels, surfaceObstacles, catalog],
@@ -148,11 +150,11 @@ export function WorldCanvas() {
   const equipmentPositions = useEquipmentPanel((state) => state.positions);
   const mappedNodes = useMemo(() => {
     const byId = new Map(renderCards.map((c) => [c.id, c]));
-    const frameSizes = containerSizes(renderCards, catalog, surfaceLevels);
+    const frameSizes = containerSizes(renderCards, catalog, surfaceLevels, workspaceSizes);
     return parentFirst(renderCards).flatMap<CanvasNode>((card) => {
       const level = surfaceLevels.get(card.id) ?? "preview";
       const displaced = displacedById.get(card.id);
-      let node = nodeFromCard(card, level, displaced?.displaced ?? false, displaced?.position ?? card.position);
+      let node = nodeFromCard(card, level, displaced?.displaced ?? false, displaced?.position ?? card.position, level === "workspace" ? workspaceSizes[card.id] : undefined);
       if (isContainer(card, catalog)) {
         const { width, height } = frameSizes.get(card.id)!;
         node = { ...node, type: "container", position: card.position, width, height, style: { width, height }, zIndex: 0,
@@ -175,11 +177,11 @@ export function WorldCanvas() {
       if (node.type === "equipment" || node.data.equipmentDetail || !catalog.node_types.find((type) => type.id === node.data.card.type)?.traits.includes("core.agent")) return [node];
       const count = renderCards.filter((card) => equipmentOwner(card, cards)?.id === node.id).length;
       return [node, { id: `${node.id}:equipment`, type: "equipmentPanel", data: node.data, parentId: node.id,
-        position: { x: 0, y: NODE_SURFACE_SIZE[node.data.surfaceLevel].height + 8 },
+        position: { x: 0, y: Number(node.style?.height ?? NODE_SURFACE_SIZE[node.data.surfaceLevel].height) + 8 },
         style: { width: 320, height: 46 + Math.max(2, count + 1) * 48 },
         hidden: !equipmentPanels.includes(node.id), draggable: false, selectable: false, connectable: false, zIndex: 24 }];
     });
-  }, [displacedById, renderCards, surfaceLevels, catalog, cards, equipmentPanels, equipmentPositions]);
+  }, [displacedById, renderCards, surfaceLevels, catalog, cards, equipmentPanels, equipmentPositions, workspaceSizes]);
   const [nodes, setNodes] = useNodesState<CanvasNode>(mappedNodes);
   const onNodesChange = useCallback((changes: NodeChange<CanvasNode>[]) => {
     setNodes(current => {
@@ -189,7 +191,7 @@ export function WorldCanvas() {
         const parent = cards.find(card => card.id === change.id);
         if (!parent || !isContainer(parent, catalog)) continue;
         if (containerShowsWorkspace(parent, catalog, surfaceLevels.get(parent.id))) continue;
-        const layout = resizeContainerLayout(cards, catalog, surfaceLevels, parent.id, change.dimensions);
+        const layout = resizeContainerLayout(cards, catalog, surfaceLevels, parent.id, change.dimensions, workspaceSizes);
         const reflowed = new Map(cards.map(card => [card.id, { ...card, position: layout.positions.get(card.id) ?? card.position }]));
         next = next.map(node => {
           if (node.id === parent.id) return { ...node, width: layout.size.width, height: layout.size.height, measured: layout.size, style: { ...node.style, ...layout.size } };
@@ -203,7 +205,7 @@ export function WorldCanvas() {
       }
       return next;
     });
-  }, [cards, catalog, surfaceLevels, setNodes]);
+  }, [cards, catalog, surfaceLevels, setNodes, workspaceSizes]);
   const nodesRef = useRef(nodes);
   const positionAnimation = useRef<number>();
   const activeDragIds = useRef(new Set<string>());
@@ -243,6 +245,7 @@ export function WorldCanvas() {
               dragging: live.dragging,
             };
           }
+          if (live?.resizing) return { ...node, ...live };
           const start = starts.get(node.id) ?? node.position;
           return {
             ...live,

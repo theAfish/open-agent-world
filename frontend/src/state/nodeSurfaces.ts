@@ -40,7 +40,12 @@ export const NODE_SURFACE_SIZE = {
   workspace: { width: 1_020, height: 700 },
 } as const;
 
+export interface SurfaceSize { width: number; height: number }
+export const WORKSPACE_MIN_SIZE = { width: 640, height: 420 };
+
 interface NodeSurfaceState {
+  workspaceSizes: Record<string, SurfaceSize>;
+  resizeWorkspace: (nodeId: string, size: SurfaceSize) => void;
   surfaceLevels: Record<string, NodeSurfaceLevel>;
   connectingNodeId?: string;
   dragging: boolean;
@@ -62,6 +67,14 @@ interface NodeSurfaceState {
 }
 
 export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set) => ({
+  workspaceSizes: {},
+  resizeWorkspace: (nodeId, size) => set((state) => {
+    if (!Number.isFinite(size.width) || !Number.isFinite(size.height)) return state;
+    return { workspaceSizes: { ...state.workspaceSizes, [nodeId]: {
+      width: Math.max(WORKSPACE_MIN_SIZE.width, Math.min(4096, size.width)),
+      height: Math.max(WORKSPACE_MIN_SIZE.height, Math.min(4096, size.height)),
+    } } };
+  }),
   surfaceLevels: {},
   drafts: {},
   maximizedWorkspaces: {},
@@ -174,6 +187,7 @@ export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set) => (
     surfaceLevels: state.surfaceLevels,
     baseLevels: state.baseLevels,
     maximizedWorkspaces: state.maximizedWorkspaces,
+    workspaceSizes: state.workspaceSizes,
   }),
 }));
 

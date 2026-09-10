@@ -701,7 +701,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     if (!parent || !isContainer(parent, catalog)) return;
     const surfaces = useNodeSurfaceStore.getState().surfaceLevels;
     const levels = new Map(cards.map(card => [card.id, surfaceLevelForNode(card.id, surfaces)]));
-    const layout = resizeContainerLayout(cards, catalog, levels, id, size);
+    const layout = resizeContainerLayout(cards, catalog, levels, id, size, useNodeSurfaceStore.getState().workspaceSizes);
     const before = cards.filter(card => card.id === id || layout.positions.has(card.id)).map(copyCard);
     const after = before.map(card => ({ ...card, size: card.id === id ? layout.size : card.size, position: layout.positions.get(card.id) ?? card.position }));
     const optimistic = new Map(after.map(card => [card.id, card]));

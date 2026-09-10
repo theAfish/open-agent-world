@@ -1,5 +1,5 @@
 import type { PluginCatalog, WorldCard, WorldPosition, WorldSize } from "../types/world";
-import { NODE_SURFACE_SIZE, type NodeSurfaceLevel } from "./nodeSurfaces";
+import { NODE_SURFACE_SIZE, type NodeSurfaceLevel, type SurfaceSize } from "./nodeSurfaces";
 import { nodePositionFromSurfacePosition, positionSurfaceAtNodeCenter } from "../canvas/nodeDisplacement";
 
 export const containerDefinition = (card: WorldCard, catalog: PluginCatalog) => catalog.node_types.find((type) => type.id === card.type)?.container;
@@ -52,7 +52,7 @@ export function acceptsMember(container: WorldCard, member: WorldCard, catalog: 
   return spec.member_traits.every((trait) => traits.includes(trait));
 }
 
-export function containerSizes(cards: WorldCard[], catalog: PluginCatalog, levels: Map<string, NodeSurfaceLevel>) {
+export function containerSizes(cards: WorldCard[], catalog: PluginCatalog, levels: Map<string, NodeSurfaceLevel>, workspaceSizes: Record<string, SurfaceSize> = {}) {
   const sizes = new Map<string, WorldSize>();
   for (const card of parentFirst(cards).reverse()) {
     const spec = containerDefinition(card, catalog);
@@ -62,7 +62,7 @@ export function containerSizes(cards: WorldCard[], catalog: PluginCatalog, level
     for (const member of cards.filter((node) => node.parent_id === card.id)) {
       const level = levels.get(member.id) ?? "preview";
       const nested = sizes.get(member.id);
-      const memberSize = nested ?? NODE_SURFACE_SIZE[level];
+      const memberSize = nested ?? (level === "workspace" ? workspaceSizes[member.id] : undefined) ?? NODE_SURFACE_SIZE[level];
       const position = nested ? member.position : memberSurfacePosition(member, card, level, catalog);
       size.width = Math.max(size.width, position.x - card.position.x + memberSize.width + spec.content_inset[2]);
       size.height = Math.max(size.height, position.y - card.position.y + memberSize.height + spec.content_inset[3]);
@@ -73,7 +73,7 @@ export function containerSizes(cards: WorldCard[], catalog: PluginCatalog, level
 }
 
 /** Reflow visible member surfaces on resize, keeping nested frames and their contents intact. */
-export function resizeContainerLayout(cards: WorldCard[], catalog: PluginCatalog, levels: Map<string, NodeSurfaceLevel>, id: string, requested: WorldSize) {
+export function resizeContainerLayout(cards: WorldCard[], catalog: PluginCatalog, levels: Map<string, NodeSurfaceLevel>, id: string, requested: WorldSize, workspaceSizes: Record<string, SurfaceSize> = {}) {
   const parent = cards.find(card => card.id === id)!;
   const spec = containerDefinition(parent, catalog)!;
   const [left, top, right, bottom] = spec.content_inset;
@@ -81,9 +81,9 @@ export function resizeContainerLayout(cards: WorldCard[], catalog: PluginCatalog
     size: { width: Math.max(requested.width, spec.min_size[0]), height: Math.max(requested.height, spec.min_size[1]) },
     positions: new Map<string, WorldPosition>(),
   };
-  const sizes = containerSizes(cards, catalog, levels);
+  const sizes = containerSizes(cards, catalog, levels, workspaceSizes);
   const members = cards.filter(card => card.parent_id === id).sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x || a.id.localeCompare(b.id));
-  const memberSize = (card: WorldCard) => sizes.get(card.id) ?? NODE_SURFACE_SIZE[levels.get(card.id) ?? 'preview'];
+  const memberSize = (card: WorldCard) => sizes.get(card.id) ?? (levels.get(card.id) === 'workspace' ? workspaceSizes[card.id] : undefined) ?? NODE_SURFACE_SIZE[levels.get(card.id) ?? 'preview'];
   const width = Math.max(requested.width, spec.min_size[0], ...members.map(card => left + memberSize(card).width + right));
   const positions = new Map<string, WorldPosition>();
   let x = left, y = top, rowHeight = 0;
