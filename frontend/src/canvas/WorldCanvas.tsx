@@ -579,10 +579,14 @@ export function WorldCanvas() {
       className={`world-canvas ${pinToolActive ? "pin-tool-active" : ""} ${cards.some((card) => selectedCardIds.includes(card.id) && isContainer(card, catalog)) ? "has-selected-container" : ""}`}
       data-testid="world-canvas"
       onMouseDownCapture={(event) => {
-        if (event.button !== 0 || !(event.target instanceof Element)
-          || !event.target.closest(".react-flow__handle")) return;
-        // Keep the mouse event flowing to React Flow, but prevent native text
-        // selection/dragging from taking over a boundary connection gesture.
+        if (event.button !== 0 || !(event.target instanceof Element)) return;
+        const target = event.target;
+        if (!target.closest(".react-flow__handle")
+          && !target.classList.contains("react-flow__pane")) return;
+        // Keep React Flow's pan/selection/connection events, but do not let
+        // Shift-click extend an old browser text selection into the canvas.
+        // Controls retain their native focus and activation behavior.
+        if (target.closest("button, input, textarea, select, a, [role='button'], [contenteditable]")) return;
         event.preventDefault();
         window.getSelection()?.removeAllRanges();
       }}

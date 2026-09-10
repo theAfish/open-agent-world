@@ -36,6 +36,26 @@ for (const type of ["agent", "conversation", "text", "sandbox", "environment", "
       expect(await page.evaluate(() => window.getSelection()?.toString().trim().length)).toBeGreaterThan(0);
       expect(Math.abs((await card.boundingBox())!.x - before.x)).toBeLessThan(2);
 
+      // Shift on the pane must not extend the existing text selection across
+      // the page. Ordinary panning must also leave no browser text selection.
+      for (const shift of [true, false]) {
+        const point = await page.locator("#oaw-world-map > .react-flow__renderer > .react-flow__pane").evaluate(element => {
+          const box = element.getBoundingClientRect();
+          for (let y = box.top + 100; y < box.bottom - 100; y += 40)
+            for (let x = box.left + 100; x < box.right - 100; x += 40)
+              if (document.elementFromPoint(x, y) === element
+                && document.elementFromPoint(x + 50, y + 30) === element) return { x, y };
+          throw new Error("No empty canvas area");
+        });
+        if (shift) await page.keyboard.down("Shift");
+        await page.mouse.move(point.x, point.y); await page.mouse.down();
+        await page.mouse.move(point.x + 50, point.y + 30, { steps: 10 });
+        if (shift) await expect(page.locator(".react-flow__selection")).toBeVisible();
+        await page.mouse.up();
+        if (shift) await page.keyboard.up("Shift");
+        expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("");
+      }
+
       // Test both the body's padding and blank space inside a nested content block.
       for (const nested of [false, true]) {
         const point = await body.evaluate((element, nested) => {

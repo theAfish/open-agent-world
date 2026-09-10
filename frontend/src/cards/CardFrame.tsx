@@ -157,8 +157,13 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
       onMouseDownCapture={event => {
         const target = event.target as Element;
         if (visualLevel === "inspector" && target.closest(".node-inspector-content, .node-inspector-footer")
-          && !target.closest(NON_DRAG_SELECTOR)
-          && hitsText(target, event.clientX, event.clientY)) event.stopPropagation();
+          && !target.closest(NON_DRAG_SELECTOR)) {
+          if (hitsText(target, event.clientX, event.clientY)) event.stopPropagation();
+          else {
+            event.preventDefault();
+            window.getSelection()?.removeAllRanges();
+          }
+        }
       }}
       onMouseDown={event => {
         if ((event.target as Element).closest(NON_DRAG_SELECTOR)) event.stopPropagation();
