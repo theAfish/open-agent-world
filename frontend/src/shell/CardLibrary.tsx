@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { Archive, Check, ChevronLeft, ChevronRight, Layers3, LibraryBig, PackageOpen, Plus, Search, Store, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Archive, Check, ChevronLeft, ChevronRight, Layers3, LibraryBig, Plus, Search, Store, X } from "lucide-react";
 import { CatalogIcon } from "../components/CatalogIcon";
 import { useCardLibrary, type DeckEntry } from "../state/cardLibrary";
 import { useWorldStore } from "../state/worldStore";
 import { collectedLibraryCards, formationSource, libraryCardMatches, libraryCardMetadata, type LibraryCard } from "./libraryCatalog";
+import { LibraryPack } from "./LibraryPack";
+import { LibraryCard as PhysicalLibraryCard } from "./LibraryCard";
 import "./cardLibrary.css";
 
 type Tab = "packs" | "cards" | "decks" | "store";
@@ -32,6 +34,9 @@ export function CardLibrary() {
   }, [library.open]);
   useEffect(() => { setPage(0); }, [query, filter, sourceFilter, showInternal, tab]);
   const snapshot = library.snapshot;
+  const sourcePack = sourceFilter.startsWith("pack:") ? snapshot?.packs[sourceFilter.slice(5)] : undefined;
+  const sourcePlugin = sourcePack && snapshot?.plugins[sourcePack.definition.plugin_id];
+  const newSourceCards = sourcePack?.definition.cards.filter(id => !snapshot?.collection[id]?.source_pack_ids.includes(sourcePack.definition.id)).length ?? 0;
   const deck = snapshot?.decks.find(item => item.id === deckId) ?? snapshot?.decks.find(item => item.id === snapshot.active_deck_id);
   useEffect(() => { setRename(deck?.name ?? ""); }, [deck?.id, deck?.name]);
   const cards = snapshot ? collectedLibraryCards(snapshot) : [];
@@ -69,13 +74,13 @@ export function CardLibrary() {
   </select></label>;
   const renderCard = (item: LibraryCard) => {
     const included = deck?.entries.some(entry => same(entry, item));
-    return <article key={`${item.kind}:${item.id}`} className={`library-card ${selected && same(selected, item) ? "is-selected" : ""}`} style={{ "--collection-color": item.definition?.color ?? "#78967b" } as CSSProperties}>
+    return <PhysicalLibraryCard key={`${item.kind}:${item.id}`} selected={Boolean(selected && same(selected, item))} color={item.definition?.color ?? "#78967b"}>
       <button className="library-card-inspect" onClick={() => setSelected(item)} aria-label={`Inspect ${item.label}`}><CatalogIcon definition={item.definition} size={26} /><span>{item.category}</span><strong>{item.label}</strong><small>{item.description}</small>
         {!item.available && !item.internal ? <span className="library-unavailable">Unavailable</span> : null}</button>
       {item.internal && !included ? <div className="library-card-usage">{item.owners.length ? "Use through its container" : "Created by a world action"}</div> :
         <button className={`library-card-add ${included ? "is-in-deck" : ""}`} disabled={library.busy || !deck || (!included && !item.available)} onClick={() => toggleCard(item)} aria-label={`${included ? "Remove" : "Add"} ${item.label} ${included ? "from" : "to"} deck`}>
           {included ? <Check size={14} /> : <Plus size={14} />}{included ? "In deck · Remove" : "Add to deck"}</button>}
-    </article>;
+    </PhysicalLibraryCard>;
   };
 
   return <dialog ref={modal} className="card-library-modal" aria-labelledby="card-library-title" onCancel={event => { event.preventDefault(); library.close(); }}
@@ -94,34 +99,22 @@ export function CardLibrary() {
         {tab === "packs" ? <>
           <div className="library-section-heading"><div><h3>Pack inventory</h3><p>Open an owned pack to add its contents to your Card Library.</p></div>
             <label className="library-search"><Search size={15} /><input aria-label="Search packs" placeholder="Search packs" value={query} onChange={event => setQuery(event.target.value)} /></label></div>
-          {reveal && snapshot.packs[reveal] ? <div className="pack-reveal" role="status"><PackageOpen size={32} /><div><strong>{snapshot.packs[reveal].definition.name} opened</strong>
-            <p>{snapshot.packs[reveal].definition.cards.length} cards are now in your collection. Choose which ones to add to a deck.</p></div>
-            <button className="primary-button" onClick={() => browsePack(reveal)}>Browse cards <ChevronRight size={14} /></button></div> : null}
-          <div className="pack-grid">{Object.values(snapshot.packs).filter(pack => `${pack.definition.name} ${pack.definition.description} ${pack.definition.plugin_id}`.toLowerCase().includes(query.toLowerCase())).map(pack => {
-            const plugin = snapshot.plugins[pack.definition.plugin_id];
-            const available = snapshot.available_pack_ids.includes(pack.definition.id);
-            const newCards = pack.definition.cards.filter(id => !snapshot.collection[id]?.source_pack_ids.includes(pack.definition.id)).length;
-            return <article className={`library-pack ${pack.opened ? "is-opened" : ""}`} key={pack.definition.id}>
-              <div className="pack-topline"><Archive size={24} /><span className="library-badge">{pack.opened ? "Opened" : "Unopened"}</span></div>
-              <h4>{pack.definition.name}</h4><p>{pack.definition.description || plugin?.descriptor.description || "A collection of capabilities for your world."}</p>
-              <small className="pack-source">{plugin?.descriptor.name ?? pack.definition.plugin_id} · v{plugin?.descriptor.version}</small>
-              <details><summary>{pack.definition.cards.length} cards · Preview contents</summary><ul>{pack.definition.cards.map(id => {
-                const card = snapshot.card_definitions[id];
-                return <li key={id}>{card ? libraryCardMetadata(snapshot, card).label : id}{card?.user_creatable === false ? " · Internal card" : ""}</li>;
-              })}</ul></details>
-              <div className="pack-actions"><span className="plugin-status">{!plugin?.installed ? "Plugin uninstalled" : !plugin.enabled ? "Plugin disabled" : !available ? "Pack unavailable" : "Installed · Enabled"}</span>
-                {plugin?.installed && pack.definition.plugin_id !== "open-agent-world.core" ? <button className="library-text-button" disabled={library.busy} onClick={() => void library.edit({ action: "set_plugin_enabled", id: pack.definition.plugin_id, enabled: !plugin.enabled })}>{plugin.enabled ? "Disable plugin" : "Enable plugin"}</button> : null}</div>
-              <button className={pack.opened && !newCards ? "secondary-button" : "primary-button"} disabled={library.busy || !available || !pack.owned || (pack.opened && !newCards)}
-                onClick={async () => { const saved = await library.edit({ action: "open_pack", id: pack.definition.id }); if (saved) setReveal(pack.definition.id); }}>
-                {pack.opened && !newCards ? <Check size={15} /> : <PackageOpen size={15} />}{!pack.opened ? "Open Pack" : newCards ? `Collect ${newCards} new cards` : "Collected"}</button>
-              {pack.opened ? <button className="library-text-button" onClick={() => browsePack(pack.definition.id)}>View collected cards <ChevronRight size={14} /></button> : null}
-            </article>;
-          })}</div>
+          <div className="pack-grid">{Object.values(snapshot.packs).filter(pack => `${pack.definition.name} ${pack.definition.description} ${pack.definition.plugin_id}`.toLowerCase().includes(query.toLowerCase())).map(pack =>
+            <LibraryPack key={pack.definition.id} pack={pack} snapshot={snapshot} onOpened={setReveal} onBrowse={browsePack} />
+          )}</div>
+          {reveal && snapshot.packs[reveal] ? <span className="library-announcement" role="status">{snapshot.packs[reveal].definition.name} opened. Click its empty wrapper to view cards.</span> : null}
         </> : null}
         {tab === "cards" ? <>
           <div className="library-section-heading"><div><h3>Card Library</h3><p>{allCards.length} collected cards and saved formations · Grouped by source pack</p></div>{deckSelect}</div>
+          {sourcePack ? <div className="library-source-actions" aria-label="Source pack controls">
+            <span>{sourcePack.definition.name} · {!sourcePlugin?.installed ? "Plugin uninstalled" : !sourcePlugin.enabled ? "Plugin disabled" : "Installed · Enabled"}</span>
+            {(!sourcePack.opened || newSourceCards > 0) ? <button className="secondary-button" disabled={library.busy || !sourcePack.owned || !snapshot.available_pack_ids.includes(sourcePack.definition.id)}
+              onClick={() => void library.edit({ action: "open_pack", id: sourcePack.definition.id })}>{sourcePack.opened ? `Collect ${newSourceCards} new ${newSourceCards === 1 ? "card" : "cards"}` : "Open pack"}</button> : null}
+            {sourcePlugin?.installed && sourcePack.definition.plugin_id !== "open-agent-world.core" ? <button className="library-text-button" disabled={library.busy}
+              onClick={() => void library.edit({ action: "set_plugin_enabled", id: sourcePack.definition.plugin_id, enabled: !sourcePlugin.enabled })}>{sourcePlugin.enabled ? "Disable plugin" : "Enable plugin"}</button> : null}
+          </div> : null}
           <div className="library-tools"><label className="library-search"><Search size={15} /><input aria-label="Search cards" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search your cards" /></label>
-            <select aria-label="Source pack" value={sourceFilter} onChange={event => setSourceFilter(event.target.value)}><option value="">All packs</option>{sources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}</select>
+            <select aria-label="Source pack" value={sourceFilter} onChange={event => setSourceFilter(event.target.value)}><option value="">All packs</option>{sourcePack && !sources.some(source => source.id === sourceFilter) ? <option value={sourceFilter}>{sourcePack.definition.name}</option> : null}{sources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}</select>
             <select aria-label="Card category" value={filter} onChange={event => setFilter(event.target.value)}><option value="">All categories</option>{categories.map(category => <option key={category}>{category}</option>)}</select>
             <label className="library-internal-toggle"><input type="checkbox" checked={showInternal} onChange={event => setShowInternal(event.target.checked)} />Show internal cards{internalCount ? ` (${internalCount})` : ""}</label>
             <span>{filtered.length} results</span></div>

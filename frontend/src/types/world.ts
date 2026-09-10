@@ -190,8 +190,13 @@ export interface RelationshipCatalogItem {
   templateable: boolean;
 }
 
+export interface PackDefinition {
+  id: string; plugin_id: string; name: string; description: string; cards: string[]; compatibility: boolean;
+  artwork_asset?: string | null; artwork_url?: string | null; accent_color?: string | null;
+}
+
 export interface PluginCatalog {
-  packs?: Array<{ id: string; plugin_id: string; name: string; description: string; cards: string[]; compatibility: boolean }>;
+  packs?: PackDefinition[];
   plugins: Array<{
     id: string;
     version: string;

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from backend.api.dependencies import get_services
 from backend.api.plugin_assets import router
 from backend.plugins.builtin import create_builtin_registry
-from open_agent_world.plugin_api import PluginAsset, PluginDefinition, PluginDescriptor
+from open_agent_world.plugin_api import PackDefinition, PluginAsset, PluginDefinition, PluginDescriptor
 
 
 def plugin(identifier, configure):
@@ -56,3 +56,41 @@ def test_catalog_carries_owned_resource_and_frontend_references():
     card = next(c for c in registry.catalog().node_types if c.id == "example.card")
     assert card.icon_url == "/api/plugins/example.views/assets/logo"
     assert card.frontend == {"body": "editor"}
+
+
+def test_pack_artwork_is_published_and_survives_collection_reload(tmp_path):
+    from backend.card_library import CardLibraryStore, LibraryEdit
+    from backend.persistence.database import Database
+
+    registry = create_builtin_registry()
+    def configure(registration):
+        registration.register_asset(PluginAsset("cover", b"<svg/>", "image/svg+xml"))
+        registration.register_node_type(replace(registry.node_type("text"), id="example.card"))
+        registration.register_pack(PackDefinition(id="example.pack", name="Tools", cards=("example.card",),
+            artwork_asset="cover", accent_color="#527b70"))
+    registry.install(PluginDefinition(PluginDescriptor(id="example.art", version="1", plugin_api_version="1.15"), configure))
+    pack = next(p for p in registry.catalog().packs if p.id == "example.pack")
+    assert pack.artwork_url == "/api/plugins/example.art/assets/cover"
+    assert pack.accent_color == "#527b70"
+    db = Database(tmp_path / "world.db")
+    try:
+        store = CardLibraryStore(db, registry)
+        state = store.read()
+        store.edit(LibraryEdit(action="open_pack", id=pack.id, expected_revision=state.revision))
+        reloaded = CardLibraryStore(db, registry).read().packs[pack.id]
+        assert reloaded.opened
+        assert reloaded.definition == pack
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("artwork", ["missing", "/api/plugins/example.owner/assets/cover"])
+def test_pack_cannot_reference_unregistered_or_foreign_artwork(artwork):
+    registry = create_builtin_registry()
+    registry.install(plugin("example.owner", lambda r: r.register_asset(PluginAsset("cover", b"<svg/>", "image/svg+xml"))))
+    def configure(registration):
+        registration.register_node_type(replace(registry.node_type("text"), id="example.card"))
+        registration.register_pack(PackDefinition(id="example.pack", name="Tools", cards=("example.card",), artwork_asset=artwork))
+    with pytest.raises(ValueError, match="pack artwork"):
+        registry.install(plugin("example.invalid", configure))
+    assert not registry.has_plugin("example.invalid")

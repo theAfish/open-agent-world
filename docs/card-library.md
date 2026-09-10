@@ -8,9 +8,9 @@ objects with their existing lifecycle, relationships and permissions.
 ## Using the Library
 
 Open **Pack & Card Library** from the world controls or the tray's Library button.
-The **Packs** tab shows installed packs, their contents and plugin availability.
-**Open Pack** collects every listed card and presents a collection reveal. It does
-not fill a deck. In **Cards**, search or filter by the existing catalog category,
+The **Packs** tab shows the wrappers themselves. Click a sealed wrapper to collect
+its contents; click an empty, opened wrapper to browse that pack's cards. Opening
+does not fill a deck. In **Cards**, search or filter by the existing catalog category,
 inspect a card and add it to the selected deck. **Decks** supports creating,
 renaming, deleting and switching named decks, and removing individual entries.
 The tray tabs switch the persistent active deck; clicking or dragging a card uses
@@ -69,6 +69,53 @@ identity and blueprint dependencies. They appear alongside collected cards under
 **Saved Legions** and may be explicitly selected for decks without a synthetic
 plugin or pack. Pack-provided Legion capabilities can use ordinary registered
 card definitions in the future.
+
+## Pack appearance
+
+Plugin API **1.15** supports optional `artwork_asset` and `accent_color` on
+`PackDefinition`. Register an image with the existing `PluginAsset` contract,
+then reference its plugin-local ID:
+
+```python
+from importlib.resources import files
+from open_agent_world.plugin_api import PackDefinition, PluginAsset
+
+registration.register_asset(PluginAsset(
+    id="pack-cover",
+    content=files(__package__).joinpath("assets/pack-cover.svg").read_bytes(),
+    media_type="image/svg+xml",
+))
+registration.register_pack(PackDefinition(
+    id="acme.tools.default",
+    name="Acme Tools",
+    cards=("acme.tool",),
+    artwork_asset="pack-cover",
+    accent_color="#527b70",
+))
+```
+
+Artwork uses the existing SVG/PNG/JPEG/WebP/GIF asset endpoint and 5 MiB limit.
+An unregistered or another plugin's asset is rejected atomically. The catalog
+publishes `artwork_url`; clients do not resolve files or accept executable views
+for the cover. Use a portrait composition (roughly 3:4) with room for the host's
+name, count and foil treatment. Artwork is cropped to fill the printed panel.
+`accent_color` accepts a six-digit hex color. Without artwork (or if it fails to
+load), the host prints a line pattern, pack name, plugin name, description and
+card count, using the pack accent or its first card's color.
+
+The Library displays compact foil wrappers with crimped seams and pointer-driven
+light/tilt. Each wrapper is a CSS 3D frustum: the front and four planar gussets share
+one depth, so the folded edges stay joined throughout collapse. A successful
+`open_pack` transaction tears the top seal, draws up to three actual card previews
+completely out, and then collapses the wrapper from 26px to 1px depth. All contents
+are collected by that transaction. Failures leave the sealed, full wrapper intact.
+`opened` determines its persistent empty appearance after reload or plugin disable.
+There are no buttons or details below a pack. Click the empty wrapper to browse
+its cards; source pack controls on that page handle plugin availability and explicit
+collection of new cards added by plugin updates. Unavailable wrappers also lead
+there so an installed, disabled plugin can be re-enabled. Motion is decorative and
+honors reduced-motion preferences; keyboard and touch use the wrapper button.
+Collection cards use paper borders, thickness shadows and a lighter surface sheen.
 
 ## Persistent model and API
 

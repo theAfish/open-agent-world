@@ -24,7 +24,7 @@ from backend.plugins.documents import NodeDocumentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.14"
+PLUGIN_API_VERSION = "1.15"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -60,11 +60,14 @@ class PackDefinition(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=1000)
     cards: tuple[str, ...] = Field(min_length=1)
+    artwork_asset: str | None = Field(default=None, min_length=1, max_length=128)
+    accent_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
 
 
 class PackCatalogItem(PackDefinition):
     plugin_id: str
     compatibility: bool = False
+    artwork_url: str | None = None
 
 
 class Plugin(Protocol):
@@ -410,7 +413,8 @@ class PluginRegistry:
 
         self._plugins[descriptor.id] = descriptor
         self._commit_owned("pack", descriptor.id, self._packs, {
-            key: PackCatalogItem(**pack.model_dump(), plugin_id=descriptor.id, compatibility=compatibility)
+            key: PackCatalogItem(**pack.model_dump(), plugin_id=descriptor.id, compatibility=compatibility,
+                artwork_url=f"/api/plugins/{descriptor.id}/assets/{pack.artwork_asset}" if pack.artwork_asset else None)
             for key, pack in staged.packs.items()
         })
         self._assets.update({(descriptor.id, key): asset for key, asset in staged.assets.items()})
@@ -499,6 +503,8 @@ class PluginRegistry:
 
         covered = set()
         for pack in staged.packs.values():
+            if pack.artwork_asset is not None and pack.artwork_asset not in staged.assets:
+                raise ValueError("pack artwork must reference an asset registered by the same plugin")
             if len(set(pack.cards)) != len(pack.cards):
                 raise ValueError(f"pack {pack.id!r} contains duplicate cards")
             if not set(pack.cards) <= staged.nodes.keys():

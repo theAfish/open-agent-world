@@ -1,5 +1,7 @@
 # Plugin development
 
+Plugin API 1.15 adds optional pack artwork and accent colors through registered
+public image assets (see [Card Library](card-library.md#pack-appearance)).
 Plugin API 1.14 adds `PackDefinition` and `registration.register_pack(...)`.
 Every card definition belongs to a pack. Opening an owned pack collects its cards;
 users then choose cards for persistent named decks. Registration alone never adds

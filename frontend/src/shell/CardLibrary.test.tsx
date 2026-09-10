@@ -141,6 +141,31 @@ it("refetches an invalidation arriving during an older request", async () => {
   expect(useCardLibrary.getState().snapshot?.revision).toBe(2);
 });
 
+it("lets an empty wrapper lead to new-card collection and plugin controls on the source page", async () => {
+  const state = packSnapshot();
+  const pluginId = "example.tools";
+  state.plugins[pluginId] = { descriptor: { ...TEST_CATALOG.plugins[0], id: pluginId }, installed: true, enabled: true };
+  state.packs.alpha.definition.plugin_id = pluginId;
+  for (const id of state.packs.alpha.definition.cards) state.card_definitions[id].plugin_id = pluginId;
+  state.available_pack_ids = ["alpha", "beta"];
+  state.collection["card.2"].source_pack_ids = [];
+  openCards(state);
+  fireEvent.click(screen.getByRole("button", { name: /^Packs/ }));
+  const pack = within(screen.getByRole("article", { name: "Alpha pack" }));
+  expect(pack.getAllByRole("button")).toHaveLength(1);
+  fireEvent.click(pack.getByRole("button", { name: "View cards in Alpha pack" }));
+  expect((screen.getByLabelText("Source pack") as HTMLSelectElement).value).toBe("pack:alpha");
+  const controls = within(screen.getByLabelText("Source pack controls"));
+  expect(controls.getByRole("button", { name: "Disable plugin" })).toBeTruthy();
+  const saved = structuredClone(state);
+  saved.revision++;
+  saved.collection["card.2"].source_pack_ids = ["alpha"];
+  const edit = vi.spyOn(worldApi, "editCardLibrary").mockResolvedValue(saved);
+  await act(async () => { fireEvent.click(controls.getByRole("button", { name: "Collect 1 new card" })); });
+  expect(edit).toHaveBeenCalledWith({ action: "open_pack", id: "alpha", expected_revision: state.revision });
+  expect(controls.queryByRole("button", { name: /Collect/ })).toBeNull();
+});
+
 it("does not replace a successful edit with an older read", async () => {
   useCardLibrary.setState({ snapshot: snapshot(9) });
   vi.spyOn(worldApi, "getCardLibrary").mockResolvedValue(snapshot(8));

@@ -1,12 +1,12 @@
 import { create } from "zustand";
 import { ApiError, apiErrorMessage, worldApi } from "../api/client";
-import type { NodeTypeCatalogItem, PluginCatalog } from "../types/world";
+import type { NodeTypeCatalogItem, PackDefinition, PluginCatalog } from "../types/world";
 import { loadLegacyDecks } from "../palette/legacyDecks";
 import { useWorldStore } from "./worldStore";
 
 export interface DeckEntry { kind: "node" | "legion"; id: string }
 export interface CardDeck { id: string; name: string; icon: string; entries: DeckEntry[] }
-export interface PackDefinition { id: string; plugin_id: string; name: string; description: string; cards: string[]; compatibility: boolean }
+export type { PackDefinition } from "../types/world";
 export interface LibrarySnapshot {
   schema_version: number;
   revision: number;
