@@ -2241,3 +2241,20 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .conversation-session-rename { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px; }
 .conversation-session-rename input { width: 100%; min-width: 0; padding: 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-soft); color: var(--ink); }
 @media (hover: none) { .conversation-session-actions > summary { opacity: 1; } }
+
+/* Canvas tools and saved map locations */
+.map-tools.react-flow__panel { right: 212px; bottom: 21px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.map-toolbar { display: flex; gap: 4px; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--chrome); box-shadow: var(--panel-shadow); }
+.map-toolbar button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.map-atlas { width: min(310px, calc(100vw - 40px)); padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--chrome); color: var(--ink); box-shadow: var(--panel-shadow); }
+.map-atlas header { display: flex; align-items: center; justify-content: space-between; }
+.map-atlas p { font-size: 12px; color: var(--ink-soft); margin: 8px 0; }
+.map-atlas-list { max-height: min(320px, 45vh); overflow-y: auto; }
+.map-atlas-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.map-atlas-row input { min-width: 0; flex: 1; width: 100%; padding: 6px; border: 1px solid transparent; border-radius: 6px; color: var(--ink); background: transparent; }
+.map-atlas-row input:focus { border-color: var(--accent); outline: none; }
+.map-pin-layer { position: absolute; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; }
+.map-pin-marker { position: absolute; display: flex; align-items: center; gap: 4px; transform: translate(-12.5px, -25px); color: var(--accent); white-space: nowrap; }
+.map-pin-marker span { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--chrome); color: var(--ink); font-size: 12px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.world-canvas.pin-tool-active > .react-flow .react-flow__pane { cursor: crosshair; }
+@media (max-width: 760px) { .map-tools.react-flow__panel { right: 60px; bottom: 82px; } }

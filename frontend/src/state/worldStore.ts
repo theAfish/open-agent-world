@@ -1,3 +1,4 @@
+import type { MapPinLocation } from "../canvas/MapAtlas";
 import { create } from "zustand";
 import { EMPTY_MODEL_CATALOG, type ModelCatalog } from "./modelConnections";
 import { useGenerationStore } from "../effects/generation";
@@ -251,6 +252,7 @@ interface WorldState {
   loadedChunkKeys: string[];
   loadingChunkKeys: string[];
   viewport: FlowViewportState;
+  mapPins: MapPinLocation[];
   syncState: SyncState;
   syncError?: string;
   socketState: SocketState;
@@ -383,6 +385,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   loadedChunkKeys: [],
   loadingChunkKeys: [],
   viewport: INITIAL_VIEWPORT,
+  mapPins: [],
   syncState: "loading",
   socketState: "connecting",
   selectedCardIds: [],
@@ -1952,5 +1955,5 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   },
 }), {
   name: "oaw-canvas-viewport-v1",
-  partialize: (state) => ({ viewport: state.viewport }),
+  partialize: (state) => ({ viewport: state.viewport, mapPins: state.mapPins }),
 }));

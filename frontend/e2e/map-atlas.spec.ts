@@ -1,0 +1,43 @@
+import { expect, test } from '@playwright/test';
+
+test('map pins place, jump, rename, persist and hide independently of shortcuts', async ({ page }) => {
+  await page.goto('/');
+  const tool = page.getByRole('button', { name: '图钉', exact: true });
+  await tool.click();
+  await page.mouse.click(900, 220);
+  await expect(page.getByTestId('map-pin-marker')).toHaveCount(1);
+  const name = page.getByRole('textbox', { name: '图钉 1 名称' });
+  await name.fill('基地');
+  const transform = () => page.locator('#oaw-world-map > .react-flow__renderer .react-flow__viewport').evaluate(el => getComputedStyle(el).transform);
+  const beforeTyping = await transform();
+  await name.press('1');
+  expect(await transform()).toBe(beforeTyping);
+  await name.fill('基地');
+  await page.getByRole('button', { name: '跳转至 基地' }).click();
+  await expect.poll(async () => {
+    const marker = await page.getByTestId('map-pin-marker').evaluate(el => ({ x: parseFloat((el as HTMLElement).style.left), y: parseFloat((el as HTMLElement).style.top) }));
+    const canvas = await page.locator('#oaw-world-map').boundingBox();
+    return Math.abs(marker.x - canvas!.width / 2) + Math.abs(marker.y - canvas!.height / 2);
+  }).toBeLessThan(2);
+  const centered = await transform();
+  await page.keyboard.press('Escape');
+  await expect(tool).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('map-pin-marker')).toHaveCount(0);
+  await page.mouse.move(900, 220);
+  await page.mouse.down();
+  await page.mouse.move(1030, 300, { steps: 8 });
+  await page.mouse.up();
+  expect(await transform()).not.toBe(centered);
+  await page.keyboard.press('1');
+  await expect.poll(transform).toBe(centered);
+  await page.reload();
+  await tool.click();
+  await expect(name).toHaveValue('基地');
+  await expect(page.getByTestId('map-pin-marker')).toHaveCount(1);
+  await page.screenshot({ path: 'test-results/map-atlas.png' });
+  await page.getByRole('button', { name: '删除 基地' }).click();
+  await expect(page.getByTestId('map-pin-marker')).toHaveCount(0);
+  await page.reload();
+  await tool.click();
+  await expect(page.getByTestId('map-pin-marker')).toHaveCount(0);
+});

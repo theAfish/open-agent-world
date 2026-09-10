@@ -1,3 +1,4 @@
+import { MapAtlas } from "./MapAtlas";
 import {
   Background,
   BackgroundVariant,
@@ -14,7 +15,7 @@ import {
   type OnSelectionChangeParams,
   type Viewport,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { worldApi } from "../api/client";
 import { transformationOptions } from "./documentTransformations";
 import { EquipmentCardNode, EquipmentPanelNode } from "../cards/Equipment";
@@ -84,6 +85,7 @@ function nodeFromCard(
 }
 
 export function WorldCanvas() {
+  const [pinToolActive, setPinToolActive] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);
   const cards = useWorldStore((state) => state.cards);
   const catalog = useWorldStore((state) => state.catalog);
@@ -534,7 +536,7 @@ export function WorldCanvas() {
   return (
     <div
       ref={wrapper}
-      className={`world-canvas ${cards.some((card) => selectedCardIds.includes(card.id) && isContainer(card, catalog)) ? "has-selected-container" : ""}`}
+      className={`world-canvas ${pinToolActive ? "pin-tool-active" : ""} ${cards.some((card) => selectedCardIds.includes(card.id) && isContainer(card, catalog)) ? "has-selected-container" : ""}`}
       data-testid="world-canvas"
       onMouseDownCapture={(event) => {
         if (event.button !== 0 || !(event.target instanceof Element)
@@ -584,7 +586,12 @@ export function WorldCanvas() {
         onMoveEnd={onMoveEnd}
         onEdgeClick={(_event, edge) => selectEdge(edge.id)}
         onSelectionChange={onSelectionChange}
-        onPaneClick={() => {
+        onPaneClick={(event) => {
+          if (pinToolActive) {
+            const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+            useWorldStore.setState(state => ({ mapPins: [...state.mapPins, { id: crypto.randomUUID(), name: `图钉 ${state.mapPins.length + 1}`, ...point, zoom: getViewport().zoom }] }));
+            return;
+          }
           selectEdge(undefined);
           selectCards([]);
         }}
@@ -614,6 +621,7 @@ export function WorldCanvas() {
           color="var(--grid-dot)"
         />
         <LocalMiniMap />
+        <MapAtlas active={pinToolActive} onActiveChange={setPinToolActive} />
         <Controls
           className="world-controls"
           position="bottom-right"
