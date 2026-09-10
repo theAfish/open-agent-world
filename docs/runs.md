@@ -1,5 +1,7 @@
 # Runs and runtime providers
 
+[Documentation](README.md)
+
 Open Agent World keeps four execution concepts separate:
 
 - **Agent** is the persistent actor and capability-bearing world object.

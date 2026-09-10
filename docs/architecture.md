@@ -2,6 +2,10 @@
 
 Open Agent World is a spatial capability system. The graph is not a workflow diagram: a card represents a persisted world object, and a semantic edge grants one precise interaction between two objects.
 
+[Documentation](README.md) / [Core concepts](concepts.md)
+
+The application uses React, TypeScript, Vite, React Flow, and Zustand in the frontend; FastAPI, SQLite, and registered Agent runtime providers in the backend. Google ADK is the default provider.
+
 ## Runtime boundaries
 
 ```text
@@ -16,7 +20,7 @@ FastAPI application
   |-- StateStore + StateContext (scoped runtime state and inherited reads)
   |-- RunManager + durable RunStore
   |    `-- RuntimeProvider (Google ADK built-in; plugins may add others)
-  `-- SandboxBackend (Windows security boundary)
+  `-- SandboxBackend (Windows, Linux, or WSL2 isolation)
 ```
 
 The frontend may request a mutation, but it cannot grant a capability. Every protected operation asks the capability broker to resolve the current graph inside the backend request. No capability is cached across an operation boundary, so changing or deleting an edge takes effect immediately.
@@ -30,7 +34,7 @@ A card stores identity, namespaced type, owning plugin ID, world position, size,
 | Agent | Agent | `communicate` |
 | Agent | Text | `read`, `read_edit` |
 | Agent | Image | `view` |
-| Agent | Sandbox | `execute` |
+| Agent | Sandbox | `execute`, `execute_manage` |
 | Text | Sandbox | `mount_read_only`, `mount_read_write` |
 | Image | Sandbox | `mount_read_only` |
 
@@ -64,13 +68,13 @@ Direct resource tools never route through a Sandbox.
 ## Sandbox interaction flow
 
 1. Resource-to-Sandbox edges define mounts and their access mode.
-2. Agent-to-Sandbox `execute` defines who may invoke that workplace.
-3. `SandboxBackend` materializes only the current attachments in the Sandbox workspace.
-4. A command is launched with an AppContainer/LPAC identity, explicit ACL grants, a scrubbed environment, no network capability, and Job Object containment.
-5. stdout, stderr, lifecycle changes, and resource changes are published as typed events.
-6. Attachment removal revokes the ACL/materialization before another command can run.
+2. Agent-to-Sandbox `execute` grants inspection and execution; `execute_manage` also grants Start/Stop. Both use live capability checks.
+3. The runtime exposes the configured workspace and currently authorized attachments.
+4. Commands run with a minimal environment and process-tree limits inside the selected boundary: AppContainer/Job Objects on Windows, or Bubblewrap, seccomp, and cgroup v2 on Linux and WSL2.
+5. Networking is disabled by default. Explicit enabled networking requires the platform's separate policy components.
+6. stdout, stderr, lifecycle changes, and resource changes are published as typed events. Revocation prevents subsequent unauthorized access.
 
-If any required Windows security primitive cannot be established, creation or execution fails. There is no normal-subprocess fallback.
+Missing isolation prerequisites fail closed; there is no ordinary host-process fallback. See [Sandbox workspace](sandbox-workspace.md), [networking](sandbox-networking.md), and [security](security.md) for platform-specific contracts.
 
 ## Canvas scaling
 
@@ -82,17 +86,22 @@ Only edges whose two endpoints are loaded are returned, so React Flow never rece
 
 The WebSocket carries operational facts, never hidden reasoning. Event types cover Run, Agent, State, and Sandbox lifecycle, tool start/completion, stdout/stderr, command completion, resource modification, permission changes, and runtime errors. A reconnect triggers a fresh world snapshot; the event stream is not treated as the persistence source of truth. Run history and state are independently authoritative in SQLite.
 
-## Storage
+## Storage and lifecycle
 
-All application-owned data lives below a single managed root. Imported resources are copied into that root and addressed by opaque IDs. Resolved paths are verified to remain below their expected managed directory before any file operation.
+Application-owned data lives below the configured managed root. Imported resources use managed IDs and validated paths. User-selected external Sandbox workspaces remain external and are not deleted with the card. [Configuration](configuration.md#application-storage) describes locations, backups, and relocation.
 
-The default Windows layout is:
+[Runs](runs.md) defines durable execution records and runtime-provider behavior. [Runtime state](state.md) explains scope and inheritance. [Execution lifecycle and durable outputs](lifecycle-artifacts.md) describes recovery, cleanup, published versions, and retention; provider output and transient events are not persistence authority.
 
-```text
-%LOCALAPPDATA%/OpenAgentWorld/
-  projects/
-  assets/
-  sandboxes/
-  database/
-  logs/
-```
+## Code navigation
+
+| Area | Responsibility |
+| --- | --- |
+| `frontend/src/api`, `frontend/src/state` | API/event boundary and client state |
+| `frontend/src/canvas`, `frontend/src/cards`, `frontend/src/edges` | Canvas, card surfaces, and connections |
+| `backend/world`, `backend/persistence` | Authoritative graph and SQLite transactions |
+| `backend/capabilities`, `backend/resources` | Permission checks and managed resources |
+| `backend/agents`, `backend/runs` | Runtime adapters and durable execution |
+| `backend/sandbox` | Platform isolation and workspace execution |
+| `open_agent_world`, `plugins` | Public plugin API and bundled extensions |
+
+Plugin ownership and registration contracts are in [Plugins](plugins.md).

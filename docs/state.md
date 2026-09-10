@@ -1,5 +1,7 @@
 # Runtime state
 
+[Documentation](README.md)
+
 Runtime state is stored independently from card configuration and Run lifecycle
 metadata. `StateStore` is the authority for persisted scopes, per-key values,
 merge behavior, revisions, and inherited reads.

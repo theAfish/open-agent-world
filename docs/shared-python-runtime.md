@@ -1,5 +1,7 @@
 # Shared sandbox Python
 
+[Documentation](README.md)
+
 Normal sandbox backends select a persistent Python venv under the OAW data root:
 `runtime/python/venv`. Python commands, Skill scripts and the sandbox shell PATH
 use this environment. It excludes system site-packages, user site-packages,

@@ -1,4 +1,31 @@
-# Plugin development
+# Plugins
+
+[Documentation](README.md)
+
+## Using plugins
+
+Plugins add cards, relationships, tools, and runtime integrations. The backend discovers packages under the repository's `plugins/` directory and installed Python entry points at startup. Install only reviewed code: plugins execute inside the trusted backend process.
+
+After installing a package and its dependencies, restart the backend, open **Pack & Card Library**, open the plugin's pack, and add its collected cards to your deck. Installation is separate from collection and deck selection. The Store tab is a placeholder, not an online marketplace.
+
+To disable a plugin, first remove its world objects, relationships, dependent Agent runtimes, and pending cleanup; the Library enforces these constraints. Uninstall by removing the package and restarting after removing its world dependencies. Collection and deck references survive unavailability. See [Card Library](card-library.md#availability-and-remaining-boundaries).
+
+## Bundled plugin guides
+
+| Plugin | Use it for |
+| --- | --- |
+| [Task Board](../plugins/task_board/README.md) | Shared tasks, dependencies, and Agent execution |
+| [Skill Toolboxes](../plugins/skill_packages/README.md) | Curated skills and shared instructions |
+| [Agent Barracks](../plugins/agent_barracks/README.md) | Stocking and summoning equipped Agents |
+| [Codex](../plugins/codex/README.md) | A Codex runtime integration |
+| [Structure viewer](../plugins/structure_viewer/README.md) | Viewing connected structure files |
+| [MatCreator](../plugins/matcreator/README.md) | Materials-oriented graph and workflow tools |
+
+Plugin-specific documentation can remain in its own package or repository. These links are a directory, not a requirement to copy all plugin content into OAW's docs. In-app plugin documentation and tutorial delivery are not implemented; no new manifest or framework is required here.
+
+## Developing a plugin
+
+Start with the installable [Greeter example](../examples/plugins/greeter/README.md), then consult [package discovery](#package-structure-and-discovery), [the public API](#public-plugin-api), and the contracts below.
 
 Plugin API 1.15 adds optional pack artwork and accent colors through registered
 public image assets (see [Card Library](card-library.md#pack-appearance)).

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" role="img" aria-labelledby="title desc">
+  <title id="title">Blue ring and navy agent logo</title>
+  <desc id="desc">A circular blue annulus with an opening around a circular navy head and a curved A-shaped navy body whose legs meet the inner ring.</desc>
+  <defs>
+    <linearGradient id="ring-blue" gradientUnits="userSpaceOnUse" x1="750" y1="112" x2="410" y2="1130">
+      <stop offset="0" stop-color="#79D1F4"/>
+      <stop offset="0.48" stop-color="#429CE8"/>
+      <stop offset="1" stop-color="#2476CE"/>
+    </linearGradient>
+    <mask id="head-opening" maskUnits="userSpaceOnUse" x="0" y="0" width="1254" height="1254">
+      <rect width="1254" height="1254" fill="white"/>
+      <circle cx="916" cy="245" r="104" fill="black"/>
+    </mask>
+    <clipPath id="body-boundary">
+      <circle cx="627" cy="621" r="390"/>
+    </clipPath>
+  </defs>
+  <path fill="#192638" clip-path="url(#body-boundary)" d="M 343,907
+    C 515,756 637,602 755,355
+    C 775,312 814,309 838,342
+    C 852,360 858,392 871,430
+    C 909,548 960,741 938,864
+    L 884,966 L 860,929
+    C 851,843 827,790 784,760
+    C 735,724 690,730 649,746
+    C 573,776 491,845 387,929 Z"/>
+  <circle cx="627" cy="621" r="449" fill="none" stroke="url(#ring-blue)" stroke-width="120" mask="url(#head-opening)"/>
+  <circle cx="916" cy="245" r="81" fill="#192638"/>
+</svg>

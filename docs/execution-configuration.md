@@ -1,5 +1,7 @@
 # Execution configuration cards
 
+[Documentation](README.md)
+
 Environment Profiles and Compute Targets are ordinary registered nodes with
 editable, revisioned node documents. Connect them to an Agent, or equip them
 using the existing equipment controls. Access grants permission to select a

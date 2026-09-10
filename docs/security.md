@@ -1,5 +1,7 @@
 # Sandbox security contract
 
+[Documentation](README.md)
+
 The Sandbox card represents an operating-system security boundary. Windows, Linux and WSL2 runtimes refuse execution if their required isolation cannot be established. The backend never falls back to an unrestricted host subprocess.
 
 ## Runtime and workspace ownership

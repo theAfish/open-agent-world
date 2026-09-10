@@ -1,5 +1,7 @@
 # MatCreator demo implementation
 
+[Documentation](README.md)
+
 Source inspected: MatCreator `devel`, commit
 `a1a57688cdb7fc476498476cc388f932b6e83d6a`, especially `skill.py`,
 `knowledge/{query,kdg_memory,review,synthesizer}.py`, builtin skills and

@@ -1,5 +1,19 @@
 # Sandbox configuration and window workspace
 
+[Documentation](README.md) / [Application defaults](configuration.md#sandbox-defaults-and-execution-credentials)
+
+## Choose a runtime and working folder
+
+Open the Sandbox inspector, select a runtime, and save its configuration before starting. An empty **Working folder** uses managed storage. An external folder must be an existing absolute path on the backend host; choose read/write or read-only access. On a Windows backend using WSL, enter a Windows path such as `D:\Projects\demo`; the bridge translates it.
+
+Writes change real files immediately. Deleting a Sandbox removes its owned storage and permissions, never the selected external folder. Stop before changing the working folder. The runtime is pinned on first start; use a new card to change runtime after that point. Host folder bindings are excluded from Legion templates.
+
+Automatic discovery prefers a usable existing WSL2 distribution on Windows, otherwise native Windows. Native Linux uses its own kernel. Linux/WSL needs Bubblewrap, libseccomp, Python 3.10+ for the trusted worker, and a systemd user manager with cgroup-v2 memory/process limits; the application backend needs Python 3.11+. No Docker or VM image is required. macOS has no local Sandbox runtime.
+
+Discovery reports missing prerequisites. Use **Refresh** after fixing them. Missing isolation never falls back to a normal host subprocess. Networking has [separate prerequisites](sandbox-networking.md).
+
+## Workspace overview
+
 The compact card and inspector report runtime, readiness, folder, access and network policy, with Start/Stop and shortcuts to the window's Workspace and Settings tabs. The inspector's collapsed Configuration section provides the same runtime/workspace, resource-limit and environment editors as Window settings. Unsaved settings and environment drafts follow the Sandbox between these surfaces; they are transient and are not saved to browser storage. Save commits through the same authoritative API, while Reset or Reload discards the corresponding draft. Workspace shows Files on the left, a file preview at upper right and the terminal at lower right. Both dividers support pointer dragging and arrow keys. History stays inside the terminal; presets, Skill resources, diagnostics and recovery remain in Window settings. Opening, closing or reopening a window never submits a command or changes runtime lifecycle.
 
 New, copied and summoned Sandboxes start stopped. Managed storage is prepared through the existing Start lifecycle. The selected runtime remains pinned after first start. Runtime, workspace, network and resource-limit changes require Stop → Save → Start. Ordinary environment changes apply to the next command without a restart.
@@ -54,7 +68,7 @@ Enable public outbound networking using **Stop → Save → Start**. Missing net
 
 ## Console and recovery
 
-The terminal uses multiline input and closed stdin, not a PTY. Run submits the current command; Ctrl/Cmd+Enter is its keyboard shortcut. Separate commands do not retain `cd`, `export` or shell-session state. Explicit interactive requests such as `read`, `set /p`, terminal editors and `ssh -tt` are rejected; other commands that require prompts may fail on EOF or reach the configured timeout. Full interactive-session detection is not possible for arbitrary programs.
+The terminal uses multiline input and closed stdin, not a PTY. Enter submits the current command; Shift+Enter adds a line. Up/Down recalls history, and Ctrl+C cancels the active command or clears input when no text is selected. Separate commands do not retain `cd`, `export` or shell-session state. Explicit interactive requests such as `read`, `set /p`, terminal editors and `ssh -tt` are rejected; other commands that require prompts may fail on EOF or reach the configured timeout. Full interactive-session detection is not possible for arbitrary programs.
 
 Named presets load ordinary command text and use the same execution path. They never execute on opening a card/window. Do not put secret values into command text or presets. Use environment references.
 

@@ -1,5 +1,7 @@
 # Packs, Card Library and Decks
 
+[Documentation](README.md)
+
 A Plugin installs trusted runtime code. A Pack distributes references to that
 plugin's canonical card definitions. Opening a Pack collects those cards. A Deck
 selects collected cards for the bottom tray. World instances remain separate

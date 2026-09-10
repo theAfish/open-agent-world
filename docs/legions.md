@@ -1,11 +1,13 @@
 # Legion team spaces
 
+[Documentation](README.md)
+
 A Legion has two representations: a reusable library template and a live `legion`
 card in the world. A live card owns settings and a durable `legion:<card_id>` state
 scope. Its members remain ordinary world nodes with a nullable `parent_id`.
 
-Select ungrouped cards and choose **Form Legion**, or place an empty Legion from
-the Fields deck. Select the Legion and additional cards to add those cards using
+Select ungrouped cards and choose **Form Legion**, or add the Legion card to your deck through the
+[Card Library](card-library.md) and place an empty Legion. Select the Legion and additional cards to add those cards using
 **Add selected cards**. **Detach** removes membership while retaining the card,
 its world position, and its edges. An Agent must finish or stop its active Runs
 before changing membership. This version supports one Legion per member, up to

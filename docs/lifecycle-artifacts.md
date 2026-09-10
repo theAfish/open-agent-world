@@ -1,5 +1,7 @@
 # Execution lifecycle and durable outputs
 
+[Documentation](README.md)
+
 ## Gap map (September 2026)
 
 Existing contracts already separate Agent lifetime from Runs and Sandbox lifetime

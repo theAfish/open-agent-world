@@ -1,5 +1,7 @@
 # Node effects
 
+[Documentation](README.md)
+
 Canvas effects live in `frontend/src/effects`. They are presentation only: node
 positions, containment, execution, and persistence remain owned by their
 existing services.

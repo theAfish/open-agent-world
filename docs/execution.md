@@ -1,5 +1,7 @@
 # Plugin work-source execution (API 1.3)
 
+[Documentation](README.md)
+
 OAW is a plugin + Agent platform. Task boards, approval queues, staged research,
 and domain workflows should share execution infrastructure without sharing one
 business model. The Task Board plugin is one adapter for this infrastructure.
