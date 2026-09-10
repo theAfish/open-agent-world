@@ -58,6 +58,11 @@ Google Vertex AI credentials supported by ADK can be used instead by setting `GO
 
 Application data defaults to `%LOCALAPPDATA%/OpenAgentWorld` on Windows, `$XDG_DATA_HOME/open-agent-world` (or `~/.local/share/open-agent-world`) on Linux, and `~/Library/Application Support/OpenAgentWorld` on macOS. Override it with `OPEN_AGENT_WORLD_DATA_ROOT` for a disposable development store.
 
+In **Settings ? Storage**, choose a new or empty absolute local folder and save. The running backend keeps using the current location. On its next start, before opening application services, it checkpoints the databases, copies and verifies the data, then switches to the new directory. Conversations, sessions, credentials, artifacts and managed Sandbox files move together. Custom external workspaces stay where they are. The source remains a backup from before the move; subsequent changes go only to the new location. Large stores take longer to start while copying and need enough free space for a full copy. `scripts/dev.ps1` waits for startup without a fixed deadline and prints periodic status, including migration progress. Ctrl+C cancels; an optional `-StartupTimeoutSeconds 300` sets an explicit deadline. A backend process exit is reported immediately.
+
+A small startup pointer stays outside the data directory, next to the platform's default folder (on Windows, `%LOCALAPPDATA%/OpenAgentWorld.storage.json`). Keep this file to preserve the selected location. Settings shows the current location, pending move, retained backup and migration errors. You can cancel a scheduled move before restarting. A failed migration keeps the original active and retries on a later start; it never merges into an unrelated nonempty folder. Stop other backend instances before migration. Explicit `OPEN_AGENT_WORLD_DATA_ROOT` overrides bypass this pointer and make the Storage setting read-only. Relocation is within the same host/account; Windows credential protection remains tied to that account.
+
+
 ## Sandbox working folders
 
 Environment Profile and Compute Target cards provide optional per-command

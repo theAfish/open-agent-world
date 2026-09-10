@@ -56,9 +56,7 @@ describe("ConversationWorkspace snapshots", () => {
       sessions: [session],
       agents: [],
     });
-    vi.spyOn(worldApi, "getConversationMessages").mockResolvedValue([
-      historicalMessage,
-    ]);
+    vi.spyOn(worldApi, "getConversationTimeline").mockResolvedValue({ items: [historicalMessage], has_before: false, has_after: false });
   });
 
   afterEach(() => cleanup());
@@ -68,9 +66,10 @@ describe("ConversationWorkspace snapshots", () => {
 
     expect(await screen.findByText(historicalMessage.content)).toBeTruthy();
     expect(worldApi.getConversation).toHaveBeenCalledWith(card.id);
-    expect(worldApi.getConversationMessages).toHaveBeenCalledWith(
+    expect(worldApi.getConversationTimeline).toHaveBeenCalledWith(
       card.id,
       session.id,
+      {},
     );
   });
 
@@ -78,68 +77,78 @@ describe("ConversationWorkspace snapshots", () => {
     render(<ConversationWorkspace card={card} />);
     await screen.findByText(historicalMessage.content);
     const initialSummaryCalls = vi.mocked(worldApi.getConversation).mock.calls.length;
-    const initialMessageCalls = vi.mocked(worldApi.getConversationMessages).mock.calls.length;
+    const initialMessageCalls = vi.mocked(worldApi.getConversationTimeline).mock.calls.length;
 
     useWorldStore.getState().setSocketState("live");
 
     await waitFor(() => {
       expect(worldApi.getConversation).toHaveBeenCalledTimes(initialSummaryCalls + 1);
-      expect(worldApi.getConversationMessages).toHaveBeenCalledTimes(initialMessageCalls + 1);
+      expect(worldApi.getConversationTimeline).toHaveBeenCalledTimes(initialMessageCalls + 1);
     });
   });
 
-  it("keeps intermediate bubbles after final persistence and event buffer eviction", async () => {
-    vi.mocked(worldApi.getConversation).mockResolvedValue({
-      conversation_id: card.id, sessions: [session], agents: [],
-    });
-    const { container } = render(<ConversationWorkspace card={card} />);
-    await screen.findByText(historicalMessage.content);
-    const event = (id: string, type: string, payload: Record<string, unknown>) => ({
-      id, type, payload, agent_id: "agent-1", run_id: "run-1",
-      conversation_id: card.id, session_id: session.id,
-      timestamp: `2026-09-04T00:00:0${id}Z`,
-    });
-    act(() => useWorldStore.setState({ events: [
-      event("4", "agent_message", { text: "Final answer" }),
-      event("3", "tool_completed", { name: "read_file" }),
-      event("2", "agent_message", { text: "Checking the file" }),
-    ] }));
-    await screen.findByText("Checking the file");
-    expect(screen.getByText("Finished read_file.")).toBeTruthy();
-    vi.mocked(worldApi.getConversationMessages).mockResolvedValue([
-      historicalMessage,
-      { ...historicalMessage, id: "final", sender_kind: "agent", run_id: "run-1",
-        content: "Final answer", created_at: "2026-09-04T00:00:05Z" },
-    ]);
-    act(() => useWorldStore.setState({ events: [event("5", "conversation_message", {})] }));
-    await waitFor(() => expect(container.querySelector('[data-message-id="final"]')).toBeTruthy());
+  it("restores intermediate messages and tools from durable history after remount", async () => {
+    const items: ConversationMessage[] = [historicalMessage,
+      { ...historicalMessage, id: "middle", sequence: 2, sender_kind: "agent", content: "Checking the file" },
+      { ...historicalMessage, id: "tool", sequence: 3, sender_kind: "agent", kind: "tool_completed", content: "Finished read_file" },
+      { ...historicalMessage, id: "final", sequence: 4, sender_kind: "agent", content: "Final answer" },
+    ];
+    vi.mocked(worldApi.getConversationTimeline).mockResolvedValue({ items, has_before: false, has_after: false });
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText("Final answer");
+    cleanup();
+    useWorldStore.setState({ events: [] });
+    render(<ConversationWorkspace card={card} />);
+    expect(await screen.findByText("Checking the file")).toBeTruthy();
+    expect(screen.getByText("Finished read_file")).toBeTruthy();
     expect(screen.getAllByText("Final answer")).toHaveLength(1);
-    expect([...container.querySelectorAll(".workspace-message p, .conversation-live-activity")]
-      .map((element) => element.textContent)).toEqual([
-      historicalMessage.content, "Checking the file", "Finished read_file.", "Final answer",
-    ]);
   });
 
-  it("follows messages inside the transcript and preserves a reader's scroll position", async () => {
-    const { container } = render(<ConversationWorkspace card={card} />);
+  it("creates independent sessions within the selected group and renames them", async () => {
+    vi.mocked(worldApi.getConversation).mockResolvedValue({ conversation_id: card.id,
+      sessions: [{ ...session, group_id: "group-1", group_title: "Research" }], agents: [] });
+    const created = { ...session, id: "session-2", title: "New session", group_id: "group-1", group_title: "Research" };
+    vi.spyOn(worldApi, "createConversationSession").mockResolvedValue(created);
+    vi.spyOn(worldApi, "renameConversationSession").mockResolvedValue({ ...created, title: "Design review" });
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText("Research");
+    fireEvent.click(screen.getByRole("button", { name: "New session" }));
+    await waitFor(() => expect(worldApi.createConversationSession).toHaveBeenCalledWith(card.id,
+      expect.objectContaining({ group_id: "group-1", title: "New session" })));
+    fireEvent.click(screen.getByRole("button", { name: "Rename session" }));
+    fireEvent.change(screen.getByLabelText("Session title"), { target: { value: "Design review" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+    await waitFor(() => expect(worldApi.renameConversationSession).toHaveBeenCalledWith(card.id, "session-2", "Design review"));
+  });
+  it("shows a bubble before send and naming finish, reconciles its ID, and preserves the next draft", async () => {
+    let finish!: (result: { message: ConversationMessage; accepted_agent_ids: string[] }) => void;
+    const send = vi.spyOn(worldApi, "postConversationMessage").mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    render(<ConversationWorkspace card={card} />);
     await screen.findByText(historicalMessage.content);
-    const transcript = container.querySelector<HTMLElement>(".workspace-transcript")!;
-    Object.defineProperties(transcript, {
-      scrollHeight: { configurable: true, value: 1000 },
-      clientHeight: { configurable: true, value: 200 },
-    });
-    act(() => useWorldStore.setState({ events: [] }));
-    expect(transcript.scrollTop).toBe(1000);
-    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
-
-    transcript.scrollTop = 100;
-    fireEvent.scroll(transcript);
-    act(() => useWorldStore.setState({ events: [] }));
-    expect(transcript.scrollTop).toBe(100);
-
-    transcript.scrollTop = 800;
-    fireEvent.scroll(transcript);
-    act(() => useWorldStore.setState({ events: [] }));
-    expect(transcript.scrollTop).toBe(1000);
+    fireEvent.change(screen.getByLabelText("Conversation message"), { target: { value: "Immediate bubble" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(screen.getByText("Immediate bubble")).toBeTruthy();
+    expect(screen.getByText("Sending...")).toBeTruthy();
+    expect((screen.getByLabelText("Conversation message") as HTMLTextAreaElement).value).toBe("");
+    fireEvent.change(screen.getByLabelText("Conversation message"), { target: { value: "Next draft" } });
+    const saved: ConversationMessage = { ...historicalMessage, id: send.mock.calls[0][2].message_id!, content: "Immediate bubble", sequence: 2 };
+    vi.mocked(worldApi.getConversationTimeline).mockResolvedValue({ items: [historicalMessage, saved], has_before: false, has_after: false });
+    // The durable notification can arrive before the POST response.
+    act(() => useWorldStore.setState({ events: [{ id: "saved", type: "conversation_message", conversation_id: card.id, session_id: session.id, timestamp: saved.created_at, payload: { message: saved } }] }));
+    await waitFor(() => expect(screen.queryByText("Sending...")).toBeNull());
+    await act(async () => finish({ message: saved, accepted_agent_ids: [] }));
+    expect(screen.getAllByText("Immediate bubble")).toHaveLength(1);
+    expect((screen.getByLabelText("Conversation message") as HTMLTextAreaElement).value).toBe("Next draft");
   });
+
+  it("keeps the text with an unconfirmed status when sending fails", async () => {
+    vi.spyOn(worldApi, "postConversationMessage").mockRejectedValue(new Error("Offline"));
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    fireEvent.change(screen.getByLabelText("Conversation message"), { target: { value: "Keep my text" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(await screen.findByText("Send not confirmed. Your text is kept here.")).toBeTruthy();
+    expect(screen.getByText("Keep my text")).toBeTruthy();
+  });
+
 });

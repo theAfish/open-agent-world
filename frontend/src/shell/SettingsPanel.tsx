@@ -1,11 +1,11 @@
-import { Box, Cpu, Settings2, X } from "lucide-react";
+import { Box, Cpu, HardDrive, Settings2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useWorldStore } from "../state/worldStore";
 import { EMPTY_MODEL_CATALOG, importLegacyModels, type ModelCatalog } from "../state/modelConnections";
 import { ModelConnectionsEditor } from "./ModelConnectionsEditor";
 import { worldApi } from "../api/client";
-import type { SandboxSettings } from "../api/client";
+import type { SandboxSettings, StorageSettings } from "../api/client";
 import type { SandboxRuntime } from "../types/world";
 import { FolderPathInput } from "./FolderPathInput";
 
@@ -18,7 +18,21 @@ export function SettingsPanel() {
   const [modelLoaded, setModelLoaded] = useState(false);
   const [modelError, setModelError] = useState("");
   const [modelRetry, setModelRetry] = useState(0);
-  const [section, setSection] = useState<"model" | "sandbox">("model");
+  const [section, setSection] = useState<"model" | "sandbox" | "storage">("model");
+  const [storage, setStorage] = useState<StorageSettings | null>(null);
+  const [storagePath, setStoragePath] = useState("");
+  const [storageRetry, setStorageRetry] = useState(0);
+  useEffect(() => {
+    if (!open || section !== "storage") return;
+    let active = true;
+    setStorage(null);
+    worldApi.getStorageSettings().then(value => {
+      if (!active) return;
+      setStorage(value);
+      setStoragePath(value.pending_path ?? "");
+    }).catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "Could not load storage settings."); });
+    return () => { active = false; };
+  }, [open, section, storageRetry]);
   const [sandbox, setSandbox] = useState<SandboxSettings>({ workspace_root: null, runtime: "auto" });
   const [runtimes, setRuntimes] = useState<SandboxRuntime[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -73,7 +87,12 @@ export function SettingsPanel() {
     setBusy(true);
     setError("");
     try {
-      if (section === "sandbox") {
+      if (section === "storage") {
+        if (!storage?.editable) return;
+        const saved = await worldApi.saveStorageSettings(storagePath.trim() || null, storage.revision);
+        setStorage(saved);
+        setStoragePath(saved.pending_path ?? "");
+      } else if (section === "sandbox") {
         await worldApi.saveSandboxSettings({ ...sandbox, workspace_root: sandbox.workspace_root?.trim() || null });
         setOpen();
       } else {
@@ -108,6 +127,7 @@ export function SettingsPanel() {
         <nav className="settings-sections" aria-label="Settings sections">
           <button type="button" className="secondary-button" aria-pressed={section === "model"} disabled={busy} onClick={() => { setSection("model"); setError(""); }}><Cpu size={16} /> Models</button>
           <button type="button" className="secondary-button" aria-pressed={section === "sandbox"} disabled={busy} onClick={() => { setSection("sandbox"); setError(""); }}><Box size={16} /> Sandbox</button>
+          <button type="button" className="secondary-button" aria-pressed={section === "storage"} disabled={busy} onClick={() => { setSection("storage"); setError(""); }}><HardDrive size={16} /> Storage</button>
         </nav>
 
         <div className="settings-content">
@@ -117,6 +137,28 @@ export function SettingsPanel() {
             {draft.revision === 0 && draft.connections.length > 0 && <p className="settings-description">Previous models are included in this draft. Save to keep them on the backend.</p>}
             <ModelConnectionsEditor value={draft} onChange={setDraft} saved={savedCatalog} busy={busy} />
           </>}
+        </div> : section === "storage" ? <div className="settings-form">
+          <div className="settings-page-heading"><h3>Storage</h3><p>Application data on the backend computer.</p></div>
+          {!storage && !error && <p role="status">Loading storage settings?</p>}
+          {storage && <>
+            <label className="field-label"><span>Current data location</span><input readOnly value={storage.current_path} /></label>
+            <p className="settings-description">Includes conversations, sessions, settings, credentials, artifacts and managed Sandbox files. External workspaces stay in their current folders.</p>
+            {storage.editable ? <div className="field-label">
+              <span>New data location</span>
+              <FolderPathInput label="New data location" describedBy="storage-help" value={storagePath} disabled={busy} onChange={setStoragePath} onPickingChange={setPicking} placeholder="Choose a new or empty folder" />
+              <small id="storage-help">Use an absolute local folder on the backend computer. Saving schedules a move for the next backend start. Data is copied and verified before switching; the original folder is retained as a backup.</small>
+            </div> : <p className="settings-description">This location is controlled by startup configuration (OPEN_AGENT_WORLD_DATA_ROOT). Remove that override to manage storage here.</p>}
+            {storage.pending_path && <p role="status" className="settings-description">Scheduled for next start: {storage.pending_path}</p>}
+            {storage.pending_path && <button type="button" className="secondary-button" disabled={busy} onClick={async () => {
+              setBusy(true); setError("");
+              try { const saved = await worldApi.saveStorageSettings(null, storage.revision); setStorage(saved); setStoragePath(""); }
+              catch (cause) { setError(cause instanceof Error ? cause.message : "Could not cancel migration."); }
+              finally { setBusy(false); }
+            }}>Cancel scheduled move</button>}
+            {storage.last_error && <p role="alert" className="settings-error">Migration did not complete. The original location remains active. {storage.last_error}</p>}
+            {storage.previous_path && <label className="field-label"><span>Retained backup (before the move)</span><input readOnly value={storage.previous_path} /></label>}
+          </>}
+          {error && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setError(""); setStorageRetry(value => value + 1); }}>Reload storage settings</button>}
         </div> : <div className="settings-form">
           <div className="settings-page-heading"><h3>Sandbox</h3><p>Workspace and runtime defaults for this backend.</p></div>
           <p className="settings-description">Defaults for new Sandboxes on this backend host. Existing Sandboxes keep their current folders and runtime.</p>
@@ -145,7 +187,7 @@ export function SettingsPanel() {
         </div>
         <footer>
           <button type="button" className="secondary-button" onClick={setOpen} disabled={busy}>Cancel</button>
-          <button type="submit" className="primary-button" disabled={busy || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)}>{saving ? "Saving…" : "Save settings"}</button>
+          <button type="submit" className="primary-button" disabled={busy || (section === "storage" && (!storage?.editable || !storagePath.trim() || storagePath.trim() === storage.pending_path)) || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)}>{saving ? "Saving…" : "Save settings"}</button>
         </footer>
       </form>
     </div>

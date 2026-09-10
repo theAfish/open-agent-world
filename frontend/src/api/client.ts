@@ -590,13 +590,21 @@ export const worldApi = {
     });
   },
 
+  getStorageSettings(): Promise<StorageSettings> {
+    return request("/settings/storage");
+  },
+
+  saveStorageSettings(targetPath: string | null, expectedRevision: number): Promise<StorageSettings> {
+    return request("/settings/storage", { method: "PUT", body: JSON.stringify({ target_path: targetPath, expected_revision: expectedRevision }) });
+  },
+
   getConversation(conversationId: string): Promise<ConversationSummary> {
     return request<ConversationSummary>(`/conversations/${encodeURIComponent(conversationId)}`);
   },
 
   createConversationSession(
     conversationId: string,
-    input: { title: string; participant_ids: string[] },
+    input: { title: string; participant_ids: string[]; group_id?: string; group_title?: string },
   ): Promise<ConversationSession> {
     return request<ConversationSession>(`/conversations/${encodeURIComponent(conversationId)}/sessions`, {
       method: "POST",
@@ -636,6 +644,19 @@ export const worldApi = {
     );
   },
 
+  renameConversationSession(conversationId: string, sessionId: string, title: string): Promise<ConversationSession> {
+    return request(`/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "PATCH", body: JSON.stringify({ title }),
+    });
+  },
+
+  getConversationTimeline(conversationId: string, sessionId: string, cursor: { before?: number; after?: number } = {}): Promise<import("../types/world").ConversationMessagePage> {
+    const query = new URLSearchParams({ limit: "50" });
+    if (cursor.before !== undefined) query.set("before", String(cursor.before));
+    if (cursor.after !== undefined) query.set("after", String(cursor.after));
+    return request(`/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/timeline?${query}`);
+  },
+
   getConversationMessages(
     conversationId: string,
     sessionId: string,
@@ -648,7 +669,7 @@ export const worldApi = {
   postConversationMessage(
     conversationId: string,
     sessionId: string,
-    input: { content: string; mention_agent_ids: string[] },
+    input: { content: string; mention_agent_ids: string[]; message_id?: string },
   ): Promise<{ message: ConversationMessage; accepted_agent_ids: string[] }> {
     return request(`/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/messages`, {
       method: "POST",
@@ -762,4 +783,14 @@ export function normalizeRuntimeEvent(input: unknown): RuntimeEvent {
 export function apiErrorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   return error instanceof Error ? error.message : "An unexpected error occurred.";
+}
+
+export interface StorageSettings {
+  current_path: string;
+  pending_path: string | null;
+  previous_path: string | null;
+  last_error: string | null;
+  revision: number;
+  editable: boolean;
+  managed_by: string;
 }

@@ -264,6 +264,10 @@ export interface ToastMessage {
 }
 
 export interface ConversationSession {
+  group_id?: string;
+  group_title?: string;
+  auto_title?: boolean;
+  is_default?: boolean;
   id: string;
   conversation_id: string;
   conversation_name?: string;
@@ -283,6 +287,9 @@ export interface ConversationAgent {
 }
 
 export interface ConversationMessage {
+  sequence?: number;
+  kind?: string;
+  is_final?: boolean;
   id: string;
   conversation_id: string;
   session_id: string;
@@ -310,4 +317,11 @@ export interface ContainerDefinition {
   content_inset: [number, number, number, number];
   max_members: number;
   document_field: string | null;
+}
+
+export interface ConversationMessagePage {
+  active_agent_ids?: string[];
+  items: ConversationMessage[];
+  has_before: boolean;
+  has_after: boolean;
 }

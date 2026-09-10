@@ -124,3 +124,55 @@ GET  /api/runs/{run_id}
 GET  /api/runs/{run_id}/children
 POST /api/runs/{run_id}/cancel
 ```
+
+
+## Conversation timeline and sessions
+
+A Conversation contains named groups, each with independent sessions. A session
+retains its participant roster and its own runtime context. Creating a new
+session in the UI copies the current roster; it does not change historical
+session membership or graph authorization. New sessions start as `New session`;
+the first user message supplies a whitespace-normalized title of up to 60
+characters. `PATCH /api/conversations/{id}/sessions/{session_id}` accepts a
+manual `title` (up to 200 characters). Renaming does not change group identity
+or the default session's deletion protection.
+
+Provider-visible text and tool start/completion records in Conversation runs
+are committed to `conversation_messages` before notification. Tool argument and
+response details are retained; provider-private reasoning is not projected.
+Each record has an immutable ID and a per-session increasing `sequence`.
+Final replies reference the originating text record through the Run's
+`output_message_id`; finalization marks that record instead of duplicating or
+matching its content. Live graph and session participation checks also apply
+to intermediate records, including delegated runs.
+
+`GET /api/conversations/{id}/sessions/{session_id}/timeline` returns `items`,
+`has_before`, `has_after`, and `active_agent_ids`. Pass either `before` or `after`
+with a sequence cursor; `limit` defaults to 50 and is capped at 100. With no
+cursor it returns the newest page in ascending order. The existing `/messages`
+endpoint remains the final-message transcript for runtime context and existing
+clients; it does not become a dump of tool activity.
+
+The UI keeps a contiguous window of at most 150 records, loads 50 at a time in
+both directions, preserves a visible message anchor when shifting windows,
+and offers Jump to latest. Discarding a UI page never deletes database history.
+WebSocket events invalidate the durable view; periodic tail reads and reconnect
+reads repair missed notifications. Session/request generation checks reject
+late responses belonging to another selection. These display limits are
+separate from provider context-window policies.
+
+Schema migration runs transactionally, maps each legacy session to its own
+group, and keeps existing session IDs, message IDs, timestamps and Run scopes.
+It can retain previously saved messages, but cannot reconstruct intermediate
+events that older versions only broadcast and never stored.
+
+
+Outgoing user messages appear immediately with a pending delivery indicator.
+The optional UUID `message_id` on POST is preserved as the durable record ID,
+so a WebSocket/REST update arriving before the POST response reconciles the
+same bubble. An existing ID is rejected with 409 rather than overwriting a
+record or starting another turn. This is identity correlation, not an automatic
+retry protocol. Unconfirmed sends remain visible with their text; responses do
+not clear a subsequent draft. Title updates do not gate rendering. Timeline
+invalidations arriving during a fetch are coalesced and drained after that fetch
+instead of being dropped until the next polling interval.

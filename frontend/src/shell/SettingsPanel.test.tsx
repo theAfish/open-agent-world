@@ -24,6 +24,34 @@ describe("Application settings", () => {
   });
   afterEach(cleanup);
 
+  it("schedules storage without moving the current location and can cancel", async () => {
+    const initial = { current_path: "D:/Data", pending_path: null, previous_path: null, last_error: null, revision: 0, editable: true, managed_by: "settings" };
+    vi.spyOn(worldApi, "getStorageSettings").mockResolvedValue(initial);
+    const save = vi.spyOn(worldApi, "saveStorageSettings")
+      .mockResolvedValueOnce({ ...initial, pending_path: "E:/NewData", revision: 1 })
+      .mockResolvedValueOnce({ ...initial, revision: 2 });
+    render(<SettingsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Storage" }));
+    const folder = await screen.findByLabelText("New data location");
+    fireEvent.change(folder, { target: { value: "E:/NewData" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await screen.findByText("Scheduled for next start: E:/NewData");
+    expect(save).toHaveBeenCalledWith("E:/NewData", 0);
+    expect((screen.getByLabelText("Current data location") as HTMLInputElement).value).toBe("D:/Data");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel scheduled move" }));
+    await waitFor(() => expect(screen.queryByText("Scheduled for next start: E:/NewData")).toBeNull());
+    expect(save).toHaveBeenLastCalledWith(null, 1);
+  });
+
+  it("respects a storage location supplied at startup", async () => {
+    vi.spyOn(worldApi, "getStorageSettings").mockResolvedValue({ current_path: "D:/Data", pending_path: null, previous_path: null, last_error: null, revision: 0, editable: false, managed_by: "startup configuration" });
+    render(<SettingsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Storage" }));
+    await screen.findByText(/This location is controlled by startup configuration/);
+    expect(screen.queryByLabelText("New data location")).toBeNull();
+    expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("browses into the draft without saving until Save settings is clicked", async () => {
     vi.spyOn(worldApi, "pickFolder").mockResolvedValue({ path: "E:\\Selected" });
     const save = vi.spyOn(worldApi, "saveSandboxSettings");

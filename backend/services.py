@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from backend.skill_runtime import RunSkillScript
 
 from backend.agents import (
+    AgentEvent,
     AgentNotFoundError,
     GoogleAdkAgentRuntime,
     RuntimeProvider,
@@ -507,7 +508,7 @@ class _LifecycleConversations:
 
     def create_initial_session(self, node_id: str, title: str) -> None:
         session = self.conversations.create_session(
-            node_id, ConversationSessionCreate(title=title)
+            node_id, ConversationSessionCreate(title=title), is_default=True
         )
         self.state.ensure_scope("session", session.id, schema_id="core.session")
 
@@ -2521,7 +2522,7 @@ class ApplicationServices:
     ) -> None:
         self._require_card_type(conversation_id, CardType.CONVERSATION)
         session = self.conversations.get_session(conversation_id, session_id)
-        if session.title == "General":
+        if session.is_default:
             raise ConversationValidationError("the default General session cannot be deleted")
         self.conversations.delete_session(conversation_id, session_id)
         self.state.delete_scope("session", session_id)
@@ -2560,6 +2561,7 @@ class ApplicationServices:
             sender_id=None,
             sender_name="You",
             content=request.content,
+            message_id=str(request.message_id) if request.message_id else None,
             mention_agent_ids=mentions,
         )
         await self._publish_conversation_message(message)
@@ -2657,10 +2659,9 @@ class ApplicationServices:
             final_text = manager.final_text(run.run_id)
         finally:
             _conversation_turn_depth.reset(token)
-        response = self.conversations.add_message(
+        response = self._conversation_final_message(
             conversation_id,
             session_id,
-            sender_kind="agent",
             sender_id=target.id,
             sender_name=target.name,
             content=final_text or "No response was produced.",
@@ -3106,10 +3107,9 @@ class ApplicationServices:
                     agent_id, conversation_id, session_id
                 ):
                     agent = self.world.get_card(agent_id)
-                    message = self.conversations.add_message(
+                    message = self._conversation_final_message(
                         conversation_id,
                         session_id,
-                        sender_kind="agent",
                         sender_id=agent.id,
                         sender_name=agent.name,
                         content=final_text,
@@ -3163,6 +3163,46 @@ class ApplicationServices:
             run_id=run_id,
         )
         await self._publish_conversation_message(message)
+
+    async def _persist_conversation_provider_event(self, event: AgentEvent, record: RunRecord, conversation_id: str, session_id: str) -> str | None:
+        if not self._can_agent_post_to_conversation_session(record.agent_id, conversation_id, session_id):
+            return None
+        kind = event.type.value
+        if kind == "agent_message":
+            content = event.payload.get("text")
+            if not isinstance(content, str) or not content.strip():
+                return None
+            kind = "text"
+        elif kind in ("tool_started", "tool_completed"):
+            name = str(event.payload.get("name") or "tool")
+            content = ("Using " if kind == "tool_started" else "Finished ") + name
+            # Store only the provider's public tool result/arguments, not runtime credentials or config.
+            detail = event.payload.get("arguments" if kind == "tool_started" else "response")
+            if detail is not None:
+                content += "\n\n" + json.dumps(detail, ensure_ascii=False, indent=2, default=str)
+        else:
+            return None
+        message = self.conversations.add_message(conversation_id, session_id,
+            sender_kind="agent", sender_id=record.agent_id,
+            sender_name=self._conversation_agent_name(record.agent_id), content=content,
+            run_id=record.run_id, kind=kind, is_final=False)
+        await self._publish_conversation_message(message)
+        return message.id
+
+    def _conversation_final_message(self, conversation_id: str, session_id: str, *, run_id: str,
+                                    sender_id: str, sender_name: str, content: str) -> ConversationMessage:
+        message_id = self.state.get(self.state.get_scope("run", run_id), "output_message_id")
+        if message_id:
+            return self.conversations.finalize_message(str(message_id), run_id, session_id)
+        return self.conversations.add_message(conversation_id, session_id, sender_kind="agent",
+            sender_id=sender_id, sender_name=sender_name, content=content, run_id=run_id)
+
+    async def rename_conversation_session(self, conversation_id: str, session_id: str, title: str) -> ConversationSession:
+        self._require_card_type(conversation_id, CardType.CONVERSATION)
+        updated = self.conversations.rename_session(conversation_id, session_id, title)
+        await self.events.publish(EventType.CONVERSATION_SESSION_UPDATED, conversation_id=conversation_id,
+                                  session_id=session_id, payload={"session": updated.model_dump(mode="json")})
+        return updated
 
     async def _publish_conversation_message(
         self, message: ConversationMessage
@@ -3571,6 +3611,7 @@ def create_services(
         plugins=plugin_registry,
         capability_provider=provider,
         state=state,
+        persist_provider_event=services._persist_conversation_provider_event,
         default_runtime_provider_id=(
             default_runtime_provider_id
             if default_runtime_provider_id is not None

@@ -252,6 +252,8 @@ class Database:
         with self._lock:
             self._connection.executescript(SCHEMA)
             self._migrate_open_card_types()
+            with self.transaction(immediate=True):
+                self._migrate_conversations()
             run_columns = {row['name'] for row in self._connection.execute('PRAGMA table_info(runs)')}
             if 'lifecycle_json' not in run_columns:
                 self._connection.execute("ALTER TABLE runs ADD COLUMN lifecycle_json TEXT NOT NULL DEFAULT '{}'")
@@ -324,6 +326,42 @@ class Database:
                     "ALTER TABLE pending_node_deletions ADD COLUMN "
                     "plugin_api_version TEXT NOT NULL DEFAULT '1.0'"
                 )
+
+    def _migrate_conversations(self) -> None:
+        # Additive migration preserves existing session IDs, messages and run scopes.
+        self._connection.execute("""CREATE TABLE IF NOT EXISTS conversation_groups (
+            id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+            title TEXT NOT NULL)""")
+        columns = {row['name'] for row in self._connection.execute('PRAGMA table_info(conversation_sessions)')}
+        for name, definition in {
+            'group_id': 'TEXT REFERENCES conversation_groups(id)',
+            'auto_title': 'INTEGER NOT NULL DEFAULT 0',
+            'is_default': 'INTEGER NOT NULL DEFAULT 0',
+        }.items():
+            if name not in columns:
+                self._connection.execute(f'ALTER TABLE conversation_sessions ADD COLUMN {name} {definition}')
+        self._connection.execute("""INSERT OR IGNORE INTO conversation_groups (id, conversation_id, title)
+            SELECT id, conversation_id, title FROM conversation_sessions WHERE group_id IS NULL""")
+        self._connection.execute("""UPDATE conversation_sessions SET group_id = id,
+            is_default = CASE WHEN title = 'General' THEN 1 ELSE 0 END WHERE group_id IS NULL""")
+        columns = {row['name'] for row in self._connection.execute('PRAGMA table_info(conversation_messages)')}
+        for name, definition in {
+            'sequence': 'INTEGER NOT NULL DEFAULT 0',
+            'kind': "TEXT NOT NULL DEFAULT 'text'",
+            'is_final': 'INTEGER NOT NULL DEFAULT 1',
+        }.items():
+            if name not in columns:
+                self._connection.execute(f'ALTER TABLE conversation_messages ADD COLUMN {name} {definition}')
+        if 'sequence' not in columns:
+            self._connection.execute("""WITH ordered AS (
+            SELECT id, ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at, id) AS seq
+            FROM conversation_messages)
+            UPDATE conversation_messages SET sequence = (SELECT seq FROM ordered WHERE ordered.id = conversation_messages.id)
+            WHERE sequence = 0""")
+        self._connection.execute('CREATE UNIQUE INDEX IF NOT EXISTS conversation_message_sequence_idx ON conversation_messages(session_id, sequence)')
+        self._connection.execute('CREATE INDEX IF NOT EXISTS conversation_session_group_idx ON conversation_sessions(group_id, updated_at)')
+        self._connection.execute("""CREATE INDEX IF NOT EXISTS conversation_active_runs_idx ON runs(caller_id, context_id, status, agent_id)
+            WHERE caller_kind = 'conversation' AND status IN ('created', 'running', 'waiting')""")
 
     def _migrate_open_card_types(self) -> None:
         row = self._connection.execute(

@@ -639,7 +639,7 @@ test("a Conversation workspace creates a group and routes explicit mentions", as
     const workspace = page.locator(`[data-workspace-node-id="${conversation.id}"]`);
     await expect(workspace).toBeVisible();
     await workspace.getByRole("button", { name: "New group" }).click();
-    await workspace.getByLabel("Session name").fill("E2E Review Group");
+    await workspace.getByLabel("Group name").fill("E2E Review Group");
     await workspace.getByLabel("E2E Atlas").check();
     await workspace.getByRole("button", { name: "Create group" }).click();
 
@@ -702,7 +702,7 @@ test("a Conversation group can remove a participant and be dissolved", async ({ 
     await conversationCard.getByRole("button", { name: "Open workspace" }).click();
     const workspace = page.locator(`[data-workspace-node-id="${conversation.id}"]`);
     await workspace.getByRole("button", { name: "New group" }).click();
-    await workspace.getByLabel("Session name").fill("E2E Kick Group");
+    await workspace.getByLabel("Group name").fill("E2E Kick Group");
     await workspace.getByLabel("E2E Kick Atlas").check();
     await workspace.getByLabel("E2E Kick River").check();
     await workspace.getByRole("button", { name: "Create group" }).click();
@@ -712,7 +712,7 @@ test("a Conversation group can remove a participant and be dissolved", async ({ 
     await workspace.getByRole("button", { name: "Remove E2E Kick River from session" }).click();
     await expect(workspace.getByText("1 active participants", { exact: true })).toBeVisible();
     page.once("dialog", (dialog) => dialog.accept());
-    await workspace.getByRole("button", { name: "Dissolve session" }).click();
+    await workspace.getByRole("button", { name: "Delete session" }).click();
     await expect(workspace.getByText("E2E Kick Group", { exact: true })).toHaveCount(0);
   } finally {
     await request.delete(`/api/nodes/${conversation.id}`);

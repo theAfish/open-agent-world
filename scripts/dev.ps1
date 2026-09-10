@@ -3,7 +3,11 @@ param(
     [ValidateSet("google-adk", "mock")]
     [string]$AgentRuntime = "google-adk",
 
-    [string[]]$PluginPath = @()
+    [string[]]$PluginPath = @(),
+
+    # Zero waits until ready or process exit; migrations can take much longer than normal startup.
+    [ValidateRange(0, 2147483)]
+    [int]$StartupTimeoutSeconds = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -118,17 +122,31 @@ function Wait-BackendListener {
     param(
         [System.Diagnostics.Process]$Backend,
         [int]$Port,
-        [int]$TimeoutMilliseconds = 10000
+        [int]$TimeoutMilliseconds = 0,
+        [string]$LogPath
     )
 
-    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
-    while ([DateTime]::UtcNow -lt $deadline) {
+    $started = [Diagnostics.Stopwatch]::StartNew()
+    $nextNotice = 0
+    $lastDetail = ""
+    Write-Host "Waiting for backend startup (including any scheduled storage migration). Ctrl+C cancels."
+    while ($TimeoutMilliseconds -eq 0 -or $started.ElapsedMilliseconds -lt $TimeoutMilliseconds) {
         $listener = Get-BackendListener -Port $Port
         if ($null -ne $listener) {
             return $listener
         }
         if ($Backend.HasExited) {
             return $null
+        }
+        if ($started.Elapsed.TotalSeconds -ge $nextNotice) {
+            $detail = if ($LogPath) { Get-Content -LiteralPath $LogPath -Tail 1 -ErrorAction SilentlyContinue } else { "" }
+            if ($detail -and $detail -ne $lastDetail) {
+                Write-Host $detail
+                $lastDetail = $detail
+            } else {
+                Write-Host ("Backend is still starting ({0:n0}s elapsed)." -f $started.Elapsed.TotalSeconds)
+            }
+            $nextNotice = $started.Elapsed.TotalSeconds + 5
         }
         Start-Sleep -Milliseconds 200
     }
@@ -212,7 +230,7 @@ try {
         -WindowStyle Hidden `
         -PassThru
 
-    $listener = Wait-BackendListener -Backend $backend -Port $backendPort
+    $listener = Wait-BackendListener -Backend $backend -Port $backendPort -TimeoutMilliseconds ($StartupTimeoutSeconds * 1000) -LogPath $backendError
     if ($null -eq $listener) {
         $detail = Get-Content -Raw $backendError -ErrorAction SilentlyContinue
         if (-not $detail) {
@@ -221,7 +239,7 @@ try {
         $failure = if ($backend.HasExited) {
             "The backend exited before becoming available on $backendHttpUrl (exit code $($backend.ExitCode))."
         } else {
-            "The backend did not become available on $backendHttpUrl within 10 seconds."
+            "The backend did not become available on $backendHttpUrl within $StartupTimeoutSeconds seconds. A storage migration may still be running; omit -StartupTimeoutSeconds to wait without a time limit."
         }
         Stop-RecordedProcessTree (Get-ProcessRecord $backend.Id)
         $backend = $null

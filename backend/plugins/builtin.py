@@ -826,6 +826,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         "result": StateFieldDefinition(
             value_type=Any, allowed_scope_kinds=run_only
         ),
+        "output_message_id": StateFieldDefinition(value_type=str, allowed_scope_kinds=run_only, default=""),
         "output_text": StateFieldDefinition(value_type=str, allowed_scope_kinds=run_only, default=""),
     }))
     registry.register_runtime_provider(
