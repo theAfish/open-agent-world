@@ -4,7 +4,6 @@ import {
   ConnectionMode,
   Controls,
   MarkerType,
-  MiniMap,
   ReactFlow,
   useNodesState,
   useReactFlow,
@@ -37,6 +36,7 @@ import { getConnectionOptions, validateConnection } from "../state/relationships
 import { useWorldStore } from "../state/worldStore";
 import { NODE_SURFACE_SIZE, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { ContourLayer } from "./ContourLayer";
+import { LocalMiniMap } from "./LocalMiniMap";
 import { GenerationLayer } from "../effects/GenerationLayer";
 import {
   displacedPositions,
@@ -613,17 +613,7 @@ export function WorldCanvas() {
           size={1.15}
           color="var(--grid-dot)"
         />
-        <MiniMap
-          className="world-minimap"
-          nodeColor={(node) => (
-            getNodeType(catalog, (node.data as CanvasNodeData).card.type)?.color ?? "#75736c"
-          )}
-          nodeStrokeWidth={0}
-          maskColor="var(--minimap-mask)"
-          pannable
-          zoomable
-          ariaLabel="World overview"
-        />
+        <LocalMiniMap />
         <Controls
           className="world-controls"
           position="bottom-right"

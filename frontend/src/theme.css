@@ -698,7 +698,9 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .world-controls .react-flow__controls-button { width: 32px; height: 31px; color: var(--ink-soft); border-bottom-color: var(--line); background: var(--chrome); }
 .world-controls .react-flow__controls-button:hover { background: var(--chrome-raised); }
 .world-controls .react-flow__controls-button svg { fill: currentColor; }
-.world-minimap.react-flow__minimap { right: 64px; bottom: 21px; width: 132px; height: 84px; border: 1px solid var(--line); border-radius: 12px; background: var(--chrome-raised); box-shadow: var(--panel-shadow); overflow: hidden; }
+.world-minimap.react-flow__minimap { right: 64px; bottom: 21px; border-radius: 12px; outline: 1px solid var(--line); box-shadow: var(--panel-shadow); overflow: hidden; }
+.world-minimap .react-flow__minimap-svg { display: block; cursor: grab; touch-action: none; }
+.world-minimap .react-flow__minimap-svg:active { cursor: grabbing; }
 .chunk-readout { position: absolute; z-index: 6; left: 252px; bottom: 22px; display: flex; align-items: center; gap: 6px; padding: 6px 9px; color: var(--ink-faint); border: 1px solid var(--line); border-radius: 9px; background: color-mix(in srgb, var(--surface) 82%, transparent); backdrop-filter: blur(8px); font-size: 8px; letter-spacing: 0.04em; pointer-events: none; }
 .chunk-readout > span { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 
