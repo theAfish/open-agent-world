@@ -250,6 +250,9 @@ function unwrap<T>(input: unknown, key: string): T {
 }
 
 export const worldApi = {
+  readFilePreview(viewerId: string, reference: import("../state/openFiles").FileReference, signal?: AbortSignal): Promise<{ name: string; size_bytes: number; data: string }> {
+    return request(`/nodes/${encodeURIComponent(viewerId)}/file-preview`, { method: "POST", body: JSON.stringify(reference), signal });
+  },
   getCardLibrary(): Promise<import("../state/cardLibrary").LibrarySnapshot> {
     return request("/card-library");
   },

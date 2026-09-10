@@ -955,7 +955,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         deck_label="Fields", deck_icon="workflow", default_name="New Conversation",
         default_size=(320, 210), default_status="available",
         statuses=frozenset({"available"}), config_model=ConversationConfig,
-        traits=frozenset({"core.field", "core.conversation"}),
+        traits=frozenset({"core.field", "core.conversation", "core.file-source"}),
         surfaces={"preview": True, "inspector": True, "workspace": True},
         lifecycle=ConversationNodeBehavior(),
         templateable=True,
@@ -985,7 +985,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         color="#696c66", deck_id="fields", deck_label="Fields", deck_icon="workflow",
         default_name="New Sandbox", default_size=(340, 220), default_status="stopped",
         statuses=frozenset({"stopped", "ready", "running", "error"}),
-        config_model=SandboxConfig, traits=frozenset({"core.sandbox"}),
+        config_model=SandboxConfig, traits=frozenset({"core.sandbox", "core.file-source"}),
         document=NodeDocumentDefinition(model=EnvironmentProfile),
         surfaces={"preview": True, "inspector": True, "workspace": True},
         lifecycle=SandboxNodeBehavior(),
@@ -1082,6 +1082,8 @@ class CorePlugin:
 
     def register(self, registration: PluginRegistration) -> None:
         _register_builtin(registration)
+        from backend.file_preview import register_file_preview
+        register_file_preview(registration)
         registration.register_pack(PackDefinition(id='open-agent-world.core.default', name='Core essentials',
             description='Agents, resources and workspaces for your world.', cards=tuple(registration.nodes)))
 

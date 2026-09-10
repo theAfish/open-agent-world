@@ -17,6 +17,8 @@
     "jsx": "react-jsx",
     "paths": {
       "@oaw/plugin-api": ["./src/plugins/sdk.ts"],
+      "matterviz/*": ["./node_modules/matterviz/dist/*"],
+      "svelte": ["./node_modules/svelte/types/index.d.ts"],
       "pdfjs-dist": ["./node_modules/pdfjs-dist"],
       "@xyflow/react": ["./node_modules/@xyflow/react"],
       "react": ["./node_modules/@types/react"],

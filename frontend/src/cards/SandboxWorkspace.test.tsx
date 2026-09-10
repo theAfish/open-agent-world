@@ -6,6 +6,7 @@ import { worldApi } from "../api/client";
 import { buildCardDraft } from "../state/helpers";
 import { useNodeSurfaceStore } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
+import { useOpenFiles } from "../state/openFiles";
 import type { SandboxInfo, WorldCard } from "../types/world";
 import { SandboxWorkspace } from "./SandboxWorkspace";
 import { ReactFlowProvider } from "@xyflow/react";
@@ -110,6 +111,7 @@ describe("Sandbox workspace interaction", () => {
 
     expect(screen.queryByText("Stale first file content")).toBeNull();
     expect(screen.getByRole("button", { name: "second.txt" }).getAttribute("aria-current")).toBe("true");
+    expect(useOpenFiles.getState().sources[card.id].reference).toEqual({ kind: "sandbox", source_id: card.id, root: "workspace", path: "second.txt" });
     expect(screen.getByRole("tab", { name: "Terminal" }).getAttribute("aria-selected")).toBe("true");
     expect((screen.getByRole("textbox", { name: "Command" }) as HTMLTextAreaElement).value).toBe("echo keep this draft");
     expect(container.querySelector(".sandbox-preview")?.closest("[hidden]")).toBeNull();

@@ -117,6 +117,11 @@ class WorldStore:
     ) -> dict[str, Any]:
         return self.registry.validate_config(card_type, value)
 
+    def _config_accepts_status(self, card_type: str) -> bool:
+        model = self.registry.node_type(card_type).config_model
+        # Preserve legacy models that stored status as an allowed extra field.
+        return "status" in model.model_fields or model.model_config.get("extra") == "allow"
+
     def validate_parent(self, card_id: str, card_type: str, parent_id: str | None) -> None:
         if parent_id is None:
             return
@@ -238,7 +243,7 @@ class WorldStore:
         )
         size = self._container_size(request.type, size)
         raw_config = dict(request.config)
-        if request.status is not None:
+        if request.status is not None and self._config_accepts_status(request.type):
             raw_config["status"] = request.status
         config = self._validate_config(request.type, raw_config)
         return Card(
@@ -250,7 +255,7 @@ class WorldStore:
             position=request.position,
             size=size,
             expanded=request.expanded,
-            status=str(config.get("status", definition.default_status)),
+            status=str(config.get("status", request.status if request.status is not None else definition.default_status)),
             config=config,
             chunk=(self._chunk(request.position.x), self._chunk(request.position.y)),
             created_at=now,
@@ -270,7 +275,7 @@ class WorldStore:
             card.size.width,
             card.size.height,
             int(card.expanded),
-            _json(card.config),
+            _json({**card.config, "status": card.status}),
             card.chunk[0],
             card.chunk[1],
             card.created_at.isoformat(),
@@ -343,8 +348,10 @@ class WorldStore:
             config = {**config, **request.config}
         if request.status is not None:
             self._assert_valid_status(current.type, request.status)
-            config = {**config, "status": request.status}
+            if self._config_accepts_status(current.type):
+                config = {**config, "status": request.status}
         config = self._validate_config(current.type, config)
+        status = str(config.get("status", request.status if request.status is not None else current.status))
         now = utc_now().isoformat()
         with self.database.transaction(immediate=True) as connection:
             cursor = connection.execute(
@@ -362,7 +369,7 @@ class WorldStore:
                     size.width,
                     size.height,
                     int(expanded),
-                    _json(config),
+                    _json({**config, "status": status}),
                     self._chunk(position.x),
                     self._chunk(position.y),
                     now,
@@ -407,7 +414,7 @@ class WorldStore:
                             preview.size.width,
                             preview.size.height,
                             int(preview.expanded),
-                            _json(preview.config),
+                            _json({**preview.config, "status": preview.status}),
                             preview.chunk[0],
                             preview.chunk[1],
                             preview.updated_at.isoformat(),
@@ -446,7 +453,8 @@ class WorldStore:
             config = {**config, **request.config}
         if request.status is not None:
             self._assert_valid_status(current.type, request.status)
-            config = {**config, "status": request.status}
+            if self._config_accepts_status(current.type):
+                config = {**config, "status": request.status}
         config = self._validate_config(current.type, config)
         return current.model_copy(update={
             "parent_id": parent_id,
@@ -455,7 +463,7 @@ class WorldStore:
             "position": position,
             "size": size,
             "expanded": expanded,
-            "status": str(config.get("status", current.status)),
+            "status": str(config.get("status", request.status if request.status is not None else current.status)),
             "config": config,
             "chunk": (self._chunk(position.x), self._chunk(position.y)),
             "updated_at": utc_now(),
@@ -731,6 +739,11 @@ class WorldStore:
                 f"{card_type!r} is owned by {owner_id!r}"
             )
         config = json.loads(row["config_json"])
+        status = str(config.get("status", definition.default_status))
+        # The existing storage format keeps status in config_json. Expose it as
+        # host metadata unless the plugin accepts the legacy config status field.
+        if not self._config_accepts_status(card_type):
+            config.pop("status", None)
         return Card(
             id=row["id"],
             parent_id=row["parent_id"],
@@ -740,7 +753,7 @@ class WorldStore:
             position={"x": row["x"], "y": row["y"]},
             size={"width": row["width"], "height": row["height"]},
             expanded=bool(row["expanded"]),
-            status=str(config.get("status", definition.default_status)),
+            status=status,
             config=config,
             chunk=(row["chunk_x"], row["chunk_y"]),
             created_at=row["created_at"],

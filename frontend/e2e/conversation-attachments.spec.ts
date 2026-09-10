@@ -28,7 +28,7 @@ test('General auto joins agents and uploaded images open a preview after reload'
     await page.screenshot({ path: '../.outputs/conversation-attachment-preview.png' });
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog', { name: 'Preview chart.png' })).toHaveCount(0);
-    const download = await Promise.all([page.waitForEvent('download'), workspace.getByRole('link', { name: 'data.csv', exact: true }).click()]);
+    const download = await Promise.all([page.waitForEvent('download'), workspace.getByRole('link', { name: 'Download data.csv', exact: true }).click()]);
     expect(download[0].suggestedFilename()).toBe('data.csv');
     await page.reload();
     await expect(workspace).toBeVisible();

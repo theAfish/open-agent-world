@@ -33,6 +33,17 @@ def _validate_tool_request(model: type[BaseModel], arguments):
 class _CapabilityContext:
     services: ApplicationServices
 
+    async def read_file_preview(self, capability, arguments):
+        from pydantic import TypeAdapter
+        from backend.file_preview import FileReference, read_file
+        try:
+            reference = TypeAdapter(FileReference).validate_python(arguments.get("file"))
+        except ValidationError as exc:
+            raise ResourceValidationError("Provide a valid Sandbox or Conversation file reference") from exc
+        if reference.source_id != capability.target_id:
+            raise ResourceValidationError("File source must match the selected capability")
+        return await read_file(self.services, capability.agent_id, reference)
+
     async def send_conversation_message(self, capability, arguments):
         from backend.conversations.models import ConversationPost
         from backend.conversations.attachments import agent_session, resolve

@@ -17,6 +17,13 @@ The tray tabs switch the persistent active deck; clicking or dragging a card use
 the existing world placement flow. Removing a deck entry preserves the collection
 and all existing world instances.
 
+Drag a card from the bottom hand onto another deck's tab to move that entry and
+switch to the destination. The source removal and target addition share one
+revisioned Library transaction, so failures cannot leave the card between decks.
+An existing target entry is kept once; membership in other decks is unchanged.
+Dragging a saved formation from the virtual Legions tab adds it to the chosen
+deck while preserving the saved formation.
+
 The **Store** tab is a placeholder. Installation remains repository-folder or
 Python-entry-point discovery followed by restarting the backend. No online
 acquisition, payments, random drops, duplicates, rarity or trading are implemented.

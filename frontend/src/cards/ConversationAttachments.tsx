@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { conversationAttachmentUrl } from "../api/client";
 import type { ConversationAttachment } from "../types/world";
+import { useOpenFiles } from "../state/openFiles";
 import "./conversationAttachments.css";
 
 export function ConversationAttachments({ conversationId, sessionId, files }: {
   conversationId: string; sessionId: string; files: ConversationAttachment[];
 }) {
   const [preview, setPreview] = useState<ConversationAttachment>();
+  const opened = useOpenFiles(state => state.sources[conversationId]);
   const close = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!preview) return;
@@ -24,11 +26,16 @@ export function ConversationAttachments({ conversationId, sessionId, files }: {
     {files.map((file) => {
       const url = conversationAttachmentUrl(conversationId, sessionId, file);
       const isImage = ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.media_type);
+      const open = () => useOpenFiles.getState().open({ kind: "conversation", source_id: conversationId,
+        session_id: sessionId, version_id: file.version_id, path: file.path }, file.name);
       return <div className="conversation-attachment" key={`${file.version_id}/${file.path}`}>
-        {isImage ? <button type="button" className="conversation-image-thumbnail" aria-label={`Preview ${file.name}`} onClick={() => setPreview(file)}>
+        {isImage ? <button type="button" className="conversation-image-thumbnail" aria-label={`Preview ${file.name}`} onClick={() => { open(); setPreview(file); }}>
           <img src={conversationAttachmentUrl(conversationId, sessionId, file, true)} alt={file.name} loading="lazy" />
         </button> : null}
-        <a href={url} download={file.name}>{file.name}</a>
+        <button type="button" className="conversation-file-open" aria-label={`Open ${file.name}`} title="Open in connected viewers"
+          aria-pressed={opened?.reference.kind === "conversation" && opened.reference.version_id === file.version_id && opened.reference.path === file.path}
+          onClick={open}>{file.name}</button>
+        <a href={url} download={file.name} aria-label={`Download ${file.name}`}>Download</a>
         <small>{file.size_bytes.toLocaleString()} bytes</small>
       </div>;
     })}

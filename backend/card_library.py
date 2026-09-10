@@ -71,11 +71,13 @@ class LibraryState(Model):
 
 class LibraryEdit(Model):
     expected_revision: int = Field(ge=0)
-    action: Literal["open_pack", "create_deck", "update_deck", "delete_deck", "activate_deck", "import_legacy", "set_plugin_enabled"]
+    action: Literal["open_pack", "create_deck", "update_deck", "delete_deck", "activate_deck", "move_entry", "import_legacy", "set_plugin_enabled"]
     id: str | None = Field(default=None, max_length=128)
     name: str | None = Field(default=None, min_length=1, max_length=120)
     icon: str | None = Field(default=None, min_length=1, max_length=40)
     entries: list[DeckEntry] | None = Field(default=None, max_length=2000)
+    entry: DeckEntry | None = None
+    source_deck_id: str | None = Field(default=None, max_length=128)
     decks: list[Deck] | None = Field(default=None, max_length=100)
     enabled: bool | None = None
 
@@ -212,6 +214,27 @@ class CardLibraryStore:
                 self._validate_additions(db, state, deck.entries, [])
                 state.decks.append(deck)
                 state.active_deck_id = deck.id
+            elif request.action == "move_entry":
+                target = next((d for d in state.decks if d.id == request.id), None)
+                source = next((d for d in state.decks if d.id == request.source_deck_id), None)
+                if target is None or (request.source_deck_id is not None and source is None):
+                    raise NotFoundError("Deck no longer exists")
+                if request.entry is None:
+                    raise GraphValidationError("Choose a card to move")
+                if source is not None and request.entry not in source.entries:
+                    raise GraphValidationError("Card is no longer in the source deck")
+                if source is target:
+                    return state
+                if request.entry not in target.entries:
+                    if len(target.entries) >= 2000:
+                        raise GraphValidationError("A deck supports at most 2000 cards")
+                    entries = [*target.entries, request.entry]
+                    # Moving an existing reference preserves even unavailable cards.
+                    self._validate_additions(db, state, entries, [*target.entries, *(source.entries if source else [])])
+                    target.entries = entries
+                if source is not None:
+                    source.entries = [entry for entry in source.entries if entry != request.entry]
+                state.active_deck_id = target.id
             elif request.action in {"update_deck", "delete_deck", "activate_deck"}:
                 deck = next((d for d in state.decks if d.id == request.id), None)
                 if deck is None:

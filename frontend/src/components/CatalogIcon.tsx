@@ -1,7 +1,7 @@
-import { Bot, Boxes, FileText, Image, MessagesSquare, Puzzle, Sparkles, Workflow, Wrench } from "lucide-react";
+import { Atom, Bot, Boxes, FileText, Image, MessagesSquare, Puzzle, Sparkles, Workflow, Wrench } from "lucide-react";
 import type { NodeTypeCatalogItem } from "../types/world";
 
-const icons = { bot: Bot, boxes: Boxes, "file-text": FileText, image: Image, "messages-square": MessagesSquare, sparkles: Sparkles, workflow: Workflow, wrench: Wrench };
+const icons = { atom: Atom, bot: Bot, boxes: Boxes, "file-text": FileText, image: Image, "messages-square": MessagesSquare, sparkles: Sparkles, workflow: Workflow, wrench: Wrench };
 
 export function CatalogIcon({ definition, size = 18 }: {
   definition?: Pick<NodeTypeCatalogItem, "icon" | "icon_url">; size?: number;

@@ -31,6 +31,37 @@ through `GET /api/catalog`; the canvas renders plugin definitions generically.
 
 Plugins execute inside the FastAPI process. Install only reviewed packages.
 
+Node `status` is host metadata, validated against the node definition's `statuses`.
+Strict plugin configuration models do not need a `status` field: create, update,
+and restore requests pass it at the top level. For compatibility, configuration
+models that declare `status` or allow extra fields retain the legacy config copy.
+
+## Connected file viewers
+
+Nodes with `core.file-viewer` can connect to nodes with `core.file-source` using
+`core.file-preview` ("Follow opened files"). This grants only `file.preview`;
+it does not grant Sandbox execution or lifecycle management. The capability
+broker checks the live direct relationship before and after reads.
+
+The frontend SDK exports `useFileViewer(card.id)` with `file`, `sources`,
+`pinned` and `setPinned`. `file` contains a `reference`, display `name` and a
+monotonic `sequence`. The hook observes current state, including files opened
+before connecting. `host.readFile(reference, signal)` returns complete bounded
+base64 bytes through the viewer-scoped backend endpoint. Each viewer owns format
+recognition and must cancel stale work and dispose its renderer on source changes.
+
+File source views may call `host.openFile(reference, name)` and
+`host.clearOpenedFile()`. The host scopes publication to the source card. Clear
+context when the source workspace or session changes or closes. Open-file and
+pin state are browser-local and are not stored in card configuration.
+
+Current source references are `{kind: "sandbox", source_id, root, path}` and
+`{kind: "conversation", source_id, session_id, version_id, path}`. Sandbox reads
+reuse its path/mount boundary; Conversation reads validate the attachment's
+session and artifact manifest. A new storage source needs a host read adapter;
+declaring a trait alone does not provide filesystem access. See the
+[Structure viewer](../plugins/structure_viewer/README.md) for an implementation.
+
 ## Package structure and discovery
 
 Use a conventional `src` package:

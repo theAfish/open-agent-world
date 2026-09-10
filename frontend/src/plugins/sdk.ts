@@ -2,6 +2,8 @@ import type { ComponentType } from "react";
 import type { NodeTypeCatalogItem, WorldCard } from "../types/world";
 export { SchemaFields } from "./SchemaFields";
 export { useNestedFlowGestures } from "../canvas/useNestedFlowGestures";
+export { useFileViewer } from "../state/openFiles";
+export type { FileReference, OpenedFile } from "../state/openFiles";
 
 export type PluginSlot = "preview" | "body" | "settings" | "workspace";
 export interface PluginViewProps {
@@ -16,6 +18,9 @@ export interface PluginViewProps {
     readDocument(nodeId?: string): Promise<{ value: unknown; revision: number }>;
     transform(operation: string, request: Record<string, unknown>): Promise<Record<string, unknown>>;
     documentDownloadUrl(name: string): string;
+    readFile(reference: import("../state/openFiles").FileReference, signal?: AbortSignal): Promise<{ name: string; size_bytes: number; data: string }>;
+    openFile(reference: import("../state/openFiles").FileReference, name: string): void;
+    clearOpenedFile(): void;
   };
 }
 export interface FrontendPlugin {

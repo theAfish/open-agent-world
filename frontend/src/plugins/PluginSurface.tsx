@@ -1,6 +1,7 @@
 import { Component, Suspense, useMemo, type ReactNode } from "react";
 import { worldApi, nodeDocumentDownloadUrl } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
+import { useOpenFiles } from "../state/openFiles";
 import type { WorldCard } from "../types/world";
 import { pluginView } from "./registry";
 import type { PluginSlot, PluginViewProps } from "./sdk";
@@ -29,6 +30,9 @@ export function PluginSurface({ card, slot, level, children }: {
     readDocument: (nodeId = card.id) => worldApi.getNodeDocument(nodeId),
     transform: (operation, request) => worldApi.transformDocument(card.id, operation, request),
     documentDownloadUrl: (name) => nodeDocumentDownloadUrl(card.id, name),
+    readFile: (reference, signal) => worldApi.readFilePreview(card.id, reference, signal),
+    openFile: (reference, name) => useOpenFiles.getState().open({ ...reference, source_id: card.id }, name),
+    clearOpenedFile: () => useOpenFiles.getState().clear(card.id),
   }), [card.id, updateCard]);
   const reference = definition?.frontend?.[slot];
   if (!reference || !definition) return <>{children}</>;

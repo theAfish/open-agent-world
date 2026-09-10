@@ -30,6 +30,19 @@ class CapabilityBroker:
         self.resources = resources
         self.plugins = plugins
 
+    def require_direct_grant(self, node_id: str, target_id: str, kind: str) -> None:
+        """Authorize a direct node-to-node operation, including non-Agent viewers."""
+        self.world.get_card(node_id)
+        self.world.get_card(target_id)
+        edges = [(edge, edge.target) for edge in self.world.connections_from(node_id)]
+        edges.extend((edge, edge.source) for edge in self.world.connections_to(node_id)
+                     if edge.direction == EdgeDirection.BIDIRECTIONAL)
+        for edge, target in edges:
+            relationship = self.plugins.relationship(edge.relationship)
+            if target == target_id and not relationship.generated and any(grant.kind == kind for grant in relationship.capabilities):
+                return
+        raise PermissionDeniedError("Connect the viewer to this file source before reading")
+
     def derive(self, agent_id: str) -> CapabilitySet:
         agent = self._require_agent(agent_id)
         capabilities: list[Capability] = []

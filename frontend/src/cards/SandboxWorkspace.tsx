@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight, Download, File, FileText, Folder, FolderOpen
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
+import { useOpenFiles } from "../state/openFiles";
 import { useNodeSurfaceStore } from "../state/nodeSurfaces";
 import type { WorldCard } from "../types/world";
 import { IconButton } from "../components/IconButton";
@@ -138,7 +139,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     setSelection(undefined); setPreview(undefined); expandedRef.current = {}; setExpanded({});
     setPublishPaths([]);
     void refreshFiles();
-    return () => { context.live = false; context.generation++; context.requests.clear(); };
+    return () => { context.live = false; context.generation++; context.requests.clear(); useOpenFiles.getState().clear(card.id); };
   }, [context]);
   useEffect(() => { void loadRuntimes(); void refreshSandbox(card.id); void refreshHistory().catch(e => setError(apiErrorMessage(e))); }, [card.id, socket]);
   const previousStatus = useRef(card.status);
@@ -171,6 +172,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   async function select(root: string, path: string, label: string) {
     const current = fileRequest("preview");
     setSelection({ root, path, label }); setPreview(undefined);
+    useOpenFiles.getState().open({ kind: "sandbox", source_id: card.id, root, path }, label);
     try {
       const value = await worldApi.sandboxWorkspace<Files>(card.id, fileQuery("preview", root, path));
       if (current()) setPreview(value);

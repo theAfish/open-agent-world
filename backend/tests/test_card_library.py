@@ -263,3 +263,47 @@ def test_shared_card_provenance_does_not_duplicate_collection(tmp_path):
     revision = store.read().revision
     assert store.read().revision == revision  # Read/reconcile must not fabricate a change.
     db.close()
+
+
+def test_move_entry_is_atomic_deduplicated_and_preserves_other_memberships(tmp_path):
+    db = Database(tmp_path / "world.db")
+    store = CardLibraryStore(db, create_builtin_registry())
+    edit(store, "open_pack", id="open-agent-world.core.default")
+    edit(store, "update_deck", id="starter", entries=[{"id": "text"}, {"id": "image"}])
+    target = edit(store, "create_deck", name="Target", entries=[{"id": "text"}]).active_deck_id
+    other = edit(store, "create_deck", name="Other", entries=[{"id": "text"}]).active_deck_id
+    stale = store.read().revision
+    state = edit(store, "move_entry", source_deck_id="starter", id=target, entry={"id": "text"})
+    decks = {deck.id: deck for deck in state.decks}
+    assert [entry.id for entry in decks["starter"].entries] == ["image"]
+    assert [entry.id for entry in decks[target].entries] == ["text"]
+    assert [entry.id for entry in decks[other].entries] == ["text"]
+    assert state.active_deck_id == target
+    with pytest.raises(RevisionConflictError):
+        store.edit(LibraryEdit(action="move_entry", expected_revision=stale, source_deck_id="starter", id=target, entry={"id": "image"}))
+    assert store.read().model_dump(mode="json") == state.model_dump(mode="json")
+    with pytest.raises(GraphValidationError, match="source deck"):
+        edit(store, "move_entry", source_deck_id="starter", id=target, entry={"id": "agent"})
+    assert store.read().model_dump(mode="json") == state.model_dump(mode="json")
+    db.close()
+    db = Database(tmp_path / "world.db")
+    assert CardLibraryStore(db, create_builtin_registry()).read().model_dump(mode="json") == state.model_dump(mode="json")
+    db.close()
+
+
+def test_move_unavailable_reference_preserves_collection_rules(tmp_path):
+    registry = create_builtin_registry()
+    install(registry)
+    db = Database(tmp_path / "world.db")
+    store = CardLibraryStore(db, registry)
+    edit(store, "open_pack", id="example.default")
+    edit(store, "update_deck", id="starter", entries=[{"id": "example.card"}])
+    target = edit(store, "create_deck", name="Archived").active_deck_id
+    edit(store, "set_plugin_enabled", id="example", enabled=False)
+    state = edit(store, "move_entry", source_deck_id="starter", id=target, entry={"id": "example.card"})
+    assert not state.decks[0].entries
+    assert state.decks[1].entries[0].id == "example.card"
+    with pytest.raises(GraphValidationError, match="Only collected"):
+        edit(store, "move_entry", id="starter", entry={"id": "example.card"})
+    assert store.read().model_dump(mode="json") == state.model_dump(mode="json")
+    db.close()

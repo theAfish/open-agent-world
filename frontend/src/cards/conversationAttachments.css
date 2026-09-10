@@ -1,6 +1,8 @@
 .conversation-attachments, .conversation-pending-files { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-top: 8px; font-size: var(--conversation-font-size, 10px); line-height: 1.6; }
 .conversation-attachment { display: flex; flex-direction: column; gap: 4px; min-width: 0; max-width: min(344px, 100%); padding: 10px; border: 1px solid #87969b55; border-radius: 8px; overflow-wrap: anywhere; }
 .conversation-attachment small { font-size: var(--conversation-caption-size, 10px); opacity: .65; }
+.conversation-file-open { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.conversation-file-open[aria-pressed=true] { color: var(--accent, #407d6a); font-weight: 600; }
 .workspace-message.is-user .conversation-attachments { justify-content: flex-end; }
 .conversation-image-thumbnail { padding: 0; border: 0; background: transparent; cursor: zoom-in; }
 .conversation-image-thumbnail { max-width: 100%; }

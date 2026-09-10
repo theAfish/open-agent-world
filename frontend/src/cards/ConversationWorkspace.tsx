@@ -12,6 +12,7 @@ import {
   resolveConversationTargets,
 } from "../state/conversationMentions";
 import { useWorldStore } from "../state/worldStore";
+import { useOpenFiles } from "../state/openFiles";
 import type { ConversationAgent, ConversationAttachment, ConversationMessage, ConversationSession, WorldCard } from "../types/world";
 
 type OutgoingMessage = { message: ConversationMessage; status: "sending" | "confirmed" | "unconfirmed" };
@@ -38,6 +39,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const [sessions, setSessions] = useState<ConversationSession[]>([]);
   const [agents, setAgents] = useState<ConversationAgent[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>();
+  useEffect(() => () => useOpenFiles.getState().clear(card.id), [card.id, activeSessionId]);
 
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<ConversationAttachment[]>([]);

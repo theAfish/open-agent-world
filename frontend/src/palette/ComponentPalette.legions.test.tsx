@@ -74,3 +74,30 @@ it("removes an unavailable entry only from the current deck", async () => {
     entries: [{ kind: "legion", id: "saved" }] }));
   expect(remove).not.toHaveBeenCalled();
 });
+
+it("moves a dragged entry to a deck tab using one revisioned library action", async () => {
+  vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+  const edit = vi.fn().mockResolvedValue(null);
+  const place = vi.fn();
+  useWorldStore.setState({ createCard: place, legions: [] });
+  useCardLibrary.setState({ busy: false, refresh: vi.fn().mockResolvedValue(undefined), edit,
+    snapshot: { schema_version: 1, revision: 1, migration_pending: false, plugins: {}, packs: {},
+      card_definitions: {}, collection: {}, available_card_ids: [], available_pack_ids: [], active_deck_id: "source",
+      decks: [{ id: "source", name: "Source", icon: "folder", entries: [{ kind: "node", id: "missing" }] },
+        { id: "target", name: "Target", icon: "folder", entries: [] }] } });
+  const screen = render(<ComponentPalette />);
+  const target = screen.getByRole("tab", { name: /Target/ });
+  const transfer = { setData: vi.fn(), dropEffect: "none" };
+  fireEvent.drop(target);
+  expect(edit).not.toHaveBeenCalled();
+  fireEvent.dragStart(screen.getByRole("button", { name: "missing unavailable" }), { dataTransfer: transfer });
+  fireEvent.dragOver(screen.getByRole("tab", { name: /Source/ }), { dataTransfer: transfer });
+  expect(transfer.dropEffect).toBe("none");
+  fireEvent.dragOver(target, { dataTransfer: transfer });
+  expect(target.classList.contains("is-drop-target")).toBe(true);
+  expect(transfer.dropEffect).toBe("move");
+  fireEvent.drop(target);
+  await waitFor(() => expect(edit).toHaveBeenCalledWith({ action: "move_entry", source_deck_id: "source", id: "target", entry: { kind: "node", id: "missing" } }));
+  expect(target.classList.contains("is-drop-target")).toBe(false);
+  expect(place).not.toHaveBeenCalled();
+});

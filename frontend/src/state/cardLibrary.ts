@@ -21,11 +21,13 @@ export interface LibrarySnapshot {
   available_pack_ids: string[];
 }
 export interface LibraryEdit {
-  action: "open_pack" | "create_deck" | "update_deck" | "delete_deck" | "activate_deck" | "import_legacy" | "set_plugin_enabled";
+  action: "open_pack" | "create_deck" | "update_deck" | "delete_deck" | "activate_deck" | "move_entry" | "import_legacy" | "set_plugin_enabled";
   id?: string;
   name?: string;
   icon?: string;
   entries?: DeckEntry[];
+  entry?: DeckEntry;
+  source_deck_id?: string;
   decks?: CardDeck[];
   enabled?: boolean;
 }

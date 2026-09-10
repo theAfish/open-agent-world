@@ -19,6 +19,7 @@ from backend.api.execution_credentials import router as execution_credentials_ro
 from backend.api.artifacts import router as artifacts_router
 from backend.api.library_translation import router as library_translation_router
 from backend.api.card_library import router as card_library_router
+from backend.api.file_preview import router as file_preview_router
 from backend.plugins import PluginCatalog
 from backend.services import ApplicationServices
 
@@ -39,6 +40,7 @@ async def plugin_catalog(
 
 
 api_router.include_router(world_router)
+api_router.include_router(file_preview_router)
 api_router.include_router(card_library_router)
 api_router.include_router(artifacts_router)
 api_router.include_router(execution_credentials_router)
