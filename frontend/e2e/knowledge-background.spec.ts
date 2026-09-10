@@ -28,17 +28,16 @@ test('nested knowledge backgrounds never change world pixels or share SVG resour
       await expect(page.locator('.kdg-canvas .contour-chunk')).toHaveCount(0);
       expect(await page.locator('.contour-chunk').evaluateAll(chunks => chunks.length > 0 && chunks.every(chunk => chunk.closest('.react-flow')?.id === 'oaw-world-map'))).toBe(true);
     };
-    for (const id of created) {
-      await page.locator(`[data-card-id="${id}"]`).getByRole('button', { name: 'Open workspace' }).click();
-      await expect(page.getByRole('region', { name: 'Background isolation check workspace' }).first().locator('.react-flow__background')).toBeVisible();
-      await checkBackground();
-    }
+    await expect(page.getByRole('region', { name: 'Background isolation check workspace' }).first().locator('.react-flow__background')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Background isolation check workspace' }).last().locator('.react-flow__background')).toBeVisible();
+    await checkBackground();
     const map = page.locator(`[data-card-id="${created[1]}"] .kdg-canvas`);
     await map.getByRole('button', { name: /zoom in/i }).click();
     await expect.poll(async () => (await page.screenshot({ clip })).equals(baseline)).toBe(true);
     await checkBackground();
     for (const id of [...created].reverse()) {
-      await page.locator(`[data-card-id="${id}"]`).getByRole('button', { name: 'Show member cards' }).click();
+      await request.delete(`/api/nodes/${id}`);
+      await expect(page.locator(`[data-card-id="${id}"]`)).toHaveCount(0);
       await checkBackground();
     }
   } finally {

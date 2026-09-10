@@ -15,7 +15,7 @@ export function ContainerFrame({ card, selected, className, label, header, child
   card: WorldCard; selected?: boolean; className: string; label: string; header: ReactNode; children?: ReactNode;
 }) {
   const catalog = useWorldStore((state) => state.catalog);
-  const update = useWorldStore((state) => state.updateCard);
+  const resize = useWorldStore((state) => state.resizeContainer);
   const spec = containerDefinition(card, catalog)!;
   const activity = useNodeActivity(card, true);
   const generation = useNodeGeneration(card.id);
@@ -34,7 +34,7 @@ export function ContainerFrame({ card, selected, className, label, header, child
     onPointerLeave={() => clearConnectionHoverHint(frameRef.current)}>
     <ActivityGlow phase={activity.phase} />
     {selected && <NodeResizeControl className="container-resize-arc" position="bottom-right" minWidth={spec.min_size[0]} minHeight={spec.min_size[1]} maxWidth={4096} maxHeight={4096}
-      onResizeEnd={(_event, size) => void update(card.id, { size: { width: size.width, height: size.height } })} />}
+      onResizeEnd={(_event, size) => void resize(card.id, { width: size.width, height: size.height })} />}
     {spec.connectable && ([[Position.Top, "top"], [Position.Right, "right"], [Position.Bottom, "bottom"], [Position.Left, "left"]] as const).map(([position, side]) =>
       <Handle key={side} type="source" id={`boundary-${side}`} position={position} className={`semantic-handle semantic-handle--${side}`} data-connection-side={side} aria-label={`Connect ${card.name} ${side}`} />)}
     {spec.connectable && <ConnectionHoverHint />}

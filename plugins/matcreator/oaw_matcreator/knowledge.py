@@ -92,10 +92,15 @@ def validate_update(old, new):
             raise ValueError("Assimilated source snapshots are immutable")
     entries = {e["id"]: e for e in new["entries"]}
     for entry in old["entries"]:
-        if entry["owner"] == "publisher":
-            replacement = entries.get(entry["id"], {})
+        replacement = entries.get(entry["id"])
+        if replacement is None:
+            continue  # Local graph deletion leaves the immutable source snapshot intact.
+        if entry["provenance"].get("snapshot"):
+            if replacement["provenance"] != entry["provenance"] or replacement["resources"] != entry["resources"]:
+                raise ValueError("Imported knowledge must retain its source provenance and resources")
+        if entry["owner"] == "publisher" and replacement["owner"] == "publisher":
             if {k: v for k, v in entry.items() if k != "usage_count"} != {k: v for k, v in replacement.items() if k != "usage_count"}:
-                raise ValueError("Publisher knowledge is immutable; create a user-owned refinement")
+                raise ValueError("Edited imported knowledge must become user-owned")
 
 def query(value, arguments):
     q = Query.model_validate(arguments)
@@ -168,9 +173,9 @@ def edit(value, arguments):
     old = next((e for e in value["entries"] if e["id"] == args.entry_id), None)
     if args.entry_id and old is None:
         raise ValueError("Entry not found")
-    if old and old["owner"] == "publisher":
-        raise ValueError("Published knowledge is preserved; create a user-owned refinement")
     entry = Entry.model_validate({**(old or {}), **args.model_dump(exclude={"entry_id"})}).model_dump(mode="json")
+    if old and old["owner"] == "publisher":
+        entry.update(owner="user", refinement="pending")
     return {**value, "entries": [e for e in value["entries"] if not old or e["id"] != old["id"]] + [entry]}
 
 class Memory(Model):
@@ -221,8 +226,8 @@ class EdgeId(Model):
 def delete_entry(value, arguments):
     key = EntryId.model_validate(arguments).entry_id
     entry = next((e for e in value["entries"] if e["id"] == key), None)
-    if entry is None or entry["owner"] != "user":
-        raise ValueError("Only existing user-owned entries can be deleted")
+    if entry is None:
+        raise ValueError("Entry not found")
     return {**value, "entries": [e for e in value["entries"] if e["id"] != key],
             "edges": [e for e in value["edges"] if key not in (e["source"], e["target"])]}
 

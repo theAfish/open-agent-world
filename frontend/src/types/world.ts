@@ -319,6 +319,7 @@ export interface ConversationSummary {
 }
 
 export interface ContainerDefinition {
+  member_display?: "cards" | "workspace";
   virtual?: boolean;
   member_type?: CardType | null;
   member_traits: string[];

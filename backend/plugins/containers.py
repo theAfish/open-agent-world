@@ -1,5 +1,6 @@
 """Declarative base contract for spatial containers; membership grants no capabilities."""
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,10 +15,12 @@ class NodeContainerDefinition:
     document_field: str | None = None
     member_type: str | None = None
     virtual: bool = False
+    # A plugin workspace can be the sole visual representation of its members.
+    member_display: Literal["cards", "workspace"] = "cards"
 
     def catalog_item(self):
         return {"member_traits": sorted(self.member_traits), "parentable": self.parentable,
                 "connectable": self.connectable, "min_size": self.min_size,
                 "content_inset": self.content_inset, "max_members": self.max_members,
                 "document_field": self.document_field, "member_type": self.member_type,
-                "virtual": self.virtual}
+                "virtual": self.virtual, "member_display": self.member_display}

@@ -8,7 +8,6 @@ test('knowledge map has quiet curves and contextual neighborhood emphasis', asyn
   const imported = await request.post(`/api/nodes/${graph.id}/transformations/assimilate`, { data: { source_type: 'matcreator.core', expected_revision: doc.revision, confirm: true } });
   expect(imported.status()).toBe(200);
   await page.goto('/');
-  await page.locator(`[data-card-id="${graph.id}"]`).getByRole('button', { name: 'Open workspace' }).click();
   const map = page.getByRole('region', { name: 'Demo knowledge workspace', exact: true });
   await expect(map.locator('.kdg-node').first()).toBeVisible();
   await expect(map.locator('.kdg-navigator')).toHaveCount(0);
@@ -55,7 +54,6 @@ test("KDG workspace assimilates, selects, filters and expands real knowledge", a
   const graph = await graphResponse.json();
   const source = await (await request.post("/api/nodes", { data: { type: "matcreator.core", name: "Demo Materials Core", position: { x: 1400, y: 100 } } })).json();
   await page.goto("/");
-  await page.locator(`[data-card-id="${graph.id}"]`).getByRole("button", { name: "Open workspace" }).click();
   const workspace = page.getByRole("region", { name: "Demo knowledge workspace", exact: true });
   await workspace.getByRole('button', { name: 'Toggle navigator' }).click();
   await workspace.getByText("Assimilate a Toolset", { exact: true }).click();
@@ -80,7 +78,6 @@ test("KDG workspace assimilates, selects, filters and expands real knowledge", a
   await expect(workspace.locator(".react-flow__node")).toHaveCount(0);
   await workspace.getByLabel("Knowledge type", { exact: true }).selectOption("");
   await expect(local).toBeVisible();
-  await workspace.getByLabel("Workspace mode").selectOption("edit");
   await workspace.getByRole("button", { name: "New entry", exact: true }).click();
   await workspace.getByLabel("Title", { exact: true }).fill("Copper validation note");
   await workspace.getByLabel("Content", { exact: true }).fill("Verify atom count and cell volume after conversion.");
@@ -125,10 +122,20 @@ test("dropping a Toolset into a declared body requires confirmation before consu
 
 test('palette Toolset drops directly into an inline graph workspace', async ({ page, request }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
+  // Decks are user-owned; explicitly collect and place the Toolset in this fixture.
+  let library = await (await request.get('/api/card-library')).json();
+  const pack = Object.values(library.packs).find((item: any) => item.definition.cards.includes('matcreator.core')) as any;
+  for (const action of [
+    { action: 'open_pack', id: pack.definition.id },
+    { action: 'create_deck', name: 'Tools', icon: 'boxes', entries: [{ kind: 'node', id: 'matcreator.core' }] },
+  ]) {
+    const response = await request.post('/api/card-library/actions', { data: { ...action, expected_revision: library.revision } });
+    expect(response.status()).toBe(200);
+    library = await response.json();
+  }
   const graph = await (await request.post('/api/nodes', { data: { type: 'matcreator.kdg', name: 'Demo knowledge', position: { x: 100, y: 100 } } })).json();
   await page.goto('/');
   const container = page.locator(`[data-card-id="${graph.id}"]`);
-  await container.getByRole('button', { name: 'Open workspace' }).click();
   const workspace = container.getByRole('region', { name: 'Demo knowledge workspace', exact: true });
   await expect(workspace).toBeVisible();
   await page.getByRole('tab', { name: /Tools/ }).click();
@@ -170,8 +177,8 @@ test('palette Toolset drops directly into an inline graph workspace', async ({ p
   const movedWorkspace = await workspace.boundingBox();
   expect(Math.round(movedWorkspace!.x - previous!.x)).toBe(Math.round(movedContainer!.x - outer!.x));
   await page.screenshot({ path: '../.outputs/matcreator-inline-graph.png' });
-  await container.getByRole('button', { name: 'Show member cards' }).click();
-  await expect(workspace).toHaveCount(0);
+  await expect(container.getByRole('button', { name: 'Show member cards' })).toHaveCount(0);
+  await expect(workspace).toBeVisible();
   const member = world.nodes.find((node: { parent_id: string }) => node.parent_id === graph.id);
-  await expect(page.locator(`[data-card-id="${member.id}"]`)).toBeVisible();
+  await expect(page.locator(`[data-card-id="${member.id}"]`)).toHaveCount(0);
 });

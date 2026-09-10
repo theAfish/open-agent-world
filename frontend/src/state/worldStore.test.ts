@@ -82,6 +82,32 @@ describe("authoritative world synchronization", () => {
     expect(useWorldStore.getState().cards).toEqual([]);
   });
 
+  it('saves a container resize with members as one batch and restores sizes and positions on undo', async () => {
+    const group = { ...card('group', 'legion'), size: { width: 1400, height: 700 } };
+    const members = Array.from({ length: 4 }, (_, i) => ({ ...card(`member-${i}`, 'text'), parent_id: group.id, position: { x: 440 + i * 310, y: 160 } }));
+    useWorldStore.setState({ cards: [group, ...members] });
+    const update = vi.spyOn(worldApi, 'batchUpdateNodes').mockImplementation(async patches => patches.map(p => ({ ...useWorldStore.getState().cards.find(c => c.id === p.node_id)!, ...p.patch })));
+    await useWorldStore.getState().resizeContainer(group.id, { width: 800, height: 550 });
+    const resized = useWorldStore.getState().cards.map(c => ({ ...c }));
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(useWorldStore.getState().undoStack).toHaveLength(1);
+    expect(resized.find(c => c.id === group.id)!.size.height).toBeGreaterThan(550);
+    await useWorldStore.getState().undo();
+    expect(useWorldStore.getState().cards).toEqual([group, ...members]);
+    await useWorldStore.getState().redo();
+    expect(useWorldStore.getState().cards).toEqual(resized);
+  });
+
+  it('rolls back the frame and members together when a resize cannot be saved', async () => {
+    const group = card('group', 'legion');
+    const member = { ...card('member', 'text'), parent_id: group.id, position: { x: 2000, y: 400 } };
+    useWorldStore.setState({ cards: [group, member] });
+    vi.spyOn(worldApi, 'batchUpdateNodes').mockRejectedValue(new Error('offline'));
+    await useWorldStore.getState().resizeContainer(group.id, { width: 800, height: 550 });
+    expect(useWorldStore.getState().cards).toEqual([group, member]);
+    expect(useWorldStore.getState().undoStack).toHaveLength(0);
+  });
+
   it("forms, undoes and restores a team without recreating its existing members", async () => {
     const first = card("first", "agent");
     const second = card("second", "text");

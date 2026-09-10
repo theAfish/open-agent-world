@@ -144,6 +144,39 @@ def test_graph_validation_and_review(client):
     assert action(client, target, 'search', {'review': True}).json()['value']['nodes'] == []
     assert len(action(client, target, 'expand', {'ids': [entry['id']]}).json()['value']['nodes']) == 2
 
+
+def test_graph_displays_its_workspace_and_curates_imported_entries_locally(client):
+    graph = create_node(client, 'matcreator.kdg')
+    definition = next(item for item in client.get('/api/catalog').json()['node_types'] if item['id'] == graph['type'])
+    assert definition['container']['member_display'] == 'workspace'
+    current = client.get(f"/api/nodes/{graph['id']}/document").json()
+    imported = client.post(f"/api/nodes/{graph['id']}/transformations/assimilate", json={
+        'source_type': 'matcreator.core', 'expected_revision': current['revision'], 'confirm': True})
+    assert imported.status_code == 200, imported.text
+    before = client.get(f"/api/nodes/{graph['id']}/document").json()['value']
+    entry = before['entries'][0]
+    updated = action(client, graph, 'edit', {'entry_id': entry['id'], 'title': 'Local notes', 'content': 'Reviewed for this graph', 'type': entry['type']})
+    assert updated.status_code == 200, updated.text
+    inspected = action(client, graph, 'inspect', {'entry_id': entry['id']}).json()['value']
+    assert inspected['entry']['id'] == entry['id']
+    assert inspected['entry']['owner'] == 'user'
+    assert inspected['entry']['provenance'] == entry['provenance']
+    assert inspected['entry']['resources'] == entry['resources']
+    assert inspected['resources']
+    changed = client.get(f"/api/nodes/{graph['id']}/document").json()['value']
+    assert changed['snapshots'] == before['snapshots']
+    assert changed['skills'] == before['skills']
+    # Both edited and untouched imported entries can leave this graph.
+    for selected in [entry, before['entries'][1]]:
+        assert action(client, graph, 'delete_entry', {'entry_id': selected['id']}).status_code == 200
+        assert action(client, graph, 'inspect', {'entry_id': selected['id']}).status_code == 422
+    after = client.get(f"/api/nodes/{graph['id']}/document").json()['value']
+    assert after['snapshots'] == before['snapshots']
+    assert after['skills'] == before['skills']
+    removed = {entry['id'], before['entries'][1]['id']}
+    assert not any(edge['source'] in removed or edge['target'] in removed for edge in after['edges'])
+    assert action(client, graph, 'replace', {**after, 'snapshots': {}}).status_code == 422
+
 def test_large_progressive_graph_and_scoped_capabilities(client):
     graph = create_node(client, 'matcreator.kdg')
     payload = {'entries': [{'id': f'e{i}', 'title': f'Knowledge {i}', 'type': 'capability'} for i in range(1200)],

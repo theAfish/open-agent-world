@@ -26,7 +26,8 @@ import { getViewportChunkKeys, viewportCenterToWorld } from "./chunks";
 import { EMPTY_CATALOG, getNodeType } from "./catalog";
 import { buildCardDraft, makeStressCards, mergeCardPatch } from "./helpers";
 import { summarizeLegionSelection } from "./legions";
-import { ancestors, containerDefinition, descendants, ownedDescendants, isContainer, parentFirst } from "./containers";
+import { ancestors, containerDefinition, descendants, ownedDescendants, isContainer, parentFirst, resizeContainerLayout } from "./containers";
+import { surfaceLevelForNode, useNodeSurfaceStore } from "./nodeSurfaces";
 import { isEquipmentConnection } from "./equipment";
 import { validateConnection, type RelationshipOption } from "./relationships";
 import { describeRuntimeError } from "./runtimeErrors";
@@ -59,7 +60,7 @@ export type WorldHistoryOperation =
   | { id: number; label: string; kind: "card-created"; cards: RestorableCard[] }
   | { id: number; label: string; kind: "cards-deleted"; cards: RestorableCard[]; edges: WorldEdge[] }
   | { id: number; label: string; kind: "card-updated"; before: WorldCard; after: WorldCard }
-  | { id: number; label: string; kind: "cards-updated"; before: WorldCard[]; after: WorldCard[]; membership?: boolean }
+  | { id: number; label: string; kind: "cards-updated"; before: WorldCard[]; after: WorldCard[]; membership?: boolean; sizes?: boolean }
   | {
       id: number;
       label: string;
@@ -102,12 +103,12 @@ function cardRestorePatch(card: WorldCard): Partial<Omit<WorldCard, "id" | "type
   };
 }
 
-async function applyCardPositions(cards: WorldCard[], membership = false): Promise<WorldCard[]> {
+async function applyCardPositions(cards: WorldCard[], membership = false, sizes = false): Promise<WorldCard[]> {
   const persistent = cards.filter((card) => !card.ephemeral);
   const authoritative = persistent.length > 0
     ? await worldApi.batchUpdateNodes(persistent.map((card) => ({
         node_id: card.id,
-        patch: { position: { ...card.position }, ...(membership ? { parent_id: card.parent_id ?? null } : {}) },
+        patch: { position: { ...card.position }, ...(membership ? { parent_id: card.parent_id ?? null } : {}), ...(sizes ? { size: card.size } : {}) },
       })))
     : [];
   const authoritativeById = new Map(authoritative.map((card) => [card.id, card]));
@@ -292,6 +293,7 @@ interface WorldState {
     patch: Partial<Omit<WorldCard, "id" | "type">>,
   ) => Promise<void>;
   updateCardPositions: (updates: Array<{ id: string; position: WorldPosition; parent_id?: string | null }>) => Promise<void>;
+  resizeContainer: (id: string, size: WorldCard['size']) => Promise<void>;
   waitForPositionCommits: () => Promise<void>;
   createLegion: (input: {
     name: string;
@@ -690,6 +692,32 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         syncState: "online",
       }));
       get().pushToast({ tone: "error", title: "Change was not saved", detail: apiErrorMessage(error) });
+    }
+  }),
+
+  resizeContainer: (id, size) => withHistoryTransaction(async () => {
+    const { cards, catalog } = get();
+    const parent = cards.find(card => card.id === id);
+    if (!parent || !isContainer(parent, catalog)) return;
+    const surfaces = useNodeSurfaceStore.getState().surfaceLevels;
+    const levels = new Map(cards.map(card => [card.id, surfaceLevelForNode(card.id, surfaces)]));
+    const layout = resizeContainerLayout(cards, catalog, levels, id, size);
+    const before = cards.filter(card => card.id === id || layout.positions.has(card.id)).map(copyCard);
+    const after = before.map(card => ({ ...card, size: card.id === id ? layout.size : card.size, position: layout.positions.get(card.id) ?? card.position }));
+    const optimistic = new Map(after.map(card => [card.id, card]));
+    markWorldMutation();
+    set(state => ({ cards: state.cards.map(card => optimistic.get(card.id) ?? card), syncState: 'syncing' }));
+    try {
+      const saved = await applyCardPositions(after, false, true);
+      const byId = new Map(saved.map(card => [card.id, card]));
+      markWorldMutation();
+      set(state => ({ cards: state.cards.map(card => byId.get(card.id) ?? card), syncState: 'online',
+        undoStack: appendHistory(state.undoStack, { id: ++historySequence, kind: 'cards-updated', label: `Resize ${parent.name}`, before, after: saved, sizes: true }), redoStack: [] }));
+    } catch (error) {
+      const byId = new Map(before.map(card => [card.id, card]));
+      markWorldMutation();
+      set(state => ({ cards: state.cards.map(card => byId.get(card.id) ?? card), syncState: 'online' }));
+      get().pushToast({ tone: 'error', title: 'Container resize was not saved', detail: apiErrorMessage(error) });
     }
   }),
 
@@ -1739,7 +1767,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
           break;
         }
         case "cards-updated": {
-          const restored = await applyCardPositions(operation.before, operation.membership);
+          const restored = await applyCardPositions(operation.before, operation.membership, operation.sizes);
           const byId = new Map(restored.map((card) => [card.id, card]));
           set((state) => ({
             cards: state.cards.map((card) => byId.get(card.id) ?? card),
@@ -1889,7 +1917,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
           break;
         }
         case "cards-updated": {
-          const restored = await applyCardPositions(operation.after, operation.membership);
+          const restored = await applyCardPositions(operation.after, operation.membership, operation.sizes);
           const byId = new Map(restored.map((card) => [card.id, card]));
           set((state) => ({
             cards: state.cards.map((card) => byId.get(card.id) ?? card),

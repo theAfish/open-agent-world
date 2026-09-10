@@ -47,10 +47,10 @@ class MatCreatorPlugin:
                 target_parameter="knowledge", description={"search": "Find a bounded working subgraph, then inspect or expand selected IDs.",
                 "expand": "Expand one-hop neighborhoods of selected IDs with filters and pagination.",
                 "inspect": "Read one entry, its provenance and addressable Skill resources. Scripts require separate Sandbox authorization.",
-                "statistics": "Inspect graph counts.", "edit": "Create or update user-owned knowledge with an expected revision.",
+                "statistics": "Inspect graph counts.", "edit": "Create or update local graph knowledge with an expected revision; imported edits become user-owned and preserve their source snapshot.",
                 "save_memory": "Save execution experience for later explicit review.", "distill": "Review pending memories into a durable Heuristic or Procedure with evidence.",
                 "connect": "Explicitly create a validated semantic relationship.",
-                "delete_entry": "Delete a user-owned entry and its relationships explicitly.",
+                "delete_entry": "Delete a local graph entry and its relationships; keep source snapshots and Skill resources.",
                 "delete_relationship": "Delete one selected semantic relationship explicitly."}[operation], input_schema=schema), invoke)
         async def read(context, capability, arguments):
             result = await context.node_document_action(capability, "read", {})
@@ -62,8 +62,8 @@ class MatCreatorPlugin:
             icon="network", color="#879a9d", deck_id="tools", deck_label="Tools", deck_icon="boxes", default_name="Know-Do Graph",
             default_size=(1000, 650), default_status="available", statuses=frozenset({"available"}), config_model=ToolboxConfig,
             traits=frozenset({"knowledge.graph"}), surfaces={"preview": True, "inspector": True, "workspace": True}, templateable=True,
-            frontend={"workspace": "workspace", "body": "workspace"},
-            container=SkillContainerDefinition(member_type="matcreator.kdg.skill", max_members=1000),
+            frontend={"workspace": "workspace"},
+            container=SkillContainerDefinition(member_type="matcreator.kdg.skill", max_members=1000, member_display="workspace"),
             document=NodeDocumentDefinition(model=k.Graph, initial_value=k.Graph().model_dump(), actions=actions,
                 summarize=k.summary, validate_update=k.validate_update, capture=lambda value: {**value, "skills": []}, max_size_bytes=32 * 1024 * 1024,
                 transformations={"assimilate": NodeDocumentTransformation("Assimilate Toolset", frozenset({"oaw.skill-package"}), k.assimilate)},
@@ -80,7 +80,7 @@ class MatCreatorPlugin:
             capabilities=tuple(CapabilityGrantDefinition(kind=kind) for kind in [READ, *["matcreator.kdg." + key for key in reads], "matcreator.kdg.save_memory"])))
         registration.register_relationship(RelationshipDefinition(id="matcreator.kdg.curate", label="Curate knowledge", short_label="curate",
             templateable=True,
-            description="Explicitly authorize editing user-owned knowledge and reviewing memories.",
+            description="Explicitly authorize editing local graph knowledge and reviewing memories; source snapshots stay immutable.",
             source_traits=frozenset({"core.agent"}), target_types=frozenset({"matcreator.kdg"}),
             capabilities=tuple(CapabilityGrantDefinition(kind=kind) for kind in [READ, *["matcreator.kdg." + key for key in [*reads, *writes]]])))
         registration.register_pack(PackDefinition(id='matcreator.default', name='MatCreator',

@@ -584,6 +584,11 @@ class PluginRegistry:
                     raise ValueError("Summoning requires a document and a capability owned by the same plugin")
                 if definition.container is None:
                     raise ValueError("Summoning catalogs require a container")
+            if definition.container:
+                if definition.container.member_display not in {"cards", "workspace"}:
+                    raise ValueError("Unknown container member display")
+                if definition.container.member_display == "workspace" and not definition.frontend.get("workspace"):
+                    raise ValueError("Workspace member display requires a frontend workspace")
             if definition.container and definition.container.document_field:
                 member = staged.nodes.get(definition.container.member_type)
                 if member is None or member.document is None or member.lifecycle is not None:

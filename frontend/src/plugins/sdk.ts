@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import type { NodeTypeCatalogItem, WorldCard } from "../types/world";
 export { SchemaFields } from "./SchemaFields";
+export { useNestedFlowGestures } from "../canvas/useNestedFlowGestures";
 
 export type PluginSlot = "preview" | "body" | "settings" | "workspace";
 export interface PluginViewProps {
