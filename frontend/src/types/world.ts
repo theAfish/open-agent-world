@@ -320,6 +320,7 @@ export interface ConversationSummary {
 
 export interface ContainerDefinition {
   virtual?: boolean;
+  member_type?: CardType | null;
   member_traits: string[];
   parentable: boolean;
   connectable: boolean;

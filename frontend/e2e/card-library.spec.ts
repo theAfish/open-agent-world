@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import type { LibrarySnapshot } from "../src/state/cardLibrary";
 
 test("packs, collection and active decks persist and recover from plugin disable", async ({ page, request, context }) => {
   test.setTimeout(90000);
@@ -44,6 +45,7 @@ test("packs, collection and active decks persist and recover from plugin disable
   await expect(tray.getByRole("button", { name: "Place Text file", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Open Pack and Card Library" }).click();
   await library.getByRole("button", { name: /^Cards/ }).click();
+  await library.getByLabel("Source pack", { exact: true }).selectOption({ label: "Core essentials" });
   await library.getByRole("button", { name: "Remove Text file from deck" }).click();
   await expect(library.getByRole("button", { name: "Add Text file to deck" })).toBeVisible();
   await library.getByRole("button", { name: /^Decks/ }).click();
@@ -111,5 +113,57 @@ test("packs, collection and active decks persist and recover from plugin disable
     return [...panel.querySelectorAll("button")].every(button => { const rect = button.getBoundingClientRect(); return rect.left >= box.left && rect.right <= box.right && rect.top >= box.top && rect.bottom <= box.bottom; });
   })).toBe(true);
   await page.screenshot({ path: "../.tmp/deck-controls-fixed.png" });
+  expect(errors).toEqual([]);
+});
+
+test("source packs organize the collection and scoped Skills lead to their usable containers", async ({ page, request }) => {
+  test.setTimeout(60000);
+  let snapshot: LibrarySnapshot = await (await request.get("/api/card-library")).json();
+  for (const id of snapshot.available_pack_ids) {
+    const result = await request.post("/api/card-library/actions", { data: { action: "open_pack", id, expected_revision: snapshot.revision } });
+    expect(result.ok()).toBe(true);
+    snapshot = await result.json();
+  }
+  const internal = Object.values(snapshot.card_definitions).find(card => !card.user_creatable && card.label === "Skill"
+    && snapshot.collection[card.id]?.unlocked && Object.values(snapshot.card_definitions).some(owner => owner.container?.member_type === card.id && snapshot.available_card_ids.includes(owner.id)))!;
+  expect(internal).toBeTruthy();
+  const owner = Object.values(snapshot.card_definitions).find(card => card.container?.member_type === internal.id)!;
+  const packId = snapshot.collection[internal.id].source_pack_ids[0];
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open Pack and Card Library" }).click();
+  const library = page.getByRole("dialog", { name: "Pack & Card Library" });
+  await library.getByRole("button", { name: /^Cards/ }).click();
+  await expect(library.getByRole("checkbox", { name: /Show internal cards/ })).not.toBeChecked();
+  expect(await library.locator(".library-source-group").count()).toBeGreaterThan(1);
+  await expect(library.locator(".library-source-group[open]")).toHaveCount(0);
+  await expect(library.locator(".library-internal-cards")).toHaveCount(0);
+  await page.screenshot({ path: "../.tmp/library-grouped-packs.png" });
+  await library.getByLabel("Source pack", { exact: true }).selectOption(`pack:${packId}`);
+  await expect(library.locator(".library-source-group")).toHaveCount(1);
+  await expect(library.getByRole("heading", { name: snapshot.packs[packId].definition.name, exact: true })).toBeVisible();
+  const group = library.locator(".library-source-group");
+  await group.locator(":scope > summary").click();
+  await expect(group).not.toHaveAttribute("open");
+  await library.getByLabel("Search cards", { exact: true }).fill(owner.label);
+  await expect(group).toHaveAttribute("open", "");
+  await library.getByRole("checkbox", { name: /Show internal cards/ }).check();
+  await library.getByLabel("Search cards", { exact: true }).fill(`${owner.label} · Skill`);
+  await library.getByRole("button", { name: `Inspect ${owner.label} · Skill`, exact: true }).click();
+  const detail = library.getByRole("complementary", { name: "Card details" });
+  await expect(detail).toContainText(internal.description);
+  await expect(detail).toContainText(`Open ${owner.label} to use this card`);
+  await expect(library.getByRole("button", { name: `Add ${owner.label} · Skill to deck`, exact: true })).toHaveCount(0);
+  await page.screenshot({ path: "../.tmp/library-internal-skill.png" });
+  await detail.getByRole("button", { name: `Inspect ${owner.label}`, exact: true }).click();
+  await expect(detail.getByRole("heading", { name: owner.label, exact: true })).toBeVisible();
+  await detail.getByRole("button", { name: "Add inspected card to deck" }).click();
+  await expect(detail.getByRole("button", { name: "Remove inspected card from deck" })).toBeEnabled();
+  await page.setViewportSize({ width: 640, height: 780 });
+  await library.locator(".library-body").evaluate(element => { element.scrollTop = 0; });
+  await page.screenshot({ path: "../.tmp/library-grouped-narrow.png" });
+  expect(await library.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  expect(await library.locator(".library-body").evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   expect(errors).toEqual([]);
 });

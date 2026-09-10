@@ -19,4 +19,5 @@ class NodeContainerDefinition:
         return {"member_traits": sorted(self.member_traits), "parentable": self.parentable,
                 "connectable": self.connectable, "min_size": self.min_size,
                 "content_inset": self.content_inset, "max_members": self.max_members,
-                "document_field": self.document_field, "virtual": self.virtual}
+                "document_field": self.document_field, "member_type": self.member_type,
+                "virtual": self.virtual}
