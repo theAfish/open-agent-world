@@ -1,5 +1,7 @@
 # Execution configuration cards
 
+[Documentation](README.md)
+
 Environment Profiles and Compute Targets are ordinary registered nodes with
 editable, revisioned node documents. Connect them to an Agent, or equip them
 using the existing equipment controls. Access grants permission to select a
@@ -12,7 +14,15 @@ is either an ordinary string or an object containing only `secret_ref`:
 {"variables":{"DEMO_REGION":"local-test","API_TOKEN":{"secret_ref":"service-token"}}}
 ```
 
-Save the document, then bind each secret in the card's private credential section.
+In the editor, choose **Secret**, enter the credential directly, and save.
+The editor generates the reference and saves configuration and encrypted bindings
+together through the host-only `PUT /api/nodes/{id}/environment` endpoint.
+Existing secrets show **Configured**; leave their input blank to keep them or
+enter a replacement. Remove unused variables. Imported or copied secret requirements
+need a value before saving. Secret inputs are never included in shared UI drafts.
+The endpoint takes `value` (the portable document), `secrets` (reference-to-value
+updates), and `expected_revision`; errors or revision conflicts roll back the save.
+The lower-level binding API remains available for existing integrations.
 The host-only `GET /api/nodes/{id}/credentials` returns configured booleans;
 `PUT /api/nodes/{id}/credentials/{reference}` takes `value` and the document's
 `expected_revision`. A null value unbinds it. These endpoints are part of the

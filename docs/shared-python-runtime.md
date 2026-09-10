@@ -1,5 +1,7 @@
 # Shared sandbox Python
 
+[Documentation](README.md)
+
 Normal sandbox backends select a persistent Python venv under the OAW data root:
 `runtime/python/venv`. Python commands, Skill scripts and the sandbox shell PATH
 use this environment. It excludes system site-packages, user site-packages,
@@ -49,9 +51,12 @@ startup hooks do not run in the backend during installation.
 
 This minimal implementation accepts index package names, extras and version
 constraints, and installs wheels only. Source builds, local paths, URLs and raw
-installer options are unsupported. Use `python -m <module>` for package commands:
-upstream console launchers created with an explicit prefix can refer to the base
-interpreter. Direct `pip install` inside a sandbox cannot mutate the read-only
+installer options are unsupported. Python commands and installed CLI entry points
+automatically use the shared venv, including calls inside shells and subprocesses.
+After installation the manager retargets launcher interpreter references without
+executing installed package code on the host. Existing environments are repaired
+on their next preparation/execution; no package reinstall or venv activation is
+needed. Direct `pip install` inside a sandbox cannot mutate the read-only
 runtime; use the manager tool. Package downloads are an explicit host-managed
 operation; the sandbox's own network policy remains unchanged.
 

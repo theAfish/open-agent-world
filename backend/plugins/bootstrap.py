@@ -76,6 +76,8 @@ class PluginEnvironmentBootstrap:
 
     async def run(self):
         for row in self.records():
+            if not self.registry.is_enabled(row['id']):
+                continue
             requirements = json.loads(row['declaration'])
             completed = json.loads(row['completed'])
             if not requirements:

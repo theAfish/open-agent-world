@@ -45,6 +45,85 @@ def bind(client, card, value="test-private-token-742"):
     return value
 
 
+@pytest.mark.parametrize("node_type", ["environment", "sandbox"])
+def test_save_environment_binds_secret_without_exposing_it(client, node_type):
+    card = create_node(client, node_type)
+    node_id = card["id"]
+    path = f"/api/nodes/{node_id}"
+    before = client.get(path + "/document").json()
+    value = {"variables": {"REGION": "test", "API_TOKEN": {"secret_ref": "token"}}}
+    secret = "private-save-environment-742"
+    payload = {"value": value, "secrets": {"token": secret}, "expected_revision": before["revision"]}
+    response = client.put(path + "/environment", json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["value"] == value
+    assert secret not in response.text
+    assert secret not in client.get(path + "/document").text
+    assert client.get(path + "/credentials").json() == {"token": True}
+    assert client.app.state.services.execution_credentials.resolve(node_id, "token") == secret
+    # A stale save must not replace the stored credential.
+    payload["secrets"]["token"] = "stale-replacement"
+    assert client.put(path + "/environment", json=payload).status_code == 409
+    assert client.app.state.services.execution_credentials.resolve(node_id, "token") == secret
+    # Leaving an existing secret untouched preserves it while other values change.
+    payload.update(secrets={}, expected_revision=response.json()["revision"])
+    payload["value"]["variables"]["REGION"] = "updated"
+    assert client.put(path + "/environment", json=payload).status_code == 200
+    assert client.app.state.services.execution_credentials.resolve(node_id, "token") == secret
+
+
+def test_save_environment_rolls_back_bindings_when_document_write_fails(client, monkeypatch):
+    card = profile(client)
+    original = bind(client, card)
+    path = f"/api/nodes/{card['id']}"
+    before = client.get(path + "/document").json()
+    def fail(*args, **kwargs):
+        raise ResourceValidationError("Document write failed")
+    monkeypatch.setattr("backend.node_documents.write_document", fail)
+    response = client.put(path + "/environment", json={"value": before["value"],
+        "secrets": {"token": "replacement"}, "expected_revision": before["revision"]})
+    assert response.status_code == 422
+    assert client.app.state.services.execution_credentials.resolve(card["id"], "token") == original
+    assert client.get(path + "/document").json() == before
+
+
+def test_save_environment_rejects_invalid_secret_without_echo(client):
+    card = profile(client)
+    path = f"/api/nodes/{card['id']}"
+    before = client.get(path + "/document").json()
+    secret = "private-invalid-secret\0"
+    response = client.put(path + "/environment", json={"value": before["value"],
+        "secrets": {"token": secret}, "expected_revision": before["revision"]})
+    assert response.status_code == 422
+    assert "private-invalid-secret" not in response.text
+    assert client.get(path + "/credentials").json() == {"token": False}
+
+
+def test_saved_sandbox_secret_reaches_agent_and_skill_commands(runtime_client):
+    client, _, native = runtime_client
+    agent, sandbox, skill, _, _ = setup_skill(client)
+    path = f"/api/nodes/{sandbox['id']}"
+    document = client.get(path + "/document").json()
+    response = client.put(path + "/environment", json={
+        "value": {"variables": {"API_TOKEN": {"secret_ref": "automatic"}}},
+        "secrets": {"automatic": "saved-command-secret"}, "expected_revision": document["revision"],
+    })
+    assert response.status_code == 200, response.text
+    provider, definitions = tools(client, agent)
+    invoke(client, provider, agent, definitions["execute_command"], sandbox=sandbox["id"], argv=["cmd.exe"])
+    assert native.last_environment["API_TOKEN"] == "saved-command-secret"
+    invoke(client, provider, agent, definitions["run_skill_script"], sandbox=sandbox["id"], skill=skill["id"],
+        script="scripts/check.py", interpreter=["python"])
+    assert native.last_environment["API_TOKEN"] == "saved-command-secret"
+
+
+def test_unbound_secret_error_identifies_variable_and_owner(client):
+    from backend.execution_config import resolve_execution_configuration
+    card = profile(client)
+    with pytest.raises(ResourceValidationError, match="Secret variable 'API_TOKEN' is unbound on 'Environment'"):
+        resolve_execution_configuration(client.app.state.services, card["id"], None)
+
+
 @pytest.mark.parametrize("equipped", [False, True])
 def test_optional_resources_live_selection_and_isolation(runtime_client, equipped, monkeypatch):
     client, backend, native = runtime_client
@@ -284,7 +363,7 @@ def test_unsupported_backend_rejects_selection_before_resolving_secrets(runtime_
     connect(client, agent, env, "environment.use")
     provider, definitions = tools(client, agent)
     monkeypatch.setattr(backend, "supports_invocation_environment", False)
-    with pytest.raises(SandboxValidationError, match="does not support"):
+    with pytest.raises(ResourceValidationError, match="does not support"):
         invoke(client, provider, agent, definitions["execute_command"], sandbox=sandbox["id"], argv=["cmd.exe"], environment=env["id"])
     assert native.last_argv == ()
     invoke(client, provider, agent, definitions["execute_command"], sandbox=sandbox["id"], argv=["cmd.exe"])

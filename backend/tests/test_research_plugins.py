@@ -114,3 +114,40 @@ async def test_paper_tool_returns_only_requested_text():
     answer = await LibraryPlugin().read_paper(Context(), object(), {"page": 1})
     assert "Research evidence" in answer["text"]
     assert "pdf" not in answer and "thumbnail" not in answer
+
+
+def test_translation_uses_configured_model_connection_and_rejects_disabled(client, monkeypatch):
+    from backend.api import library_translation
+    from backend.tests.test_model_connections import connection
+
+    saved = client.put("/api/settings/models", json={"revision": 0, "connections": [connection()]}).json()
+    calls = []
+
+    class Response:
+        status_code = 200
+        def json(self):
+            return {"choices": [{"message": {"content": "Translated evidence"}}]}
+
+    class TranslationClient:
+        def __init__(self, **kwargs):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def post(self, url, **kwargs):
+            calls.append((url, kwargs))
+            return Response()
+
+    monkeypatch.setattr(library_translation.httpx, "AsyncClient", TranslationClient)
+    request = {"text": "Evidence", "model": "oaw:model:work"}
+    response = client.post("/api/library/translate", json=request)
+    assert response.status_code == 200, response.text
+    assert response.json() == {"translation": "Translated evidence"}
+    assert calls[0][0] == "https://work.example/v1/chat/completions"
+    assert calls[0][1]["json"]["model"] == "same-model"
+    assert calls[0][1]["headers"]["Authorization"] == "Bearer secret-work"
+    saved["connections"][0]["enabled"] = False
+    assert client.put("/api/settings/models", json=saved).status_code == 200
+    assert client.post("/api/library/translate", json=request).status_code == 422
+    assert len(calls) == 1

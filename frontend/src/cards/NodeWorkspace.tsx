@@ -93,7 +93,7 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
               aria-label={`Show runtime history for ${session.title}`}
             >
               <MessageSquare size={13} />
-              <span><strong>{session.title}</strong><small>{session.conversation_name ?? cards.find((item) => item.id === session.conversation_id)?.name ?? "Conversation"}</small></span>
+              <span><strong>{session.title}</strong><small>{session.group_title ?? session.conversation_name ?? cards.find((item) => item.id === session.conversation_id)?.name ?? "Conversation"}</small></span>
             </button>
           ))}
           {sessions.length === 0 ? <p>{historyError ?? "No Conversation sessions yet."}</p> : null}

@@ -47,35 +47,9 @@ export function environmentVariablesToValue(rows: EnvironmentVariableRow[]): Rec
   return { variables };
 }
 
-export function CredentialBinding({ id, reference, configured, revision, changed }: {
-  id: string; reference: string; configured: boolean; revision: number; changed(): Promise<void>;
-}) {
-  const [value, setValue] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function bind(secret: string | null) {
-    setBusy(true); setError("");
-    // Credentials live only in this input until submission, never in saved UI drafts.
-    setValue("");
-    try { await worldApi.bindCredential(id, reference, secret, revision); await changed(); }
-    catch (reason) { setError(apiErrorMessage(reason)); }
-    finally { setBusy(false); }
-  }
-  return <div className="card-section credential-binding">
-    <label className="field-label"><span>{reference} · {configured ? "Configured" : "Unbound"}</span>
-      <input aria-label={`Secret for ${reference}`} type="password" autoComplete="new-password" value={value}
-        onChange={(event) => setValue(event.target.value)} disabled={busy} />
-    </label>
-    <div className="editor-actions">
-      <button type="button" className="secondary-button" disabled={busy || !configured} onClick={() => void bind(null)}>Unbind</button>
-      <button type="button" className="primary-button" disabled={busy || !value} onClick={() => void bind(value)}>Bind secret</button>
-    </div>
-    {error && <p role="alert">{error}</p>}
-  </div>;
-}
-
-export function EnvironmentVariablesEditor({ rows, onChange, disabled }: {
+export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, onSecretsChange, bindings }: {
   rows: EnvironmentVariableRow[]; onChange(rows: EnvironmentVariableRow[]): void; disabled: boolean;
+  secrets: Record<string, string>; onSecretsChange(secrets: Record<string, string>): void; bindings: Record<string, boolean>;
 }) {
   const patch = (id: number, change: Partial<EnvironmentVariableRow>) => onChange(rows.map((row) => row.id === id ? { ...row, ...change } : row));
   return <fieldset className="environment-variables-editor" disabled={disabled}>
@@ -89,16 +63,32 @@ export function EnvironmentVariablesEditor({ rows, onChange, disabled }: {
       </div>
       <div className="variable-value-row">
         <select aria-label={`Environment variable ${index + 1} type`} value={row.kind}
-          onChange={(event) => patch(row.id, { kind: event.target.value as EnvironmentVariableKind })}>
-          <option value="value">Value</option><option value="secret">Secret reference</option>
+          onChange={(event) => patch(row.id, { kind: event.target.value as EnvironmentVariableKind,
+            value: event.target.value === "secret" ? crypto.randomUUID() : "" })}>
+          <option value="value">Value</option><option value="secret">Secret</option>
         </select>
-        <input aria-label={`Environment variable ${index + 1} value`} value={row.value}
-          placeholder={row.kind === "secret" ? "Reference, e.g. api-token" : "Value"}
-          onChange={(event) => patch(row.id, { value: event.target.value })} />
+        <input aria-label={`Environment variable ${index + 1} value`} value={row.kind === "secret" ? secrets[row.value] ?? "" : row.value}
+          type={row.kind === "secret" ? "password" : "text"} autoComplete="off"
+          placeholder={row.kind === "secret" ? (bindings[row.value] ? "Configured — enter to replace" : "Enter secret") : "Value"}
+          onChange={(event) => row.kind === "secret"
+            ? onSecretsChange({ ...secrets, [row.value]: event.target.value })
+            : patch(row.id, { value: event.target.value })} />
       </div>
+      {row.kind === "secret" && <small>{secrets[row.value] ? "Will be saved securely" : bindings[row.value] ? "Configured" : "Enter a secret before saving"}</small>}
     </div>)}
     <button type="button" className="secondary-button" onClick={() => onChange([...rows, newEnvironmentVariable()])}><Plus size={13} /> Add variable</button>
   </fieldset>;
+}
+
+export async function saveEnvironmentRows(id: string, rows: EnvironmentVariableRow[], secrets: Record<string, string>, bindings: Record<string, boolean>, revision: number) {
+  const value = environmentVariablesToValue(rows);
+  const updates: Record<string, string> = {};
+  for (const row of rows) {
+    if (row.kind !== "secret") continue;
+    if (secrets[row.value]) updates[row.value] = secrets[row.value];
+    else if (!bindings[row.value]) throw new Error(`Enter a secret for ${row.name}, or remove the unused variable.`);
+  }
+  return worldApi.saveEnvironment(id, value, updates, revision);
 }
 
 /** The same document editor also supports plugin-declared structured target fields. */
@@ -111,6 +101,7 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
   const [providerId, setProviderId] = useState("");
   const [targetRows, setTargetRows] = useState<SettingRow[]>([]);
   const [bindings, setBindings] = useState<Record<string, boolean>>({});
+  const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -133,6 +124,7 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
 
   async function refreshBindings() { if (environment) setBindings(await worldApi.getCredentialBindings(card.id)); }
   async function reload() {
+    setSecrets({});
     setBusy(true);
     try {
       const next = await worldApi.getNodeDocument(card.id);
@@ -160,13 +152,16 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
       const value = environment ? environmentVariablesToValue(environmentRows) : {
         name: targetName, provider_id: providerId, config: settingsToValue(targetRows),
       };
-      const next = await worldApi.nodeDocumentAction(card.id, "replace", value, document.revision);
+      const next = environment
+        ? await saveEnvironmentRows(card.id, environmentRows, secrets, bindings, document.revision)
+        : await worldApi.nodeDocumentAction(card.id, "replace", value, document.revision);
+      setSecrets({});
       applyValue(next.value); setDocument(next); await refreshBindings(); setNotice("Configuration saved.");
     } catch (reason) { setError(apiErrorMessage(reason)); }
     finally { setBusy(false); }
   }
 
-  return <div className="expanded-stack execution-config nodrag nopan">
+  return <div className="expanded-stack execution-config">
     <section className="card-section">
       <div className="section-heading execution-config-heading">
         <span>{environment ? "Environment variables" : "Destination configuration"}</span>
@@ -175,7 +170,8 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
           aria-label="Import execution configuration JSON" onChange={(event) => void importJson(event.target.files?.[0])} />
       </div>
       {environment ? <>
-        <EnvironmentVariablesEditor rows={environmentRows} onChange={setEnvironmentRows} disabled={busy || !document} />
+        <EnvironmentVariablesEditor rows={environmentRows} onChange={setEnvironmentRows} disabled={busy || !document}
+          secrets={secrets} onSecretsChange={setSecrets} bindings={bindings} />
       </> : <>
         <div className="execution-target-fields">
           <label className="field-label"><span>Name</span><input value={targetName} disabled={busy || !document} placeholder="Display name"
@@ -192,7 +188,7 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
         <summary>Usage details</summary>
         <p>Select this card for each command. Connecting or equipping it grants access.</p>
         <p>{environment
-          ? "For credentials, choose Secret reference, save, then bind the secret below."
+          ? "Choose Secret and enter the credential. Save stores it securely for commands. Leave a configured secret blank to keep it."
           : "Keep credentials in an Environment Profile. Add provider options as named settings."}</p>
       </details>
       <div className="editor-actions">
@@ -202,11 +198,5 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
       {notice && <p className="execution-config-notice" role="status">{notice}</p>}
       {error && <p role="alert">{error}</p>}
     </section>
-    {environment && Object.keys(bindings).length > 0 && <section className="card-section">
-      <div className="section-heading"><span>Credentials</span></div>
-      <p>Stored on this host; rebind copies. Commands can read injected secrets.</p>
-      {Object.entries(bindings).map(([reference, configured]) => <CredentialBinding key={`${card.id}:${reference}`}
-        id={card.id} reference={reference} configured={configured} revision={document?.revision ?? 0} changed={refreshBindings} />)}
-    </section>}
   </div>;
 }

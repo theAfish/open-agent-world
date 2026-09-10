@@ -38,7 +38,7 @@ export function LifecycleStatus({ agentId }: { agentId?: string }) {
     try { await operation(); setRefresh(n => n + 1); }
     catch (e) { setError(apiErrorMessage(e)); setRefresh(n => n + 1); }
   }
-  return <section className="lifecycle-status nodrag nopan">
+  return <section className="lifecycle-status">
     <header><strong>Execution and cleanup</strong><button className="secondary-button" onClick={() => setRefresh(n => n + 1)}>Refresh state</button></header>
     {error && <p role="alert">{error}</p>}
     {snapshot?.runs.filter(r => !agentId || r.agent_id === agentId).slice(-30).reverse().map(run => <article key={run.run_id}>

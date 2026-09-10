@@ -59,7 +59,7 @@ function DependencyGraph({ tasks, onSelect }: { tasks: BoardTask[]; onSelect: (t
     const column = depth(task.id); const row = rows.get(column) ?? 0; rows.set(column, row + 1);
     return [task.id, { x: 24 + column * 240, y: 24 + row * 90 }];
   }));
-  return <div className="task-dependency-graph nowheel" aria-label="Task dependency graph"
+  return <div className="task-dependency-graph nodrag nopan nowheel" aria-label="Task dependency graph"
     onPointerDown={(event) => {
       if (event.button !== 0) return;
       drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop, moved: false };
@@ -132,7 +132,7 @@ export function TaskBoardBody({ card, workspace = false }: { card: WorldCard; wo
     if (await mutate("upsert", { tasks: [task] })) setQuickTitle("");
   };
   const patch = (change: Partial<BoardTask>) => setDraft((current) => current ? { ...current, task: { ...current.task, ...change } } : current);
-  return <div className={`task-board nodrag nopan nowheel ${workspace ? "is-workspace" : ""}`}>
+  return <div className={`task-board nowheel ${workspace ? "is-workspace" : ""}`}>
     <header className="task-board-heading"><div><span className="task-board-eyebrow">SHARED WORK BOARD</span><h3>{board ? `${board.summary.done} / ${board.summary.total} complete` : "Loading tasks..."}</h3></div>
       <button className="secondary-button" title="Reload the board and discard the open task draft" aria-label="Reload task board" disabled={busy} onClick={() => { setDraft(undefined); void reload(); }}><RefreshCw size={14} /></button></header>
     <progress aria-label="Task completion" value={board?.summary.done ?? 0} max={board?.summary.total || 1} />

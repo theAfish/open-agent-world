@@ -96,20 +96,21 @@ class CaptureRuntime(MockAgentRuntime):
 
 
 @pytest.mark.asyncio
-async def test_runtime_inherits_context_and_revokes_tools(tmp_path: Path):
+@pytest.mark.parametrize("team_model,own_model", [("team/model", "own/model"), ("oaw:model:team", "oaw:model:own")])
+async def test_runtime_inherits_context_and_revokes_tools(tmp_path: Path, team_model: str, own_model: str):
     services = create_services(Settings.for_data_root(tmp_path / "world"), default_runtime_provider_id="core.mock")
     manager = services.run_manager
     assert manager is not None
     runtime = CaptureRuntime(manager.capability_provider)
     manager.install_provider("core.mock", runtime)
     try:
-        group = await services.restore_card(CardCreate(id="runtime-team", type="legion", config={"instruction": "Coordinate through the board", "model_override": "team/model"}))
-        member = await services.create_card(CardCreate(type="agent", parent_id=group.id, config={"model": "own/model", "legion_role": "Planner"}))
+        group = await services.restore_card(CardCreate(id="runtime-team", type="legion", config={"instruction": "Coordinate through the board", "model_override": team_model}))
+        member = await services.create_card(CardCreate(type="agent", parent_id=group.id, config={"model": own_model, "legion_role": "Planner"}))
         outsider = await services.create_card(CardCreate(type="agent"))
         write_shared_state(services.world, services.state, group.id, LegionStateWrite(value={"goal": "Deliver a report"}, expected_revision=0))
         run = await manager.start_run(member.id, "hello")
         await manager.wait_execution(run.run_id)
-        assert runtime.captured_config.model == "team/model"
+        assert runtime.captured_config.model == team_model
         assert "Coordinate through the board" in runtime.captured_config.system_instruction
         assert "Deliver a report" in runtime.captured_config.system_instruction
         assert runtime.captured_context.group_context["role"] == "Planner"
@@ -133,7 +134,7 @@ async def test_runtime_inherits_context_and_revokes_tools(tmp_path: Path):
         runtime.block = True
         run = await manager.start_run(member.id, "wait")
         await asyncio.sleep(0.01)
-        assert runtime.captured_config.model == "own/model"
+        assert runtime.captured_config.model == own_model
         with pytest.raises(ConflictError):
             await services.update_card(member.id, CardPatch(parent_id=None))
         await manager.cancel_run(run.run_id)

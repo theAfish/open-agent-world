@@ -1,4 +1,5 @@
-import { Activity, Moon, Redo2, RefreshCw, Settings2, Sun, Undo2, Wifi, WifiOff } from "lucide-react";
+import { Activity, LibraryBig, Moon, RefreshCw, Settings2, Sun, Wifi, WifiOff } from "lucide-react";
+import { useCardLibrary } from "../state/cardLibrary";
 import { useWorldStore } from "../state/worldStore";
 
 export function TopBar() {
@@ -11,11 +12,6 @@ export function TopBar() {
   const toggleActivity = useWorldStore((state) => state.toggleActivity);
   const toggleSettings = useWorldStore((state) => state.toggleSettings);
   const refreshWorld = useWorldStore((state) => state.refreshWorld);
-  const undoStack = useWorldStore((state) => state.undoStack);
-  const redoStack = useWorldStore((state) => state.redoStack);
-  const historyBusy = useWorldStore((state) => state.historyBusy);
-  const undo = useWorldStore((state) => state.undo);
-  const redo = useWorldStore((state) => state.redo);
   const live = socketState === "live";
   const syncLabel = syncState === "online"
     ? "Synced"
@@ -45,28 +41,9 @@ export function TopBar() {
       </div>
 
       <div className="top-actions">
-        <button type="button" className="top-icon-button" onClick={toggleSettings} aria-label="Open ADK model settings" title="ADK model settings">
+        <button type="button" className="top-icon-button" onClick={useCardLibrary.getState().show} aria-label="Open Pack and Card Library" title="Packs, Cards and Decks"><LibraryBig size={16} /></button>
+        <button type="button" className="top-icon-button" onClick={toggleSettings} aria-label="Open settings" title="Settings">
           <Settings2 size={16} />
-        </button>
-        <button
-          type="button"
-          className="top-icon-button"
-          onClick={() => void undo()}
-          disabled={historyBusy || undoStack.length === 0}
-          aria-label="Undo last canvas action"
-          title={undoStack.at(-1) ? `Undo: ${undoStack.at(-1)?.label} (Ctrl+Z)` : "Nothing to undo"}
-        >
-          <Undo2 size={16} />
-        </button>
-        <button
-          type="button"
-          className="top-icon-button"
-          onClick={() => void redo()}
-          disabled={historyBusy || redoStack.length === 0}
-          aria-label="Redo last canvas action"
-          title={redoStack.at(-1) ? `Redo: ${redoStack.at(-1)?.label} (Ctrl+Y)` : "Nothing to redo"}
-        >
-          <Redo2 size={16} />
         </button>
         <button
           type="button"

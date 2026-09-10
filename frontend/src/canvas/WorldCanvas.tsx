@@ -1,21 +1,23 @@
+import { MapAtlas } from "./MapAtlas";
 import {
   Background,
   BackgroundVariant,
   ConnectionMode,
   Controls,
   MarkerType,
-  MiniMap,
   ReactFlow,
+  applyNodeChanges,
   useNodesState,
   useReactFlow,
   type Connection,
+  type NodeChange,
   type OnNodeDrag,
   type OnInit,
   type OnMove,
   type OnSelectionChangeParams,
   type Viewport,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { worldApi } from "../api/client";
 import { transformationOptions } from "./documentTransformations";
 import { EquipmentCardNode, EquipmentPanelNode } from "../cards/Equipment";
@@ -23,7 +25,7 @@ import { equipmentOriginId, equipmentSurfaceNodes } from "./equipmentLayout";
 import { SurfaceBridge } from "../effects/SurfaceBridge";
 import { canEquip, equipmentOwner, useEquipmentDrag, useEquipmentPanel } from "../state/equipment";
 import { ContainerCardNode } from "../cards/ContainerCard";
-import { ancestors, containerDefinition, containerSizes, dropContainer, isContainer, memberSurfacePosition, parentFirst } from "../state/containers";
+import { ancestors, containerDefinition, containerDisplayOwners, containerShowsWorkspace, containerSizes, dropContainer, isContainer, memberSurfacePosition, parentFirst, resizeContainerLayout } from "../state/containers";
 import { WorldCardNode } from "../cards/CardFrame";
 import type { CanvasNode, CanvasNodeData } from "../cards/types";
 import { EdgeInspector } from "../edges/EdgeInspector";
@@ -35,8 +37,9 @@ import { buildCardDraft } from "../state/helpers";
 import { hasPaletteDrag, readPaletteDrag } from "../palette/dragPayload";
 import { getConnectionOptions, validateConnection } from "../state/relationships";
 import { useWorldStore } from "../state/worldStore";
-import { NODE_SURFACE_SIZE, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
+import { NODE_SURFACE_SIZE, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel, type SurfaceSize } from "../state/nodeSurfaces";
 import { ContourLayer } from "./ContourLayer";
+import { LocalMiniMap } from "./LocalMiniMap";
 import { GenerationLayer } from "../effects/GenerationLayer";
 import {
   displacedPositions,
@@ -65,8 +68,9 @@ function nodeFromCard(
   surfaceLevel: NodeSurfaceLevel,
   displaced: boolean,
   position: ReturnType<typeof useWorldStore.getState>["cards"][number]["position"],
+  windowSize?: SurfaceSize,
 ): CanvasNode {
-  const size = NODE_SURFACE_SIZE[surfaceLevel];
+  const size = windowSize ?? NODE_SURFACE_SIZE[surfaceLevel];
   return {
     id: card.id,
     type: "worldCard",
@@ -84,6 +88,7 @@ function nodeFromCard(
 }
 
 export function WorldCanvas() {
+  const [pinToolActive, setPinToolActive] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);
   const cards = useWorldStore((state) => state.cards);
   const catalog = useWorldStore((state) => state.catalog);
@@ -96,6 +101,7 @@ export function WorldCanvas() {
   const selectedCardIds = useWorldStore((state) => state.selectedCardIds);
   const selectionRevision = useWorldStore((state) => state.selectionRevision);
   const surfaceLevelsByNodeId = useNodeSurfaceStore((state) => state.surfaceLevels);
+  const workspaceSizes = useNodeSurfaceStore((state) => state.workspaceSizes);
   const connectingNodeId = useNodeSurfaceStore((state) => state.connectingNodeId);
   const dragging = useNodeSurfaceStore((state) => state.dragging);
   const setDragging = useNodeSurfaceStore((state) => state.setDragging);
@@ -116,15 +122,16 @@ export function WorldCanvas() {
   const selectCards = useWorldStore((state) => state.selectCards);
   const undo = useWorldStore((state) => state.undo);
   const redo = useWorldStore((state) => state.redo);
-  const { getViewport, screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
+  const { fitView, getNodes, getViewport, screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
+  const displayOwners = useMemo(() => containerDisplayOwners(cards, catalog, surfaceLevelsByNodeId), [cards, catalog, surfaceLevelsByNodeId]);
 
   const renderCards = useMemo(
     () => {
-      const visible = filterCardsToChunks([...cards, ...stressCards].filter((c) => !equipmentOwner(c, cards)), activeChunkKeys, catalog);
+      const visible = filterCardsToChunks([...cards, ...stressCards].filter((c) => !displayOwners.has(c.id) && !equipmentOwner(c, cards)), activeChunkKeys, catalog);
       const ids = new Set(visible.map((c) => c.id));
-      return [...visible, ...cards.filter((c) => { const owner = equipmentOwner(c, cards); return owner && ids.has(owner.id); })];
+      return [...visible, ...cards.filter((c) => { const owner = equipmentOwner(c, cards); return !displayOwners.has(c.id) && owner && ids.has(owner.id); })];
     },
-    [activeChunkKeys, cards, stressCards, catalog],
+    [activeChunkKeys, cards, stressCards, catalog, displayOwners],
   );
   const surfaceLevels = useMemo(() => new Map(renderCards.map((card) => [
     card.id,
@@ -133,8 +140,8 @@ export function WorldCanvas() {
   const surfaceObstacles = useMemo<SurfaceObstacle[]>(() => renderCards.flatMap<SurfaceObstacle>((card) => {
     if (isContainer(card, catalog) || card.parent_id || card.equipment) return [];
     const level = surfaceLevels.get(card.id);
-    return level === "inspector" || level === "workspace" ? [{ card, level }] : [];
-  }), [renderCards, surfaceLevels, catalog]);
+    return level === "inspector" || level === "workspace" ? [{ card, level, size: level === "workspace" ? workspaceSizes[card.id] : undefined }] : [];
+  }), [renderCards, surfaceLevels, catalog, workspaceSizes]);
   const displacedById = useMemo(
     () => displacedPositions(renderCards.filter((c) => !isContainer(c, catalog) && !c.parent_id && !c.equipment), surfaceObstacles, surfaceLevels),
     [renderCards, surfaceLevels, surfaceObstacles, catalog],
@@ -143,16 +150,14 @@ export function WorldCanvas() {
   const equipmentPositions = useEquipmentPanel((state) => state.positions);
   const mappedNodes = useMemo(() => {
     const byId = new Map(renderCards.map((c) => [c.id, c]));
-    const frameSizes = containerSizes(renderCards, catalog, surfaceLevels);
+    const frameSizes = containerSizes(renderCards, catalog, surfaceLevels, workspaceSizes);
     return parentFirst(renderCards).flatMap<CanvasNode>((card) => {
-      if (ancestors(renderCards, card).some((parent) => surfaceLevels.get(parent.id) === "workspace" && catalog.node_types.find((type) => type.id === parent.type)?.frontend?.workspace)) return [];
       const level = surfaceLevels.get(card.id) ?? "preview";
       const displaced = displacedById.get(card.id);
-      let node = nodeFromCard(card, level, displaced?.displaced ?? false, displaced?.position ?? card.position);
+      let node = nodeFromCard(card, level, displaced?.displaced ?? false, displaced?.position ?? card.position, level === "workspace" ? workspaceSizes[card.id] : undefined);
       if (isContainer(card, catalog)) {
-        const { width, height } = level === "workspace" && catalog.node_types.find((type) => type.id === card.type)?.frontend?.workspace
-          ? card.size : frameSizes.get(card.id)!;
-        node = { ...node, type: "container", position: card.position, style: { width, height }, zIndex: 0,
+        const { width, height } = frameSizes.get(card.id)!;
+        node = { ...node, type: "container", position: card.position, width, height, style: { width, height }, zIndex: 0,
           dragHandle: ".container-drag-region", connectable: containerDefinition(card, catalog)!.connectable };
       }
       const equipmentAgent = equipmentOwner(card, cards);
@@ -172,12 +177,35 @@ export function WorldCanvas() {
       if (node.type === "equipment" || node.data.equipmentDetail || !catalog.node_types.find((type) => type.id === node.data.card.type)?.traits.includes("core.agent")) return [node];
       const count = renderCards.filter((card) => equipmentOwner(card, cards)?.id === node.id).length;
       return [node, { id: `${node.id}:equipment`, type: "equipmentPanel", data: node.data, parentId: node.id,
-        position: { x: 0, y: NODE_SURFACE_SIZE[node.data.surfaceLevel].height + 8 },
+        position: { x: 0, y: Number(node.style?.height ?? NODE_SURFACE_SIZE[node.data.surfaceLevel].height) + 8 },
         style: { width: 320, height: 46 + Math.max(2, count + 1) * 48 },
         hidden: !equipmentPanels.includes(node.id), draggable: false, selectable: false, connectable: false, zIndex: 24 }];
     });
-  }, [displacedById, renderCards, surfaceLevels, catalog, cards, equipmentPanels, equipmentPositions]);
-  const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(mappedNodes);
+  }, [displacedById, renderCards, surfaceLevels, catalog, cards, equipmentPanels, equipmentPositions, workspaceSizes]);
+  const [nodes, setNodes] = useNodesState<CanvasNode>(mappedNodes);
+  const onNodesChange = useCallback((changes: NodeChange<CanvasNode>[]) => {
+    setNodes(current => {
+      let next = applyNodeChanges(changes, current);
+      for (const change of changes) {
+        if (change.type !== 'dimensions' || !change.resizing || !change.dimensions) continue;
+        const parent = cards.find(card => card.id === change.id);
+        if (!parent || !isContainer(parent, catalog)) continue;
+        if (containerShowsWorkspace(parent, catalog, surfaceLevels.get(parent.id))) continue;
+        const layout = resizeContainerLayout(cards, catalog, surfaceLevels, parent.id, change.dimensions, workspaceSizes);
+        const reflowed = new Map(cards.map(card => [card.id, { ...card, position: layout.positions.get(card.id) ?? card.position }]));
+        next = next.map(node => {
+          if (node.id === parent.id) return { ...node, width: layout.size.width, height: layout.size.height, measured: layout.size, style: { ...node.style, ...layout.size } };
+          if (!layout.positions.has(node.id)) return node;
+          const card = reflowed.get(node.id)!;
+          const owner = reflowed.get(card.parent_id ?? '');
+          if (!owner) return node;
+          const position = isContainer(card, catalog) ? card.position : memberSurfacePosition(card, owner, surfaceLevels.get(card.id) ?? 'preview', catalog);
+          return { ...node, position: { x: position.x - owner.position.x, y: position.y - owner.position.y } };
+        });
+      }
+      return next;
+    });
+  }, [cards, catalog, surfaceLevels, setNodes, workspaceSizes]);
   const nodesRef = useRef(nodes);
   const positionAnimation = useRef<number>();
   const activeDragIds = useRef(new Set<string>());
@@ -200,7 +228,8 @@ export function WorldCanvas() {
     const starts = new Map(mappedNodes.map((node) => [
       node.id,
       // A changed parent changes the coordinate space, not the visual location.
-      currentById.has(node.id) && currentById.get(node.id)!.parentId === node.parentId ? currentById.get(node.id)!.position : node.position,
+      // Member reflow must remain inside the resized frame, including during undo.
+      !node.parentId && currentById.has(node.id) && currentById.get(node.id)!.parentId === node.parentId ? currentById.get(node.id)!.position : node.position,
     ]));
 
     const applyProgress = (eased: number) => {
@@ -216,6 +245,7 @@ export function WorldCanvas() {
               dragging: live.dragging,
             };
           }
+          if (live?.resizing) return { ...node, ...live };
           const start = starts.get(node.id) ?? node.position;
           return {
             ...live,
@@ -264,12 +294,13 @@ export function WorldCanvas() {
 
   const visibleNodeIds = useMemo(() => new Set(renderCards.map((card) => card.id)), [renderCards]);
   const displayEndpoint = useCallback((id: string) => {
+    if (displayOwners.has(id)) return displayOwners.get(id)!;
     const card = cards.find((item) => item.id === id);
     return card && nodes.find((node) => node.id === id)?.hidden ? equipmentOwner(card, cards)?.id ?? id : id;
-  }, [cards, nodes]);
+  }, [cards, nodes, displayOwners]);
   const flowEdges = useMemo<CanvasEdge[]>(
     () => edges
-      .filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target))
+      .filter((edge) => visibleNodeIds.has(displayEndpoint(edge.source)) && visibleNodeIds.has(displayEndpoint(edge.target)))
       .map<CanvasEdge>((edge) => ({
         id: edge.id,
         source: displayEndpoint(edge.source),
@@ -321,6 +352,24 @@ export function WorldCanvas() {
       // Modal workspaces and embedded readers own their keyboard shortcuts.
       if (event.defaultPrevented || document.querySelector("dialog:modal") || target?.closest(".library-reader, input, textarea, select, [contenteditable='true']")) return;
       const modifier = event.ctrlKey || event.metaKey;
+      if (!modifier && !event.altKey && event.key.toLowerCase() === "f") {
+        if (event.defaultPrevented || event.isComposing || event.repeat
+          || target?.isContentEditable
+          || target?.closest("input, textarea, select, [role='textbox'], .xterm")
+          || useNodeSurfaceStore.getState().dragging) return;
+        const selected = new Set(selectedCardIds);
+        const focusNodes = getNodes().filter((node) => selected.has(node.id) && !node.hidden);
+        if (focusNodes.length === 0) return;
+        event.preventDefault();
+        void fitView({
+          nodes: focusNodes,
+          padding: 0.15,
+          minZoom: 0.12,
+          maxZoom: 2.2,
+          duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300,
+        });
+        return;
+      }
       if (modifier && event.key.toLowerCase() === "z") {
         event.preventDefault();
         if (event.shiftKey) void redo();
@@ -352,7 +401,7 @@ export function WorldCanvas() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeInspector, closeWorkspace, deleteCards, deleteSelectedEdge, dismissSurface, redo, selectEdge, selectedCardIds, selectedEdgeId, surfaceLevelsByNodeId, undo]);
+  }, [closeInspector, closeWorkspace, deleteCards, deleteSelectedEdge, dismissSurface, fitView, getNodes, redo, selectEdge, selectedCardIds, selectedEdgeId, surfaceLevelsByNodeId, undo]);
 
   const onNodeDragStart: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
     cancelPositionAnimation();
@@ -556,10 +605,23 @@ export function WorldCanvas() {
   return (
     <div
       ref={wrapper}
-      className={`world-canvas ${cards.some((card) => selectedCardIds.includes(card.id) && isContainer(card, catalog)) ? "has-selected-container" : ""}`}
+      className={`world-canvas ${pinToolActive ? "pin-tool-active" : ""} ${cards.some((card) => selectedCardIds.includes(card.id) && isContainer(card, catalog)) ? "has-selected-container" : ""}`}
       data-testid="world-canvas"
+      onMouseDownCapture={(event) => {
+        if (event.button !== 0 || !(event.target instanceof Element)) return;
+        const target = event.target;
+        if (!target.closest(".react-flow__handle")
+          && !target.classList.contains("react-flow__pane")) return;
+        // Keep React Flow's pan/selection/connection events, but do not let
+        // Shift-click extend an old browser text selection into the canvas.
+        // Controls retain their native focus and activation behavior.
+        if (target.closest("button, input, textarea, select, a, [role='button'], [contenteditable]")) return;
+        event.preventDefault();
+        window.getSelection()?.removeAllRanges();
+      }}
       onWheelCapture={(event) => {
         const element = wrapper.current;
+        if ((event.target as Element).closest('.react-flow')?.id !== 'oaw-world-map') return;
         if (element && isScrollableArea(event.target, element)) event.stopPropagation();
       }}
       onDrop={onDrop}
@@ -598,7 +660,12 @@ export function WorldCanvas() {
         onMoveEnd={onMoveEnd}
         onEdgeClick={(_event, edge) => selectEdge(edge.id)}
         onSelectionChange={onSelectionChange}
-        onPaneClick={() => {
+        onPaneClick={(event) => {
+          if (pinToolActive) {
+            const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+            useWorldStore.setState(state => ({ mapPins: [...state.mapPins, { id: crypto.randomUUID(), name: `图钉 ${state.mapPins.length + 1}`, ...point, zoom: getViewport().zoom }] }));
+            return;
+          }
           selectEdge(undefined);
           selectCards([]);
         }}
@@ -627,17 +694,8 @@ export function WorldCanvas() {
           size={1.15}
           color="var(--grid-dot)"
         />
-        <MiniMap
-          className="world-minimap"
-          nodeColor={(node) => (
-            getNodeType(catalog, (node.data as CanvasNodeData).card.type)?.color ?? "#75736c"
-          )}
-          nodeStrokeWidth={0}
-          maskColor="var(--minimap-mask)"
-          pannable
-          zoomable
-          ariaLabel="World overview"
-        />
+        <LocalMiniMap />
+        <MapAtlas active={pinToolActive} onActiveChange={setPinToolActive} />
         <Controls
           className="world-controls"
           position="bottom-right"

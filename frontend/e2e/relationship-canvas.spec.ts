@@ -191,7 +191,21 @@ test("an Agent relationship can be dragged between boundaries and exposes real e
     await expect(targetCard).toBeVisible();
     await expect(sourceCard).toHaveAttribute("data-card-type", "agent");
 
-    await dragConnection(sourceCard, targetCard);
+    // An existing browser selection must not turn a connection into text drag.
+    await page.evaluate(() => {
+      const range = document.createRange();
+      range.selectNodeContents(document.body);
+      window.getSelection()?.addRange(range);
+    });
+    expect(await page.evaluate(() => window.getSelection()?.isCollapsed)).toBe(false);
+    const start = await handleCenter(sourceCard, "right");
+    const end = await handleCenter(targetCard, "left");
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    expect(await page.evaluate(() => window.getSelection()?.isCollapsed)).toBe(true);
+    await page.mouse.move(end.x, end.y, { steps: 10 });
+    expect(await page.evaluate(() => window.getSelection()?.isCollapsed)).toBe(true);
+    await page.mouse.up();
 
     const dialog = page.getByRole("dialog", { name: "Choose a capability" });
     await expect(dialog).toBeVisible();
@@ -394,6 +408,43 @@ test("surfaces change only explicitly and restore their previous level", async (
   }
 });
 
+test("agent previews resolve model names and keep long content within the card", async ({ page, request }) => {
+  const id = `preview-model-${Date.now()}`;
+  const modelId = "b629919a-bddd-421c-a334-f0cbca006d7e";
+  const modelName = "Research model with a deliberately long readable name";
+  await page.route("**/api/settings/models", route => route.fulfill({ json: {
+    revision: 1, default_model: `oaw:model:${modelId}`, connections: [{
+      id: "preview-test", name: "Test", adapter: "openai", base_url: "", enabled: true,
+      auth_mode: "none", api_key_configured: false,
+      models: [{ id: modelId, name: modelName, model_id: "research", enabled: true }],
+    }],
+  } }));
+  expect((await request.post("/api/nodes", { data: {
+    id, type: "agent", name: "Preview layout", position: { x: 400, y: 260 },
+    config: { model: `oaw:model:${modelId}`, system_instruction: "You are a careful research agent. Use only capabilities connected in this world. " + "longword".repeat(30) },
+  } })).ok()).toBe(true);
+  try {
+    await page.addInitScript(nodeId => localStorage.setItem("oaw-node-surfaces-v1", JSON.stringify({
+      state: { surfaceLevels: { [nodeId]: "preview" }, baseLevels: {}, maximizedWorkspaces: {} }, version: 3,
+    })), id);
+    await page.goto("/");
+    const card = page.locator(`[data-card-id="${id}"]`);
+    await expect(card.locator(".node-preview-metadata")).toContainText(modelName);
+    await expect(card.locator(".node-preview-metadata")).not.toContainText("oaw:model:");
+    const dimensions = await card.evaluate(element => {
+      const content = element.querySelector(".node-preview-content")!.getBoundingClientRect();
+      const paragraph = element.querySelector(".node-preview-summary p")!;
+      const bounds = paragraph.getBoundingClientRect();
+      return { right: bounds.right, contentRight: content.right, height: bounds.height,
+        lineHeight: parseFloat(getComputedStyle(paragraph).lineHeight) };
+    });
+    expect(dimensions.right).toBeLessThanOrEqual(dimensions.contentRight + 1);
+    expect(dimensions.height).toBeGreaterThan(dimensions.lineHeight * 1.5);
+  } finally {
+    await request.delete(`/api/nodes/${id}`);
+  }
+});
+
 test("a detail card uses the same boundary-following connection hint", async ({ page, request }) => {
   const suffix = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
   const card = await createCard(
@@ -588,7 +639,7 @@ test("a Conversation workspace creates a group and routes explicit mentions", as
     const workspace = page.locator(`[data-workspace-node-id="${conversation.id}"]`);
     await expect(workspace).toBeVisible();
     await workspace.getByRole("button", { name: "New group" }).click();
-    await workspace.getByLabel("Session name").fill("E2E Review Group");
+    await workspace.getByLabel("Group name").fill("E2E Review Group");
     await workspace.getByLabel("E2E Atlas").check();
     await workspace.getByRole("button", { name: "Create group" }).click();
 
@@ -651,7 +702,7 @@ test("a Conversation group can remove a participant and be dissolved", async ({ 
     await conversationCard.getByRole("button", { name: "Open workspace" }).click();
     const workspace = page.locator(`[data-workspace-node-id="${conversation.id}"]`);
     await workspace.getByRole("button", { name: "New group" }).click();
-    await workspace.getByLabel("Session name").fill("E2E Kick Group");
+    await workspace.getByLabel("Group name").fill("E2E Kick Group");
     await workspace.getByLabel("E2E Kick Atlas").check();
     await workspace.getByLabel("E2E Kick River").check();
     await workspace.getByRole("button", { name: "Create group" }).click();
@@ -661,7 +712,7 @@ test("a Conversation group can remove a participant and be dissolved", async ({ 
     await workspace.getByRole("button", { name: "Remove E2E Kick River from session" }).click();
     await expect(workspace.getByText("1 active participants", { exact: true })).toBeVisible();
     page.once("dialog", (dialog) => dialog.accept());
-    await workspace.getByRole("button", { name: "Dissolve session" }).click();
+    await workspace.getByRole("button", { name: "Delete session" }).click();
     await expect(workspace.getByText("E2E Kick Group", { exact: true })).toHaveCount(0);
   } finally {
     await request.delete(`/api/nodes/${conversation.id}`);

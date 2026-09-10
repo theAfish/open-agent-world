@@ -15,6 +15,7 @@ export interface SurfaceObstacle {
   card: WorldCard;
   level: Exclude<NodeSurfaceLevel, "node">;
   clearance?: number;
+  size?: { width: number; height: number };
 }
 
 function surfaceSize(level: NodeSurfaceLevel) {
@@ -63,7 +64,7 @@ function pushOutsideSurface(
 ): WorldPosition {
   if (card.id === obstacle.card.id) return position;
   const nodeSize = surfaceSize(level);
-  const obstacleSize = surfaceSize(obstacle.level);
+  const obstacleSize = obstacle.size ?? surfaceSize(obstacle.level);
   const renderedObstaclePosition = positionSurfaceAtNodeCenter(obstaclePosition, obstacle.level);
   const compactSize = NODE_SURFACE_SIZE.node;
   const center = { x: position.x + compactSize.width / 2, y: position.y + compactSize.height / 2 };

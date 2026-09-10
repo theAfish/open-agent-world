@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { normalizeRuntimeEvent, runtimeWebSocketUrl } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
+import { useCardLibrary } from "../state/cardLibrary";
 
 // The stream stays honest about liveness: a half-open TCP connection is
 // detected through the ping/pong heartbeat instead of stalling silently.
@@ -34,6 +35,7 @@ export function RuntimeConnection() {
         lastMessageAt = Date.now();
         setSocketState("live");
         void refreshWorld();
+        void useCardLibrary.getState().refresh();
         stopHeartbeat();
         heartbeatTimer = window.setInterval(() => {
           if (!socket || socket.readyState !== WebSocket.OPEN) return;
@@ -55,6 +57,10 @@ export function RuntimeConnection() {
             const normalized = normalizeRuntimeEvent(item);
             // Heartbeat pongs only prove liveness; keep them out of the event log.
             if (normalized.type === "connection_ready" && normalized.payload.message === "pong") continue;
+            if (normalized.type === "card_library_updated") {
+              void useCardLibrary.getState().refresh();
+              void refreshWorld();
+            }
             ingestEvent(normalized);
           }
         } catch {

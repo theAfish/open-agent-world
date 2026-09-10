@@ -25,7 +25,12 @@ def bundle_path(value: str) -> str:
         if (part in {"", ".", ".."} or part.endswith((".", " "))
             or any(ord(c) < 32 or c in '\\:<>"|?*' for c in part)
             or re.fullmatch(r"(?i:con|prn|aux|nul|conin\$|conout\$|clock\$|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?", part)):
-            raise SandboxValidationError("Bundle paths must be safe portable relative paths")
+            raise SandboxValidationError(
+                f"Bundle paths must be safe portable relative paths; invalid path: {value!r}. "
+                "Use forward-slash relative paths such as scripts/check.py; "
+                "absolute paths, empty/dot/parent segments, reserved names and "
+                "non-portable characters are not allowed."
+            )
     return value
 
 

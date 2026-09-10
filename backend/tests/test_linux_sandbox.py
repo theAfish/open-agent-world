@@ -172,7 +172,7 @@ def test_wsl_bridge_never_interpolates_user_commands_into_launcher() -> None:
     decoded = json.loads(_envelope(request))
     assert decoded["request"] == request
     assert "echo $HOME" not in command[-1]
-    assert [item[0] for item in decoded["modules"]] == ["models", "materialization", "base", "environment", "files", "transfers", "python_runtime", "linux_network", "linux", "linux_worker"]
+    assert [item[0] for item in decoded["modules"]] == ["models", "materialization", "base", "environment", "files", "transfers", "python_launchers", "python_runtime", "linux_network", "linux", "linux_worker"]
     with pytest.raises(SandboxValidationError):
         wsl_command("--terminate")
 
@@ -387,3 +387,122 @@ async def test_real_wsl_files_network_resource_limits_timeout_and_cancellation(t
         await backend.destroy("live")
     assert (external / "changed.txt").read_text() == "live"
     assert secret.read_text() == "must remain private"
+
+
+@pytest.mark.asyncio
+async def test_managed_home_survives_restart_and_workspace_switch(tmp_path):
+    backend = LinuxSandboxBackend(tmp_path / "managed")
+    await backend.create("home-test")
+    record = await backend._record("home-test")
+    backend._validate_record_paths(record)
+    home = record.root / "home"
+    (home / "installed").write_text("persistent")
+    project = tmp_path / "other"
+    project.mkdir()
+    await backend.configure("home-test", workspace_path=str(project), workspace_access=ResourceAccess.READ_ONLY)
+    recovered = LinuxSandboxBackend(tmp_path / "managed")
+    record = await recovered._record("home-test")
+    recovered._validate_record_paths(record)
+    assert (record.root / "home" / "installed").read_text() == "persistent"
+    command = bubblewrap_command(project, ResourceAccess.READ_ONLY, (), ["true"], minimal_linux_environment(), home=home)
+    index = command.index(str(home))
+    assert command[index-1:index+2] == ["--bind", str(home), "/sandbox/home"]
+    await recovered.destroy("home-test")
+    assert project.is_dir()
+    assert not home.exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not os.environ.get("OAW_TEST_WSL_DISTRO"), reason="requires WSL2")
+async def test_real_wsl_persistent_home_cli_and_fresh_tmp(tmp_path):
+    backend = WslSandboxBackend(tmp_path / "managed", distribution=os.environ["OAW_TEST_WSL_DISTRO"])
+    await backend.create("home-test")
+    try:
+        await backend.start("home-test")
+        result = await backend.execute("home-test", ["/bin/sh", "-c", "mkdir -p \"$HOME/.local/bin\"; printf '#!/bin/sh\\nprintf persistent-ok\\n' > \"$HOME/.local/bin/home-probe\"; chmod +x \"$HOME/.local/bin/home-probe\"; touch /tmp/ephemeral-probe"], timeout_seconds=15)
+        assert result.exit_code == 0, result.stderr
+        await backend.terminate("home-test")
+        await backend.start("home-test")
+        result = await backend.execute("home-test", ["/bin/sh", "-c", "home-probe && test ! -e /tmp/ephemeral-probe && test ! -e /mnt/c && test ! -e /root/.ssh"], timeout_seconds=15)
+        assert result.exit_code == 0, result.stderr
+        assert "persistent-ok" in result.stdout
+    finally:
+        await backend.destroy("home-test")
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_python_preparation_never_launches_workload(tmp_path, monkeypatch):
+    entered, release = asyncio.Event(), asyncio.Event()
+    class PythonRuntime:
+        venv = tmp_path / "venv"
+        def environment(self, environment):
+            pass
+        def command(self, command):
+            return command
+        async def prepare(self):
+            entered.set()
+            await release.wait()
+    backend = LinuxSandboxBackend(tmp_path / "managed", python_runtime=PythonRuntime())
+    await backend.create("preparing")
+    record = await backend._record("preparing")
+    record.state = SandboxState.READY
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("Cancelled workload must not be launched")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", forbidden)
+    execution = asyncio.create_task(backend.execute("preparing", ["true"]))
+    await entered.wait()
+    cancellation = asyncio.create_task(backend.cancel("preparing"))
+    await asyncio.sleep(0)
+    assert record.cancelled.is_set()
+    release.set()
+    result = await execution
+    await cancellation
+    assert result.cancelled and not result.timed_out
+    assert record.state == SandboxState.READY
+
+
+@pytest.mark.asyncio
+async def test_wsl_late_cancel_does_not_relabel_completed_work(tmp_path, monkeypatch):
+    backend = WslSandboxBackend(tmp_path, distribution="unused")
+    async def get(sandbox_id):
+        return SandboxInfo(sandbox_id, SandboxState.READY, PurePosixPath("/workspace"))
+    async def prepare():
+        pass
+    async def request(payload, **kwargs):
+        kwargs["active"].cancelled = True
+        return {"sandbox_id": "box", "argv": ["true"], "exit_code": 0,
+                "stdout": "completed", "stderr": "", "duration_seconds": 1,
+                "timed_out": False, "cancelled": False}
+    monkeypatch.setattr(backend, "get", get)
+    monkeypatch.setattr(backend, "prepare_python", prepare)
+    monkeypatch.setattr(backend, "_request", request)
+    result = await backend.execute("box", ["true"])
+    assert result.exit_code == 0 and not result.cancelled
+
+
+def test_npm_global_prefix_uses_persistent_home_bin():
+    environment = minimal_linux_environment()
+    assert environment["NPM_CONFIG_PREFIX"] == environment["HOME"] + "/.local"
+    assert environment["NPM_CONFIG_PREFIX"] + "/bin" in environment["PATH"].split(":")
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not os.environ.get("OAW_TEST_WSL_DISTRO"), reason="requires WSL2 with npm")
+async def test_real_wsl_npm_global_install_uses_home(tmp_path):
+    backend = WslSandboxBackend(tmp_path / "managed", distribution=os.environ["OAW_TEST_WSL_DISTRO"])
+    await backend.create("npm-home")
+    policy = {"active_process_limit": 64}
+    try:
+        await backend.start("npm-home")
+        package = {"name": "@oaw-test/cli", "version": "1.0.0", "bin": {"oaw-npm-home-check": "cli.js"}}
+        setup = "from pathlib import Path; p=Path('fixture'); p.mkdir(); (p/'package.json').write_text(" + repr(json.dumps(package)) + "); (p/'cli.js').write_text('#!/usr/bin/env node\\nconsole.log(\"npm-home-ok\");\\n')"
+        result = await backend.execute("npm-home", ["python3", "-c", setup], execution_policy=policy)
+        assert result.exit_code == 0, result.stderr
+        result = await backend.execute("npm-home", ["npm", "install", "-g", "./fixture", "--offline", "--no-audit", "--no-fund"], execution_policy=policy)
+        assert result.exit_code == 0, result.stderr
+        await backend.terminate("npm-home")
+        await backend.start("npm-home")
+        result = await backend.execute("npm-home", ["oaw-npm-home-check"], execution_policy=policy)
+        assert result.exit_code == 0 and "npm-home-ok" in result.stdout, result.stderr
+    finally:
+        await backend.destroy("npm-home")

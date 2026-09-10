@@ -53,7 +53,7 @@ sys.modules['oaw_sandbox.linux_worker'].main(payload['request'],stdin_pending=bo
 # source change the next unrestricted transport helper.
 _WORKER_MODULES = tuple(
     (name, (Path(__file__).parent / f"{name}.py").read_text(encoding="utf-8"))
-    for name in ("models", "materialization", "base", "environment", "files", "transfers", "python_runtime", "linux_network", "linux", "linux_worker")
+    for name in ("models", "materialization", "base", "environment", "files", "transfers", "python_launchers", "python_runtime", "linux_network", "linux", "linux_worker")
 )
 
 
@@ -334,7 +334,7 @@ class WslSandboxBackend(SandboxBackend):
             result = CommandResult(sandbox_id=raw["sandbox_id"], argv=tuple(raw["argv"]),
                 exit_code=raw["exit_code"], stdout=raw["stdout"], stderr=raw["stderr"],
                 duration_seconds=raw["duration_seconds"], timed_out=raw["timed_out"],
-                cancelled=raw["cancelled"] or active.cancelled)
+                cancelled=raw["cancelled"])
             self._infos[sandbox_id] = replace(info,
                 state=SandboxState.STOPPED if active.stop_requested else SandboxState.READY)
             return result

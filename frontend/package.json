@@ -1,6 +1,9 @@
 {
   "name": "open-agent-world-frontend",
   "private": true,
+  "overrides": {
+    "matterviz": { "svelte-widgets": "1.6.1" }
+  },
   "version": "0.1.0",
   "type": "module",
   "scripts": {
@@ -12,13 +15,18 @@
   "dependencies": {
     "@xyflow/react": "^12.8.5",
     "lucide-react": "^0.468.0",
+    "matterviz": "0.7.0",
     "pdfjs-dist": "^5.4.624",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "svelte": "5.57.0",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
+    "@sveltejs/vite-plugin-svelte": "5.1.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@types/react": "^18.3.18",

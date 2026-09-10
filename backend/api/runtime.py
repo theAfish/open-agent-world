@@ -4,10 +4,10 @@ from pathlib import PurePath
 from dataclasses import fields
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import Response
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from backend.api.dependencies import get_services
 from backend.services import ApplicationServices
@@ -18,6 +18,27 @@ from backend.sandbox.models import SandboxValidationError
 
 
 router = APIRouter(tags=["runtime"])
+
+from backend.security.model_connections import CatalogEdit, ModelCatalog, ModelConnectionStore
+
+
+@router.get("/settings/models", response_model=ModelCatalog)
+async def get_model_connections(services: ApplicationServices = Depends(get_services)):
+    return ModelConnectionStore(services.llm_settings).read()
+
+
+@router.put("/settings/models", response_model=ModelCatalog)
+async def save_model_connections(request: Request, services: ApplicationServices = Depends(get_services)):
+    # Pydantic's default error input can contain the entire submitted credential
+    # document. Return field locations/messages, never the submitted values.
+    try:
+        edit = CatalogEdit.model_validate(await request.json())
+    except ValidationError as exc:
+        raise HTTPException(422, detail=[{"loc": e["loc"], "msg": e["msg"], "type": e["type"]}
+                                         for e in exc.errors(include_input=False, include_context=False)]) from None
+    except ValueError:
+        raise HTTPException(422, detail="Invalid model settings document") from None
+    return ModelConnectionStore(services.llm_settings).save(edit)
 
 
 class PythonPackagesRequest(BaseModel):
@@ -116,7 +137,7 @@ class SandboxExecuteRequest(BaseModel):
 
     command: Annotated[str, Field(min_length=1, max_length=32_768)] | None = None
     argv: Annotated[list[str], Field(min_length=1, max_length=256)] | None = None
-    timeout_seconds: Annotated[float, Field(gt=0, le=600)] | None = None
+    timeout_seconds: Annotated[float, Field(gt=0, le=3600, strict=True, allow_inf_nan=False)] | None = None
     environment_id: str | None = None
     target_id: str | None = None
 

@@ -47,7 +47,7 @@ class SandboxLimits:
     """Limits applied to the complete command process tree by every runtime."""
 
     memory_bytes: int = 512 * 1024 * 1024
-    active_process_limit: int = 16
+    active_process_limit: int = 64
     default_timeout_seconds: float = 60.0
 
     def __post_init__(self) -> None:

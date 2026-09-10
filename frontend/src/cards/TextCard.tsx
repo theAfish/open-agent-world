@@ -55,7 +55,7 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
   };
 
   return (
-    <div className="expanded-stack nodrag nopan">
+    <div className="expanded-stack">
       <div className="resource-banner">
         <div>
           <span>Managed resource</span>

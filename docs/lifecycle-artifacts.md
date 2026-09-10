@@ -1,5 +1,7 @@
 # Execution lifecycle and durable outputs
 
+[Documentation](README.md)
+
 ## Gap map (September 2026)
 
 Existing contracts already separate Agent lifetime from Runs and Sandbox lifetime
@@ -189,6 +191,35 @@ created. Ready means captured bytes are complete and accessible under authorizat
 domain validity and scientific verification belong to plugins.
 
 ## Migration and verification boundaries
+
+### Conversation attachments
+
+Participate connections admit Agents to General once per edge, including connections
+saved before this feature. Explicit session removal is preserved; reconnecting a
+new edge admits the Agent again. General remains protected from deletion.
+
+Conversation messages persist typed attachment references (`version_id`, `path`,
+name, media type and byte size). User uploads stream into the existing immutable
+artifact journal and retention store. The composer accepts up to 20 attachments
+per message and 64 MiB per uploaded file, also subject to configured artifact and
+storage quotas. Empty text is allowed when attachments are present. PNG, JPEG,
+GIF and WebP attachments have clickable previews; other files download without
+executing active content. Session changes do not redirect an in-flight upload.
+
+Participate grants `send_conversation_message` and the existing artifact read,
+publish and materialize operations. Publishing/materializing additionally needs
+an independently authorized Sandbox selector. Agents publish finalized Sandbox
+files into the conversation, then send references to those files. Each version
+records its session in provenance. Read/list/send checks require the current run's
+session, membership and live edge; another session cannot use a guessed version
+ID. Unsent user uploads are not visible to Agents. Sharing a file from an artifact
+version makes that version available to the session, including its other selected
+files. Text can be inspected directly; binary/document analysis uses the Agent's
+available Sandbox tools. This does not add model-native multimodal input support.
+
+Uploads and published versions use user-owned retention. Removing an attachment
+from a draft, deleting messages or deleting a session does not release retained
+bytes. The retained-artifact controls remain responsible for explicit release.
 
 Startup adds `runs.lifecycle_json` with an empty default for old records and creates
 `artifact_versions` / `artifact_references` if absent. Existing Run statuses,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,16 +46,19 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        owned = services is None
-        active_services = services or create_services(selected_settings)
-        application.state.services = active_services
-        try:
-            await active_services.startup()
-            yield
-        finally:
-            await active_services.shutdown()
-            if owned:
-                active_services.close()
+        from backend.storage_location import prepare_storage
+        with ExitStack() as stack:
+            owned = services is None
+            effective_settings = prepare_storage(selected_settings, stack) if owned else selected_settings
+            active_services = services or create_services(effective_settings)
+            application.state.services = active_services
+            try:
+                await active_services.startup()
+                yield
+            finally:
+                await active_services.shutdown()
+                if owned:
+                    active_services.close()
 
     application = FastAPI(
         title="Open Agent World",

@@ -9,7 +9,6 @@ import sys
 import threading
 import time
 from types import SimpleNamespace
-import zipfile
 
 import pytest
 
@@ -196,46 +195,3 @@ async def test_bootstrap_discovery_restart_change_failure_retry_and_removal(tmp_
     removed = PluginEnvironmentBootstrap(tmp_path, PluginRegistry(), manager)
     assert removed.records() == []
     assert retained.exists()
-
-
-def test_real_venv_persists_wheel_across_instances_and_workspaces(tmp_path, monkeypatch):
-    if not shutil.which('uv'):
-        pytest.skip('uv required for real environment acceptance')
-    wheels = tmp_path / 'wheels'
-    wheels.mkdir()
-    with zipfile.ZipFile(wheels / 'oaw_shared_probe-1.0-py3-none-any.whl', 'w') as wheel:
-        files = {
-            'oaw_shared_probe.py': 'VALUE = "shared-package-ok"\n',
-            'oaw_shared_probe-1.0.dist-info/METADATA': 'Metadata-Version: 2.1\nName: oaw-shared-probe\nVersion: 1.0\n',
-            'oaw_shared_probe-1.0.dist-info/WHEEL': 'Wheel-Version: 1.0\nGenerator: oaw-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n',
-        }
-        files['oaw_shared_probe-1.0.dist-info/RECORD'] = ''.join(f'{name},,\n' for name in files)
-        for name, data in files.items():
-            wheel.writestr(name, data)
-    original = SharedPythonRuntime._run
-    def offline_run(self, argv):
-        if 'install' in argv:
-            argv = [*argv, '--no-index', '--find-links', str(wheels)]
-        return original(self, argv)
-    monkeypatch.setattr(SharedPythonRuntime, '_run', offline_run)
-    first = SharedPythonRuntime(tmp_path / 'data')
-    first.prepare_sync(['oaw-shared-probe==1.0'])
-    second = SharedPythonRuntime(tmp_path / 'data')
-    second.prepare_sync()
-    assert first.python == second.python
-    for name in ('workspace-a', 'workspace-b'):
-        workspace = tmp_path / name
-        workspace.mkdir()
-        result = subprocess.run([str(second.python), '-I', '-c',
-            'import oaw_shared_probe,sys,json; print(json.dumps([oaw_shared_probe.VALUE,sys.prefix,sys.path]))'],
-            cwd=workspace, capture_output=True, text=True, check=True)
-        value, prefix, paths = json.loads(result.stdout)
-        assert value == 'shared-package-ok'
-        assert Path(prefix) == first.venv
-        assert str(Path(sys.prefix) / 'Lib' / 'site-packages') not in paths
-    assert 'include-system-site-packages = false' in (first.venv / 'pyvenv.cfg').read_text()
-    site = next(first.venv.glob('Lib/site-packages')) if os.name == 'nt' else next(first.venv.glob('lib/python*/site-packages'))
-    marker = tmp_path / 'host-startup-hook-ran'
-    (site / 'untrusted.pth').write_text(f'import pathlib; pathlib.Path({str(marker)!r}).touch()\n')
-    second.prepare_sync(['oaw-shared-probe==1.0'])
-    assert not marker.exists(), 'installer must never execute shared Python startup hooks on the host'

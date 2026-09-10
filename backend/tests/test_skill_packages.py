@@ -99,6 +99,10 @@ def test_exported_plugin_owns_cards_and_updates_only_new_instances(client, tmp_p
                 catalog = installed.get("/api/catalog").json()
                 definition = next(item for item in catalog["node_types"] if item["id"] == "example.review.toolbox")
                 assert definition["plugin_id"] == "example.review"
+                # The library can identify the scoped Skill's actual container without guessing from IDs or traits.
+                assert definition["container"]["member_type"] == "example.review.toolbox.skill"
+                library_definition = installed.get("/api/card-library").json()["card_definitions"][definition["id"]]
+                assert library_definition["container"]["member_type"] == "example.review.toolbox.skill"
                 current = create_node(installed, "example.review.toolbox")
                 ids.append(current["id"])
                 value = installed.get(f"/api/nodes/{current['id']}/document").json()["value"]

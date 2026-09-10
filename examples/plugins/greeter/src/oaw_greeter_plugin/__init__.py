@@ -18,7 +18,7 @@ from open_agent_world.plugin_api import (
     NodeLifecycleHandler,
     NodeLifecycleTransaction,
     NodeTypeDefinition,
-    PluginDescriptor,
+    PackDefinition, PluginDescriptor,
     PluginRegistration,
     RelationshipDefinition,
     ResourceValidationError,
@@ -131,7 +131,7 @@ class GreeterPlugin:
     descriptor = PluginDescriptor(
         id="community.greeter",
         version="0.1.0",
-        plugin_api_version="1.10",
+        plugin_api_version="1.14",
         name="Greeter",
         description="A minimal graph-derived Agent tool example.",
     )
@@ -195,6 +195,8 @@ class GreeterPlugin:
                 kind="community.greeter.greet",
             ),),
         ))
+        registration.register_pack(PackDefinition(id='community.greeter.default', name='Greeter',
+            description='A small example capability pack.', cards=tuple(registration.nodes)))
 
 
 def create_plugin() -> GreeterPlugin:

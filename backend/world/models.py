@@ -104,7 +104,7 @@ class SandboxConfig(BaseModel):
     workspace_access: Literal["read_only", "read_write"] = "read_write"
     network_enabled: bool = False
     memory_bytes: int = Field(default=512 * 1024 * 1024, ge=16 * 1024 * 1024, le=8 * 1024 * 1024 * 1024)
-    active_process_limit: int = Field(default=16, ge=1, le=256)
+    active_process_limit: int = Field(default=64, ge=1, le=256)
     command_timeout: float = Field(default=60, gt=0, le=600)
     presets: dict[str, str] = Field(default_factory=dict, max_length=30)
 

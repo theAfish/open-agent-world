@@ -93,7 +93,7 @@ def resolve_execution_configuration(services, environment_id, target_id):
         profile = EnvironmentProfile.model_validate(read_document(services, environment_id)["value"])
         for key, value in profile.variables.items():
             if isinstance(value, SecretRequirement):
-                value = services.execution_credentials.resolve(environment_id, value.secret_ref)
+                value = resolve_environment_secret(services, environment_id, key, value.secret_ref)
                 secrets.append(value)
             environment[key] = value
     if target_id is not None:
@@ -101,6 +101,17 @@ def resolve_execution_configuration(services, environment_id, target_id):
         environment[TARGET_VARIABLE] = json.dumps(target, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
     validate_command_environment(environment)
     return environment, tuple(secrets)
+
+
+def resolve_environment_secret(services, owner, name, reference):
+    if not services.execution_credentials.configured(owner, reference):
+        from backend.errors import ResourceValidationError
+        node = services.world.get_card(owner)
+        raise ResourceValidationError(
+            f"Secret variable {name!r} is unbound on {node.name!r} ({owner}); "
+            "enter its secret in Environment variables and save, or remove the unused variable"
+        )
+    return services.execution_credentials.resolve(owner, reference)
 
 
 def linked_environment(services, sandbox_id):
@@ -130,7 +141,7 @@ def resolve_sandbox_configuration(services, sandbox_id, environment_id=None, tar
     environment, secrets = {}, []
     for name, value, owner, _ in variables:
         if isinstance(value, SecretRequirement):
-            value = services.execution_credentials.resolve(owner, value.secret_ref)
+            value = resolve_environment_secret(services, owner, name, value.secret_ref)
             secrets.append(value)
         environment[name] = value
     if target_id:

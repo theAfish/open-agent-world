@@ -9,6 +9,54 @@ def action(client, node, name, args):
     current = client.get(f"/api/nodes/{node['id']}/document").json()
     return client.post(f"/api/nodes/{node['id']}/actions/{name}", json={"arguments": args, "expected_revision": current['revision']})
 
+
+@pytest.fixture
+def summoning_client(tmp_path):
+    from dataclasses import replace
+    from fastapi.testclient import TestClient
+    from backend.config import Settings
+    from backend.main import create_app
+
+    settings = replace(Settings.for_data_root(tmp_path / "world"), agent_runtime="core.mock")
+    with TestClient(create_app(settings)) as client:
+        yield client
+
+
+@pytest.mark.parametrize("relationship", ["matcreator.kdg.use", "matcreator.kdg.learn", "matcreator.kdg.curate"])
+def test_summoned_agent_keeps_shared_graph_and_sandbox_connections(summoning_client, relationship):
+    from backend.tests.test_summoning import stock, invoke, settle
+
+    client = summoning_client
+    box = create_node(client, "oaw.barracks")
+    agent = create_node(client, "agent")
+    graph = create_node(client, "matcreator.kdg")
+    sandbox = create_node(client, "sandbox")
+    stock(client, box, agent)
+    for target, relation in [(graph, relationship), (sandbox, "execute")]:
+        response = client.post("/api/edges", json={"source": agent["id"],
+            "target": target["id"], "relationship": relation})
+        assert response.status_code == 201, response.text
+    services = client.app.state.services
+    original_caps = {(c.kind, c.target_id) for c in services.capabilities.derive(agent["id"]).capabilities}
+    instance = settle(client, box, invoke(client, box, action="summon", agent_id=agent["id"], prompt="Inspect knowledge"))
+    assert instance["status"] == "succeeded"
+    summoned = instance["entry_agent_id"]
+    assert instance["node_ids"] == [summoned]
+    assert {(c.kind, c.target_id) for c in services.capabilities.derive(summoned).capabilities} == original_caps
+    edges = [e for e in services.world.list_edges() if e.source == summoned]
+    assert {(e.target, e.relationship) for e in edges} == {(graph["id"], relationship), (sandbox["id"], "execute")}
+    provider = WorldAgentCapabilityProvider(services)
+    result = client.portal.call(provider.invoke_tool, summoned, "operation:knowledge_search", {"knowledge": graph["id"]})
+    assert result["value"]["nodes"] == []
+    graph_edge = next(e for e in edges if e.target == graph["id"])
+    assert client.delete(f"/api/edges/{graph_edge.id}").status_code == 200
+    with pytest.raises(PermissionDeniedError):
+        client.portal.call(provider.invoke_tool, summoned, "operation:knowledge_search", {"knowledge": graph["id"]})
+    invoke(client, box, action="reclaim", instance_id=instance["id"])
+    for shared in [graph, sandbox]:
+        assert client.get(f"/api/nodes/{shared['id']}").status_code == 200
+    assert {(c.kind, c.target_id) for c in services.capabilities.derive(agent["id"]).capabilities} == original_caps
+
 def test_palette_assimilation_has_no_temporary_source_and_preview_is_read_only(client):
     target = create_node(client, 'matcreator.kdg')
     before = client.get('/api/world').json()['nodes']
@@ -95,6 +143,39 @@ def test_graph_validation_and_review(client):
     assert action(client, target, 'distill', {'memory_ids': [queue[0]['id']], 'title': 'Check frame count', 'content': 'Verify every output frame', 'evidence': 'Trial output inspected'}).status_code == 200
     assert action(client, target, 'search', {'review': True}).json()['value']['nodes'] == []
     assert len(action(client, target, 'expand', {'ids': [entry['id']]}).json()['value']['nodes']) == 2
+
+
+def test_graph_displays_its_workspace_and_curates_imported_entries_locally(client):
+    graph = create_node(client, 'matcreator.kdg')
+    definition = next(item for item in client.get('/api/catalog').json()['node_types'] if item['id'] == graph['type'])
+    assert definition['container']['member_display'] == 'workspace'
+    current = client.get(f"/api/nodes/{graph['id']}/document").json()
+    imported = client.post(f"/api/nodes/{graph['id']}/transformations/assimilate", json={
+        'source_type': 'matcreator.core', 'expected_revision': current['revision'], 'confirm': True})
+    assert imported.status_code == 200, imported.text
+    before = client.get(f"/api/nodes/{graph['id']}/document").json()['value']
+    entry = before['entries'][0]
+    updated = action(client, graph, 'edit', {'entry_id': entry['id'], 'title': 'Local notes', 'content': 'Reviewed for this graph', 'type': entry['type']})
+    assert updated.status_code == 200, updated.text
+    inspected = action(client, graph, 'inspect', {'entry_id': entry['id']}).json()['value']
+    assert inspected['entry']['id'] == entry['id']
+    assert inspected['entry']['owner'] == 'user'
+    assert inspected['entry']['provenance'] == entry['provenance']
+    assert inspected['entry']['resources'] == entry['resources']
+    assert inspected['resources']
+    changed = client.get(f"/api/nodes/{graph['id']}/document").json()['value']
+    assert changed['snapshots'] == before['snapshots']
+    assert changed['skills'] == before['skills']
+    # Both edited and untouched imported entries can leave this graph.
+    for selected in [entry, before['entries'][1]]:
+        assert action(client, graph, 'delete_entry', {'entry_id': selected['id']}).status_code == 200
+        assert action(client, graph, 'inspect', {'entry_id': selected['id']}).status_code == 422
+    after = client.get(f"/api/nodes/{graph['id']}/document").json()['value']
+    assert after['snapshots'] == before['snapshots']
+    assert after['skills'] == before['skills']
+    removed = {entry['id'], before['entries'][1]['id']}
+    assert not any(edge['source'] in removed or edge['target'] in removed for edge in after['edges'])
+    assert action(client, graph, 'replace', {**after, 'snapshots': {}}).status_code == 422
 
 def test_large_progressive_graph_and_scoped_capabilities(client):
     graph = create_node(client, 'matcreator.kdg')

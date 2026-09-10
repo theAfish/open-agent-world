@@ -1,4 +1,39 @@
-# Plugin development
+# Plugins
+
+[Documentation](README.md)
+
+## Using plugins
+
+Plugins add cards, relationships, tools, and runtime integrations. The backend discovers packages under the repository's `plugins/` directory and installed Python entry points at startup. Install only reviewed code: plugins execute inside the trusted backend process.
+
+After installing a package and its dependencies, restart the backend, open **Pack & Card Library**, open the plugin's pack, and add its collected cards to your deck. Installation is separate from collection and deck selection. The Store tab is a placeholder, not an online marketplace.
+
+To disable a plugin, first remove its world objects, relationships, dependent Agent runtimes, and pending cleanup; the Library enforces these constraints. Uninstall by removing the package and restarting after removing its world dependencies. Collection and deck references survive unavailability. See [Card Library](card-library.md#availability-and-remaining-boundaries).
+
+## Bundled plugin guides
+
+| Plugin | Use it for |
+| --- | --- |
+| [Task Board](../plugins/task_board/README.md) | Shared tasks, dependencies, and Agent execution |
+| [Skill Toolboxes](../plugins/skill_packages/README.md) | Curated skills and shared instructions |
+| [Agent Barracks](../plugins/agent_barracks/README.md) | Stocking and summoning equipped Agents |
+| [Codex](../plugins/codex/README.md) | A Codex runtime integration |
+| [Structure viewer](../plugins/structure_viewer/README.md) | Viewing connected structure files |
+| [MatCreator](../plugins/matcreator/README.md) | Materials-oriented graph and workflow tools |
+
+Plugin-specific documentation can remain in its own package or repository. These links are a directory, not a requirement to copy all plugin content into OAW's docs. In-app plugin documentation and tutorial delivery are not implemented; no new manifest or framework is required here.
+
+## Developing a plugin
+
+Start with the installable [Greeter example](../examples/plugins/greeter/README.md), then consult [package discovery](#package-structure-and-discovery), [the public API](#public-plugin-api), and the contracts below.
+
+Plugin API 1.15 adds optional pack artwork and accent colors through registered
+public image assets (see [Card Library](card-library.md#pack-appearance)).
+Plugin API 1.14 adds `PackDefinition` and `registration.register_pack(...)`.
+Every card definition belongs to a pack. Opening an owned pack collects its cards;
+users then choose cards for persistent named decks. Registration alone never adds
+cards to a user's collection or tray. See [Packs, Card Library and Decks](card-library.md)
+for manifests, migration, persistence and disable semantics.
 
 Plugin API 1.13 adds projected read-only document actions (`project=True`),
 document update validators and declarative `NodeDocumentTransformation`s.
@@ -24,6 +59,37 @@ state schemas. It publishes serializable plugin, node, and relationship metadata
 through `GET /api/catalog`; the canvas renders plugin definitions generically.
 
 Plugins execute inside the FastAPI process. Install only reviewed packages.
+
+Node `status` is host metadata, validated against the node definition's `statuses`.
+Strict plugin configuration models do not need a `status` field: create, update,
+and restore requests pass it at the top level. For compatibility, configuration
+models that declare `status` or allow extra fields retain the legacy config copy.
+
+## Connected file viewers
+
+Nodes with `core.file-viewer` can connect to nodes with `core.file-source` using
+`core.file-preview` ("Follow opened files"). This grants only `file.preview`;
+it does not grant Sandbox execution or lifecycle management. The capability
+broker checks the live direct relationship before and after reads.
+
+The frontend SDK exports `useFileViewer(card.id)` with `file`, `sources`,
+`pinned` and `setPinned`. `file` contains a `reference`, display `name` and a
+monotonic `sequence`. The hook observes current state, including files opened
+before connecting. `host.readFile(reference, signal)` returns complete bounded
+base64 bytes through the viewer-scoped backend endpoint. Each viewer owns format
+recognition and must cancel stale work and dispose its renderer on source changes.
+
+File source views may call `host.openFile(reference, name)` and
+`host.clearOpenedFile()`. The host scopes publication to the source card. Clear
+context when the source workspace or session changes or closes. Open-file and
+pin state are browser-local and are not stored in card configuration.
+
+Current source references are `{kind: "sandbox", source_id, root, path}` and
+`{kind: "conversation", source_id, session_id, version_id, path}`. Sandbox reads
+reuse its path/mount boundary; Conversation reads validate the attachment's
+session and artifact manifest. A new storage source needs a host read adapter;
+declaring a trait alone does not provide filesystem access. See the
+[Structure viewer](../plugins/structure_viewer/README.md) for an implementation.
 
 ## Package structure and discovery
 
@@ -847,6 +913,12 @@ plugin-owned data and delete every node owned by that plugin. Node deletion remo
 its edges and immediately revokes derived capabilities. If persisted nodes or edges
 remain, startup fails with an ownership-aware unavailable-plugin diagnostic. The
 host never loads an unknown object under a generic fallback behavior.
+
+The Pack Library can disable an installed plugin after its world instances,
+relationships and dependent Agent runtimes have been removed. Pack ownership,
+collected cards and deck references survive disable and uninstall. Re-enabling or
+reinstalling the same stable IDs restores availability. Installation and package
+removal still use the existing discovery mechanism and require a restart.
 
 ## Trust and security boundary
 

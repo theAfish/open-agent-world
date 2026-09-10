@@ -1,7 +1,8 @@
-import { ChevronDown, ChevronRight, Download, File, FileText, Folder, FolderOpen, History, LayoutPanelLeft, Play, RefreshCw, Settings, Square, Terminal } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, File, FileText, Folder, FolderOpen, History, LayoutPanelLeft, RefreshCw, Settings, Square, Terminal } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
+import { useOpenFiles } from "../state/openFiles";
 import { useNodeSurfaceStore } from "../state/nodeSurfaces";
 import type { WorldCard } from "../types/world";
 import { IconButton } from "../components/IconButton";
@@ -64,6 +65,13 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
   const [loading, setLoading] = useState<Record<string, boolean>>({});
+  const terminalInput = useRef<HTMLTextAreaElement>(null);
+  const terminalScroll = useRef<HTMLDivElement>(null);
+  const followOutput = useRef(true);
+  const submitting = useRef(false);
+  const recalled = useRef(-1);
+  const savedDraft = useRef("");
+  const [commands, setCommands] = useState<string[]>([]);
   const [terminalTab, setTerminalTab] = useState("terminal");
   const [selection, setSelection] = useState<{ root: string; path: string; label: string }>();
   const [preview, setPreview] = useState<Files>();
@@ -98,10 +106,12 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const running = history.find(h => h.state === "running");
   const occupied = !!busy || !!running || card.status === "running" || diagnosticBusy;
   const ready = info?.state === "ready" && !occupied;
-  const latest = history.at(-1);
   const output = Array.isArray(card.config.output) && card.config.output.length
     ? card.config.output.map(String).slice(-250).join("\n")
-    : latest?.error || [latest?.stdout, latest?.stderr].filter(Boolean).join("\n");
+    : history.map(h => [`$ ${h.argv.at(-1) ?? h.argv.join(" ")}`, h.stdout, h.stderr, h.error].filter(Boolean).join("\n")).join("\n");
+  useEffect(() => {
+    if (followOutput.current && terminalScroll.current) terminalScroll.current.scrollTop = terminalScroll.current.scrollHeight;
+  }, [output, draft, terminalTab, tab]);
   async function refreshHistory() { setHistory(await worldApi.sandboxWorkspace<Receipt[]>(card.id, "history")); }
   async function refreshFiles() {
     const current = fileRequest("roots");
@@ -129,7 +139,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     setSelection(undefined); setPreview(undefined); expandedRef.current = {}; setExpanded({});
     setPublishPaths([]);
     void refreshFiles();
-    return () => { context.live = false; context.generation++; context.requests.clear(); };
+    return () => { context.live = false; context.generation++; context.requests.clear(); useOpenFiles.getState().clear(card.id); };
   }, [context]);
   useEffect(() => { void loadRuntimes(); void refreshSandbox(card.id); void refreshHistory().catch(e => setError(apiErrorMessage(e))); }, [card.id, socket]);
   const previousStatus = useRef(card.status);
@@ -162,6 +172,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   async function select(root: string, path: string, label: string) {
     const current = fileRequest("preview");
     setSelection({ root, path, label }); setPreview(undefined);
+    useOpenFiles.getState().open({ kind: "sandbox", source_id: card.id, root, path }, label);
     try {
       const value = await worldApi.sandboxWorkspace<Files>(card.id, fileQuery("preview", root, path));
       if (current()) setPreview(value);
@@ -173,8 +184,6 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     return <ul>{loading[key] && !value ? <li className="sandbox-tree-note">Loading…</li> : value?.state ? <li className="sandbox-tree-note">{value.message ?? value.state}</li> : <>
       {value?.entries?.length === 0 && <li className="sandbox-tree-note">Empty folder</li>}
       {value?.entries?.map(e => { const next = path ? `${path}/${e.name}` : e.name; return <li key={e.name}>
-        {root === "workspace" && !e.blocked && <input type="checkbox" aria-label={`Select ${next} for publication`} checked={publishPaths.includes(next)}
-          onChange={event => setPublishPaths(current => event.target.checked ? [...current, next] : current.filter(p => p !== next))} />}
         <button className="sandbox-tree-entry" disabled={e.blocked} title={e.blocked ? "Links are blocked" : next}
           aria-expanded={e.directory ? !!expanded[`${root}:${next}`] : undefined}
           aria-current={!e.directory && selection?.root === root && selection.path === next ? "true" : undefined}
@@ -203,10 +212,39 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     finally { setDiagnosticBusy(false); }
   }
   async function run() {
-    if (!ready || !draft.trim()) return;
-    setError("");
-    try { await execute(card.id, draft.trim()); await refreshHistory(); await refreshFiles(); }
+    if (!ready || submitting.current || !draft.trim()) return;
+    const command = draft.trim();
+    submitting.current = true;
+    followOutput.current = true;
+    recalled.current = -1;
+    setCommands(current => [...current, command].slice(-100));
+    setDraft(""); setError("");
+    try { await execute(card.id, command); await refreshHistory(); await refreshFiles(); }
     catch (e) { setError(apiErrorMessage(e)); }
+    finally { submitting.current = false; }
+  }
+  function terminalKeys(e: KeyboardEvent<HTMLTextAreaElement>) {
+    e.stopPropagation();
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void run(); return; }
+    if (e.ctrlKey && e.key.toLowerCase() === "c" && !window.getSelection()?.toString()) {
+      e.preventDefault();
+      if (occupied) void action("cancel");
+      else setDraft("");
+      return;
+    }
+    if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !draft.includes("\n")) {
+      const previous = [...commands].reverse();
+      for (const receipt of [...history].reverse()) {
+        const command = receipt.argv.at(-1);
+        if (command && !previous.includes(command)) previous.push(command);
+      }
+      if (!previous.length) return;
+      e.preventDefault();
+      if (recalled.current === -1) savedDraft.current = draft;
+      recalled.current = Math.max(-1, Math.min(previous.length - 1, recalled.current + (e.key === "ArrowUp" ? 1 : -1)));
+      setDraft(recalled.current === -1 ? savedDraft.current : previous[recalled.current]);
+    }
   }
   async function download() {
     if (!selection) return;
@@ -277,7 +315,16 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
         onKeyDown={e => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); e.stopPropagation(); saveSidebarWidth(sidebarWidth + (e.key === "ArrowRight" ? 16 : -16)); } }} />
       <main ref={workArea} className="sandbox-work-area">
         <section className="sandbox-preview" aria-label="File preview">
-          <PublishFiles card={card} paths={publishPaths.length ? publishPaths : selection?.root === "workspace" ? [selection.path] : []} />
+          <PublishFiles card={card} paths={publishPaths.length ? publishPaths : selection?.root === "workspace" ? [selection.path] : []}>
+            {Object.entries(tree).filter(([key]) => key.startsWith("workspace:")).flatMap(([key, value]) =>
+              (value.entries ?? []).filter(entry => !entry.blocked).map(entry => {
+                const parent = key.slice("workspace:".length);
+                const path = parent ? `${parent}/${entry.name}` : entry.name;
+                return <label key={path} className="sandbox-checkbox"><input type="checkbox"
+                  aria-label={`Select ${path} for publication`} checked={publishPaths.includes(path)}
+                  onChange={event => setPublishPaths(current => event.target.checked ? [...current, path] : current.filter(p => p !== path))} />{path}</label>;
+              }))}
+          </PublishFiles>
           <header className="sandbox-pane-heading">
             <span title={selection?.path}><FileText size={13} />{selection?.label ?? "File preview"}</span>
             {selection && <div className="sandbox-pane-actions">
@@ -319,24 +366,19 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
             </div>
           </header>
           <div className="sandbox-console" role="tabpanel" id={`${card.id}-terminal-panel`} aria-labelledby={`${card.id}-terminal-tab`} hidden={terminalTab !== "terminal"}>
-            <div className="sandbox-terminal-output" role="log" aria-live="polite" aria-label="Command output">
-              {output ? <pre>{output}</pre> : <span>{ready ? "Ready for a command." : occupied ? "Command running…" : "Start the sandbox to run commands."}</span>}
-            </div>
-            {(running || latest) && <div className="sandbox-command-meta">
-              <span title={running?.argv.join(" ")}>{running ? `${running.caller} · running` : `${latest!.state} · exit ${latest!.exit_code ?? "—"}`}</span>
-              {!running && latest?.duration_seconds !== undefined && <span>{latest.duration_seconds.toFixed(2)}s</span>}
-            </div>}
-            <form className="sandbox-command-form" onSubmit={e => { e.preventDefault(); void run(); }}>
-              <span className="sandbox-prompt" aria-hidden="true">›</span>
-              <textarea aria-label="Command" placeholder="Enter a command…" rows={2} spellCheck={false} value={draft} onChange={e => setDraft(e.target.value)}
-                onKeyDown={e => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); e.stopPropagation(); void run(); } }} />
-              <button className="primary-button" type="submit" aria-label="Run command" title="Run command (Ctrl/⌘ + Enter)" disabled={!ready || !draft.trim()}><Play size={12} /> Run</button>
-              <div className="sandbox-command-options">
-                <select aria-label="Command history" value="" disabled={!history.length} onChange={e => setDraft(e.target.value)}><option value="">Recall command</option>{history.map(h => <option key={h.id} value={h.argv.at(-1)}>{h.argv.join(" ")}</option>)}</select>
-                {Object.keys(card.config.presets as Record<string, string> ?? {}).length > 0 && <select aria-label="Command preset" value="" onChange={e => setDraft(e.target.value)}><option value="">Load preset</option>{Object.entries(card.config.presets as Record<string, string> ?? {}).map(([name, command]) => <option key={name} value={command}>{name}</option>)}</select>}
-                <span>Ctrl/⌘ + Enter</span>
+            <div ref={terminalScroll} className="sandbox-terminal-output"
+              onScroll={e => { const el = e.currentTarget; followOutput.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32; }}
+              onClick={() => { if (!window.getSelection()?.toString()) terminalInput.current?.focus(); }}>
+              <div role="log" aria-live="polite" aria-label="Command output">
+                {output ? <pre>{output}</pre> : <span>{ready ? "Ready for a command." : occupied ? "Command running?" : "Start the sandbox to run commands."}</span>}
               </div>
-            </form>
+              <form className="sandbox-command-form" onSubmit={e => { e.preventDefault(); void run(); }}>
+                <span className="sandbox-prompt" aria-hidden="true">$</span>
+                <textarea ref={terminalInput} aria-label="Command" aria-description="Enter to execute, Shift+Enter for a new line, Up and Down for history, Ctrl+C to cancel."
+                  rows={Math.max(1, draft.split("\n").length)} spellCheck={false} autoComplete="off" autoCapitalize="off"
+                  value={draft} readOnly={!ready} onChange={e => { recalled.current = -1; setDraft(e.target.value); }} onKeyDown={terminalKeys} />
+              </form>
+            </div>
           </div>
           <div className="sandbox-history" role="tabpanel" id={`${card.id}-history-panel`} aria-labelledby={`${card.id}-history-tab`} hidden={terminalTab !== "history"}>
             {!history.length && <div className="sandbox-pane-empty">No executions yet.</div>}
@@ -351,6 +393,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
         <SandboxSettings card={card} onDirtyChange={setSettingsDirty} />
         <details className="sandbox-settings"><summary>Command presets</summary><div className="sandbox-config-form">
           <p className="sandbox-help">Save the current command for reuse.</p>
+          <label className="field-label">Load preset<select aria-label="Command preset" value="" onChange={e => { setDraft(e.target.value); setTab("workspace"); setTerminalTab("terminal"); }}><option value="">Choose a preset</option>{Object.entries(card.config.presets as Record<string, string> ?? {}).map(([name, command]) => <option key={name} value={command}>{name}</option>)}</select></label>
           <label className="field-label">Preset name<input value={presetName} onChange={e => setPresetName(e.target.value)} placeholder="e.g. Run tests" /></label>
           {draft.trim() && <pre className="sandbox-preset-preview">{draft}</pre>}
           <div className="editor-actions"><button className="secondary-button" disabled={!presetName.trim() || !draft.trim()} onClick={() => void savePreset()}>Save preset</button></div>

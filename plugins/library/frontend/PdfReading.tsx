@@ -5,6 +5,7 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "pdfjs-dist/web/pdf_viewer.css";
 import { useLibrarySettings } from "../../../frontend/src/state/librarySettings";
 import { useWorldStore } from "../../../frontend/src/state/worldStore";
+import { availableModels } from "../../../frontend/src/state/modelConnections";
 import { StudyCanvas } from "./StudyCanvas";
 
 GlobalWorkerOptions.workerSrc = workerUrl;
@@ -41,8 +42,10 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
   const selectionEpoch=useRef(0);
   function dismissSelection(){selectionEpoch.current++;setSelection(undefined);setPopupPosition(undefined);}
   const {provider,model:selectedModel,target}=useLibrarySettings();
-  const models=useWorldStore(state=>state.modelSettings.models);
-  const model=models.includes(selectedModel)?selectedModel:(models[0]||"");
+  const catalog=useWorldStore(state=>state.modelCatalog);
+  const legacyModels=useWorldStore(state=>state.modelSettings.models);
+  const models=catalog.revision>0?availableModels({...catalog,connections:catalog.connections.filter(c=>c.adapter==="openai"||c.adapter==="legacy")}):legacyModels.map(value=>({value,label:value}));
+  const model=models.some(item=>item.value===selectedModel)?selectedModel:(models[0]?.value||"");
   const [sidebarOpen,setSidebarOpen]=useState(false);
   const [annotating,setAnnotating]=useState(false);
   const [tool,setTool]=useState<"text"|"crop">("text");
@@ -181,7 +184,7 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
         <header><strong>Library 设置</strong><button aria-label="关闭 Library 设置" onClick={()=>setSettingsOpen(false)}>×</button></header>
         <p>对所有文献生效。API 地址和密钥统一在 OAW 总设置中管理。</p>
         <label>翻译服务<select value={provider} onChange={e=>useLibrarySettings.setState({provider:e.target.value})}><option value="openai">OAW 模型连接</option><option value="deepl">DeepL Free</option></select></label>
-        {provider==="openai"&&<label>翻译模型<select value={model} onChange={e=>useLibrarySettings.setState({model:e.target.value})}>{models.map(item=><option key={item} value={item}>{item}</option>)}</select></label>}
+        {provider==="openai"&&<label>翻译模型<select value={model} onChange={e=>useLibrarySettings.setState({model:e.target.value})}>{models.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}</select></label>}
         <label>目标语言<input value={target} onChange={e=>useLibrarySettings.setState({target:e.target.value})}/></label>
         <small>连接配置：返回窗口后，打开 OAW 设置 → Models / DeepL。此处修改不影响 Agent 的模型选择。</small>
       </section>}

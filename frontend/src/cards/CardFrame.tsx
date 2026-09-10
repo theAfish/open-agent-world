@@ -1,12 +1,12 @@
 import { EquipmentToggle } from "./Equipment";
 import { ExecutionConfigurationBody } from "./ExecutionConfiguration";
 import { BarracksBody } from "./Barracks";
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Handle, NodeResizeControl, Position, type NodeProps } from "@xyflow/react";
 import { Maximize2, Minus, ExternalLink, Trash2, X } from "lucide-react";
 import { memo, type ComponentType, type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef } from "react";
 import { ConnectionHoverHint, clearConnectionHoverHint, updateConnectionHoverHint } from "./ConnectionHoverHint";
 import { IconButton } from "../components/IconButton";
-import { nodeSurfaceSupport, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
+import { WORKSPACE_MIN_SIZE, nodeSurfaceSupport, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
 import { type CardType, type WorldCard } from "../types/world";
 import { TaskBoardBody } from "./TaskBoard";
@@ -27,7 +27,19 @@ import { PluginSurface } from "../plugins/PluginSurface";
 import { CatalogIcon } from "../components/CatalogIcon";
 
 const DRAG_THRESHOLD_PX = 5;
-const NON_DRAG_SELECTOR = "button, input, textarea, select, label, a, [contenteditable='true'], .react-flow__handle";
+const NON_DRAG_SELECTOR = "button, input, textarea, select, label, a, summary, [role='button'], [role='separator'], [contenteditable='true'], .react-flow__handle";
+
+// Element boxes include padding and empty line space. Only rendered text should
+// take a mouse gesture away from dragging the surrounding inspector.
+function hitsText(target: Element, x: number, y: number): boolean {
+  const range = document.createRange();
+  return Array.from(target.childNodes).some(node => {
+    if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) return false;
+    range.selectNodeContents(node);
+    return Array.from(range.getClientRects()).some(rect =>
+      x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom);
+  });
+}
 
 interface BodyProps { card: WorldCard; level: NodeSurfaceLevel }
 
@@ -87,6 +99,7 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
   const closeInspector = useNodeSurfaceStore((state) => state.closeInspector);
   const dismissSurface = useNodeSurfaceStore((state) => state.dismiss);
   const openWorkspace = useNodeSurfaceStore((state) => state.openWorkspace);
+  const resizeWorkspace = useNodeSurfaceStore((state) => state.resizeWorkspace);
   const updateCard = useWorldStore((state) => state.updateCard);
   const deleteCard = useWorldStore((state) => state.deleteCard);
   const connectingNodeId = useNodeSurfaceStore((state) => state.connectingNodeId);
@@ -113,12 +126,7 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
   };
 
   const onPointerDownCapture = (event: ReactPointerEvent<HTMLElement>) => {
-    const target = event.target as HTMLElement;
-    const isNonDraggableTarget = Boolean(target.closest(NON_DRAG_SELECTOR));
     pointerStart.current = { x: event.clientX, y: event.clientY, moved: false };
-    if (isNonDraggableTarget) {
-      event.stopPropagation();
-    }
   };
 
   return (
@@ -142,14 +150,38 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
       }}
       onPointerMove={onPointerMove}
       onPointerDownCapture={onPointerDownCapture}
+      onPointerDown={event => {
+        // Let child controls receive the gesture before isolating it from the canvas.
+        if ((event.target as Element).closest(NON_DRAG_SELECTOR)) event.stopPropagation();
+      }}
+      onMouseDownCapture={event => {
+        const target = event.target as Element;
+        if (visualLevel === "inspector" && target.closest(".node-inspector-content, .node-inspector-footer")
+          && !target.closest(NON_DRAG_SELECTOR)) {
+          if (hitsText(target, event.clientX, event.clientY)) event.stopPropagation();
+          else {
+            event.preventDefault();
+            window.getSelection()?.removeAllRanges();
+          }
+        }
+      }}
+      onMouseDown={event => {
+        if ((event.target as Element).closest(NON_DRAG_SELECTOR)) event.stopPropagation();
+      }}
       onClick={(event) => {
         const start = pointerStart.current;
+        if ((visualLevel === "inspector" || visualLevel === "workspace") && window.getSelection()?.toString()) return;
         if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || connectingNodeId || dragging) return;
         if (event.detail !== 0 && start && (start.moved || Math.hypot(event.clientX - start.x, event.clientY - start.y) >= DRAG_THRESHOLD_PX)) return;
         if ((event.target as HTMLElement).closest("button, input, textarea, select, label, a, [contenteditable='true'], .react-flow__handle")) return;
         if (support.inspector && (visualLevel === "node" || visualLevel === "preview")) openInspector(card.id);
       }}
     >
+      {visualLevel === "workspace" && selected && <NodeResizeControl
+        className="container-resize-arc" position="bottom-right"
+        minWidth={WORKSPACE_MIN_SIZE.width} minHeight={WORKSPACE_MIN_SIZE.height}
+        maxWidth={4096} maxHeight={4096}
+        onResizeEnd={(_event, size) => resizeWorkspace(card.id, size)} />}
       <ActivityGlow phase={activity.phase} />
       {!card.ephemeral ? (
         <ConnectionHoverHint />
@@ -209,7 +241,7 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
         <footer className="card-footer node-inspector-footer">
           {definition?.traits.includes("core.agent") && !card.ephemeral ? <EquipmentToggle card={card} />
             : <span className="card-id">{card.ephemeral ? "synthetic" : card.id.slice(0, 8)}</span>}
-          <div className="card-footer-actions nodrag nopan">
+          <div className="card-footer-actions">
             {!card.ephemeral ? <IconButton icon={Trash2} danger
               onClick={() => { dismissSurface(card.id); void deleteCard(card.id); }} label={`Remove ${card.name}`}
               title="Remove object (Ctrl+Z to undo)" /> : null}

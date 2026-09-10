@@ -190,7 +190,13 @@ export interface RelationshipCatalogItem {
   templateable: boolean;
 }
 
+export interface PackDefinition {
+  id: string; plugin_id: string; name: string; description: string; cards: string[]; compatibility: boolean;
+  artwork_asset?: string | null; artwork_url?: string | null; accent_color?: string | null;
+}
+
 export interface PluginCatalog {
+  packs?: PackDefinition[];
   plugins: Array<{
     id: string;
     version: string;
@@ -264,6 +270,10 @@ export interface ToastMessage {
 }
 
 export interface ConversationSession {
+  group_id?: string;
+  group_title?: string;
+  auto_title?: boolean;
+  is_default?: boolean;
   id: string;
   conversation_id: string;
   conversation_name?: string;
@@ -282,7 +292,19 @@ export interface ConversationAgent {
   connected: boolean;
 }
 
+export interface ConversationAttachment {
+  version_id: string;
+  path: string;
+  name: string;
+  size_bytes: number;
+  media_type: string;
+}
+
 export interface ConversationMessage {
+  attachments?: ConversationAttachment[];
+  sequence?: number;
+  kind?: string;
+  is_final?: boolean;
   id: string;
   conversation_id: string;
   session_id: string;
@@ -302,7 +324,9 @@ export interface ConversationSummary {
 }
 
 export interface ContainerDefinition {
+  member_display?: "cards" | "workspace";
   virtual?: boolean;
+  member_type?: CardType | null;
   member_traits: string[];
   parentable: boolean;
   connectable: boolean;
@@ -310,4 +334,11 @@ export interface ContainerDefinition {
   content_inset: [number, number, number, number];
   max_members: number;
   document_field: string | null;
+}
+
+export interface ConversationMessagePage {
+  active_agent_ids?: string[];
+  items: ConversationMessage[];
+  has_before: boolean;
+  has_after: boolean;
 }

@@ -1,5 +1,7 @@
 # Reusable canvas placement
 
+[Documentation](README.md)
+
 Placement finds space for a new or moved region without moving other objects. It
 does not perform global packing or continuously rearrange the canvas.
 

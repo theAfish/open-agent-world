@@ -11,6 +11,7 @@ import { RuntimeConnection } from "./shell/RuntimeConnection";
 import { SettingsPanel } from "./shell/SettingsPanel";
 import { ToastStack } from "./shell/ToastStack";
 import { TopBar } from "./shell/TopBar";
+import { CardLibrary } from "./shell/CardLibrary";
 import { useWorldStore } from "./state/worldStore";
 
 export function App() {
@@ -39,6 +40,7 @@ export function App() {
         <ToastStack />
         <RuntimeConnection />
         <SettingsPanel />
+        <CardLibrary />
       </main>
     </ReactFlowProvider>
   );

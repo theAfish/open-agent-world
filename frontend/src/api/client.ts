@@ -27,6 +27,10 @@ export type CardCreateInput = (Omit<WorldCard, "id"> | WorldCard) & {
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, "") ?? "/api";
 
+export function conversationAttachmentUrl(conversationId: string, sessionId: string, file: { version_id: string; path: string }, preview = false): string {
+  return `${API_BASE}/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(file.version_id)}?${new URLSearchParams({ path: file.path, preview: String(preview) })}`;
+}
+
 export function nodeDocumentDownloadUrl(id: string, name: string): string {
   return `${API_BASE}/nodes/${encodeURIComponent(id)}/document/downloads/${encodeURIComponent(name)}`;
 }
@@ -246,6 +250,15 @@ function unwrap<T>(input: unknown, key: string): T {
 }
 
 export const worldApi = {
+  readFilePreview(viewerId: string, reference: import("../state/openFiles").FileReference, signal?: AbortSignal): Promise<{ name: string; size_bytes: number; data: string }> {
+    return request(`/nodes/${encodeURIComponent(viewerId)}/file-preview`, { method: "POST", body: JSON.stringify(reference), signal });
+  },
+  getCardLibrary(): Promise<import("../state/cardLibrary").LibrarySnapshot> {
+    return request("/card-library");
+  },
+  editCardLibrary(edit: import("../state/cardLibrary").LibraryEdit & { expected_revision: number }): Promise<import("../state/cardLibrary").LibrarySnapshot> {
+    return request("/card-library/actions", { method: "POST", body: JSON.stringify(edit) });
+  },
   pickFolder(initialPath: string | null): Promise<{ path: string | null }> {
     return request<{ path: string | null }>("/desktop/pick-folder", {
       method: "POST", body: JSON.stringify({ initial_path: initialPath }),
@@ -357,7 +370,7 @@ export const worldApi = {
     return normalizeLegionInstantiation(await request(`/nodes/${encodeURIComponent(id)}/duplicate`, { method: "POST" }));
   },
 
-  async createNode(node: CardCreateInput): Promise<WorldCard> {
+  async createNode(node: CardCreateInput, fromCollection = false): Promise<WorldCard> {
     const payload = {
       ...("id" in node ? { id: node.id } : {}),
       type: node.type,
@@ -373,7 +386,7 @@ export const worldApi = {
       data_base64: node.data_base64,
       media_type: node.media_type,
     };
-    const body = await request<unknown>("/nodes", {
+    const body = await request<unknown>(fromCollection ? "/card-library/nodes" : "/nodes", {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -559,6 +572,12 @@ export const worldApi = {
     });
   },
 
+  async saveEnvironment(id: string, value: Record<string, unknown>, secrets: Record<string, string>, expectedRevision: number): Promise<{ value: Record<string, unknown>; revision: number; summary: Record<string, unknown> }> {
+    return request(`/nodes/${encodeURIComponent(id)}/environment`, {
+      method: "PUT", body: JSON.stringify({ value, secrets, expected_revision: expectedRevision }),
+    });
+  },
+
   async transformDocument(id: string, operation: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
     return request(`/nodes/${encodeURIComponent(id)}/transformations/${encodeURIComponent(operation)}`, { method: "POST", body: JSON.stringify(body) });
   },
@@ -584,13 +603,21 @@ export const worldApi = {
     });
   },
 
+  getStorageSettings(): Promise<StorageSettings> {
+    return request("/settings/storage");
+  },
+
+  saveStorageSettings(targetPath: string | null, expectedRevision: number): Promise<StorageSettings> {
+    return request("/settings/storage", { method: "PUT", body: JSON.stringify({ target_path: targetPath, expected_revision: expectedRevision }) });
+  },
+
   getConversation(conversationId: string): Promise<ConversationSummary> {
     return request<ConversationSummary>(`/conversations/${encodeURIComponent(conversationId)}`);
   },
 
   createConversationSession(
     conversationId: string,
-    input: { title: string; participant_ids: string[] },
+    input: { title: string; participant_ids: string[]; group_id?: string; group_title?: string },
   ): Promise<ConversationSession> {
     return request<ConversationSession>(`/conversations/${encodeURIComponent(conversationId)}/sessions`, {
       method: "POST",
@@ -630,6 +657,19 @@ export const worldApi = {
     );
   },
 
+  renameConversationSession(conversationId: string, sessionId: string, title: string): Promise<ConversationSession> {
+    return request(`/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "PATCH", body: JSON.stringify({ title }),
+    });
+  },
+
+  getConversationTimeline(conversationId: string, sessionId: string, cursor: { before?: number; after?: number } = {}): Promise<import("../types/world").ConversationMessagePage> {
+    const query = new URLSearchParams({ limit: "50" });
+    if (cursor.before !== undefined) query.set("before", String(cursor.before));
+    if (cursor.after !== undefined) query.set("after", String(cursor.after));
+    return request(`/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/timeline?${query}`);
+  },
+
   getConversationMessages(
     conversationId: string,
     sessionId: string,
@@ -642,7 +682,7 @@ export const worldApi = {
   postConversationMessage(
     conversationId: string,
     sessionId: string,
-    input: { content: string; mention_agent_ids: string[] },
+    input: { content: string; mention_agent_ids: string[]; message_id?: string; attachments?: { version_id: string; path: string }[] },
   ): Promise<{ message: ConversationMessage; accepted_agent_ids: string[] }> {
     return request(`/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/messages`, {
       method: "POST",
@@ -652,6 +692,25 @@ export const worldApi = {
 
   getAgentConversationSessions(agentId: string): Promise<ConversationSession[]> {
     return request<ConversationSession[]>(`/agents/${encodeURIComponent(agentId)}/conversation-sessions`);
+  },
+
+  async uploadConversationAttachment(conversationId: string, sessionId: string, file: File): Promise<import("../types/world").ConversationAttachment> {
+    const response = await fetch(`${API_BASE}/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/attachments?${new URLSearchParams({ filename: file.name })}`, {
+      method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file,
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new ApiError(errorMessage(data.detail, response.status), response.status);
+    }
+    return response.json();
+  },
+
+  getModelConnections(): Promise<import("../state/modelConnections").ModelCatalog> {
+    return request("/settings/models");
+  },
+
+  saveModelConnections(settings: import("../state/modelConnections").ModelCatalog): Promise<import("../state/modelConnections").ModelCatalog> {
+    return request("/settings/models", { method: "PUT", body: JSON.stringify(settings) });
   },
 
   getLlmSettings(): Promise<{ base_url: string; api_key_configured: boolean }> {
@@ -748,4 +807,14 @@ export function normalizeRuntimeEvent(input: unknown): RuntimeEvent {
 export function apiErrorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   return error instanceof Error ? error.message : "An unexpected error occurred.";
+}
+
+export interface StorageSettings {
+  current_path: string;
+  pending_path: string | null;
+  previous_path: string | null;
+  last_error: string | null;
+  revision: number;
+  editable: boolean;
+  managed_by: string;
 }

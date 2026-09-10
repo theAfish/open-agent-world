@@ -1,5 +1,7 @@
 # Opt-in Sandbox networking
 
+[Documentation](README.md)
+
 Networking defaults to **Disabled**. Stop the Sandbox, select **Enabled** in its
 existing settings, save, and start it. Manual commands, Agent commands, Skill
 scripts and connectivity diagnostics all use the same saved execution policy.

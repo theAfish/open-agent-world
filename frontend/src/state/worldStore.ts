@@ -1,4 +1,6 @@
+import type { MapPinLocation } from "../canvas/MapAtlas";
 import { create } from "zustand";
+import { EMPTY_MODEL_CATALOG, type ModelCatalog } from "./modelConnections";
 import { useGenerationStore } from "../effects/generation";
 import { persist } from "zustand/middleware";
 import { apiErrorMessage, normalizeCard, resourceContentUrl, worldApi, type CardCreateInput } from "../api/client";
@@ -24,13 +26,12 @@ import { getViewportChunkKeys, viewportCenterToWorld } from "./chunks";
 import { EMPTY_CATALOG, getNodeType } from "./catalog";
 import { buildCardDraft, makeStressCards, mergeCardPatch } from "./helpers";
 import { summarizeLegionSelection } from "./legions";
-import { ancestors, containerDefinition, descendants, ownedDescendants, isContainer, parentFirst } from "./containers";
+import { ancestors, containerDefinition, descendants, ownedDescendants, isContainer, parentFirst, resizeContainerLayout } from "./containers";
+import { surfaceLevelForNode, useNodeSurfaceStore } from "./nodeSurfaces";
 import { isEquipmentConnection } from "./equipment";
 import { validateConnection, type RelationshipOption } from "./relationships";
 import { describeRuntimeError } from "./runtimeErrors";
 import {
-  normalizeModelList,
-  persistModelSettings,
   readModelSettings,
   type ModelSettings,
 } from "./modelSettings";
@@ -59,7 +60,7 @@ export type WorldHistoryOperation =
   | { id: number; label: string; kind: "card-created"; cards: RestorableCard[] }
   | { id: number; label: string; kind: "cards-deleted"; cards: RestorableCard[]; edges: WorldEdge[] }
   | { id: number; label: string; kind: "card-updated"; before: WorldCard; after: WorldCard }
-  | { id: number; label: string; kind: "cards-updated"; before: WorldCard[]; after: WorldCard[]; membership?: boolean }
+  | { id: number; label: string; kind: "cards-updated"; before: WorldCard[]; after: WorldCard[]; membership?: boolean; sizes?: boolean }
   | {
       id: number;
       label: string;
@@ -102,12 +103,12 @@ function cardRestorePatch(card: WorldCard): Partial<Omit<WorldCard, "id" | "type
   };
 }
 
-async function applyCardPositions(cards: WorldCard[], membership = false): Promise<WorldCard[]> {
+async function applyCardPositions(cards: WorldCard[], membership = false, sizes = false): Promise<WorldCard[]> {
   const persistent = cards.filter((card) => !card.ephemeral);
   const authoritative = persistent.length > 0
     ? await worldApi.batchUpdateNodes(persistent.map((card) => ({
         node_id: card.id,
-        patch: { position: { ...card.position }, ...(membership ? { parent_id: card.parent_id ?? null } : {}) },
+        patch: { position: { ...card.position }, ...(membership ? { parent_id: card.parent_id ?? null } : {}), ...(sizes ? { size: card.size } : {}) },
       })))
     : [];
   const authoritativeById = new Map(authoritative.map((card) => [card.id, card]));
@@ -252,6 +253,7 @@ interface WorldState {
   loadedChunkKeys: string[];
   loadingChunkKeys: string[];
   viewport: FlowViewportState;
+  mapPins: MapPinLocation[];
   syncState: SyncState;
   syncError?: string;
   socketState: SocketState;
@@ -263,6 +265,7 @@ interface WorldState {
   activityOpen: boolean;
   settingsOpen: boolean;
   modelSettings: ModelSettings;
+  modelCatalog: ModelCatalog;
   paletteCollapsed: boolean;
   theme: "light" | "dark";
   toasts: ToastMessage[];
@@ -290,6 +293,7 @@ interface WorldState {
     patch: Partial<Omit<WorldCard, "id" | "type">>,
   ) => Promise<void>;
   updateCardPositions: (updates: Array<{ id: string; position: WorldPosition; parent_id?: string | null }>) => Promise<void>;
+  resizeContainer: (id: string, size: WorldCard['size']) => Promise<void>;
   waitForPositionCommits: () => Promise<void>;
   createLegion: (input: {
     name: string;
@@ -329,7 +333,6 @@ interface WorldState {
   toggleActivity: () => void;
   setActivityOpen: (open: boolean) => void;
   toggleSettings: () => void;
-  saveModelSettings: (settings: ModelSettings, clearApiKey?: boolean) => Promise<boolean>;
   togglePalette: () => void;
   toggleTheme: () => void;
   generateStressWorld: (count?: number) => void;
@@ -384,6 +387,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   loadedChunkKeys: [],
   loadingChunkKeys: [],
   viewport: INITIAL_VIEWPORT,
+  mapPins: [],
   syncState: "loading",
   socketState: "connecting",
   selectedCardIds: [],
@@ -392,6 +396,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   activityOpen: false,
   settingsOpen: false,
   modelSettings: readModelSettings(),
+  modelCatalog: EMPTY_MODEL_CATALOG,
   paletteCollapsed: false,
   theme: preferredTheme(),
   toasts: [],
@@ -406,6 +411,8 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   sandboxRuntimesLoading: false,
 
   initialize: async () => {
+    const modelsLoaded = worldApi.getModelConnections().then(modelCatalog => set(state => modelCatalog.revision >= state.modelCatalog.revision ? { modelCatalog } : {}))
+      .catch(error => get().pushToast({ tone: "error", title: "Model settings unavailable", detail: apiErrorMessage(error) }));
     const keys = getViewportChunkKeys(get().viewport);
     set({ activeChunkKeys: keys });
     set({ syncState: "loading", syncError: undefined, legionError: undefined });
@@ -416,6 +423,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         loadLegionLibrary(),
       ]);
       const legionError = library.ok ? undefined : apiErrorMessage(library.error);
+      await modelsLoaded;
       set({
         catalog,
         cards: snapshot.nodes,
@@ -445,6 +453,8 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   },
 
   refreshWorld: async () => {
+    void worldApi.getModelConnections().then(modelCatalog => set(state => modelCatalog.revision >= state.modelCatalog.revision ? { modelCatalog } : {}))
+      .catch(error => get().pushToast({ tone: "error", title: "Model settings unavailable", detail: apiErrorMessage(error) }));
     const refreshId = ++refreshSequence;
     set({ syncState: "syncing" });
     try {
@@ -595,12 +605,13 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
     const finalPosition = position ?? viewportCenterToWorld(get().viewport);
     const draft = buildCardDraft(type, finalPosition, definition);
-    const configuredDraft = type === "agent" && get().modelSettings.models[0]
-      ? { ...draft, config: { ...draft.config, model: get().modelSettings.models[0] } }
+    const defaultModel = get().modelCatalog.default_model ?? (!get().modelCatalog.revision ? get().modelSettings.models[0] : undefined);
+    const configuredDraft = type === "agent" && defaultModel
+      ? { ...draft, config: { ...draft.config, model: defaultModel } }
       : draft;
     set({ syncState: "syncing" });
     try {
-      const card = await worldApi.createNode({ ...configuredDraft, ...placement });
+      const card = await worldApi.createNode({ ...configuredDraft, ...placement }, true);
       markWorldMutation();
       set((state) => ({
         cards: mergeCards(state.cards, [card]),
@@ -681,6 +692,32 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         syncState: "online",
       }));
       get().pushToast({ tone: "error", title: "Change was not saved", detail: apiErrorMessage(error) });
+    }
+  }),
+
+  resizeContainer: (id, size) => withHistoryTransaction(async () => {
+    const { cards, catalog } = get();
+    const parent = cards.find(card => card.id === id);
+    if (!parent || !isContainer(parent, catalog)) return;
+    const surfaces = useNodeSurfaceStore.getState().surfaceLevels;
+    const levels = new Map(cards.map(card => [card.id, surfaceLevelForNode(card.id, surfaces)]));
+    const layout = resizeContainerLayout(cards, catalog, levels, id, size, useNodeSurfaceStore.getState().workspaceSizes);
+    const before = cards.filter(card => card.id === id || layout.positions.has(card.id)).map(copyCard);
+    const after = before.map(card => ({ ...card, size: card.id === id ? layout.size : card.size, position: layout.positions.get(card.id) ?? card.position }));
+    const optimistic = new Map(after.map(card => [card.id, card]));
+    markWorldMutation();
+    set(state => ({ cards: state.cards.map(card => optimistic.get(card.id) ?? card), syncState: 'syncing' }));
+    try {
+      const saved = await applyCardPositions(after, false, true);
+      const byId = new Map(saved.map(card => [card.id, card]));
+      markWorldMutation();
+      set(state => ({ cards: state.cards.map(card => byId.get(card.id) ?? card), syncState: 'online',
+        undoStack: appendHistory(state.undoStack, { id: ++historySequence, kind: 'cards-updated', label: `Resize ${parent.name}`, before, after: saved, sizes: true }), redoStack: [] }));
+    } catch (error) {
+      const byId = new Map(before.map(card => [card.id, card]));
+      markWorldMutation();
+      set(state => ({ cards: state.cards.map(card => byId.get(card.id) ?? card), syncState: 'online' }));
+      get().pushToast({ tone: 'error', title: 'Container resize was not saved', detail: apiErrorMessage(error) });
     }
   }),
 
@@ -1476,7 +1513,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       sandboxErrors: { ...state.sandboxErrors, [id]: undefined },
       sandboxRevisions: { ...state.sandboxRevisions, [id]: revision },
       cards: state.cards.map((card) => card.id === id
-        ? mergeCardPatch(card, { config: { active_command: command } }) : card),
+        ? mergeCardPatch(card, { config: { active_command: command, output: [...(Array.isArray(card.config.output) ? card.config.output : []), `$ ${command}`].slice(-100) } }) : card),
       activityOpen: true,
     }));
     try {
@@ -1619,39 +1656,6 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   setActivityOpen: (activityOpen) => set({ activityOpen }),
   toggleSettings: () => set((state) => ({ settingsOpen: !state.settingsOpen })),
 
-  saveModelSettings: async (settings, clearApiKey = false) => {
-    const normalized: ModelSettings = {
-      baseUrl: settings.baseUrl.trim(),
-      apiKey: settings.apiKey,
-      apiKeyConfigured: settings.apiKeyConfigured,
-      models: normalizeModelList(settings.models),
-    };
-    if (normalized.models.length === 0) {
-      get().pushToast({ tone: "error", title: "Add at least one model", detail: "Agent cards need a model to call." });
-      return false;
-    }
-    try {
-      const saved = await worldApi.configureLlm({
-        base_url: normalized.baseUrl,
-        api_key: normalized.apiKey || null,
-        clear_api_key: clearApiKey,
-      });
-      const persisted = {
-        ...normalized,
-        baseUrl: saved.base_url,
-        apiKey: "",
-        apiKeyConfigured: saved.api_key_configured,
-      };
-      set({ modelSettings: persisted });
-      persistModelSettings(persisted);
-      get().pushToast({ tone: "success", title: "Model connection saved securely", detail: "The backend will restore this connection automatically after restarts." });
-      return true;
-    } catch (error) {
-      get().pushToast({ tone: "error", title: "Model connection was not applied", detail: apiErrorMessage(error) });
-      return false;
-    }
-  },
-
   togglePalette: () => set((state) => ({ paletteCollapsed: !state.paletteCollapsed })),
 
   toggleTheme: () => {
@@ -1763,7 +1767,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
           break;
         }
         case "cards-updated": {
-          const restored = await applyCardPositions(operation.before, operation.membership);
+          const restored = await applyCardPositions(operation.before, operation.membership, operation.sizes);
           const byId = new Map(restored.map((card) => [card.id, card]));
           set((state) => ({
             cards: state.cards.map((card) => byId.get(card.id) ?? card),
@@ -1913,7 +1917,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
           break;
         }
         case "cards-updated": {
-          const restored = await applyCardPositions(operation.after, operation.membership);
+          const restored = await applyCardPositions(operation.after, operation.membership, operation.sizes);
           const byId = new Map(restored.map((card) => [card.id, card]));
           set((state) => ({
             cards: state.cards.map((card) => byId.get(card.id) ?? card),
@@ -1979,5 +1983,5 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   },
 }), {
   name: "oaw-canvas-viewport-v1",
-  partialize: (state) => ({ viewport: state.viewport }),
+  partialize: (state) => ({ viewport: state.viewport, mapPins: state.mapPins }),
 }));

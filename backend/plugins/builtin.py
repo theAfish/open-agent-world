@@ -14,7 +14,7 @@ from backend.plugins.registry import (
     CapabilityGrantDefinition,
     CapabilityDefinition,
     NodeTypeDefinition,
-    PluginDescriptor,
+    PackDefinition, PluginDescriptor,
     PluginRegistration,
     PluginRegistry,
     RelationshipDefinition,
@@ -650,6 +650,10 @@ async def _request_conversation_turn(
     )
 
 
+async def _send_conversation_message(context, capability, arguments):
+    return await context.send_conversation_message(capability, arguments)
+
+
 async def _read_text(
     context: CapabilityContext, capability: Any, values: dict[str, Any]
 ) -> Any:
@@ -698,12 +702,24 @@ async def _inspect_sandbox(
     return await context.inspect_sandbox(capability.agent_id, capability.target_id)
 
 
+async def _start_sandbox(context, capability, values):
+    if values:
+        raise ResourceValidationError("sandbox start takes no arguments")
+    return await context.start_sandbox(capability.agent_id, capability.target_id)
+
+
+async def _stop_sandbox(context, capability, values):
+    if values:
+        raise ResourceValidationError("sandbox stop takes no arguments")
+    return await context.stop_sandbox(capability.agent_id, capability.target_id)
+
+
 async def _execute_sandbox(
     context: CapabilityContext, capability: Any, values: dict[str, Any]
 ) -> Any:
     argv = values.get("argv")
     if (
-        set(values) - {"argv", "environment_id", "target_id"}
+        set(values) - {"argv", "environment_id", "target_id", "timeout_seconds"}
         or not isinstance(argv, list)
         or not argv
         or not all(isinstance(item, str) and item for item in argv)
@@ -713,8 +729,15 @@ async def _execute_sandbox(
         )
     return await context.execute_sandbox(
         capability.agent_id, capability.target_id, argv,
-        **{key: values[key] for key in ("environment_id", "target_id") if key in values}
+        **{key: values[key] for key in ("environment_id", "target_id", "timeout_seconds") if key in values}
     )
+
+
+async def _cancel_sandbox_command(context, capability, values):
+    command_id = values.get("command_id")
+    if set(values) != {"command_id"} or not isinstance(command_id, str) or not command_id:
+        raise ResourceValidationError("command_id is required; inspect the Sandbox first")
+    return await context.cancel_sandbox_command(capability.agent_id, capability.target_id, command_id)
 
 
 async def _install_python_packages(context, capability, values):
@@ -807,6 +830,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         "result": StateFieldDefinition(
             value_type=Any, allowed_scope_kinds=run_only
         ),
+        "output_message_id": StateFieldDefinition(value_type=str, allowed_scope_kinds=run_only, default=""),
         "output_text": StateFieldDefinition(value_type=str, allowed_scope_kinds=run_only, default=""),
     }))
     registry.register_runtime_provider(
@@ -824,6 +848,14 @@ def _register_builtin(registry: PluginRegistration) -> None:
     from backend.skill_runtime import SKILL_SELECTOR, skill_script_schema
     from backend.resources.artifact_capabilities import register as register_artifacts
     register_artifacts(registry)
+    from backend.conversations.models import ConversationPost
+    message_schema = ConversationPost.model_json_schema()
+    for key in ('message_id', 'mention_agent_ids'):
+        message_schema['properties'].pop(key, None)
+    registry.register_capability(CapabilityDefinition(
+        kind='conversation.send_message', tool_name='send_conversation_message', target_parameter='conversation',
+        description='Send text and/or published file attachments to the current session. Publish Sandbox files to this conversation first; attach version_id and path. Images are clickable previews.',
+        input_schema=message_schema), _send_conversation_message)
     registry.register_capability(CapabilityDefinition(
         kind='agent.communicate', tool_name='send_message', target_parameter='target',
         description='Send a message to the selected Agent and receive its response.',
@@ -858,11 +890,21 @@ def _register_builtin(registry: PluginRegistration) -> None:
         kind='image.view', tool_name='view_image', target_parameter='target',
         description='Inspect the selected managed image.',
         input_schema={"type": "object", "properties": {}, "additionalProperties": False}), _view_image)
+    for operation, handler in (("start", _start_sandbox), ("stop", _stop_sandbox)):
+        registry.register_capability(CapabilityDefinition(
+            kind=f"sandbox.{operation}", tool_name=f"{operation}_sandbox", target_parameter="sandbox",
+            description=("Start the selected Sandbox using its saved runtime, workspace and network settings. Inspect it before executing commands."
+                         if operation == "start" else "Stop the selected Sandbox, terminating any active command and waiting for cleanup. This affects every agent sharing this Sandbox."),
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False}), handler)
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.execute', tool_name='execute_command', target_parameter='sandbox',
         selectors=EXECUTION_SELECTORS,
-        description='Execute an argv command in the selected sandbox. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES.',
-        input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}}, "required": ["argv"], "additionalProperties": False}), _execute_sandbox)
+        description='Execute an argv command in the selected sandbox. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES. Calls use fresh non-interactive processes: cd/export/venv activation do not carry over. For installations set timeout_seconds explicitly and keep progress visible; do not pipe installers to tail. Shell pipelines report the final command status: use bash -o pipefail or download with curl -f to a file and only execute it after success. Use install_python_packages for shared Python dependencies.',
+        input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}, "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 3600, "description": "Command wall-clock budget in seconds. Omit to use Sandbox settings; set explicitly for slow installs."}}, "required": ["argv"], "additionalProperties": False}), _execute_sandbox)
+    registry.register_capability(CapabilityDefinition(
+        kind='sandbox.cancel_command', tool_name='cancel_command', target_parameter='sandbox',
+        description='Cancel the current Sandbox command and wait for process cleanup. First inspect the Sandbox and supply its current_command_id. A stale ID cannot cancel a newer command.',
+        input_schema={"type": "object", "properties": {"command_id": {"type": "string", "minLength": 1}}, "required": ["command_id"], "additionalProperties": False}), _cancel_sandbox_command)
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.install_python_packages', tool_name='install_python_packages', target_parameter='sandbox',
         description='Install missing Python packages into the persistent shared sandbox Python environment, then retry execution. Packages become available to all sandboxes on this execution platform. Supply index package names with optional extras/version constraints. Installation is serialized by the environment manager; source builds, paths and URLs are unsupported.',
@@ -913,7 +955,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         deck_label="Fields", deck_icon="workflow", default_name="New Conversation",
         default_size=(320, 210), default_status="available",
         statuses=frozenset({"available"}), config_model=ConversationConfig,
-        traits=frozenset({"core.field", "core.conversation"}),
+        traits=frozenset({"core.field", "core.conversation", "core.file-source"}),
         surfaces={"preview": True, "inspector": True, "workspace": True},
         lifecycle=ConversationNodeBehavior(),
         templateable=True,
@@ -943,7 +985,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         color="#696c66", deck_id="fields", deck_label="Fields", deck_icon="workflow",
         default_name="New Sandbox", default_size=(340, 220), default_status="stopped",
         statuses=frozenset({"stopped", "ready", "running", "error"}),
-        config_model=SandboxConfig, traits=frozenset({"core.sandbox"}),
+        config_model=SandboxConfig, traits=frozenset({"core.sandbox", "core.file-source"}),
         document=NodeDocumentDefinition(model=EnvironmentProfile),
         surfaces={"preview": True, "inspector": True, "workspace": True},
         lifecycle=SandboxNodeBehavior(),
@@ -965,7 +1007,8 @@ def _register_builtin(registry: PluginRegistration) -> None:
         source_traits=frozenset({"core.agent"}),
         target_traits=frozenset({"core.conversation"}),
         templateable=True,
-        capabilities=(CapabilityGrantDefinition(kind='conversation.request_turn'),),
+        capabilities=tuple(CapabilityGrantDefinition(kind=kind) for kind in (
+            'conversation.request_turn', 'conversation.send_message', 'artifact.read', 'artifact.publish', 'artifact.materialize')),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="conversation_notes", label="Meeting notes", short_label="notes",
@@ -1004,10 +1047,17 @@ def _register_builtin(registry: PluginRegistration) -> None:
         input_schema={"type": "object", "properties": {"source": {"type": "string"}, "destination": {"type": "string"}, "overwrite": {"type": "boolean", "default": False}}, "required": ["source", "destination"], "additionalProperties": False}), _copy_skill_resource)
     registry.register_relationship(RelationshipDefinition(
         id="execute", label="Execute", short_label="execute",
-        description="The agent can run commands in this isolated workplace.",
+        description="The agent can run commands in this isolated workplace. Starting and stopping require manual control.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.sandbox"}),
         templateable=True,
-        capabilities=(CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
+        capabilities=(CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.cancel_command'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
+    ))
+    registry.register_relationship(RelationshipDefinition(
+        id="execute_manage", label="Execute + Start/Stop", short_label="execute + manage",
+        description="The agent can run commands, start this Sandbox and stop it, including active commands.",
+        source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.sandbox"}),
+        templateable=True,
+        capabilities=(CapabilityGrantDefinition(kind='sandbox.start'), CapabilityGrantDefinition(kind='sandbox.stop'), CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.cancel_command'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="mount_read_only", label="Mount read-only", short_label="read-only",
@@ -1032,6 +1082,10 @@ class CorePlugin:
 
     def register(self, registration: PluginRegistration) -> None:
         _register_builtin(registration)
+        from backend.file_preview import register_file_preview
+        register_file_preview(registration)
+        registration.register_pack(PackDefinition(id='open-agent-world.core.default', name='Core essentials',
+            description='Agents, resources and workspaces for your world.', cards=tuple(registration.nodes)))
 
 
 def create_builtin_registry() -> PluginRegistry:

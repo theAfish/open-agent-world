@@ -39,6 +39,37 @@ def test_collection_accepts_palette_status_on_create_and_update(client):
     assert response.json()['config']['status'] == 'available'
 
 
+def test_agent_publish_invalid_arguments_returns_feedback_then_accepts_correction(runtime_client):
+    from backend.agents.tools import build_scoped_tool_callables
+
+    client, _, agent, sandbox, collection, workspace, _ = setup(runtime_client)
+    (workspace / 'math_flower.png').write_bytes(b'generated output')
+    provider = WorldAgentCapabilityProvider(client.app.state.services)
+    definitions = client.portal.call(provider.list_tools, agent['id'])
+    tool = next(t for t in build_scoped_tool_callables(provider, agent['id'], definitions)
+                if t.__name__ == 'publish_artifact')
+    arguments = dict(collection=collection['id'], sandbox=sandbox['id'],
+                     request_key='correctable', finalized=True, name='Flower',
+                     paths=[{'path': 'math_flower.png'}],
+                     inputs=[{'type': 'sandbox_file', 'path': 'math_flower.png'}])
+
+    async def call():
+        return await tool(**arguments)
+
+    failed = client.portal.call(call)
+    assert failed['ok'] is False
+    assert failed['error']['type'] == 'ResourceValidationError'
+    for field in ('paths.0', 'inputs.0.collection_id', 'inputs.0.version_id',
+                  'inputs.0.type', 'inputs.0.path'):
+        assert field in failed['error']['message']
+    assert 'math_flower.png' not in failed['error']['message']
+    assert client.app.state.services.resources.artifacts.all() == []
+    arguments.update(paths=['math_flower.png'], inputs=[])
+    corrected = client.portal.call(call)
+    assert corrected['state'] == 'ready'
+    assert corrected['manifest'][0]['path'] == 'math_flower.png'
+
+
 def test_large_binary_bundle_immutable_reclamation_and_reference_retention(runtime_client):
     client, backend, agent, sandbox, collection, workspace, _ = setup(runtime_client)
     (workspace / 'bundle').mkdir()

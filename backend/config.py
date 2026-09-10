@@ -33,6 +33,7 @@ class Settings:
     run_execution_deadline_seconds: float = 3600.0
     run_cleanup_timeout_seconds: float = 10.0
     control_plane_token: str | None = field(default=None, repr=False)
+    storage_config_path: Path | None = None
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -63,6 +64,7 @@ class Settings:
             inactivity_timeout = parsed if parsed > 0 else None
         return cls(
             data_root=root,
+            storage_config_path=None if os.environ.get("OPEN_AGENT_WORLD_DATA_ROOT") else root.with_name(root.name + ".storage.json"),
             database_path=root / "database" / "world.sqlite3",
             agent_runtime=runtime,
             sandbox_runtime=sandbox_runtime,

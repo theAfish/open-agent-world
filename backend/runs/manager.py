@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -99,6 +99,7 @@ class RunManager:
     execution_deadline_seconds: float = 3600.0
     _cleanup_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
     admission_check: Any = None
+    persist_provider_event: Callable[[AgentEvent, RunRecord, str, str], Awaitable[str | None]] | None = None
 
     def __post_init__(self):
         import math
@@ -672,7 +673,7 @@ class RunManager:
                         awaiting=str(event.payload.get('name', 'tool execution')) if active_tools else None,
                         last_signal=event.type.value)
                     text = event.payload.get("text")
-                    if isinstance(text, str):
+                    if event.type.value == "agent_message" and isinstance(text, str):
                         self._final_text[record.run_id] = text
                         self.state.set(context.state_context.local_scope, "output_text", text, run_id=record.run_id)
                     if event.run_status is not None:
@@ -762,6 +763,7 @@ class RunManager:
         return StateContext(tuple(scopes))
 
     def _provider(self, provider_id: str) -> RuntimeProvider:
+        self.plugins.assert_runtime_provider_enabled(provider_id)
         existing = self._providers.get(provider_id)
         if existing is not None:
             return existing
@@ -792,6 +794,7 @@ class RunManager:
         provider_id = provider_id or self.default_runtime_provider_id
         if provider_id is None:
             return None
+        self.plugins.assert_runtime_provider_enabled(provider_id)
         if (
             not self.plugins.has_runtime_provider(provider_id)
             and provider_id not in self._providers
@@ -901,6 +904,11 @@ class RunManager:
         # AgentEvent.COMPLETED means one provider turn finished. Run success is
         # controlled only by the separate explicit ``run_status`` transition.
         conversation_id, session_id = self._conversation_scope(record)
+        message_id = None
+        if conversation_id and session_id and self.persist_provider_event:
+            message_id = await self.persist_provider_event(event, record, conversation_id, session_id)
+            if event.type.value == "agent_message":
+                self.state.set(self.state.get_scope("run", record.run_id), "output_message_id", message_id or "", run_id=record.run_id)
         await self.events.publish(
             EventType(event.type.value),
             node_id=record.agent_id,
@@ -908,7 +916,7 @@ class RunManager:
             run_id=record.run_id,
             conversation_id=conversation_id,
             session_id=session_id,
-            payload={**dict(event.payload), "run_id": record.run_id},
+            payload={**dict(event.payload), "run_id": record.run_id, "message_id": message_id},
         )
 
     async def _publish_agent_operational(

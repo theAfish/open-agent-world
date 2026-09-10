@@ -20,7 +20,20 @@ def read_key(services, history_key, sandbox_id):
         if item["state"] == "running" and (not active or active["id"] != item["id"]):
             item["state"] = "interrupted"
             item["error"] = "Execution could not be recovered after backend restart; it was not resubmitted."
+    if active and active.get("history_key") == history_key:
+        items = [entry for entry in items if entry["id"] != active["id"]] + [dict(active)]
     return items
+
+
+def recent_summaries(services, sandbox_id):
+    """The Agent view uses the same receipts as the UI, with smaller output tails."""
+    fields = ("id", "state", "exit_code", "timed_out", "cancelled", "termination_reason",
+              "cancellation_reason", "error", "duration_seconds")
+    return [
+        {key: entry[key] for key in fields if key in entry}
+        | {label: entry.get(label, "")[-8192:] for label in ("stdout", "stderr")}
+        for entry in read(services, sandbox_id)[-3:]
+    ]
 
 
 def save(services, sandbox_id, item):
@@ -40,19 +53,27 @@ def lifecycle_records(services):
     return [entry for row in rows for entry in json.loads(row[0])]
 
 
-async def stop(services, sandbox_id, *, terminate=False):
+async def stop(services, sandbox_id, *, terminate=False, agent_id=None, command_id=None):
     """Persist cancellation intent and join the existing native backend operation."""
     import asyncio
     from datetime import UTC, datetime
     from uuid import uuid4
     async with services._node_mutation():
         services._require_card_type(sandbox_id, 'sandbox')
+        if agent_id is not None:
+            kind = "sandbox.stop" if terminate else "sandbox.execute"
+            services.capabilities.capability_for_id(agent_id, f"{kind}:{sandbox_id}")
+        if command_id is not None:
+            from backend.sandbox.models import SandboxStateError
+            current = services._sandbox_commands.get(sandbox_id)
+            if current is None or current['id'] != command_id:
+                raise SandboxStateError('Command is no longer active; inspect the Sandbox again')
         services.resources.artifacts.assert_source_idle(sandbox_id)
         active = services._sandbox_commands.get(sandbox_id)
         pending = next((r for r in reversed(read(services, sandbox_id)) if r.get('cleanup') in {'pending', 'failed'}), None)
         receipt = active or pending or {'id': uuid4().hex, 'sandbox_id': sandbox_id, 'caller': 'user', 'state': 'stopping',
             'argv': [], 'started_at': datetime.now(UTC).isoformat(), 'history_key': key(services, sandbox_id)}
-        receipt.update(cancellation_requested=True, cleanup='pending', cleanup_error=None, stop_runtime=terminate)
+        receipt.update(cancellation_requested=True, cancellation_reason="sandbox_stop" if terminate else "command_cancel", cleanup='pending', cleanup_error=None, stop_runtime=terminate)
         save(services, sandbox_id, receipt)
         services._sandbox_stopping.add(sandbox_id)
     try:

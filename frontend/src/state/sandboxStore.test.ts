@@ -131,7 +131,7 @@ describe("sandbox state contracts", () => {
     vi.spyOn(worldApi, "executeSandbox").mockResolvedValue({ stdout: "hello\n", stderr: "failure\n", exit_code: 2 });
     useWorldStore.setState({ cards: [{ ...sandbox, status: "ready" }], socketState: "live" });
     await useWorldStore.getState().executeSandbox(sandbox.id, "run task");
-    expect(useWorldStore.getState().cards[0].config.output).toEqual(["hello", "! failure", "exit 2"]);
+    expect(useWorldStore.getState().cards[0].config.output).toEqual(["$ run task", "hello", "! failure", "exit 2"]);
   });
 
   it("shares runtime discovery across cards and refreshes only when requested", async () => {

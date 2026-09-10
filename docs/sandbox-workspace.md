@@ -1,12 +1,28 @@
 # Sandbox configuration and window workspace
 
+[Documentation](README.md) / [Application defaults](configuration.md#sandbox-defaults-and-execution-credentials)
+
+## Choose a runtime and working folder
+
+Open the Sandbox inspector, select a runtime, and save its configuration before starting. An empty **Working folder** uses managed storage. An external folder must be an existing absolute path on the backend host; choose read/write or read-only access. On a Windows backend using WSL, enter a Windows path such as `D:\Projects\demo`; the bridge translates it.
+
+Writes change real files immediately. Deleting a Sandbox removes its owned storage and permissions, never the selected external folder. Stop before changing the working folder. The runtime is pinned on first start; use a new card to change runtime after that point. Host folder bindings are excluded from Legion templates.
+
+Automatic discovery prefers a usable existing WSL2 distribution on Windows, otherwise native Windows. Native Linux uses its own kernel. Linux/WSL needs Bubblewrap, libseccomp, Python 3.10+ for the trusted worker, and a systemd user manager with cgroup-v2 memory/process limits; the application backend needs Python 3.11+. No Docker or VM image is required. macOS has no local Sandbox runtime.
+
+Discovery reports missing prerequisites. Use **Refresh** after fixing them. Missing isolation never falls back to a normal host subprocess. Networking has [separate prerequisites](sandbox-networking.md).
+
+## Workspace overview
+
 The compact card and inspector report runtime, readiness, folder, access and network policy, with Start/Stop and shortcuts to the window's Workspace and Settings tabs. The inspector's collapsed Configuration section provides the same runtime/workspace, resource-limit and environment editors as Window settings. Unsaved settings and environment drafts follow the Sandbox between these surfaces; they are transient and are not saved to browser storage. Save commits through the same authoritative API, while Reset or Reload discards the corresponding draft. Workspace shows Files on the left, a file preview at upper right and the terminal at lower right. Both dividers support pointer dragging and arrow keys. History stays inside the terminal; presets, Skill resources, diagnostics and recovery remain in Window settings. Opening, closing or reopening a window never submits a command or changes runtime lifecycle.
 
 New, copied and summoned Sandboxes start stopped. Managed storage is prepared through the existing Start lifecycle. The selected runtime remains pinned after first start. Runtime, workspace, network and resource-limit changes require Stop → Save → Start. Ordinary environment changes apply to the next command without a restart.
 
+Agent-to-Sandbox connections offer **Execute** (the default) or **Execute + Start/Stop**. Both grant the existing command and inspection tools; the latter also grants `start_sandbox` and `stop_sandbox`. Start uses saved configuration, and stop terminates active commands through the same cleanup lifecycle as the UI, affecting all agents sharing the Sandbox. Downgrading or removing the connection revokes lifecycle access immediately. Existing Execute connections retain their permissions.
+
 ## Configuration and authority
 
-Sandbox-local variables use the existing `EnvironmentProfile` document model, editor and private credential bindings, scoped directly to the Sandbox node. No hidden Environment cards are created. Add ordinary values or secret references, save, then bind secrets under Settings → Environment variables.
+Sandbox-local variables use the existing `EnvironmentProfile` document model, editor and private credential bindings, scoped directly to the Sandbox node. No hidden Environment cards are created. Under Settings → Environment variables, choose Value or Secret, enter the value, and save. Secret references and encrypted bindings are managed automatically in the same save. Configured secrets stay unchanged when their input is blank. Secret input is local to the mounted editor and is cleared on reload or closing it; ordinary drafts still follow the Sandbox across surfaces.
 
 An `environment.default` connection points from an Environment Profile to a Sandbox. At most one default is allowed. It remains a live reference. The resolution order is:
 
@@ -52,7 +68,7 @@ Enable public outbound networking using **Stop → Save → Start**. Missing net
 
 ## Console and recovery
 
-The terminal uses multiline input and closed stdin, not a PTY. Run submits the current command; Ctrl/Cmd+Enter is its keyboard shortcut. Separate commands do not retain `cd`, `export` or shell-session state. Explicit interactive requests such as `read`, `set /p`, terminal editors and `ssh -tt` are rejected; other commands that require prompts may fail on EOF or reach the configured timeout. Full interactive-session detection is not possible for arbitrary programs.
+The terminal uses multiline input and closed stdin, not a PTY. Enter submits the current command; Shift+Enter adds a line. Up/Down recalls history, and Ctrl+C cancels the active command or clears input when no text is selected. Separate commands do not retain `cd`, `export` or shell-session state. Explicit interactive requests such as `read`, `set /p`, terminal editors and `ssh -tt` are rejected; other commands that require prompts may fail on EOF or reach the configured timeout. Full interactive-session detection is not possible for arbitrary programs.
 
 Named presets load ordinary command text and use the same execution path. They never execute on opening a card/window. Do not put secret values into command text or presets. Use environment references.
 
@@ -76,3 +92,55 @@ Run native tests with an ordinary user token outside restricted tool sandboxes.
 See [network acceptance setup](sandbox-networking.md#real-runtime-acceptance)
 for the separate networking prerequisites and verification boundaries. Preserve
 per-run logs, failures, skips and unresolved platform evidence in `.outputs/` or CI.
+
+
+## Execution continuity and installation
+
+Linux/WSL Sandboxes have a private persistent `HOME=/sandbox/home`, stored under
+that Sandbox's managed root. `$HOME/.local/bin` and `$HOME/bin` are on PATH.
+CLI installations and private venvs there survive commands, Stop/Start and backend
+restart, independently of the selected workspace. Destroy removes this home;
+resetting the Skill cache does not. `/tmp` remains command-local. The host's home,
+credentials and system directories are not made writable or exposed.
+
+Commands remain non-interactive independent processes. `cd`, `export`, and shell
+activation do not carry into another call. Invoke a private venv's interpreter by
+path, or use the existing Environment configuration for repeatable variables.
+Use `install_python_packages` to mutate the managed shared Python environment;
+it is read-only inside workloads. Download standalone CLI tools into the private
+home. Do not assume system package installation or interactive prompts work.
+
+Manual, Agent `execute_command`, and `run_skill_script` requests accept optional
+`timeout_seconds` up to 3600 seconds. Omission uses the saved Sandbox budget.
+Inspect returns that default, the active command ID and the last three command
+receipts with bounded output tails. `cancel_command` requires the current command
+ID and live Sandbox execution authority; a stale ID cannot cancel its successor.
+History preserves `timed_out`, `cancelled`, termination reason and explicit
+cancellation source. Ordinary nonzero exits remain command results, not runtime
+setup errors. Live output is available through the existing event/history path;
+secret-bearing output is withheld until whole-output redaction completes.
+
+Keep installer output visible. Shell pipelines such as `curl ... | sh` can return
+zero when the download fails because the last program succeeds. Download with
+`curl -f` to a file and execute only after a successful download, or explicitly
+use a shell with `pipefail`. Avoid `tail` pipelines during long installations.
+This API does not provide a persistent shell, PTY, stdin writes or detached jobs.
+
+Cancellation ownership is established before asynchronous Python preparation.
+A cancellation during that phase prevents workload launch. The WSL bridge reports
+actual worker cancellation, rather than converting a late cancellation request
+into a claim that an already completed command was cancelled.
+
+
+Linux/WSL sets `NPM_CONFIG_PREFIX=/sandbox/home/.local`, so ordinary `npm install
+-g <package>` uses the Sandbox's persistent home and places commands on its PATH.
+It does not require writes to `/usr/lib/node_modules` or `/usr/local`. Existing
+running backend processes must be restarted to pick up the frozen worker update.
+For an older backend, `npm install -g --prefix "$HOME/.local" <package>` selects
+the same destination explicitly.
+
+New Sandboxes default to a process limit of 64. On Linux/WSL this is a cgroup task
+limit, counting threads and command helpers as well as processes. The previous
+16-task default can prevent npm install scripts from forking. Existing saved
+limits are preserved: Stop, set Process limit to 64 (or a suitable explicit
+budget), Save, then Start. The cap remains enforced.

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import { useNodeSurfaceStore } from "../state/nodeSurfaces";
@@ -19,7 +19,7 @@ export function PublishedReferences({ references }: { references?: ArtifactRefer
     {ref.collection_id && <button className="secondary-button" onClick={() => useNodeSurfaceStore.getState().openWorkspace(ref.collection_id!)}>Inspect artifact</button>}</p>)}</>;
 }
 
-export function PublishFiles({ card, paths }: { card: WorldCard; paths: string[] }) {
+export function PublishFiles({ card, paths, children }: { card: WorldCard; paths: string[]; children?: ReactNode }) {
   const cards = useWorldStore(s => s.cards);
   const [collection, setCollection] = useState("");
   const [finalized, setFinalized] = useState(false);
@@ -39,8 +39,9 @@ export function PublishFiles({ card, paths }: { card: WorldCard; paths: string[]
     } catch (error) { setMessage(apiErrorMessage(error)); }
     finally { setBusy(false); }
   }
-  return <details className="artifact-publish nodrag nopan">
+  return <details className="artifact-publish">
     <summary>Publish selected files ({paths.length})</summary>
+    {children}
     <p>{paths.join(", ") || "Select files or directories in the file tree."}</p>
     <label>Collection <select aria-label="Publication collection" value={collection} onChange={e => setCollection(e.target.value)}>
       <option value="">Choose a collection</option>{cards.filter(c => c.type === "core.artifact-collection").map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -81,7 +82,7 @@ export function ArtifactCollection({ card }: { card: WorldCard }) {
     catch (e) { setError(apiErrorMessage(e)); }
     finally { setBusy(false); }
   }
-  return <div className="artifact-collection nodrag nopan nowheel">
+  return <div className="artifact-collection nowheel">
     <header><h3>Published versions</h3><button className="secondary-button" onClick={() => void action(refresh)}>Refresh</button></header>
     <p>Retained independently of producers. Removing a reference preserves its stored content.</p>
     {error && <p role="alert">{error}</p>}

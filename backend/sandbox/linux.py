@@ -165,9 +165,11 @@ def validate_relative_path(raw: str) -> str:
 def minimal_linux_environment(extra: Mapping[str, str] | None = None, *, invocation_env: Mapping[str, str] | None = None) -> dict[str, str]:
     from .environment import validate_command_environment, apply_invocation_environment
     environment = {
-        "PATH": "/usr/bin:/bin", "HOME": "/tmp/home", "TMPDIR": "/tmp",
+        "PATH": "/sandbox/home/.local/bin:/sandbox/home/bin:/usr/bin:/bin", "HOME": "/sandbox/home", "TMPDIR": "/tmp",
         "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "SHELL": "/bin/sh",
         "SANDBOX_RESOURCES": "/sandbox",
+        # npm global packages and their bin links belong to this Sandbox, not /usr.
+        "NPM_CONFIG_PREFIX": "/sandbox/home/.local",
     }
     if extra is not None:
         if not isinstance(extra, Mapping):
@@ -220,7 +222,7 @@ def bubblewrap_command(
     workspace: Path, access: ResourceAccess,
     attachments: Sequence[ResourceAttachment], argv: Sequence[str],
     environment: Mapping[str, str],
-    runtime_mount: tuple[Path, str] | None = None, *, network_enabled=False, python_runtime=None,
+    runtime_mount: tuple[Path, str] | None = None, *, network_enabled=False, python_runtime=None, home: Path | None = None,
 ) -> list[str]:
     result = [
         "/usr/bin/bwrap", "--unshare-all", "--unshare-user",
@@ -255,6 +257,10 @@ def bubblewrap_command(
     # Attachments occupy an independent ephemeral tree: mounting one never
     # creates files in, shadows files in, or changes the selected real folder.
     result.extend(("--dir", "/sandbox", "--dir", "/sandbox/resources"))
+    if home is not None:
+        result.extend(("--bind", str(home), "/sandbox/home"))
+    else:
+        result.extend(("--dir", "/sandbox/home"))
     for item in attachments:
         result.extend((
             "--ro-bind" if item.access == ResourceAccess.READ_ONLY else "--bind",
@@ -455,7 +461,6 @@ class LinuxSandboxBackend(SandboxBackend):
         command = validate_argv(argv)
         environment = minimal_linux_environment(env, invocation_env=invocation_env)
         if self.python_runtime is not None:
-            await self.python_runtime.prepare()
             self.python_runtime.environment(environment)
             command = self.python_runtime.command(command)
         timeout = limits.default_timeout_seconds if timeout_seconds is None else float(timeout_seconds)
@@ -475,7 +480,7 @@ class LinuxSandboxBackend(SandboxBackend):
                 source = materialize_bundle(record.root, runtime_mount.bundle)
                 mount = (source, runtime_mount.bundle.key)
             isolated = bubblewrap_command(record.host_workspace, record.workspace_access,
-                tuple(record.attachments.values()), command, environment, mount, network_enabled=bool(policy.get("network_enabled")), python_runtime=self.python_runtime)
+                tuple(record.attachments.values()), command, environment, mount, network_enabled=bool(policy.get("network_enabled")), python_runtime=self.python_runtime, home=record.root / "home")
             invocation = service_command(isolated, unit, limits, timeout, network_enabled=bool(policy.get("network_enabled")))
             record.state = SandboxState.RUNNING
             record.active_command, record.unit = command, unit
@@ -501,69 +506,78 @@ class LinuxSandboxBackend(SandboxBackend):
             await self._emit_state(record)
             await self._emit(SandboxEvent(sandbox_id, SandboxEventType.COMMAND_STARTED,
                 {"argv": list(command), "timeout_seconds": timeout}))
-            process = await asyncio.create_subprocess_exec(*invocation,
-                stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE, env=_host_control_environment())
+            # Admission and cancellation ownership must precede asynchronous
+            # Python preparation. A cancellation during preparation used to see
+            # READY/done and disappear before execute cleared the event.
+            if self.python_runtime is not None and not record.cancelled.is_set():
+                await self.python_runtime.prepare()
+            if record.cancelled.is_set():
+                result = CommandResult(sandbox_id, command, -9, "", "",
+                    time.monotonic() - started, cancelled=True)
+            else:
+                process = await asyncio.create_subprocess_exec(*invocation,
+                    stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE, env=_host_control_environment())
 
-            async def consume(stream: asyncio.StreamReader, label: str) -> None:
-                decoder = codecs.getincrementaldecoder("utf-8")("replace")
-                total = 0
-                truncated = False
-                event_type = SandboxEventType.STDOUT if label == "stdout" else SandboxEventType.STDERR
+                async def consume(stream: asyncio.StreamReader, label: str) -> None:
+                    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+                    total = 0
+                    truncated = False
+                    event_type = SandboxEventType.STDOUT if label == "stdout" else SandboxEventType.STDERR
 
-                async def append(value: str) -> None:
-                    if value:
-                        outputs[label].append(value)
-                        await self._emit(SandboxEvent(sandbox_id, event_type, {"text": value}))
+                    async def append(value: str) -> None:
+                        if value:
+                            outputs[label].append(value)
+                            await self._emit(SandboxEvent(sandbox_id, event_type, {"text": value}))
 
-                while chunk := await stream.read(8192):
-                    value = decoder.decode(chunk)
-                    remaining = max(0, _OUTPUT_LIMIT - total)
-                    encoded = value.encode("utf-8")
-                    total += len(encoded)
-                    if remaining:
-                        kept = encoded[:remaining].decode("utf-8", "ignore")
-                        await append(kept)
+                    while chunk := await stream.read(8192):
+                        value = decoder.decode(chunk)
+                        remaining = max(0, _OUTPUT_LIMIT - total)
+                        encoded = value.encode("utf-8")
+                        total += len(encoded)
+                        if remaining:
+                            kept = encoded[:remaining].decode("utf-8", "ignore")
+                            await append(kept)
+                        if total > _OUTPUT_LIMIT and not truncated:
+                            await append("\n[output truncated at 2 MiB]\n")
+                            truncated = True
+                    tail = decoder.decode(b"", final=True)
+                    if total < _OUTPUT_LIMIT and tail:
+                        encoded = tail.encode("utf-8")
+                        await append(encoded[:_OUTPUT_LIMIT - total].decode("utf-8", "ignore"))
+                        total += len(encoded)
                     if total > _OUTPUT_LIMIT and not truncated:
                         await append("\n[output truncated at 2 MiB]\n")
-                        truncated = True
-                tail = decoder.decode(b"", final=True)
-                if total < _OUTPUT_LIMIT and tail:
-                    encoded = tail.encode("utf-8")
-                    await append(encoded[:_OUTPUT_LIMIT - total].decode("utf-8", "ignore"))
-                    total += len(encoded)
-                if total > _OUTPUT_LIMIT and not truncated:
-                    await append("\n[output truncated at 2 MiB]\n")
 
-            assert process.stdout is not None and process.stderr is not None
-            streams = [asyncio.create_task(consume(process.stdout, "stdout")),
-                       asyncio.create_task(consume(process.stderr, "stderr"))]
-            exited = asyncio.create_task(process.wait())
-            cancelled = asyncio.create_task(record.cancelled.wait())
-            waiters = [exited, cancelled]
-            finished, _ = await asyncio.wait(waiters, timeout=timeout,
-                return_when=asyncio.FIRST_COMPLETED)
-            timed_out = not finished
-            if timed_out or record.cancelled.is_set():
-                # Stop the local launcher before stopping its registered scope:
-                # cancellation can arrive while systemd is still registering
-                # it. This prevents a late registration from starting user code
-                # after an initially absent scope was treated as already gone.
-                if process.returncode is None:
-                    process.kill()
-                await self.kill_unit(unit)
-            await asyncio.wait_for(asyncio.shield(exited), 5)
-            await asyncio.wait_for(asyncio.gather(*streams), 5)
-            stderr = "".join(outputs["stderr"])
-            if NETWORK_ERROR_MARKER in stderr:
-                raise SandboxNetworkError(stderr.strip())
-            if _ERROR_MARKER in stderr:
-                raise SandboxSecurityError(stderr.strip())
-            if policy.get("network_enabled"):
-                self._network_ready = True
-            result = CommandResult(sandbox_id, command, process.returncode or 0,
-                "".join(outputs["stdout"]), stderr, time.monotonic() - started,
-                timed_out, record.cancelled.is_set())
+                assert process.stdout is not None and process.stderr is not None
+                streams = [asyncio.create_task(consume(process.stdout, "stdout")),
+                           asyncio.create_task(consume(process.stderr, "stderr"))]
+                exited = asyncio.create_task(process.wait())
+                cancelled = asyncio.create_task(record.cancelled.wait())
+                waiters = [exited, cancelled]
+                finished, _ = await asyncio.wait(waiters, timeout=timeout,
+                    return_when=asyncio.FIRST_COMPLETED)
+                timed_out = not finished
+                if timed_out or record.cancelled.is_set():
+                    # Stop the local launcher before stopping its registered scope:
+                    # cancellation can arrive while systemd is still registering
+                    # it. This prevents a late registration from starting user code
+                    # after an initially absent scope was treated as already gone.
+                    if process.returncode is None:
+                        process.kill()
+                    await self.kill_unit(unit)
+                await asyncio.wait_for(asyncio.shield(exited), 5)
+                await asyncio.wait_for(asyncio.gather(*streams), 5)
+                stderr = "".join(outputs["stderr"])
+                if NETWORK_ERROR_MARKER in stderr:
+                    raise SandboxNetworkError(stderr.strip())
+                if _ERROR_MARKER in stderr:
+                    raise SandboxSecurityError(stderr.strip())
+                if policy.get("network_enabled"):
+                    self._network_ready = True
+                result = CommandResult(sandbox_id, command, process.returncode or 0,
+                    "".join(outputs["stdout"]), stderr, time.monotonic() - started,
+                    timed_out, record.cancelled.is_set())
         except BaseException as exc:
             failure = exc
             if process is not None and process.returncode is None:
@@ -853,6 +867,12 @@ class LinuxSandboxBackend(SandboxBackend):
                 raise SandboxSecurityError("workspace target changed; configure the selected directory again")
         else:
             self._assert_within(record.host_workspace.resolve(strict=True), record.root)
+        home = record.root / "home"
+        if home.is_symlink():
+            raise SandboxSecurityError("sandbox home must not be a symlink")
+        home.mkdir(mode=0o700, exist_ok=True)
+        if home.resolve(strict=True) != record.root.resolve() / "home":
+            raise SandboxSecurityError("sandbox home target changed")
         for attachment in record.attachments.values():
             if self._validate_source(attachment.source) != attachment.source:
                 raise SandboxSecurityError("resource target changed")

@@ -1,4 +1,5 @@
 """Reusable configured Agents and an equipable summoning adapter."""
+from open_agent_world.plugin_api import PackDefinition
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from open_agent_world.plugin_api import (
@@ -22,7 +23,7 @@ class Config(BaseModel):
 
 
 class AgentBarracksPlugin:
-    descriptor = PluginDescriptor(id="oaw.barracks", version="0.2.0", plugin_api_version="1.7",
+    descriptor = PluginDescriptor(id="oaw.barracks", version="0.2.0", plugin_api_version="1.14",
         name="Agent Barracks", description="Reusable configured Agents with private equipment.")
 
     def register(self, registration):
@@ -54,6 +55,8 @@ class AgentBarracksPlugin:
             capabilities=(CapabilityGrantDefinition(kind=kind, tool_prefix="summon_agents",
                 description="List Agents in {target_name!r}, then summon with agent_id and prompt. Each instance owns fresh equipment and keeps external connections shared. message continues an instance; inspect, stop and reclaim manage your instances. Recursive summons share root task limits.",
                 input_schema=SummoningAction.model_json_schema()),)))
+        registration.register_pack(PackDefinition(id='oaw.barracks.default', name='Agent Barracks',
+            description='Reusable configured Agents and summoning.', cards=tuple(registration.nodes)))
 
 
 def create_plugin():

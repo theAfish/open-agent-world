@@ -6,17 +6,51 @@ import { worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import { SettingsPanel } from "./SettingsPanel";
 
-describe("Sandbox application settings", () => {
+const savedCatalog = () => ({ revision: 1, default_model: null, connections: [{
+  id: "work", name: "Work account", adapter: "openai" as const, base_url: "https://example.test/v1",
+  enabled: true, auth_mode: "api_key" as const, api_key_configured: true,
+  models: [{ id: "assistant", name: "Assistant", model_id: "test-model", enabled: true }],
+}] });
+
+describe("Application settings", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     useWorldStore.setState({ settingsOpen: true });
-    vi.spyOn(worldApi, "getLlmSettings").mockResolvedValue({ base_url: "", api_key_configured: false });
+    vi.spyOn(worldApi, "getModelConnections").mockResolvedValue(savedCatalog());
     vi.spyOn(worldApi, "getSandboxSettings").mockResolvedValue({ workspace_root: "D:\\Workspaces", runtime: "auto" });
     vi.spyOn(worldApi, "getSandboxRuntimes").mockResolvedValue({ default_runtime: "windows", runtimes: [
       { id: "windows", label: "Windows", platform: "windows", available: true, reason: null, shell: [], supports_workspace: true },
     ] });
   });
   afterEach(cleanup);
+
+  it("schedules storage without moving the current location and can cancel", async () => {
+    const initial = { current_path: "D:/Data", pending_path: null, previous_path: null, last_error: null, revision: 0, editable: true, managed_by: "settings" };
+    vi.spyOn(worldApi, "getStorageSettings").mockResolvedValue(initial);
+    const save = vi.spyOn(worldApi, "saveStorageSettings")
+      .mockResolvedValueOnce({ ...initial, pending_path: "E:/NewData", revision: 1 })
+      .mockResolvedValueOnce({ ...initial, revision: 2 });
+    render(<SettingsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Storage" }));
+    const folder = await screen.findByLabelText("New data location");
+    fireEvent.change(folder, { target: { value: "E:/NewData" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await screen.findByText("Scheduled for next start: E:/NewData");
+    expect(save).toHaveBeenCalledWith("E:/NewData", 0);
+    expect((screen.getByLabelText("Current data location") as HTMLInputElement).value).toBe("D:/Data");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel scheduled move" }));
+    await waitFor(() => expect(screen.queryByText("Scheduled for next start: E:/NewData")).toBeNull());
+    expect(save).toHaveBeenLastCalledWith(null, 1);
+  });
+
+  it("respects a storage location supplied at startup", async () => {
+    vi.spyOn(worldApi, "getStorageSettings").mockResolvedValue({ current_path: "D:/Data", pending_path: null, previous_path: null, last_error: null, revision: 0, editable: false, managed_by: "startup configuration" });
+    render(<SettingsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Storage" }));
+    await screen.findByText(/This location is controlled by startup configuration/);
+    expect(screen.queryByLabelText("New data location")).toBeNull();
+    expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled).toBe(true);
+  });
 
   it("browses into the draft without saving until Save settings is clicked", async () => {
     vi.spyOn(worldApi, "pickFolder").mockResolvedValue({ path: "E:\\Selected" });
@@ -32,7 +66,7 @@ describe("Sandbox application settings", () => {
 
   it("loads and saves Sandbox defaults independently of model settings", async () => {
     const save = vi.spyOn(worldApi, "saveSandboxSettings").mockResolvedValue({ workspace_root: "E:\\Projects", runtime: "windows" });
-    const saveModel = vi.spyOn(useWorldStore.getState(), "saveModelSettings");
+    const saveModel = vi.spyOn(worldApi, "saveModelConnections");
     render(<SettingsPanel />);
     fireEvent.click(screen.getByRole("button", { name: "Sandbox" }));
     const folder = screen.getByLabelText("Default Workspace location") as HTMLInputElement;
@@ -70,11 +104,8 @@ describe("Sandbox application settings", () => {
   });
 
   it("shows saved-key status without loading the secret into the browser", async () => {
-    vi.mocked(worldApi.getLlmSettings).mockResolvedValue({
-      base_url: "https://example.test/v1",
-      api_key_configured: true,
-    });
-    const saveModel = vi.spyOn(useWorldStore.getState(), "saveModelSettings").mockResolvedValue(true);
+
+    const saveModel = vi.spyOn(worldApi, "saveModelConnections").mockResolvedValue(savedCatalog());
     render(<SettingsPanel />);
 
     const key = await screen.findByLabelText("API key") as HTMLInputElement;
@@ -83,20 +114,109 @@ describe("Sandbox application settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => expect(saveModel).toHaveBeenCalled());
-    expect(saveModel.mock.calls[0][0].apiKey).toBe("");
-    expect(saveModel.mock.calls[0][1]).toBe(false);
+    expect(saveModel.mock.calls[0][0].connections[0].api_key).toBeUndefined();
+    expect(saveModel.mock.calls[0][0].connections[0].clear_api_key).toBeUndefined();
   });
 
   it("only removes a persisted key after an explicit user action", async () => {
-    vi.mocked(worldApi.getLlmSettings).mockResolvedValue({ base_url: "", api_key_configured: true });
-    const saveModel = vi.spyOn(useWorldStore.getState(), "saveModelSettings").mockResolvedValue(true);
+
+    const saveModel = vi.spyOn(worldApi, "saveModelConnections").mockResolvedValue(savedCatalog());
     render(<SettingsPanel />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Remove saved key" }));
-    expect(screen.getByText("The saved key will be removed when you save.")).toBeTruthy();
+    expect(screen.getByText(/The saved key will be removed when you save/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => expect(saveModel).toHaveBeenCalled());
-    expect(saveModel.mock.calls[0][1]).toBe(true);
+    expect(saveModel.mock.calls[0][0].connections[0].clear_api_key).toBe(true);
   });
+
+  it("uses preset authentication defaults and keeps deployment authentication in advanced options", async () => {
+    render(<SettingsPanel />);
+    await screen.findByLabelText("Connection name");
+    expect(screen.queryByText("Authentication source")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced connection options" }));
+    expect((screen.getByLabelText("Authentication source") as HTMLSelectElement).value).toBe("api_key");
+    fireEvent.change(screen.getByLabelText("New connection type"), { target: { value: "local" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+    expect((screen.getByLabelText("API key") as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByText(/Optional for this connection/)).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: "Advanced connection options" }).at(-1)!);
+    fireEvent.change(screen.getAllByLabelText("Authentication source").at(-1)!, { target: { value: "environment" } });
+    expect((screen.getByLabelText("API key") as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByLabelText("Backend environment variable") as HTMLInputElement).placeholder).toBe("OPENAI_API_KEY");
+    expect(screen.getByText(/managed deployments/)).toBeTruthy();
+  });
+
+  it.each(["none", "environment"] as const)("accepts a key directly from %s without opening advanced options", async (auth_mode) => {
+    const initial = savedCatalog();
+    vi.mocked(worldApi.getModelConnections).mockResolvedValue({ ...initial, connections: [{ ...initial.connections[0],
+      id: "legacy", adapter: "legacy", auth_mode, api_key_configured: false,
+    }] });
+    const save = vi.spyOn(worldApi, "saveModelConnections").mockResolvedValue(initial);
+    render(<SettingsPanel />);
+    const key = await screen.findByLabelText("API key") as HTMLInputElement;
+    expect(key.disabled).toBe(false);
+    expect(screen.queryByLabelText("Authentication source")).toBeNull();
+    fireEvent.change(key, { target: { value: "direct-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].connections[0]).toMatchObject({ auth_mode: "api_key", api_key: "direct-key", clear_api_key: false });
+  });
+
+  it("changing credential sources does not delete the saved key", async () => {
+    const save = vi.spyOn(worldApi, "saveModelConnections").mockResolvedValue(savedCatalog());
+    render(<SettingsPanel />);
+    await screen.findByLabelText("API key");
+    fireEvent.click(screen.getByRole("button", { name: "Advanced connection options" }));
+    fireEvent.change(screen.getByLabelText("Authentication source"), { target: { value: "environment" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].connections[0].auth_mode).toBe("environment");
+    expect(save.mock.calls[0][0].connections[0].clear_api_key).toBeUndefined();
+  });
+
+  it("entering a replacement cancels pending key removal", async () => {
+    const save = vi.spyOn(worldApi, "saveModelConnections").mockResolvedValue(savedCatalog());
+    render(<SettingsPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "Remove saved key" }));
+    const key = screen.getByLabelText("API key") as HTMLInputElement;
+    expect(key.disabled).toBe(false);
+    fireEvent.change(key, { target: { value: "replacement-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].connections[0]).toMatchObject({ api_key: "replacement-key", clear_api_key: false });
+  });
+  it("keeps separate connection drafts and preserves them across tabs", async () => {
+    const save = vi.spyOn(worldApi, "saveModelConnections").mockImplementation(async v => v);
+    render(<SettingsPanel />);
+    await screen.findByLabelText("Connection name");
+    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+    fireEvent.change(screen.getByLabelText("Connection name"), { target: { value: "Personal" } });
+    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "personal-secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add model" }));
+    fireEvent.change(screen.getByLabelText("Model 1 display name"), { target: { value: "Personal assistant" } });
+    fireEvent.change(screen.getByLabelText("Model 1 ID"), { target: { value: "test-model" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sandbox" }));
+    fireEvent.click(screen.getByRole("button", { name: "Models" }));
+    fireEvent.click(screen.getByRole("button", { name: /Personal 1 models/ }));
+    expect((screen.getByLabelText("API key") as HTMLInputElement).value).toBe("personal-secret");
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].connections).toHaveLength(2);
+    expect(save.mock.calls[0][0].connections[0].api_key).toBeUndefined();
+    expect(save.mock.calls[0][0].connections[1].api_key).toBe("personal-secret");
+  });
+
+  it("preserves a failed save and supports explicitly discarding a stale draft", async () => {
+    vi.spyOn(worldApi, "saveModelConnections").mockRejectedValue(new Error("Model settings changed in another window"));
+    render(<SettingsPanel />);
+    fireEvent.change(await screen.findByLabelText("Connection name"), { target: { value: "Unsaved name" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("another window");
+    expect((screen.getByLabelText("Connection name") as HTMLInputElement).value).toBe("Unsaved name");
+    fireEvent.click(screen.getByRole("button", { name: "Discard draft and reload" }));
+    await waitFor(() => expect((screen.getByLabelText("Connection name") as HTMLInputElement).value).toBe("Work account"));
+  });
+
 });

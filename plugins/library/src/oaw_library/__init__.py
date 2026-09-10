@@ -1,4 +1,5 @@
 """Portable PDF documents and native OAW library containers."""
+from open_agent_world.plugin_api import PackDefinition
 import base64
 from pydantic import BaseModel, Field
 from open_agent_world.plugin_api import (
@@ -104,7 +105,7 @@ def read(value, args):
 
 class LibraryPlugin:
     descriptor = PluginDescriptor(id="research.library", version="0.2.0",
-        plugin_api_version="1.10", name="Library", description="PDF reading and native research spaces")
+        plugin_api_version="1.14", name="Library", description="PDF reading and native research spaces")
 
     async def read_paper(self, context, capability, arguments):
         document = await context.node_document_action(capability, "read", arguments)
@@ -135,6 +136,8 @@ class LibraryPlugin:
         registration.register_relationship(RelationshipDefinition(id="library.research",label="Research",short_label="research",
             description="Associate an Agent with a library; membership alone grants no paper access.",
             source_traits=frozenset({"core.agent"}),target_types=frozenset({"library.region"}),templateable=True))
+        registration.register_pack(PackDefinition(id='research.library.default', name='Research Library',
+            description='Papers and reading spaces.', cards=tuple(registration.nodes)))
 
 def create_plugin():
     return LibraryPlugin()

@@ -73,7 +73,7 @@ export function BarracksBody({ card, workspace = false }: { card: WorldCard; wor
     action, instance_id: instance?.id, agent_id: target || snapshot?.agents[0]?.id,
     ...(["summon", "message"].includes(action) ? { prompt: task } : {}),
   }));
-  return <div className={`skill-toolbox barracks-body nodrag nopan nowheel ${workspace ? "is-workspace" : ""}`}>
+  return <div className={`skill-toolbox barracks-body nowheel ${workspace ? "is-workspace" : ""}`}>
     <header className="toolbox-heading"><div><span className="toolbox-eyebrow">AGENT BARRACKS</span><h3>{card.name}</h3></div><Bot size={28} /></header>
     <p className="toolbox-help">Agents in this space are live blueprints. Summoning copies their current configuration and private equipment, with fresh workspaces. External connections remain shared.</p>
     <div className="toolbox-toolbar">

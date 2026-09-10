@@ -68,6 +68,7 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
         *,
         app_name: str = "open-agent-world",
         adk_bindings: _AdkBindings | None = None,
+        model_connections: Any = None,
     ) -> None:
         self._provider = capability_provider
         self._app_name = app_name
@@ -77,6 +78,7 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
         self._context_sessions: dict[tuple[str, str], str] = {}
         self._records_lock = asyncio.Lock()
         self._litellm_connection: dict[str, str] = {}
+        self.model_connections = model_connections
 
     def configure_litellm_connection(
         self, *, api_base: str | None = None, api_key: str | None = None
@@ -157,13 +159,16 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
             record.last_error = None
         run_id = context.run_id
         final_text = ""
+        run_secret = None
         try:
             definitions = tuple(await self._provider.list_tools(agent_id))
             tools = build_scoped_tool_callables(self._provider, agent_id, definitions)
+            selected_model = self._adk_model(record.config.model)
+            run_secret = getattr(selected_model, "_additional_args", {}).get("api_key")
             agent = self._adk.Agent(
                 name=self._adk_agent_name(agent_id),
                 description=record.config.name,
-                model=self._adk_model(record.config.model),
+                model=selected_model,
                 instruction=record.config.system_instruction,
                 tools=tools,
             )
@@ -198,7 +203,10 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
             raise
         except Exception as exc:
             error_message = _runtime_error_message(exc)
-            raise RuntimeError(error_message) from exc
+            if run_secret:
+                from backend.security.redaction import redact
+                error_message = redact(error_message, [run_secret])
+            raise RuntimeError(error_message) from None
 
     async def _translate_event(
         self, record: AgentRecord, run_id: str, event: Any
@@ -278,14 +286,34 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
     def _adk_model(self, configured_model: str) -> Any:
         """Return a configured LiteLlm object only when ADK selects that adapter."""
 
-        if not self._litellm_connection:
+        from backend.security.model_connections import MODEL_REF_PREFIX
+        if configured_model.startswith(MODEL_REF_PREFIX):
+            if self.model_connections is None:
+                raise AgentStateError("Model connections are not configured on this runtime")
+            adapter, model_id, base_url, api_key = self.model_connections.resolve(configured_model)
+            from google.adk.models.lite_llm import LiteLlm
+            if adapter == "legacy":
+                from google.adk.models import LLMRegistry
+                if not isinstance(LLMRegistry.new_llm(model_id), LiteLlm):
+                    return model_id
+            else:
+                model_id = model_id if model_id.startswith(adapter + "/") else adapter + "/" + model_id
+            options = {}
+            if base_url:
+                options["api_base"] = base_url
+            if api_key:
+                options["api_key"] = api_key
+            return LiteLlm(model_id, **options)
+
+        if not self._litellm_connection and self.model_connections is None:
             return configured_model
         from google.adk.models import LLMRegistry
         from google.adk.models.lite_llm import LiteLlm
 
         resolved = LLMRegistry.new_llm(configured_model)
         if isinstance(resolved, LiteLlm):
-            return LiteLlm(configured_model, **self._litellm_connection)
+            connection = self.model_connections.legacy_options() if self.model_connections else None
+            return LiteLlm(configured_model, **(connection if connection is not None else self._litellm_connection))
         return configured_model
 
     @staticmethod
