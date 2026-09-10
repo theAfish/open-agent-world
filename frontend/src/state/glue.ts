@@ -1,10 +1,48 @@
 ﻿import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { NodeSurfaceLevel } from './nodeSurfaces';
+import { NODE_SURFACE_SIZE, type NodeSurfaceLevel, type SurfaceSize } from './nodeSurfaces';
 
-export interface GlueBox { x: number; y: number; width: number; height: number; level: NodeSurfaceLevel }
+export interface GlueBox { x: number; y: number; width: number; height: number; level: NodeSurfaceLevel; sizes?: Partial<Record<NodeSurfaceLevel, SurfaceSize>> }
 export interface GlueBond { a: string; b: string; side: 'right' | 'left' | 'top' | 'bottom' }
 export interface GlueCandidate extends GlueBond { dx: number; dy: number }
+/** Change the surface size, then reposition its bonded neighbours in the same coordinate space. */
+export function reflowGlueSurfaces(boxes: Record<string, GlueBox>, bonds: GlueBond[], levels: ReadonlyMap<string, NodeSurfaceLevel>, workspaces: Record<string, SurfaceSize>) {
+  const changed = Object.keys(boxes).filter(id => levels.has(id) && levels.get(id) !== boxes[id].level);
+  if (!changed.length) return boxes;
+  const next = { ...boxes };
+  for (const id of changed) {
+    const old = boxes[id], level = levels.get(id)!;
+    const size = old.sizes?.[level] ?? (level === 'workspace' ? workspaces[id] : undefined) ?? NODE_SURFACE_SIZE[level];
+    next[id] = { ...old, ...size, level, sizes: { ...old.sizes, [old.level]: { width: old.width, height: old.height } } };
+  }
+  const visited = new Set<string>();
+  for (const root of changed) {
+    if (visited.has(root)) continue;
+    visited.add(root);
+    const queue = [root];
+    for (let i = 0; i < queue.length; i++) {
+      const id = queue[i];
+      for (const bond of bonds) {
+        if (bond.a !== id && bond.b !== id) continue;
+        const peer = bond.a === id ? bond.b : bond.a;
+        if (!next[peer] || visited.has(peer)) continue;
+        const side = bond.a === id ? bond.side : ({ left: 'right', right: 'left', top: 'bottom', bottom: 'top' } as const)[bond.side];
+        const a = next[id], b = next[peer], oldA = boxes[id], oldB = boxes[peer];
+        // Preserve aligned ends; otherwise retain the offset while keeping a usable seam.
+        const offset = (start: number, length: number, peerStart: number, peerLength: number, newLength: number, newPeerLength: number) => {
+          if (Math.abs(start - peerStart) < 1) return 0;
+          if (Math.abs(start + length - peerStart - peerLength) < 1) return newLength - newPeerLength;
+          return Math.max(24 - newPeerLength, Math.min(newLength - 24, peerStart - start));
+        };
+        next[peer] = side === 'left' || side === 'right'
+          ? { ...b, x: side === 'right' ? a.x + a.width : a.x - b.width, y: a.y + offset(oldA.y, oldA.height, oldB.y, oldB.height, a.height, b.height) }
+          : { ...b, y: side === 'bottom' ? a.y + a.height : a.y - b.height, x: a.x + offset(oldA.x, oldA.width, oldB.x, oldB.width, a.width, b.width) };
+        visited.add(peer); queue.push(peer);
+      }
+    }
+  }
+  return next;
+}
 export function glueGroup(id: string, bonds: GlueBond[]): Set<string> {
   const ids = new Set([id]);
   let changed = true;
@@ -66,7 +104,7 @@ export function resizeGlued(box: GlueBox, corner: string, dx: number, dy: number
 interface GlueState { boxes: Record<string, GlueBox>; bonds: GlueBond[]; setLayout: (boxes: Record<string, GlueBox>, bond?: GlueBond) => void; detach: (id: string) => void }
 export const useGlueStore = create<GlueState>()(persist((set) => ({
   boxes: {}, bonds: [],
-  setLayout: (boxes, bond) => set(state => ({ boxes: { ...state.boxes, ...boxes }, bonds: bond && !state.bonds.some(b => b.a === bond.a && b.b === bond.b || b.a === bond.b && b.b === bond.a) ? [...state.bonds, bond] : state.bonds })),
+  setLayout: (boxes, bond) => set(state => ({ boxes: { ...state.boxes, ...Object.fromEntries(Object.entries(boxes).map(([id, box]) => [id, { ...state.boxes[id], ...box }])) }, bonds: bond && !state.bonds.some(b => b.a === bond.a && b.b === bond.b || b.a === bond.b && b.b === bond.a) ? [...state.bonds, bond] : state.bonds })),
   detach: id => set(state => {
     const bonds = state.bonds.filter(b => b.a !== id && b.b !== id);
     const ids = new Set(bonds.flatMap(b => [b.a, b.b]));

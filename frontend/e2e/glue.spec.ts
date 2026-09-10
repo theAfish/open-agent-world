@@ -34,7 +34,29 @@ test('glue joins cards, moves the group, resizes from a free corner and survives
     const h = (await handle.boundingBox())!;
     await page.mouse.move(h.x + 7, h.y + 7); await page.mouse.down(); await page.mouse.move(h.x + 7, h.y + 47, { steps: 10 }); await page.mouse.up();
     await expect.poll(async () => Math.round((await first.boundingBox())!.height)).toBe(Math.round(glued1.height + 40));
+    await first.getByRole('button', { name: `Collapse ${a} card` }).click();
+    await expect.poll(async () => Math.round((await first.boundingBox())!.width)).toBe(96);
+    await expect.poll(async () => {
+      const left = (await first.boundingBox())!, right = (await second.boundingBox())!;
+      return Math.abs(left.x + left.width - right.x);
+    }).toBeLessThan(2);
+    await first.getByRole('button', { name: `Expand ${a} card` }).click();
+    await expect.poll(async () => Math.round((await first.boundingBox())!.width)).toBe(286);
+    await expect.poll(async () => Math.round((await first.boundingBox())!.height)).toBe(Math.round(glued1.height + 40));
+    await first.click({ position: { x: 35, y: 25 } });
+    await expect.poll(async () => Math.round((await first.boundingBox())!.width)).toBe(438);
+    await first.getByRole('button', { name: `Close ${a} inspector` }).click();
+    await expect.poll(async () => Math.round((await first.boundingBox())!.width)).toBe(286);
     await page.reload(); await expect(first).toHaveClass(/is-glued/);
+    await first.click({ modifiers: ['Shift'], position: { x: 35, y: 25 } });
+    await page.getByRole('button', { name: '解除粘连', exact: true }).click();
+    await expect(first).not.toHaveClass(/is-glued/);
+    await expect(second).not.toHaveClass(/is-glued/);
+    await first.getByRole('button', { name: `Collapse ${a} card` }).click();
+    await expect.poll(async () => Math.round((await first.boundingBox())!.width)).toBe(96);
+    await first.getByRole('button', { name: `Expand ${a} card` }).click();
+    await expect.poll(async () => Math.round((await first.boundingBox())!.width)).toBe(286);
+    await expect.poll(async () => Math.round((await first.boundingBox())!.height)).toBe(156);
   } finally { await request.delete(`/api/nodes/${a}`); await request.delete(`/api/nodes/${b}`); }
 });
 

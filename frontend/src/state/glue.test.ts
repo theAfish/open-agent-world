@@ -1,7 +1,22 @@
 ﻿import { describe, expect, it } from 'vitest';
-import { findGlue, freeCorners, glueGroup, resizeGlued, type GlueBox } from './glue';
+import { findGlue, freeCorners, glueGroup, resizeGlued, reflowGlueSurfaces, type GlueBox } from './glue';
 const box = (x: number, y: number, width = 200, height = 160): GlueBox => ({ x, y, width, height, level: 'preview' });
 describe('glue geometry', () => {
+  it('reflows a chain across state changes and restores custom sizes on returning', () => {
+    const boxes = { a: box(0, 0, 320, 200), b: box(320, 0), c: box(520, 0) };
+    const bonds = [{ a: 'a', b: 'b', side: 'right' as const }, { a: 'b', b: 'c', side: 'right' as const }];
+    const collapsed = reflowGlueSurfaces(boxes, bonds, new Map([['a', 'node']]), {});
+    expect(collapsed.a.width).toBe(96);
+    expect(collapsed.b.x).toBe(96);
+    expect(collapsed.c.x).toBe(296);
+    const restored = reflowGlueSurfaces(collapsed, bonds, new Map([['a', 'preview']]), {});
+    expect(restored.a).toMatchObject({ width: 320, height: 200 });
+    expect(restored.b.x).toBe(320);
+    expect(reflowGlueSurfaces(restored, bonds, new Map([['a', 'preview']]), {})).toBe(restored);
+    const workspace = reflowGlueSurfaces(restored, bonds, new Map([['a', 'workspace']]), { a: { width: 1200, height: 800 } });
+    expect(workspace.a).toMatchObject({ width: 1200, height: 800 });
+    expect(workspace.b.x).toBe(1200);
+  });
   it('attaches opposite edges and rejects corner-only contact and distant cards', () => {
     expect(findGlue({ a: box(0, 0) }, { b: box(210, 30) }, 16)).toMatchObject({ side: 'right', dx: 10, dy: 0 });
     expect(findGlue({ a: box(0, 0) }, { b: box(0, 170) }, 16)).toMatchObject({ side: 'bottom', dy: 10 });

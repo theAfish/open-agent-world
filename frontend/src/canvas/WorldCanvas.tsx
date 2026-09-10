@@ -1,5 +1,5 @@
 import { GlueLayer } from "./GlueLayer";
-import { findGlue, glueGroup, useGlueStore, type GlueBox, type GlueCandidate } from "../state/glue";
+import { findGlue, glueGroup, reflowGlueSurfaces, useGlueStore, type GlueBox, type GlueCandidate } from "../state/glue";
 import { MapAtlas } from "./MapAtlas";
 import {
   Background,
@@ -78,6 +78,7 @@ function nodeFromCard(
     type: "worldCard",
     position: positionSurfaceAtNodeCenter(position, surfaceLevel),
     data: { card, surfaceLevel, displaced },
+    width: size.width, height: size.height, className: undefined,
     style: { width: size.width, height: size.height },
     parentId: undefined,
     extent: undefined,
@@ -93,7 +94,7 @@ export function WorldCanvas() {
   const [pinToolActive, setPinToolActive] = useState(false);
   const [glueActive, setGlueActive] = useState(false);
   const [gluePreview, setGluePreview] = useState<GlueCandidate>();
-  const glueBoxes = useGlueStore(s => s.boxes);
+  const storedGlueBoxes = useGlueStore(s => s.boxes);
   const glueBonds = useGlueStore(s => s.bonds);
   const glueDrag = useRef<{ origin: { x: number; y: number }; boxes: Record<string, GlueBox>; latest: Record<string, GlueBox>; candidate?: GlueCandidate }>();
   const wrapper = useRef<HTMLDivElement>(null);
@@ -146,6 +147,15 @@ export function WorldCanvas() {
     card.id,
     surfaceLevelForNode(card.id, surfaceLevelsByNodeId),
   ])), [renderCards, surfaceLevelsByNodeId]);
+  const glueBoxes = useMemo(() => reflowGlueSurfaces(storedGlueBoxes, glueBonds, surfaceLevels, workspaceSizes),
+    [storedGlueBoxes, glueBonds, surfaceLevels, workspaceSizes]);
+  useEffect(() => {
+    if (glueBoxes === storedGlueBoxes) return;
+    useGlueStore.getState().setLayout(glueBoxes);
+    void updateCardPositions(Object.entries(glueBoxes).filter(([id, box]) => box !== storedGlueBoxes[id]).map(([id, box]) => ({
+      id, position: nodePositionFromSurfacePosition(box, box.level),
+    })));
+  }, [glueBoxes, storedGlueBoxes, updateCardPositions]);
   const surfaceObstacles = useMemo<SurfaceObstacle[]>(() => renderCards.flatMap<SurfaceObstacle>((card) => {
     if (isContainer(card, catalog) || card.parent_id || card.equipment) return [];
     const level = surfaceLevels.get(card.id);
