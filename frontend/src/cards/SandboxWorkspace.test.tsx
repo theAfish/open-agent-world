@@ -8,6 +8,9 @@ import { useNodeSurfaceStore } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
 import type { SandboxInfo, WorldCard } from "../types/world";
 import { SandboxWorkspace } from "./SandboxWorkspace";
+import { ReactFlowProvider } from "@xyflow/react";
+import type { ComponentProps } from "react";
+import { WorldCardNode } from "./CardFrame";
 
 const card: WorldCard = { id: "sandbox-window", ...buildCardDraft("sandbox", { x: 0, y: 0 }), status: "ready" };
 const info: SandboxInfo = {
@@ -54,7 +57,43 @@ describe("Sandbox workspace interaction", () => {
       throw new Error(`Unexpected workspace request: ${action}`);
     });
   });
-  afterEach(() => cleanup());
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  it("delivers resize gestures through the card frame and saves both pane sizes", async () => {
+    vi.stubGlobal("IntersectionObserver", class { observe() {} disconnect() {} });
+    useNodeSurfaceStore.setState({ surfaceLevels: { [card.id]: "workspace" } });
+    const outerPointerDown = vi.fn();
+    const props = { id: card.id, data: { card }, selected: false, dragging: false } as ComponentProps<typeof WorldCardNode>;
+    render(<ReactFlowProvider><div onPointerDown={outerPointerDown}><WorldCardNode {...props} /></div></ReactFlowProvider>);
+    await screen.findByRole("button", { name: "first.txt" });
+    const terminal = screen.getByRole("separator", { name: "Resize terminal" });
+    const sidebar = screen.getByRole("separator", { name: "Resize file sidebar" });
+    const area = terminal.parentElement!;
+    const files = screen.getByRole("complementary", { name: "Sandbox files" });
+    vi.spyOn(area, "getBoundingClientRect").mockReturnValue({ height: 500 } as DOMRect);
+    Object.defineProperty(files, "offsetWidth", { configurable: true, value: 224 });
+    vi.spyOn(files, "getBoundingClientRect").mockReturnValue({ width: 112 } as DOMRect);
+    for (const divider of [terminal, sidebar]) {
+      divider.setPointerCapture = vi.fn();
+      divider.releasePointerCapture = vi.fn();
+    }
+    const pointer = (element: HTMLElement, type: string, x: number, y: number) => {
+      const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 });
+      Object.defineProperty(event, "pointerId", { value: 1 });
+      fireEvent(element, event);
+    };
+    pointer(terminal, "pointerdown", 300, 300);
+    pointer(terminal, "pointermove", 300, 250);
+    expect(terminal.getAttribute("aria-valuenow")).toBe("52");
+    pointer(terminal, "pointerup", 300, 250);
+    expect(useNodeSurfaceStore.getState().drafts[`sandbox-terminal:${card.id}`]).toBe("52");
+    pointer(sidebar, "pointerdown", 112, 200);
+    pointer(sidebar, "pointermove", 132, 200);
+    expect(sidebar.getAttribute("aria-valuenow")).toBe("264");
+    pointer(sidebar, "pointerup", 132, 200);
+    expect(useNodeSurfaceStore.getState().drafts[`sandbox-sidebar:${card.id}`]).toBe("264");
+    expect(outerPointerDown).not.toHaveBeenCalled();
+  });
 
   it("keeps the terminal and latest file selection when an older preview completes later", async () => {
     let resolveFirst!: (value: unknown) => void;

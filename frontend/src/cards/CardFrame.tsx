@@ -126,12 +126,7 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
   };
 
   const onPointerDownCapture = (event: ReactPointerEvent<HTMLElement>) => {
-    const target = event.target as HTMLElement;
-    const isNonDraggableTarget = Boolean(target.closest(NON_DRAG_SELECTOR));
     pointerStart.current = { x: event.clientX, y: event.clientY, moved: false };
-    if (isNonDraggableTarget) {
-      event.stopPropagation();
-    }
   };
 
   return (
@@ -155,6 +150,10 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
       }}
       onPointerMove={onPointerMove}
       onPointerDownCapture={onPointerDownCapture}
+      onPointerDown={event => {
+        // Let child controls receive the gesture before isolating it from the canvas.
+        if ((event.target as Element).closest(NON_DRAG_SELECTOR)) event.stopPropagation();
+      }}
       onMouseDownCapture={event => {
         const target = event.target as Element;
         if (visualLevel === "inspector" && target.closest(".node-inspector-content, .node-inspector-footer")
