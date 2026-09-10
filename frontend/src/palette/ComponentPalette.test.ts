@@ -3,6 +3,17 @@ import { TEST_CATALOG } from "../state/catalog.fixture";
 import { defaultDecks, normalizeDecks } from "./ComponentPalette";
 
 describe("component palette creation policy", () => {
+  it("moves Paper to Objects and removes the retired Library deck", () => {
+    const paper = { ...TEST_CATALOG.node_types[1], id: "library.paper", deck_id: "objects", deck_label: "Objects", deck_revision: 2 };
+    const region = { ...paper, id: "library.region", user_creatable: false };
+    const decks = normalizeDecks([
+      { id: "library", label: "Library", icon: "folder", cardTypes: [region.id, paper.id], custom: false },
+      { id: "custom-empty", label: "My folder", icon: "folder", cardTypes: [], custom: true },
+    ], { ...TEST_CATALOG, node_types: [...TEST_CATALOG.node_types, paper, region] });
+    expect(decks.find((deck) => deck.id === "objects")?.cardTypes).toContain(paper.id);
+    expect(decks.some((deck) => deck.id === "library")).toBe(false);
+    expect(decks.some((deck) => deck.id === "custom-empty")).toBe(true);
+  });
   const managedLegion = {
     ...TEST_CATALOG.node_types[0],
     id: "legion",
@@ -48,7 +59,7 @@ describe("component palette creation policy", () => {
       id: "agents", label: "Agents", icon: "bot", cardTypes: ["agent", skill.id],
       catalogVersions: { agent: 1, [skill.id]: 1 }, custom: false,
     }], catalogWithSkill);
-    expect(migrated.find((deck) => deck.id === "agents")?.cardTypes).not.toContain(skill.id);
+    expect(migrated.find((deck) => deck.id === "agents")?.cardTypes ?? []).not.toContain(skill.id);
     expect(migrated.find((deck) => deck.id === "tools")?.cardTypes).toContain(skill.id);
 
     const userMoved = normalizeDecks([

@@ -316,7 +316,7 @@ interface WorldState {
   ) => Promise<void>;
   deleteSelectedEdge: () => Promise<void>;
   loadText: (id: string) => Promise<void>;
-  saveText: (id: string, content: string) => Promise<boolean>;
+  saveText: (id: string, content: string, expectedRevision?: number) => Promise<boolean>;
   uploadImage: (id: string, file: File) => Promise<boolean>;
   runAgent: (id: string, prompt: string) => Promise<void>;
   stopAgent: (id: string) => Promise<void>;
@@ -1228,14 +1228,14 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
   },
 
-  saveText: async (id, content) => {
+  saveText: async (id, content, expectedRevision) => {
     const card = get().cards.find((item) => item.id === id);
     if (!card) return false;
     try {
       const result = await worldApi.saveText(
         id,
         content,
-        typeof card.config.revision === "number" ? card.config.revision : undefined,
+        expectedRevision ?? (typeof card.config.revision === "number" ? card.config.revision : undefined),
       );
       const resource = (result.resource && typeof result.resource === "object"
         ? result.resource

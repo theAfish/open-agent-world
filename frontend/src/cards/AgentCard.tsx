@@ -44,7 +44,7 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
     : [];
 
   return (
-    <div className="expanded-stack">
+    <div className="expanded-stack nodrag nopan">
       <PluginSurface card={card} slot="settings" level={level}>
       {schemaSettings ? <AgentSchemaSettings card={card} /> : <>
       {level === "workspace" && <><label className="field-label"><span>When to use this Agent</span><textarea defaultValue={String(card.config.description ?? "")} maxLength={500}

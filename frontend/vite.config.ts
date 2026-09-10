@@ -7,10 +7,13 @@ const backendHttpUrl = process.env.OAW_DEV_BACKEND_HTTP_URL ?? "http://127.0.0.1
 const backendWsUrl = process.env.OAW_DEV_BACKEND_WS_URL ?? "ws://127.0.0.1:8000";
 
 export default defineConfig({
+  // PDF.js worker is a URL asset, not a dependency to prebundle as JavaScript.
+  optimizeDeps: { exclude: ["pdfjs-dist"] },
   resolve: {
     dedupe: ["react", "react-dom"],
     alias: {
       "@oaw/plugin-api": fileURLToPath(new URL("./src/plugins/sdk.ts", import.meta.url)),
+      "pdfjs-dist": fileURLToPath(new URL("./node_modules/pdfjs-dist", import.meta.url)),
       "@xyflow/react": fileURLToPath(new URL("./node_modules/@xyflow/react", import.meta.url)),
       "react": fileURLToPath(new URL("./node_modules/react", import.meta.url)),
       "react-dom": fileURLToPath(new URL("./node_modules/react-dom", import.meta.url)),

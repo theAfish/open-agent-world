@@ -20,7 +20,7 @@ export function ContainerCardNode(props: NodeProps<CanvasNode>) {
   if (definition.traits.includes("ui.legion.v1")) return <LegionCardNode {...props} />;
   if (definition.traits.includes("ui.skill-package.v1")) return <SkillContainerNode {...props} />;
   return <ContainerFrame card={card} selected={props.selected} className="skill-container" label={`${card.name} container`} header={<><Boxes size={24} /><div><span>{definition.label}</span><strong>{card.name}</strong></div>{definition.frontend?.workspace && <button className="secondary-button nodrag nopan" aria-pressed={workspace} onClick={() => setWorkspace(!workspace)}>{workspace ? "Show member cards" : "Open workspace"}</button>}<AddSelectedMembers card={card} /><ContainerActions card={card} /></>}>
-    {!workspace && <p className="skill-container-hint">Drag cards into or out of this space. Each member keeps its own connections.</p>}
+    {!workspace && <PluginSurface card={card} slot="body" level="inspector"><p className="skill-container-hint">Drag cards into or out of this space. Each member keeps its own connections.</p></PluginSurface>}
     {workspace && <div className="container-plugin-workspace nodrag nopan nowheel" role="region" aria-label={`${card.name} workspace`}><PluginSurface card={card} slot="workspace" level="workspace" /></div>}
   </ContainerFrame>;
 }

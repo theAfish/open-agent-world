@@ -17,6 +17,7 @@ from backend.api.plugin_assets import router as plugin_assets_router
 from backend.api.summoning import router as summoning_router
 from backend.api.execution_credentials import router as execution_credentials_router
 from backend.api.artifacts import router as artifacts_router
+from backend.api.library_translation import router as library_translation_router
 from backend.plugins import PluginCatalog
 from backend.services import ApplicationServices
 
@@ -51,3 +52,4 @@ api_router.include_router(runtime_router)
 api_router.include_router(desktop_router)
 
 api_router.include_router(storage_router)
+api_router.include_router(library_translation_router)

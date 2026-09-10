@@ -8,6 +8,7 @@ import { worldApi } from "../api/client";
 import type { SandboxSettings, StorageSettings } from "../api/client";
 import type { SandboxRuntime } from "../types/world";
 import { FolderPathInput } from "./FolderPathInput";
+import { DeepLSettings } from "./DeepLSettings";
 
 export function SettingsPanel() {
   const open = useWorldStore((state) => state.settingsOpen);
@@ -18,7 +19,7 @@ export function SettingsPanel() {
   const [modelLoaded, setModelLoaded] = useState(false);
   const [modelError, setModelError] = useState("");
   const [modelRetry, setModelRetry] = useState(0);
-  const [section, setSection] = useState<"model" | "sandbox" | "storage">("model");
+  const [section, setSection] = useState<"model" | "sandbox" | "storage" | "deepl">("model");
   const [storage, setStorage] = useState<StorageSettings | null>(null);
   const [storagePath, setStoragePath] = useState("");
   const [storageRetry, setStorageRetry] = useState(0);
@@ -83,6 +84,7 @@ export function SettingsPanel() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (section === "deepl") return;
     if (busy || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)) return;
     setBusy(true);
     setError("");
@@ -128,10 +130,11 @@ export function SettingsPanel() {
           <button type="button" className="secondary-button" aria-pressed={section === "model"} disabled={busy} onClick={() => { setSection("model"); setError(""); }}><Cpu size={16} /> Models</button>
           <button type="button" className="secondary-button" aria-pressed={section === "sandbox"} disabled={busy} onClick={() => { setSection("sandbox"); setError(""); }}><Box size={16} /> Sandbox</button>
           <button type="button" className="secondary-button" aria-pressed={section === "storage"} disabled={busy} onClick={() => { setSection("storage"); setError(""); }}><HardDrive size={16} /> Storage</button>
+          <button type="button" className="secondary-button" aria-pressed={section === "deepl"} disabled={busy} onClick={() => { setSection("deepl"); setError(""); }}>DeepL</button>
         </nav>
 
         <div className="settings-content">
-        {section === "model" ? <div className="settings-form">
+        {section === "deepl" ? <DeepLSettings /> : section === "model" ? <div className="settings-form">
           {!modelLoaded && !modelError && <p role="status">Loading model settings…</p>}
           {modelLoaded && <>
             {draft.revision === 0 && draft.connections.length > 0 && <p className="settings-description">Previous models are included in this draft. Save to keep them on the backend.</p>}
@@ -187,7 +190,7 @@ export function SettingsPanel() {
         </div>
         <footer>
           <button type="button" className="secondary-button" onClick={setOpen} disabled={busy}>Cancel</button>
-          <button type="submit" className="primary-button" disabled={busy || (section === "storage" && (!storage?.editable || !storagePath.trim() || storagePath.trim() === storage.pending_path)) || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)}>{saving ? "Saving…" : "Save settings"}</button>
+          {section !== "deepl" && <button type="submit" className="primary-button" disabled={busy || (section === "storage" && (!storage?.editable || !storagePath.trim() || storagePath.trim() === storage.pending_path)) || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)}>{saving ? "Saving…" : "Save settings"}</button>}
         </footer>
       </form>
     </div>

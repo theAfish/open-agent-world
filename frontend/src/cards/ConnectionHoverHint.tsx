@@ -19,13 +19,16 @@ export function updateConnectionHoverHint(event: ReactPointerEvent<HTMLElement>,
     x: (event.clientX - bounds.left) * scaleX,
     y: (event.clientY - bounds.top) * scaleY,
   };
-  const cornerRadius = Number.parseFloat(window.getComputedStyle(element).borderTopLeftRadius) || 0;
+  const style = window.getComputedStyle(element);
+  const cornerRadius = Number.parseFloat(style.borderTopLeftRadius) || 0;
+  const boundaryWidth = Number.parseFloat(style.getPropertyValue("--connection-boundary-width"));
   const anchor = roundedRectAnchor(
     { x: 0, y: 0, width: element.offsetWidth, height: element.offsetHeight },
     pointer,
     cornerRadius,
   );
-  if (Math.hypot(pointer.x - anchor.x, pointer.y - anchor.y) > 20 * Math.max(scaleX, scaleY)) {
+  const threshold = Number.isFinite(boundaryWidth) ? boundaryWidth : 20 * Math.max(scaleX, scaleY);
+  if (Math.hypot(pointer.x - anchor.x, pointer.y - anchor.y) > threshold) {
     clearConnectionHoverHint(element);
     return;
   }

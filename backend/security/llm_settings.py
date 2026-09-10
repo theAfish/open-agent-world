@@ -91,15 +91,16 @@ class LlmPublicSettings:
 class LlmSettingsStore:
     """Stores LLM credentials encrypted at rest and never exposes them via the API."""
 
-    def __init__(self, database: Database, data_root: Path) -> None:
+    def __init__(self, database: Database, data_root: Path, *, settings_key: str = _SETTINGS_KEY) -> None:
         self.database = database
+        self.settings_key = settings_key
         self.key_path = data_root / "secrets" / "settings.key"
 
     def read(self) -> LlmConnectionSettings:
         with self.database.locked() as connection:
             row = connection.execute(
                 "SELECT value_json FROM application_settings WHERE key = ?",
-                (_SETTINGS_KEY,),
+                (self.settings_key,),
             ).fetchone()
         if row is None:
             return LlmConnectionSettings()
@@ -151,7 +152,7 @@ class LlmSettingsStore:
             connection.execute(
                 "INSERT INTO application_settings (key, value_json) VALUES (?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
-                (_SETTINGS_KEY, payload),
+                (self.settings_key, payload),
             )
         return LlmConnectionSettings(base_url=base_url, api_key=selected_key)
 

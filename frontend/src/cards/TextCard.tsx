@@ -4,39 +4,58 @@ import { useWorldStore } from "../state/worldStore";
 import type { ModificationRecord, WorldCard } from "../types/world";
 import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { RelationshipList } from "./CardUtilities";
+import { worldApi, apiErrorMessage } from "../api/client";
 
 export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurfaceLevel }) {
-  const loadText = useWorldStore((state) => state.loadText);
   const saveText = useWorldStore((state) => state.saveText);
-  const [content, setContent] = useState(String(card.config.content ?? ""));
+  const [content, setContent] = useState("");
   const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving">("saved");
-  const loaded = useRef(false);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState("");
+  const [revision, setRevision] = useState<number>();
+  const [history, setHistory] = useState<ModificationRecord[]>([]);
+  const [reload, setReload] = useState(0);
+  const draft = useRef({ content: "", dirty: false });
+  const saving = useRef(false);
 
   useEffect(() => {
-    setContent(String(card.config.content ?? ""));
-    setSaveState("saved");
-  }, [card.config.content]);
-
-  useEffect(() => {
-    if ((level === "inspector" || level === "workspace") && !card.ephemeral && !loaded.current) {
-      loaded.current = true;
-      void loadText(card.id);
-    }
-  }, [card.ephemeral, card.id, level, loadText]);
-
-  const history = Array.isArray(card.config.history)
-    ? (card.config.history as ModificationRecord[])
-    : [];
+    if ((level !== "inspector" && level !== "workspace") || card.ephemeral) return;
+    let active = true;
+    void worldApi.getText(card.id).then(document => {
+      if (!active) return;
+      setHistory((document.history ?? []) as ModificationRecord[]);
+      setReady(true);
+      if (draft.current.dirty || saving.current) return;
+      draft.current.content = document.content;
+      setContent(document.content);
+      setRevision(document.revision);
+      setSaveState("saved");
+      setError("");
+    }).catch(reason => { if (active) setError(apiErrorMessage(reason)); });
+    return () => { active = false; };
+  }, [card.ephemeral, card.id, card.config.revision, level, reload]);
   const filename = String(card.config.filename ?? `${card.name}.txt`);
 
   const performSave = async () => {
+    if (!ready || !draft.current.dirty || saving.current) return;
+    saving.current = true;
+    const submitted = draft.current.content;
     setSaveState("saving");
-    const saved = await saveText(card.id, content);
-    setSaveState(saved ? "saved" : "dirty");
+    const saved = await saveText(card.id, submitted, revision);
+    saving.current = false;
+    if (saved) {
+      setRevision(Number(useWorldStore.getState().cards.find(item => item.id === card.id)?.config.revision));
+      draft.current.dirty = draft.current.content !== submitted;
+      setError("");
+      setReload(value => value + 1);
+    } else {
+      setError("保存失败；草稿已保留。若正文被其他参与者更新，请先核对新版本，避免覆盖。");
+    }
+    setSaveState(draft.current.dirty ? "dirty" : "saved");
   };
 
   return (
-    <div className="expanded-stack">
+    <div className="expanded-stack nodrag nopan">
       <div className="resource-banner">
         <div>
           <span>Managed resource</span>
@@ -44,17 +63,20 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
         </div>
         <div className={`save-state save-state--${saveState}`}>
           {saveState === "saved" ? <Check size={12} /> : null}
-          {saveState}
+          {ready ? saveState : "Loading…"}
         </div>
       </div>
 
+      {error && <p role="alert">{error}</p>}
       <label className="field-label text-editor-label">
         <span>Contents</span>
         <textarea
           className="text-editor"
           value={content}
+          disabled={!ready}
           spellCheck
           onChange={(event) => {
+            draft.current = { content: event.target.value, dirty: true };
             setContent(event.target.value);
             setSaveState("dirty");
           }}
@@ -68,12 +90,12 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
         />
       </label>
       <div className="editor-actions">
-        <span id={`text-save-state-${card.id}`}>{content.length.toLocaleString()} characters · r{Number(card.config.revision ?? 0)}</span>
+        <span id={`text-save-state-${card.id}`}>{content.length.toLocaleString()} characters · r{revision ?? "—"}</span>
         <button
           type="button"
           className="primary-button"
           onClick={() => void performSave()}
-          disabled={saveState !== "dirty"}
+          disabled={!ready || saveState !== "dirty"}
         >
           <Save size={14} /> {saveState === "saving" ? "Saving…" : "Save text"}
         </button>

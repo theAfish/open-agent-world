@@ -1,0 +1,12 @@
+[project]
+name = "oaw-library"
+version = "0.2.0"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.11,<3", "pymupdf>=1.25"]
+[project.entry-points."open_agent_world.plugins"]
+library = "oaw_library:create_plugin"
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+[tool.hatch.build.targets.wheel]
+packages = ["src/oaw_library"]
