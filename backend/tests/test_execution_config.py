@@ -363,7 +363,7 @@ def test_unsupported_backend_rejects_selection_before_resolving_secrets(runtime_
     connect(client, agent, env, "environment.use")
     provider, definitions = tools(client, agent)
     monkeypatch.setattr(backend, "supports_invocation_environment", False)
-    with pytest.raises(SandboxValidationError, match="does not support"):
+    with pytest.raises(ResourceValidationError, match="does not support"):
         invoke(client, provider, agent, definitions["execute_command"], sandbox=sandbox["id"], argv=["cmd.exe"], environment=env["id"])
     assert native.last_argv == ()
     invoke(client, provider, agent, definitions["execute_command"], sandbox=sandbox["id"], argv=["cmd.exe"])

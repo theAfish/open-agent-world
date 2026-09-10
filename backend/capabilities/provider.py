@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+from pydantic import BaseModel, ValidationError
 
 from backend.agents import ScopedToolDefinition, ToolParameter
 from backend.errors import ResourceValidationError, RuntimeUnavailableError
@@ -14,6 +15,20 @@ if TYPE_CHECKING:
     from backend.services import ApplicationServices
 
 
+def _validate_tool_request(model: type[BaseModel], arguments):
+    """Convert caller input errors only; internal state/output errors still propagate."""
+    try:
+        return model.model_validate(arguments)
+    except ValidationError as exc:
+        details = []
+        for error in exc.errors(include_url=False, include_input=False, include_context=False):
+            location = '.'.join(str(part) for part in error['loc']) or 'arguments'
+            details.append(f"{location}: {error['msg']}")
+        raise ResourceValidationError(
+            'Invalid tool arguments. Correct the listed fields and retry: ' + '; '.join(details)
+        ) from exc
+
+
 @dataclass(frozen=True, slots=True)
 class _CapabilityContext:
     services: ApplicationServices
@@ -21,7 +36,7 @@ class _CapabilityContext:
     async def send_conversation_message(self, capability, arguments):
         from backend.conversations.models import ConversationPost
         from backend.conversations.attachments import agent_session, resolve
-        request = ConversationPost.model_validate(arguments)
+        request = _validate_tool_request(ConversationPost, arguments)
         conversation_id, agent_id = capability.target_id, capability.agent_id
         session_id = agent_session(self.services, conversation_id, agent_id)
         attachments = resolve(self.services, conversation_id, session_id, request.attachments, agent_id)
@@ -40,7 +55,7 @@ class _CapabilityContext:
         args = dict(arguments)
         # Projected operations have already reauthorized independent selectors.
         if capability.kind == 'artifact.publish':
-            return await store.publish(self.services, collection, ArtifactPublish.model_validate(args), agent)
+            return await store.publish(self.services, collection, _validate_tool_request(ArtifactPublish, args), agent)
         version = args.pop('version_id', None)
         if capability.kind == 'artifact.manage':
             if args.get('action', 'remove') == 'add':
@@ -49,7 +64,7 @@ class _CapabilityContext:
                 raise ResourceValidationError('Choose add or remove for collection references')
             return store.remove_reference(self.services, collection, version, agent)
         if capability.kind == 'artifact.materialize':
-            return await store.materialize(self.services, collection, version, ArtifactMaterialize.model_validate(args), agent)
+            return await store.materialize(self.services, collection, version, _validate_tool_request(ArtifactMaterialize, args), agent)
         if args.get('path') is not None:
             if not version:
                 raise ResourceValidationError('Preview requires a version_id')
@@ -62,35 +77,26 @@ class _CapabilityContext:
 
     async def legion_state_action(self, capability, arguments):
         from backend.legions.runtime import LegionStateWrite, read_shared_state, write_shared_state
-        from pydantic import ValidationError
         async with self.services._node_mutation():
             self.services.capabilities.capability_for_id(capability.agent_id, capability.id)
             if capability.kind == "legion.state.read":
                 if arguments:
                     raise ResourceValidationError("State read takes no arguments")
                 return read_shared_state(self.services.world, self.services.state, capability.target_id)
-            try:
-                request = LegionStateWrite.model_validate(dict(arguments))
-            except ValidationError as exc:
-                raise ResourceValidationError(str(exc)) from exc
+            request = _validate_tool_request(LegionStateWrite, dict(arguments))
             context = self.services._require_run_manager().current_context
             return write_shared_state(self.services.world, self.services.state, capability.target_id,
                 request, actor_id=capability.agent_id, run_id=context.run_id if context else None, merge=True)
 
     async def summoning_action(self, capability, arguments):
         from backend.plugins.summoning import SummoningAction
-        return await self.services.summoning.action(capability.target_id, SummoningAction.model_validate(arguments), capability=capability)
+        return await self.services.summoning.action(capability.target_id, _validate_tool_request(SummoningAction, arguments), capability=capability)
 
     async def node_execution_action(self, capability, action, arguments):
         from backend.node_execution import ExecutionRequest
-        from backend.node_documents import validation_message
-        from pydantic import ValidationError
         service = self.services.node_execution
         if action == "start":
-            try:
-                request = ExecutionRequest.model_validate(arguments)
-            except ValidationError as error:
-                raise ResourceValidationError(validation_message(error)) from error
+            request = _validate_tool_request(ExecutionRequest, arguments)
             return await service.start(capability.target_id, request, capability=capability)
         if arguments:
             raise ResourceValidationError("Only start accepts execution arguments")
@@ -104,7 +110,7 @@ class _CapabilityContext:
     async def node_document_action(self, capability, action, arguments, expected_revision=None):
         from backend.node_documents import DocumentActionRequest, invoke_document_action
         return await invoke_document_action(self.services, capability.target_id, action,
-            DocumentActionRequest(arguments=arguments, expected_revision=expected_revision), capability=capability)
+            _validate_tool_request(DocumentActionRequest, dict(arguments=arguments, expected_revision=expected_revision)), capability=capability)
 
     async def communicate(
         self, source_agent_id: str, target_agent_id: str, message: str
@@ -141,7 +147,7 @@ class _CapabilityContext:
         self, agent_id: str, resource_id: str, content: str
     ) -> dict[str, Any]:
         document = await self.services.replace_text(
-            resource_id, TextReplace(content=content), agent_id=agent_id
+            resource_id, _validate_tool_request(TextReplace, dict(content=content)), agent_id=agent_id
         )
         return document.model_dump(mode="json")
 
@@ -171,11 +177,7 @@ class _CapabilityContext:
 
     async def run_skill_script(self, agent_id: str, sandbox_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
         from backend.skill_runtime import RunSkillScript
-        from backend.node_documents import validation_message
-        try:
-            request = RunSkillScript.model_validate(arguments)
-        except ValueError as exc:
-            raise ResourceValidationError(validation_message(exc)) from exc
+        request = _validate_tool_request(RunSkillScript, arguments)
         result = await self.services.execute_sandbox(sandbox_id,
             [*request.interpreter, request.script_path, *request.argv],
             agent_id=agent_id, _skill_request=request, environment_id=request.environment_id, target_id=request.target_id, timeout_seconds=request.timeout_seconds)
