@@ -39,6 +39,18 @@ class ConversationSession(BaseModel):
     revision: int
 
 
+class ConversationAttachmentRef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version_id: str
+    path: str
+
+
+class ConversationAttachment(ConversationAttachmentRef):
+    name: str
+    size_bytes: int
+    media_type: str
+
+
 class ConversationMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -49,6 +61,7 @@ class ConversationMessage(BaseModel):
     sender_id: str | None = None
     sender_name: str
     content: str
+    attachments: list[ConversationAttachment] = Field(default_factory=list)
     mention_agent_ids: list[str]
     sequence: int = 0
     kind: str = "text"
@@ -62,7 +75,8 @@ class ConversationPost(BaseModel):
 
     message_id: UUID | None = None
 
-    content: Annotated[str, Field(min_length=1, max_length=100_000)]
+    content: Annotated[str, Field(max_length=100_000)] = ""
+    attachments: list[ConversationAttachmentRef] = Field(default_factory=list, max_length=20)
     mention_agent_ids: Annotated[list[str], Field(max_length=8)] = Field(default_factory=list)
 
 

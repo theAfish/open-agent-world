@@ -93,6 +93,7 @@ class ConversationStore:
         return self._session(row, [str(item["agent_id"]) for item in participants])
 
     def list_sessions(self, conversation_id: str) -> list[ConversationSession]:
+        self.admit_default_participants(conversation_id)
         with self.database.locked() as connection:
             rows = connection.execute(
                 """
@@ -118,6 +119,21 @@ class ConversationStore:
         for item in participant_rows:
             by_session.setdefault(str(item["session_id"]), []).append(str(item["agent_id"]))
         return [self._session(row, by_session.get(str(row["id"]), [])) for row in rows]
+
+    def admit_default_participants(self, conversation_id: str) -> None:
+        # Remember each connection admission so an explicit kick remains effective.
+        # Existing databases are backfilled through the same path as new edges.
+        with self.database.transaction(immediate=True) as db:
+            session = db.execute('SELECT id FROM conversation_sessions WHERE conversation_id=? AND is_default=1', (conversation_id,)).fetchone()
+            if session is None:
+                return
+            edges = db.execute('''SELECT id, source_id FROM edges WHERE target_id=? AND relationship='participate'
+                AND id NOT IN (SELECT edge_id FROM conversation_default_admissions)''', (conversation_id,)).fetchall()
+            for edge in edges:
+                db.execute('INSERT OR IGNORE INTO conversation_participants VALUES (?,?,?)', (session['id'], edge['source_id'], _now()))
+                db.execute('INSERT INTO conversation_default_admissions VALUES (?)', (edge['id'],))
+            if edges:
+                db.execute('UPDATE conversation_sessions SET revision=revision+1 WHERE id=?', (session['id'],))
 
     def list_agent_sessions(self, agent_id: str) -> list[ConversationSession]:
         with self.database.locked() as connection:
@@ -204,9 +220,10 @@ class ConversationStore:
         kind: str = "text",
         message_id: str | None = None,
         is_final: bool = True,
+        attachments: list | None = None,
     ) -> ConversationMessage:
         value = content.strip()
-        if not value:
+        if not value and not attachments:
             raise ConversationValidationError("conversation message must not be empty")
         message_id = message_id or str(uuid4())
         now = _now()
@@ -229,9 +246,9 @@ class ConversationStore:
                 """
                 INSERT INTO conversation_messages (
                     id, conversation_id, session_id, sender_kind, sender_id,
-                    sender_name, content, mention_ids_json, run_id, created_at, sequence, kind, is_final
+                    sender_name, content, mention_ids_json, run_id, created_at, sequence, kind, is_final, attachments_json
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    (SELECT COALESCE(MAX(sequence), 0) + 1 FROM conversation_messages WHERE session_id = ?), ?, ?)
+                    (SELECT COALESCE(MAX(sequence), 0) + 1 FROM conversation_messages WHERE session_id = ?), ?, ?, ?)
                 """,
                 (
                     message_id,
@@ -245,6 +262,7 @@ class ConversationStore:
                     run_id,
                     now,
                     session_id, kind, is_final,
+                    json.dumps([item.model_dump() for item in attachments or []]),
                 ),
             )
             connection.execute(
@@ -256,7 +274,7 @@ class ConversationStore:
             )
             if sender_kind == "user":
                 connection.execute("""UPDATE conversation_sessions SET title = ?, auto_title = 0
-                    WHERE id = ? AND auto_title = 1""", (" ".join(value.split())[:60], session_id))
+                    WHERE id = ? AND auto_title = 1""", (" ".join(value.split())[:60] or attachments[0].name[:60], session_id))
         return self.get_message(message_id)
 
     def get_message(self, message_id: str) -> ConversationMessage:
@@ -359,6 +377,7 @@ class ConversationStore:
             sender_id=None if row["sender_id"] is None else str(row["sender_id"]),
             sender_name=str(row["sender_name"]),
             content=str(row["content"]),
+            attachments=json.loads(row["attachments_json"]),
             sequence=int(row["sequence"]),
             kind=str(row["kind"]),
             is_final=bool(row["is_final"]),

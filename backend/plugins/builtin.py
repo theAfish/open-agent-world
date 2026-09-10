@@ -650,6 +650,10 @@ async def _request_conversation_turn(
     )
 
 
+async def _send_conversation_message(context, capability, arguments):
+    return await context.send_conversation_message(capability, arguments)
+
+
 async def _read_text(
     context: CapabilityContext, capability: Any, values: dict[str, Any]
 ) -> Any:
@@ -844,6 +848,14 @@ def _register_builtin(registry: PluginRegistration) -> None:
     from backend.skill_runtime import SKILL_SELECTOR, skill_script_schema
     from backend.resources.artifact_capabilities import register as register_artifacts
     register_artifacts(registry)
+    from backend.conversations.models import ConversationPost
+    message_schema = ConversationPost.model_json_schema()
+    for key in ('message_id', 'mention_agent_ids'):
+        message_schema['properties'].pop(key, None)
+    registry.register_capability(CapabilityDefinition(
+        kind='conversation.send_message', tool_name='send_conversation_message', target_parameter='conversation',
+        description='Send text and/or published file attachments to the current session. Publish Sandbox files to this conversation first; attach version_id and path. Images are clickable previews.',
+        input_schema=message_schema), _send_conversation_message)
     registry.register_capability(CapabilityDefinition(
         kind='agent.communicate', tool_name='send_message', target_parameter='target',
         description='Send a message to the selected Agent and receive its response.',
@@ -995,7 +1007,8 @@ def _register_builtin(registry: PluginRegistration) -> None:
         source_traits=frozenset({"core.agent"}),
         target_traits=frozenset({"core.conversation"}),
         templateable=True,
-        capabilities=(CapabilityGrantDefinition(kind='conversation.request_turn'),),
+        capabilities=tuple(CapabilityGrantDefinition(kind=kind) for kind in (
+            'conversation.request_turn', 'conversation.send_message', 'artifact.read', 'artifact.publish', 'artifact.materialize')),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="read", label="Read", short_label="read",

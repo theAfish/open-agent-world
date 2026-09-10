@@ -27,6 +27,10 @@ export type CardCreateInput = (Omit<WorldCard, "id"> | WorldCard) & {
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, "") ?? "/api";
 
+export function conversationAttachmentUrl(conversationId: string, sessionId: string, file: { version_id: string; path: string }, preview = false): string {
+  return `${API_BASE}/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(file.version_id)}?${new URLSearchParams({ path: file.path, preview: String(preview) })}`;
+}
+
 export function nodeDocumentDownloadUrl(id: string, name: string): string {
   return `${API_BASE}/nodes/${encodeURIComponent(id)}/document/downloads/${encodeURIComponent(name)}`;
 }
@@ -669,7 +673,7 @@ export const worldApi = {
   postConversationMessage(
     conversationId: string,
     sessionId: string,
-    input: { content: string; mention_agent_ids: string[]; message_id?: string },
+    input: { content: string; mention_agent_ids: string[]; message_id?: string; attachments?: { version_id: string; path: string }[] },
   ): Promise<{ message: ConversationMessage; accepted_agent_ids: string[] }> {
     return request(`/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/messages`, {
       method: "POST",
@@ -679,6 +683,17 @@ export const worldApi = {
 
   getAgentConversationSessions(agentId: string): Promise<ConversationSession[]> {
     return request<ConversationSession[]>(`/agents/${encodeURIComponent(agentId)}/conversation-sessions`);
+  },
+
+  async uploadConversationAttachment(conversationId: string, sessionId: string, file: File): Promise<import("../types/world").ConversationAttachment> {
+    const response = await fetch(`${API_BASE}/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/attachments?${new URLSearchParams({ filename: file.name })}`, {
+      method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file,
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new ApiError(errorMessage(data.detail, response.status), response.status);
+    }
+    return response.json();
   },
 
   getModelConnections(): Promise<import("../state/modelConnections").ModelCatalog> {

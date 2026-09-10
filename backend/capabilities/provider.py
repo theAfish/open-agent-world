@@ -18,6 +18,20 @@ if TYPE_CHECKING:
 class _CapabilityContext:
     services: ApplicationServices
 
+    async def send_conversation_message(self, capability, arguments):
+        from backend.conversations.models import ConversationPost
+        from backend.conversations.attachments import agent_session, resolve
+        request = ConversationPost.model_validate(arguments)
+        conversation_id, agent_id = capability.target_id, capability.agent_id
+        session_id = agent_session(self.services, conversation_id, agent_id)
+        attachments = resolve(self.services, conversation_id, session_id, request.attachments, agent_id)
+        message = self.services.conversations.add_message(conversation_id, session_id,
+            sender_kind='agent', sender_id=agent_id, sender_name=self.services.world.get_card(agent_id).name,
+            content=request.content, attachments=attachments,
+            run_id=self.services._require_run_manager().current_context.run_id)
+        await self.services._publish_conversation_message(message)
+        return message.model_dump(mode='json')
+
     async def artifact_action(self, capability, arguments):
         from backend.resources.artifact_models import ArtifactPublish, ArtifactMaterialize
         from backend.errors import ResourceValidationError

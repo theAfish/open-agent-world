@@ -85,10 +85,16 @@ class ArtifactStore:
 
     def authorize(self, services, collection_id, agent_id, kind='artifact.read', version_id=None):
         node = services.world.get_card(collection_id)
-        if 'core.artifact-collection' not in services.plugins.node_type(node.type).traits:
+        conversation = services.plugins.has_trait(node.type, 'core.conversation')
+        if not conversation and 'core.artifact-collection' not in services.plugins.node_type(node.type).traits:
             raise ResourceValidationError('Choose an artifact collection')
         if agent_id is not None:
             services.capabilities.capability_for_id(agent_id, f'{kind}:{collection_id}')
+            if conversation:
+                from backend.conversations.attachments import agent_session, visible
+                session_id = agent_session(services, collection_id, agent_id)
+                if version_id is not None and not visible(self, self.get(version_id), session_id, agent_id):
+                    raise PermissionDeniedError('This session does not grant access to that attachment')
         if version_id is not None:
             with self.database.locked() as db:
                 row = db.execute('SELECT 1 FROM artifact_references WHERE collection_id=? AND version_id=?',
@@ -99,8 +105,13 @@ class ArtifactStore:
     def listing(self, services, collection_id, agent_id=None):
         self.authorize(services, collection_id, agent_id)
         with self.database.locked() as db:
-            return [json.loads(row[0]) for row in db.execute(
+            records = [json.loads(row[0]) for row in db.execute(
                 'SELECT v.record_json FROM artifact_versions v JOIN artifact_references r USING(version_id) WHERE r.collection_id=? ORDER BY v.rowid', (collection_id,))]
+        if agent_id is not None and services.plugins.has_trait(services.world.get_card(collection_id).type, 'core.conversation'):
+            from backend.conversations.attachments import agent_session, visible
+            session_id = agent_session(services, collection_id, agent_id)
+            records = [r for r in records if visible(self, r, session_id, agent_id)]
+        return records
 
     def assert_source_idle(self, node_id):
         if self.source_leases.get(node_id):
@@ -160,6 +171,12 @@ class ArtifactStore:
                     raise PermissionDeniedError('A new version requires current access to that artifact in this collection')
             version_id = str(uuid4())
             context = services.run_manager.current_context
+            session_id = None
+            if services.plugins.has_trait(services.world.get_card(collection_id).type, 'core.conversation'):
+                from backend.conversations.attachments import agent_session
+                if agent_id is None:
+                    raise ResourceValidationError('Use the session upload endpoint for Conversation files')
+                session_id = agent_session(services, collection_id, agent_id)
             inputs = []
             for item in request.inputs:
                 self.authorize(services, item.collection_id, agent_id, version_id=item.version_id)
@@ -174,7 +191,7 @@ class ArtifactStore:
                 'manifest': [], 'retention': {'owner': 'user', 'reason': 'explicit publication', 'retained': True},
                 'provenance': {'agent_id': agent_id, 'agent_name': services.world.get_card(agent_id).name if agent_id else None,
                     'run_id': context.run_id if context else None, 'sandbox_id': source.id, 'sandbox_name': source.name,
-                    'selected_paths': request.paths, 'finalized_inputs': True, 'inputs': inputs},
+                    'selected_paths': request.paths, 'finalized_inputs': True, 'inputs': inputs, 'session_id': session_id},
                 'error': None}
             self.check_source(services, request.sandbox_id, agent_id)
             self.reserve_source(services, request.sandbox_id, agent_id)
@@ -273,6 +290,57 @@ class ArtifactStore:
         if record['state'] == 'deleting':
             record['state'] = 'deleted'
         self.save(record)
+
+    async def upload(self, services, collection_id, session_id, filename, chunks):
+        """Stream a user attachment through the same retained-version journal."""
+        services.conversations.get_session(collection_id, session_id)
+        if not filename or len(filename) > 255 or parts(filename) != [filename] or ':' in filename:
+            raise ResourceValidationError('Choose a single safe filename')
+        version_id = str(uuid4())
+        record = dict(version_id=version_id, artifact_id=str(uuid4()), collection_id=collection_id,
+            name=filename, state='staging', created_at=now(), size_bytes=0, manifest=[], error=None,
+            retention={'owner': 'user', 'reason': 'conversation attachment', 'retained': True},
+            provenance={'agent_id': None, 'run_id': None, 'session_id': session_id,
+                        'sandbox_id': None, 'inputs': [], 'finalized_inputs': True})
+        with self.database.transaction(immediate=True) as db:
+            db.execute('INSERT INTO artifact_versions VALUES (?,?,?,?,?,?,?)',
+                (version_id, record['artifact_id'], 'user', version_id, version_id, 'staging', json.dumps(record)))
+            db.execute('INSERT INTO artifact_references VALUES (?,?)', (collection_id, version_id))
+        try:
+            staging = self.path(version_id, staging=True)
+            await run_file_operation(staging.mkdir)
+            digest = hashlib.sha256()
+            with (staging / filename).open('xb') as output:
+                async for chunk in chunks:
+                    async with self._lock:
+                        size = record['size_bytes'] + len(chunk)
+                        if size > min(self.max_version_bytes, 64 * 1024 * 1024):
+                            raise ResourceValidationError('Conversation upload exceeds the 64 MiB or configured artifact limit')
+                        used = sum(r['size_bytes'] for r in self.all() if r['state'] in {'ready', 'staging', 'deleting'} or
+                                   (r['state'] == 'failed' and r.get('cleanup') != 'complete'))
+                        if used + len(chunk) > self.max_storage_bytes:
+                            raise ResourceValidationError('Artifact storage limit exceeded')
+                        record['size_bytes'] = size
+                        self.save(record)
+                    await run_file_operation(output.write, chunk)
+                    digest.update(chunk)
+                await run_file_operation(output.flush)
+                await run_file_operation(os.fsync, output.fileno())
+            record['manifest'] = [{'path': filename, 'directory': False, 'size': record['size_bytes'], 'sha256': digest.hexdigest()}]
+            record['content_sha256'] = hashlib.sha256(json.dumps(record['manifest'], sort_keys=True).encode()).hexdigest()
+            self.save(record)
+            await run_file_operation(staging.rename, self.path(version_id))
+            async with services._node_mutation():
+                services.conversations.get_session(collection_id, session_id)
+                record.update(state='ready', ready_at=now())
+                self.save(record)
+                self.notify(services, record)
+            return record
+        except BaseException as error:
+            record.update(state='failed', error=str(error)[:4096], cleanup='pending')
+            self.save(record)
+            await self.remove_bytes(record)
+            raise
 
     async def recover(self, *, interrupted=True):
         async with self._lock:

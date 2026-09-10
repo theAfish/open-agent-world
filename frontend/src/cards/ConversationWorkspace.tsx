@@ -1,6 +1,7 @@
 import { useConversationTimeline } from "../state/useConversationTimeline";
 import { MarkdownMessage } from "./MarkdownMessage";
-import { ArrowDown, Bot, Info, MessageSquare, Plus, Send, Trash2, UserMinus, UserRound, Users, X } from "lucide-react";
+import { ConversationAttachments } from "./ConversationAttachments";
+import { ArrowDown, Bot, Info, LoaderCircle, MessageSquare, MoreHorizontal, Paperclip, Pencil, Plus, Send, Trash2, UserMinus, UserRound, Users, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { activeConversationAgentIds } from "../state/conversationActivity";
@@ -11,7 +12,7 @@ import {
   resolveConversationTargets,
 } from "../state/conversationMentions";
 import { useWorldStore } from "../state/worldStore";
-import type { ConversationAgent, ConversationMessage, ConversationSession, WorldCard } from "../types/world";
+import type { ConversationAgent, ConversationAttachment, ConversationMessage, ConversationSession, WorldCard } from "../types/world";
 
 type OutgoingMessage = { message: ConversationMessage; status: "sending" | "confirmed" | "unconfirmed" };
 
@@ -39,6 +40,9 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const [activeSessionId, setActiveSessionId] = useState<string>();
 
   const [draft, setDraft] = useState("");
+  const [attachments, setAttachments] = useState<ConversationAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [outgoing, setOutgoing] = useState<OutgoingMessage[]>([]);
   const revealOutgoing = useRef(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string>();
@@ -61,7 +65,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const connectedAgents = agents.filter((agent) => agent.connected);
   const participants = (activeSession?.participant_ids ?? [])
     .map((id) => agents.find((item) => item.id === id))
-    .filter((item): item is ConversationAgent => Boolean(item));
+    .filter((item): item is ConversationAgent => Boolean(item?.connected));
   const respondingAgentIds = useMemo(() => activeConversationAgentIds(
     runtimeEvents, card.id, activeSessionId,
   ), [activeSessionId, card.id, runtimeEvents]);
@@ -84,7 +88,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const activeGroupId = activeSession?.group_id ?? activeSession?.id;
   const groups = [...new Map(sessions.map((session) => [session.group_id ?? session.id, session])).values()];
   const groupSessions = sessions.filter((session) => (session.group_id ?? session.id) === activeGroupId);
-  const [renaming, setRenaming] = useState(false);
+  const [renaming, setRenaming] = useState<string>();
   const [sessionTitle, setSessionTitle] = useState("");
   const availableAgents = connectedAgents.filter((agent) => (
     !activeSession?.participant_ids.includes(agent.id)
@@ -112,10 +116,11 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   }, [accessEvent, card.id, refreshEvent, socketLive]);
 
   useEffect(() => {
-    if (!activeSession?.participant_ids.includes(selectedAgentId ?? "")) {
-      setSelectedAgentId(activeSession?.participant_ids[0]);
+    const eligible = activeSession?.participant_ids.filter((id) => agents.some((agent) => agent.id === id && agent.connected)) ?? [];
+    if (!eligible.includes(selectedAgentId ?? "")) {
+      setSelectedAgentId(eligible[0]);
     }
-  }, [activeSession, selectedAgentId]);
+  }, [activeSession, agents, selectedAgentId]);
 
   useEffect(() => {
     setMentionIndex(0);
@@ -125,8 +130,9 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     setAddingParticipants(false);
     setParticipantAgentIds([]);
     setMentionCaret(undefined);
-    setRenaming(false);
+    setRenaming(undefined);
     setDraft("");
+    setAttachments([]);
   }, [activeSessionId]);
 
   const createSession = async (title: string, participantIds: string[], groupId?: string) => {
@@ -154,7 +160,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
 
   const openDirectSession = async (agent: ConversationAgent) => {
     const existing = sessions.find((session) => (
-      session.participant_ids.length === 1 && session.participant_ids[0] === agent.id
+      !session.is_default && session.participant_ids.length === 1 && session.participant_ids[0] === agent.id
     ));
     if (existing) {
       setActiveSessionId(existing.id);
@@ -215,15 +221,14 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     }
   };
 
-  const deleteActiveSession = async () => {
-    if (!activeSession || activeSession.is_default || busy) return;
-    if (!window.confirm(`Delete session ${activeSession.title}? Its conversation history will be deleted.`)) return;
+  const deleteSession = async (target: ConversationSession) => {
+    if (target.is_default || busy) return;
+    if (!window.confirm(`Delete session ${target.title}? Its conversation history will be deleted.`)) return;
     setBusy(true);
     try {
-      await worldApi.deleteConversationSession(card.id, activeSession.id);
-      const remaining = sessions.filter((session) => session.id !== activeSession.id);
-      setSessions(remaining);
-      setActiveSessionId(remaining[0]?.id);
+      await worldApi.deleteConversationSession(card.id, target.id);
+      setSessions((current) => current.filter((session) => session.id !== target.id));
+      setActiveSessionId((current) => current === target.id ? sessions.find((session) => session.id !== target.id)?.id : current);
     } catch (reason) {
       pushToast({ tone: "error", title: "Session was not deleted", detail: apiErrorMessage(reason) });
     } finally {
@@ -233,17 +238,19 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
 
   const submit = async () => {
     const content = draft.trim();
-    if (!content || !activeSession || busy) return;
+    if ((!content && attachments.length === 0) || !activeSession || busy || uploading) return;
     const targets = resolveConversationTargets(content, participants, selectedAgentId);
     const messageId = crypto.randomUUID();
     const message: ConversationMessage = {
       id: messageId, conversation_id: card.id, session_id: activeSession.id,
       sender_kind: "user", sender_name: "You", content, mention_agent_ids: targets,
+      attachments,
       created_at: new Date().toISOString(),
     };
     revealOutgoing.current = true;
     setOutgoing((current) => [...current, { message, status: "sending" }]);
     setDraft("");
+    setAttachments([]);
     setMentionCaret(undefined);
     setBusy(true);
     try {
@@ -251,6 +258,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
         content,
         message_id: messageId,
         mention_agent_ids: targets,
+        ...(attachments.length ? { attachments: attachments.map(({ version_id, path }) => ({ version_id, path })) } : {}),
       });
       setOutgoing((current) => current.map((item) => item.message.id === messageId
         ? { message: result.message, status: "confirmed" } : item));
@@ -314,20 +322,9 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
 
       <main className="workspace-conversation">
         <header>
-          <div><strong>{activeSession?.title ?? "Conversation"}</strong><span>{participants.length} active participants</span></div>
+          <div className="conversation-heading"><strong title={activeSession?.title}>{activeSession?.title ?? "Conversation"}</strong><span>{participants.length} active participants</span></div>
           <div className="conversation-header-tools">
-            <div className="conversation-targets" aria-label="Message target">
-              {participants.map((agent) => (
-                <button type="button" key={agent.id} className={selectedAgentId === agent.id ? "is-selected" : ""} onClick={() => setSelectedAgentId(agent.id)} title={`Address ${agent.name} by default`}>@{agent.name}</button>
-              ))}
-            </div>
             <button type="button" className="conversation-add-agent" aria-label="Add agents to session" disabled={!activeSession || availableAgents.length === 0} onClick={() => setAddingParticipants((value) => !value)}><Plus size={12} /> Add</button>
-            <button type="button" className="conversation-add-agent" disabled={!activeSession} onClick={() => { setSessionTitle(activeSession?.title ?? ""); setRenaming(true); }}>Rename session</button>
-            {renaming ? <form onSubmit={(event) => { event.preventDefault(); if (!activeSession || !sessionTitle.trim()) return; void worldApi.renameConversationSession(card.id, activeSession.id, sessionTitle.trim()).then((updated) => { setSessions((current) => current.map((item) => item.id === updated.id ? updated : item)); setRenaming(false); }).catch((reason) => pushToast({ tone: "error", title: "Session was not renamed", detail: apiErrorMessage(reason) })); }}>
-              <input aria-label="Session title" maxLength={200} value={sessionTitle} onChange={(event) => setSessionTitle(event.target.value)} />
-              <button type="submit" disabled={!sessionTitle.trim()}>Save name</button><button type="button" onClick={() => setRenaming(false)}>Cancel</button>
-            </form> : null}
-            {activeSession && !activeSession.is_default ? <button type="button" className="conversation-delete-session" aria-label="Delete session" disabled={busy} onClick={() => void deleteActiveSession()}><Trash2 size={12} /> Delete</button> : null}
             {addingParticipants ? (
               <div className="conversation-participant-picker" role="dialog" aria-label="Add participants">
                 <header><strong>Add to session</strong><button type="button" onClick={() => setAddingParticipants(false)} aria-label="Close participant picker"><X size={12} /></button></header>
@@ -361,7 +358,8 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
               <span>{message.sender_kind === "agent" ? <Bot size={13} /> : message.sender_kind === "system" ? <Info size={13} /> : <UserRound size={13} />}</span>
               <div><strong>{message.sender_name}</strong>{message.kind?.startsWith("tool_")
                 ? <details className="conversation-tool-message"><summary>{message.content.split("\n")[0]}</summary><pre>{message.content.split("\n").slice(1).join("\n").trim() || "No additional details"}</pre></details>
-                : message.sender_kind === "agent" ? <MarkdownMessage content={message.content} /> : <p>{message.content}</p>}
+                : message.content ? (message.sender_kind === "agent" ? <MarkdownMessage content={message.content} /> : <p>{message.content}</p>) : null}
+                {message.attachments?.length ? <ConversationAttachments conversationId={card.id} sessionId={message.session_id} files={message.attachments} /> : null}
                 {visibleOutgoing.find((item) => item.message.id === message.id)?.status === "sending" ? <small className="conversation-delivery-state" role="status">Sending...</small> : null}
                 {visibleOutgoing.find((item) => item.message.id === message.id)?.status === "unconfirmed" ? <small className="conversation-delivery-state is-error" role="alert">Send not confirmed. Your text is kept here.</small> : null}
               </div>
@@ -383,6 +381,28 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
         {history.showLatest ? <button type="button" className="conversation-latest" aria-label="Jump to latest" title="Jump to latest" disabled={history.loading} onClick={() => void history.loadLatest()}><ArrowDown size={18} aria-hidden="true" /></button> : null}
         </div>
         <div className="workspace-composer">
+          <input ref={fileInput} type="file" multiple hidden aria-label="Attach files" onChange={(event) => {
+            const files = Array.from(event.target.files ?? []);
+            event.target.value = "";
+            if (!activeSession || uploading || busy || files.length === 0) return;
+            if (files.length + attachments.length > 20 || files.some((file) => file.size > 64 * 1024 * 1024)) {
+              pushToast({ tone: "error", title: "Choose up to 20 files, each at most 64 MiB" }); return;
+            }
+            const sessionId = activeSession.id;
+            const scope = `${card.id}/${sessionId}`;
+            setUploading(true);
+            void (async () => {
+              try {
+                for (const file of files) {
+                  const attachment = await worldApi.uploadConversationAttachment(card.id, sessionId, file);
+                  if (selectedScope.current === scope) setAttachments((current) => [...current, attachment]);
+                }
+              } catch (reason) {
+                pushToast({ tone: "error", title: "File upload failed", detail: apiErrorMessage(reason) });
+              } finally { setUploading(false); }
+            })();
+          }} />
+          <div className="conversation-pending-files">{attachments.map((file) => <span key={file.version_id}>{file.name}<button type="button" aria-label={`Remove attachment ${file.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.version_id !== file.version_id))}><X size={12} /></button></span>)}</div>
           <textarea ref={messageInput} value={draft} onChange={(event) => {
             setDraft(event.target.value);
             setMentionCaret(event.target.selectionStart ?? event.target.value.length);
@@ -422,8 +442,9 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
             </div>
           ) : null}
           <footer>
+            <button type="button" aria-label={uploading ? "Uploading files" : "Attach files"} title="Attach files" disabled={!activeSession || busy || uploading} onClick={() => fileInput.current?.click()}>{uploading ? <LoaderCircle size={14} /> : <Paperclip size={14} />}</button>
             <span>{selectedAgentId ? `Default: @${agents.find((item) => item.id === selectedAgentId)?.name}` : "No default recipient"} · Enter to send · Shift+Enter for new line</span>
-            <button type="button" onClick={() => void submit()} disabled={!draft.trim() || !activeSession || busy} aria-label="Send message"><Send size={14} /></button>
+            <button type="button" onClick={() => void submit()} disabled={(!draft.trim() && attachments.length === 0) || !activeSession || busy || uploading} aria-label="Send message"><Send size={14} /></button>
           </footer>
         </div>
       </main>
@@ -456,9 +477,30 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
           <button type="button" className="workspace-new-session" disabled={!activeSession || busy} onClick={() => void createSession("New session", activeSession?.participant_ids ?? [], activeGroupId)}><Plus size={13} /> New session</button>
           <div className="conversation-sidebar-scroll">
             {groupSessions.map((session) => (
-              <button type="button" className={`workspace-session ${session.id === activeSessionId ? "is-active" : ""}`} key={session.id} title={session.title} aria-current={session.id === activeSessionId ? "true" : undefined} onClick={() => setActiveSessionId(session.id)}>
-                <MessageSquare size={13} /><span><strong>{session.title}</strong><small>{new Date(session.created_at).toLocaleString()}</small></span>
-              </button>
+              <div className="conversation-session-row" key={session.id}>
+                <button type="button" className={`workspace-session ${session.id === activeSessionId ? "is-active" : ""}`} title={session.title} aria-current={session.id === activeSessionId ? "true" : undefined} onClick={() => setActiveSessionId(session.id)}>
+                  <MessageSquare size={13} /><span><strong>{session.title}</strong><small>{new Date(session.created_at).toLocaleString()}</small></span>
+                </button>
+                <details className="conversation-session-actions" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }} onKeyDown={(event) => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}>
+                  <summary aria-label={`Session actions for ${session.title}`} title="Session actions"><MoreHorizontal size={15} /></summary>
+                  <div className="conversation-session-menu">
+                    <button type="button" disabled={busy} onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); setSessionTitle(session.title); setRenaming(session.id); }}><Pencil size={12} /> Rename session</button>
+                    <button type="button" className="is-danger" disabled={busy || session.is_default} onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); void deleteSession(session); }}><Trash2 size={12} /> Delete session</button>
+                  </div>
+                </details>
+                {renaming === session.id ? <form className="conversation-session-rename" onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!sessionTitle.trim() || busy) return;
+                  setBusy(true);
+                  void worldApi.renameConversationSession(card.id, session.id, sessionTitle.trim()).then((updated) => {
+                    setSessions((current) => current.map((item) => item.id === updated.id ? updated : item));
+                    setRenaming(undefined);
+                  }).catch((reason) => pushToast({ tone: "error", title: "Session was not renamed", detail: apiErrorMessage(reason) })).finally(() => setBusy(false));
+                }}>
+                  <input autoFocus aria-label="Session title" maxLength={200} value={sessionTitle} onChange={(event) => setSessionTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setRenaming(undefined); }} />
+                  <button type="submit" disabled={busy || !sessionTitle.trim()}>Save name</button><button type="button" onClick={() => setRenaming(undefined)}>Cancel</button>
+                </form> : null}
+              </div>
             ))}
           </div>
         </div>

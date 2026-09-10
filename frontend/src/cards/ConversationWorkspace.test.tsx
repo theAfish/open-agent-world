@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
@@ -61,6 +61,38 @@ describe("ConversationWorkspace snapshots", () => {
 
   afterEach(() => cleanup());
 
+  it("uploads and sends an attachment without text, then previews its image", async () => {
+    const attachment = { version_id: 'version-1', path: 'plot.png', name: 'plot.png', size_bytes: 12, media_type: 'image/png' };
+    vi.spyOn(worldApi, 'uploadConversationAttachment').mockResolvedValue(attachment);
+    vi.spyOn(worldApi, 'postConversationMessage').mockImplementation(async (_conversation, _session, input) => ({
+      message: { ...historicalMessage, id: input.message_id!, content: '', attachments: [attachment] }, accepted_agent_ids: [],
+    }));
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    fireEvent.change(screen.getByLabelText('Attach files', { selector: 'input' }), { target: { files: [new File(['image'], 'plot.png', { type: 'image/png' })] } });
+    await screen.findByRole('button', { name: 'Remove attachment plot.png' });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    await waitFor(() => expect(worldApi.postConversationMessage).toHaveBeenCalledWith(card.id, session.id,
+      expect.objectContaining({ content: '', attachments: [{ version_id: 'version-1', path: 'plot.png' }] })));
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview plot.png' }));
+    expect(screen.getByRole('dialog', { name: 'Preview plot.png' })).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it("does not put an in-flight upload into a different session", async () => {
+    const second = { ...session, id: 'session-2', title: 'Second' };
+    vi.mocked(worldApi.getConversation).mockResolvedValue({ conversation_id: card.id, sessions: [session, second], agents: [] });
+    let finish!: (value: { version_id: string; path: string; name: string; size_bytes: number; media_type: string }) => void;
+    vi.spyOn(worldApi, 'uploadConversationAttachment').mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    fireEvent.change(screen.getByLabelText('Attach files', { selector: 'input' }), { target: { files: [new File(['private'], 'private.txt')] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Second' }));
+    await act(async () => finish({ version_id: 'private', path: 'private.txt', name: 'private.txt', size_bytes: 7, media_type: 'text/plain' }));
+    expect(screen.queryByRole('button', { name: 'Remove attachment private.txt' })).toBeNull();
+  });
+
   it("loads persisted history while the WebSocket is offline", async () => {
     render(<ConversationWorkspace card={card} />);
 
@@ -115,7 +147,8 @@ describe("ConversationWorkspace snapshots", () => {
     fireEvent.click(screen.getByRole("button", { name: "New session" }));
     await waitFor(() => expect(worldApi.createConversationSession).toHaveBeenCalledWith(card.id,
       expect.objectContaining({ group_id: "group-1", title: "New session" })));
-    fireEvent.click(screen.getByRole("button", { name: "Rename session" }));
+    fireEvent.click(screen.getByLabelText("Session actions for New session"));
+    fireEvent.click(within(screen.getByLabelText("Session actions for New session").closest("details")!).getByRole("button", { name: "Rename session" }));
     fireEvent.change(screen.getByLabelText("Session title"), { target: { value: "Design review" } });
     fireEvent.click(screen.getByRole("button", { name: "Save name" }));
     await waitFor(() => expect(worldApi.renameConversationSession).toHaveBeenCalledWith(card.id, "session-2", "Design review"));

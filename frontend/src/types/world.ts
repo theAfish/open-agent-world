@@ -286,7 +286,16 @@ export interface ConversationAgent {
   connected: boolean;
 }
 
+export interface ConversationAttachment {
+  version_id: string;
+  path: string;
+  name: string;
+  size_bytes: number;
+  media_type: string;
+}
+
 export interface ConversationMessage {
+  attachments?: ConversationAttachment[];
   sequence?: number;
   kind?: string;
   is_final?: boolean;

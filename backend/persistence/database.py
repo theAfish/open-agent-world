@@ -345,7 +345,10 @@ class Database:
         self._connection.execute("""UPDATE conversation_sessions SET group_id = id,
             is_default = CASE WHEN title = 'General' THEN 1 ELSE 0 END WHERE group_id IS NULL""")
         columns = {row['name'] for row in self._connection.execute('PRAGMA table_info(conversation_messages)')}
+        self._connection.execute('''CREATE TABLE IF NOT EXISTS conversation_default_admissions (
+            edge_id TEXT PRIMARY KEY REFERENCES edges(id) ON DELETE CASCADE)''')
         for name, definition in {
+            'attachments_json': "TEXT NOT NULL DEFAULT '[]'",
             'sequence': 'INTEGER NOT NULL DEFAULT 0',
             'kind': "TEXT NOT NULL DEFAULT 'text'",
             'is_final': 'INTEGER NOT NULL DEFAULT 1',

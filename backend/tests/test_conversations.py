@@ -364,7 +364,8 @@ async def test_agent_requesting_own_turn_is_recoverable_and_does_not_recurse(
 
         provider = WorldAgentCapabilityProvider(services)
         definitions = await provider.list_tools(atlas.id)
-        assert len(definitions) == 1
+        assert {'request_conversation_turn', 'send_conversation_message', 'inspect_artifacts'} <= {item.name for item in definitions}
+        definitions = [item for item in definitions if item.name == 'request_conversation_turn']
         assert "Never use your own agent id" in definitions[0].description
         assert [parameter.name for parameter in definitions[0].parameters] == [
             "conversation", "agent_id", "message"
