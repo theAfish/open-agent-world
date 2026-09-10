@@ -613,6 +613,11 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
           }),
         redoStack: [],
       }));
+      if (isContainer(card, get().catalog)) {
+        const snapshot = await worldApi.getWorld();
+        const members = ownedDescendants(snapshot.nodes, card.id);
+        set((state) => ({ cards: mergeCards(state.cards, members) }));
+      }
       get().pushToast({
         tone: "success",
         title: `${card.name} placed`,
@@ -972,6 +977,18 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   deleteCard: async (id) => get().deleteCards([id]),
 
   deleteCards: (ids) => withHistoryTransaction(async () => {
+    // Container members may have been created server-side since the last snapshot.
+    if (ids.some((id) => get().cards.some((card) => card.id === id && isContainer(card, get().catalog)))) {
+      try {
+        const snapshot = await worldApi.getWorld();
+        const owned = new Set(ids);
+        ids.forEach((id) => ownedDescendants(snapshot.nodes, id).forEach((member) => owned.add(member.id)));
+        set((state) => ({ cards: mergeCards(state.cards, snapshot.nodes.filter((card) => owned.has(card.id))) }));
+      } catch (error) {
+        get().pushToast({ tone: "error", title: "Cards were not removed", detail: apiErrorMessage(error) });
+        return;
+      }
+    }
     const requested = new Set(ids);
     for (const id of ids) {
       const card = get().cards.find((item) => item.id === id);
@@ -996,7 +1013,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         if (persistent.length) await worldApi.deleteNodes(persistent.map((card) => card.id));
         removed.push(...cards);
       } catch (error) {
-        get().pushToast({ tone: "error", title: "Legion was not removed", detail: apiErrorMessage(error) });
+        get().pushToast({ tone: "error", title: "Cards were not removed", detail: apiErrorMessage(error) });
         return;
       }
     } else for (const card of cards) {

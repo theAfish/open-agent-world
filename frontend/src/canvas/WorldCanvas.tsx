@@ -16,6 +16,8 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { worldApi } from "../api/client";
+import { transformationOptions } from "./documentTransformations";
 import { EquipmentCardNode, EquipmentPanelNode } from "../cards/Equipment";
 import { equipmentOriginId, equipmentSurfaceNodes } from "./equipmentLayout";
 import { SurfaceBridge } from "../effects/SurfaceBridge";
@@ -143,11 +145,13 @@ export function WorldCanvas() {
     const byId = new Map(renderCards.map((c) => [c.id, c]));
     const frameSizes = containerSizes(renderCards, catalog, surfaceLevels);
     return parentFirst(renderCards).flatMap<CanvasNode>((card) => {
+      if (ancestors(renderCards, card).some((parent) => surfaceLevels.get(parent.id) === "workspace" && catalog.node_types.find((type) => type.id === parent.type)?.frontend?.workspace)) return [];
       const level = surfaceLevels.get(card.id) ?? "preview";
       const displaced = displacedById.get(card.id);
       let node = nodeFromCard(card, level, displaced?.displaced ?? false, displaced?.position ?? card.position);
       if (isContainer(card, catalog)) {
-        const { width, height } = frameSizes.get(card.id)!;
+        const { width, height } = level === "workspace" && catalog.node_types.find((type) => type.id === card.type)?.frontend?.workspace
+          ? card.size : frameSizes.get(card.id)!;
         node = { ...node, type: "container", position: card.position, style: { width, height }, zIndex: 0,
           dragHandle: ".container-drag-region", connectable: containerDefinition(card, catalog)!.connectable };
       }
@@ -366,6 +370,20 @@ export function WorldCanvas() {
       return box && x > box.left && x < box.right && y > box.top && y < box.bottom;
     });
   }, [cards, catalog]);
+  const transformationTarget = useCallback((event: MouseEvent | TouchEvent, node: CanvasNode) => {
+    if (!("clientX" in event)) return;
+    const stackedIds = [...new Set(document.elementsFromPoint(event.clientX, event.clientY).map(element => element.closest('.react-flow__node')?.getAttribute('data-id')).filter(Boolean))];
+    for (const id of stackedIds) {
+      const target = cards.find(card => card.id === id);
+      if (!target) continue;
+      const option = transformationOptions(catalog, node.data.card, target)[0];
+      if (!option) continue;
+      const element = wrapper.current?.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(target.id)}"]`);
+      const rect = element?.getBoundingClientRect();
+      if (rect && event.clientX > rect.left + 32 && event.clientX < rect.right - 32 && event.clientY > rect.top + 70 && event.clientY < rect.bottom - 32) return { target, option, element };
+    }
+  }, [cards, catalog]);
+  const clearTransformationHints = () => wrapper.current?.querySelectorAll("[data-transformation-hint]").forEach(element => element.removeAttribute("data-transformation-hint"));
   const clearContainerDropHint = useCallback(() => {
     wrapper.current?.querySelectorAll<HTMLElement>("[data-member-drop]").forEach((frame) => {
       delete frame.dataset.memberDrop;
@@ -383,6 +401,9 @@ export function WorldCanvas() {
   }, [clearContainerDropHint]);
   const onNodeDrag: OnNodeDrag<CanvasNode> = useCallback((event, node) => {
     clearContainerDropHint();
+    clearTransformationHints();
+    const transformation = transformationTarget(event, node);
+    transformation?.element?.setAttribute("data-transformation-hint", `${transformation.option[1].label}: ${node.data.card.name}`);
     const member = node.data.card;
     if (!node.data.equipmentDetail && !member.ephemeral) {
       const parent = cards.find((c) => c.id === node.parentId);
@@ -408,11 +429,29 @@ export function WorldCanvas() {
     const resource = useEquipmentDrag.getState().resource;
     if (resource?.id !== node.id || !("clientX" in event)) return;
     useEquipmentDrag.getState().set(resource, equipmentDropOwner(resource, event.clientX, event.clientY)?.id);
-  }, [equipmentDropOwner, clearContainerDropHint, cards, catalog]);
+  }, [equipmentDropOwner, clearContainerDropHint, cards, catalog, transformationTarget]);
 
   const onNodeDragStop: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
     clearContainerDropHint();
     cancelPositionAnimation();
+    clearTransformationHints();
+    const transformation = draggedNodes.length <= 1 ? transformationTarget(_event, node) : undefined;
+    if (transformation) {
+      useEquipmentDrag.getState().set();
+      void (async () => {
+        try {
+          const [source, target] = await Promise.all([worldApi.getNodeDocument(node.id), worldApi.getNodeDocument(transformation.target.id)]);
+          const request = { source_id: node.id, source_revision: source.revision, expected_revision: target.revision };
+          const preview = await worldApi.transformDocument(transformation.target.id, transformation.option[0], request);
+          const skills = Array.isArray(source.value.skills) ? source.value.skills.length : null;
+          if (window.confirm(`${String(preview.label)} "${node.data.card.name}"?\n${skills === null ? "" : `${skills} skills will be added.\n`}The source card is consumed only after a successful commit. Its package snapshot is preserved.`)) {
+            await worldApi.transformDocument(transformation.target.id, transformation.option[0], { ...request, confirm: true });
+          }
+        } catch (error) { window.alert(String(error)); }
+        finally { activeDragIds.current.clear(); setDragging(false); await useWorldStore.getState().refreshWorld(); }
+      })();
+      return;
+    }
     const targetId = useEquipmentDrag.getState().targetId;
     useEquipmentDrag.getState().set();
     if (targetId) {
@@ -447,7 +486,7 @@ export function WorldCanvas() {
       activeDragIds.current.clear();
       setDragging(false);
     });
-  }, [cancelPositionAnimation, cards, setDragging, updateCardPositions, updateCard, catalog, clearContainerDropHint]);
+  }, [cancelPositionAnimation, cards, setDragging, updateCardPositions, updateCard, catalog, clearContainerDropHint, transformationTarget]);
 
   const onConnect = useCallback((connection: Connection) => {
     requestConnection(connection.source, connection.target);
@@ -473,6 +512,7 @@ export function WorldCanvas() {
 
   const onDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
+    clearTransformationHints();
     const payload = readPaletteDrag(event.dataTransfer);
     if (!payload) return;
     const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
@@ -480,6 +520,22 @@ export function WorldCanvas() {
       const definition = getNodeType(catalog, payload.type);
       if (!definition) return;
       const resource = { ...buildCardDraft(payload.type, position, definition), id: "" };
+      const transformation = transformationTarget(event.nativeEvent, { data: { card: resource } } as CanvasNode);
+      if (transformation) {
+        useEquipmentDrag.getState().set();
+        void (async () => {
+          try {
+            const target = await worldApi.getNodeDocument(transformation.target.id);
+            const request = { source_type: payload.type, expected_revision: target.revision };
+            const preview = await worldApi.transformDocument(transformation.target.id, transformation.option[0], request);
+            if (window.confirm(`${String(preview.label)} "${definition.label}" into "${transformation.target.name}"?`)) {
+              await worldApi.transformDocument(transformation.target.id, transformation.option[0], { ...request, confirm: true });
+              await useWorldStore.getState().refreshWorld();
+            }
+          } catch (error) { window.alert(String(error)); }
+        })();
+        return;
+      }
       const owner = equipmentDropOwner(resource, event.clientX, event.clientY);
       useEquipmentDrag.getState().set();
       if (owner) {
@@ -495,7 +551,7 @@ export function WorldCanvas() {
     const legion = legions.find((item) => item.id === payload.id);
     if (!legion || legion.revision !== payload.revision) return;
     void instantiateLegion(payload.id, position);
-  }, [cards, catalog, createCard, instantiateLegion, legions, screenToFlowPosition, updateCard, equipmentDropOwner]);
+  }, [cards, catalog, createCard, instantiateLegion, legions, screenToFlowPosition, updateCard, equipmentDropOwner, transformationTarget]);
 
   return (
     <div
@@ -512,10 +568,16 @@ export function WorldCanvas() {
         event.preventDefault();
         event.dataTransfer.dropEffect = "copy";
         const resource = useEquipmentDrag.getState().resource;
+        clearTransformationHints();
+        if (resource) {
+          const transformation = transformationTarget(event.nativeEvent, { data: { card: resource } } as CanvasNode);
+          transformation?.element?.setAttribute("data-transformation-hint", `${transformation.option[1].label}: ${resource.name}`);
+        }
         if (resource) useEquipmentDrag.getState().set(resource, equipmentDropOwner(resource, event.clientX, event.clientY)?.id);
       }}
     >
       <ReactFlow<CanvasNode, CanvasEdge>
+        id="oaw-world-map"
         nodes={nodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}

@@ -1,4 +1,6 @@
 """Wire contracts contain references and bounded metadata, never file bytes."""
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -27,3 +29,4 @@ class ArtifactMaterialize(BaseModel):
 
 class ArtifactCollectionConfig(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    status: Literal['available'] = 'available'

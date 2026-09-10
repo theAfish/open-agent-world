@@ -1,4 +1,5 @@
-import { ViewportPortal, useOnViewportChange, type Viewport } from "@xyflow/react";
+import { useOnViewportChange, type Viewport } from "@xyflow/react";
+import { ViewportPortal } from "./FlowPortal";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CHUNK_SIZE, getViewportChunkKeys } from "../state/chunks";
 import { useWorldStore } from "../state/worldStore";

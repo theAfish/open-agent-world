@@ -380,6 +380,19 @@ class Database:
     @contextmanager
     def transaction(self, *, immediate: bool = False) -> Iterator[sqlite3.Connection]:
         with self._lock:
+            if self._connection.in_transaction:
+                from uuid import uuid4
+                name = "nested_" + uuid4().hex
+                self._connection.execute(f"SAVEPOINT {name}")
+                try:
+                    yield self._connection
+                except BaseException:
+                    self._connection.execute(f"ROLLBACK TO {name}")
+                    self._connection.execute(f"RELEASE {name}")
+                    raise
+                else:
+                    self._connection.execute(f"RELEASE {name}")
+                return
             self._connection.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
             try:
                 yield self._connection

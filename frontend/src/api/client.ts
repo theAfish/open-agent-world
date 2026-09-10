@@ -559,6 +559,10 @@ export const worldApi = {
     });
   },
 
+  async transformDocument(id: string, operation: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return request(`/nodes/${encodeURIComponent(id)}/transformations/${encodeURIComponent(operation)}`, { method: "POST", body: JSON.stringify(body) });
+  },
+
   artifacts<T>(collectionId: string, action = "versions", body?: unknown, method?: string): Promise<T> {
     return request(`/artifact-collections/${encodeURIComponent(collectionId)}/${action}`, {
       method: method ?? (body === undefined ? "GET" : "POST"),

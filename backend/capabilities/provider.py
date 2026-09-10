@@ -171,6 +171,9 @@ class _CapabilityContext:
         from backend.sandbox_workspace import copy_skill
         return await copy_skill(self.services, sandbox_id, agent_id=agent_id, **arguments)
 
+    async def install_python_packages(self, agent_id, sandbox_id, requirements):
+        return await self.services.install_python_packages(sandbox_id, requirements, agent_id=agent_id)
+
     async def inspect_sandbox(self, agent_id: str, sandbox_id: str) -> dict[str, Any]:
         self.services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
         info = await self.services.get_sandbox(sandbox_id)

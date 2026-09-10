@@ -65,6 +65,16 @@ def test_broken_local_plugin_reports_manifest(tmp_path):
         loader.load_plugin_registry(tmp_path)
 
 
+def test_configured_directories_and_optional_runtime_manifest(tmp_path):
+    directory = tmp_path / 'configured'
+    write_plugin(directory, 'autoload_runtime')
+    manifest = directory / 'autoload_runtime' / 'pyproject.toml'
+    with manifest.open('a') as stream:
+        stream.write('\n[tool.open-agent-world.runtime]\npython = ["numpy>=2"]\n')
+    registry = loader.load_plugin_registry(tmp_path / 'empty', plugin_directories=(directory,))
+    assert registry.runtime_requirements['test.autoload_runtime'] == ('numpy>=2',)
+
+
 def test_default_directory_is_independent_of_working_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     registry = loader.load_plugin_registry()

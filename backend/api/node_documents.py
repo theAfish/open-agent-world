@@ -9,6 +9,12 @@ from backend.node_execution import ExecutionRequest
 
 router = APIRouter(prefix="/nodes", tags=["node-documents"])
 
+from backend.document_transformations import TransformationRequest, transform_document
+
+@router.post("/{node_id}/transformations/{operation}")
+async def transformation(node_id: str, operation: str, request: TransformationRequest, services: ApplicationServices = Depends(get_services)):
+    return await transform_document(services, node_id, operation, request)
+
 @router.get("/{node_id}/document/downloads/{name}")
 async def download_document(node_id: str, name: str, services: ApplicationServices = Depends(get_services)):
     from backend.node_documents import definition

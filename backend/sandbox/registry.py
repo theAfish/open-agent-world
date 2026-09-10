@@ -139,6 +139,8 @@ class SandboxRuntimeRegistry:
 
 
 def builtin_sandbox_registry(root: Path, event_sink: SandboxEventSink | None) -> SandboxRuntimeRegistry:
+    from .python_runtime import SharedPythonRuntime
+    python_runtime = SharedPythonRuntime(root)
     registry = SandboxRuntimeRegistry()
     if sys.platform == "linux":
         from .linux import LinuxSandboxBackend
@@ -146,7 +148,7 @@ def builtin_sandbox_registry(root: Path, event_sink: SandboxEventSink | None) ->
             SandboxRuntime("linux", "Linux · Bubblewrap", "linux", ("/bin/sh", "-c"),
                 supported_network_modes=("disabled", "enabled"),
                 network_reason="Public outbound IPv4 only; private networks, host services and IPv6 are blocked."),
-            lambda: LinuxSandboxBackend(root, event_sink=event_sink),
+            lambda: LinuxSandboxBackend(root, event_sink=event_sink, python_runtime=python_runtime),
             LinuxSandboxBackend.probe, 100, LinuxSandboxBackend.probe_network,
         ))
     elif os.name == "nt":
@@ -165,7 +167,7 @@ def builtin_sandbox_registry(root: Path, event_sink: SandboxEventSink | None) ->
             SandboxRuntime("windows", "Windows · AppContainer", "windows", shell,
                 supported_network_modes=("disabled", "enabled"),
                 network_reason="Public outbound IPv4 with AppContainer and enforced destination restrictions; private networks, host services and IPv6 are blocked."),
-            lambda: WindowsSandboxBackend(root, event_sink=event_sink), windows_probe, 50, WindowsSandboxBackend.probe_network,
+            lambda: WindowsSandboxBackend(root, event_sink=event_sink, python_runtime=python_runtime), windows_probe, 50, WindowsSandboxBackend.probe_network,
         ))
 
         async def discover_wsl() -> None:

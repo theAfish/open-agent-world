@@ -64,6 +64,23 @@ describe("authoritative world synchronization", () => {
     });
   });
 
+  it("loads server-created toolbox members and includes missing members when deleting", async () => {
+    const definition = { ...TEST_CATALOG.node_types.find((node) => node.id === 'legion')!, id: 'test.toolbox', user_creatable: true, traits: [] };
+    const toolbox = { ...card('toolbox', 'test.toolbox') };
+    const member = { ...card('skill', 'test.skill'), parent_id: toolbox.id };
+    useWorldStore.setState({ catalog: { ...TEST_CATALOG, node_types: [...TEST_CATALOG.node_types, definition] } });
+    vi.spyOn(worldApi, 'createNode').mockResolvedValue(toolbox);
+    vi.spyOn(worldApi, 'getWorld').mockResolvedValue({ nodes: [toolbox, member], edges: [], chunks: [] });
+    const remove = vi.spyOn(worldApi, 'deleteNodes').mockResolvedValue([toolbox, member]);
+    await useWorldStore.getState().createCard(toolbox.type);
+    expect(useWorldStore.getState().cards.map((node) => node.id)).toContain(member.id);
+    // A stale client can still display only the parent when Delete is pressed.
+    useWorldStore.setState({ cards: [toolbox] });
+    await useWorldStore.getState().deleteCards([toolbox.id]);
+    expect(remove).toHaveBeenCalledWith([toolbox.id, member.id]);
+    expect(useWorldStore.getState().cards).toEqual([]);
+  });
+
   it("forms, undoes and restores a team without recreating its existing members", async () => {
     const first = card("first", "agent");
     const second = card("second", "text");

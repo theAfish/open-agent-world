@@ -29,6 +29,16 @@ def publish(client, sandbox, collection, paths, **options):
     return client.post(f"/api/artifact-collections/{collection['id']}/versions", json=request)
 
 
+def test_collection_accepts_palette_status_on_create_and_update(client):
+    collection = create_node(client, 'core.artifact-collection', status='available', config={})
+    assert collection['status'] == 'available'
+    assert collection['config']['status'] == 'available'
+
+    response = client.patch(f"/api/nodes/{collection['id']}", json={'status': 'available'})
+    assert response.status_code == 200, response.text
+    assert response.json()['config']['status'] == 'available'
+
+
 def test_large_binary_bundle_immutable_reclamation_and_reference_retention(runtime_client):
     client, backend, agent, sandbox, collection, workspace, _ = setup(runtime_client)
     (workspace / 'bundle').mkdir()

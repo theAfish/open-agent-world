@@ -717,6 +717,10 @@ async def _execute_sandbox(
     )
 
 
+async def _install_python_packages(context, capability, values):
+    return await context.install_python_packages(capability.agent_id, capability.target_id, values.get("requirements"))
+
+
 def _register_builtin(registry: PluginRegistration) -> None:
     from backend.execution_config import register_execution_configuration, EXECUTION_SELECTORS, EnvironmentProfile
     from backend.plugins.documents import NodeDocumentDefinition
@@ -860,6 +864,10 @@ def _register_builtin(registry: PluginRegistration) -> None:
         description='Execute an argv command in the selected sandbox. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES.',
         input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}}, "required": ["argv"], "additionalProperties": False}), _execute_sandbox)
     registry.register_capability(CapabilityDefinition(
+        kind='sandbox.install_python_packages', tool_name='install_python_packages', target_parameter='sandbox',
+        description='Install missing Python packages into the persistent shared sandbox Python environment, then retry execution. Packages become available to all sandboxes on this execution platform. Supply index package names with optional extras/version constraints. Installation is serialized by the environment manager; source builds, paths and URLs are unsupported.',
+        input_schema={"type": "object", "properties": {"requirements": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 100}}, "required": ["requirements"], "additionalProperties": False}), _install_python_packages)
+    registry.register_capability(CapabilityDefinition(
         kind='sandbox.run_skill_script', tool_name='run_skill_script', target_parameter='sandbox',
         description='Run a file from the selected Skill in the selected sandbox. Both resources require independent live authorization. The current bundle is mounted read-only outside the workspace; cwd and generated outputs use the sandbox workspace.',
         input_schema=skill_script_schema(), selectors=(SKILL_SELECTOR, *EXECUTION_SELECTORS), target_capabilities=frozenset({"sandbox.execute"})), _run_skill_script)
@@ -999,7 +1007,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         description="The agent can run commands in this isolated workplace.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.sandbox"}),
         templateable=True,
-        capabilities=(CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
+        capabilities=(CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="mount_read_only", label="Mount read-only", short_label="read-only",

@@ -12,7 +12,7 @@ from backend.plugins.registry import PluginRegistry
 ENTRY_POINT_GROUP = "open_agent_world.plugins"
 
 
-def load_plugin_registry(plugin_directory: Path | None = None) -> PluginRegistry:
+def load_plugin_registry(plugin_directory: Path | None = None, *, plugin_directories: tuple[Path, ...] = ()) -> PluginRegistry:
     """Load trusted packages in the project's plugins folder, then installed plugins.
 
     Each entry point exposes a zero-argument plugin factory. Loading is
@@ -26,7 +26,9 @@ def load_plugin_registry(plugin_directory: Path | None = None) -> PluginRegistry
         else Path(__file__).resolve().parents[2] / "plugins"
     )
     local: list[tuple[EntryPoint, Path]] = []
-    if directory.is_dir():
+    for directory in dict.fromkeys((directory, *plugin_directories)):
+        if not directory.is_dir():
+            continue
         for package in sorted(directory.iterdir()):
             manifest = package / "pyproject.toml"
             if not package.is_dir() or not manifest.is_file():
@@ -64,7 +66,15 @@ def load_plugin_registry(plugin_directory: Path | None = None) -> PluginRegistry
             factory = entry_point.load()
             if not callable(factory):
                 raise TypeError("entry point must expose a plugin factory")
-            registry.install(factory())
+            plugin = factory()
+            registry.install(plugin)
+            if isinstance(origin, Path):
+                with origin.open("rb") as stream:
+                    manifest = tomllib.load(stream)
+                requirements = manifest.get("tool", {}).get("open-agent-world", {}).get("runtime", {}).get("python")
+                if requirements is not None:
+                    from backend.sandbox.python_runtime import validate_requirements
+                    registry.runtime_requirements[plugin.descriptor.id] = tuple(validate_requirements(requirements))
         except Exception as exc:
             raise RuntimeError(f"Cannot load plugin {entry_point.name!r} from {origin}: {exc}") from exc
     return registry

@@ -28,6 +28,7 @@ class Settings:
     event_queue_size: int = 256
     agent_runtime: str | None = None
     sandbox_runtime: str | None = None
+    plugin_directories: tuple[Path, ...] = ()
     run_inactivity_timeout_seconds: float | None = 300.0
     run_execution_deadline_seconds: float = 3600.0
     run_cleanup_timeout_seconds: float = 10.0
@@ -65,6 +66,7 @@ class Settings:
             database_path=root / "database" / "world.sqlite3",
             agent_runtime=runtime,
             sandbox_runtime=sandbox_runtime,
+            plugin_directories=tuple(Path(p).expanduser().resolve() for p in os.environ.get("OPEN_AGENT_WORLD_PLUGIN_DIRS", "").split(os.pathsep) if p),
             run_inactivity_timeout_seconds=inactivity_timeout,
             run_execution_deadline_seconds=float(os.environ.get('OPEN_AGENT_WORLD_RUN_DEADLINE', 3600)),
             run_cleanup_timeout_seconds=float(os.environ.get('OPEN_AGENT_WORLD_RUN_CLEANUP_TIMEOUT', 10)),

@@ -1,5 +1,17 @@
 # Plugin development
 
+Plugin API 1.13 adds projected read-only document actions (`project=True`),
+document update validators and declarative `NodeDocumentTransformation`s.
+Projected actions return bounded plugin query results through the same revision
+and capability checks as document actions. Transformations accept only inert
+document collections; the host checks source/destination revisions and atomically
+commits target updates and source consumption. They are explicit user actions,
+never relationships or implicit execution grants. The frontend SDK now exposes
+document actions, reads, downloads, card discovery and explicit transformations;
+container plugins can provide a normal workspace view. These primitives belong
+in core because persistence, rollback, events and lifecycle authority belong to
+the host. See the [MatCreator demo](../plugins/matcreator/README.md).
+
 Open Agent World loads trusted Python plugins through the
 `open_agent_world.plugins` entry-point group. A plugin is an application-scoped
 object with a stable descriptor and a synchronous registration method. Each
