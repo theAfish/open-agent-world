@@ -116,7 +116,7 @@ export function WorldCanvas() {
   const selectCards = useWorldStore((state) => state.selectCards);
   const undo = useWorldStore((state) => state.undo);
   const redo = useWorldStore((state) => state.redo);
-  const { getViewport, screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
+  const { fitView, getNodes, getViewport, screenToFlowPosition } = useReactFlow<CanvasNode, CanvasEdge>();
 
   const renderCards = useMemo(
     () => {
@@ -320,6 +320,24 @@ export function WorldCanvas() {
       const target = event.target as HTMLElement | null;
       if (target?.matches("input, textarea, select, [contenteditable='true']")) return;
       const modifier = event.ctrlKey || event.metaKey;
+      if (!modifier && !event.altKey && event.key.toLowerCase() === "f") {
+        if (event.defaultPrevented || event.isComposing || event.repeat
+          || target?.isContentEditable
+          || target?.closest("input, textarea, select, [role='textbox'], .xterm")
+          || useNodeSurfaceStore.getState().dragging) return;
+        const selected = new Set(selectedCardIds);
+        const focusNodes = getNodes().filter((node) => selected.has(node.id) && !node.hidden);
+        if (focusNodes.length === 0) return;
+        event.preventDefault();
+        void fitView({
+          nodes: focusNodes,
+          padding: 0.15,
+          minZoom: 0.12,
+          maxZoom: 2.2,
+          duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300,
+        });
+        return;
+      }
       if (modifier && event.key.toLowerCase() === "z") {
         event.preventDefault();
         if (event.shiftKey) void redo();
@@ -351,7 +369,7 @@ export function WorldCanvas() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeInspector, closeWorkspace, deleteCards, deleteSelectedEdge, dismissSurface, redo, selectEdge, selectedCardIds, selectedEdgeId, surfaceLevelsByNodeId, undo]);
+  }, [closeInspector, closeWorkspace, deleteCards, deleteSelectedEdge, dismissSurface, fitView, getNodes, redo, selectEdge, selectedCardIds, selectedEdgeId, surfaceLevelsByNodeId, undo]);
 
   const onNodeDragStart: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
     cancelPositionAnimation();
