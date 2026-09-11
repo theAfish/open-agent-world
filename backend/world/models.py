@@ -47,7 +47,7 @@ class SandboxStatus(StrEnum):
 
 
 class Point(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     x: float = 0
     y: float = 0
@@ -63,21 +63,21 @@ class Size(BaseModel):
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    system_instruction: str = "You are a helpful agent in Open Agent World."
-    model: str = "gemini-3.7-flash"
+    system_instruction: str = Field(default="You are a helpful agent in Open Agent World.", json_schema_extra={"agentReadable": True, "agentWritable": True})
+    model: str = Field(default="gemini-3.7-flash", json_schema_extra={"agentReadable": True, "privileged": True})
     status: AgentStatus = AgentStatus.IDLE
     runtime_provider_id: str | None = None
     max_concurrent_runs: Annotated[int, Field(ge=1, le=64)] = 1
     inherit_legion_model: bool = True
-    legion_role: str = Field(default="", max_length=200)
+    legion_role: str = Field(default="", max_length=200, json_schema_extra={"agentReadable": True, "agentWritable": True})
 
 
 class LegionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["available"] = "available"
-    description: str = Field(default="", max_length=2000)
-    instruction: str = Field(default="", max_length=16000)
+    description: str = Field(default="", max_length=2000, json_schema_extra={"agentReadable": True, "agentWritable": True})
+    instruction: str = Field(default="", max_length=16000, json_schema_extra={"agentReadable": True, "agentWritable": True})
     model_override: str = Field(default="", max_length=200)
     paused: bool = False
     shared_state_access: Literal["read_only", "read_write"] = "read_write"
@@ -86,13 +86,13 @@ class LegionConfig(BaseModel):
 class TextConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    filename: str = "untitled.txt"
+    filename: str = Field(default="untitled.txt", json_schema_extra={"agentReadable": True})
 
 
 class ImageConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    filename: str = "image.png"
+    filename: str = Field(default="image.png", json_schema_extra={"agentReadable": True})
 
 
 class SandboxConfig(BaseModel):
@@ -133,7 +133,7 @@ class SandboxConfig(BaseModel):
 class ConversationConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    description: str = "A shared field for durable human and agent conversations."
+    description: str = Field(default="A shared field for durable human and agent conversations.", json_schema_extra={"agentReadable": True, "agentWritable": True})
 
 
 ConfigValue = AgentConfig | ConversationConfig | TextConfig | ImageConfig | SandboxConfig | LegionConfig
@@ -184,6 +184,8 @@ class CardCreate(BaseModel):
 class CardPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    expected_revision: int | None = Field(default=None, ge=1, strict=True)
+
     parent_id: str | None = Field(default=None, max_length=100)
     equipment: EquipmentBinding | None = None
 
@@ -199,6 +201,7 @@ class CardsDelete(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     node_ids: Annotated[list[str], Field(min_length=1, max_length=101)]
+    expected_revisions: dict[str, Annotated[int, Field(ge=1, strict=True)]] | None = None
 
     @field_validator("node_ids")
     @classmethod
@@ -261,6 +264,8 @@ class EdgeCreate(BaseModel):
 
 class EdgePatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int | None = Field(default=None, ge=1, strict=True)
 
     relationship: str | None = Field(default=None, min_length=1, max_length=128)
     direction: EdgeDirection | None = None

@@ -60,6 +60,8 @@ def test_websocket_streams_typed_world_and_permission_events(client: TestClient)
         created = websocket.receive_json()
         assert created["type"] == "card_created"
         assert created["node_id"] == agent["id"]
+        assert created["stream_id"] == ready["stream_id"]
+        assert created["sequence"] > ready["sequence"]
 
         text = create_node(client, "text")
         assert websocket.receive_json()["type"] == "card_created"
@@ -76,3 +78,22 @@ def test_websocket_streams_typed_world_and_permission_events(client: TestClient)
         permission = websocket.receive_json()
         assert permission["type"] == "permission_changed"
         assert permission["payload"]["affected_agent_ids"] == [agent["id"]]
+
+
+def test_event_overflow_is_detectable_without_a_durable_event_log():
+    import asyncio
+    from backend.events.hub import EventHub
+    from backend.events.models import EventType
+
+    async def run():
+        hub = EventHub(queue_size=1)
+        async with hub.subscribe() as queue:
+            await hub.publish(EventType.CARD_CREATED)
+            first = await queue.get()
+            await hub.publish(EventType.CARD_UPDATED)
+            await hub.publish(EventType.CARD_DELETED)
+            last = await queue.get()
+            assert first.stream_id == last.stream_id
+            assert last.sequence == first.sequence + 2
+            assert hub.sequence == last.sequence
+    asyncio.run(run())

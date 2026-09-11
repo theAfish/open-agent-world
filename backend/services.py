@@ -5,7 +5,7 @@ import base64
 import json
 import logging
 import math
-from collections.abc import Coroutine, Mapping
+from collections.abc import Callable, Coroutine, Mapping
 from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
@@ -16,6 +16,7 @@ from uuid import uuid4
 
 if TYPE_CHECKING:
     from backend.skill_runtime import RunSkillScript
+    from backend.canvas_control import CanvasControl, CanvasScope
 
 from backend.agents import (
     AgentEvent,
@@ -573,6 +574,11 @@ class ApplicationServices:
         from backend.security.execution_credentials import ExecutionCredentialStore
         return ExecutionCredentialStore(self.llm_settings, self.world)
 
+    def canvas_control(self, actor_id: str, authorize: Callable[[str], CanvasScope | None]) -> CanvasControl:
+        """Bind a host-owned, live scope resolver to an automated caller."""
+        from backend.canvas_control import CanvasControl
+        return CanvasControl(self, actor_id, authorize)
+
     @asynccontextmanager
     async def _node_mutation(self, *, read_only: bool = False):
         current_task = asyncio.current_task()
@@ -913,20 +919,25 @@ class ApplicationServices:
                 touch_parent(self, card.parent_id)
         return card
 
+    def expand_card_updates(self, updates: list[CardBatchPatch]) -> list[CardBatchPatch]:
+        """Resolve implicit descendant movement before validation or persistence."""
+        updates = list(updates)
+        explicit = {item.node_id: item.patch.position for item in updates if item.patch.position is not None}
+        requested = {item.node_id for item in updates}
+        for member in self.world.list_cards():
+            if member.id in requested:
+                continue
+            parent = next((node for node in self.world.ancestors(member) if node.id in explicit), None)
+            if parent is not None:
+                target = explicit[parent.id]
+                updates.append(CardBatchPatch(node_id=member.id, patch=CardPatch(position={
+                    "x": member.position.x + target.x - parent.position.x,
+                    "y": member.position.y + target.y - parent.position.y})))
+        return updates
+
     async def update_cards(self, updates: list[CardBatchPatch]) -> list[Card]:
         async with self._node_mutation():
-            updates = list(updates)
-            explicit = {item.node_id: item.patch.position for item in updates if item.patch.position is not None}
-            requested = {item.node_id for item in updates}
-            for member in self.world.list_cards():
-                if member.id in requested:
-                    continue
-                parent = next((node for node in self.world.ancestors(member) if node.id in explicit), None)
-                if parent is not None:
-                    target = explicit[parent.id]
-                    updates.append(CardBatchPatch(node_id=member.id, patch=CardPatch(position={
-                        "x": member.position.x + target.x - parent.position.x,
-                        "y": member.position.y + target.y - parent.position.y})))
+            updates = self.expand_card_updates(updates)
             context = self._node_lifecycle_context()
             previous_parents = {item.node_id: self.world.get_card(item.node_id).parent_id for item in updates}
             prepared: list[tuple[CardBatchPatch, NodeLifecycleTransaction]] = []
@@ -978,14 +989,19 @@ class ApplicationServices:
                     touch_parent(self, card.parent_id)
         return cards
 
-    async def delete_card(self, card_id: str) -> Card:
-        return (await self.delete_cards([card_id]))[0]
+    async def delete_card(self, card_id: str, *, expected_revision: int | None = None) -> Card:
+        return (await self.delete_cards([card_id], expected_revisions={card_id: expected_revision} if expected_revision is not None else None))[0]
 
-    async def delete_cards(self, card_ids: list[str]) -> list[Card]:
+    def expand_card_deletions(self, card_ids: list[str]) -> list[str]:
+        return list(dict.fromkeys([*card_ids, *[n.id for key in card_ids for item in self.world.equipment_for(key) for n in [item, *self.world.owned_descendants(item.id)]]]))
+
+    async def delete_cards(self, card_ids: list[str], *, expected_revisions: dict[str, int] | None = None) -> list[Card]:
         finish_committed_delete: Coroutine[Any, Any, None]
         async with self._node_mutation():
-            ids = list(dict.fromkeys([*card_ids, *[n.id for key in card_ids for item in self.world.equipment_for(key) for n in [item, *self.world.owned_descendants(item.id)]]]))
+            ids = self.expand_card_deletions(card_ids)
             cards = [self.world.get_card(card_id) for card_id in ids]
+            for card in cards:
+                self.world.check_revision(card, (expected_revisions or {}).get(card.id))
             for card in cards:
                 self.resources.artifacts.assert_source_idle(card.id)
             for card in cards:
@@ -1033,6 +1049,8 @@ class ApplicationServices:
                     self._set_pending_node_deletion_state(
                         transaction_card.id, "committed"
                     )
+                for card in cards:
+                    self.world.check_revision(self.world.get_card(card.id), (expected_revisions or {}).get(card.id))
                 deleted = (
                     [self.world.delete_card(ids[0])]
                     if len(ids) == 1
@@ -2260,6 +2278,7 @@ class ApplicationServices:
 
     async def _update_edge_locked(self, edge_id: str, request: EdgePatch) -> Edge:
         old = self.world.get_edge(edge_id)
+        self.world.check_revision(old, request.expected_revision)
         if (self.plugins.relationship(old.relationship).generated
                 or self.plugins.relationship(request.relationship or old.relationship).generated):
             raise GraphValidationError("Generated connections cannot change relationship")
@@ -2293,15 +2312,16 @@ class ApplicationServices:
         return edge
 
     async def delete_edge(
-        self, edge_id: str, *, _publish_event: bool = True
+        self, edge_id: str, *, _publish_event: bool = True, expected_revision: int | None = None
     ) -> Edge:
         async with self._node_mutation():
+            self.world.check_revision(self.world.get_edge(edge_id), expected_revision)
             return await self._delete_edge_locked(
-                edge_id, _publish_event=_publish_event
+                edge_id, _publish_event=_publish_event, expected_revision=expected_revision
             )
 
     async def _delete_edge_locked(
-        self, edge_id: str, *, _publish_event: bool = True
+        self, edge_id: str, *, _publish_event: bool = True, expected_revision: int | None = None
     ) -> Edge:
         edge = self.world.get_edge(edge_id)
         affected = self._affected_agents(edge)
@@ -2311,6 +2331,7 @@ class ApplicationServices:
         if self._is_mount(source.type, target.type, edge.relationship):
             detached = await self._detach_mount(edge, ignore_missing=True)
         try:
+            self.world.check_revision(self.world.get_edge(edge_id), expected_revision)
             edge = self.world.delete_edge(edge_id)
         except BaseException:
             if detached:

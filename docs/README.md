@@ -20,6 +20,7 @@ Use these guides to look up a feature or understand how it works. Start with set
 ## Technical reference
 
 - [Architecture](architecture.md): authority, persistence, interaction flows, and canvas scaling.
+- [Scoped canvas automation](canvas-control.md): host-issued control scopes, field policy, revisions, and synchronization.
 - [Runs and runtime providers](runs.md), [runtime state](state.md), and [execution lifecycle and durable outputs](lifecycle-artifacts.md).
 - [Plugin work-source execution](execution.md), [node effects](node-effects.md), and [canvas placement](layout.md).
 - [Security and isolation contract](security.md): trust zones and platform boundaries.

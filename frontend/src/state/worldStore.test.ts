@@ -3,7 +3,7 @@ import { worldApi } from "../api/client";
 import type { LegionSummary, WorldCard, WorldEdge, WorldSnapshot } from "../types/world";
 import { buildCardDraft } from "./helpers";
 import { TEST_CATALOG } from "./catalog.fixture";
-import { useWorldStore } from "./worldStore";
+import { mergeEdges, useWorldStore } from "./worldStore";
 
 function card(id: string, type: WorldCard["type"]): WorldCard {
   return { id, ...buildCardDraft(type, { x: 0, y: 0 }) };
@@ -52,6 +52,10 @@ describe("authoritative world synchronization", () => {
       loadingChunkKeys: [],
       syncState: "online",
       socketState: "closed",
+      eventStream: undefined,
+      eventSequence: undefined,
+      cardTombstones: {},
+      edgeTombstones: {},
       selectedEdgeId: undefined,
       selectedCardIds: [],
       selectionRevision: 0,
@@ -63,6 +67,138 @@ describe("authoritative world synchronization", () => {
       historyBusy: false,
       positionCommitBusy: false,
     });
+  });
+
+  it("does not revive a deleted incarnation from a delayed create response", async () => {
+    const node = { ...card("new", "text"), revision: 1, created_at: "2026-09-11T00:00:00Z" };
+    const response = deferred<WorldCard>();
+    const create = vi.spyOn(worldApi, "createNode").mockReturnValue(response.promise);
+    const pending = useWorldStore.getState().createCard("text");
+    await vi.waitFor(() => expect(create).toHaveBeenCalled());
+    const edge: WorldEdge = { id: "new-edge", source: node.id, target: "other", relationship: "read", direction: "forward", revision: 1, created_at: node.created_at };
+    useWorldStore.setState({ cards: [node], edges: [edge] });
+    useWorldStore.getState().ingestEvent({ id: "deleted", type: "card_deleted", timestamp: node.created_at, payload: { node } });
+    response.resolve(node);
+    await pending;
+    expect(useWorldStore.getState().cards).toEqual([]);
+    expect(mergeEdges([], [edge], useWorldStore.getState().edgeTombstones)).toEqual([]);
+    useWorldStore.getState().ingestEvent({ id: "restored", type: "card_created", timestamp: node.created_at,
+      payload: { node: { ...node, created_at: "2026-09-11T00:01:00Z" } } });
+    expect(useWorldStore.getState().cards).toHaveLength(1);
+  });
+
+  it("reconciles initialization when a background mutation arrives during loading", async () => {
+    const node = { ...card("initializing", "text"), revision: 1 };
+    const snapshot = deferred<WorldSnapshot>();
+    vi.spyOn(worldApi, "getWorld").mockReturnValueOnce(snapshot.promise).mockResolvedValue({ nodes: [], edges: [], chunks: [] });
+    const pending = useWorldStore.getState().initialize();
+    useWorldStore.getState().ingestEvent({ id: "deleted", type: "card_deleted", timestamp: "2026-09-11T00:00:00Z", payload: { node } });
+    snapshot.resolve({ nodes: [node], edges: [], chunks: [] });
+    await pending;
+    expect(useWorldStore.getState().cards).toEqual([]);
+  });
+
+  it.each([false, true])("preserves a newer background edit during a position commit (failed=%s)", async (failed) => {
+    const node = { ...card("moving-background", "text"), revision: 1 };
+    const response = deferred<WorldCard[]>();
+    const update = vi.spyOn(worldApi, "batchUpdateNodes").mockReturnValue(response.promise);
+    useWorldStore.setState({ cards: [node] });
+    const position = { x: 80, y: 90 };
+    const pending = useWorldStore.getState().updateCardPositions([{ id: node.id, position }]);
+    await vi.waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update).toHaveBeenCalledWith([{ node_id: node.id, patch: { position } }]);
+    useWorldStore.getState().ingestEvent({ id: "newer", type: "card_updated", timestamp: "2026-09-11T00:00:00Z",
+      payload: { node: { ...node, position, revision: 3, name: "Background edit" } } });
+    if (failed) response.reject(new Error("conflict"));
+    else response.resolve([{ ...node, position, revision: 2 }]);
+    await pending;
+    expect(useWorldStore.getState().cards[0]).toMatchObject({ revision: 3, name: "Background edit" });
+  });
+
+  it("keeps a newer background edge change when an older editor response arrives", async () => {
+    const edge: WorldEdge = { id: "editing-edge", source: "agent", target: "text", relationship: "read", direction: "forward", revision: 1 };
+    const response = deferred<WorldEdge>();
+    const update = vi.spyOn(worldApi, "updateEdge").mockReturnValue(response.promise);
+    useWorldStore.setState({ edges: [edge], selectedEdgeId: edge.id });
+    const pending = useWorldStore.getState().updateSelectedEdge("read_edit");
+    await vi.waitFor(() => expect(update).toHaveBeenCalled());
+    useWorldStore.getState().ingestEvent({ id: "newer-edge", type: "edge_updated", timestamp: "2026-09-11T00:00:00Z",
+      payload: { edge: { ...edge, revision: 3 } } });
+    response.resolve({ ...edge, relationship: "read_edit", revision: 2 });
+    await pending;
+    expect(useWorldStore.getState().edges[0]).toMatchObject({ revision: 3, relationship: "read" });
+  });
+
+  it("applies background graph events without changing editor history or using selection", () => {
+    const node = { ...card("background", "conversation"), revision: 1, created_at: "2026-09-11T00:00:00Z" };
+    const emit = (type: string, payload: Record<string, unknown>, sequence: number) => useWorldStore.getState().ingestEvent({
+      id: `event-${sequence}`, type, timestamp: node.created_at, payload, stream_id: "stream", sequence,
+    });
+    emit("card_created", { node }, 1);
+    useWorldStore.setState(state => ({ cards: state.cards.map(card => ({ ...card, config: { ...card.config, output: ["Live output"] } })) }));
+    emit("card_updated", { node: { ...node, revision: 3, name: "Changed elsewhere", position: { x: 80, y: 90 } } }, 2);
+    emit("card_updated", { node: { ...node, revision: 2, name: "Stale" } }, 3);
+    expect(useWorldStore.getState().cards[0]).toMatchObject({ name: "Changed elsewhere", position: { x: 80, y: 90 }, revision: 3 });
+    expect(useWorldStore.getState().cards[0].config.output).toEqual(["Live output"]);
+    const edge = { id: "background-edge", source: node.id, target: "external", relationship: "read", direction: "forward", revision: 1 };
+    emit("edge_created", { edge }, 4);
+    emit("edge_updated", { edge: { ...edge, relationship: "read_edit", revision: 2 } }, 5);
+    expect(useWorldStore.getState().edges[0]).toMatchObject({ relationship: "read_edit", revision: 2 });
+    emit("edge_deleted", { edge: { ...edge, revision: 2 } }, 6);
+    expect(useWorldStore.getState().edges).toEqual([]);
+    emit("card_deleted", { node: { ...node, revision: 3 } }, 7);
+    expect(useWorldStore.getState().cards).toEqual([]);
+    expect(useWorldStore.getState().undoStack).toEqual([]);
+  });
+
+  it("reconciles missed deletions in requested chunks and their owned descendants", async () => {
+    const group = card("deleted-group", "legion");
+    const child = { ...card("deleted-child", "text"), parent_id: group.id, position: { x: 10000, y: 0 } };
+    const cached = { ...card("cached", "text"), position: { x: 9000, y: 9000 } };
+    useWorldStore.setState({ cards: [group, child, cached], activeChunkKeys: ["0:0"], loadedChunkKeys: ["0:0", "4:4"] });
+    vi.spyOn(worldApi, "getWorld").mockResolvedValue({ nodes: [], edges: [], chunks: [[0, 0]] });
+    await useWorldStore.getState().refreshWorld();
+    expect(useWorldStore.getState().cards).toEqual([cached]);
+    expect(useWorldStore.getState().loadedChunkKeys).not.toContain("4:4");
+  });
+
+  it("does not resurrect a deleted card from a chunk request already in flight", async () => {
+    const node = { ...card("deleted-in-flight", "text"), revision: 1 };
+    const pending = deferred<WorldSnapshot>();
+    vi.spyOn(worldApi, "getWorld").mockReturnValueOnce(pending.promise).mockResolvedValue({ nodes: [], edges: [], chunks: [[0, 0]] });
+    useWorldStore.setState({ cards: [node], loadedChunkKeys: [] });
+    const loading = useWorldStore.getState().ensureChunks(["0:0"]);
+    useWorldStore.getState().ingestEvent({ id: "deleted", type: "card_deleted", node_id: node.id, timestamp: "now", payload: { node } });
+    pending.resolve({ nodes: [node], edges: [], chunks: [[0, 0]] });
+    await loading;
+    expect(useWorldStore.getState().cards).toEqual([]);
+  });
+
+  it("resynchronizes on stream gaps including the last event lost before a heartbeat", async () => {
+    const refresh = vi.spyOn(useWorldStore.getState(), "refreshWorld").mockResolvedValue();
+    const emit = (sequence: number, type = "stdout") => useWorldStore.getState().ingestEvent({
+      id: `seq-${sequence}`, type, timestamp: "now", payload: {}, stream_id: "watermark", sequence,
+    });
+    emit(1);
+    emit(3);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    emit(4, "connection_ready");
+    expect(refresh).toHaveBeenCalledTimes(2);
+    emit(4, "connection_ready");
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves a newer background edit when an older HTTP update completes", async () => {
+    const node = { ...card("concurrent-update", "conversation"), revision: 1 };
+    const pending = deferred<WorldCard>();
+    const update = vi.spyOn(worldApi, "updateNode").mockReturnValue(pending.promise);
+    useWorldStore.setState({ cards: [node] });
+    const editing = useWorldStore.getState().updateCard(node.id, { name: "Local" });
+    await vi.waitFor(() => expect(update).toHaveBeenCalledWith(node.id, { name: "Local" }));
+    useWorldStore.getState().ingestEvent({ id: "external-update", type: "card_updated", timestamp: "now", payload: { node: { ...node, revision: 3, name: "External" } } });
+    pending.resolve({ ...node, revision: 2, name: "Local" });
+    await editing;
+    expect(useWorldStore.getState().cards[0]).toMatchObject({ name: "External", revision: 3 });
   });
 
   it("copies a selection snapshot with internal links and supports paste undo/redo", async () => {

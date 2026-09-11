@@ -38,13 +38,14 @@ async def _send_json(websocket: WebSocket, payload: dict[str, object]) -> bool:
 async def event_websocket(websocket: WebSocket) -> None:
     await websocket.accept()
     services: ApplicationServices = websocket.app.state.services
-    ready = RuntimeEvent(
-        type=EventType.CONNECTION_READY,
-        payload={"message": "Open Agent World event stream connected"},
-    )
-    if not await _send_json(websocket, ready.model_dump(mode="json")):
-        return
     async with services.events.subscribe() as queue:
+        ready = RuntimeEvent(
+            type=EventType.CONNECTION_READY,
+            stream_id=services.events.stream_id, sequence=services.events.sequence,
+            payload={"message": "Open Agent World event stream connected"},
+        )
+        if not await _send_json(websocket, ready.model_dump(mode="json")):
+            return
         while True:
             receive_task = asyncio.create_task(websocket.receive())
             event_task = asyncio.create_task(queue.get())
@@ -64,7 +65,8 @@ async def event_websocket(websocket: WebSocket) -> None:
                     return
                 if message.get("text") == "ping":
                     pong = RuntimeEvent(
-                        type=EventType.CONNECTION_READY, payload={"message": "pong"}
+                        type=EventType.CONNECTION_READY, payload={"message": "pong"},
+                        stream_id=services.events.stream_id, sequence=services.events.sequence,
                     )
                     if not await _send_json(websocket, pong.model_dump(mode="json")):
                         return

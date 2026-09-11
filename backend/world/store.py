@@ -14,6 +14,7 @@ from backend.errors import (
     GraphValidationError,
     NotFoundError,
     PluginUnavailableError,
+    RevisionConflictError,
 )
 from backend.plugins.registry import PluginRegistry
 from backend.persistence.database import Database
@@ -51,6 +52,11 @@ def _json(value: dict[str, Any]) -> str:
 
 
 class WorldStore:
+    @staticmethod
+    def check_revision(record: Card | Edge, expected: int | None) -> None:
+        if expected is not None and record.revision != expected:
+            raise RevisionConflictError("Canvas object changed; read it again before editing")
+
     def __init__(
         self, database: Database, registry: PluginRegistry, *, chunk_size: int = 2048
     ) -> None:
@@ -331,7 +337,8 @@ class WorldStore:
 
     def update_card(self, card_id: str, request: CardPatch) -> Card:
         current = self.get_card(card_id)
-        changes = request.model_dump(exclude_unset=True)
+        self.check_revision(current, request.expected_revision)
+        changes = request.model_dump(exclude_unset=True, exclude={"expected_revision"})
         if not changes:
             return current
 
@@ -360,7 +367,7 @@ class WorldStore:
                 SET name = ?, x = ?, y = ?, width = ?, height = ?, expanded = ?,
                     config_json = ?, chunk_x = ?, chunk_y = ?, updated_at = ?,
                     revision = revision + 1, parent_id = ?, equipment_json = ?
-                WHERE id = ?
+                WHERE id = ? AND revision = ?
                 """,
                 (
                     name,
@@ -376,10 +383,12 @@ class WorldStore:
                     parent_id,
                     equipment.model_dump_json() if equipment else None,
                     card_id,
+                    current.revision,
                 ),
             )
             if cursor.rowcount != 1:
-                raise NotFoundError(f"card {card_id!r} does not exist")
+                self.get_card(card_id)
+                raise RevisionConflictError("Card changed; read it again before editing")
         return self.get_card(card_id)
 
     def update_cards(self, updates: Iterable[CardBatchPatch], *, _connection: sqlite3.Connection | None = None) -> list[Card]:
@@ -394,7 +403,7 @@ class WorldStore:
         changed = [
             (item, preview)
             for item, preview in zip(items, previews, strict=True)
-            if item.patch.model_dump(exclude_unset=True)
+            if item.patch.model_dump(exclude_unset=True, exclude={"expected_revision"})
         ]
         if changed:
             with (nullcontext(_connection) if _connection is not None else self.database.transaction(immediate=True)) as connection:
@@ -405,7 +414,7 @@ class WorldStore:
                         SET name = ?, x = ?, y = ?, width = ?, height = ?, expanded = ?,
                             config_json = ?, chunk_x = ?, chunk_y = ?, updated_at = ?,
                             revision = revision + 1, parent_id = ?, equipment_json = ?
-                        WHERE id = ?
+                        WHERE id = ? AND revision = ?
                         """,
                         (
                             preview.name,
@@ -421,12 +430,12 @@ class WorldStore:
                             preview.parent_id,
                             preview.equipment.model_dump_json() if preview.equipment else None,
                             item.node_id,
+                            preview.revision - 1,
                         ),
                     )
                     if cursor.rowcount != 1:
-                        raise NotFoundError(
-                            f"card {item.node_id!r} no longer exists"
-                        )
+                        self.get_card(item.node_id)
+                        raise RevisionConflictError("Card changed; read it again before editing")
                 # Validate the resulting membership graph, including cycles across a batch.
                 for _, preview in changed:
                     self.validate_parent(preview.id, preview.type, preview.parent_id)
@@ -437,7 +446,8 @@ class WorldStore:
         """Validate an update and return its resulting node without persisting it."""
 
         current = self.get_card(card_id)
-        changes = request.model_dump(exclude_unset=True)
+        self.check_revision(current, request.expected_revision)
+        changes = request.model_dump(exclude_unset=True, exclude={"expected_revision"})
         if not changes:
             return current
         parent_id = changes.get("parent_id", current.parent_id)
@@ -641,6 +651,7 @@ class WorldStore:
             ).fetchone()
             if row is None:
                 raise NotFoundError(f"edge {edge_id!r} does not exist")
+            self.check_revision(self._edge_from_row(row), request.expected_revision)
             relationship = request.relationship or str(row["relationship"])
             direction = request.direction or EdgeDirection(row["direction"])
             self._assert_valid_relationship(

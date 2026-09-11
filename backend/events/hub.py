@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
+from uuid import uuid4
 
 from backend.events.models import EventType, RuntimeEvent
 
@@ -15,6 +16,8 @@ class EventHub:
         if queue_size <= 0:
             raise ValueError("queue_size must be positive")
         self.queue_size = queue_size
+        self.stream_id = str(uuid4())
+        self.sequence = 0
         self._subscribers: set[asyncio.Queue[RuntimeEvent]] = set()
         self._lock = asyncio.Lock()
         self._buffer: ContextVar[list[RuntimeEvent] | None] = ContextVar("event_buffer", default=None)
@@ -64,23 +67,11 @@ class EventHub:
             run_id=run_id,
             payload=payload or {},
         )
-        async with self._lock:
-            queues = tuple(self._subscribers)
-        for queue in queues:
-            if queue.full():
-                # Runtime output is a live view rather than an audit log. Keep
-                # the newest operational state for slow clients.
-                queue.get_nowait()
-            queue.put_nowait(event)
+        self.publish_event_nowait(event)
         return event
 
     async def publish_event(self, event: RuntimeEvent) -> None:
-        async with self._lock:
-            queues = tuple(self._subscribers)
-        for queue in queues:
-            if queue.full():
-                queue.get_nowait()
-            queue.put_nowait(event)
+        self.publish_event_nowait(event)
 
     def publish_event_nowait(self, event: RuntimeEvent) -> None:
         """Publish a synchronously committed state change to live subscribers.
@@ -93,6 +84,8 @@ class EventHub:
         if pending is not None:
             pending.append(event)
             return
+        self.sequence += 1
+        event = event.model_copy(update={"stream_id": self.stream_id, "sequence": self.sequence})
         for queue in tuple(self._subscribers):
             if queue.full():
                 queue.get_nowait()

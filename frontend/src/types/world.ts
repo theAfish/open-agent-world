@@ -101,6 +101,7 @@ export interface CardConfig extends Record<string, unknown> {
 
 export interface WorldCard {
   id: string;
+  revision?: number;
   parent_id?: string | null;
   equipment?: { owner_id: string; relationship: string | null } | null;
   type: CardType;
@@ -118,6 +119,7 @@ export interface WorldCard {
 
 export interface WorldEdge {
   id: string;
+  revision?: number;
   source: string;
   target: string;
   relationship: Relationship;
@@ -241,6 +243,8 @@ export interface LegionInstantiation {
 
 export interface RuntimeEvent {
   id: string;
+  stream_id?: string;
+  sequence?: number;
   type: string;
   node_id?: string;
   agent_id?: string;

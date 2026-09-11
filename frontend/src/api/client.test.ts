@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   normalizeCard,
+  normalizeEdge,
   normalizeLegionInstantiation,
   normalizeLegionSummary,
   normalizeRuntimeEvent,
@@ -12,6 +13,11 @@ afterEach(() => {
 });
 
 describe("API normalization boundary", () => {
+  it("preserves card and edge revisions separately from resource revisions", () => {
+    expect(normalizeCard({ id: "text", type: "text", revision: 8, resource: { revision: 3 } })).toMatchObject({ revision: 8, config: { revision: 3 } });
+    expect(normalizeEdge({ id: "edge", source: "a", target: "b", relationship: "read", revision: 5 }).revision).toBe(5);
+    expect(normalizeRuntimeEvent({ type: "card_updated", sequence: 42, stream_id: "stream" })).toMatchObject({ sequence: 42, stream_id: "stream" });
+  });
   it("keeps display metadata out of restorable Legion settings", () => {
     const card = normalizeCard({ id: "team", type: "legion", config: { instruction: "Review", status: "available" }, resource: { status: "available" } });
     expect(card.config).toEqual({ instruction: "Review", status: "available" });

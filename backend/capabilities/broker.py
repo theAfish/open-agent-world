@@ -8,7 +8,7 @@ from backend.errors import PermissionDeniedError, ResourceValidationError
 from backend.plugins import PluginRegistry
 from backend.resources.manager import ManagedResourceStore
 from backend.resources.models import ResourceRecord, TextDocument, TextEdit
-from backend.world.models import Card, CardType, EdgeDirection, Relationship
+from backend.world.models import Card, CardType, Edge, EdgeDirection, Relationship
 from backend.world.store import WorldStore
 
 
@@ -62,15 +62,7 @@ class CapabilityBroker:
             relationship = self.plugins.relationship(edge.relationship)
             if relationship.generated:
                 continue
-            # Participation explicitly shares only attached meeting-note resources,
-            # not arbitrary capabilities belonging to other participants.
-            if edge.relationship == "participate" and self.plugins.has_trait(target.type, "core.conversation"):
-                directed_edges.extend(
-                    (child, child.target) for child in self.world.connections_from(target_id)
-                    if child.relationship == "conversation_notes"
-                )
-            if not relationship.capabilities:
-                directed_edges.extend((child, child.target) for child in self.world.connections_from(target_id))
+            directed_edges.extend(self.forwarded_connections(edge, target_id))
             for grant in relationship.capabilities:
                 operation = self.plugins.capability_definition(grant.kind)
                 capability_id = f"{grant.kind}:{target.id}"
@@ -104,6 +96,20 @@ class CapabilityBroker:
                     description=definition.description, input_schema=dict(definition.input_schema),
                 ))
         return CapabilitySet(agent_id=agent.id, capabilities=capabilities)
+
+    def forwarded_connections(self, edge: Edge, target_id: str) -> list[tuple[Edge, str]]:
+        """Shared traversal contract for capability use and canvas grant changes."""
+        return [(child, child.target) for child in self.world.connections_from(target_id)
+                if self.forwards_connection(edge, target_id, child)]
+
+    def forwards_connection(self, edge: Edge, target_id: str, child: Edge) -> bool:
+        relationship = self.plugins.relationship(edge.relationship)
+        if relationship.generated or child.source != target_id:
+            return False
+        if not relationship.capabilities:
+            return True
+        return (edge.relationship == "participate" and child.relationship == "conversation_notes"
+                and self.plugins.has_trait(self.world.get_card(target_id).type, "core.conversation"))
 
     def require_agent_communicate(self, agent_id: str, target_agent_id: str) -> None:
         self._require_agent(agent_id)

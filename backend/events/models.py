@@ -57,6 +57,8 @@ class RuntimeEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(default_factory=lambda: str(uuid4()))
+    stream_id: str | None = None
+    sequence: int | None = None
     type: EventType
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     node_id: str | None = None

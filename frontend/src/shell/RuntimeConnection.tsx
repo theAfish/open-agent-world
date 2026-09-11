@@ -56,7 +56,10 @@ export function RuntimeConnection() {
           for (const item of items) {
             const normalized = normalizeRuntimeEvent(item);
             // Heartbeat pongs only prove liveness; keep them out of the event log.
-            if (normalized.type === "connection_ready" && normalized.payload.message === "pong") continue;
+            if (normalized.type === "connection_ready" && normalized.payload.message === "pong") {
+              ingestEvent(normalized); // The stream watermark also detects lost graph events.
+              continue;
+            }
             if (normalized.type === "card_library_updated") {
               void useCardLibrary.getState().refresh();
               void refreshWorld();
