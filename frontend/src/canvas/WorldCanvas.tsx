@@ -334,8 +334,10 @@ export function WorldCanvas() {
             };
           }
           if (live?.resizing) return { ...node, ...live };
-          // End with the canonical layout, not a synthetic animation frame.
-          if (eased === 1) return node;
+          // Commit canonical geometry without discarding React Flow's live
+          // selection. Updates can arrive mid-marquee; its membership cache
+          // will not reselect nodes whose selected flag we accidentally erase.
+          if (eased === 1) return { ...node, selected: live?.selected };
           const start = starts.get(node.id) ?? node.position;
           const previous=currentById.get(node.id);
           const outline=node.data.shadowOutline as {x:number;y:number}[]|undefined;
