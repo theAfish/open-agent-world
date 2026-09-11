@@ -44,11 +44,11 @@ export function ContainerFrame({ card, selected, className, label, header, child
   </section>;
 }
 
-export function ContainerActions({ card, busy = false, deleteLabel = `Delete ${card.name} and members` }: { card: WorldCard; busy?: boolean; deleteLabel?: string }) {
+export function ContainerActions({ card, busy = false, deleteLabel = `Delete ${card.name} and members`, releaseMode }: { card: WorldCard; busy?: boolean; deleteLabel?: string; releaseMode?:{active:boolean;toggle:()=>void} }) {
   const remove = useWorldStore((state) => state.deleteCards);
   const dissolve = useWorldStore((state) => state.dissolveContainer);
   return <>
-    <button className="secondary-button nodrag nopan" disabled={busy} title="Remove the container; keep members and their connections" onClick={() => void dissolve(card.id)}><Ungroup size={14} /> Dissolve</button>
+    <button className="secondary-button nodrag nopan" disabled={busy} aria-pressed={releaseMode?.active} title={releaseMode?"切换移出模式：开启后拖到阴影边缘移出成员":"Remove the container; keep members and their connections"} onClick={e=>{e.stopPropagation();if(releaseMode)releaseMode.toggle();else void dissolve(card.id);}}><Ungroup size={14} /> {releaseMode?(releaseMode.active?"完成移出":"移出成员"):"Dissolve"}</button>
     <button className="secondary-button nodrag nopan" disabled={busy} aria-label={deleteLabel} title="Delete the container and its members. Ctrl+Z to undo." onClick={() => void remove([card.id])}><Trash2 size={14} /></button>
   </>;
 }

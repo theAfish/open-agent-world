@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { useGenerationStore } from "../effects/generation";
+import { isShadow } from "./shadowCollection";
 import { persist } from "zustand/middleware";
 import { apiErrorMessage, normalizeCard, resourceContentUrl, worldApi, type CardCreateInput } from "../api/client";
 import type {
@@ -280,6 +281,7 @@ interface WorldState {
 
   initialize: () => Promise<void>;
   refreshWorld: () => Promise<void>;
+  acceptImportedCard: (card: WorldCard) => void;
   ensureChunks: (keys: string[]) => Promise<void>;
   setViewport: (viewport: FlowViewportState) => void;
   formLegionGroup: (nodeIds: string[]) => Promise<void>;
@@ -559,13 +561,18 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     try {
       const after = await worldApi.batchUpdateNodes(before.map((c, index) => ({ node_id: c.id, patch: {
         parent_id: parentId,
-        ...(group ? { position: { x: group.position.x + containerDefinition(group, get().catalog)!.content_inset[0] + 100 + (index % 2) * 310, y: group.position.y + containerDefinition(group, get().catalog)!.content_inset[1] + 40 + Math.floor(index / 2) * 200 } } : {}),
+        ...(group && !isShadow(group) ? { position: { x: group.position.x + containerDefinition(group, get().catalog)!.content_inset[0] + 100 + (index % 2) * 310, y: group.position.y + containerDefinition(group, get().catalog)!.content_inset[1] + 40 + Math.floor(index / 2) * 200 } } : {}),
       } })));
       markWorldMutation();
       set((state) => ({ cards: mergeCards(state.cards, after),
         undoStack: appendHistory(state.undoStack, { id: ++historySequence, kind: "cards-updated", label: parentId ? "Join container" : "Leave container", before, after, membership: true }), redoStack: [] }));
     } catch (error) { get().pushToast({ tone: "error", title: "Membership was not changed", detail: apiErrorMessage(error) }); }
   }),
+
+  acceptImportedCard: (card) => {
+    markWorldMutation();
+    set((state) => ({ cards: mergeCards(state.cards, [card]) }));
+  },
 
   createCard: (type, position, placement) => withHistoryTransaction(async () => {
     if (get().syncState === "offline") {

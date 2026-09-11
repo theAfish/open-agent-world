@@ -2,7 +2,7 @@ import { EquipmentToggle } from "./Equipment";
 import { ExecutionConfigurationBody } from "./ExecutionConfiguration";
 import { BarracksBody } from "./Barracks";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Maximize2, Minus, ExternalLink, Trash2, X } from "lucide-react";
+import { BookOpen, Maximize2, Minus, ExternalLink, Trash2, X } from "lucide-react";
 import { memo, type ComponentType, type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef } from "react";
 import { ConnectionHoverHint, clearConnectionHoverHint, updateConnectionHoverHint } from "./ConnectionHoverHint";
 import { IconButton } from "../components/IconButton";
@@ -25,6 +25,7 @@ import { useNodeActivity } from "../effects/useNodeActivity";
 import { useNodeGeneration } from "../effects/generation";
 import { PluginSurface } from "../plugins/PluginSurface";
 import { CatalogIcon } from "../components/CatalogIcon";
+import { useCollectionHover } from "../state/shadowCollection";
 
 const DRAG_THRESHOLD_PX = 5;
 const NON_DRAG_SELECTOR = "button, input, textarea, select, label, a, [contenteditable='true'], .react-flow__handle";
@@ -214,11 +215,11 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
               onClick={() => { dismissSurface(card.id); void deleteCard(card.id); }} label={`Remove ${card.name}`}
               title="Remove object (Ctrl+Z to undo)" /> : null}
             {support.workspace ? (
-              <button type="button" className="card-expand-button" onClick={() => {
+              <button type="button" className="card-expand-button" aria-label={definition?.traits.includes("library.readable") ? "打开阅读器" : "Open workspace"} title={definition?.traits.includes("library.readable") ? "打开阅读器" : "Open workspace"} onClick={() => {
                 if (definition?.traits.includes("library.readable")) cardRef.current?.dispatchEvent(new Event("oaw:expand-reader"));
                 else openWorkspace(card.id);
               }}>
-                {definition?.traits.includes("library.readable") ? "全屏显示" : "Open workspace"} <ExternalLink size={13} />
+                {definition?.traits.includes("library.readable") ? <BookOpen size={18}/> : <>Open workspace <ExternalLink size={13}/></>}
               </button>
             ) : null}
           </div>
@@ -228,4 +229,17 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
   );
 }
 
-export const WorldCardNode = memo(WorldCardNodeComponent);
+function CollectionAwareCard(props:NodeProps<CanvasNode>) {
+  const owner=props.data.collectionOwner as string|undefined;
+  const hovered=useCollectionHover(s=>owner?s.members[owner]:undefined);
+  const setHover=useCollectionHover(s=>s.set);
+  const cards=useWorldStore(s=>s.cards);
+  if(!owner)return <WorldCardNodeComponent {...props}/>;
+  const collection=cards.find(c=>c.id===owner);
+  const neighbor=hovered&&Math.abs(cards.filter(c=>c.parent_id===owner).findIndex(c=>c.id===hovered)-Number(props.data.stackIndex))===1;
+  return <div className={`shadow-stack-member ${hovered===props.id?"is-hovered":neighbor?"is-neighbor":""}`} onPointerEnter={()=>setHover(owner,props.id)} onPointerLeave={()=>setHover(owner)}>
+    <div className="shadow-stack-face" {...{inert:""}} aria-hidden="true"><WorldCardNodeComponent {...props}/></div>
+    <button className="nodrag nopan" disabled={Boolean(props.data.collectionFading)} aria-label={`展开集合 · ${props.data.card.name}`} onClick={e=>{e.stopPropagation();if(collection)void useWorldStore.getState().updateCard(owner,{config:{...collection.config,display_state:"expanded"}});}}/>
+  </div>;
+}
+export const WorldCardNode = memo(CollectionAwareCard);

@@ -16,11 +16,17 @@
 .library-reader-toolbar {display:flex;align-items:center;gap:12px;flex-shrink:0;}
 .library-reader-toolbar span {flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .library-reader-toolbar button {flex-shrink:0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:34px;height:34px;min-width:34px;min-height:34px;line-height:1;}
-.library-reader:modal {position:fixed;inset:0;width:100%;height:100%;padding:20px;background:var(--surface,#242622);color:var(--ink,#eee);visibility:visible;}
-.library-reader::backdrop {background:var(--surface,#242622);}
-.library-reader:modal {transition:background 180ms ease,box-shadow 180ms ease;}
-.library-reader:modal:has(.is-annotating) {background:color-mix(in srgb,var(--surface,#242622) 58%,transparent);backdrop-filter:blur(18px) saturate(125%);box-shadow:inset 0 0 0 1px #b4e3d166,inset 0 1px 40px #b4e3d118;}
-.library-reader:has(.is-annotating)::backdrop {background:#10191438;}
+.library-reader:modal {position:fixed;inset:0;width:100%;height:100%;padding:0;background:transparent;color:var(--ink,#eee);visibility:visible;}
+.library-reader::backdrop {background:transparent;}
+.library-reader-content {position:absolute;inset:0;box-sizing:border-box;padding:20px;display:flex;flex-direction:column;gap:8px;min-height:0;background:var(--surface,#242622);visibility:hidden;z-index:1;}
+.library-reader[data-entrance-phase="complete"]>.library-reader-content {visibility:visible!important;mask-image:none!important;filter:none!important;}
+.library-reader-glass {position:absolute;inset:0;z-index:0;pointer-events:none;background:transparent;mask-composite:add;opacity:0;}
+.library-reader .library-transition-cancel {position:absolute;z-index:3;right:20px;top:20px;width:34px;height:34px;}
+.library-reader-failure {position:absolute;z-index:2;inset:0;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;background:var(--surface,#242622);}
+.library-reader-failure p {flex-basis:100%;text-align:center;max-height:50vh;overflow:auto;overflow-wrap:anywhere;padding:24px;align-self:flex-end;}
+.library-reader-failure button {align-self:flex-start;}
+.library-reader[data-entrance-phase="complete"]>.library-reader-content:has(.is-annotating) {background:color-mix(in srgb,var(--surface,#242622) 58%,transparent);backdrop-filter:blur(18px) saturate(125%);box-shadow:inset 0 0 0 1px #b4e3d166;}
+.library-reader[data-entrance-phase="complete"]:has(.is-annotating)::backdrop {background:#10191438;}
 .is-annotating .library-page-scroll {background:color-mix(in srgb,#202321 45%,transparent);box-shadow:inset 0 0 0 1px #b4e3d12b;}
 @media(prefers-reduced-motion:reduce){.library-reader:modal{transition:none;}}
 .library-reader:modal .library-reader-toolbar button {padding:6px;border:1px solid var(--line,#56665f);border-radius:10px;background:var(--surface-raised,#36443d);color:inherit;}
@@ -102,3 +108,16 @@
 .library-annotation-tools button[aria-label="划词"] {box-sizing:border-box;width:33px;min-width:33px;padding-inline:6px;flex-shrink:0;}
 .library-annotation-tools button[aria-label="框选截图"],
 .library-annotation-tools button[aria-label="添加图片"] {box-sizing:border-box;width:34px;min-width:34px;padding-inline:6px;flex-shrink:0;}
+.library-magazine{display:flex;flex-direction:column;height:100%;min-height:0;gap:12px;overflow:hidden}
+.library-magazine h3,.library-magazine h4{margin:0;flex:none}
+.library-magazine h3{font-size:16px;line-height:1.4}
+.library-magazine-summary{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px;flex:none}
+.library-magazine-summary img{display:block;max-width:100%;height:158px;object-fit:contain;object-position:left top;border-radius:4px}
+.library-magazine-summary small{display:block;opacity:.65;font-size:11px;margin-top:5px}
+.library-magazine-stats{display:grid;gap:6px}
+.library-magazine-stats>div{padding:7px 12px;border:1px solid #ffffff18;border-radius:8px;background:#ffffff04}
+.library-magazine-stats strong{font-size:18px}
+.library-magazine-notes{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;user-select:text;padding-right:8px}
+.library-magazine-notes article{border-top:1px solid #ffffff18;padding:12px 0;font-size:12px;overflow-wrap:anywhere}
+.library-magazine-notes blockquote{margin:8px 0;padding-left:10px;border-left:2px solid #83b49b}
+.library-magazine-notes img{max-width:100%;height:auto}

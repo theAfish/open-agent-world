@@ -1,4 +1,5 @@
 import { BarracksContainerNode } from "./Barracks";
+import { ShadowCollectionNode } from "./ShadowCollection";
 import { PluginSurface } from "../plugins/PluginSurface";
 import type { NodeProps } from "@xyflow/react";
 import { Boxes } from "lucide-react";
@@ -10,6 +11,7 @@ import type { CanvasNode } from "./types";
 
 export function ContainerCardNode(props: NodeProps<CanvasNode>) {
   const catalog = useWorldStore((state) => state.catalog);
+  if(props.data.card.type==="core.shadow-collection")return <ShadowCollectionNode {...props}/>;
   const card = props.data.card;
   const definition = catalog.node_types.find((type) => type.id === card.type)!;
   if (definition.traits.includes("ui.agent-barracks.v1")) return <BarracksContainerNode {...props} />;

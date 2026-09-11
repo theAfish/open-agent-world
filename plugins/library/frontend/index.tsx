@@ -1,7 +1,13 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { FrontendPlugin, PluginViewProps } from "@oaw/plugin-api";
 import "./style.css";
 import type { ReadingValue } from "./PdfReading";
+import { useWorldStore } from "../../../frontend/src/state/worldStore";
+import { getNodeType } from "../../../frontend/src/state/catalog";
+import { useReaderEntrance } from "./useReaderEntrance";
+import { ReaderTransition } from "./GlassTransition";
+import { loadPaper, loadPaperPreview, rememberPaper, forgetPaper, type PaperPreview } from "./paperCache";
 const PdfReading = lazy(() => import("./PdfReading").then(module => ({default:module.PdfReading})));
 
 async function api(path: string, body?: unknown) {
@@ -13,17 +19,54 @@ function encoded(file: File): Promise<string> {
   return new Promise((resolve,reject) => { const reader=new FileReader(); reader.onerror=()=>reject(reader.error); reader.onload=()=>resolve(String(reader.result).split(",")[1]); reader.readAsDataURL(file); });
 }
 type Doc = {revision:number;value:ReadingValue & {thumbnail:string;notes:string}};
-function usePaper(id:string) {
+function usePaper(id:string,enabled=true) {
   const [doc,setDoc]=useState<Doc>(); const [error,setError]=useState("");
-  useEffect(()=>{let active=true; void api(`nodes/${id}/document`).then(d=>{if(active)setDoc(d);}).catch(e=>{if(active)setError(String(e));});return()=>{active=false;};},[id]);
+  useEffect(()=>{if(!enabled)return;let active=true; void loadPaper(id).then(d=>{if(active)setDoc(d);}).catch(e=>{if(active)setError(String(e));});return()=>{active=false;};},[id,enabled]);
+  useEffect(()=>{if(doc)rememberPaper(id,doc);},[id,doc]);
   return {doc,setDoc,error,setError};
 }
 function Thumbnail({card}:PluginViewProps) {
-  const {doc,error}=usePaper(card.id);
+  const [doc,setDoc]=useState<PaperPreview>(); const [error,setError]=useState("");
+  useEffect(()=>{let active=true;void loadPaperPreview(card.id).then(value=>{if(active){setDoc(value);setError("");}}).catch(e=>{if(active)setError(String(e));});return()=>{active=false;};},[card.id,card.updated_at]);
   return <div className="library-paper-thumb">{doc?.value.thumbnail&&<img draggable={false} src={doc.value.thumbnail} alt="PDF cover"/>}<div><strong>{card.name}</strong><p>{String(card.config.authors??"")} {String(card.config.year??"")}</p><small>{doc?.value.pages??0} 页 · {error||"PDF"}</small></div></div>;
 }
-function Reader({card}:PluginViewProps) {
-  const {doc,setDoc,error,setError}=usePaper(card.id);
+function Reader(props:PluginViewProps) {
+  // CardFrame mounts both preview and body. CSS-hidden bodies must not load PDFs.
+  return props.level === "inspector" || props.level === "workspace" ? <PaperMagazine {...props}/> : null;
+}
+function PaperMagazine(props:PluginViewProps) {
+  const {card}=props;
+  const root=useRef<HTMLDivElement>(null);
+  const [open,setOpen]=useState(false);
+  const [attempt,setAttempt]=useState(0);
+  const [summary,setSummary]=useState<PaperPreview & {value:{annotations:NonNullable<ReadingValue["annotations"]>;page:number}}>();
+  const [error,setError]=useState("");
+  const cards=useWorldStore(s=>s.cards), edges=useWorldStore(s=>s.edges), catalog=useWorldStore(s=>s.catalog);
+  const connected=new Set(edges.flatMap(e=>e.source===card.id?[e.target]:e.target===card.id?[e.source]:[]));
+  const agents=cards.filter(c=>connected.has(c.id)&&getNodeType(catalog,c.type)?.traits.includes("core.agent")).length;
+  useEffect(()=>{let active=true;void api(`library/papers/${card.id}/preview?details=true`).then(d=>{if(active){setSummary(d);setError("");}}).catch(e=>{if(active)setError(String(e));});return()=>{active=false;};},[card.id,card.updated_at,open]);
+  useEffect(()=>{const el=root.current?.closest(".world-card");const expand=()=>setOpen(true);el?.addEventListener("oaw:expand-reader",expand);return()=>el?.removeEventListener("oaw:expand-reader",expand);},[]);
+  const annotations=summary?.value.annotations??[];
+  return <div ref={root} className="library-magazine nodrag nopan nowheel">
+    <h3>{card.name}</h3>
+    {error&&<p role="alert">{error}</p>}
+    <div className="library-magazine-summary">
+      <div>{summary?.value.thumbnail?<img src={summary.value.thumbnail} alt="论文封面快照" draggable={false}/>:<p>尚未导入 PDF</p>}<small>{summary?.value.pages??0} 页 · 封面快照</small></div>
+      <div className="library-magazine-stats">{[[agents,"连接 Agent"],[annotations.length,"批注"],[annotations.filter(a=>a.learning).length,"学习卡片"]].map(([n,label])=><div key={label}><strong>{n}</strong><small>{label}</small></div>)}</div>
+    </div>
+    <h4>批注 · {annotations.length}</h4>
+    <div className="library-magazine-notes nowheel" tabIndex={0} aria-label="批注列表" onWheel={e=>e.stopPropagation()}>
+      {annotations.length?annotations.map(a=><article key={a.id}><small>第 {a.page} 页{a.title?` · ${a.title}`:""}</small>{a.image&&<img src={a.image} alt="截图批注"/>}{a.text&&<blockquote>{a.text}</blockquote>}{a.translation&&<p>{a.translation}</p>}{a.comment&&<p>{a.comment}</p>}</article>):<p>暂无批注</p>}
+    </div>
+    {open&&<ActiveReader key={attempt} {...props} onRetry={()=>setAttempt(n=>n+1)} onClose={()=>setOpen(false)}/>}
+  </div>;
+}
+export function ActiveReader({card,onClose,onRetry}:PluginViewProps & {onClose:()=>void;onRetry:()=>void}) {
+  const {phase,mountReader,failure,reduced,markReady,invalidate,fail,finish,cancel}=useReaderEntrance();
+  const {doc,setDoc,error}=usePaper(card.id,mountReader);
+  const contentRef=useRef<HTMLDivElement>(null);
+  useEffect(()=>{if(contentRef.current)contentRef.current.inert=phase!=="complete";},[phase]);
+  useEffect(()=>{if(error)fail(error);else if(doc&&!doc.value.pdf)fail("此节点尚未导入 PDF。");},[doc,error,fail]);
   const latest=useRef(doc); latest.current=doc;
   const writes=useRef<Promise<void>>(Promise.resolve());
   function updateDocument(args:Record<string,unknown>){
@@ -32,20 +75,29 @@ function Reader({card}:PluginViewProps) {
     });writes.current=next;return next;
   }
   const readerRef=useRef<HTMLDialogElement>(null);
-  const [fullscreen,setFullscreen]=useState(false);
+  const fullscreen=true;
   const [settingsOpen,setSettingsOpen]=useState(false);
-  function resizeReader(expanded:boolean){const reader=readerRef.current;if(!reader)return;reader.close();if(expanded)reader.showModal();else reader.show();setFullscreen(expanded);}
-  useEffect(()=>{const cardElement=readerRef.current?.closest(".world-card");const expand=()=>resizeReader(true);cardElement?.addEventListener("oaw:expand-reader",expand);return()=>cardElement?.removeEventListener("oaw:expand-reader",expand);},[]);
+  const closed=useRef(false);
+  useEffect(()=>{if(phase==="cancelled"&&!closed.current){closed.current=true;void writes.current.catch(()=>{}).then(onClose);}},[phase,onClose]);
+  function resizeReader(_expanded:boolean){cancel();}
+  useEffect(()=>{readerRef.current?.showModal();return()=>readerRef.current?.close();},[]);
   useEffect(()=>{const escape=(e:KeyboardEvent)=>{if(e.key==="Escape"&&readerRef.current?.matches(":modal")){if(readerRef.current.querySelector(".library-selection-popup, .library-edit-backdrop"))return;e.preventDefault();e.stopImmediatePropagation();resizeReader(false);}};window.addEventListener("keydown",escape,true);return()=>window.removeEventListener("keydown",escape,true);},[]);
-  return <dialog open ref={readerRef} aria-label={card.name} className="library-reader nodrag nopan nowheel" onCancel={e=>{e.preventDefault();resizeReader(false);}}>
+  return createPortal(<dialog ref={readerRef} aria-label={card.name} data-entrance-phase={phase} className="library-reader nodrag nopan nowheel" onCancel={e=>{e.preventDefault();resizeReader(false);}}>
+    {["spreading","waiting","revealing","concealing","retracting"].includes(phase)&&<ReaderTransition phase={phase} reduced={reduced} content={contentRef} onComplete={finish}/>}
+    {phase!=="complete"&&<button className="library-transition-cancel" disabled={["concealing","retracting","cancelled"].includes(phase)} aria-label="返回窗口" title="返回窗口" onClick={()=>resizeReader(false)}>↶</button>}
+    {phase==="failed"&&<div className="library-reader-failure" role="alert"><p>{failure}</p>
+      {doc&&!doc.value.pdf&&<label>导入 PDF<input type="file" accept=".pdf" onChange={async event=>{const file=event.target.files?.[0];if(!file)return;try{const updated=await api(`nodes/${card.id}/actions/import`,{arguments:{filename:file.name,pdf:await encoded(file)},expected_revision:doc.revision});rememberPaper(card.id,updated);onRetry();}catch(error){fail(String(error));}}}/></label>}
+      <button onClick={()=>{forgetPaper(card.id);onRetry();}}>重试</button><button onClick={()=>resizeReader(false)}>返回窗口</button></div>}
+    <div ref={contentRef} className="library-reader-content" aria-hidden={phase!=="complete"}>
     <div className="library-reader-toolbar">
       <span title={card.name}>{card.name}</span>
       {doc?.value.pdf&&<button type="button" aria-label="Library 设置" title="Library 设置" aria-expanded={settingsOpen} onClick={()=>setSettingsOpen(open=>!open)}>⚙</button>}
       {fullscreen&&<button type="button" aria-label="返回窗口" title="返回窗口" onClick={()=>resizeReader(false)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 4-5 5 5 5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>}
     </div>
     {error&&<p role="alert">{error}</p>}
-    {doc?.value.pdf?<Suspense fallback={<p>正在加载阅读器…</p>}><PdfReading value={doc.value} save={updateDocument} fullscreen={fullscreen} settingsOpen={settingsOpen} setSettingsOpen={setSettingsOpen}/></Suspense>:<p>从 Library 导入 PDF，或选择文件：<input type="file" accept=".pdf" onChange={async e=>{const f=e.target.files?.[0];if(!f||!doc)return;try{setDoc(await api(`nodes/${card.id}/actions/import`,{arguments:{filename:f.name,pdf:await encoded(f)},expected_revision:doc.revision}));}catch(err){setError(String(err));}}}/></p>}
-  </dialog>;
+    {doc?.value.pdf&&mountReader&&phase!=="failed"&&<Suspense fallback={null}><PdfReading onReady={markReady} onPreparing={invalidate} onLoadError={fail} value={doc.value} save={updateDocument} fullscreen={fullscreen} settingsOpen={settingsOpen} setSettingsOpen={setSettingsOpen}/></Suspense>}
+    </div>
+  </dialog>,document.body);
 }
 function Region({card,host}:PluginViewProps) {
   const [message,setMessage]=useState(""); const [busy,setBusy]=useState(false);

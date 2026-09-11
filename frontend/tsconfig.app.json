@@ -19,6 +19,7 @@
       "@oaw/plugin-api": ["./src/plugins/sdk.ts"],
       "pdfjs-dist": ["./node_modules/pdfjs-dist"],
       "react": ["./node_modules/@types/react"],
+      "react-dom": ["./node_modules/@types/react-dom"],
       "react/*": ["./node_modules/@types/react/*"]
     }
   },

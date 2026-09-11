@@ -1,0 +1,43 @@
+.react-flow__node.shadow-flow-node { pointer-events:none; background:none; }
+.shadow-collection.container-frame { position:relative;pointer-events:none;border:0;border-radius:0;background:none;box-shadow:none;overflow:visible;min-width:0;min-height:0;transition:width 400ms ease,height 400ms ease; }
+.shadow-collection .shadow-silhouette {position:absolute;inset:0;pointer-events:none;overflow:visible;}
+.shadow-core {fill:#2a2a27;fill-opacity:.9;stroke:#77766e;stroke-opacity:.18;stroke-width:1;pointer-events:fill;cursor:grab;transition:d 450ms ease,transform 300ms ease;}
+.shadow-feather {fill:#111210;fill-opacity:.85;pointer-events:none;transition:d 450ms ease,transform 300ms ease;}
+.shadow-collection.is-selected .shadow-core {stroke:#c28c70;stroke-opacity:.24;}
+.shadow-core {filter:blur(3px);}
+.shadow-collection[data-member-drop] {outline:0!important;box-shadow:none!important;}
+.shadow-collection[data-member-drop]::after {display:none;}
+.shadow-collection[data-member-drop-side=left] .shadow-silhouette {transform:scaleX(1.035);transform-origin:right;}
+.shadow-collection[data-member-drop-side=right] .shadow-silhouette {transform:scaleX(1.035);transform-origin:left;}
+.shadow-collection[data-member-drop-side=top] .shadow-silhouette {transform:scaleY(1.035);transform-origin:bottom;}
+.shadow-collection[data-member-drop-side=bottom] .shadow-silhouette {transform:scaleY(1.035);transform-origin:top;}
+.shadow-silhouette {transition:transform 150ms ease;}
+.shadow-counts {position:absolute;top:24px;left:50%;transform:translateX(-50%);display:flex;gap:23px;pointer-events:auto;cursor:grab;color:#dfddd6;font-size:15px;}
+.shadow-counts span {display:flex;gap:9px;align-items:center;white-space:nowrap;}
+.shadow-counts span:last-child svg {color:#77aaa0;}
+.shadow-collection[data-state=minimal] .shadow-counts {top:32px;flex-direction:column;gap:15px;}
+.shadow-close {position:absolute;right:22px;top:16px;width:36px;height:36px;border:0;border-radius:50%;background:#30302c;box-shadow:0 0 15px 8px #272825;color:#dca991;pointer-events:auto;display:grid;place-items:center;}
+.shadow-title {position:absolute;bottom:18px;left:32px;right:32px;min-height:34px;font-size:13px;line-height:17px;text-align:center;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;opacity:0;transform:translateY(4px);transition:opacity 150ms,transform 150ms;}
+.shadow-title.is-visible {opacity:1;transform:translateY(0);}
+.shadow-actions {position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:8px;pointer-events:auto;}
+.shadow-port.react-flow__handle {pointer-events:auto;width:12px;height:12px;border:2px solid #95968b;background:#30332d;opacity:0;transition:opacity 150ms;}
+.shadow-collection:hover .shadow-port,.shadow-collection.is-selected .shadow-port,.react-flow.connecting .shadow-port {opacity:1;}
+.shadow-stack-member {position:relative;width:100%;height:100%;transition:transform 150ms ease;}
+.shadow-stack-face {pointer-events:none;height:100%;}
+.shadow-stack-member>button {position:absolute;inset:0;width:100%;height:100%;border:0;background:transparent;border-radius:24px;cursor:pointer;pointer-events:auto;}
+.shadow-stack-member.is-hovered {transform:translateY(-4px) rotate(2deg);}
+.shadow-stack-member.is-neighbor {transform:translateY(-2px) rotate(1deg);}
+@media(prefers-reduced-motion:reduce){.shadow-collection *,.shadow-stack-member{transition:none!important;transform:none!important;}.shadow-counts,.shadow-actions{transform:translateX(-50%)!important;}}
+.shadow-collection.container-frame {transition-duration:var(--shadow-collapse-ms);}
+.shadow-core,.shadow-feather {transition-duration:var(--shadow-expand-ms),var(--shadow-absorb-ms);}
+.shadow-stack-member,.shadow-title,.shadow-silhouette,.shadow-port.react-flow__handle {transition-duration:var(--shadow-hover-ms);}
+.shadow-stack-member.is-hovered {transform:translateY(calc(-1 * var(--shadow-hover-px))) rotate(var(--shadow-hover-deg));}
+.shadow-collection.container-frame {transition:none;}
+.shadow-core,.shadow-feather {transition:transform var(--shadow-absorb-ms) ease;}
+/* Source-over compensation: a_shader=.9*s, a_core=.9*(1-s)/(1-.9*s),
+   hence combined interior alpha remains .9 throughout the transition. */
+.shadow-core {fill-opacity:calc(.9 * (1 - var(--gas-strength,0)) / (1 - .9 * var(--gas-strength,0)));}
+.shadow-feather {opacity:calc(1 - var(--gas-strength,0));}
+.shadow-collection.is-releasing .shadow-core {stroke-opacity:0;}
+@media(prefers-reduced-motion:reduce){.shadow-collection.is-releasing .shadow-core{fill-opacity:.9;}.shadow-collection.is-releasing .shadow-feather{opacity:1;}}
+.shadow-actions button[aria-pressed=true] {border-color:#d7a181;color:#efbb97;background:#534238;}

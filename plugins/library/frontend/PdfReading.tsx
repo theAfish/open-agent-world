@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from "pdfjs-dist";
 import { PdfPageSurface } from "./PdfPageSurface";
+import { decodePdf } from "./decodePdf";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "pdfjs-dist/web/pdf_viewer.css";
 import { useLibrarySettings } from "../../../frontend/src/state/librarySettings";
@@ -18,7 +19,7 @@ async function request(path:string, init?:RequestInit) {
   return data;
 }
 
-export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettingsOpen}:{value:ReadingValue;save:(args:Record<string,unknown>)=>Promise<void>;fullscreen?:boolean;settingsOpen:boolean;setSettingsOpen:(open:boolean)=>void}) {
+export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettingsOpen,onReady,onPreparing,onLoadError}:{value:ReadingValue;save:(args:Record<string,unknown>)=>Promise<void>;fullscreen?:boolean;settingsOpen:boolean;setSettingsOpen:(open:boolean)=>void;onReady?:()=>void;onPreparing?:()=>void;onLoadError?:(error:string)=>void}) {
   const [pdf,setPdf]=useState<PDFDocumentProxy>();
   const [page,setPage]=useState(value.page);
   const [continuous,setContinuous]=useState(false);
@@ -32,6 +33,10 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
   const [comment,setComment]=useState("");
   const [translation,setTranslation]=useState("");
   const [error,setError]=useState("");
+  const loadError=useRef(onLoadError);loadError.current=onLoadError;
+  const [fitted,setFitted]=useState(false);
+  const [fitVersion,setFitVersion]=useState(0);
+  const pageSize=useRef<{width:number;height:number}>();
   const [busy,setBusy]=useState(false);
   const [saving,setSaving]=useState(false);
   const reading=useRef<HTMLDivElement>(null);
@@ -117,10 +122,12 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
   },[selection]);
 
   useEffect(()=>{
-    let active=true;
-    const task=getDocument({data:Uint8Array.from(atob(value.pdf),c=>c.charCodeAt(0)),isEvalSupported:false});
-    void task.promise.then(async doc=>{if(active){setPdf(doc);const items=await doc.getOutline();if(active)setOutline(items??[]);}}).catch(e=>{if(active)setError(String(e));});
-    return()=>{active=false;void task.destroy();};
+    const abort=new AbortController();let task:ReturnType<typeof getDocument>|undefined;
+    void decodePdf(value.pdf,abort.signal).then(data=>{
+      if(abort.signal.aborted)return;
+      task=getDocument({data,isEvalSupported:false});return task.promise;
+    }).then(async doc=>{if(doc&&!abort.signal.aborted){setPdf(doc);const items=await doc.getOutline();if(!abort.signal.aborted)setOutline(items??[]);}}).catch(e=>{if(!abort.signal.aborted){setError(String(e));loadError.current?.(String(e));}});
+    return()=>{abort.abort();void task?.destroy();};
   },[value.pdf]);
   function jumpToPage(next:number){requestAnimationFrame(()=>{const el=scroll.current?.querySelector<HTMLElement>(`[data-pdf-page="${next}"]`);if(el&&scroll.current){const box=scroll.current.getBoundingClientRect();scroll.current.scrollTop+=(el.getBoundingClientRect().top-box.top)/(box.height/scroll.current.offsetHeight);}});}
   useEffect(()=>{
@@ -129,12 +136,18 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
     let size:{width:number;height:number}|undefined;
     const fit=()=>{if(!active||!size||el.clientWidth<40||el.clientHeight<40)return;
       const next=Math.max(.1,Math.min(3,(el.clientWidth-32)/size.width,(el.clientHeight-24)/size.height));
+      pageSize.current=size;setFitted(true);setFitVersion(v=>v+1);onPreparing?.();
       setScale(current=>Math.abs(current-next)>.002?next:current);
     };
-    void pdf.getPage(page).then(p=>{size=p.getViewport({scale:1});fit();}).catch(e=>{if(active)setError(String(e));});
+    void pdf.getPage(page).then(p=>{size=p.getViewport({scale:1});fit();}).catch(e=>{if(active){setError(String(e));loadError.current?.(String(e));}});
     const observer=new ResizeObserver(fit);observer.observe(el);
     return()=>{active=false;observer.disconnect();};
-  },[pdf,page,autoFit,studyOpen,fullscreen]);
+  },[pdf,page,autoFit,studyOpen,fullscreen,onPreparing]);
+  function renderedPage(renderedScale:number){
+    const el=scroll.current,size=pageSize.current;if(!el||!size)return;
+    const expected=autoFit?Math.max(.1,Math.min(3,(el.clientWidth-32)/size.width,(el.clientHeight-24)/size.height)):scale;
+    if(Math.abs(expected-renderedScale)<=.002)onReady?.();
+  }
   useEffect(()=>{
     if(studyOpen||value.page===page)return;
     const timer=setTimeout(()=>{void save({page}).catch(e=>setError(String(e)));},650);
@@ -191,7 +204,7 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
       const top=scroll.current.getBoundingClientRect().top;
       const el=Array.from(scroll.current.querySelectorAll<HTMLElement>("[data-pdf-page]")).find(el=>el.getBoundingClientRect().bottom>top+80);
       if(el)setPage(Number(el.dataset.pdfPage));
-    }}>{pdf&&(continuous?Array.from({length:value.pages},(_,i)=>i+1):[page]).map(pageNumber=><PdfPageSurface key={pageNumber} pdf={pdf} number={pageNumber} scale={scale} onPointerDownCapture={e=>{
+    }}>{pdf&&fitted&&(continuous?Array.from({length:value.pages},(_,i)=>i+1):[page]).map(pageNumber=><PdfPageSurface key={pageNumber} pdf={pdf} number={pageNumber} scale={scale} layoutVersion={fitVersion} onReady={pageNumber===page?renderedPage:undefined} onPreparing={pageNumber===page?onPreparing:undefined} onLoadError={onLoadError} onPointerDownCapture={e=>{
       sheet.current=e.currentTarget;canvas.current=e.currentTarget.querySelector("canvas");layer.current=e.currentTarget.querySelector(".textLayer");setPage(pageNumber);
     }} onMouseDown={()=>{if(!busy&&!saving)dismissSelection();}} onMouseUp={selectText} onKeyUp={e=>{if(e.shiftKey)selectText();}} onClick={e=>{
       if(window.getSelection()?.toString())return;const b=e.currentTarget.getBoundingClientRect(),x=(e.clientX-b.left)/b.width,y=(e.clientY-b.top)/b.height;

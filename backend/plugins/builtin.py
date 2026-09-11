@@ -1023,6 +1023,8 @@ class CorePlugin:
     )
 
     def register(self, registration: PluginRegistration) -> None:
+        from backend.plugins.shadow_collection import register_shadow_collection
+        register_shadow_collection(registration)
         _register_builtin(registration)
 
 
