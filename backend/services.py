@@ -535,6 +535,9 @@ class ApplicationServices:
     card_library: CardLibraryStore
     _sandbox_commands: dict[str, dict] = field(default_factory=dict, init=False, repr=False)
     _sandbox_stopping: set[str] = field(default_factory=set, init=False, repr=False)
+    # Short-lived desktop review requests. Restart expires them; approval never
+    # becomes a durable grant or an Agent tool argument.
+    _minister_proposals: dict[str, dict] = field(default_factory=dict, init=False, repr=False)
     _execution_secrets: ContextVar[tuple[str, ...]] = field(
         default_factory=lambda: ContextVar("execution_secrets", default=()), init=False, repr=False)
     run_manager: RunManager | None = None
@@ -574,10 +577,10 @@ class ApplicationServices:
         from backend.security.execution_credentials import ExecutionCredentialStore
         return ExecutionCredentialStore(self.llm_settings, self.world)
 
-    def canvas_control(self, actor_id: str, authorize: Callable[[str], CanvasScope | None]) -> CanvasControl:
+    def canvas_control(self, actor_id: str, authorize: Callable[[str], CanvasScope | None], *, review=None) -> CanvasControl:
         """Bind a host-owned, live scope resolver to an automated caller."""
         from backend.canvas_control import CanvasControl
-        return CanvasControl(self, actor_id, authorize)
+        return CanvasControl(self, actor_id, authorize, review=review)
 
     @asynccontextmanager
     async def _node_mutation(self, *, read_only: bool = False):
@@ -886,7 +889,9 @@ class ApplicationServices:
             if request.config is not None:
                 self.resources.artifacts.assert_source_idle(card_id)
             current = self.world.get_card(card_id)
-            if self.world.is_container(current) and request.position is not None:
+            from backend.canvas_glue import read_glue
+            if ((self.world.is_container(current) and request.position is not None)
+                    or (request.position is not None or request.size is not None) and card_id in read_glue(self)['boxes']):
                 return (await self.update_cards([CardBatchPatch(node_id=card_id, patch=request)]))[0]
             updated = self.world.preview_update_card(card_id, request)
             self._validate_membership_change(current, updated)
@@ -921,7 +926,8 @@ class ApplicationServices:
 
     def expand_card_updates(self, updates: list[CardBatchPatch]) -> list[CardBatchPatch]:
         """Resolve implicit descendant movement before validation or persistence."""
-        updates = list(updates)
+        from backend.canvas_glue import expand_glued_updates
+        updates = expand_glued_updates(self, updates)
         explicit = {item.node_id: item.patch.position for item in updates if item.patch.position is not None}
         requested = {item.node_id for item in updates}
         for member in self.world.list_cards():
@@ -1579,27 +1585,32 @@ class ApplicationServices:
 
     async def form_legion_group(self, name: str, node_ids: list[str]) -> list[Card]:
         async with self._node_mutation():
+            request = self.preview_legion_group(name, node_ids)
             cards = [self.world.get_card(node_id) for node_id in dict.fromkeys(node_ids)]
-            if not cards or any(c.type == "legion" or c.parent_id for c in cards):
-                raise GraphValidationError("Select ungrouped member cards to form a Legion")
-            x = min(c.position.x for c in cards) - 480
-            y = min(c.position.y for c in cards) - 90
-            width = max(1100, max(c.position.x + c.size.width for c in cards) - x + 60)
-            height = max(700, max(c.position.y + c.size.height for c in cards) - y + 60)
-            if width > 4096 or height > 4096:
-                raise GraphValidationError("Move the selected cards closer together before grouping")
-            group_id = str(uuid4())
             for card in cards:
-                self._validate_membership_change(card, card.model_copy(update={"parent_id": group_id}))
+                self._validate_membership_change(card, card.model_copy(update={"parent_id": request.id}))
             with self.world.database.transaction(immediate=True) as connection:
-                group = self.world.create_card(CardCreate(id=group_id, type="legion", name=name,
-                    position={"x": x, "y": y}, size={"width": width, "height": height}), _connection=connection)
+                group = self.world.create_card(request, _connection=connection)
                 members = self.world.update_cards([CardBatchPatch(node_id=c.id, patch=CardPatch(parent_id=group.id)) for c in cards], _connection=connection)
             self._publish_card_created_nowait(group)
             for member in members:
                 await self.events.publish(EventType.CARD_UPDATED, node_id=member.id,
                                           payload={"node": self.enrich_card(member).model_dump(mode="json")})
             return [group, *[self.enrich_card(m) for m in members]]
+
+    def preview_legion_group(self, name: str, node_ids: list[str]) -> CardCreate:
+        """Use the same existing group geometry for review and commit."""
+        cards = [self.world.get_card(node_id) for node_id in dict.fromkeys(node_ids)]
+        if not cards or any(c.type == "legion" or c.parent_id for c in cards):
+            raise GraphValidationError("Select ungrouped member cards to form a Legion")
+        x = min(c.position.x for c in cards) - 480
+        y = min(c.position.y for c in cards) - 90
+        width = max(1100, max(c.position.x + c.size.width for c in cards) - x + 60)
+        height = max(700, max(c.position.y + c.size.height for c in cards) - y + 60)
+        if width > 4096 or height > 4096:
+            raise GraphValidationError("Move the selected cards closer together before grouping")
+        return CardCreate(id=str(uuid4()), type="legion", name=name,
+            position={"x": x, "y": y}, size={"width": width, "height": height})
 
     async def capture_legion(self, request: LegionCapture) -> LegionSummary:
         # Commands may mutate read-write hard links before their resource

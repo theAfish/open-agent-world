@@ -22,6 +22,19 @@ from backend.world.models import (
 
 
 router = APIRouter(tags=["world"])
+from backend.canvas_glue import GluePatch, read_glue, patch_glue
+
+
+@router.get("/canvas/glue")
+async def get_glue(services: ApplicationServices = Depends(get_services)):
+    async with services._node_mutation(read_only=True):
+        return read_glue(services)
+
+
+@router.patch("/canvas/glue")
+async def update_glue(request: GluePatch, services: ApplicationServices = Depends(get_services)):
+    async with services._node_mutation():
+        return patch_glue(services, request)
 _CHUNK = re.compile(r"^(-?\d+):(-?\d+)$")
 
 

@@ -33,6 +33,10 @@ def _validate_tool_request(model: type[BaseModel], arguments):
 class _CapabilityContext:
     services: ApplicationServices
 
+    async def minister_action(self, capability, arguments):
+        from backend.minister import invoke
+        return await invoke(self.services, capability, arguments)
+
     async def read_file_preview(self, capability, arguments):
         from pydantic import TypeAdapter
         from backend.file_preview import FileReference, read_file

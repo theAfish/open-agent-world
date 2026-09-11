@@ -658,7 +658,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     const finalPosition = position ?? viewportCenterToWorld(get().viewport);
     const draft = buildCardDraft(type, finalPosition, definition);
     const defaultModel = get().modelCatalog.default_model ?? (!get().modelCatalog.revision ? get().modelSettings.models[0] : undefined);
-    const configuredDraft = type === "agent" && defaultModel
+    const configuredDraft = definition.traits.includes("core.agent") && defaultModel
       ? { ...draft, config: { ...draft.config, model: defaultModel } }
       : draft;
     set({ syncState: "syncing" });
@@ -684,7 +684,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       get().pushToast({
         tone: "success",
         title: `${card.name} placed`,
-        detail: "Drag its ports to define a real capability.",
+        detail: card.type === "core.minister" ? "Open the circle to talk or adjust its control radius." : "Drag its ports to define a real capability.",
       });
       return card;
     } catch (error) {

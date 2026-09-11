@@ -1,5 +1,5 @@
 import { GlueLayer } from "./GlueLayer";
-import { findGlue, glueGroup, reflowGlueSurfaces, useGlueStore, type GlueBox, type GlueCandidate } from "../state/glue";
+import { findGlue, glueGroup, reflowGlueSurfaces, refreshGlue, cancelGlueRefresh, persistGlue, useGlueStore, type GlueBox, type GlueCandidate } from "../state/glue";
 import { MapAtlas } from "./MapAtlas";
 import {
   Background,
@@ -20,7 +20,7 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { worldApi } from "../api/client";
+import { apiErrorMessage, worldApi } from "../api/client";
 import { transformationOptions } from "./documentTransformations";
 import { EquipmentCardNode, EquipmentPanelNode } from "../cards/Equipment";
 import { equipmentOriginId, equipmentSurfaceNodes } from "./equipmentLayout";
@@ -29,6 +29,7 @@ import { canEquip, equipmentOwner, useEquipmentDrag, useEquipmentPanel } from ".
 import { ContainerCardNode } from "../cards/ContainerCard";
 import { ancestors, containerDefinition, containerDisplayOwners, containerShowsWorkspace, containerSizes, dropContainer, isContainer, memberSurfacePosition, parentFirst, resizeContainerLayout } from "../state/containers";
 import { WorldCardNode } from "../cards/CardFrame";
+import { MinisterNode, MINISTER_TYPE } from "../cards/Minister";
 import type { CanvasNode, CanvasNodeData } from "../cards/types";
 import { EdgeInspector } from "../edges/EdgeInspector";
 import { RelationshipConnectionLine } from "../edges/RelationshipConnectionLine";
@@ -50,7 +51,7 @@ import {
   type SurfaceObstacle,
 } from "./nodeDisplacement";
 
-const nodeTypes = { worldCard: WorldCardNode, container: ContainerCardNode, equipment: EquipmentCardNode, equipmentPanel: EquipmentPanelNode };
+const nodeTypes = { worldCard: WorldCardNode, minister: MinisterNode, container: ContainerCardNode, equipment: EquipmentCardNode, equipmentPanel: EquipmentPanelNode };
 const edgeTypes = { semantic: SemanticEdge };
 
 function isScrollableArea(target: EventTarget | null, boundary: HTMLElement): boolean {
@@ -72,7 +73,7 @@ function nodeFromCard(
   position: ReturnType<typeof useWorldStore.getState>["cards"][number]["position"],
   windowSize?: SurfaceSize,
 ): CanvasNode {
-  const size = windowSize ?? NODE_SURFACE_SIZE[surfaceLevel];
+  const size = windowSize ?? (surfaceLevel === 'node' ? card.size : NODE_SURFACE_SIZE[surfaceLevel]);
   return {
     id: card.id,
     type: "worldCard",
@@ -96,6 +97,8 @@ export function WorldCanvas() {
   const [gluePreview, setGluePreview] = useState<GlueCandidate>();
   const storedGlueBoxes = useGlueStore(s => s.boxes);
   const glueBonds = useGlueStore(s => s.bonds);
+  const glueEvent = useWorldStore(s => s.events.find(event => event.type.startsWith('state_') || event.type.startsWith('card_'))?.id);
+  const glueSocket = useWorldStore(s => s.socketState);
   const glueDrag = useRef<{ origin: { x: number; y: number }; boxes: Record<string, GlueBox>; latest: Record<string, GlueBox>; candidate?: GlueCandidate }>();
   const wrapper = useRef<HTMLDivElement>(null);
   const clipboardTask = useRef<Promise<unknown>>(Promise.resolve());
@@ -115,6 +118,12 @@ export function WorldCanvas() {
   const connectingNodeId = useNodeSurfaceStore((state) => state.connectingNodeId);
   const dragging = useNodeSurfaceStore((state) => state.dragging);
   const setDragging = useNodeSurfaceStore((state) => state.setDragging);
+  useEffect(() => {
+    if (dragging) return;
+    const timer = window.setTimeout(() => void refreshGlue(true).catch(reason =>
+      useWorldStore.getState().pushToast({ tone: 'error', title: 'Glue could not synchronize', detail: apiErrorMessage(reason) })), 120);
+    return () => window.clearTimeout(timer);
+  }, [glueEvent, glueSocket, dragging]);
   const closeInspector = useNodeSurfaceStore((state) => state.closeInspector);
   const closeWorkspace = useNodeSurfaceStore((state) => state.closeWorkspace);
   const dismissSurface = useNodeSurfaceStore((state) => state.dismiss);
@@ -145,7 +154,7 @@ export function WorldCanvas() {
   );
   const surfaceLevels = useMemo(() => new Map(renderCards.map((card) => [
     card.id,
-    surfaceLevelForNode(card.id, surfaceLevelsByNodeId),
+    card.type === MINISTER_TYPE ? "node" : surfaceLevelForNode(card.id, surfaceLevelsByNodeId),
   ])), [renderCards, surfaceLevelsByNodeId]);
   const glueBoxes = useMemo(() => reflowGlueSurfaces(storedGlueBoxes, glueBonds, surfaceLevels, workspaceSizes),
     [storedGlueBoxes, glueBonds, surfaceLevels, workspaceSizes]);
@@ -154,7 +163,7 @@ export function WorldCanvas() {
     useGlueStore.getState().setLayout(glueBoxes);
     void updateCardPositions(Object.entries(glueBoxes).filter(([id, box]) => box !== storedGlueBoxes[id]).map(([id, box]) => ({
       id, position: nodePositionFromSurfacePosition(box, box.level),
-    })));
+    }))).then(() => persistGlue()).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: 'Glue layout needs a retry', detail: apiErrorMessage(reason) }));
   }, [glueBoxes, storedGlueBoxes, updateCardPositions]);
   const surfaceObstacles = useMemo<SurfaceObstacle[]>(() => renderCards.flatMap<SurfaceObstacle>((card) => {
     if (isContainer(card, catalog) || card.parent_id || card.equipment) return [];
@@ -174,6 +183,13 @@ export function WorldCanvas() {
       const level = surfaceLevels.get(card.id) ?? "preview";
       const displaced = displacedById.get(card.id);
       let node = nodeFromCard(card, level, displaced?.displaced ?? false, displaced?.position ?? card.position, level === "workspace" ? workspaceSizes[card.id] : undefined);
+      if (card.type === MINISTER_TYPE) {
+        // The chat opens beside the orb; its world position and radius never shift.
+        node = { ...node, type: "minister", position: card.position, data: { ...node.data, displaced: false },
+          width: card.size.width, height: card.size.height, style: { width: card.size.width, height: card.size.height },
+          dragHandle: ".minister-drag-region", connectable: false,
+          zIndex: ["inspector", "workspace"].includes(surfaceLevelsByNodeId[card.id]) ? 28 : 2 };
+      }
       if (isContainer(card, catalog)) {
         const { width, height } = frameSizes.get(card.id)!;
         node = { ...node, type: "container", position: card.position, width, height, style: { width, height }, zIndex: 0,
@@ -203,7 +219,7 @@ export function WorldCanvas() {
         style: { width: 320, height: 46 + Math.max(2, count + 1) * 48 },
         hidden: !equipmentPanels.includes(node.id), draggable: false, selectable: false, connectable: false, zIndex: 24 }];
     });
-  }, [displacedById, renderCards, surfaceLevels, catalog, cards, equipmentPanels, equipmentPositions, workspaceSizes, glueBoxes]);
+  }, [displacedById, renderCards, surfaceLevels, surfaceLevelsByNodeId, catalog, cards, equipmentPanels, equipmentPositions, workspaceSizes, glueBoxes]);
   const [nodes, setNodes] = useNodesState<CanvasNode>(mappedNodes);
   const onNodesChange = useCallback((changes: NodeChange<CanvasNode>[]) => {
     setNodes(current => {
@@ -447,6 +463,7 @@ export function WorldCanvas() {
   const onNodeDragStart: OnNodeDrag<CanvasNode> = useCallback((_event, node, draggedNodes) => {
     cancelPositionAnimation();
     if ((glueActive || glueBoxes[node.id]) && node.type === 'worldCard' && !node.parentId && !node.data.card.ephemeral && !node.data.equipmentDetail) {
+      cancelGlueRefresh();
       const ids = glueGroup(node.id, glueBonds);
       draggedNodes.forEach(n => glueGroup(n.id, glueBonds).forEach(id => ids.add(id)));
       const boxes = Object.fromEntries(nodesRef.current.filter(n => ids.has(n.id) && n.type === 'worldCard' && !n.parentId).map(n => [n.id,
@@ -457,7 +474,7 @@ export function WorldCanvas() {
       activeDragIds.current = ids;
       return;
     }
-    useEquipmentDrag.getState().set(!node.data.equipmentDetail && draggedNodes.length <= 1 ? node.data.card : undefined);
+    useEquipmentDrag.getState().set(node.data.card.type !== MINISTER_TYPE && !node.data.equipmentDetail && draggedNodes.length <= 1 ? node.data.card : undefined);
     setDragging(true);
     activeDragIds.current.clear();
     activeDragIds.current.add(node.id);
@@ -518,7 +535,7 @@ export function WorldCanvas() {
     const transformation = transformationTarget(event, node);
     transformation?.element?.setAttribute("data-transformation-hint", `${transformation.option[1].label}: ${node.data.card.name}`);
     const member = node.data.card;
-    if (!node.data.equipmentDetail && !member.ephemeral) {
+    if (!node.data.equipmentDetail && !member.ephemeral && member.type !== MINISTER_TYPE) {
       const parent = cards.find((c) => c.id === node.parentId);
       const surface = parent ? { x: node.position.x + parent.position.x, y: node.position.y + parent.position.y } : node.position;
       const position = isContainer(member, catalog) ? surface : nodePositionFromSurfacePosition(surface, node.data.surfaceLevel);
@@ -559,7 +576,8 @@ export function WorldCanvas() {
       if (candidate || Object.keys(layout).some(id => glueBoxes[id])) useGlueStore.getState().setLayout(layout, candidate);
       glueDrag.current = undefined;
       setGluePreview(undefined);
-      void updateCardPositions(Object.entries(layout).map(([id, b]) => ({ id, position: nodePositionFromSurfacePosition(b, b.level) }))).finally(() => {
+      void updateCardPositions(Object.entries(layout).map(([id, b]) => ({ id, position: nodePositionFromSurfacePosition(b, b.level) })))
+        .then(() => persistGlue()).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: 'Glue layout needs a retry', detail: apiErrorMessage(reason) })).finally(() => {
         activeDragIds.current.clear(); setDragging(false);
       });
       return;
@@ -608,7 +626,7 @@ export function WorldCanvas() {
     const sizes = new Map(nodesRef.current.map((item) => [item.id, { width: Number(item.style?.width), height: Number(item.style?.height) }]));
     void updateCardPositions(updates.map((update) => {
       const member = cards.find((card) => card.id === update.id)!;
-      if (member.ephemeral || containerDefinition(member, catalog)?.parentable === false) return update;
+      if (member.ephemeral || member.type === MINISTER_TYPE || containerDefinition(member, catalog)?.parentable === false) return update;
       const destination = dropContainer(cards, member, { x: update.position.x + 48, y: update.position.y + 48 }, catalog, sizes);
       return { ...update, parent_id: destination?.id ?? null };
     })).finally(() => {

@@ -11,6 +11,7 @@ Use these guides to look up a feature or understand how it works. Start with set
 | Configure models, credentials, or application storage | [Configuration](configuration.md) |
 | Collect cards and organize the bottom tray | [Packs, Card Library, and Decks](card-library.md) |
 | Organize and reuse a team | [Legion team spaces](legions.md) |
+| Inspect and tidy a local area of the canvas | [Minister](minister.md) |
 | Use or develop an extension | [Plugins](plugins.md) |
 | Work with files and run commands | [Sandbox workspace](sandbox-workspace.md) |
 | Configure command variables, secrets, and targets | [Execution configuration](execution-configuration.md) |

@@ -1,0 +1,70 @@
+.minister-node { width: 100%; height: 100%; position: relative; color: var(--ink); --minister-accent: #557e69; }
+.minister-radius { pointer-events: none; position: absolute; z-index: -1; width: calc(var(--minister-radius) * 2); height: calc(var(--minister-radius) * 2); left: calc(var(--minister-cx) - var(--minister-radius)); top: calc(var(--minister-cy) - var(--minister-radius)); border: 1.5px dashed #72998288; border-radius: 50%; background: #75967a05; }
+.minister-node.can-edit .minister-radius { border-style: solid; background: #75967a0a; }
+.minister-node.is-selected .minister-radius, .minister-node.is-open .minister-radius { border-color: #668c75cc; }
+.minister-orb { height: 100%; width: 100%; border-radius: 50%; border: 1px solid #729480; background: radial-gradient(circle at 30% 22%, #f8faf2, #dce6d7); color: #375b47; box-shadow: 0 5px 18px #203a2920, inset 0 0 0 6px #f4f6ed; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 4px; cursor: grab; user-select: none; position: relative; }
+.minister-orb span { font-size: 10px; font-weight: 650; letter-spacing: .04em; }
+.minister-orb:focus-visible, .minister-node.is-selected .minister-orb { outline: 2px solid #537760; outline-offset: 4px; }
+.minister-orb i { position: absolute; right: 8px; bottom: 9px; width: 9px; height: 9px; border: 2px solid #f4f6ed; border-radius: 50%; background: #8a998e; }
+.minister-node[data-activity="running"] .minister-orb i, .minister-node[data-activity="waiting"] .minister-orb i { background: #b99443; box-shadow: 0 0 0 3px #b9944320; }
+.minister-label { position: absolute; top: calc(100% + 10px); left: 50%; transform: translateX(-50%); font-size: 11px; max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.minister-radius-handle { position: absolute; left: calc(var(--minister-cx) + var(--minister-radius) - 7px); top: calc(var(--minister-cy) - 7px); width: 14px; height: 14px; border-radius: 50%; padding: 0; border: 2px solid #61876e; background: #f3f5ed; cursor: ew-resize; touch-action: none; }
+.minister-radius-handle span { position: absolute; left: 20px; top: -3px; color: var(--minister-accent); font-size: 11px; pointer-events: none; }
+.minister-panel { position: absolute; left: calc(100% + 24px); top: -52px; width: 410px; height: 540px; display: flex; flex-direction: column; background: var(--surface-solid); color: var(--ink); border: 1px solid var(--line); box-shadow: var(--panel-shadow); border-radius: 16px; overflow: hidden; cursor: default; user-select: text; }
+.minister-panel button { cursor: pointer; }
+.minister-panel button:disabled { opacity: .4; cursor: default; }
+.minister-panel-header { display: flex; align-items: center; gap: 10px; padding: 16px 16px 10px; color: var(--minister-accent); }
+.minister-panel-header input { min-width: 0; flex: 1; border: 0; background: transparent; font-size: 14px; font-weight: 650; color: inherit; }
+.minister-panel-header button, .minister-composer button { display: grid; place-items: center; border: 0; background: transparent; padding: 5px; color: inherit; }
+.minister-settings { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 16px 10px; font-size: 11px; }
+.minister-settings label { display: flex; align-items: center; gap: 6px; }
+.minister-settings input[type="number"] { width: 66px; padding: 3px 5px; border: 1px solid #94978844; background: transparent; color: inherit; border-radius: 5px; }
+.minister-edit-switch input { accent-color: #557e69; }
+.minister-model { padding: 0 16px 10px; font-size: 11px; color: var(--ink-soft); }
+.minister-model summary { cursor: pointer; margin-bottom: 6px; }
+.minister-model p { margin: 7px 0 0; line-height: 1.5; }
+.minister-tabs { display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid #94978833; }
+.minister-tabs button { background: transparent; color: var(--ink-soft); padding: 9px 0; border: 0; border-bottom: 2px solid transparent; font-size: 12px; }
+.minister-tabs button[aria-pressed="true"] { color: var(--minister-accent); border-bottom-color: #63836b; }
+.minister-tabs small { margin-left: auto; font-size: 10px; color: var(--ink-soft); }
+.minister-conversation, .minister-nearby { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.minister-messages { flex: 1; min-height: 0; overflow: auto; padding: 15px 17px; overscroll-behavior: contain; }
+.minister-welcome { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 22px 6px; color: var(--minister-accent); font-size: 12px; }
+.minister-welcome strong { font-size: 16px; font-weight: 550; }
+.minister-welcome p { margin: 0; line-height: 1.6; color: var(--ink-soft); }
+.minister-welcome button { margin-top: 4px; border: 1px solid #a2ac9360; border-radius: 7px; padding: 7px 10px; background: transparent; color: var(--minister-accent); }
+.minister-message { font-size: 12px; margin: 0 0 15px; overflow-wrap: anywhere; }
+.minister-message small { display: block; color: var(--ink-soft); font-size: 10px; margin-bottom: 5px; }
+.minister-message.is-user { background: #8b956a12; padding: 9px 11px; border-radius: 9px; }
+.minister-message .conversation-markdown > :first-child { margin-top: 0; }
+.minister-message .conversation-markdown > :last-child { margin-bottom: 0; }
+.minister-tool { color: var(--ink-soft); font-size: 10px; }
+.minister-tool summary { cursor: pointer; }
+.minister-tool pre { white-space: pre-wrap; max-height: 140px; overflow: auto; }
+.minister-thinking, .minister-loading { padding: 10px 16px; font-size: 11px; color: var(--ink-soft); }
+.minister-error { margin: 5px 16px; font-size: 11px; color: var(--danger); overflow-wrap: anywhere; }
+.minister-composer { display: flex; align-items: flex-end; gap: 8px; margin: 10px 12px 12px; border: 1px solid #9aa18a55; border-radius: 10px; padding: 8px; background: #9c9c7710; }
+.minister-composer textarea { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; resize: none; color: inherit; font: inherit; font-size: 12px; line-height: 1.5; padding: 3px; }
+.minister-composer button { background: #557e69; color: #fff; border-radius: 7px; width: 30px; height: 30px; }
+.minister-search { display: flex; align-items: center; gap: 8px; margin: 14px 16px 8px; padding: 7px 9px; border: 1px solid #9aa18a55; border-radius: 7px; color: var(--ink-soft); }
+.minister-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: inherit; outline: 0; font-size: 12px; }
+.minister-search-summary { margin: 2px 16px 8px; font-size: 10px; color: var(--ink-soft); }
+.minister-results { overflow: auto; flex: 1; min-height: 0; padding: 0 10px; }
+.minister-results > button { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 0; border-radius: 8px; padding: 10px; background: transparent; color: inherit; text-align: left; }
+.minister-results > button:hover { background: #8b956a18; }
+.minister-results strong, .minister-results small { display: block; overflow-wrap: anywhere; }
+.minister-results strong { font-size: 12px; font-weight: 550; }
+.minister-results small { font-size: 10px; color: var(--ink-soft); margin-top: 4px; }
+.minister-results p { font-size: 12px; padding: 10px; color: var(--ink-soft); }
+.minister-pager { padding: 10px 16px; display: flex; justify-content: space-between; }
+.minister-pager button, .minister-text-button { font-size: 11px; border: 0; background: transparent; color: var(--minister-accent); padding: 5px; }
+
+:root[data-theme="dark"] .minister-node { --minister-accent: #acc4a6; }
+.minister-reviews { max-height: 260px; overflow: auto; padding: 0 12px; font-size: 12px; }
+.minister-review { border: 1px solid var(--border-color, #aaa8); border-radius: 8px; padding: 10px; margin: 8px 0; }
+.minister-review p { margin: 6px 0; overflow-wrap: anywhere; }
+.minister-review ul { padding-left: 18px; }
+.minister-review dl { margin: 5px 0; }
+.minister-review dt { font-weight: 600; }
+.minister-review dd { margin: 0 0 5px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.minister-review button { margin: 6px 8px 0 0; }

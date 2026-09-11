@@ -10,6 +10,9 @@ const frontendUrl = "http://127.0.0.1:5177";
 const dataRoot = path.resolve(projectRoot, ".open-agent-world", "playwright");
 const resultFile = path.join(dataRoot, "result.json");
 const children = [];
+const ministerSuite = process.argv.includes("--minister");
+const testArgs = process.argv.slice(2).filter(arg => arg !== "--minister");
+if (ministerSuite) testArgs.unshift("e2e/minister.spec.ts");
 
 async function resetDataRoot() {
   const relative = path.relative(projectRoot, dataRoot);
@@ -75,7 +78,7 @@ try {
   await resetDataRoot();
   start(
     path.join(projectRoot, "backend", ".venv", "Scripts", "python.exe"),
-    ["-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "8017", "--no-proxy-headers"],
+    ["-m", "uvicorn", ministerSuite ? "backend.tests.minister_app:app" : "backend.main:app", "--host", "127.0.0.1", "--port", "8017", "--no-proxy-headers"],
     {
       cwd: projectRoot,
       env: {
@@ -105,10 +108,10 @@ try {
   await rm(resultFile, { force: true });
   const runner = start(
     process.execPath,
-    ["node_modules/@playwright/test/cli.js", "test", ...process.argv.slice(2)],
+    ["node_modules/@playwright/test/cli.js", "test", ...testArgs],
     {
       cwd: frontendRoot,
-      env: { ...process.env, OAW_E2E_RESULT_FILE: resultFile },
+      env: { ...process.env, OAW_E2E_RESULT_FILE: resultFile, OAW_MINISTER_E2E: ministerSuite ? "1" : "0" },
     },
   );
   exitCode = await waitForResult(runner);

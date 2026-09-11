@@ -32,6 +32,44 @@ def versions(client, facade):
     return call(client, facade.query)["versions"]
 
 
+def test_principal_connection_authority_is_explicit_and_never_self_mutation(client):
+    services = client.app.state.services
+    principal = create_node(client, "agent", position={"x": -1000, "y": -1000})
+    # Private equipment outside the spatial area must not be mistaken for an
+    # ordinary endpoint effect, or become mutable through the principal grant.
+    equipment = create_node(client, "text", position={"x": -1000, "y": -1000},
+                            equipment={"owner_id": principal["id"], "relationship": "read"})
+    chat = create_node(client, "conversation", position={"x": 100, "y": 100})
+    _, grants = control(client, relationships=frozenset({"read", "participate"}),
+                        principal_relationships=frozenset({"participate"}))
+    grants[principal["id"]] = grants.pop("automation")
+    facade = services.canvas_control(principal["id"], grants.get)
+    view = call(client, facade.query)
+    assert view["principal"]["id"] == principal["id"]
+    assert principal["id"] not in {node["id"] for node in view["nodes"]}
+    option = call(client, facade.connection_options, principal["id"], chat["id"])[0]
+    assert option["permitted"] and option["relationship"] == "participate"
+    edge = call(client, facade.connect_cards, principal["id"], chat["id"], "participate", view["versions"])
+    assert not next(item for item in call(client, facade.query)["edges"] if item["id"] == edge["id"])["external"]
+    assert call(client, facade.connection_options, principal["id"], chat["id"])[0]["existing_edge_id"] == edge["id"]
+    with pytest.raises(PermissionDeniedError):
+        call(client, facade.move_card, principal["id"], {"x": 200, "y": 200}, versions(client, facade))
+    with pytest.raises(PermissionDeniedError):
+        call(client, facade.delete_cards, [equipment["id"]], versions(client, facade))
+    note = create_node(client, "text", position={"x": 100, "y": 400})
+    assert not call(client, facade.connection_options, principal["id"], note["id"])[0]["permitted"]
+    with pytest.raises(PermissionDeniedError):
+        call(client, facade.connect_cards, principal["id"], note["id"], "read", versions(client, facade))
+    observed = versions(client, facade)
+    client.patch(f"/api/nodes/{principal['id']}", json={"name": "Changed controller"})
+    with pytest.raises(RevisionConflictError):
+        call(client, facade.disconnect_cards, edge["id"], observed)
+    call(client, facade.disconnect_cards, edge["id"], versions(client, facade))
+    grants[principal["id"]] = grants[principal["id"]].model_copy(update={"principal_relationships": frozenset()})
+    with pytest.raises(PermissionDeniedError):
+        call(client, facade.connect_cards, principal["id"], chat["id"], "participate", versions(client, facade))
+
+
 def test_explicit_operations_use_services_and_preserve_resource_lifecycle(client):
     facade, _ = control(client)
     node = call(client, facade.create_card, {"type": "text", "position": {"x": 100, "y": 100}}, {})

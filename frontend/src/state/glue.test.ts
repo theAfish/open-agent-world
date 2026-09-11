@@ -1,7 +1,23 @@
 ﻿import { describe, expect, it } from 'vitest';
-import { findGlue, freeCorners, glueGroup, resizeGlued, reflowGlueSurfaces, type GlueBox } from './glue';
+import { vi } from 'vitest';
+import { worldApi } from '../api/client';
+import { findGlue, freeCorners, glueGroup, resizeGlued, reflowGlueSurfaces, refreshGlue, cancelGlueRefresh, useGlueStore, type GlueBox, type SharedGlue } from './glue';
 const box = (x: number, y: number, width = 200, height = 160): GlueBox => ({ x, y, width, height, level: 'preview' });
 describe('glue geometry', () => {
+  it('does not apply an in-flight remote layout over a newly started drag', async () => {
+    let finish!: (value: SharedGlue) => void;
+    const remote = new Promise<SharedGlue>(resolve => { finish = resolve; });
+    const get = vi.spyOn(worldApi, 'getGlue').mockReturnValue(remote);
+    try {
+      const pending = refreshGlue();
+      await vi.waitFor(() => expect(get).toHaveBeenCalledOnce());
+      cancelGlueRefresh();
+      useGlueStore.setState({ boxes: { a: box(80, 90) }, bonds: [] });
+      finish({ revision: 3, boxes: { a: box(0, 0) }, bonds: [] });
+      await pending;
+      expect(useGlueStore.getState().boxes.a.x).toBe(80);
+    } finally { get.mockRestore(); useGlueStore.setState({ boxes: {}, bonds: [] }); }
+  });
   it('reflows a chain across state changes and restores custom sizes on returning', () => {
     const boxes = { a: box(0, 0, 320, 200), b: box(320, 0), c: box(520, 0) };
     const bonds = [{ a: 'a', b: 'b', side: 'right' as const }, { a: 'b', b: 'c', side: 'right' as const }];

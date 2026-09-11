@@ -10,8 +10,8 @@ resolver. It runs anew inside the existing node mutation barrier on every call.
 Return `None` or raise `PermissionDeniedError` to revoke access. Grant changes
 must use that same barrier. The host may resolve an existing live capability
 with `services.capabilities.capability_for_id(actor_id, host_selected_id)` before
-returning its scope. Scope storage and the future Minister's grant mechanism are
-intentionally not introduced here. Neither the resolver, actor identity nor scope
+returning its scope. The builtin [Minister](minister.md) uses this resolver with
+its live, host-configured circular radius. Neither the resolver, actor identity nor scope
 is an argument exposed to an automated caller.
 
 ```python
@@ -50,17 +50,31 @@ detaching them first. Generated provenance connections cannot be edited here.
 Query returns projected cards, stored and derived equipment connections, explicit
 `external` flags, and version tokens. Boundary connections include endpoint IDs
 without loading external card configuration. A query never grants control of
-those endpoints. Equipment can be unequipped with `detach_card`; creating new
-equipment bindings, document collection seeds, resource content edits, document
+those endpoints. Equipment can be bound with `attach_card` or unequipped with
+`detach_card`. Document collection seeds, resource content edits, document
 actions, credentials, execution and plugin-specific operations retain their
 dedicated host/capability contracts.
+
+For controller endpoints, a host can opt into `principal_relationships`. This
+allows the facade's own actor to be an endpoint for the intersection with
+`relationships`, even though it is not an ordinary controlled card. Query returns
+it separately as `principal`, with a version token. This never permits moving,
+configuring or deleting the principal or its private equipment. Real forwarded
+capabilities and external consequences still undergo the usual checks.
+
+`connection_options(source, target)` provides a small read-only preflight for an
+explicit pair, using registry relationship compatibility and the same connection
+scope checks as commit. It reports permitted relationships, existing connections
+and denial reasons. It does not reserve authority or suppress revision checks.
 
 ## Operations and conflicts
 
 - `query()` and `read_card(node_id)`
 - `create_card(request, versions)`
 - `update_card(node_id, patch, versions)` for name, position, size, parent and config
-- `move_card`, `resize_card`, `set_card_config`, `detach_card`
+- `update_cards(updates, versions)` for an existing atomic card-update batch
+- `move_card`, `resize_card`, `set_card_config`, `attach_card`, `detach_card`
+- `group_cards(name, node_ids, versions)` and `glue_cards(...)`
 - `delete_cards(node_ids, versions)`
 - `connect_cards(source, target, relationship, versions, direction="forward")`
 - `update_edge(edge_id, patch, versions)` and `disconnect_cards(edge_id, versions)`
@@ -68,6 +82,8 @@ dedicated host/capability contracts.
 These return ordinary JSON-compatible data or raise existing domain errors.
 Updates return all changed cards, including implicitly moved descendants. Resize
 changes saved size; it does not run the frontend's surface-dependent reflow.
+Glue bonds/surfaces share the existing revisioned StateStore. Their revision is
+returned in `versions.glue`; moving/resizing glued cards also checks affected peers.
 Versions contain revision and creation time so restoring the same ID cannot make
 an old version valid again. Missing dependencies and stale versions raise
 `RevisionConflictError`; reread and reconsider the operation. A new connection
@@ -104,6 +120,20 @@ description and Legion description/instructions. Resource filenames are readable
 Model/provider selection, Sandbox policy and host bindings, runtime status and
 credentials are protected. This adds no plaintext secret storage. Third-party
 plugins remain trusted code and must correctly declare their field policies.
+
+Minister opts into `CanvasScope.review_config` with a trusted pre-commit reviewer.
+This permits proposing declared sensitive fields for human confirmation. It does
+not change the default policy for other automated actors. Extra, secret, immutable,
+internal and explicitly read-only fields are still denied. Unreviewed creation
+and relationships default to confirmation via `canvas_create_requires_confirmation`
+and `canvas_requires_confirmation` on the existing plugin definitions. Ordinary
+builtin card creation and local relationships opt out of confirmation.
+
+The optional `review` callback receives validated changed/affected cards and
+connections before lifecycle work. It may stop a mutation for review but cannot
+override scope or revision checks. Minister's desktop confirmation repeats these
+checks against its exact original proposal. No general transaction or command
+framework is involved.
 
 ## Frontend synchronization
 

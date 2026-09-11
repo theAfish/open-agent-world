@@ -785,6 +785,10 @@ def _register_builtin(registry: PluginRegistration) -> None:
     registry.register_state_schema(StateSchema(id="core.world", fields={
         **common_fields("world"),
     }))
+    registry.register_state_schema(StateSchema(id="core.canvas", fields={
+        "glue": StateFieldDefinition(value_type=dict[str, Any], allowed_scope_kinds=frozenset({"canvas"}),
+            read_visibility="scope_only", write_permissions=frozenset({"canvas.host"}), default={"boxes": {}, "bonds": []}),
+    }))
     registry.register_state_schema(StateSchema(id="core.node_document", fields={
         "document": StateFieldDefinition(value_type=dict[str, Any], allowed_scope_kinds=frozenset({"node_document"}), default={}),
         "execution": StateFieldDefinition(value_type=dict[str, Any], allowed_scope_kinds=frozenset({"node_document"}), default={}),
@@ -918,7 +922,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         description='Inspect the selected sandbox before executing: returns its operating system, shell argv prefix, cwd, read/write access, resource directory and availability.',
         input_schema={"type": "object", "properties": {}, "additionalProperties": False}), _inspect_sandbox)
     registry.register_node_type(NodeTypeDefinition(
-        id="agent", label="Agent", description="Reasoning worker", icon="bot",
+        canvas_create_requires_confirmation=False, id="agent", label="Agent", description="Reasoning worker", icon="bot",
         color="#75736c", deck_id="agents", deck_label="Agents", deck_icon="bot",
         default_name="New Agent", default_size=(300, 190), default_status="idle",
         statuses=frozenset({"idle", "running", "waiting", "error"}),
@@ -928,6 +932,8 @@ def _register_builtin(registry: PluginRegistration) -> None:
         templateable=True, template_status="idle",
         template_handler=AgentNodeTemplateHandler(),
     ))
+    from backend.minister import register as register_minister
+    register_minister(registry)
     registry.register_node_type(NodeTypeDefinition(
         id="core.virtual-workspace", label="Virtual workspace", description="Temporary space for generated cards",
         icon="boxes", color="#697c78", deck_id="fields", deck_label="Fields", deck_icon="workflow",
@@ -950,7 +956,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         user_creatable=False, templateable=True,
     ))
     registry.register_node_type(NodeTypeDefinition(
-        id="conversation", label="Conversation", description="Shared communication field",
+        canvas_create_requires_confirmation=False, id="conversation", label="Conversation", description="Shared communication field",
         icon="messages-square", color="#9a6954", deck_id="fields",
         deck_label="Fields", deck_icon="workflow", default_name="New Conversation",
         default_size=(320, 210), default_status="available",
@@ -961,7 +967,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         templateable=True,
     ))
     registry.register_node_type(NodeTypeDefinition(
-        id="text", label="Text file", description="Managed knowledge", icon="file-text",
+        canvas_create_requires_confirmation=False, id="text", label="Text file", description="Managed knowledge", icon="file-text",
         color="#7c7267", deck_id="objects", deck_label="Objects", deck_icon="boxes",
         default_name="Untitled Text", default_size=(300, 220), default_status="available",
         statuses=frozenset({"available", "modified"}), config_model=TextConfig,
@@ -971,7 +977,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         templateable=True, template_handler=TextNodeTemplateHandler(),
     ))
     registry.register_node_type(NodeTypeDefinition(
-        id="image", label="Image file", description="Visual resource", icon="image",
+        canvas_create_requires_confirmation=False, id="image", label="Image file", description="Visual resource", icon="image",
         color="#8a7560", deck_id="objects", deck_label="Objects", deck_icon="boxes",
         default_name="Untitled Image", default_size=(280, 240), default_status="available",
         statuses=frozenset({"available", "modified"}), config_model=ImageConfig,
@@ -994,7 +1000,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
     ))
 
     registry.register_relationship(RelationshipDefinition(
-        id="communicate", label="Communicate", short_label="message",
+        canvas_requires_confirmation=False, id="communicate", label="Communicate", short_label="message",
         description="The agent can send a scoped message to this agent and receive its response.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.agent"}),
         directions=frozenset({"forward", "bidirectional"}),
@@ -1002,7 +1008,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         capabilities=(CapabilityGrantDefinition(kind='agent.communicate'),),
     ))
     registry.register_relationship(RelationshipDefinition(
-        id="participate", label="Participate", short_label="join",
+        canvas_requires_confirmation=False, id="participate", label="Participate", short_label="join",
         description="The agent can join sessions and speak inside this Conversation field.",
         source_traits=frozenset({"core.agent"}),
         target_traits=frozenset({"core.conversation"}),
@@ -1011,21 +1017,21 @@ def _register_builtin(registry: PluginRegistration) -> None:
             'conversation.request_turn', 'conversation.send_message', 'artifact.read', 'artifact.publish', 'artifact.materialize')),
     ))
     registry.register_relationship(RelationshipDefinition(
-        id="conversation_notes", label="Meeting notes", short_label="notes",
+        canvas_requires_confirmation=False, id="conversation_notes", label="Meeting notes", short_label="notes",
         description="Attach meeting notes. Participating agents can read and edit this text; disconnect to revoke access.",
         source_traits=frozenset({"core.conversation"}), target_traits=frozenset({"core.text"}),
         templateable=True,
         capabilities=(CapabilityGrantDefinition(kind='text.read'), CapabilityGrantDefinition(kind='text.edit')),
     ))
     registry.register_relationship(RelationshipDefinition(
-        id="read", label="Read", short_label="read",
+        canvas_requires_confirmation=False, id="read", label="Read", short_label="read",
         description="The agent can inspect this text through a scoped tool.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.text"}),
         templateable=True,
         capabilities=(CapabilityGrantDefinition(kind='text.read'),),
     ))
     registry.register_relationship(RelationshipDefinition(
-        id="read_edit", label="Read + edit", short_label="read + edit",
+        canvas_requires_confirmation=False, id="read_edit", label="Read + edit", short_label="read + edit",
         description="The agent can inspect and modify this text through scoped tools.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.text"}),
         templateable=True,
@@ -1035,7 +1041,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         ),
     ))
     registry.register_relationship(RelationshipDefinition(
-        id="view", label="View", short_label="view",
+        canvas_requires_confirmation=False, id="view", label="View", short_label="view",
         description="The agent can inspect the image content.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.image"}),
         templateable=True,

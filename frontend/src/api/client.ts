@@ -252,6 +252,23 @@ function unwrap<T>(input: unknown, key: string): T {
 }
 
 export const worldApi = {
+  getGlue(): Promise<import("../state/glue").SharedGlue> { return request('/canvas/glue'); },
+  saveGlue(patch: { revision: number; boxes?: Record<string, import("../state/glue").GlueBox>; bonds?: import("../state/glue").GlueBond[]; detach?: string[] }): Promise<import("../state/glue").SharedGlue> {
+    return request('/canvas/glue', { method: 'PATCH', body: JSON.stringify(patch) });
+  },
+  getMinisterProposals(id: string): Promise<import("../types/minister").MinisterProposal[]> {
+    return request(`/ministers/${encodeURIComponent(id)}/proposals`);
+  },
+  decideMinisterProposal(id: string, proposalId: string, approve: boolean): Promise<{ status: string }> {
+    return request(`/ministers/${encodeURIComponent(id)}/proposals/${encodeURIComponent(proposalId)}`, { method: 'POST', body: JSON.stringify({ approve }) });
+  },
+  getMinisterWorld(id: string, query = "", offset = 0): Promise<import("../types/minister").MinisterWorldView> {
+    return request(`/ministers/${encodeURIComponent(id)}/world?${new URLSearchParams({ query, offset: String(offset) })}`);
+  },
+
+  openMinisterChat(id: string): Promise<import("../types/minister").MinisterChat> {
+    return request(`/ministers/${encodeURIComponent(id)}/chat`, { method: "POST" });
+  },
   readFilePreview(viewerId: string, reference: import("../state/openFiles").FileReference, signal?: AbortSignal): Promise<{ name: string; size_bytes: number; data: string }> {
     return request(`/nodes/${encodeURIComponent(viewerId)}/file-preview`, { method: "POST", body: JSON.stringify(reference), signal });
   },

@@ -1,6 +1,7 @@
 ﻿import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { NODE_SURFACE_SIZE, type NodeSurfaceLevel, type SurfaceSize } from './nodeSurfaces';
+import { worldApi } from '../api/client';
 
 export interface GlueBox { x: number; y: number; width: number; height: number; level: NodeSurfaceLevel; sizes?: Partial<Record<NodeSurfaceLevel, SurfaceSize>> }
 export interface GlueBond { a: string; b: string; side: 'right' | 'left' | 'top' | 'bottom' }
@@ -111,3 +112,45 @@ export const useGlueStore = create<GlueState>()(persist((set) => ({
     return { bonds, boxes: Object.fromEntries(Object.entries(state.boxes).filter(([key]) => ids.has(key))) };
   }),
 }), { name: 'oaw-glue-v1' }));
+
+export interface SharedGlue { revision: number; boxes: Record<string, GlueBox>; bonds: GlueBond[] }
+let sharedRevision: number | undefined;
+let loadSequence = 0;
+let saves: Promise<unknown> = Promise.resolve();
+
+export function cancelGlueRefresh() { ++loadSequence; }
+
+/** Browser persistence is a migration cache; the shared state owns live bonds. */
+export async function refreshGlue(migrate = false) {
+  const sequence = ++loadSequence;
+  await saves.catch(() => undefined);
+  let shared = await worldApi.getGlue();
+  if (migrate && shared.revision === 0 && useGlueStore.getState().bonds.length) {
+    const world = await worldApi.getWorld();
+    const roots = new Set(world.nodes.filter(card => !card.parent_id && !card.equipment && card.type !== 'core.minister').map(card => card.id));
+    const local = useGlueStore.getState();
+    const bonds = local.bonds.filter(bond => roots.has(bond.a) && roots.has(bond.b));
+    const ids = new Set(bonds.flatMap(bond => [bond.a, bond.b]));
+    if (bonds.length) shared = await worldApi.saveGlue({ revision: 0, bonds,
+      boxes: Object.fromEntries(Object.entries(local.boxes).filter(([key]) => ids.has(key))) });
+  }
+  if (sequence === loadSequence) {
+    sharedRevision = shared.revision;
+    useGlueStore.setState({ boxes: shared.boxes, bonds: shared.bonds });
+  }
+}
+
+/** Call at gesture commit, never for every pointer move. A conflict refreshes
+ * the shared layout and asks the user to retry instead of replaying stale glue. */
+export function persistGlue(detach: string[] = []) {
+  const { boxes, bonds } = useGlueStore.getState();
+  const edit = { boxes: structuredClone(boxes), bonds: structuredClone(bonds), detach };
+  ++loadSequence;
+  const save = saves.catch(() => undefined).then(async () => {
+    if (sharedRevision === undefined) sharedRevision = (await worldApi.getGlue()).revision;
+    const shared = await worldApi.saveGlue({ revision: sharedRevision, ...edit });
+    sharedRevision = shared.revision;
+  });
+  saves = save;
+  return save.catch(async error => { await refreshGlue(); throw error; });
+}

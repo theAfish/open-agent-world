@@ -10,4 +10,4 @@ export interface CanvasNodeData extends Record<string, unknown> {
   equipmentOrigin?: boolean;
 }
 
-export type CanvasNode = Node<CanvasNodeData, "worldCard" | "container" | "equipment" | "equipmentPanel">;
+export type CanvasNode = Node<CanvasNodeData, "worldCard" | "container" | "equipment" | "equipmentPanel" | "minister">;

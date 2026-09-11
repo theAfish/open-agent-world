@@ -10,7 +10,8 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit -p tsconfig.app.json && vite build",
     "test": "vitest run src",
-    "test:e2e": "node scripts/run-e2e.mjs"
+    "test:e2e": "node scripts/run-e2e.mjs",
+    "test:e2e:minister": "node scripts/run-e2e.mjs --minister"
   },
   "dependencies": {
     "@xyflow/react": "^12.8.5",

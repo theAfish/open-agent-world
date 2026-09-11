@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from backend.api.capabilities import router as capabilities_router
+from backend.api.ministers import router as ministers_router
 from backend.api.conversations import router as conversations_router
 from backend.api.dependencies import get_services
 from backend.api.desktop import router as desktop_router
@@ -40,6 +41,7 @@ async def plugin_catalog(
 
 
 api_router.include_router(world_router)
+api_router.include_router(ministers_router)
 api_router.include_router(file_preview_router)
 api_router.include_router(card_library_router)
 api_router.include_router(artifacts_router)

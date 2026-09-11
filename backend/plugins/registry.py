@@ -230,6 +230,8 @@ class NodeTypeDefinition:
     execution: NodeExecutionDefinition | None = None
     container: NodeContainerDefinition | None = None
     summoning: NodeSummoningDefinition | None = None
+    # Trusted plugins opt ordinary creation into autonomous local administration.
+    canvas_create_requires_confirmation: bool = True
 
     def catalog_item(self, plugin_id: str) -> NodeTypeCatalogItem:
         default_config = self.config_model().model_dump(mode="json")
@@ -285,6 +287,8 @@ class RelationshipDefinition:
     templateable: bool = False
     # Runtime provenance only: never traversed for capabilities or copied into templates.
     generated: bool = False
+    # Unknown grants/effects are reviewable, not silently granted to automation.
+    canvas_requires_confirmation: bool = True
 
     def catalog_item(self, plugin_id: str) -> RelationshipCatalogItem:
         return RelationshipCatalogItem(

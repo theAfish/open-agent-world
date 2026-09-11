@@ -855,6 +855,10 @@ class RunManager:
 
     @staticmethod
     def _agent_config(card: Card) -> AgentConfig:
+        instruction = str(card.config.get("system_instruction", ""))
+        if card.type == "core.minister":
+            from backend.minister import runtime_instruction
+            instruction = runtime_instruction(instruction)
         provider_config = {
             key: value
             for key, value in card.config.items()
@@ -871,7 +875,7 @@ class RunManager:
         return AgentConfig(
             agent_id=card.id,
             name=card.name,
-            system_instruction=str(card.config.get("system_instruction", "")),
+            system_instruction=instruction,
             model=str(card.config.get("model", "gemini-3.7-flash")),
             runtime_provider_id=(
                 str(card.config["runtime_provider_id"])
