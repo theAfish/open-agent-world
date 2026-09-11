@@ -887,6 +887,13 @@ export function WorldCanvas() {
         onMoveEnd={onMoveEnd}
         onEdgeClick={(_event, edge) => selectEdge(edge.id)}
         onSelectionChange={onSelectionChange}
+        onSelectionStart={(event) => {
+          // The previous selection overlay disappears on the first movement.
+          // Keep capture on the pane so that removal (or crossing a control)
+          // cannot swallow subsequent movement and the final pointerup.
+          const pointer = event as React.PointerEvent<HTMLDivElement>;
+          pointer.currentTarget.setPointerCapture(pointer.pointerId);
+        }}
         onPaneClick={(event) => {
           if (pinToolActive) {
             const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
