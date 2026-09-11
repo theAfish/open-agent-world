@@ -254,7 +254,9 @@ function unwrap<T>(input: unknown, key: string): T {
 export const worldApi = {
   getGlue(): Promise<import("../state/glue").SharedGlue> { return request('/canvas/glue'); },
   saveGlue(patch: { revision: number; boxes?: Record<string, import("../state/glue").GlueBox>; bonds?: import("../state/glue").GlueBond[]; detach?: string[] }): Promise<import("../state/glue").SharedGlue> {
-    return request('/canvas/glue', { method: 'PATCH', body: JSON.stringify(patch) });
+    // Snap candidates and older browser caches can carry gesture-only dx/dy.
+    const bonds = patch.bonds?.map(({ a, b, side }) => ({ a, b, side }));
+    return request('/canvas/glue', { method: 'PATCH', body: JSON.stringify({ ...patch, bonds }) });
   },
   getMinisterProposals(id: string): Promise<import("../types/minister").MinisterProposal[]> {
     return request(`/ministers/${encodeURIComponent(id)}/proposals`);

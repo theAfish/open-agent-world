@@ -1,20 +1,29 @@
 ﻿import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { NODE_SURFACE_SIZE, type NodeSurfaceLevel, type SurfaceSize } from './nodeSurfaces';
+import { NODE_SURFACE_SIZE, WORKSPACE_MIN_SIZE, type NodeSurfaceLevel, type SurfaceSize } from './nodeSurfaces';
 import { worldApi } from '../api/client';
 
 export interface GlueBox { x: number; y: number; width: number; height: number; level: NodeSurfaceLevel; sizes?: Partial<Record<NodeSurfaceLevel, SurfaceSize>> }
 export interface GlueBond { a: string; b: string; side: 'right' | 'left' | 'top' | 'bottom' }
 export interface GlueCandidate extends GlueBond { dx: number; dy: number }
+function minimumGlueSize(level: NodeSurfaceLevel): SurfaceSize {
+  return level === 'workspace' ? WORKSPACE_MIN_SIZE : NODE_SURFACE_SIZE.node;
+}
 /** Change the surface size, then reposition its bonded neighbours in the same coordinate space. */
 export function reflowGlueSurfaces(boxes: Record<string, GlueBox>, bonds: GlueBond[], levels: ReadonlyMap<string, NodeSurfaceLevel>, workspaces: Record<string, SurfaceSize>) {
-  const changed = Object.keys(boxes).filter(id => levels.has(id) && levels.get(id) !== boxes[id].level);
+  const changed = Object.keys(boxes).filter(id => {
+    const level = levels.get(id);
+    if (!level) return false;
+    const minimum = minimumGlueSize(level);
+    return level !== boxes[id].level || boxes[id].width < minimum.width || boxes[id].height < minimum.height;
+  });
   if (!changed.length) return boxes;
   const next = { ...boxes };
   for (const id of changed) {
     const old = boxes[id], level = levels.get(id)!;
-    const size = old.sizes?.[level] ?? (level === 'workspace' ? workspaces[id] : undefined) ?? NODE_SURFACE_SIZE[level];
-    next[id] = { ...old, ...size, level, sizes: { ...old.sizes, [old.level]: { width: old.width, height: old.height } } };
+    const size = level === old.level ? old : old.sizes?.[level] ?? (level === 'workspace' ? workspaces[id] : undefined) ?? NODE_SURFACE_SIZE[level];
+    const minimum = minimumGlueSize(level);
+    next[id] = { ...old, width: Math.max(minimum.width, size.width), height: Math.max(minimum.height, size.height), level, sizes: { ...old.sizes, [old.level]: { width: old.width, height: old.height } } };
   }
   const visited = new Set<string>();
   for (const root of changed) {
@@ -93,25 +102,26 @@ export function freeCorners(id: string, boxes: Record<string, GlueBox>, bonds: G
   });
 }
 export function resizeGlued(box: GlueBox, corner: string, dx: number, dy: number, peers: GlueBox[], threshold: number) {
+  const minimum = minimumGlueSize(box.level);
   let left = box.x, right = box.x + box.width, top = box.y, bottom = box.y + box.height;
   const snap = (value: number, values: number[]) => values.reduce((best, n) => Math.abs(n - value) < Math.min(threshold, Math.abs(best - value)) ? n : best, value + threshold);
   const snapped = (value: number, values: number[]) => { const n = snap(value, values); return Math.abs(n - value) < threshold ? n : value; };
-  if (corner.endsWith('left')) left = Math.min(right - 96, snapped(left + dx, peers.flatMap(p => [p.x, p.x + p.width])));
-  else right = Math.max(left + 96, snapped(right + dx, peers.flatMap(p => [p.x, p.x + p.width])));
-  if (corner.startsWith('top')) top = Math.min(bottom - 96, snapped(top + dy, peers.flatMap(p => [p.y, p.y + p.height])));
-  else bottom = Math.max(top + 96, snapped(bottom + dy, peers.flatMap(p => [p.y, p.y + p.height])));
+  if (corner.endsWith('left')) left = Math.min(right - minimum.width, snapped(left + dx, peers.flatMap(p => [p.x, p.x + p.width])));
+  else right = Math.max(left + minimum.width, snapped(right + dx, peers.flatMap(p => [p.x, p.x + p.width])));
+  if (corner.startsWith('top')) top = Math.min(bottom - minimum.height, snapped(top + dy, peers.flatMap(p => [p.y, p.y + p.height])));
+  else bottom = Math.max(top + minimum.height, snapped(bottom + dy, peers.flatMap(p => [p.y, p.y + p.height])));
   return { ...box, x: left, y: top, width: right - left, height: bottom - top };
 }
-interface GlueState { boxes: Record<string, GlueBox>; bonds: GlueBond[]; setLayout: (boxes: Record<string, GlueBox>, bond?: GlueBond) => void; detach: (id: string) => void }
+interface GlueState { activeEdits: number; boxes: Record<string, GlueBox>; bonds: GlueBond[]; setLayout: (boxes: Record<string, GlueBox>, bond?: GlueBond) => void; detach: (id: string) => void }
 export const useGlueStore = create<GlueState>()(persist((set) => ({
-  boxes: {}, bonds: [],
-  setLayout: (boxes, bond) => set(state => ({ boxes: { ...state.boxes, ...Object.fromEntries(Object.entries(boxes).map(([id, box]) => [id, { ...state.boxes[id], ...box }])) }, bonds: bond && !state.bonds.some(b => b.a === bond.a && b.b === bond.b || b.a === bond.b && b.b === bond.a) ? [...state.bonds, bond] : state.bonds })),
+  activeEdits: 0, boxes: {}, bonds: [],
+  setLayout: (boxes, bond) => set(state => ({ boxes: { ...state.boxes, ...Object.fromEntries(Object.entries(boxes).map(([id, box]) => [id, { ...state.boxes[id], ...box }])) }, bonds: bond && !state.bonds.some(b => b.a === bond.a && b.b === bond.b || b.a === bond.b && b.b === bond.a) ? [...state.bonds, { a: bond.a, b: bond.b, side: bond.side }] : state.bonds })),
   detach: id => set(state => {
     const bonds = state.bonds.filter(b => b.a !== id && b.b !== id);
     const ids = new Set(bonds.flatMap(b => [b.a, b.b]));
     return { bonds, boxes: Object.fromEntries(Object.entries(state.boxes).filter(([key]) => ids.has(key))) };
   }),
-}), { name: 'oaw-glue-v1' }));
+}), { name: 'oaw-glue-v1', partialize: ({ boxes, bonds }) => ({ boxes, bonds }) }));
 
 export interface SharedGlue { revision: number; boxes: Record<string, GlueBox>; bonds: GlueBond[] }
 let sharedRevision: number | undefined;
@@ -120,8 +130,22 @@ let saves: Promise<unknown> = Promise.resolve();
 
 export function cancelGlueRefresh() { ++loadSequence; }
 
+/** Hold refreshes through the entire gesture and both position/layout saves. */
+export function beginGlueEdit() {
+  cancelGlueRefresh();
+  useGlueStore.setState(state => ({ activeEdits: state.activeEdits + 1 }));
+  let ended = false;
+  return () => {
+    if (ended) return;
+    ended = true;
+    cancelGlueRefresh();
+    useGlueStore.setState(state => ({ activeEdits: state.activeEdits - 1 }));
+  };
+}
+
 /** Browser persistence is a migration cache; the shared state owns live bonds. */
 export async function refreshGlue(migrate = false) {
+  if (useGlueStore.getState().activeEdits) return;
   const sequence = ++loadSequence;
   await saves.catch(() => undefined);
   let shared = await worldApi.getGlue();
@@ -134,7 +158,7 @@ export async function refreshGlue(migrate = false) {
     if (bonds.length) shared = await worldApi.saveGlue({ revision: 0, bonds,
       boxes: Object.fromEntries(Object.entries(local.boxes).filter(([key]) => ids.has(key))) });
   }
-  if (sequence === loadSequence) {
+  if (sequence === loadSequence && !useGlueStore.getState().activeEdits) {
     sharedRevision = shared.revision;
     useGlueStore.setState({ boxes: shared.boxes, bonds: shared.bonds });
   }

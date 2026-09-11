@@ -1,5 +1,5 @@
 import { GlueLayer } from "./GlueLayer";
-import { findGlue, glueGroup, reflowGlueSurfaces, refreshGlue, cancelGlueRefresh, persistGlue, useGlueStore, type GlueBox, type GlueCandidate } from "../state/glue";
+import { findGlue, glueGroup, reflowGlueSurfaces, refreshGlue, beginGlueEdit, cancelGlueRefresh, persistGlue, useGlueStore, type GlueBox, type GlueCandidate } from "../state/glue";
 import { MapAtlas } from "./MapAtlas";
 import {
   Background,
@@ -105,6 +105,7 @@ export function WorldCanvas() {
   const storedGlueBoxes = useGlueStore(s => s.boxes);
   const glueBonds = useGlueStore(s => s.bonds);
   const glueEvent = useWorldStore(s => s.events.find(event => event.type.startsWith('state_') || event.type.startsWith('card_'))?.id);
+  const activeGlueEdits = useGlueStore(s => s.activeEdits);
   const glueSocket = useWorldStore(s => s.socketState);
   const glueDrag = useRef<{ origin: { x: number; y: number }; boxes: Record<string, GlueBox>; latest: Record<string, GlueBox>; candidate?: GlueCandidate }>();
   const [importStatus,setImportStatus]=useState("");
@@ -129,11 +130,11 @@ export function WorldCanvas() {
   const dragging = useNodeSurfaceStore((state) => state.dragging);
   const setDragging = useNodeSurfaceStore((state) => state.setDragging);
   useEffect(() => {
-    if (dragging) return;
+    if (dragging || activeGlueEdits) return;
     const timer = window.setTimeout(() => void refreshGlue(true).catch(reason =>
       useWorldStore.getState().pushToast({ tone: 'error', title: 'Glue could not synchronize', detail: apiErrorMessage(reason) })), 120);
     return () => window.clearTimeout(timer);
-  }, [glueEvent, glueSocket, dragging]);
+  }, [glueEvent, glueSocket, dragging, activeGlueEdits]);
   const closeInspector = useNodeSurfaceStore((state) => state.closeInspector);
   const closeWorkspace = useNodeSurfaceStore((state) => state.closeWorkspace);
   const dismissSurface = useNodeSurfaceStore((state) => state.dismiss);
@@ -170,10 +171,11 @@ export function WorldCanvas() {
     [storedGlueBoxes, glueBonds, surfaceLevels, workspaceSizes]);
   useEffect(() => {
     if (glueBoxes === storedGlueBoxes) return;
+    const endEdit = beginGlueEdit();
     useGlueStore.getState().setLayout(glueBoxes);
     void updateCardPositions(Object.entries(glueBoxes).filter(([id, box]) => box !== storedGlueBoxes[id]).map(([id, box]) => ({
       id, position: nodePositionFromSurfacePosition(box, box.level),
-    }))).then(() => persistGlue()).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: 'Glue layout needs a retry', detail: apiErrorMessage(reason) }));
+    }))).then(() => persistGlue()).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: 'Glue layout needs a retry', detail: apiErrorMessage(reason) })).finally(endEdit);
   }, [glueBoxes, storedGlueBoxes, updateCardPositions]);
   const surfaceObstacles = useMemo<SurfaceObstacle[]>(() => renderCards.flatMap<SurfaceObstacle>((card) => {
     if (isContainer(card, catalog) || card.parent_id || card.equipment) return [];

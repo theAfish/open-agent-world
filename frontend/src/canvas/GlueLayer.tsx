@@ -1,7 +1,7 @@
 ﻿import { useReactFlow } from '@xyflow/react';
-import { useRef, type PointerEvent } from 'react';
+import { useEffect, useRef, type PointerEvent } from 'react';
 import { EdgeLabelRenderer } from './FlowPortal';
-import { freeCorners, glueGroup, resizeGlued, seam, cancelGlueRefresh, persistGlue, useGlueStore, type GlueBox, type GlueCandidate } from '../state/glue';
+import { freeCorners, glueGroup, resizeGlued, seam, beginGlueEdit, persistGlue, useGlueStore, type GlueBox, type GlueCandidate } from '../state/glue';
 import { apiErrorMessage } from '../api/client';
 import { useWorldStore } from '../state/worldStore';
 import { useNodeSurfaceStore } from '../state/nodeSurfaces';
@@ -15,7 +15,8 @@ export function GlueLayer({ nodes, preview }: { nodes: CanvasNode[]; preview?: G
   const edges = useWorldStore(s => s.edges);
   const selectedEdge = useWorldStore(s => s.selectedEdgeId);
   const { getViewport } = useReactFlow();
-  const drag = useRef<{ id: string; corner: string; x: number; y: number; box: GlueBox }>();
+  const drag = useRef<{ id: string; corner: string; x: number; y: number; box: GlueBox; endEdit: () => void }>();
+  useEffect(() => () => drag.current?.endEdit(), []);
   const live = Object.fromEntries(nodes.filter(n => !n.hidden).map(n => [n.id, { x: n.position.x, y: n.position.y, width: Number(n.style?.width), height: Number(n.style?.height), level: n.data.surfaceLevel }]));
   const move = (event: PointerEvent) => {
     const start = drag.current;
@@ -41,10 +42,10 @@ export function GlueLayer({ nodes, preview }: { nodes: CanvasNode[]; preview?: G
   const finish = (cancel = false) => {
     const start = drag.current;
     if (!start) return;
-    if (cancel) useGlueStore.getState().setLayout({ [start.id]: start.box });
-    else { const box = useGlueStore.getState().boxes[start.id]; void useWorldStore.getState().updateCardPositions([{ id: start.id, position: nodePositionFromSurfacePosition(box, box.level) }])
-      .then(() => persistGlue()).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: 'Glue resize needs a retry', detail: apiErrorMessage(reason) })); }
     drag.current = undefined;
+    if (cancel) { useGlueStore.getState().setLayout({ [start.id]: start.box }); start.endEdit(); }
+    else { const box = useGlueStore.getState().boxes[start.id]; void useWorldStore.getState().updateCardPositions([{ id: start.id, position: nodePositionFromSurfacePosition(box, box.level) }])
+      .then(() => persistGlue()).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: 'Glue resize needs a retry', detail: apiErrorMessage(reason) })).finally(start.endEdit); }
   };
   return <EdgeLabelRenderer>
     {bonds.concat(preview ? [preview] : []).map((bond, index) => {
@@ -68,13 +69,13 @@ export function GlueLayer({ nodes, preview }: { nodes: CanvasNode[]; preview?: G
       </div>;
     })}
     {nodes.filter(n => n.selected && !n.hidden && boxes[n.id]).flatMap(node => freeCorners(node.id, live, bonds).map(corner => {
-      const box = { ...live[node.id], level: boxes[node.id].level };
+      const box = { ...boxes[node.id], ...live[node.id] };
       return <button key={`${node.id}-${corner}`} className={`glue-resize nodrag nopan ${corner}`} aria-label={`缩放 ${node.data.card.name} ${corner}`}
         style={{ left: box.x + (corner.endsWith('right') ? box.width : 0) - 7, top: box.y + (corner.startsWith('bottom') ? box.height : 0) - 7 }}
-        onPointerDown={event => { event.preventDefault(); event.stopPropagation(); cancelGlueRefresh(); event.currentTarget.setPointerCapture(event.pointerId); drag.current = { id: node.id, corner, x: event.clientX, y: event.clientY, box }; }}
+        onPointerDown={event => { event.preventDefault(); event.stopPropagation(); const endEdit = beginGlueEdit(); event.currentTarget.setPointerCapture(event.pointerId); drag.current = { id: node.id, corner, x: event.clientX, y: event.clientY, box, endEdit }; }}
         onPointerMove={move} onPointerUp={() => finish()} onPointerCancel={() => finish(true)} onLostPointerCapture={() => finish()} />;
     }))}
     {nodes.filter(n => n.selected && boxes[n.id]).map(node => <button key={`detach-${node.id}`} className="glue-detach nodrag nopan"
-      style={{ left: node.position.x + 10, top: node.position.y - 29 }} onClick={() => { useGlueStore.getState().detach(node.id); void persistGlue([node.id]).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: 'Could not detach glue', detail: apiErrorMessage(reason) })); useNodeSurfaceStore.getState().setDragging(false); }}>解除粘连</button>)}
+      style={{ left: node.position.x + 10, top: node.position.y - 29 }} onClick={() => { const endEdit = beginGlueEdit(); useGlueStore.getState().detach(node.id); void persistGlue([node.id]).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: 'Could not detach glue', detail: apiErrorMessage(reason) })).finally(endEdit); useNodeSurfaceStore.getState().setDragging(false); }}>解除粘连</button>)}
   </EdgeLabelRenderer>;
 }

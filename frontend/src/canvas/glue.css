@@ -10,7 +10,7 @@
 .glue-stitch-marks circle { fill: currentColor; }
 .glue-resize { position: absolute; z-index: 40; pointer-events: auto; width: 14px; height: 14px; padding: 0; border: 2px solid var(--accent); background: var(--chrome); border-radius: 50%; touch-action: none; cursor: nwse-resize; }
 .glue-resize.top-right, .glue-resize.bottom-left { cursor: nesw-resize; }
-.glue-detach { position: absolute; z-index: 40; pointer-events: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--chrome); color: var(--text); padding: 3px 9px; cursor: pointer; }
+.glue-detach { white-space: nowrap; position: absolute; z-index: 40; pointer-events: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--chrome); color: var(--text); padding: 3px 9px; cursor: pointer; }
 .react-flow__node.is-glued .world-card { box-shadow: none; width: 100%; height: 100%; }
 .react-flow__node.is-glued .container-resize-arc { display: none; }
 .glue-tool-hint { max-width: 260px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--chrome); color: var(--text); font-size: 12px; line-height: 1.7; }

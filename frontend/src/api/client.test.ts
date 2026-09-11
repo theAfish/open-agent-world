@@ -13,6 +13,17 @@ afterEach(() => {
 });
 
 describe("API normalization boundary", () => {
+  it("saves cached glue candidates without gesture offsets", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ revision: 1, boxes: {}, bonds: [] })));
+    vi.stubGlobal("fetch", fetchMock);
+    const candidate = { a: "a", b: "b", side: "right" as const, dx: 10, dy: 0 };
+    await worldApi.saveGlue({ revision: 0, bonds: [candidate] });
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/canvas/glue");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      revision: 0, bonds: [{ a: "a", b: "b", side: "right" }],
+    });
+    expect(candidate.dx).toBe(10);
+  });
   it("preserves card and edge revisions separately from resource revisions", () => {
     expect(normalizeCard({ id: "text", type: "text", revision: 8, resource: { revision: 3 } })).toMatchObject({ revision: 8, config: { revision: 3 } });
     expect(normalizeEdge({ id: "edge", source: "a", target: "b", relationship: "read", revision: 5 }).revision).toBe(5);
