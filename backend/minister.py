@@ -124,7 +124,7 @@ def runtime_instruction(saved: str) -> str:
 class MinisterConfig(AgentConfig):
     model_config = ConfigDict(extra="forbid")
     system_instruction: str = Field(default=INSTRUCTION, json_schema_extra={"privileged": True})
-    control_radius: float = Field(default=600, ge=200, le=3000, allow_inf_nan=False,
+    control_radius: float = Field(default=1200, ge=200, le=3000, allow_inf_nan=False,
                                   json_schema_extra={"privileged": True})
     allow_canvas_edits: bool = Field(default=True, json_schema_extra={"privileged": True})
 

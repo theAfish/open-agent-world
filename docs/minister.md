@@ -5,7 +5,7 @@ Card Library, add Minister to your deck and place it on the canvas. Click its
 circular node to talk beside it. Choose a configured model under **Model & actions**.
 
 New Ministers have **Allow canvas edits** enabled. Turn it off to pause administration;
-existing explicitly disabled Ministers stay disabled. Drag the radius handle or
+existing explicitly disabled Ministers stay disabled. New Ministers have a radius of 1200 canvas units. The area preview appears only while hovering over the Minister. Open settings to drag the radius handle or
 enter a radius from 200 to 3000. The circle follows the node, and every affected
 card's saved rectangle must fit inside it. Glued surface rectangles are checked too.
 Only the user can move a Minister or change its control radius/authority.

@@ -1,4 +1,21 @@
 .minister-node { width: 100%; height: 100%; position: relative; color: var(--ink); --minister-accent: #557e69; }
+.minister-avatar-zone { position: absolute; inset: -18px; padding: 18px; }
+.minister-manage { position: absolute; right: 18px; top: 18px; z-index: 2; border: 1px solid var(--line); border-radius: 50%; width: 25px; height: 25px; display: grid; place-items: center; background: var(--surface-solid); color: var(--ink-soft); cursor: pointer; }
+.minister-presence { position: absolute; width: 290px; z-index: 1001; pointer-events: auto; color: var(--ink); --minister-accent: #557e69; transform: translateY(-100%); padding: 14px 0 0; }
+.minister-presence[hidden] { display: none; }
+.minister-presence .minister-conversation { overflow: visible; }
+.minister-presence .minister-messages { overflow: visible; padding: 0; flex: none; display: flex; flex-direction: column; gap: 8px; }
+.minister-presence .minister-message, .minister-greeting { position: relative; background: var(--surface-solid); border: 1px solid var(--line); border-radius: 18px 18px 18px 4px; padding: 10px 13px; margin: 0; box-shadow: 0 4px 14px #203a2912; animation: minister-bubble-in .25s ease-out; }
+.minister-presence .minister-message { max-height: 135px; overflow: auto; overscroll-behavior: contain; }
+.minister-presence .minister-message.is-user { margin-left: 28px; border-radius: 18px 18px 4px 18px; background: var(--surface-solid); border-color: #72998288; }
+.minister-greeting { font-size: 12px; line-height: 1.5; margin-bottom: 8px; }
+.minister-presence .minister-composer { margin: 10px 0 0; padding: 7px 9px 7px 15px; border: 1px solid #72998288; border-radius: 26px; background: var(--surface-solid); box-shadow: 0 5px 20px #203a2920; align-items: center; }
+.minister-presence .minister-composer textarea { min-height: 22px; max-height: 100px; height: 22px; resize: none; transition: height .18s ease; }
+.minister-presence .minister-composer:focus-within textarea { height: 48px; }
+.minister-presence-history { float: right; border: 0; background: var(--surface-solid); color: var(--ink-soft); border-radius: 10px; margin-top: 5px; padding: 3px 8px; font-size: 10px; cursor: pointer; }
+.minister-presence-loading { background: var(--surface-solid); padding: 12px; border-radius: 24px; font-size: 12px; }
+@keyframes minister-bubble-in { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .minister-presence * { animation: none !important; transition: none !important; } }
 .minister-radius { pointer-events: none; position: absolute; z-index: -1; width: calc(var(--minister-radius) * 2); height: calc(var(--minister-radius) * 2); left: calc(var(--minister-cx) - var(--minister-radius)); top: calc(var(--minister-cy) - var(--minister-radius)); border: 1.5px dashed #72998288; border-radius: 50%; background: #75967a05; }
 .minister-node.can-edit .minister-radius { border-style: solid; background: #75967a0a; }
 .minister-node.is-selected .minister-radius, .minister-node.is-open .minister-radius { border-color: #668c75cc; }
@@ -7,7 +24,6 @@
 .minister-orb:focus-visible, .minister-node.is-selected .minister-orb { outline: 2px solid #537760; outline-offset: 4px; }
 .minister-orb i { position: absolute; right: 8px; bottom: 9px; width: 9px; height: 9px; border: 2px solid #f4f6ed; border-radius: 50%; background: #8a998e; }
 .minister-node[data-activity="running"] .minister-orb i, .minister-node[data-activity="waiting"] .minister-orb i { background: #b99443; box-shadow: 0 0 0 3px #b9944320; }
-.minister-label { position: absolute; top: calc(100% + 10px); left: 50%; transform: translateX(-50%); font-size: 11px; max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 .minister-radius-handle { position: absolute; left: calc(var(--minister-cx) + var(--minister-radius) - 7px); top: calc(var(--minister-cy) - 7px); width: 14px; height: 14px; border-radius: 50%; padding: 0; border: 2px solid #61876e; background: #f3f5ed; cursor: ew-resize; touch-action: none; }
 .minister-radius-handle span { position: absolute; left: 20px; top: -3px; color: var(--minister-accent); font-size: 11px; pointer-events: none; }
 .minister-panel { position: absolute; left: calc(100% + 24px); top: -52px; width: 410px; height: 540px; display: flex; flex-direction: column; background: var(--surface-solid); color: var(--ink); border: 1px solid var(--line); box-shadow: var(--panel-shadow); border-radius: 16px; overflow: hidden; cursor: default; user-select: text; }
@@ -68,3 +84,15 @@
 .minister-review dt { font-weight: 600; }
 .minister-review dd { margin: 0 0 5px; overflow-wrap: anywhere; white-space: pre-wrap; }
 .minister-review button { margin: 6px 8px 0 0; }
+
+.minister-bubble-slot { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows .3s ease, opacity .3s ease, transform .3s ease; }
+.minister-bubble-slot > article { min-height: 0; }
+.minister-bubble-slot.is-leaving { grid-template-rows: 0fr; opacity: 0; transform: translateY(-12px) scale(.94); pointer-events: none; }
+.minister-bubble-slot.is-leaving > article { padding-block: 0; border-width: 0; overflow: hidden; }
+
+/* Scope is a card-hover preview, independent of conversation attention. */
+.minister-radius { visibility: hidden; }
+.minister-node:has(.minister-orb:hover) .minister-radius,
+.minister-node:has(.minister-manage:hover) .minister-radius { visibility: visible; }
+.minister-radius-handle { visibility: hidden; }
+.minister-node.is-open .minister-radius-handle { visibility: visible; z-index: 2; }

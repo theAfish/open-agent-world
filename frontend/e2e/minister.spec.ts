@@ -22,6 +22,7 @@ test("Minister can be collected and placed from the ordinary card deck", async (
   const cards = await (await request.get("/api/nodes")).json();
   const card = cards.find((node: { type: string }) => node.type === "core.minister");
   expect(card.config.allow_canvas_edits).toBe(true);
+  expect(card.config.control_radius).toBe(1200);
   expect(card.size).toEqual({ width: 96, height: 96 });
   await request.delete(`/api/nodes/${card.id}`);
 });
@@ -45,6 +46,7 @@ test("Minister circle, radius, local search, durable chat and cross-tab edits", 
     await expect(orb).toBeVisible();
     expect(await orb.evaluate(element => getComputedStyle(element).borderRadius)).toBe("50%");
     const node = page.locator(`[data-card-id="${id}"]`);
+    await page.getByRole("button", { name: "Settings and history for Garden Minister" }).click();
     const handle = page.getByRole("button", { name: "Resize Garden Minister control radius" });
     const grip = await handle.boundingBox();
     await page.mouse.move(grip!.x + grip!.width / 2, grip!.y + grip!.height / 2);
@@ -53,7 +55,6 @@ test("Minister circle, radius, local search, durable chat and cross-tab edits", 
     await page.mouse.up();
     await expect.poll(async () => (await (await request.get(`/api/nodes/${id}`)).json()).config.control_radius).toBe(500);
     const origin = await orb.boundingBox();
-    await orb.click();
     const panel = page.getByRole("region", { name: "Garden Minister controls" });
     await expect(panel).toBeVisible();
     const opened = await orb.boundingBox();
@@ -78,7 +79,7 @@ test("Minister circle, radius, local search, durable chat and cross-tab edits", 
     await page.reload();
     await expect(page.getByRole("log", { name: "Garden Minister conversation" })).toContainText("Renamed the card.");
     await page.getByRole("button", { name: "Close Minister", exact: true }).click();
-    await orb.click();
+    await page.getByRole("button", { name: "Settings and history for Garden Minister" }).click();
     await expect(page.getByRole("log", { name: "Garden Minister conversation" })).toContainText("Renamed the card.");
     await expect(node).toHaveAttribute("data-control-radius", "300");
     await page.getByRole("button", { name: "Use dark theme" }).click();
@@ -113,8 +114,8 @@ test("two Minister conversations report an overlapping edit conflict", async ({ 
   const second = await context.newPage();
   try {
     await page.goto("/"); await second.goto("/");
-    await page.getByRole("button", { name: "Open Minister North", exact: true }).click();
-    await second.getByRole("button", { name: "Open Minister South", exact: true }).click();
+    await page.getByRole("button", { name: "Settings and history for North", exact: true }).click();
+    await second.getByRole("button", { name: "Settings and history for South", exact: true }).click();
     await page.getByRole("textbox", { name: "Message North" }).fill(`race:${noteId}`);
     await second.getByRole("textbox", { name: "Message South" }).fill(`race:${noteId}`);
     await Promise.all([page.getByRole("button", { name: "Send to North" }).click(), second.getByRole("button", { name: "Send to South" }).click()]);
@@ -139,7 +140,7 @@ test("the reported Chinese chat-setup scenario creates a usable separate Convers
   let areaId: string | undefined, participantId: string | undefined;
   try {
     await page.goto("/");
-    await page.getByRole("button", { name: "Open Minister Minister", exact: true }).click();
+    await page.getByRole("button", { name: "Settings and history for Minister", exact: true }).click();
     const input = page.getByRole("textbox", { name: "Message Minister", exact: true });
     const send = page.getByRole("button", { name: "Send to Minister", exact: true });
     const log = page.getByRole("log", { name: "Minister conversation", exact: true });
@@ -198,7 +199,7 @@ test('local administration shares glue and resize, and deletion waits for a real
       await canvas.getByRole('button', { name: 'Collapse Working notes card', exact: true }).click();
       await canvas.getByRole('button', { name: 'Collapse Worker card', exact: true }).click();
     }
-    await page.getByRole('button', { name: 'Open Minister Local administrator', exact: true }).click();
+    await page.getByRole('button', { name: 'Settings and history for Local administrator', exact: true }).click();
     const send = async (text: string) => {
       await page.getByRole('textbox', { name: 'Message Local administrator', exact: true }).fill(text);
       await page.getByRole('button', { name: 'Send to Local administrator', exact: true }).click();
@@ -231,4 +232,51 @@ test('local administration shares glue and resize, and deletion waits for a real
     await observer.close();
     for (const id of ids.reverse()) await request.delete(`/api/nodes/${id}`);
   }
+});
+
+
+test("canvas presence greets locally and opens management explicitly", async ({ page, request }) => {
+  const card = await (await request.post('/api/nodes', { data: {
+    type: 'core.minister', name: 'Presence check', position: { x: 320, y: 300 },
+  } })).json();
+  let sent = 0;
+  page.on('request', request => { if (request.method() === 'POST' && request.url().includes('/messages')) sent++; });
+  try {
+    await page.goto('/');
+    const avatar = page.getByRole('button', { name: 'Open Minister Presence check', exact: true });
+    await avatar.hover();
+    const node = page.locator(`[data-card-id="${card.id}"]`);
+    await expect(node.locator('.minister-label')).toHaveCount(0);
+    await expect(node.locator('.minister-radius')).toBeVisible();
+    const input = page.getByRole('textbox', { name: 'Message Presence check', exact: true });
+    await expect(input).toBeVisible();
+    await expect(page.getByText('Hi! Need a hand with this part of your canvas?', { exact: true })).toBeVisible();
+    const panel = page.getByRole('region', { name: 'Presence check controls' });
+    await expect(panel).toHaveCount(0);
+    await input.fill('What is nearby?');
+    await page.mouse.move(20, 20);
+    await expect(node.locator('.minister-radius')).toBeHidden();
+    await expect(node.locator('.minister-radius-handle')).toBeHidden();
+    await expect(input).toBeVisible();
+    expect(sent).toBe(0);
+    await page.screenshot({ path: '../.tmp/minister-presence.png' });
+    await page.getByRole('button', { name: 'Send to Presence check', exact: true }).click();
+    const bubbles = page.locator('.minister-presence .minister-messages');
+    await expect(bubbles).toContainText('What is nearby?');
+    await expect(bubbles.locator('.is-agent')).not.toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Settings and history for Presence check' }).click();
+    await expect(panel).toBeVisible();
+    await expect(page.getByRole('spinbutton', { name: 'Control radius' })).toBeVisible();
+    await expect(panel.getByRole('log')).toContainText('What is nearby?');
+    await page.getByRole('button', { name: 'Close Minister', exact: true }).click();
+    await avatar.hover();
+    await input.fill('');
+    await input.press('Escape');
+    await page.mouse.move(20, 20);
+    await avatar.hover();
+    await expect(input).toBeVisible();
+    await expect(page.getByText('Hi! Need a hand with this part of your canvas?', { exact: true })).toHaveCount(0);
+
+  } finally { await request.delete(`/api/nodes/${card.id}`); }
 });
