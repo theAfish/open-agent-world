@@ -9,6 +9,7 @@ function nodeRect(node: ConnectionLineComponentProps<CanvasNode>["fromNode"]): N
     y: node.internals.positionAbsolute.y,
     width: node.measured.width ?? node.width ?? 1,
     height: node.measured.height ?? node.height ?? 1,
+    outline: node.data.shadowOutline as NodeRect["outline"],
   };
 }
 

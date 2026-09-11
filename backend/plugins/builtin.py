@@ -1081,6 +1081,8 @@ class CorePlugin:
     )
 
     def register(self, registration: PluginRegistration) -> None:
+        from backend.plugins.shadow_collection import register_shadow_collection
+        register_shadow_collection(registration)
         _register_builtin(registration)
         from backend.file_preview import register_file_preview
         register_file_preview(registration)
