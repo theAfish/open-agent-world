@@ -1,6 +1,7 @@
 import type { PluginCatalog, WorldCard, WorldPosition, WorldSize } from "../types/world";
 import { NODE_SURFACE_SIZE, type NodeSurfaceLevel, type SurfaceSize } from "./nodeSurfaces";
 import { nodePositionFromSurfacePosition, positionSurfaceAtNodeCenter } from "../canvas/nodeDisplacement";
+import { isShadow, shadowLayout, insideShadow } from "./shadowCollection";
 
 export const containerDefinition = (card: WorldCard, catalog: PluginCatalog) => catalog.node_types.find((type) => type.id === card.type)?.container;
 export const isContainer = (card: WorldCard, catalog: PluginCatalog) => containerDefinition(card, catalog) != null;
@@ -28,6 +29,7 @@ export function containerDisplayOwners(cards: WorldCard[], catalog: PluginCatalo
 /** Expanded member surfaces stay below the header and inside the left border. */
 export function memberSurfacePosition(card: WorldCard, parent: WorldCard, level: NodeSurfaceLevel, catalog: PluginCatalog) {
   const position = positionSurfaceAtNodeCenter(card.position, level);
+  if(isShadow(parent)) return position;
   const [left, top] = containerDefinition(parent, catalog)!.content_inset;
   return { x: Math.max(position.x, parent.position.x + left), y: Math.max(position.y, parent.position.y + top) };
 }
@@ -57,6 +59,7 @@ export function containerSizes(cards: WorldCard[], catalog: PluginCatalog, level
   for (const card of parentFirst(cards).reverse()) {
     const spec = containerDefinition(card, catalog);
     if (!spec) continue;
+    if(isShadow(card)){const layout=shadowLayout(card,cards,levels,catalog);sizes.set(card.id,{width:layout.width,height:layout.height});continue;}
     const size = { width: Math.max(card.size.width, spec.min_size[0]), height: Math.max(card.size.height, spec.min_size[1]) };
     if (containerShowsWorkspace(card, catalog, levels.get(card.id))) { sizes.set(card.id, size); continue; }
     for (const member of cards.filter((node) => node.parent_id === card.id)) {
@@ -108,6 +111,10 @@ export function dropContainer(cards: WorldCard[], member: WorldCard, point: Worl
   return cards.filter((card) => {
     if (!containerDefinition(card, catalog) || !accepts(card, member, catalog, cards)) return false;
     const size = sizes.get(card.id) ?? card.size;
+    if(isShadow(card)) {
+      const rect=shadowLayout(card,cards,undefined,catalog);
+      return insideShadow(point.x,point.y,rect);
+    }
     // Membership follows the visible frame; insets only govern member layout.
     // Use the same boundary for the drag hint and the final drop.
     return point.x >= card.position.x && point.x <= card.position.x + size.width

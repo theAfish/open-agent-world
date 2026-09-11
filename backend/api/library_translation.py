@@ -10,6 +10,19 @@ from backend.api.dependencies import get_services
 
 router = APIRouter()
 
+@router.get("/library/papers/{node_id}/preview")
+async def paper_preview(node_id: str, details: bool = False, services=Depends(get_services)):
+    from backend.node_documents import read_document
+    async with services._node_mutation(read_only=True):
+        if services.world.get_card(node_id).type != "library.paper":
+            raise HTTPException(422, "Expected a Paper node")
+        document = read_document(services, node_id)
+        value = document["value"]
+        preview = {"thumbnail": value["thumbnail"], "pages": value["pages"], "filename": value["filename"]}
+        if details:
+            preview.update(annotations=value["annotations"], page=value["page"])
+        return {"revision": document["revision"], "value": preview}
+
 class TranslationRequest(BaseModel):
     text: str = Field(min_length=1, max_length=20000)
     model: str = Field(min_length=1, max_length=200)

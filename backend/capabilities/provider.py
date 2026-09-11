@@ -62,6 +62,14 @@ class _CapabilityContext:
         await self.services._publish_conversation_message(message)
         return message.model_dump(mode='json')
 
+    async def collection_members(self, capability):
+        async with self.services._node_mutation():
+            self.services.capabilities.capability_for_id(capability.agent_id, capability.id)
+            return {"collection_id": capability.target_id, "members": [
+                {"id": member.id, "name": member.name, "type": member.type}
+                for member in self.services.world.list_members(capability.target_id)
+            ], "permissions": "Member content and execution require independent connections."}
+
     async def artifact_action(self, capability, arguments):
         from backend.resources.artifact_models import ArtifactPublish, ArtifactMaterialize
         from backend.errors import ResourceValidationError

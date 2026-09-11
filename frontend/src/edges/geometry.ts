@@ -6,6 +6,7 @@ export interface Point {
 export interface NodeRect extends Point {
   width: number;
   height: number;
+  outline?: Point[];
 }
 
 export interface BoundaryAnchor extends Point {
@@ -61,6 +62,21 @@ export function roundedRectAnchor(
   } else {
     dx /= length;
     dy /= length;
+  }
+
+  if(rect.outline?.length) {
+    let nearest=Infinity,result:BoundaryAnchor|undefined;
+    for(let i=0;i<rect.outline.length;i++) {
+      const a=rect.outline[i],b=rect.outline[(i+1)%rect.outline.length];
+      const ex=b.x-a.x,ey=b.y-a.y,den=dx*ey-dy*ex;
+      if(Math.abs(den)<EPSILON)continue;
+      const ax=rect.x+a.x-centerX,ay=rect.y+a.y-centerY;
+      const distance=(ax*ey-ay*ex)/den,t=(ax*dy-ay*dx)/den;
+      if(distance<0||t<0||t>1||distance>=nearest)continue;
+      nearest=distance;const norm=Math.hypot(ex,ey)||1;
+      result={x:centerX+dx*distance,y:centerY+dy*distance,normalX:ey/norm,normalY:-ex/norm};
+    }
+    if(result)return result;
   }
 
   let inside = 0;

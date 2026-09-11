@@ -57,6 +57,17 @@ def test_pdf_document_membership_and_revision(client):
     assert base64.b64decode(document["value"]["pdf"]) == raw
     assert document["value"]["pages"] == 1
     assert "Research evidence" in document["value"]["text"][0]
+    preview = client.get(f"/api/library/papers/{paper['id']}/preview")
+    assert preview.status_code == 200
+    assert preview.json()["revision"] == document["revision"]
+    assert set(preview.json()["value"]) == {"thumbnail", "pages", "filename"}
+    assert preview.json()["value"]["thumbnail"] == document["value"]["thumbnail"]
+    details = client.get(f"/api/library/papers/{paper['id']}/preview?details=true")
+    assert details.status_code == 200
+    assert details.json()["value"]["annotations"] == document["value"]["annotations"]
+    assert details.json()["value"]["page"] == document["value"]["page"]
+    assert "pdf" not in details.json()["value"]
+    assert "text" not in details.json()["value"]
     notes = client.post(path + "/actions/annotate", json={
         "expected_revision": document["revision"], "arguments": {"notes": "Traceable", "page": 1}})
     assert notes.status_code == 200, notes.text

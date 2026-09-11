@@ -1,4 +1,5 @@
 import { BarracksContainerNode } from "./Barracks";
+import { ShadowCollectionNode } from "./ShadowCollection";
 import type { NodeProps } from "@xyflow/react";
 import { Boxes } from "lucide-react";
 import { useWorldStore } from "../state/worldStore";
@@ -14,6 +15,7 @@ export function ContainerCardNode(props: NodeProps<CanvasNode>) {
   const level = useNodeSurfaceStore((state) => state.surfaceLevels[props.data.card.id]);
   const setWorkspace = (open: boolean) => open ? useNodeSurfaceStore.getState().openWorkspace(props.data.card.id) : useNodeSurfaceStore.getState().closeWorkspace(props.data.card.id);
   const catalog = useWorldStore((state) => state.catalog);
+  if(props.data.card.type==="core.shadow-collection")return <ShadowCollectionNode {...props}/>;
   const card = props.data.card;
   const definition = catalog.node_types.find((type) => type.id === card.type)!;
   const workspace = containerShowsWorkspace(card, catalog, level);

@@ -11,12 +11,15 @@ import { relationshipPath, type NodeRect } from "./geometry";
 import { nodeCornerRadius } from "./nodeGeometry";
 import type { CanvasNode } from "../cards/types";
 import { EdgeLabelRenderer } from "../canvas/FlowPortal";
+import {isShadow,shadowPresentation,shadowPoints,useCollectionDrag} from "../state/shadowCollection";
+import {useNodeSurfaceStore,surfaceLevelForNode} from "../state/nodeSurfaces";
 
 export interface SemanticEdgeData extends Record<string, unknown> {
   relationship: Relationship;
   direction: EdgeDirection;
   sourceCardId?: string;
   targetCardId?: string;
+  fading?: boolean;
 }
 
 export type CanvasEdge = Edge<SemanticEdgeData, "semantic">;
@@ -37,12 +40,25 @@ export function SemanticEdge({
   const catalog = useWorldStore((state) => state.catalog);
   const sourceNode = useInternalNode<CanvasNode>(source);
   const targetNode = useInternalNode<CanvasNode>(target);
-  const nodeRect = (node: typeof sourceNode, fallbackX: number, fallbackY: number): NodeRect => ({
+  const cards=useWorldStore(s=>s.cards),surfaces=useNodeSurfaceStore(s=>s.surfaceLevels),positions=useCollectionDrag(s=>s.positions);
+  const outline=(node:typeof sourceNode)=>{
+    if(!node||!isShadow(node.data.card)||!Object.keys(positions).length)return node?.data.shadowOutline as NodeRect["outline"];
+    const rect=shadowPresentation(node.data.card,cards,new Map(cards.map(c=>[c.id,surfaceLevelForNode(c.id,surfaces)])),positions,catalog);
+    return shadowPoints(rect.width,rect.height,rect.rects);
+  };
+  const nodeRect = (node: typeof sourceNode, fallbackX: number, fallbackY: number): NodeRect => {
+    const origin=node?.data.shadowOrigin as {x:number;y:number}|undefined;
+    if(node&&origin&&isShadow(node.data.card)&&Object.keys(positions).length){
+      const rect=shadowPresentation(node.data.card,cards,new Map(cards.map(c=>[c.id,surfaceLevelForNode(c.id,surfaces)])),positions,catalog);
+      return {...rect,x:node.internals.positionAbsolute.x+rect.x-origin.x,y:node.internals.positionAbsolute.y+rect.y-origin.y,outline:outline(node)};
+    }
+    return ({
     x: node?.internals.positionAbsolute.x ?? fallbackX,
     y: node?.internals.positionAbsolute.y ?? fallbackY,
     width: node?.measured.width ?? node?.width ?? 1,
     height: node?.measured.height ?? node?.height ?? 1,
-  });
+    outline: outline(node),
+  });};
   const geometry = relationshipPath(
     nodeRect(sourceNode, sourceX, sourceY),
     nodeRect(targetNode, targetX, targetY),
@@ -91,7 +107,7 @@ export function SemanticEdge({
       <EdgeLabelRenderer>
         <div
           className={`semantic-edge-label ${selected ? "is-selected" : ""}`}
-          style={{ transform: `translate(-50%, -50%) translate(${geometry.labelX}px, ${geometry.labelY}px)` }}
+          style={{ transform: `translate(-50%, -50%) translate(${geometry.labelX}px, ${geometry.labelY}px)`,opacity:data?.fading?0:1,transition:"opacity 400ms ease",pointerEvents:data?.fading?"none":undefined }}
           title={option.description}
         >
           <span aria-hidden="true" />
