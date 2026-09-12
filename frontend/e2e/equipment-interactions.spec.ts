@@ -24,7 +24,7 @@ test("equipment links follow visible boundaries and backpack controls stay clear
     expect(response.status()).toBe(201);
     return response.json();
   };
-  const owner = await create({ type: "agent", name: "Equipment owner", position: { x: 500, y: 250 } });
+  const owner = await create({ type: "agent", name: "Equipment owner", position: { x: 500, y: 250 }, size: { width: 96, height: 96 } });
   const external = await create({ type: "agent", name: "External reader", position: { x: 1000, y: 560 } });
   const item = await create({ type: "text", name: "Equipped notes", equipment: { owner_id: owner.id, relationship: "read" } });
   const edge = await request.post("/api/edges", { data: { source: external.id, target: item.id, relationship: "read" } });

@@ -227,7 +227,10 @@ export function WorldCanvas() {
         const owner = equipmentAgent;
         const ownerLevel = surfaceLevels.get(owner.id) ?? "preview";
         const index = renderCards.filter((c) => equipmentOwner(c, cards)?.id === owner.id).findIndex((c) => c.id === card.id);
-        return equipmentSurfaceNodes(node, owner.id, ownerLevel, index, equipmentPanels.includes(owner.id), equipmentPositions[card.id]);
+        const ownerHeight = frameSizes.get(owner.id)?.height
+          ?? (ownerLevel === "workspace" ? workspaceSizes[owner.id]?.height : undefined)
+          ?? (ownerLevel === "node" ? owner.size.height : NODE_SURFACE_SIZE[ownerLevel].height);
+        return equipmentSurfaceNodes(node, owner.id, ownerLevel, index, equipmentPanels.includes(owner.id), equipmentPositions[card.id], ownerHeight);
       }
       if (card.parent_id && byId.has(card.parent_id)) {
         const parent = byId.get(card.parent_id)!;

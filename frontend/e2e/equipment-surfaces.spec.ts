@@ -12,6 +12,14 @@ test("equipped skills reuse draggable detail cards and keep a visual origin", as
     await page.goto('/');
     await page.getByRole('button', { name: 'Equipment for Skill owner', exact: true }).click();
     const surface = page.locator(`[data-card-id="${item.id}"]`);
+    const expectSlotSize = async (slot: typeof surface) => {
+      await expect(slot).toHaveCSS('width', '294px');
+      await expect(slot).toHaveCSS('height', '40px');
+      const wrapper = slot.locator('..');
+      await expect(wrapper).toHaveCSS('width', '294px');
+      await expect(wrapper).toHaveCSS('height', '40px');
+    };
+    await expectSlotSize(surface);
     await surface.getByRole('button', { name: 'Summoning', exact: true }).click();
     await expect(surface).toHaveAttribute('data-surface-level', 'inspector');
     await expect(surface).toHaveCSS('width', '438px');
@@ -20,6 +28,7 @@ test("equipped skills reuse draggable detail cards and keep a visual origin", as
     const origin = page.locator(`[data-equipment-origin="${item.id}"]`);
     const bridge = page.locator(`[data-surface-bridge="${item.id}"]`);
     await expect(origin).toBeVisible();
+    await expectSlotSize(origin);
     await expect(bridge).toHaveCSS('pointer-events', 'none');
     await expect(async () => {
       const a = (await origin.boundingBox())!, b = (await surface.boundingBox())!;
@@ -48,6 +57,7 @@ test("equipped skills reuse draggable detail cards and keep a visual origin", as
     await page.screenshot({ path: '../.open-agent-world/equipment-detail-dark.png' });
     await origin.getByRole('button', { name: 'Hide Call specialists details', exact: true }).click();
     await expect(surface).toHaveClass(/equipment-card/);
+    await expectSlotSize(surface);
     await expect(bridge).toHaveCount(0);
     await expect(origin).toHaveCount(0);
   } finally {
