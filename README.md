@@ -49,7 +49,7 @@ See [Getting started](docs/getting-started.md) for setup details, macOS limitati
 
 ## Learn and explore
 
-- **Tutorial - planned.** A future interactive guide will teach basic operations by building a small working example. It is not available yet.
+- **[Interactive Tutorial](docs/tutorial.md).** Start from the empty canvas with the OAW guide, or use the compass button to replay navigation, cards, connections, sticking, and the Minister.
 - **[Docs](docs/README.md)**: feature usage, configuration, and technical reference you can read as needed.
 - **[Plugins](docs/plugins.md)**: use bundled extensions or develop your own cards, capabilities, and runtime integrations.
 

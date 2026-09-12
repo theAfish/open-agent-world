@@ -28,7 +28,7 @@ Use these guides to look up a feature or understand how it works. Start with set
 
 ## Scope and future learning
 
-The interactive tutorial is planned, not implemented. It will introduce basic operations and guide a small working example, linking here for deeper explanations.
+The [interactive tutorial](tutorial.md) starts on an empty canvas and guides a small working example. Replay it with the compass button in the world controls; use these docs for deeper explanations.
 
 This repository documents OAW, core functionality, bundled plugins, and plugin development. Plugin-specific guides can live with their packages; see the [plugin guide directory](plugins.md#bundled-plugin-guides). In-app viewing of plugin documentation and tutorials is a future direction, with no documentation delivery API promised here.
 

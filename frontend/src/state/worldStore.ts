@@ -352,7 +352,7 @@ interface WorldState {
   closeConnectionDialog: () => void;
   createConnection: (relationship: Relationship, direction?: EdgeDirection) => Promise<void>;
   selectEdge: (id?: string) => void;
-  selectCards: (ids: string[]) => void;
+  selectCards: (ids: string[], options?: { syncCanvas: boolean }) => void;
   updateSelectedEdge: (
     patch: Relationship | { relationship?: Relationship; direction?: EdgeDirection },
   ) => Promise<void>;
@@ -1291,7 +1291,8 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   }),
 
   selectEdge: (id) => set({ selectedEdgeId: id }),
-  selectCards: (ids) => set({ selectedCardIds: [...new Set(ids)] }),
+  selectCards: (ids, options) => set(state => ({ selectedCardIds: [...new Set(ids)],
+    selectionRevision: state.selectionRevision + (options?.syncCanvas ? 1 : 0) })),
 
   updateSelectedEdge: (patch) => withHistoryTransaction(async () => {
     const id = get().selectedEdgeId;

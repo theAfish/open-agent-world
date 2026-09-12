@@ -9,6 +9,7 @@ import type { WorldCard } from '../types/world';
 import { MarkdownMessage } from './MarkdownMessage';
 import { MinisterBubbleStack } from './MinisterBubbleStack';
 import { ministerToolSummary } from './ministerActivity';
+import { reportInteraction } from '../state/interactions';
 
 export function MinisterConversation({ card, chat, presence = false }: { card: WorldCard; chat: MinisterChat; presence?: boolean }) {
   const log = useRef<HTMLDivElement>(null);
@@ -31,6 +32,7 @@ export function MinisterConversation({ card, chat, presence = false }: { card: W
         content, mention_agent_ids: [card.id], message_id: crypto.randomUUID(),
       });
       setDraft(card.id, "");
+      reportInteraction({ type: 'message-sent', cardId: card.id, conversationId: chat.conversation_id });
       await timeline.loadLatest();
     } catch (reason) { setError(apiErrorMessage(reason)); }
     finally { setSending(false); }

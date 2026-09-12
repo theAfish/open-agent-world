@@ -38,7 +38,7 @@ export function ComponentPalette() {
     writePaletteDrag(event.dataTransfer, payload);
     if (payload.kind === "node") useEquipmentDrag.getState().set({ ...buildCardDraft(payload.type, { x: 0, y: 0 }, catalog.node_types.find(item => item.id === payload.type)), id: "" });
   };
-  return <aside className="component-palette" aria-label="Active card deck"
+  return <aside className="component-palette" aria-label="Active card deck" data-tutorial="deck"
     style={{ "--deck-tab-count": (snapshot?.decks.length ?? 0) + 1 } as CSSProperties}>
     <div className="deck-tabs">
       <div className="deck-tab-scroll" role="tablist" aria-label="Card decks">

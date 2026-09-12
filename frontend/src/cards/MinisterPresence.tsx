@@ -6,6 +6,7 @@ import { useNodeSurfaceStore } from '../state/nodeSurfaces';
 import type { WorldCard } from '../types/world';
 import type { MinisterChat } from '../types/minister';
 import { MinisterConversation } from './MinisterConversation';
+import { reportInteraction } from '../state/interactions';
 
 // Presence is transient; the conversation API remains the history authority.
 export function MinisterPresence({ card, active, setActive, panelOpen }: {
@@ -20,6 +21,7 @@ export function MinisterPresence({ card, active, setActive, panelOpen }: {
   const region = useRef<HTMLDivElement>(null);
   const draft = useNodeSurfaceStore(s => s.drafts[card.id] ?? '');
   const [attempt, setAttempt] = useState(0);
+  useEffect(() => { if (active) reportInteraction({ type: 'minister-opened', cardId: card.id }); }, [active, card.id]);
   useEffect(() => {
     if (!active || greeted.current) return;
     greeted.current = true;

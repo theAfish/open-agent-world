@@ -2,6 +2,7 @@
 import { persist } from 'zustand/middleware';
 import { NODE_SURFACE_SIZE, WORKSPACE_MIN_SIZE, type NodeSurfaceLevel, type SurfaceSize } from './nodeSurfaces';
 import { worldApi } from '../api/client';
+import { reportInteraction } from './interactions';
 
 export interface GlueBox { x: number; y: number; width: number; height: number; level: NodeSurfaceLevel; sizes?: Partial<Record<NodeSurfaceLevel, SurfaceSize>> }
 export interface GlueBond { a: string; b: string; side: 'right' | 'left' | 'top' | 'bottom' }
@@ -174,6 +175,7 @@ export function persistGlue(detach: string[] = []) {
     if (sharedRevision === undefined) sharedRevision = (await worldApi.getGlue()).revision;
     const shared = await worldApi.saveGlue({ revision: sharedRevision, ...edit });
     sharedRevision = shared.revision;
+    reportInteraction({ type: 'glue-saved', bonds: shared.bonds });
   });
   saves = save;
   return save.catch(async error => { await refreshGlue(); throw error; });

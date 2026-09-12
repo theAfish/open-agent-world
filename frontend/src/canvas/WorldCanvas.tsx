@@ -1,4 +1,5 @@
 import { GlueLayer } from "./GlueLayer";
+import { reportInteraction } from "../state/interactions";
 import { findGlue, glueGroup, reflowGlueSurfaces, refreshGlue, beginGlueEdit, cancelGlueRefresh, persistGlue, useGlueStore, type GlueBox, type GlueCandidate } from "../state/glue";
 import { MapAtlas } from "./MapAtlas";
 import {
@@ -456,7 +457,10 @@ export function WorldCanvas() {
     setViewportState({ ...next, ...size });
   }, [dimensions, setViewportState]);
 
-  const onMoveEnd: OnMove = useCallback((_event, next) => commitViewport(next), [commitViewport]);
+  const onMoveEnd: OnMove = useCallback((event, next) => {
+    commitViewport(next);
+    if (event || document.activeElement?.closest('.world-controls')) reportInteraction({ type: 'viewport', ...next });
+  }, [commitViewport]);
   const onInit: OnInit<CanvasNode, CanvasEdge> = useCallback((instance) => {
     commitViewport(instance.getViewport());
   }, [commitViewport]);
@@ -506,7 +510,7 @@ export function WorldCanvas() {
           minZoom: 0.12,
           maxZoom: 2.2,
           duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300,
-        });
+        }).then(() => reportInteraction({ type: 'focus', ids: focusNodes.map(node => node.id) }));
         return;
       }
       if (modifier && event.key.toLowerCase() === "z") {

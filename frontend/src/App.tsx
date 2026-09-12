@@ -6,7 +6,7 @@ import { ComponentPalette } from "./palette/ComponentPalette";
 import { LegionSelection } from "./legions/LegionSelection";
 import { ActivityPanel } from "./shell/ActivityPanel";
 import { BackendUnavailableNotice } from "./shell/BackendUnavailableNotice";
-import { EmptyWorld } from "./shell/EmptyWorld";
+import { Onboarding } from "./onboarding/Onboarding";
 import { RuntimeConnection } from "./shell/RuntimeConnection";
 import { SettingsPanel } from "./shell/SettingsPanel";
 import { ToastStack } from "./shell/ToastStack";
@@ -34,7 +34,7 @@ export function App() {
         <BackendUnavailableNotice />
         <LegionSelection />
         <ComponentPalette />
-        <EmptyWorld />
+        <Onboarding />
         <ActivityPanel />
         <ConnectionDialog />
         <ToastStack />

@@ -14,6 +14,7 @@ import {
 import { useWorldStore } from "../state/worldStore";
 import { useOpenFiles } from "../state/openFiles";
 import type { ConversationAgent, ConversationAttachment, ConversationMessage, ConversationSession, WorldCard } from "../types/world";
+import { reportInteraction } from '../state/interactions';
 
 type OutgoingMessage = { message: ConversationMessage; status: "sending" | "confirmed" | "unconfirmed" };
 
@@ -264,6 +265,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       });
       setOutgoing((current) => current.map((item) => item.message.id === messageId
         ? { message: result.message, status: "confirmed" } : item));
+      reportInteraction({ type: 'message-sent', cardId: card.id, conversationId: card.id });
       if (selectedScope.current === `${card.id}/${result.message.session_id}`) {
         void history.loadLatest();
       }

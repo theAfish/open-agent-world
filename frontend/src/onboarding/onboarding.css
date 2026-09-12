@@ -1,0 +1,43 @@
+.onboarding-layer { position: absolute; inset: 0; z-index: 34; pointer-events: none; }
+.onboarding-logo-ring { position: absolute; width: 160px; height: 160px; left: calc(50% - 80px); top: calc(38% - 112px); transition: opacity .7s ease, transform 1.1s ease; }
+.onboarding-logo-ring.has-entered { opacity: 0; transform: scale(.92); }
+.onboarding-welcome { position: absolute; left: 50%; top: calc(38% + 65px); width: min(430px, calc(100% - 40px)); transform: translateX(-50%); text-align: center; pointer-events: auto; }
+.onboarding-eyebrow { color: var(--ink-faint); font-size: 10px; letter-spacing: .17em; text-transform: uppercase; }
+.onboarding-welcome h1 { margin: 9px 0 10px; font-size: clamp(26px, 3.2vw, 38px); letter-spacing: -.045em; font-weight: 560; }
+.onboarding-welcome > p { margin: 0 0 25px; font-size: 13px; color: var(--ink-soft); }
+.onboarding-actions { display: flex; flex-direction: column; align-items: center; gap: 9px; }
+.onboarding-actions .onboarding-start { display: flex; justify-content: space-between; width: 290px; max-width: 100%; padding: 14px 17px; border-radius: 13px; text-align: left; box-shadow: 0 5px 18px var(--shadow); }
+.onboarding-start span { display: grid; gap: 3px; }
+.onboarding-start small { opacity: .8; font-size: 10px; font-weight: 400; }
+.onboarding-actions > .secondary-button { width: 290px; max-width: 100%; justify-content: center; padding: 10px; border-radius: 11px; }
+.onboarding-text-button { background: none; border: 0; font-size: 11px; color: var(--ink-soft); padding: 6px 3px; cursor: pointer; }
+.onboarding-text-button:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.tutorial-guide { position: absolute; top: 0; left: 0; width: 256px; transform: translate(var(--guide-x), var(--guide-y)); transition: transform .85s cubic-bezier(.35,0,.25,1); }
+.tutorial-guide.is-logo { width: 160px; transition: none; }
+.tutorial-mascot { width: 92px; height: 92px; transform-origin: 50% 75%; transition: width .85s, height .85s; }
+.is-logo .tutorial-mascot { width: 160px; height: 160px; }
+.oaw-guide-art { display: block; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 2px 2px var(--shadow)); }
+.is-logo .oaw-guide-art { filter: none; }
+:root[data-theme="dark"] .tutorial-mascot .oaw-guide-art { filter: drop-shadow(0 0 1px #a4bad3) drop-shadow(0 2px 2px var(--shadow)); }
+.tutorial-bubble { position: absolute; width: 256px; max-width: calc(100vw - 32px); bottom: calc(100% + 9px); left: 0; border: 1px solid var(--line-strong); border-radius: 16px 16px 16px 5px; background: var(--surface-raised); box-shadow: var(--panel-shadow); padding: 12px 14px 10px; pointer-events: auto; }
+.tutorial-bubble::after { content: ''; position: absolute; bottom: -8px; left: 44px; width: 13px; height: 13px; background: var(--surface-raised); border-right: 1px solid var(--line-strong); border-bottom: 1px solid var(--line-strong); transform: skewY(25deg) rotate(25deg); }
+.tutorial-bubble header { display: flex; align-items: center; gap: 3px; margin-bottom: 7px; }
+.tutorial-bubble header > span { font-size: 9px; letter-spacing: .025em; color: var(--ink-faint); flex: 1; }
+.onboarding-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 23px; height: 23px; padding: 2px; border: 0; background: transparent; color: var(--ink-soft); border-radius: 6px; cursor: pointer; }
+.onboarding-icon-button:hover { background: var(--accent-soft); color: var(--accent); }
+.tutorial-bubble p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--ink); }
+.tutorial-bubble small { display: block; margin-top: 8px; color: var(--ink-faint); font-size: 10px; line-height: 1.5; }
+.tutorial-bubble footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; }
+.tutorial-next { display: inline-flex; align-items: center; gap: 10px; border: 0; border-radius: 7px; padding: 7px 9px; font-size: 11px; font-weight: 550; background: var(--accent-soft); color: var(--accent-strong); cursor: pointer; }
+.tutorial-next:hover { background: var(--accent); color: var(--surface-raised); }
+.tutorial-optional { margin-top: 6px; font-size: 10px; }
+.tutorial-waiting { display: flex; align-items: center; gap: 7px; font-size: 10px; color: var(--ink-soft); }
+.tutorial-waiting i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.tutorial-bubble .onboarding-error, .onboarding-welcome .onboarding-error { margin-top: 9px; font-size: 11px; color: var(--danger); }
+.is-compact .tutorial-bubble { padding: 6px 10px; }
+.is-compact .tutorial-bubble header { margin: 0; }
+[data-tutorial-highlight="true"] { outline: 2px solid var(--accent); outline-offset: 7px; }
+.tutorial-connection-trace { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.tutorial-connection-trace path { fill: none; stroke: var(--accent); stroke-width: 3; stroke-dasharray: 1; stroke-linecap: round; }
+@media (max-height: 650px) { .onboarding-welcome { top: calc(32% + 45px); } .onboarding-logo-ring { top: calc(32% - 112px); } .onboarding-welcome > p { margin-bottom: 16px; } .tutorial-bubble p { font-size: 12px; } }
+@media (prefers-reduced-motion: reduce) { .tutorial-guide, .tutorial-mascot, .onboarding-logo-ring { transition: none; } }

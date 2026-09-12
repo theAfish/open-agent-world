@@ -42,7 +42,7 @@ export function MapAtlas({ active, onActiveChange, glueActive, onGlueChange }: {
         <MapPin size={25} /><span>{index + 1} · {pin.name}</span>
       </div>)}
     </div>}
-    <Panel position="bottom-right" className="map-tools nodrag nopan nowheel">
+    <Panel position="bottom-right" className="map-tools nodrag nopan nowheel" data-tutorial="tools">
       {active && <section className="map-atlas" aria-label="地图册">
         <header><strong>地图册</strong><button className="icon-button" aria-label="关闭图钉工具" onClick={() => onActiveChange(false)}><X size={16} /></button></header>
         <p>点击空白画布放置图钉 · 按 1–9 跳转 · Esc 收起</p>
