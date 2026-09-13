@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { Check, FileClock, Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useWorldStore } from "../state/worldStore";
@@ -7,6 +8,7 @@ import { RelationshipList } from "./CardUtilities";
 import { worldApi, apiErrorMessage } from "../api/client";
 
 export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurfaceLevel }) {
+  useLocale();
   const saveText = useWorldStore((state) => state.saveText);
   const [content, setContent] = useState("");
   const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving">("saved");
@@ -49,7 +51,7 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
       setError("");
       setReload(value => value + 1);
     } else {
-      setError("保存失败；草稿已保留。若正文被其他参与者更新，请先核对新版本，避免覆盖。");
+      setError(t("保存失败；草稿已保留。若正文被其他参与者更新，请先核对新版本，避免覆盖。"));
     }
     setSaveState(draft.current.dirty ? "dirty" : "saved");
   };
@@ -58,18 +60,18 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
     <div className="expanded-stack">
       <div className="resource-banner">
         <div>
-          <span>Managed resource</span>
+          <span>{t("Managed resource")}</span>
           <strong>{filename}</strong>
         </div>
         <div className={`save-state save-state--${saveState}`}>
           {saveState === "saved" ? <Check size={12} /> : null}
-          {ready ? saveState : "Loading…"}
+          {ready ? saveState : t("Loading…")}
         </div>
       </div>
 
       {error && <p role="alert">{error}</p>}
       <label className="field-label text-editor-label">
-        <span>Contents</span>
+        <span>{t("Contents")}</span>
         <textarea
           className="text-editor"
           value={content}
@@ -90,24 +92,24 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
         />
       </label>
       <div className="editor-actions">
-        <span id={`text-save-state-${card.id}`}>{content.length.toLocaleString()} characters · r{revision ?? "—"}</span>
+        <span id={`text-save-state-${card.id}`}>{content.length.toLocaleString(useLocale.getState().locale)} {t("characters · r")}{revision ?? "—"}</span>
         <button
           type="button"
           className="primary-button"
           onClick={() => void performSave()}
           disabled={!ready || saveState !== "dirty"}
         >
-          <Save size={14} /> {saveState === "saving" ? "Saving…" : "Save text"}
+          <Save size={14} /> {saveState === "saving" ? t("Saving…") : t("Save text")}
         </button>
       </div>
 
       <section className="card-section">
-        <div className="section-heading"><span>Relationships</span><small>live permissions</small></div>
+        <div className="section-heading"><span>{t("Relationships")}</span><small>{t("live permissions")}</small></div>
         <RelationshipList card={card} />
       </section>
 
       <section className="card-section history-section">
-        <div className="section-heading"><span>Modification history</span><small>{history.length} entries</small></div>
+        <div className="section-heading"><span>{t("Modification history")}</span><small>{history.length} {t("entries")}</small></div>
         {history.length > 0 ? (
           <ul className="history-list">
             {history.slice(-3).reverse().map((entry, index) => (
@@ -118,7 +120,7 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
               </li>
             ))}
           </ul>
-        ) : <div className="mini-empty"><FileClock size={14} /><span>History begins after the first save.</span></div>}
+        ) : <div className="mini-empty"><FileClock size={14} /><span>{t("History begins after the first save.")}</span></div>}
       </section>
     </div>
   );

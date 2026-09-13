@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { Activity, CircleDot, Radio, X } from "lucide-react";
 import { useWorldStore } from "../state/worldStore";
 import type { RuntimeEvent } from "../types/world";
@@ -9,10 +10,11 @@ function eventLabel(type: string): string {
 
 function eventSubject(event: RuntimeEvent, cardNames: Map<string, string>): string {
   const id = event.node_id ?? event.agent_id ?? event.sandbox_id ?? event.resource_id;
-  return id ? (cardNames.get(id) ?? id.slice(0, 8)) : "World runtime";
+  return id ? (cardNames.get(id) ?? id.slice(0, 8)) : t("World runtime");
 }
 
 export function ActivityPanel() {
+  useLocale();
   const open = useWorldStore((state) => state.activityOpen);
   const events = useWorldStore((state) => state.events);
   const cards = useWorldStore((state) => state.cards);
@@ -21,20 +23,20 @@ export function ActivityPanel() {
   const cardNames = new Map(cards.map((card) => [card.id, card.name]));
 
   return (
-    <aside className={`activity-panel ${open ? "is-open" : ""}`} aria-hidden={!open} aria-label="Runtime activity">
+    <aside className={`activity-panel ${open ? "is-open" : ""}`} aria-hidden={!open} aria-label={t("Runtime activity")}>
       <header>
         <div className="activity-title">
           <span className="activity-icon"><Activity size={16} /></span>
-          <div><strong>Runtime activity</strong><span>Operational events only</span></div>
+          <div><strong>{t("Runtime activity")}</strong><span>{t("Operational events only")}</span></div>
         </div>
-        <button type="button" className="icon-button" onClick={() => setOpen(false)} aria-label="Close runtime activity">
+        <button type="button" className="icon-button" onClick={() => setOpen(false)} aria-label={t("Close runtime activity")}>
           <X size={16} />
         </button>
       </header>
 
       <div className={`stream-status stream-status--${socketState}`}>
         <Radio size={13} />
-        <span>{socketState === "live" ? "Event stream live" : socketState === "connecting" ? "Connecting to event stream" : "Event stream offline"}</span>
+        <span>{socketState === "live" ? t("Event stream live") : socketState === "connecting" ? t("Connecting to event stream") : t("Event stream offline")}</span>
       </div>
 
       <div className="event-list" role="log" aria-live="polite">
@@ -51,8 +53,8 @@ export function ActivityPanel() {
         )) : (
           <div className="activity-empty">
             <span><Activity size={22} /></span>
-            <strong>The instruments are quiet</strong>
-            <p>Agent runs, scoped tools, sandbox commands, resource changes, and errors will appear here.</p>
+            <strong>{t("The instruments are quiet")}</strong>
+            <p>{t("Agent runs, scoped tools, sandbox commands, resource changes, and errors will appear here.")}</p>
           </div>
         )}
       </div>

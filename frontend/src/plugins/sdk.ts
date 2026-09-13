@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import type { NodeTypeCatalogItem, WorldCard } from "../types/world";
 export { SchemaFields } from "./SchemaFields";
+export { t, useLocale } from "../i18n";
 export { useNestedFlowGestures } from "../canvas/useNestedFlowGestures";
 export { useFileViewer } from "../state/openFiles";
 export type { FileReference, OpenedFile } from "../state/openFiles";

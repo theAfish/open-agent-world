@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { Panel, useReactFlow, useStore } from '@xyflow/react';
 import { useRef } from 'react';
 import { shallow } from 'zustand/shallow';
@@ -6,6 +7,7 @@ import { getNodeType } from '../state/catalog';
 import { useWorldStore } from '../state/worldStore';
 
 function LocalNode({ id }: { id: string }) {
+  useLocale();
   const catalog = useWorldStore(state => state.catalog);
   const rect = useStore(state => {
     const node = state.nodeLookup.get(id);
@@ -23,6 +25,7 @@ function LocalNode({ id }: { id: string }) {
 
 /** A local lens: bounds depend only on the live viewport, never on node extents. */
 export function LocalMiniMap() {
+  useLocale();
   const { setViewport, getViewport } = useReactFlow();
   const { x, y, zoom, width, height } = useStore(state => ({
     x: state.transform[0], y: state.transform[1], zoom: state.transform[2],
@@ -42,7 +45,7 @@ export function LocalMiniMap() {
     style={{ width: mapWidth, height: mapHeight, background: 'var(--canvas)' }}>
     <svg className="react-flow__minimap-svg" width={mapWidth} height={mapHeight}
       viewBox={`${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`} role="img"
-      aria-label="Nearby canvas — current view with 15% surroundings; drag to pan"
+      aria-label={t("Nearby canvas — current view with 15% surroundings; drag to pan")}
       onWheel={event => event.stopPropagation()}
       onPointerDown={event => {
         if (event.button !== 0) return;
@@ -62,7 +65,7 @@ export function LocalMiniMap() {
       }}
       onPointerCancel={() => { drag.current = undefined; }}
       onLostPointerCapture={() => { drag.current = undefined; }}>
-      <title>Nearby canvas · drag to pan</title>
+      <title>{t("Nearby canvas · drag to pan")}</title>
       {ids.map(id => <LocalNode key={id} id={id} />)}
       <path className="local-minimap-mask" fill="var(--minimap-mask)" fillRule="evenodd" pointerEvents="none"
         d={`M${bounds.x},${bounds.y}h${bounds.width}v${bounds.height}h${-bounds.width}z M${view.x},${view.y}h${view.width}v${view.height}h${-view.width}z`} />

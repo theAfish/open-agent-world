@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { useConversationTimeline } from "../state/useConversationTimeline";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { ConversationAttachments } from "./ConversationAttachments";
@@ -19,6 +20,7 @@ import { reportInteraction } from '../state/interactions';
 type OutgoingMessage = { message: ConversationMessage; status: "sending" | "confirmed" | "unconfirmed" };
 
 export function ConversationWorkspace({ card }: { card: WorldCard }) {
+  useLocale();
   const runtimeEvents = useWorldStore((state) => state.events);
   const accessEvent = useWorldStore((state) => state.events.find((event) => {
     if (event.type !== "permission_changed") return false;
@@ -142,8 +144,8 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     setBusy(true);
     try {
       const session = await worldApi.createConversationSession(card.id, {
-        title: "New session",
-        group_title: groupId ? undefined : title.trim() || "Group conversation",
+        title: t("New session"),
+        group_title: groupId ? undefined : title.trim() || t("Group conversation"),
         group_id: groupId,
         participant_ids: participantIds,
       });
@@ -154,7 +156,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       setGroupAgentIds([]);
       return session;
     } catch (reason) {
-      pushToast({ tone: "error", title: "Session was not created", detail: apiErrorMessage(reason) });
+      pushToast({ tone: "error", title: t("Session was not created"), detail: apiErrorMessage(reason) });
       return undefined;
     } finally {
       setBusy(false);
@@ -170,7 +172,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       setSelectedAgentId(agent.id);
       return;
     }
-    const created = await createSession(`Chat with ${agent.name}`, [agent.id]);
+    const created = await createSession(t("Chat with {v0}", { v0: String(agent.name) }), [agent.id]);
     if (created) setSelectedAgentId(agent.id);
   };
 
@@ -187,7 +189,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       setAddingParticipants(false);
       setParticipantAgentIds([]);
     } catch (reason) {
-      pushToast({ tone: "error", title: "Agents were not added", detail: apiErrorMessage(reason) });
+      pushToast({ tone: "error", title: t("Agents were not added"), detail: apiErrorMessage(reason) });
     } finally {
       setBusy(false);
     }
@@ -207,7 +209,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
 
   const removeParticipant = async (agent: ConversationAgent) => {
     if (!activeSession || busy) return;
-    if (!window.confirm(`Remove ${agent.name} from ${activeSession.title}?`)) return;
+    if (!window.confirm(t("Remove {v0} from {v1}?", { v0: String(agent.name), v1: String(activeSession.title) }))) return;
     setBusy(true);
     try {
       const updated = await worldApi.removeConversationSessionParticipant(
@@ -218,7 +220,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       )));
       if (selectedAgentId === agent.id) setSelectedAgentId(updated.participant_ids[0]);
     } catch (reason) {
-      pushToast({ tone: "error", title: "Agent was not removed", detail: apiErrorMessage(reason) });
+      pushToast({ tone: "error", title: t("Agent was not removed"), detail: apiErrorMessage(reason) });
     } finally {
       setBusy(false);
     }
@@ -226,14 +228,14 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
 
   const deleteSession = async (target: ConversationSession) => {
     if (target.is_default || busy) return;
-    if (!window.confirm(`Delete session ${target.title}? Its conversation history will be deleted.`)) return;
+    if (!window.confirm(t("Delete session {v0}? Its conversation history will be deleted.", { v0: String(target.title) }))) return;
     setBusy(true);
     try {
       await worldApi.deleteConversationSession(card.id, target.id);
       setSessions((current) => current.filter((session) => session.id !== target.id));
       setActiveSessionId((current) => current === target.id ? sessions.find((session) => session.id !== target.id)?.id : current);
     } catch (reason) {
-      pushToast({ tone: "error", title: "Session was not deleted", detail: apiErrorMessage(reason) });
+      pushToast({ tone: "error", title: t("Session was not deleted"), detail: apiErrorMessage(reason) });
     } finally {
       setBusy(false);
     }
@@ -246,7 +248,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     const messageId = crypto.randomUUID();
     const message: ConversationMessage = {
       id: messageId, conversation_id: card.id, session_id: activeSession.id,
-      sender_kind: "user", sender_name: "You", content, mention_agent_ids: targets,
+      sender_kind: "user", sender_name: t("You"), content, mention_agent_ids: targets,
       attachments,
       created_at: new Date().toISOString(),
     };
@@ -272,15 +274,15 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       if (targets.length === 0 && participants.length > 1) {
         pushToast({
           tone: "neutral",
-          title: "Message saved without calling an Agent",
-          detail: "Select a participant or include an explicit @name to request a response.",
+          title: t("Message saved without calling an Agent"),
+          detail: t("Select a participant or include an explicit @name to request a response."),
         });
       }
     } catch (reason) {
       setOutgoing((current) => current.map((item) => item.message.id === messageId
         ? { ...item, status: "unconfirmed" } : item));
       if (selectedScope.current === `${card.id}/${message.session_id}`) void history.loadLatest();
-      pushToast({ tone: "error", title: "Send could not be confirmed", detail: apiErrorMessage(reason) });
+      pushToast({ tone: "error", title: t("Send could not be confirmed"), detail: apiErrorMessage(reason) });
     } finally {
       setBusy(false);
     }
@@ -288,24 +290,23 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
 
   return (
     <div className="conversation-workspace-grid">
-      <nav className="workspace-session-sidebar" aria-label="Conversation sessions and agents">
+      <nav className="workspace-session-sidebar" aria-label={t("Conversation sessions and agents")}>
         <button type="button" className="workspace-new-session" onClick={() => setCreatingGroup(true)}>
-          <Plus size={13} /> New group
-        </button>
+          <Plus size={13} /> {t("New group")} </button>
         {creatingGroup ? (
           <div className="conversation-group-builder">
-            <header><strong>Create session</strong><button type="button" onClick={() => setCreatingGroup(false)} aria-label="Cancel group"><X size={12} /></button></header>
-            <input value={groupTitle} onChange={(event) => setGroupTitle(event.target.value)} placeholder="Group name" aria-label="Group name" />
+            <header><strong>{t("Create session")}</strong><button type="button" onClick={() => setCreatingGroup(false)} aria-label={t("Cancel group")}><X size={12} /></button></header>
+            <input value={groupTitle} onChange={(event) => setGroupTitle(event.target.value)} placeholder={t("Group name")} aria-label={t("Group name")} />
             {connectedAgents.map((agent) => (
               <label key={agent.id}>
                 <input type="checkbox" checked={groupAgentIds.includes(agent.id)} onChange={() => setGroupAgentIds((current) => current.includes(agent.id) ? current.filter((id) => id !== agent.id) : [...current, agent.id])} />
                 <span>{agent.name}</span>
               </label>
             ))}
-            <button type="button" disabled={busy || groupAgentIds.length === 0} onClick={() => void createSession(groupTitle || "Group conversation", groupAgentIds)}>Create group</button>
+            <button type="button" disabled={busy || groupAgentIds.length === 0} onClick={() => void createSession(groupTitle || t("Group conversation"), groupAgentIds)}>{t("Create group")}</button>
           </div>
         ) : null}
-        <div className="workspace-nav-label"><Users size={11} /> Groups</div>
+        <div className="workspace-nav-label"><Users size={11} /> {t("Groups")}</div>
         <div className="conversation-sidebar-scroll">
           {groups.map((group) => (
             <button type="button" className={`workspace-session ${(group.group_id ?? group.id) === activeGroupId ? "is-active" : ""}`} key={group.group_id ?? group.id} onClick={() => setActiveSessionId(sessions.find((item) => (item.group_id ?? item.id) === (group.group_id ?? group.id))?.id)}>
@@ -313,32 +314,32 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
             </button>
           ))}
         </div>
-        <div className="workspace-nav-label"><Bot size={11} /> Connected agents</div>
+        <div className="workspace-nav-label"><Bot size={11} /> {t("Connected agents")}</div>
         <div className="conversation-sidebar-scroll conversation-contact-list">
           {connectedAgents.map((agent) => (
             <button type="button" className="workspace-session" key={agent.id} onClick={() => void openDirectSession(agent)}>
               <Bot size={13} /><span><strong>{agent.name}</strong><small>{agent.status}</small></span>
             </button>
           ))}
-          {connectedAgents.length === 0 ? <p>Connect an Agent using Participate.</p> : null}
+          {connectedAgents.length === 0 ? <p>{t("Connect an Agent using Participate.")}</p> : null}
         </div>
       </nav>
 
       <main className="workspace-conversation">
         <header>
-          <div className="conversation-heading"><strong title={activeSession?.title}>{activeSession?.title ?? "Conversation"}</strong><span>{participants.length} active participants</span></div>
+          <div className="conversation-heading"><strong title={activeSession?.title}>{activeSession?.title ?? t("Conversation")}</strong><span>{participants.length} {t("active participants")}</span></div>
           <div className="conversation-header-tools">
-            <button type="button" className="conversation-add-agent" aria-label="Add agents to session" disabled={!activeSession || availableAgents.length === 0} onClick={() => setAddingParticipants((value) => !value)}><Plus size={12} /> Add</button>
+            <button type="button" className="conversation-add-agent" aria-label={t("Add agents to session")} disabled={!activeSession || availableAgents.length === 0} onClick={() => setAddingParticipants((value) => !value)}><Plus size={12} /> {t("Add")}</button>
             {addingParticipants ? (
-              <div className="conversation-participant-picker" role="dialog" aria-label="Add participants">
-                <header><strong>Add to session</strong><button type="button" onClick={() => setAddingParticipants(false)} aria-label="Close participant picker"><X size={12} /></button></header>
+              <div className="conversation-participant-picker" role="dialog" aria-label={t("Add participants")}>
+                <header><strong>{t("Add to session")}</strong><button type="button" onClick={() => setAddingParticipants(false)} aria-label={t("Close participant picker")}><X size={12} /></button></header>
                 {availableAgents.map((agent) => (
                   <label key={agent.id}>
-                    <input type="checkbox" aria-label={`Add ${agent.name} to session`} checked={participantAgentIds.includes(agent.id)} onChange={() => setParticipantAgentIds((current) => current.includes(agent.id) ? current.filter((id) => id !== agent.id) : [...current, agent.id])} />
+                    <input type="checkbox" aria-label={t("Add {v0} to session", { v0: String(agent.name) })} checked={participantAgentIds.includes(agent.id)} onChange={() => setParticipantAgentIds((current) => current.includes(agent.id) ? current.filter((id) => id !== agent.id) : [...current, agent.id])} />
                     <span><Bot size={11} /> {agent.name}</span>
                   </label>
                 ))}
-                <button type="button" disabled={busy || participantAgentIds.length === 0} onClick={() => void addParticipants()}>Add selected</button>
+                <button type="button" disabled={busy || participantAgentIds.length === 0} onClick={() => void addParticipants()}>{t("Add selected")}</button>
               </div>
             ) : null}
           </div>
@@ -351,46 +352,46 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
           onScroll={history.onScroll}
         >
           <div className="conversation-transcript-content">
-          {error || history.error ? <div role="alert"><p>{error ?? history.error}</p><button type="button" onClick={() => void history.loadLatest()}>Retry history</button></div> : null}
-          {history.hasBefore ? <button type="button" disabled={history.loading} onClick={() => void history.loadOlder()}>Load older messages</button> : null}
-          {history.loading ? <div className="sr-only" role="status">Loading messages...</div> : null}
+          {error || history.error ? <div role="alert"><p>{error ?? history.error}</p><button type="button" onClick={() => void history.loadLatest()}>{t("Retry history")}</button></div> : null}
+          {history.hasBefore ? <button type="button" disabled={history.loading} onClick={() => void history.loadOlder()}>{t("Load older messages")}</button> : null}
+          {history.loading ? <div className="sr-only" role="status">{t("Loading messages...")}</div> : null}
           {!error && messages.length === 0 && respondingAgents.length === 0 && !history.loading ? (
-            <div className="workspace-welcome"><span><MessageSquare size={22} /></span><strong>This session is ready</strong><p>Select a participant, type an explicit @name, or keep an unaddressed note.</p></div>
+            <div className="workspace-welcome"><span><MessageSquare size={22} /></span><strong>{t("This session is ready")}</strong><p>{t("Select a participant, type an explicit @name, or keep an unaddressed note.")}</p></div>
           ) : null}
           {messages.map((message) => (
             <article className={`workspace-message is-${message.sender_kind}`} key={message.id} data-message-id={message.id}>
               <span>{message.sender_kind === "agent" ? <Bot size={13} /> : message.sender_kind === "system" ? <Info size={13} /> : <UserRound size={13} />}</span>
               <div><strong>{message.sender_name}</strong>{message.kind?.startsWith("tool_")
-                ? <details className="conversation-tool-message"><summary>{message.content.split("\n")[0]}</summary><pre>{message.content.split("\n").slice(1).join("\n").trim() || "No additional details"}</pre></details>
+                ? <details className="conversation-tool-message"><summary>{message.content.split("\n")[0]}</summary><pre>{message.content.split("\n").slice(1).join("\n").trim() || t("No additional details")}</pre></details>
                 : message.content ? (message.sender_kind === "agent" ? <MarkdownMessage content={message.content} /> : <p>{message.content}</p>) : null}
                 {message.attachments?.length ? <ConversationAttachments conversationId={card.id} sessionId={message.session_id} files={message.attachments} /> : null}
-                {visibleOutgoing.find((item) => item.message.id === message.id)?.status === "sending" ? <small className="conversation-delivery-state" role="status">Sending...</small> : null}
-                {visibleOutgoing.find((item) => item.message.id === message.id)?.status === "unconfirmed" ? <small className="conversation-delivery-state is-error" role="alert">Send not confirmed. Your text is kept here.</small> : null}
+                {visibleOutgoing.find((item) => item.message.id === message.id)?.status === "sending" ? <small className="conversation-delivery-state" role="status">{t("Sending...")}</small> : null}
+                {visibleOutgoing.find((item) => item.message.id === message.id)?.status === "unconfirmed" ? <small className="conversation-delivery-state is-error" role="alert">{t("Send not confirmed. Your text is kept here.")}</small> : null}
               </div>
             </article>
           ))}
-          {history.hasAfter ? <button type="button" disabled={history.loading} onClick={() => void history.loadNewer()}>Load newer messages</button> : null}
+          {history.hasAfter ? <button type="button" disabled={history.loading} onClick={() => void history.loadNewer()}>{t("Load newer messages")}</button> : null}
           {!error ? respondingAgents.map((agent) => (
-            <article className="workspace-message is-agent is-responding" key={`responding-${agent.id}`} data-responding-agent-id={agent.id} aria-label={`${agent.name} is responding`}>
+            <article className="workspace-message is-agent is-responding" key={`responding-${agent.id}`} data-responding-agent-id={agent.id} aria-label={t("{v0} is responding", { v0: String(agent.name) })}>
               <span><Bot size={13} /></span>
               <div>
                 <strong>{agent.name}</strong>
                 <div className="conversation-typing-bubble" aria-hidden="true"><i /><i /><i /></div>
-                <span className="sr-only">{agent.name} is responding</span>
+                <span className="sr-only">{agent.name} {t("is responding")}</span>
               </div>
             </article>
           )) : null}
           </div>
         </div>
-        {history.showLatest ? <button type="button" className="conversation-latest" aria-label="Jump to latest" title="Jump to latest" disabled={history.loading} onClick={() => void history.loadLatest()}><ArrowDown size={18} aria-hidden="true" /></button> : null}
+        {history.showLatest ? <button type="button" className="conversation-latest" aria-label={t("Jump to latest")} title={t("Jump to latest")} disabled={history.loading} onClick={() => void history.loadLatest()}><ArrowDown size={18} aria-hidden="true" /></button> : null}
         </div>
         <div className="workspace-composer">
-          <input ref={fileInput} type="file" multiple hidden aria-label="Attach files" onChange={(event) => {
+          <input ref={fileInput} type="file" multiple hidden aria-label={t("Attach files")} onChange={(event) => {
             const files = Array.from(event.target.files ?? []);
             event.target.value = "";
             if (!activeSession || uploading || busy || files.length === 0) return;
             if (files.length + attachments.length > 20 || files.some((file) => file.size > 64 * 1024 * 1024)) {
-              pushToast({ tone: "error", title: "Choose up to 20 files, each at most 64 MiB" }); return;
+              pushToast({ tone: "error", title: t("Choose up to 20 files, each at most 64 MiB") }); return;
             }
             const sessionId = activeSession.id;
             const scope = `${card.id}/${sessionId}`;
@@ -402,11 +403,11 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
                   if (selectedScope.current === scope) setAttachments((current) => [...current, attachment]);
                 }
               } catch (reason) {
-                pushToast({ tone: "error", title: "File upload failed", detail: apiErrorMessage(reason) });
+                pushToast({ tone: "error", title: t("File upload failed"), detail: apiErrorMessage(reason) });
               } finally { setUploading(false); }
             })();
           }} />
-          <div className="conversation-pending-files">{attachments.map((file) => <span key={file.version_id}>{file.name}<button type="button" aria-label={`Remove attachment ${file.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.version_id !== file.version_id))}><X size={12} /></button></span>)}</div>
+          <div className="conversation-pending-files">{attachments.map((file) => <span key={file.version_id}>{file.name}<button type="button" aria-label={t("Remove attachment {v0}", { v0: String(file.name) })} onClick={() => setAttachments((current) => current.filter((item) => item.version_id !== file.version_id))}><X size={12} /></button></span>)}</div>
           <textarea ref={messageInput} value={draft} onChange={(event) => {
             setDraft(event.target.value);
             setMentionCaret(event.target.selectionStart ?? event.target.value.length);
@@ -435,9 +436,9 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
               event.preventDefault();
               void submit();
             }
-          }} placeholder={activeSession ? "Write a message; use @name to address a participant…" : "Create or select a session first…"} aria-label="Conversation message" aria-autocomplete="list" aria-expanded={Boolean(completion)} aria-controls={completion ? "conversation-mention-menu" : undefined} disabled={!activeSession} />
+          }} placeholder={activeSession ? t("Write a message; use @name to address a participant…") : t("Create or select a session first…")} aria-label={t("Conversation message")} aria-autocomplete="list" aria-expanded={Boolean(completion)} aria-controls={completion ? "conversation-mention-menu" : undefined} disabled={!activeSession} />
           {completion ? (
-            <div className="conversation-mention-menu" id="conversation-mention-menu" role="listbox" aria-label="Mention an Agent">
+            <div className="conversation-mention-menu" id="conversation-mention-menu" role="listbox" aria-label={t("Mention an Agent")}>
               {completion.candidates.map((agent, index) => (
                 <button type="button" role="option" aria-selected={index === mentionIndex} className={index === mentionIndex ? "is-selected" : ""} key={agent.id} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseMention(agent)}>
                   <span><Bot size={12} /></span><strong>{agent.name}</strong><small>@{agent.name}</small>
@@ -446,50 +447,50 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
             </div>
           ) : null}
           <footer>
-            <button type="button" aria-label={uploading ? "Uploading files" : "Attach files"} title="Attach files" disabled={!activeSession || busy || uploading} onClick={() => fileInput.current?.click()}>{uploading ? <LoaderCircle size={14} /> : <Paperclip size={14} />}</button>
-            <span>{selectedAgentId ? `Default: @${agents.find((item) => item.id === selectedAgentId)?.name}` : "No default recipient"} · Enter to send · Shift+Enter for new line</span>
-            <button type="button" onClick={() => void submit()} disabled={(!draft.trim() && attachments.length === 0) || !activeSession || busy || uploading} aria-label="Send message"><Send size={14} /></button>
+            <button type="button" aria-label={uploading ? t("Uploading files") : t("Attach files")} title={t("Attach files")} disabled={!activeSession || busy || uploading} onClick={() => fileInput.current?.click()}>{uploading ? <LoaderCircle size={14} /> : <Paperclip size={14} />}</button>
+            <span>{selectedAgentId ? `Default: @${agents.find((item) => item.id === selectedAgentId)?.name}` : t("No default recipient")} {t("· Enter to send · Shift+Enter for new line")}</span>
+            <button type="button" onClick={() => void submit()} disabled={(!draft.trim() && attachments.length === 0) || !activeSession || busy || uploading} aria-label={t("Send message")}><Send size={14} /></button>
           </footer>
         </div>
       </main>
 
       <aside className="workspace-context-panel conversation-participant-panel">
         <div className="conversation-participant-details">
-        <header><Users size={13} /><strong>Participants</strong></header>
+        <header><Users size={13} /><strong>{t("Participants")}</strong></header>
         <section>
-          <span className="workspace-panel-label">In this session</span>
+          <span className="workspace-panel-label">{t("In this session")}</span>
           {participants.map((agent) => (
             <div className="conversation-participant-row" key={agent.id}>
               <button type="button" className="workspace-context-item" onClick={() => {
                 setSelectedAgentId(agent.id);
                 setDraft((value) => appendMention(value, agent.name));
               }}>
-                <span><Bot size={12} /></span><div><strong>{agent.name}</strong><small>{agent.status} · insert mention</small></div>
+                <span><Bot size={12} /></span><div><strong>{agent.name}</strong><small>{agent.status} {t("· insert mention")}</small></div>
               </button>
-              <button type="button" className="conversation-kick-agent" aria-label={`Remove ${agent.name} from session`} disabled={busy} onClick={() => void removeParticipant(agent)} title={`Remove ${agent.name}`}><UserMinus size={12} /></button>
+              <button type="button" className="conversation-kick-agent" aria-label={t("Remove {v0} from session", { v0: String(agent.name) })} disabled={busy} onClick={() => void removeParticipant(agent)} title={t("Remove {v0}", { v0: String(agent.name) })}><UserMinus size={12} /></button>
             </div>
           ))}
-          {participants.length === 0 ? <p>This session has no Agents. Create a direct or group session from the left.</p> : null}
+          {participants.length === 0 ? <p>{t("This session has no Agents. Create a direct or group session from the left.")}</p> : null}
         </section>
         <section>
-          <span className="workspace-panel-label">Field policy</span>
-          <p>Canvas connections authorize access. Session membership selects the group. Removing an edge keeps history but blocks future turns.</p>
+          <span className="workspace-panel-label">{t("Field policy")}</span>
+          <p>{t("Canvas connections authorize access. Session membership selects the group. Removing an edge keeps history but blocks future turns.")}</p>
         </section>
         </div>
         <div className="conversation-session-list">
-          <div className="workspace-nav-label"><MessageSquare size={11} /> Sessions</div>
-          <button type="button" className="workspace-new-session" disabled={!activeSession || busy} onClick={() => void createSession("New session", activeSession?.participant_ids ?? [], activeGroupId)}><Plus size={13} /> New session</button>
+          <div className="workspace-nav-label"><MessageSquare size={11} /> {t("Sessions")}</div>
+          <button type="button" className="workspace-new-session" disabled={!activeSession || busy} onClick={() => void createSession(t("New session"), activeSession?.participant_ids ?? [], activeGroupId)}><Plus size={13} /> {t("New session")}</button>
           <div className="conversation-sidebar-scroll">
             {groupSessions.map((session) => (
               <div className="conversation-session-row" key={session.id}>
                 <button type="button" className={`workspace-session ${session.id === activeSessionId ? "is-active" : ""}`} title={session.title} aria-current={session.id === activeSessionId ? "true" : undefined} onClick={() => setActiveSessionId(session.id)}>
-                  <MessageSquare size={13} /><span><strong>{session.title}</strong><small>{new Date(session.created_at).toLocaleString()}</small></span>
+                  <MessageSquare size={13} /><span><strong>{session.title}</strong><small>{new Date(session.created_at).toLocaleString(useLocale.getState().locale)}</small></span>
                 </button>
                 <details className="conversation-session-actions" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }} onKeyDown={(event) => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}>
-                  <summary aria-label={`Session actions for ${session.title}`} title="Session actions"><MoreHorizontal size={15} /></summary>
+                  <summary aria-label={t("Session actions for {v0}", { v0: String(session.title) })} title={t("Session actions")}><MoreHorizontal size={15} /></summary>
                   <div className="conversation-session-menu">
-                    <button type="button" disabled={busy} onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); setSessionTitle(session.title); setRenaming(session.id); }}><Pencil size={12} /> Rename session</button>
-                    <button type="button" className="is-danger" disabled={busy || session.is_default} onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); void deleteSession(session); }}><Trash2 size={12} /> Delete session</button>
+                    <button type="button" disabled={busy} onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); setSessionTitle(session.title); setRenaming(session.id); }}><Pencil size={12} /> {t("Rename session")}</button>
+                    <button type="button" className="is-danger" disabled={busy || session.is_default} onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); void deleteSession(session); }}><Trash2 size={12} /> {t("Delete session")}</button>
                   </div>
                 </details>
                 {renaming === session.id ? <form className="conversation-session-rename" onSubmit={(event) => {
@@ -499,10 +500,10 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
                   void worldApi.renameConversationSession(card.id, session.id, sessionTitle.trim()).then((updated) => {
                     setSessions((current) => current.map((item) => item.id === updated.id ? updated : item));
                     setRenaming(undefined);
-                  }).catch((reason) => pushToast({ tone: "error", title: "Session was not renamed", detail: apiErrorMessage(reason) })).finally(() => setBusy(false));
+                  }).catch((reason) => pushToast({ tone: "error", title: t("Session was not renamed"), detail: apiErrorMessage(reason) })).finally(() => setBusy(false));
                 }}>
-                  <input autoFocus aria-label="Session title" maxLength={200} value={sessionTitle} onChange={(event) => setSessionTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setRenaming(undefined); }} />
-                  <button type="submit" disabled={busy || !sessionTitle.trim()}>Save name</button><button type="button" onClick={() => setRenaming(undefined)}>Cancel</button>
+                  <input autoFocus aria-label={t("Session title")} maxLength={200} value={sessionTitle} onChange={(event) => setSessionTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setRenaming(undefined); }} />
+                  <button type="submit" disabled={busy || !sessionTitle.trim()}>{t("Save name")}</button><button type="button" onClick={() => setRenaming(undefined)}>{t("Cancel")}</button>
                 </form> : null}
               </div>
             ))}

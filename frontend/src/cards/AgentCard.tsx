@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { ModelSelect } from "./ModelSelect";
 import { AgentSchemaSettings } from "./AgentSchemaSettings";
 import { PluginSurface } from "../plugins/PluginSurface";
@@ -11,6 +12,7 @@ import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { InstrumentOutput } from "./CardUtilities";
 
 export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSurfaceLevel }) {
+  useLocale();
   const definition = useWorldStore((state) => state.catalog.node_types.find((item) => item.id === card.type));
   const schemaSettings = definition?.traits.includes("ui.schema-agent.v1");
   const edges = useWorldStore((state) => state.edges);
@@ -47,34 +49,34 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
     <div className="expanded-stack">
       <PluginSurface card={card} slot="settings" level={level}>
       {schemaSettings ? <AgentSchemaSettings card={card} /> : <>
-      {level === "workspace" && <><label className="field-label"><span>When to use this Agent</span><textarea defaultValue={String(card.config.description ?? "")} maxLength={500}
+      {level === "workspace" && <><label className="field-label"><span>{t("When to use this Agent")}</span><textarea defaultValue={String(card.config.description ?? "")} maxLength={500}
         onBlur={(event) => { if (event.target.value !== card.config.description) void updateCard(card.id, { config: { description: event.target.value } }); }} /></label>
       {cards.find((c) => c.id === card.parent_id)?.type === "legion" && <section className="card-section">
-        <div className="section-heading"><span>Legion: {cards.find((c) => c.id === card.parent_id)?.name ?? "Team"}</span></div>
-        <label className="field-label"><span>Member role</span><input key={String(card.config.legion_role ?? "")} defaultValue={String(card.config.legion_role ?? "")} maxLength={200} placeholder="Planner, executor, reviewer"
+        <div className="section-heading"><span>{t("Legion:")} {cards.find((c) => c.id === card.parent_id)?.name ?? t("Team")}</span></div>
+        <label className="field-label"><span>{t("Member role")}</span><input key={String(card.config.legion_role ?? "")} defaultValue={String(card.config.legion_role ?? "")} maxLength={200} placeholder={t("Planner, executor, reviewer")}
           onBlur={(e) => { if (e.target.value !== card.config.legion_role) void updateCard(card.id, { config: { legion_role: e.target.value } }); }} /></label>
         <label><input type="checkbox" checked={card.config.inherit_legion_model !== false}
-          onChange={(e) => void updateCard(card.id, { config: { inherit_legion_model: e.target.checked } })} /> Use team model override</label>
-        <p>Team instructions and shared state are included at the start of each Run.</p>
+          onChange={(e) => void updateCard(card.id, { config: { inherit_legion_model: e.target.checked } })} /> {t("Use team model override")}</label>
+        <p>{t("Team instructions and shared state are included at the start of each Run.")}</p>
       </section>}
       </>}
       <div className="field-row">
         <label>
-          <span>Model</span>
+          <span>{t("Model")}</span>
           <ModelSelect value={model} onChange={value => {
             setModel(value);
             if (value !== card.config.model) void updateCard(card.id, { config: { model: value } });
           }} />
-          <button type="button" className="secondary-button" onClick={() => useWorldStore.getState().toggleSettings()}>Manage models</button>
+          <button type="button" className="secondary-button" onClick={() => useWorldStore.getState().toggleSettings()}>{t("Manage models")}</button>
         </label>
         <div className="live-readout">
           <Radio size={13} aria-hidden="true" />
-          <span title="Agent runtime provider">{String(card.config.runtime_provider_id ?? "google.adk")} · {card.status}</span>
+          <span title={t("Agent runtime provider")}>{String(card.config.runtime_provider_id ?? "google.adk")} · {card.status}</span>
         </div>
       </div>
 
       <label className="field-label">
-        <span>System instruction</span>
+        <span>{t("System instruction")}</span>
         <textarea
           value={instruction}
           rows={3}
@@ -91,22 +93,22 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
       </PluginSurface>
       {level === "workspace" && <section className="card-section">
         <div className="section-heading">
-          <span>Effective capabilities</span>
+          <span>{t("Effective capabilities")}</span>
         </div>
         <div className="capability-chips">
           {capabilities.length > 0 ? capabilities.map((capability) => (
             <span key={capability.id} title={capability.description}>{capability.target_name} · {capability.kind}</span>
-          )) : <em>Equip a resource or connect a shared resource to grant a scoped tool.</em>}
+          )) : <em>{t("Equip a resource or connect a shared resource to grant a scoped tool.")}</em>}
           {capabilityError && <p role="alert">{capabilityError}</p>}
         </div>
       </section>}
 
       <label className="field-label prompt-field">
-        <span>Prompt</span>
+        <span>{t("Prompt")}</span>
         <textarea
           value={prompt}
           rows={2}
-          placeholder="Ask Atlas to work with its connected objects…"
+          placeholder={t("Ask Atlas to work with its connected objects…")}
           onChange={(event) => setDraft(card.id, event.target.value)}
           onKeyDown={(event) => {
             if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && prompt.trim()) {
@@ -123,20 +125,18 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
           onClick={() => void runAgent(card.id, prompt.trim())}
           disabled={!prompt.trim() || card.status === "running"}
         >
-          <Play size={14} fill="currentColor" /> Run agent
-        </button>
+          <Play size={14} fill="currentColor" /> {t("Run agent")} </button>
         <button
           type="button"
           className="secondary-button"
           onClick={() => void stopAgent(card.id)}
           disabled={card.status !== "running" && card.status !== "waiting"}
         >
-          <CircleStop size={14} /> Stop
-        </button>
+          <CircleStop size={14} /> {t("Stop")} </button>
       </div>
 
       {level === "workspace" && <section className="card-section output-section">
-        <div className="section-heading"><span>Runtime activity</span><small>operational log</small></div>
+        <div className="section-heading"><span>{t("Runtime activity")}</span><small>{t("operational log")}</small></div>
         <InstrumentOutput lines={output} empty="Run output and tool activity will appear here." />
       </section>}
     </div>

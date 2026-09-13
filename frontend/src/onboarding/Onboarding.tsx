@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { getNodesBounds, getViewportForBounds, useReactFlow, useViewport } from '@xyflow/react';
 import { ArrowRight, ChevronDown, Compass, RotateCcw, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
@@ -21,7 +22,7 @@ async function frameElement(id: string, signal: AbortSignal) {
     if (element && element.getBoundingClientRect().width > 0) return element;
     await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
   }
-  throw new Error('The card is outside the visible canvas. Use Recover this step and retry.');
+  throw new Error(t("The card is outside the visible canvas. Use Recover this step and retry."));
 }
 async function animate(element: Element, keyframes: Keyframe[], signal: AbortSignal, duration = 850) {
   signal.throwIfAborted();
@@ -35,6 +36,7 @@ async function animate(element: Element, keyframes: Keyframe[], signal: AbortSig
 }
 
 export function Onboarding() {
+  useLocale();
   const s = useTutorialStore();
   const sync = useWorldStore(w => w.syncState);
   const cards = useWorldStore(w => w.cards);
@@ -204,40 +206,40 @@ export function Onboarding() {
   const missing = role && step.expects !== 'place' && step.expects !== 'delete' && !cards.some(card => card.id === s.session?.refs[role]);
   return <div className={`onboarding-layer ${welcome ? 'is-welcome' : 'is-tutorial'}`}>
     <div className={`onboarding-logo-ring ${welcome ? '' : 'has-entered'}`}><OawGuide ringOnly /></div>
-    {welcome && <section className="onboarding-welcome" aria-label="Welcome to Open Agent World">
-      <span className="onboarding-eyebrow">A world of possibilities</span>
-      <h1>Open Agent World</h1>
-      <p>A little space. A few cards. Something entirely yours.</p>
+    {welcome && <section className="onboarding-welcome" aria-label={t("Welcome to Open Agent World")}>
+      <span className="onboarding-eyebrow">{t("A world of possibilities")}</span>
+      <h1>{t("Open Agent World")}</h1>
+      <p>{t("A little space. A few cards. Something entirely yours.")}</p>
       <div className="onboarding-actions">
-        <button className="primary-button onboarding-start" disabled={s.busy || sync === 'offline'} onClick={() => void tutorial.start()}><span>Start Tutorial<small>A guided walk through your first world</small></span><ArrowRight size={19} /></button>
-        <button className="secondary-button" disabled={s.busy || sync === 'offline'} onClick={() => void tutorial.minister()}>Place Minister Card</button>
-        <button className="onboarding-text-button" disabled={s.busy} onClick={() => void tutorial.directly()}>Start Directly</button>
+        <button className="primary-button onboarding-start" disabled={s.busy || sync === 'offline'} onClick={() => void tutorial.start()}><span>{t("Start Tutorial")}<small>{t("A guided walk through your first world")}</small></span><ArrowRight size={19} /></button>
+        <button className="secondary-button" disabled={s.busy || sync === 'offline'} onClick={() => void tutorial.minister()}>{t("Place Minister Card")}</button>
+        <button className="onboarding-text-button" disabled={s.busy} onClick={() => void tutorial.directly()}>{t("Start Directly")}</button>
       </div>
       {s.error && <p className="onboarding-error" role="alert">{s.error}</p>}
     </section>}
     {trace && <svg className="tutorial-connection-trace" aria-hidden="true"><path ref={tracePath} d={`M ${trace.a.x},${trace.a.y} C ${trace.a.x + 65},${trace.a.y} ${trace.b.x - 65},${trace.b.y} ${trace.b.x},${trace.b.y}`} pathLength="1" /></svg>}
     <div ref={guide} className={`tutorial-guide ${welcome ? 'is-logo' : ''} ${compact ? 'is-compact' : ''}`}
       style={{ '--guide-x': `${position.x}px`, '--guide-y': `${position.y}px` } as CSSProperties}>
-      {!welcome && <div className="tutorial-bubble" role="region" aria-label="Tutorial guide" data-step={step.id}>
-        <header><span>{s.view === 'paused' ? 'Your walk is saved' : `${step.chapter + 1} / ${CHAPTERS.length} · ${CHAPTERS[step.chapter]}`}</span>
-          <button className="onboarding-icon-button" aria-label={compact ? 'Show tutorial hint' : 'Minimize tutorial hint'} onClick={() => setCompact(value => !value)}><ChevronDown size={13} /></button>
-          <button className="onboarding-icon-button" aria-label="Skip tutorial" title="Skip tutorial and tidy temporary props" onClick={() => void tutorial.exit('skipped')}><X size={13} /></button>
+      {!welcome && <div className="tutorial-bubble" role="region" aria-label={t("Tutorial guide")} data-step={step.id}>
+        <header><span>{s.view === 'paused' ? t("Your walk is saved") : `${step.chapter + 1} / ${CHAPTERS.length} · ${t(CHAPTERS[step.chapter])}`}</span>
+          <button className="onboarding-icon-button" aria-label={compact ? t("Show tutorial hint") : t("Minimize tutorial hint")} onClick={() => setCompact(value => !value)}><ChevronDown size={13} /></button>
+          <button className="onboarding-icon-button" aria-label={t("Skip tutorial")} title={t("Skip tutorial and tidy temporary props")} onClick={() => void tutorial.exit('skipped')}><X size={13} /></button>
         </header>
         {!compact && <>
-          <p aria-live="polite" aria-atomic="true">{s.view === 'paused' ? 'Pick up where you left off, or start a new walk. Your own cards stay with you.' : missing ? 'Looks like that card moved away or was removed. I can help you find it or return to placing one.' : step.dialogue}</p>
-          {s.error ? <p className="onboarding-error" role="alert">{s.error}</p> : sync === 'offline' ? <small role="status">Waiting for the world service to reconnect. Your progress is saved.</small> : step.hint && <small>{step.hint}</small>}
+          <p aria-live="polite" aria-atomic="true">{s.view === 'paused' ? t("Pick up where you left off, or start a new walk. Your own cards stay with you.") : missing ? t("Looks like that card moved away or was removed. I can help you find it or return to placing one.") : t(step.dialogue)}</p>
+          {s.error ? <p className="onboarding-error" role="alert">{s.error}</p> : sync === 'offline' ? <small role="status">{t("Waiting for the world service to reconnect. Your progress is saved.")}</small> : step.hint && <small>{t(step.hint)}</small>}
           <footer>
             {s.view === 'paused' ? <>
-              <button className="tutorial-next" disabled={s.busy} onClick={() => tutorial.resume()}>Resume</button>
-              <button className="onboarding-icon-button" disabled={s.busy} onClick={() => void tutorial.replay()} aria-label="Restart tutorial"><RotateCcw size={14} /></button>
-              {s.error && <button className="onboarding-text-button" disabled={s.busy} onClick={() => void tutorial.exit('skipped')}>Retry cleanup</button>}
+              <button className="tutorial-next" disabled={s.busy} onClick={() => tutorial.resume()}>{t("Resume")}</button>
+              <button className="onboarding-icon-button" disabled={s.busy} onClick={() => void tutorial.replay()} aria-label={t("Restart tutorial")}><RotateCcw size={14} /></button>
+              {s.error && <button className="onboarding-text-button" disabled={s.busy} onClick={() => void tutorial.exit('skipped')}>{t("Retry cleanup")}</button>}
             </> : <>
-              {step.button && <button className="tutorial-next" disabled={s.busy || sync === 'offline'} onClick={() => void tutorial.continue()}>{s.busy ? 'One moment…' : step.button}<ArrowRight size={13} /></button>}
-              {!step.button && <span className="tutorial-waiting"><i />{s.busy ? 'One moment…' : s.ready ? 'Settings saved' : 'Your turn'}</span>}
-              {(step.expects || s.error) && <button className="onboarding-icon-button" aria-label="Recover this step" title="Find the card, or recover a missing card" disabled={s.busy} onClick={() => void tutorial.recover()}><Compass size={15} /></button>}
+              {step.button && <button className="tutorial-next" disabled={s.busy || sync === 'offline'} onClick={() => void tutorial.continue()}>{s.busy ? t("One moment…") : t(step.button)}<ArrowRight size={13} /></button>}
+              {!step.button && <span className="tutorial-waiting"><i />{s.busy ? t("One moment…") : s.ready ? t("Settings saved") : t("Your turn")}</span>}
+              {(step.expects || s.error) && <button className="onboarding-icon-button" aria-label={t("Recover this step")} title={t("Find the card, or recover a missing card")} disabled={s.busy} onClick={() => void tutorial.recover()}><Compass size={15} /></button>}
             </>}
           </footer>
-          {active && step.optional && <button className="onboarding-text-button tutorial-optional" disabled={s.busy || sync === 'syncing' || (step.id === 'configure' && !['inspector', 'workspace'].includes(surfaces[s.session?.refs.agent ?? ''] ?? ''))} onClick={() => void tutorial.continue()}>{s.ready ? 'Continue with these settings' : step.optional}</button>}
+          {active && step.optional && <button className="onboarding-text-button tutorial-optional" disabled={s.busy || sync === 'syncing' || (step.id === 'configure' && !['inspector', 'workspace'].includes(surfaces[s.session?.refs.agent ?? ''] ?? ''))} onClick={() => void tutorial.continue()}>{s.ready ? t("Continue with these settings") : t(step.optional)}</button>}
         </>}
       </div>}
       <div className="tutorial-mascot"><OawGuide motion={motion} inLogo={welcome} movementTarget={guide} celebration={s.celebration} /></div>

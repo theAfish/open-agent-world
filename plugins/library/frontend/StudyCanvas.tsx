@@ -1,12 +1,14 @@
+import { t, useLocale } from "@oaw/plugin-api";
 import { useEffect, useRef, useState } from "react";
 import type { Annotation } from "./PdfReading";
 import { StudyCardContent } from "./StudyCardContent";
 
 export function StudyCanvas({items,move,open,locate,title,linked,layout,name,rename}:{items:Annotation[];move:(a:Annotation)=>Promise<void>;open:(a:Annotation)=>void;locate:(page:number)=>void;title:string;linked:boolean;layout:(positions:Record<string,{x:number;y:number}>)=>Promise<void>;name:string;rename:(name:string)=>Promise<void>}) {
+  useLocale();
   const [nameDraft,setNameDraft]=useState(name);
   const [renaming,setRenaming]=useState(false);
   useEffect(()=>setNameDraft(name),[name]);
-  async function saveName(){const next=nameDraft.trim()||"学习画布";setNameDraft(next);if(next===name||renaming)return;setRenaming(true);try{await rename(next);}catch(error){setError(String(error));}finally{setRenaming(false);}}
+  async function saveName(){const next=nameDraft.trim()||t("学习画布");setNameDraft(next);if(next===name||renaming)return;setRenaming(true);try{await rename(next);}catch(error){setError(String(error));}finally{setRenaming(false);}}
   const [view,setView]=useState({x:40,y:40,k:1});
   const [draft,setDraft]=useState<{id:string;x:number;y:number}>();
   const drag=useRef<{id?:string;x:number;y:number;ox:number;oy:number;sx:number;sy:number;k:number}>();
@@ -52,9 +54,9 @@ export function StudyCanvas({items,move,open,locate,title,linked,layout,name,ren
   onPointerUp={e=>{const d=drag.current;if(!d)return;cancelMotion();const position=dragPoint(e.clientX,e.clientY);if(d.id){const a=items.find(a=>a.id===d.id);if(a){const id=a.id;setPending(current=>({...current,[id]:position}));void move({...a,position}).catch(error=>setError(String(error))).finally(()=>setPending(current=>{if(current[id]!==position)return current;const next={...current};delete next[id];return next;}));}}else setView(v=>({...v,...position}));drag.current=undefined;setDraft(undefined);}}
   onPointerCancel={()=>{cancelMotion();drag.current=undefined;setDraft(undefined);}}>
     <div className="library-study-controls">
-      <input className="library-study-name" aria-label="学习画布名称" title="点击改名，Enter 保存" maxLength={100} value={nameDraft} disabled={renaming} onChange={e=>setNameDraft(e.target.value)} onBlur={()=>void saveName()} onKeyDown={e=>{if(e.key==="Enter"&&!e.nativeEvent.isComposing)e.currentTarget.blur();}}/>
-      <button aria-label="自动排版" title={busy?"排版中…":"自动排版"} disabled={busy||!items.length} onClick={()=>void arrange()}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="2" y="9" width="6" height="6" rx="1"/><rect x="16" y="3" width="6" height="6" rx="1"/><rect x="16" y="15" width="6" height="6" rx="1"/><path d="M8 12h4M12 6v12M12 6h4M12 18h4"/></svg></button>
-      <button aria-label="复位" title="复位" onClick={()=>setView({x:40,y:40,k:1})}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></svg></button>
+      <input className="library-study-name" aria-label={t("学习画布名称")} title={t("点击改名，Enter 保存")} maxLength={100} value={nameDraft} disabled={renaming} onChange={e=>setNameDraft(e.target.value)} onBlur={()=>void saveName()} onKeyDown={e=>{if(e.key==="Enter"&&!e.nativeEvent.isComposing)e.currentTarget.blur();}}/>
+      <button aria-label={t("自动排版")} title={busy?t("排版中…"):t("自动排版")} disabled={busy||!items.length} onClick={()=>void arrange()}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="2" y="9" width="6" height="6" rx="1"/><rect x="16" y="3" width="6" height="6" rx="1"/><rect x="16" y="15" width="6" height="6" rx="1"/><path d="M8 12h4M12 6v12M12 6h4M12 18h4"/></svg></button>
+      <button aria-label={t("复位")} title={t("复位")} onClick={()=>setView({x:40,y:40,k:1})}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></svg></button>
       {error&&<span role="alert">{error}</span>}
     </div>
     <div style={{transform:`translate(${view.x}px,${view.y}px) scale(${view.k})`,transformOrigin:"0 0"}}>
@@ -64,11 +66,11 @@ export function StudyCanvas({items,move,open,locate,title,linked,layout,name,ren
           {items.filter(a=>a.page===b.page).map(a=>{const p=point(a);return <path key={a.id} d={`M ${b.x+140} ${b.y} C ${p.x-40} ${b.y}, ${p.x-40} ${p.y+60}, ${p.x} ${p.y+60}`}/>;})}
         </g>)}</svg>
         <div className="library-study-root" style={{left:root.x,top:root.y-24}} title={title}>{title}</div>
-        {branches.map(b=><button className="library-study-branch" key={b.page} style={{left:b.x,top:b.y-20}} onClick={()=>locate(b.page)}>第 {b.page} 页</button>)}
+        {branches.map(b=><button className="library-study-branch" key={b.page} style={{left:b.x,top:b.y-20}} onClick={()=>locate(b.page)}>{t("Page {page}", { page: b.page })}</button>)}
       </>}
       {items.map(a=><article className="library-study-card" data-study-id={a.id} key={a.id} style={{left:0,top:0,transform:`translate3d(${point(a).x}px,${point(a).y}px,0)`,borderTopColor:a.color??"#f4d144"}}>
         <StudyCardContent item={a} save={move}/>
-        <button onClick={()=>open(a)}>编辑</button><button onClick={()=>locate(a.page)}>原文 · {a.page}</button>
+        <button onClick={()=>open(a)}>{t("编辑")}</button><button onClick={()=>locate(a.page)}>{t("原文 ·")} {a.page}</button>
       </article>)}
     </div>
   </div>;

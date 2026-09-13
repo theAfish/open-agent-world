@@ -1,0 +1,6378 @@
+{
+  "A clear place to start.": [
+    "A clear place to start.",
+    "从这里开始。"
+  ],
+  "A command-specific profile replaces the linked profile. Private Agent equipment is never shared automatically.": [
+    "A command-specific profile replaces the linked profile. Private Agent equipment is never shared automatically.",
+    "命令专用配置会替代已连接的配置。智能体的私有装备不会自动共享。"
+  ],
+  "A formation you saved from your world. Its members keep their original plugin dependencies.": [
+    "A formation you saved from your world. Its members keep their original plugin dependencies.",
+    "从世界中保存的编队，成员保留原有的插件依赖。"
+  ],
+  "A guided walk through your first world": [
+    "A guided walk through your first world",
+    "跟随教程探索你的第一个世界"
+  ],
+  "A little help, close at hand.": [
+    "A little help, close at hand.",
+    "身边的小帮手。"
+  ],
+  "A little space. A few cards. Something entirely yours.": [
+    "A little space. A few cards. Something entirely yours.",
+    "一片空间，几张卡片，打造属于你的世界。"
+  ],
+  "A shared field for durable conversations.": [
+    "A shared field for durable conversations.",
+    "共享空间，让对话持续留存。"
+  ],
+  "A world of possibilities": [
+    "A world of possibilities",
+    "充满可能的世界"
+  ],
+  "AGENT BARRACKS": [
+    "AGENT BARRACKS",
+    "智能体营地"
+  ],
+  "AGENT BARRACKS · OPEN SPACE": [
+    "AGENT BARRACKS · OPEN SPACE",
+    "智能体营地 · 开放空间"
+  ],
+  "API format": [
+    "API format",
+    "API 格式"
+  ],
+  "API key": [
+    "API key",
+    "API 密钥"
+  ],
+  "API key entered here": [
+    "API key entered here",
+    "在此输入的 API 密钥"
+  ],
+  "About this toolbox": [
+    "About this toolbox",
+    "关于此工具箱"
+  ],
+  "Absolute folder path on the server. When using WSL from Windows, enter a Windows path.": [
+    "Absolute folder path on the server. When using WSL from Windows, enter a Windows path.",
+    "服务器上的文件夹绝对路径。在 Windows 上使用 WSL 时，请输入 Windows 路径。"
+  ],
+  "Access": [
+    "Access",
+    "访问权限"
+  ],
+  "Active": [
+    "Active",
+    "已激活"
+  ],
+  "Active card deck": [
+    "Active card deck",
+    "当前卡组"
+  ],
+  "Active deck": [
+    "Active deck",
+    "当前卡组"
+  ],
+  "Active in your world": [
+    "Active in your world",
+    "已在世界中启用"
+  ],
+  "Activity": [
+    "Activity",
+    "动态"
+  ],
+  "Add": [
+    "Add",
+    "添加"
+  ],
+  "Add a connection to get started.": [
+    "Add a connection to get started.",
+    "添加连接以开始使用。"
+  ],
+  "Add a model using the model ID supplied by your service.": [
+    "Add a model using the model ID supplied by your service.",
+    "使用服务商提供的模型 ID 添加模型。"
+  ],
+  "Add a skill, write its instructions, or import a SKILL.md file.": [
+    "Add a skill, write its instructions, or import a SKILL.md file.",
+    "添加技能并编写说明，或导入 SKILL.md 文件。"
+  ],
+  "Add agents to session": [
+    "Add agents to session",
+    "向会话添加智能体"
+  ],
+  "Add another task to set a dependency.": [
+    "Add another task to set a dependency.",
+    "先添加另一个任务，再设置依赖。"
+  ],
+  "Add connection": [
+    "Add connection",
+    "添加连接"
+  ],
+  "Add inspected card to deck": [
+    "Add inspected card to deck",
+    "将此卡片加入卡组"
+  ],
+  "Add item": [
+    "Add item",
+    "添加项目"
+  ],
+  "Add model": [
+    "Add model",
+    "添加模型"
+  ],
+  "Add multiple accounts from the same provider, or connect your own service.": [
+    "Add multiple accounts from the same provider, or connect your own service.",
+    "可添加同一服务商的多个账户，也可连接自建服务。"
+  ],
+  "Add participants": [
+    "Add participants",
+    "添加参与者"
+  ],
+  "Add reference": [
+    "Add reference",
+    "添加引用"
+  ],
+  "Add selected": [
+    "Add selected",
+    "添加所选项"
+  ],
+  "Add setting": [
+    "Add setting",
+    "添加设置"
+  ],
+  "Add skill": [
+    "Add skill",
+    "添加技能"
+  ],
+  "Add task": [
+    "Add task",
+    "添加任务"
+  ],
+  "Add to deck": [
+    "Add to deck",
+    "加入卡组"
+  ],
+  "Add to session": [
+    "Add to session",
+    "加入会话"
+  ],
+  "Add variable": [
+    "Add variable",
+    "添加变量"
+  ],
+  "Add your first task. Dependencies are optional.": [
+    "Add your first task. Dependencies are optional.",
+    "添加第一个任务，依赖关系可选。"
+  ],
+  "Advanced connection options": [
+    "Advanced connection options",
+    "高级连接选项"
+  ],
+  "Affected:": [
+    "Affected:",
+    "受影响："
+  ],
+  "Agent": [
+    "Agent",
+    "智能体"
+  ],
+  "Agent context": [
+    "Agent context",
+    "智能体上下文"
+  ],
+  "Agent conversation history": [
+    "Agent conversation history",
+    "智能体对话历史"
+  ],
+  "Agent execution": [
+    "Agent execution",
+    "智能体执行"
+  ],
+  "Agent runs, scoped tools, sandbox commands, resource changes, and errors will appear here.": [
+    "Agent runs, scoped tools, sandbox commands, resource changes, and errors will appear here.",
+    "这里显示智能体运行、授权工具、沙箱命令、资源变更和错误。"
+  ],
+  "Agent runtime provider": [
+    "Agent runtime provider",
+    "智能体运行服务商"
+  ],
+  "Agent state": [
+    "Agent state",
+    "智能体状态"
+  ],
+  "Agent was not removed": [
+    "Agent was not removed",
+    "未能移除智能体"
+  ],
+  "Agent window": [
+    "Agent window",
+    "智能体窗口"
+  ],
+  "Agents": [
+    "Agents",
+    "智能体"
+  ],
+  "Agents in this space are live blueprints. Summoning copies their current configuration and private equipment, with fresh workspaces. External connections remain shared.": [
+    "Agents in this space are live blueprints. Summoning copies their current configuration and private equipment, with fresh workspaces. External connections remain shared.",
+    "此空间中的智能体是可编辑的模板。召唤会复制其当前配置和私有装备，并创建新工作区。外部连接保持共享。"
+  ],
+  "Agents were not added": [
+    "Agents were not added",
+    "未能添加智能体"
+  ],
+  "Aliases": [
+    "Aliases",
+    "别名"
+  ],
+  "All categories": [
+    "All categories",
+    "全部分类"
+  ],
+  "All packs": [
+    "All packs",
+    "全部卡包"
+  ],
+  "All relations": [
+    "All relations",
+    "全部关系"
+  ],
+  "All tasks": [
+    "All tasks",
+    "全部任务"
+  ],
+  "All types": [
+    "All types",
+    "全部类型"
+  ],
+  "Allow canvas edits": [
+    "Allow canvas edits",
+    "允许编辑画布"
+  ],
+  "An empty toolbox, ready for your skills.": [
+    "An empty toolbox, ready for your skills.",
+    "空工具箱，等待加入技能。"
+  ],
+  "Application data on the backend computer.": [
+    "Application data on the backend computer.",
+    "后端计算机上的应用数据。"
+  ],
+  "Application preferences": [
+    "Application preferences",
+    "应用偏好"
+  ],
+  "Applies to the next command.": [
+    "Applies to the next command.",
+    "对下一条命令生效。"
+  ],
+  "Applying confirmed changes…": [
+    "Applying confirmed changes…",
+    "正在应用已确认的更改…"
+  ],
+  "Arrange": [
+    "Arrange",
+    "自动排列"
+  ],
+  "Artifact": [
+    "Artifact",
+    "成果"
+  ],
+  "Artifact cleanup": [
+    "Artifact cleanup",
+    "成果清理"
+  ],
+  "Ask Atlas to work with its connected objects…": [
+    "Ask Atlas to work with its connected objects…",
+    "让 Atlas 操作已连接的对象…"
+  ],
+  "Ask about this part of your canvas…": [
+    "Ask about this part of your canvas…",
+    "询问画布中这片区域的情况…"
+  ],
+  "Ask me to find cards or tidy this part of your canvas.": [
+    "Ask me to find cards or tidy this part of your canvas.",
+    "让我帮你寻找卡片或整理这片画布。"
+  ],
+  "Assign connected executors to ready work before running.": [
+    "Assign connected executors to ready work before running.",
+    "运行前，为就绪任务指定已连接的执行者。"
+  ],
+  "Assimilate a Toolset": [
+    "Assimilate a Toolset",
+    "吸收工具集"
+  ],
+  "Assimilate “": [
+    "Assimilate “",
+    "吸收“"
+  ],
+  "Attach files": [
+    "Attach files",
+    "附加文件"
+  ],
+  "Attached objects": [
+    "Attached objects",
+    "附属对象"
+  ],
+  "Authentication source": [
+    "Authentication source",
+    "身份验证来源"
+  ],
+  "Author": [
+    "Author",
+    "作者"
+  ],
+  "Automatic": [
+    "Automatic",
+    "自动"
+  ],
+  "Available participants": [
+    "Available participants",
+    "可用参与者"
+  ],
+  "Awaiting": [
+    "Awaiting",
+    "等待中"
+  ],
+  "Awaiting image": [
+    "Awaiting image",
+    "等待图片"
+  ],
+  "Backend environment": [
+    "Backend environment",
+    "后端环境"
+  ],
+  "Backend environment variable": [
+    "Backend environment variable",
+    "后端环境变量"
+  ],
+  "Barracks settings": [
+    "Barracks settings",
+    "营地设置"
+  ],
+  "Base URL": [
+    "Base URL",
+    "基础地址"
+  ],
+  "Both agents can message each other directly.": [
+    "Both agents can message each other directly.",
+    "两个智能体可以直接互相发送消息。"
+  ],
+  "Browse": [
+    "Browse",
+    "浏览"
+  ],
+  "Browse packs": [
+    "Browse packs",
+    "浏览卡包"
+  ],
+  "Browse retained versions": [
+    "Browse retained versions",
+    "浏览保留版本"
+  ],
+  "Browse…": [
+    "Browse…",
+    "浏览…"
+  ],
+  "Build a deck": [
+    "Build a deck",
+    "创建卡组"
+  ],
+  "Build your deck": [
+    "Build your deck",
+    "构建你的卡组"
+  ],
+  "CARDS": [
+    "CARDS",
+    "卡片"
+  ],
+  "COLLECTED CARD": [
+    "COLLECTED CARD",
+    "已收藏卡片"
+  ],
+  "Cached": [
+    "Cached",
+    "已缓存"
+  ],
+  "Cancel": [
+    "Cancel",
+    "取消"
+  ],
+  "Cancel Run": [
+    "Cancel Run",
+    "取消运行"
+  ],
+  "Cancel command": [
+    "Cancel command",
+    "取消命令"
+  ],
+  "Cancel creating deck": [
+    "Cancel creating deck",
+    "取消创建卡组"
+  ],
+  "Cancel editing": [
+    "Cancel editing",
+    "取消编辑"
+  ],
+  "Cancel group": [
+    "Cancel group",
+    "取消分组"
+  ],
+  "Cancel scheduled move": [
+    "Cancel scheduled move",
+    "取消迁移计划"
+  ],
+  "Cannot reach the local backend. Start": [
+    "Cannot reach the local backend. Start",
+    "无法连接本地后端。请在终端运行"
+  ],
+  "Canvas connections authorize access. Session membership selects the group. Removing an edge keeps history but blocks future turns.": [
+    "Canvas connections authorize access. Session membership selects the group. Removing an edge keeps history but blocks future turns.",
+    "画布连接授予访问权限，会话成员决定参与群体。移除连线会保留历史，但阻止后续交互。"
+  ],
+  "Canvas zoom controls": [
+    "Canvas zoom controls",
+    "画布缩放控制"
+  ],
+  "Card Library": [
+    "Card Library",
+    "卡片图书馆"
+  ],
+  "Card category": [
+    "Card category",
+    "卡片分类"
+  ],
+  "Card decks": [
+    "Card decks",
+    "卡组"
+  ],
+  "Card details": [
+    "Card details",
+    "卡片详情"
+  ],
+  "Cards": [
+    "Cards",
+    "卡片"
+  ],
+  "Changes apply to new runs. Disable saved models or connections to preserve existing agent references.": [
+    "Changes apply to new runs. Disable saved models or connections to preserve existing agent references.",
+    "更改对新运行生效。禁用已保存的模型或连接可以保留现有智能体引用。"
+  ],
+  "Check execution environment": [
+    "Check execution environment",
+    "检查执行环境"
+  ],
+  "Checking…": [
+    "Checking…",
+    "检查中…"
+  ],
+  "Choose Secret and enter the credential. Save stores it securely for commands. Leave a configured secret blank to keep it.": [
+    "Choose Secret and enter the credential. Save stores it securely for commands. Leave a configured secret blank to keep it.",
+    "选择“密钥”并输入凭据，保存后供命令安全使用。已有密钥留空即可保留。"
+  ],
+  "Choose Toolset": [
+    "Choose Toolset",
+    "选择工具集"
+  ],
+  "Choose a capability": [
+    "Choose a capability",
+    "选择能力"
+  ],
+  "Choose a collection": [
+    "Choose a collection",
+    "选择集合"
+  ],
+  "Choose a folder in the system window.": [
+    "Choose a folder in the system window.",
+    "在系统窗口中选择文件夹。"
+  ],
+  "Choose a name and icon.": [
+    "Choose a name and icon.",
+    "选择名称和图标。"
+  ],
+  "Choose a new or empty folder": [
+    "Choose a new or empty folder",
+    "选择新建或空文件夹"
+  ],
+  "Choose a preset": [
+    "Choose a preset",
+    "选择预设"
+  ],
+  "Choose a resource": [
+    "Choose a resource",
+    "选择资源"
+  ],
+  "Choose cards from Library": [
+    "Choose cards from Library",
+    "从图书馆选择卡片"
+  ],
+  "Choose entry…": [
+    "Choose entry…",
+    "选择条目…"
+  ],
+  "Choose up to 20 files, each at most 64 MiB": [
+    "Choose up to 20 files, each at most 64 MiB",
+    "最多选择 20 个文件，每个不超过 64 MiB"
+  ],
+  "Choose workspace": [
+    "Choose workspace",
+    "选择工作区"
+  ],
+  "Choose…": [
+    "Choose…",
+    "选择…"
+  ],
+  "Clear the runtime cache. Workspace files are preserved.": [
+    "Clear the runtime cache. Workspace files are preserved.",
+    "清除运行环境缓存，保留工作区文件。"
+  ],
+  "Click for details": [
+    "Click for details",
+    "点击查看详情"
+  ],
+  "Close": [
+    "Close",
+    "关闭"
+  ],
+  "Close Library": [
+    "Close Library",
+    "关闭图书馆"
+  ],
+  "Close Minister": [
+    "Close Minister",
+    "关闭管家"
+  ],
+  "Close barracks": [
+    "Close barracks",
+    "关闭营地"
+  ],
+  "Close capability chooser": [
+    "Close capability chooser",
+    "关闭能力选择器"
+  ],
+  "Close equipment slots": [
+    "Close equipment slots",
+    "关闭装备槽"
+  ],
+  "Close inspector": [
+    "Close inspector",
+    "关闭检查器"
+  ],
+  "Close participant picker": [
+    "Close participant picker",
+    "关闭参与者选择器"
+  ],
+  "Close preview": [
+    "Close preview",
+    "关闭预览"
+  ],
+  "Close relationship controls": [
+    "Close relationship controls",
+    "关闭关系控制"
+  ],
+  "Close resource": [
+    "Close resource",
+    "关闭资源"
+  ],
+  "Close runtime activity": [
+    "Close runtime activity",
+    "关闭运行动态"
+  ],
+  "Close settings": [
+    "Close settings",
+    "关闭设置"
+  ],
+  "Close skill details": [
+    "Close skill details",
+    "关闭技能详情"
+  ],
+  "Close task details": [
+    "Close task details",
+    "关闭任务详情"
+  ],
+  "Close toolbox editor": [
+    "Close toolbox editor",
+    "关闭工具箱编辑器"
+  ],
+  "Close toolbox settings": [
+    "Close toolbox settings",
+    "关闭工具箱设置"
+  ],
+  "Close workspace": [
+    "Close workspace",
+    "关闭工作区"
+  ],
+  "Code assistant": [
+    "Code assistant",
+    "编程助手"
+  ],
+  "Collapse": [
+    "Collapse",
+    "收起"
+  ],
+  "Collapse to node": [
+    "Collapse to node",
+    "收起为节点"
+  ],
+  "Collect cards": [
+    "Collect cards",
+    "收藏卡片"
+  ],
+  "Collect the tools you use together. Connect an Agent with “Use skills” to let it open the right tool for the job.": [
+    "Collect the tools you use together. Connect an Agent with “Use skills” to let it open the right tool for the job.",
+    "收集需要搭配使用的工具。通过“使用技能”连接智能体，让它按需选择工具。"
+  ],
+  "Collected": [
+    "Collected",
+    "已收藏"
+  ],
+  "Collected from": [
+    "Collected from",
+    "收藏来源"
+  ],
+  "Collection": [
+    "Collection",
+    "集合"
+  ],
+  "Coming later": [
+    "Coming later",
+    "即将推出"
+  ],
+  "Command": [
+    "Command",
+    "命令"
+  ],
+  "Command output": [
+    "Command output",
+    "命令输出"
+  ],
+  "Command preset": [
+    "Command preset",
+    "命令预设"
+  ],
+  "Command presets": [
+    "Command presets",
+    "命令预设"
+  ],
+  "Command running": [
+    "Command running",
+    "命令运行中"
+  ],
+  "Command running?": [
+    "Command running?",
+    "命令正在运行？"
+  ],
+  "Command timeout (seconds)": [
+    "Command timeout (seconds)",
+    "命令超时（秒）"
+  ],
+  "Commit relationship": [
+    "Commit relationship",
+    "确认关系"
+  ],
+  "Communication direction": [
+    "Communication direction",
+    "通信方向"
+  ],
+  "Company account": [
+    "Company account",
+    "公司账户"
+  ],
+  "Complete": [
+    "Complete",
+    "完成"
+  ],
+  "Complete prerequisites first": [
+    "Complete prerequisites first",
+    "请先完成前置任务"
+  ],
+  "Completed": [
+    "Completed",
+    "已完成"
+  ],
+  "Concurrent summoned Runs": [
+    "Concurrent summoned Runs",
+    "召唤实例并发运行数"
+  ],
+  "Configuration": [
+    "Configuration",
+    "配置"
+  ],
+  "Configuration saved.": [
+    "Configuration saved.",
+    "配置已保存。"
+  ],
+  "Configured": [
+    "Configured",
+    "已配置"
+  ],
+  "Configured — enter to replace": [
+    "Configured — enter to replace",
+    "已配置，输入可替换"
+  ],
+  "Confirm assimilation": [
+    "Confirm assimilation",
+    "确认吸收"
+  ],
+  "Confirm changes": [
+    "Confirm changes",
+    "确认更改"
+  ],
+  "Confirm delete": [
+    "Confirm delete",
+    "确认删除"
+  ],
+  "Confirm release and delete stored content": [
+    "Confirm release and delete stored content",
+    "确认释放并删除存储内容"
+  ],
+  "Confirm these changes": [
+    "Confirm these changes",
+    "确认这些更改"
+  ],
+  "Confirmed changes applied.": [
+    "Confirmed changes applied.",
+    "已应用确认的更改。"
+  ],
+  "Connect a Sandbox or Conversation": [
+    "Connect a Sandbox or Conversation",
+    "连接沙箱或对话"
+  ],
+  "Connect an Agent to read tasks, update progress, or manage the plan.": [
+    "Connect an Agent to read tasks, update progress, or manage the plan.",
+    "连接智能体以读取任务、更新进度或管理计划。"
+  ],
+  "Connect an Agent using Participate.": [
+    "Connect an Agent using Participate.",
+    "通过“参与”连接智能体。"
+  ],
+  "Connect an Agent with Participate to make it available here.": [
+    "Connect an Agent with Participate to make it available here.",
+    "通过“参与”连接智能体，使其在此可用。"
+  ],
+  "Connect an Agent with Use skill to share these instructions, settings and files.": [
+    "Connect an Agent with Use skill to share these instructions, settings and files.",
+    "通过“使用技能”连接智能体，共享说明、设置和文件。"
+  ],
+  "Connect this board to an Agent with “Execute with”, then choose an executor. Leaving it unset keeps this a todo board. Successful runs complete tasks automatically.": [
+    "Connect this board to an Agent with “Execute with”, then choose an executor. Leaving it unset keeps this a todo board. Successful runs complete tasks automatically.",
+    "通过“交由执行”将看板连接到智能体，再选择执行者。不设置时作为待办看板使用。运行成功后会自动完成任务。"
+  ],
+  "Connect this card to a Sandbox or Conversation": [
+    "Connect this card to a Sandbox or Conversation",
+    "将此卡片连接到沙箱或对话"
+  ],
+  "Connect to": [
+    "Connect to",
+    "连接到"
+  ],
+  "Connect your accounts, then choose the models your agents can use.": [
+    "Connect your accounts, then choose the models your agents can use.",
+    "连接账户，再选择智能体可用的模型。"
+  ],
+  "Connected agents": [
+    "Connected agents",
+    "已连接智能体"
+  ],
+  "Connected objects": [
+    "Connected objects",
+    "已连接对象"
+  ],
+  "Connecting to event stream": [
+    "Connecting to event stream",
+    "正在连接事件流"
+  ],
+  "Connection name": [
+    "Connection name",
+    "连接名称"
+  ],
+  "Connections": [
+    "Connections",
+    "连接"
+  ],
+  "Connectivity destination": [
+    "Connectivity destination",
+    "连通性测试目标"
+  ],
+  "Consume its world card after committing knowledge and a recoverable package snapshot.": [
+    "Consume its world card after committing knowledge and a recoverable package snapshot.",
+    "提交知识和可恢复的卡包快照后，消耗世界中的原卡片。"
+  ],
+  "Content": [
+    "Content",
+    "内容"
+  ],
+  "Content manifest (": [
+    "Content manifest (",
+    "内容清单（"
+  ],
+  "Content unavailable. Inspect it in the Library.": [
+    "Content unavailable. Inspect it in the Library.",
+    "内容不可用，请在图书馆查看。"
+  ],
+  "Contents": [
+    "Contents",
+    "内容"
+  ],
+  "Continue with these settings": [
+    "Continue with these settings",
+    "使用这些设置继续"
+  ],
+  "Control radius": [
+    "Control radius",
+    "控制半径"
+  ],
+  "Conversation": [
+    "Conversation",
+    "对话"
+  ],
+  "Conversation field": [
+    "Conversation field",
+    "对话空间"
+  ],
+  "Conversation history": [
+    "Conversation history",
+    "对话历史"
+  ],
+  "Conversation message": [
+    "Conversation message",
+    "对话消息"
+  ],
+  "Conversation sessions and agents": [
+    "Conversation sessions and agents",
+    "对话会话与智能体"
+  ],
+  "Copy destination": [
+    "Copy destination",
+    "复制目标"
+  ],
+  "Copy into Sandbox": [
+    "Copy into Sandbox",
+    "复制到沙箱"
+  ],
+  "Copy into workspace": [
+    "Copy into workspace",
+    "复制到工作区"
+  ],
+  "Copy version to workspace": [
+    "Copy version to workspace",
+    "将此版本复制到工作区"
+  ],
+  "Could not cancel migration.": [
+    "Could not cancel migration.",
+    "无法取消迁移。"
+  ],
+  "Could not detach glue": [
+    "Could not detach glue",
+    "无法解除粘连"
+  ],
+  "Could not load Sandbox settings.": [
+    "Could not load Sandbox settings.",
+    "无法加载沙箱设置。"
+  ],
+  "Could not load model settings.": [
+    "Could not load model settings.",
+    "无法加载模型设置。"
+  ],
+  "Could not load storage settings.": [
+    "Could not load storage settings.",
+    "无法加载存储设置。"
+  ],
+  "Could not open folder selection. Enter the path manually.": [
+    "Could not open folder selection. Enter the path manually.",
+    "无法打开文件夹选择器，请手动输入路径。"
+  ],
+  "Could not save settings.": [
+    "Could not save settings.",
+    "无法保存设置。"
+  ],
+  "Create": [
+    "Create",
+    "创建"
+  ],
+  "Create Agents and other cards, configure and arrange this area, and manage connections, groups and attachments. Destructive or sensitive changes need your confirmation.": [
+    "Create Agents and other cards, configure and arrange this area, and manage connections, groups and attachments. Destructive or sensitive changes need your confirmation.",
+    "创建智能体及其他卡片，配置和整理此区域，管理连接、分组和附属对象。破坏性或敏感更改需要你确认。"
+  ],
+  "Create a new card deck": [
+    "Create a new card deck",
+    "创建新卡组"
+  ],
+  "Create a new deck": [
+    "Create a new deck",
+    "创建新卡组"
+  ],
+  "Create deck": [
+    "Create deck",
+    "创建卡组"
+  ],
+  "Create folder": [
+    "Create folder",
+    "创建文件夹"
+  ],
+  "Create group": [
+    "Create group",
+    "创建分组"
+  ],
+  "Create or select a session first…": [
+    "Create or select a session first…",
+    "请先创建或选择会话…"
+  ],
+  "Create session": [
+    "Create session",
+    "创建会话"
+  ],
+  "Create text file": [
+    "Create text file",
+    "创建文本文件"
+  ],
+  "Created by a world action": [
+    "Created by a world action",
+    "由世界操作创建"
+  ],
+  "Current data location": [
+    "Current data location",
+    "当前数据位置"
+  ],
+  "Current folder": [
+    "Current folder",
+    "当前文件夹"
+  ],
+  "Deck": [
+    "Deck",
+    "卡组"
+  ],
+  "Deck icon": [
+    "Deck icon",
+    "卡组图标"
+  ],
+  "Deck name": [
+    "Deck name",
+    "卡组名称"
+  ],
+  "Decks": [
+    "Decks",
+    "卡组"
+  ],
+  "Default Workspace location": [
+    "Default Workspace location",
+    "默认工作区位置"
+  ],
+  "Default executor": [
+    "Default executor",
+    "默认执行者"
+  ],
+  "Default for new agents": [
+    "Default for new agents",
+    "新智能体默认使用"
+  ],
+  "Default profile": [
+    "Default profile",
+    "默认配置"
+  ],
+  "Default runtime": [
+    "Default runtime",
+    "默认运行环境"
+  ],
+  "Default settings": [
+    "Default settings",
+    "默认设置"
+  ],
+  "Defaults for new Sandboxes on this backend host. Existing Sandboxes keep their current folders and runtime.": [
+    "Defaults for new Sandboxes on this backend host. Existing Sandboxes keep their current folders and runtime.",
+    "此后端主机上新沙箱的默认值。现有沙箱保留当前文件夹和运行环境。"
+  ],
+  "Delete": [
+    "Delete",
+    "删除"
+  ],
+  "Delete deck": [
+    "Delete deck",
+    "删除卡组"
+  ],
+  "Delete entry": [
+    "Delete entry",
+    "删除条目"
+  ],
+  "Delete knowledge entry": [
+    "Delete knowledge entry",
+    "删除知识条目"
+  ],
+  "Delete relationship": [
+    "Delete relationship",
+    "删除关系"
+  ],
+  "Delete saved formation": [
+    "Delete saved formation",
+    "删除已保存编队"
+  ],
+  "Delete session": [
+    "Delete session",
+    "删除会话"
+  ],
+  "Delete task": [
+    "Delete task",
+    "删除任务"
+  ],
+  "Delete the container and its members. Ctrl+Z to undo.": [
+    "Delete the container and its members. Ctrl+Z to undo.",
+    "删除容器及其成员，按 Ctrl+Z 撤销。"
+  ],
+  "Delete this task": [
+    "Delete this task",
+    "删除此任务"
+  ],
+  "Delete “": [
+    "Delete “",
+    "删除“"
+  ],
+  "Dependencies": [
+    "Dependencies",
+    "依赖"
+  ],
+  "Depends on": [
+    "Depends on",
+    "依赖于"
+  ],
+  "Describe how to do this work…": [
+    "Describe how to do this work…",
+    "描述如何完成此工作…"
+  ],
+  "Describe the task for the entry Agent": [
+    "Describe the task for the entry Agent",
+    "描述入口智能体的任务"
+  ],
+  "Description": [
+    "Description",
+    "描述"
+  ],
+  "Destination configuration": [
+    "Destination configuration",
+    "目标配置"
+  ],
+  "Detach": [
+    "Detach",
+    "分离"
+  ],
+  "Detach skill": [
+    "Detach skill",
+    "移除技能"
+  ],
+  "Diagnostics": [
+    "Diagnostics",
+    "诊断"
+  ],
+  "Dimensions": [
+    "Dimensions",
+    "尺寸"
+  ],
+  "Dimensions unavailable": [
+    "Dimensions unavailable",
+    "尺寸不可用"
+  ],
+  "Direction": [
+    "Direction",
+    "方向"
+  ],
+  "Disable plugin": [
+    "Disable plugin",
+    "禁用插件"
+  ],
+  "Disabled": [
+    "Disabled",
+    "已禁用"
+  ],
+  "Discard card": [
+    "Discard card",
+    "移除卡片"
+  ],
+  "Discard draft and reload": [
+    "Discard draft and reload",
+    "放弃草稿并重新加载"
+  ],
+  "Disconnect": [
+    "Disconnect",
+    "断开连接"
+  ],
+  "Discovering local runtime…": [
+    "Discovering local runtime…",
+    "正在检测本地运行环境…"
+  ],
+  "Dismiss message": [
+    "Dismiss message",
+    "关闭消息"
+  ],
+  "Display name": [
+    "Display name",
+    "显示名称"
+  ],
+  "Dissolve": [
+    "Dissolve",
+    "解散"
+  ],
+  "Distill to Heuristic": [
+    "Distill to Heuristic",
+    "提炼为启发式规则"
+  ],
+  "Download": [
+    "Download",
+    "下载"
+  ],
+  "Download file": [
+    "Download file",
+    "下载文件"
+  ],
+  "Download file (up to 16 MiB)": [
+    "Download file (up to 16 MiB)",
+    "下载文件（不超过 16 MiB）"
+  ],
+  "Download source snapshots": [
+    "Download source snapshots",
+    "下载来源快照"
+  ],
+  "Download this toolbox as an installable plugin": [
+    "Download this toolbox as an installable plugin",
+    "将此工具箱下载为可安装插件"
+  ],
+  "Drag Agents into or out of this space. Each Agent keeps its equipment and shared connections. Connect an Agent's equipped Summoning skill to this space to call its Agents.": [
+    "Drag Agents into or out of this space. Each Agent keeps its equipment and shared connections. Connect an Agent's equipped Summoning skill to this space to call its Agents.",
+    "将智能体拖入或拖出此空间，装备和共享连接会保留。将智能体装备的召唤技能连接到此空间，即可召唤其中的智能体。"
+  ],
+  "Drag a configured Agent into this space to make it available.": [
+    "Drag a configured Agent into this space to make it available.",
+    "将配置好的智能体拖入此空间以供调用。"
+  ],
+  "Drag cards from your active deck to choose their exact position.": [
+    "Drag cards from your active deck to choose their exact position.",
+    "从当前卡组拖出卡片，可精确选择放置位置。"
+  ],
+  "Drag cards into or out of this space. Each member keeps its own connections.": [
+    "Drag cards into or out of this space. Each member keeps its own connections.",
+    "将卡片拖入或拖出此空间，每个成员保留自己的连接。"
+  ],
+  "Drag into the world": [
+    "Drag into the world",
+    "拖入世界"
+  ],
+  "Drag skills into this space. Connect its border to use the whole toolbox, or connect a skill to use only that skill.": [
+    "Drag skills into this space. Connect its border to use the whole toolbox, or connect a skill to use only that skill.",
+    "将技能拖入此空间。连接边框以使用整个工具箱，或连接单个技能以仅使用该技能。"
+  ],
+  "Drag to change control radius": [
+    "Drag to change control radius",
+    "拖动以调整控制半径"
+  ],
+  "Drag to pan · Shift-drag to select": [
+    "Drag to pan · Shift-drag to select",
+    "拖动平移 · 按住 Shift 拖动框选"
+  ],
+  "Drop to delete saved Legion": [
+    "Drop to delete saved Legion",
+    "拖到此处删除已保存的军团"
+  ],
+  "Drop to remove from this deck": [
+    "Drop to remove from this deck",
+    "拖到此处从卡组移除"
+  ],
+  "Earlier messages": [
+    "Earlier messages",
+    "较早消息"
+  ],
+  "Edit entry": [
+    "Edit entry",
+    "编辑条目"
+  ],
+  "Edit relationships": [
+    "Edit relationships",
+    "编辑关系"
+  ],
+  "Edit resource": [
+    "Edit resource",
+    "编辑资源"
+  ],
+  "Edit toolbox": [
+    "Edit toolbox",
+    "编辑工具箱"
+  ],
+  "Edits change files in this folder directly.": [
+    "Edits change files in this folder directly.",
+    "编辑会直接修改此文件夹中的文件。"
+  ],
+  "Edits enabled": [
+    "Edits enabled",
+    "已允许编辑"
+  ],
+  "Effective capabilities": [
+    "Effective capabilities",
+    "有效能力"
+  ],
+  "Effective values ·": [
+    "Effective values ·",
+    "有效值 ·"
+  ],
+  "Empty": [
+    "Empty",
+    "空"
+  ],
+  "Empty folder": [
+    "Empty folder",
+    "空文件夹"
+  ],
+  "Empty managed text resource.": [
+    "Empty managed text resource.",
+    "托管文本资源为空。"
+  ],
+  "Empty world": [
+    "Empty world",
+    "空白世界"
+  ],
+  "Enable plugin": [
+    "Enable plugin",
+    "启用插件"
+  ],
+  "Enabled": [
+    "Enabled",
+    "已启用"
+  ],
+  "Enabled · runtime ready": [
+    "Enabled · runtime ready",
+    "已启用 · 运行环境就绪"
+  ],
+  "Enter API key": [
+    "Enter API key",
+    "输入 API 密钥"
+  ],
+  "Enter a secret before saving": [
+    "Enter a secret before saving",
+    "请先输入密钥再保存"
+  ],
+  "Enter a variable name, not an API key. For managed deployments, set its value on the server before starting OAW. Leave blank to use": [
+    "Enter a variable name, not an API key. For managed deployments, set its value on the server before starting OAW. Leave blank to use",
+    "输入变量名，而非 API 密钥。托管部署需在启动 OAW 前设置服务器变量值。留空则使用"
+  ],
+  "Enter an existing absolute folder on the backend computer, for example D:\\Workspaces. Each new Sandbox gets its own subfolder. Leave blank to use the system-managed location.": [
+    "Enter an existing absolute folder on the backend computer, for example D:\\Workspaces. Each new Sandbox gets its own subfolder. Leave blank to use the system-managed location.",
+    "输入后端计算机上现有文件夹的绝对路径，例如 D:\\Workspaces。每个新沙箱会创建独立子文件夹。留空使用系统管理的位置。"
+  ],
+  "Enter secret": [
+    "Enter secret",
+    "输入密钥"
+  ],
+  "Entry type": [
+    "Entry type",
+    "条目类型"
+  ],
+  "Environment variable name": [
+    "Environment variable name",
+    "环境变量名"
+  ],
+  "Environment variables": [
+    "Environment variables",
+    "环境变量"
+  ],
+  "Equip a resource or connect a shared resource to grant a scoped tool.": [
+    "Equip a resource or connect a shared resource to grant a scoped tool.",
+    "装备资源或连接共享资源，以授予限定范围的工具权限。"
+  ],
+  "Equipment": [
+    "Equipment",
+    "装备"
+  ],
+  "Event data": [
+    "Event data",
+    "事件数据"
+  ],
+  "Event stream live": [
+    "Event stream live",
+    "事件流已连接"
+  ],
+  "Event stream offline": [
+    "Event stream offline",
+    "事件流离线"
+  ],
+  "Evidence": [
+    "Evidence",
+    "依据"
+  ],
+  "Execution and cleanup": [
+    "Execution and cleanup",
+    "执行与清理"
+  ],
+  "Execution history (": [
+    "Execution history (",
+    "执行历史（"
+  ],
+  "Execution mode": [
+    "Execution mode",
+    "执行模式"
+  ],
+  "Execution:": [
+    "Execution:",
+    "执行："
+  ],
+  "Executor": [
+    "Executor",
+    "执行者"
+  ],
+  "Executor disconnected": [
+    "Executor disconnected",
+    "执行者已断开"
+  ],
+  "Exit": [
+    "Exit",
+    "退出"
+  ],
+  "Expand": [
+    "Expand",
+    "展开"
+  ],
+  "Expand card": [
+    "Expand card",
+    "展开卡片"
+  ],
+  "Expand neighborhood": [
+    "Expand neighborhood",
+    "展开邻域"
+  ],
+  "Expected outcome or instructions": [
+    "Expected outcome or instructions",
+    "预期结果或说明"
+  ],
+  "Explore a card": [
+    "Explore a card",
+    "探索卡片"
+  ],
+  "Explore your installed packs": [
+    "Explore your installed packs",
+    "探索已安装的卡包"
+  ],
+  "Explore your packs": [
+    "Explore your packs",
+    "探索你的卡包"
+  ],
+  "Export plugin": [
+    "Export plugin",
+    "导出插件"
+  ],
+  "Failed": [
+    "Failed",
+    "失败"
+  ],
+  "Field policy": [
+    "Field policy",
+    "字段策略"
+  ],
+  "File contents": [
+    "File contents",
+    "文件内容"
+  ],
+  "File no longer exists.": [
+    "File no longer exists.",
+    "文件已不存在。"
+  ],
+  "File path": [
+    "File path",
+    "文件路径"
+  ],
+  "File preview": [
+    "File preview",
+    "文件预览"
+  ],
+  "File upload failed": [
+    "File upload failed",
+    "文件上传失败"
+  ],
+  "Filename": [
+    "Filename",
+    "文件名"
+  ],
+  "Files": [
+    "Files",
+    "文件"
+  ],
+  "Files and folders": [
+    "Files and folders",
+    "文件与文件夹"
+  ],
+  "Files are finalized; external writers are paused": [
+    "Files are finalized; external writers are paused",
+    "文件已定稿，外部写入已暂停"
+  ],
+  "Files in this folder are read only.": [
+    "Files in this folder are read only.",
+    "此文件夹中的文件为只读。"
+  ],
+  "Filter tasks": [
+    "Filter tasks",
+    "筛选任务"
+  ],
+  "Find a tool…": [
+    "Find a tool…",
+    "查找工具…"
+  ],
+  "Find the card, or recover a missing card": [
+    "Find the card, or recover a missing card",
+    "查找卡片或恢复缺失的卡片"
+  ],
+  "First 300 entries shown.": [
+    "First 300 entries shown.",
+    "仅显示前 300 个条目。"
+  ],
+  "Focus": [
+    "Focus",
+    "聚焦"
+  ],
+  "Focus selection": [
+    "Focus selection",
+    "聚焦所选项"
+  ],
+  "Folder": [
+    "Folder",
+    "文件夹"
+  ],
+  "Folder access": [
+    "Folder access",
+    "文件夹访问权限"
+  ],
+  "Follow up": [
+    "Follow up",
+    "继续跟进"
+  ],
+  "Following": [
+    "Following",
+    "跟随中"
+  ],
+  "For now, packs arrive with plugins installed in Open Agent World.": [
+    "For now, packs arrive with plugins installed in Open Agent World.",
+    "目前，卡包随 Open Agent World 中安装的插件提供。"
+  ],
+  "Form Legion": [
+    "Form Legion",
+    "组建军团"
+  ],
+  "Form a Legion in the world, then save it to your library.": [
+    "Form a Legion in the world, then save it to your library.",
+    "在世界中组建军团，再保存到图书馆。"
+  ],
+  "Form a team, configure it, then save it to your library.": [
+    "Form a team, configure it, then save it to your library.",
+    "组建并配置团队，再保存到图书馆。"
+  ],
+  "Format": [
+    "Format",
+    "格式"
+  ],
+  "Forming...": [
+    "Forming...",
+    "组建中…"
+  ],
+  "From": [
+    "From",
+    "来源"
+  ],
+  "Give each environment variable a name, or remove the empty row.": [
+    "Give each environment variable a name, or remove the empty row.",
+    "请为每个环境变量命名，或移除空行。"
+  ],
+  "Give each setting a name or remove the empty row.": [
+    "Give each setting a name or remove the empty row.",
+    "请为每项设置命名，或移除空行。"
+  ],
+  "Give each variable a name, or remove the empty row.": [
+    "Give each variable a name, or remove the empty row.",
+    "请为每个变量命名，或移除空行。"
+  ],
+  "Give the skill useful starting values, such as a language, output format, or iteration limit.": [
+    "Give the skill useful starting values, such as a language, output format, or iteration limit.",
+    "为技能设置实用的初始值，例如语言、输出格式或迭代上限。"
+  ],
+  "Give your Legion a name before saving it to the library.": [
+    "Give your Legion a name before saving it to the library.",
+    "保存到图书馆前，请先为军团命名。"
+  ],
+  "Glue could not synchronize": [
+    "Glue could not synchronize",
+    "粘连状态无法同步"
+  ],
+  "Glue layout needs a retry": [
+    "Glue layout needs a retry",
+    "粘连布局需要重试"
+  ],
+  "Glue resize needs a retry": [
+    "Glue resize needs a retry",
+    "粘连缩放需要重试"
+  ],
+  "Grant access": [
+    "Grant access",
+    "授予访问权限"
+  ],
+  "Grant capability": [
+    "Grant capability",
+    "授予能力"
+  ],
+  "Group": [
+    "Group",
+    "分组"
+  ],
+  "Group connected entries and fit the graph": [
+    "Group connected entries and fit the graph",
+    "将相连条目分组并适配图形视图"
+  ],
+  "Group name": [
+    "Group name",
+    "分组名称"
+  ],
+  "Groups": [
+    "Groups",
+    "分组"
+  ],
+  "Hi! Need a hand with this part of your canvas?": [
+    "Hi! Need a hand with this part of your canvas?",
+    "你好！需要帮忙整理这片画布吗？"
+  ],
+  "Hide details": [
+    "Hide details",
+    "隐藏详情"
+  ],
+  "History": [
+    "History",
+    "历史"
+  ],
+  "History & confirmations": [
+    "History & confirmations",
+    "历史与确认"
+  ],
+  "History begins after the first save.": [
+    "History begins after the first save.",
+    "首次保存后将开始记录历史。"
+  ],
+  "How to use": [
+    "How to use",
+    "使用方法"
+  ],
+  "Idle": [
+    "Idle",
+    "空闲"
+  ],
+  "Image resources are immutable in this POC. Create a new Image card to import another file.": [
+    "Image resources are immutable in this POC. Create a new Image card to import another file.",
+    "此版本中的图片资源不可修改。请创建新的图片卡片以导入其他文件。"
+  ],
+  "Import JSON": [
+    "Import JSON",
+    "导入 JSON"
+  ],
+  "Import SKILL.md": [
+    "Import SKILL.md",
+    "导入 SKILL.md"
+  ],
+  "Import execution configuration JSON": [
+    "Import execution configuration JSON",
+    "导入执行配置 JSON"
+  ],
+  "Import files": [
+    "Import files",
+    "导入文件"
+  ],
+  "Import folder": [
+    "Import folder",
+    "导入文件夹"
+  ],
+  "Import image": [
+    "Import image",
+    "导入图片"
+  ],
+  "Import skill files": [
+    "Import skill files",
+    "导入技能文件"
+  ],
+  "Import skill folder": [
+    "Import skill folder",
+    "导入技能文件夹"
+  ],
+  "Importing managed copy…": [
+    "Importing managed copy…",
+    "正在导入托管副本…"
+  ],
+  "In deck · Remove": [
+    "In deck · Remove",
+    "已在卡组中 · 移除"
+  ],
+  "In this session": [
+    "In this session",
+    "在此会话中"
+  ],
+  "Includes conversations, sessions, settings, credentials, artifacts and managed Sandbox files. External workspaces stay in their current folders.": [
+    "Includes conversations, sessions, settings, credentials, artifacts and managed Sandbox files. External workspaces stay in their current folders.",
+    "包括对话、会话、设置、凭据、成果和托管沙箱文件。外部工作区保留在原文件夹中。"
+  ],
+  "Inspect": [
+    "Inspect",
+    "检查"
+  ],
+  "Inspect artifact": [
+    "Inspect artifact",
+    "检查成果"
+  ],
+  "Inspect collection": [
+    "Inspect collection",
+    "检查集合"
+  ],
+  "Inspect only": [
+    "Inspect only",
+    "仅检查"
+  ],
+  "Inspector": [
+    "Inspector",
+    "检查器"
+  ],
+  "Installed · Enabled": [
+    "Installed · Enabled",
+    "已安装 · 已启用"
+  ],
+  "Instance cleanup": [
+    "Instance cleanup",
+    "实例清理"
+  ],
+  "Instances": [
+    "Instances",
+    "实例"
+  ],
+  "Instances per root task": [
+    "Instances per root task",
+    "每个根任务的实例数"
+  ],
+  "Instructions": [
+    "Instructions",
+    "说明"
+  ],
+  "Instructions for connected Agents": [
+    "Instructions for connected Agents",
+    "给已连接智能体的说明"
+  ],
+  "Instructions load on demand": [
+    "Instructions load on demand",
+    "说明按需加载"
+  ],
+  "Internal cards · Created through containers or world actions": [
+    "Internal cards · Created through containers or world actions",
+    "内部卡片 · 通过容器或世界操作创建"
+  ],
+  "Isolate": [
+    "Isolate",
+    "隔离"
+  ],
+  "Isolation": [
+    "Isolation",
+    "隔离"
+  ],
+  "It cannot be added to a deck on its own.": [
+    "It cannot be added to a deck on its own.",
+    "无法单独加入卡组。"
+  ],
+  "Item": [
+    "Item",
+    "项目"
+  ],
+  "Jump to latest": [
+    "Jump to latest",
+    "跳转至最新消息"
+  ],
+  "Keep credentials in an Environment Profile. Add provider options as named settings.": [
+    "Keep credentials in an Environment Profile. Add provider options as named settings.",
+    "将凭据保存在环境配置中，以命名设置添加服务商选项。"
+  ],
+  "Keep saved key": [
+    "Keep saved key",
+    "保留已保存密钥"
+  ],
+  "Keep the ID for future versions. Choose your own ID when sharing a separate fork. New plugin versions appear in newly created cards; your existing copies stay as you arranged them.": [
+    "Keep the ID for future versions. Choose your own ID when sharing a separate fork. New plugin versions appear in newly created cards; your existing copies stay as you arranged them.",
+    "后续版本请保留此 ID。分享独立分支时请使用新 ID。新插件版本用于新建卡片，现有副本保留你的布局。"
+  ],
+  "Keys are encrypted on the backend. Their values are never returned to the browser.": [
+    "Keys are encrypted on the backend. Their values are never returned to the browser.",
+    "密钥在后端加密保存，不会将其值返回浏览器。"
+  ],
+  "Know-Do Graph workspace": [
+    "Know-Do Graph workspace",
+    "知行图谱工作区"
+  ],
+  "Knowledge details": [
+    "Knowledge details",
+    "知识详情"
+  ],
+  "Knowledge type": [
+    "Knowledge type",
+    "知识类型"
+  ],
+  "Knowledge type legend": [
+    "Knowledge type legend",
+    "知识类型图例"
+  ],
+  "LEGION · TEAM SPACE": [
+    "LEGION · TEAM SPACE",
+    "军团 · 团队空间"
+  ],
+  "Latest messages": [
+    "Latest messages",
+    "最新消息"
+  ],
+  "Leave empty to create a managed workspace.": [
+    "Leave empty to create a managed workspace.",
+    "留空以创建托管工作区。"
+  ],
+  "Legion name": [
+    "Legion name",
+    "军团名称"
+  ],
+  "Legion:": [
+    "Legion:",
+    "军团："
+  ],
+  "Legions": [
+    "Legions",
+    "军团"
+  ],
+  "Library description": [
+    "Library description",
+    "图书馆描述"
+  ],
+  "Library name": [
+    "Library name",
+    "图书馆名称"
+  ],
+  "Library needs attention": [
+    "Library needs attention",
+    "图书馆需要处理"
+  ],
+  "Library sections": [
+    "Library sections",
+    "图书馆分区"
+  ],
+  "Linked profile ·": [
+    "Linked profile ·",
+    "已连接配置 ·"
+  ],
+  "Links are blocked": [
+    "Links are blocked",
+    "链接已被阻止"
+  ],
+  "List": [
+    "List",
+    "列表"
+  ],
+  "Load more": [
+    "Load more",
+    "加载更多"
+  ],
+  "Load newer messages": [
+    "Load newer messages",
+    "加载较新消息"
+  ],
+  "Load older messages": [
+    "Load older messages",
+    "加载较早消息"
+  ],
+  "Load preset": [
+    "Load preset",
+    "加载预设"
+  ],
+  "Loading Sandbox settings…": [
+    "Loading Sandbox settings…",
+    "正在加载沙箱设置…"
+  ],
+  "Loading files…": [
+    "Loading files…",
+    "正在加载文件…"
+  ],
+  "Loading messages...": [
+    "Loading messages...",
+    "正在加载消息…"
+  ],
+  "Loading model settings…": [
+    "Loading model settings…",
+    "正在加载模型设置…"
+  ],
+  "Loading plugin view...": [
+    "Loading plugin view...",
+    "正在加载插件视图…"
+  ],
+  "Loading preview…": [
+    "Loading preview…",
+    "正在加载预览…"
+  ],
+  "Loading storage settings?": [
+    "Loading storage settings?",
+    "正在加载存储设置…"
+  ],
+  "Loading structure…": [
+    "Loading structure…",
+    "正在加载结构…"
+  ],
+  "Loading tasks...": [
+    "Loading tasks...",
+    "正在加载任务…"
+  ],
+  "Loading your collection…": [
+    "Loading your collection…",
+    "正在加载收藏…"
+  ],
+  "Loading your deck": [
+    "Loading your deck",
+    "正在加载卡组"
+  ],
+  "Loading…": [
+    "Loading…",
+    "加载中…"
+  ],
+  "Local backend unavailable": [
+    "Local backend unavailable",
+    "本地后端不可用"
+  ],
+  "Local runtime": [
+    "Local runtime",
+    "本地运行环境"
+  ],
+  "Local service": [
+    "Local service",
+    "本地服务"
+  ],
+  "Looking around…": [
+    "Looking around…",
+    "正在查看周围…"
+  ],
+  "Looks like that card moved away or was removed. I can help you find it or return to placing one.": [
+    "Looks like that card moved away or was removed. I can help you find it or return to placing one.",
+    "那张卡片似乎已移走或被删除。我可以帮你找回它，或重新放置一张。"
+  ],
+  "Manage models": [
+    "Manage models",
+    "管理模型"
+  ],
+  "Managed image imported": [
+    "Managed image imported",
+    "已导入托管图片"
+  ],
+  "Managed resource": [
+    "Managed resource",
+    "托管资源"
+  ],
+  "Managed workspace (default)": [
+    "Managed workspace (default)",
+    "托管工作区（默认）"
+  ],
+  "Maximum summon depth": [
+    "Maximum summon depth",
+    "最大召唤深度"
+  ],
+  "Member nodes can connect to the world outside.": [
+    "Member nodes can connect to the world outside.",
+    "成员节点可以连接到外部世界。"
+  ],
+  "Member role": [
+    "Member role",
+    "成员角色"
+  ],
+  "Member state access": [
+    "Member state access",
+    "成员状态访问权限"
+  ],
+  "Members": [
+    "Members",
+    "成员"
+  ],
+  "Memory (MiB)": [
+    "Memory (MiB)",
+    "内存（MiB）"
+  ],
+  "Mention an Agent": [
+    "Mention an Agent",
+    "提及智能体"
+  ],
+  "Message saved without calling an Agent": [
+    "Message saved without calling an Agent",
+    "消息已保存，未调用智能体"
+  ],
+  "Migration did not complete. The original location remains active.": [
+    "Migration did not complete. The original location remains active.",
+    "迁移未完成，仍使用原位置。"
+  ],
+  "Minimize tutorial hint": [
+    "Minimize tutorial hint",
+    "最小化教程提示"
+  ],
+  "Minister": [
+    "Minister",
+    "管家"
+  ],
+  "Minister confirmations": [
+    "Minister confirmations",
+    "管家操作确认"
+  ],
+  "Minister is working…": [
+    "Minister is working…",
+    "管家正在工作…"
+  ],
+  "Minister name": [
+    "Minister name",
+    "管家名称"
+  ],
+  "Minister views": [
+    "Minister views",
+    "管家视图"
+  ],
+  "Mode": [
+    "Mode",
+    "模式"
+  ],
+  "Model": [
+    "Model",
+    "模型"
+  ],
+  "Model & actions": [
+    "Model & actions",
+    "模型与操作"
+  ],
+  "Model ID": [
+    "Model ID",
+    "模型 ID"
+  ],
+  "Models": [
+    "Models",
+    "模型"
+  ],
+  "Models & connections": [
+    "Models & connections",
+    "模型与连接"
+  ],
+  "Modification history": [
+    "Modification history",
+    "修改历史"
+  ],
+  "More worlds of possibility": [
+    "More worlds of possibility",
+    "更多可能的世界"
+  ],
+  "Move / rename": [
+    "Move / rename",
+    "移动 / 重命名"
+  ],
+  "Name": [
+    "Name",
+    "名称"
+  ],
+  "Name a new deck": [
+    "Name a new deck",
+    "为新卡组命名"
+  ],
+  "Name, e.g. REGION": [
+    "Name, e.g. REGION",
+    "名称，例如 REGION"
+  ],
+  "Name, e.g. language": [
+    "Name, e.g. language",
+    "名称，例如 language"
+  ],
+  "Name, type or card ID": [
+    "Name, type or card ID",
+    "名称、类型或卡片 ID"
+  ],
+  "Nearby canvas · drag to pan": [
+    "Nearby canvas · drag to pan",
+    "附近画布 · 拖动平移"
+  ],
+  "Nearby canvas — current view with 15% surroundings; drag to pan": [
+    "Nearby canvas — current view with 15% surroundings; drag to pan",
+    "附近画布，包含当前视图及周围 15% 的区域；拖动平移"
+  ],
+  "Nearby cards": [
+    "Nearby cards",
+    "附近卡片"
+  ],
+  "Needs attention": [
+    "Needs attention",
+    "需要处理"
+  ],
+  "Nested summons share the root task's limits. A connected library can tighten them.": [
+    "Nested summons share the root task's limits. A connected library can tighten them.",
+    "嵌套召唤共享根任务的限制，连接的图书馆可以进一步收紧限制。"
+  ],
+  "Network": [
+    "Network",
+    "网络"
+  ],
+  "Network details": [
+    "Network details",
+    "网络详情"
+  ],
+  "Network disabled": [
+    "Network disabled",
+    "网络已禁用"
+  ],
+  "Network enabled": [
+    "Network enabled",
+    "网络已启用"
+  ],
+  "Networking": [
+    "Networking",
+    "网络连接"
+  ],
+  "New collection": [
+    "New collection",
+    "新集合"
+  ],
+  "New connection type": [
+    "New connection type",
+    "新连接类型"
+  ],
+  "New data location": [
+    "New data location",
+    "新数据位置"
+  ],
+  "New deck": [
+    "New deck",
+    "新卡组"
+  ],
+  "New deck name": [
+    "New deck name",
+    "新卡组名称"
+  ],
+  "New destination directory": [
+    "New destination directory",
+    "新目标目录"
+  ],
+  "New entry": [
+    "New entry",
+    "新条目"
+  ],
+  "New file or folder name": [
+    "New file or folder name",
+    "新文件或文件夹名称"
+  ],
+  "New group": [
+    "New group",
+    "新分组"
+  ],
+  "New knowledge": [
+    "New knowledge",
+    "新知识"
+  ],
+  "New relationship type": [
+    "New relationship type",
+    "新关系类型"
+  ],
+  "New session": [
+    "New session",
+    "新会话"
+  ],
+  "New skill": [
+    "New skill",
+    "新技能"
+  ],
+  "New task title": [
+    "New task title",
+    "新任务标题"
+  ],
+  "Next": [
+    "Next",
+    "下一步"
+  ],
+  "Next cards": [
+    "Next cards",
+    "下一组卡片"
+  ],
+  "No API key": [
+    "No API key",
+    "无 API 密钥"
+  ],
+  "No capabilities connected yet.": [
+    "No capabilities connected yet.",
+    "尚未连接任何能力。"
+  ],
+  "No completed tasks yet.": [
+    "No completed tasks yet.",
+    "尚无已完成任务。"
+  ],
+  "No connected context yet.": [
+    "No connected context yet.",
+    "尚未连接上下文。"
+  ],
+  "No default executor": [
+    "No default executor",
+    "无默认执行者"
+  ],
+  "No default recipient": [
+    "No default recipient",
+    "无默认接收者"
+  ],
+  "No executions yet.": [
+    "No executions yet.",
+    "尚无执行记录。"
+  ],
+  "No file imported": [
+    "No file imported",
+    "尚未导入文件"
+  ],
+  "No image imported": [
+    "No image imported",
+    "尚未导入图片"
+  ],
+  "No linked profile": [
+    "No linked profile",
+    "未连接配置"
+  ],
+  "No matching cards": [
+    "No matching cards",
+    "没有匹配的卡片"
+  ],
+  "No matching cards inside the circle.": [
+    "No matching cards inside the circle.",
+    "圆圈内没有匹配的卡片。"
+  ],
+  "No public configuration fields.": [
+    "No public configuration fields.",
+    "没有公开配置字段。"
+  ],
+  "No runtime activity for this session": [
+    "No runtime activity for this session",
+    "此会话暂无运行动态"
+  ],
+  "No saved Legions": [
+    "No saved Legions",
+    "尚未保存军团"
+  ],
+  "No skills match your search.": [
+    "No skills match your search.",
+    "没有匹配的技能。"
+  ],
+  "No tasks are ready. Check prerequisites and blockers.": [
+    "No tasks are ready. Check prerequisites and blockers.",
+    "没有就绪任务，请检查前置条件和阻碍。"
+  ],
+  "No value": [
+    "No value",
+    "无值"
+  ],
+  "No variables configured.": [
+    "No variables configured.",
+    "尚未配置变量。"
+  ],
+  "No variables yet. Add only what your team needs.": [
+    "No variables yet. Add only what your team needs.",
+    "尚无变量，请按团队需要添加。"
+  ],
+  "No variables.": [
+    "No variables.",
+    "无变量。"
+  ],
+  "Node cleanup": [
+    "Node cleanup",
+    "节点清理"
+  ],
+  "Non-interactive": [
+    "Non-interactive",
+    "非交互式"
+  ],
+  "Non-interactive commands. Each command starts in the working folder; cd and export do not persist. Interactive prompts are unsupported. Closing this window leaves execution running.": [
+    "Non-interactive commands. Each command starts in the working folder; cd and export do not persist. Interactive prompts are unsupported. Closing this window leaves execution running.",
+    "非交互式命令。每条命令都从工作文件夹开始，cd 和 export 不会持续生效。不支持交互提示，关闭窗口不会停止执行。"
+  ],
+  "Not available": [
+    "Not available",
+    "不可用"
+  ],
+  "Not cached": [
+    "Not cached",
+    "未缓存"
+  ],
+  "Not owned": [
+    "Not owned",
+    "未拥有"
+  ],
+  "Number": [
+    "Number",
+    "数字"
+  ],
+  "Off": [
+    "Off",
+    "关"
+  ],
+  "Offline": [
+    "Offline",
+    "离线"
+  ],
+  "Older cache": [
+    "Older cache",
+    "旧缓存"
+  ],
+  "On": [
+    "On",
+    "开"
+  ],
+  "On / off": [
+    "On / off",
+    "开 / 关"
+  ],
+  "On Linux/WSL, the process limit includes threads. npm installers may need 64 or more.": [
+    "On Linux/WSL, the process limit includes threads. npm installers may need 64 or more.",
+    "在 Linux/WSL 中，进程上限包含线程。npm 安装程序可能需要至少 64。"
+  ],
+  "One moment…": [
+    "One moment…",
+    "请稍候…"
+  ],
+  "One task at a time": [
+    "One task at a time",
+    "每次一个任务"
+  ],
+  "One-way": [
+    "One-way",
+    "单向"
+  ],
+  "Open Agent World spatial canvas": [
+    "Open Agent World spatial canvas",
+    "Open Agent World 空间画布"
+  ],
+  "Open Library": [
+    "Open Library",
+    "打开图书馆"
+  ],
+  "Open Pack and Card Library": [
+    "Open Pack and Card Library",
+    "打开卡包与卡片图书馆"
+  ],
+  "Open Window": [
+    "Open Window",
+    "打开窗口"
+  ],
+  "Open a pack": [
+    "Open a pack",
+    "打开卡包"
+  ],
+  "Open a pack, collect its cards, and build a deck. Their connections become real capabilities.": [
+    "Open a pack, collect its cards, and build a deck. Their connections become real capabilities.",
+    "打开卡包、收藏卡片并构建卡组，卡片之间的连接会赋予实际能力。"
+  ],
+  "Open a structure file in a connected window": [
+    "Open a structure file in a connected window",
+    "在已连接的窗口中打开结构文件"
+  ],
+  "Open an owned pack to add its contents to your Card Library.": [
+    "Open an owned pack to add its contents to your Card Library.",
+    "打开已拥有的卡包，将内容加入卡片图书馆。"
+  ],
+  "Open barracks": [
+    "Open barracks",
+    "打开营地"
+  ],
+  "Open in connected viewers": [
+    "Open in connected viewers",
+    "在已连接的查看器中打开"
+  ],
+  "Open its source pack to collect": [
+    "Open its source pack to collect",
+    "打开来源卡包以收藏"
+  ],
+  "Open pack": [
+    "Open pack",
+    "打开卡包"
+  ],
+  "Open packs, collect cards, then choose what belongs here.": [
+    "Open packs, collect cards, then choose what belongs here.",
+    "打开卡包并收藏卡片，再选择要放入此卡组的内容。"
+  ],
+  "Open settings": [
+    "Open settings",
+    "打开设置"
+  ],
+  "Open workspace": [
+    "Open workspace",
+    "打开工作区"
+  ],
+  "Open workspace to inspect, copy, or release published content.": [
+    "Open workspace to inspect, copy, or release published content.",
+    "打开工作区以检查、复制或释放已发布内容。"
+  ],
+  "OpenAI-compatible Chat Completions": [
+    "OpenAI-compatible Chat Completions",
+    "兼容 OpenAI 的 Chat Completions"
+  ],
+  "OpenAI-compatible service": [
+    "OpenAI-compatible service",
+    "兼容 OpenAI 的服务"
+  ],
+  "Opening…": [
+    "Opening…",
+    "打开中…"
+  ],
+  "Operational events only": [
+    "Operational events only",
+    "仅操作事件"
+  ],
+  "Optional": [
+    "Optional",
+    "可选"
+  ],
+  "Optional for this connection. Leave blank to use no key, or enter a key to use it.": [
+    "Optional for this connection. Leave blank to use no key, or enter a key to use it.",
+    "此连接的密钥为可选项。留空则不使用密钥，也可输入密钥启用。"
+  ],
+  "Organize scripts, assets, references, or your own folders. Import a skill folder to keep its directory structure. Toolbox limit: 16 MiB including file data.": [
+    "Organize scripts, assets, references, or your own folders. Import a skill folder to keep its directory structure. Toolbox limit: 16 MiB including file data.",
+    "管理脚本、素材、参考资料或自建文件夹。导入技能文件夹会保留目录结构。工具箱上限为 16 MiB，包含文件数据。"
+  ],
+  "Other objects": [
+    "Other objects",
+    "其他对象"
+  ],
+  "Overwrite existing file": [
+    "Overwrite existing file",
+    "覆盖现有文件"
+  ],
+  "Owner": [
+    "Owner",
+    "所有者"
+  ],
+  "PDF cover": [
+    "PDF cover",
+    "PDF 封面"
+  ],
+  "Pack & Card Library": [
+    "Pack & Card Library",
+    "卡包与卡片图书馆"
+  ],
+  "Pack inventory": [
+    "Pack inventory",
+    "卡包库存"
+  ],
+  "Pack unavailable": [
+    "Pack unavailable",
+    "卡包不可用"
+  ],
+  "Package ID": [
+    "Package ID",
+    "包 ID"
+  ],
+  "Packs": [
+    "Packs",
+    "卡包"
+  ],
+  "Packs, Cards and Decks": [
+    "Packs, Cards and Decks",
+    "卡包、卡片与卡组"
+  ],
+  "Page": [
+    "Page",
+    "页"
+  ],
+  "Participants": [
+    "Participants",
+    "参与者"
+  ],
+  "Pause new tasks on failure": [
+    "Pause new tasks on failure",
+    "失败时暂停新任务"
+  ],
+  "Pause prevents new member Runs; active Runs continue.": [
+    "Pause prevents new member Runs; active Runs continue.",
+    "暂停会阻止成员开始新运行，正在进行的运行会继续。"
+  ],
+  "Pause team": [
+    "Pause team",
+    "暂停团队"
+  ],
+  "Paused": [
+    "Paused",
+    "已暂停"
+  ],
+  "Permission": [
+    "Permission",
+    "权限"
+  ],
+  "Permission denied.": [
+    "Permission denied.",
+    "权限被拒绝。"
+  ],
+  "Pick up where you left off, or start a new walk. Your own cards stay with you.": [
+    "Pick up where you left off, or start a new walk. Your own cards stay with you.",
+    "继续上次的进度，或重新开始探索。你自己的卡片会保留。"
+  ],
+  "Pinned": [
+    "Pinned",
+    "已固定"
+  ],
+  "Place": [
+    "Place",
+    "放置"
+  ],
+  "Place Minister Card": [
+    "Place Minister Card",
+    "放置管家卡片"
+  ],
+  "Place in your world": [
+    "Place in your world",
+    "放入世界"
+  ],
+  "Planner, executor, reviewer": [
+    "Planner, executor, reviewer",
+    "规划者、执行者、审阅者"
+  ],
+  "Plugin configuration": [
+    "Plugin configuration",
+    "插件配置"
+  ],
+  "Plugin disabled": [
+    "Plugin disabled",
+    "插件已禁用"
+  ],
+  "Plugin uninstalled": [
+    "Plugin uninstalled",
+    "插件已卸载"
+  ],
+  "Plugin view unavailable:": [
+    "Plugin view unavailable:",
+    "插件视图不可用："
+  ],
+  "Prerequisites flow from left to right": [
+    "Prerequisites flow from left to right",
+    "前置依赖从左向右排列"
+  ],
+  "Preset name": [
+    "Preset name",
+    "预设名称"
+  ],
+  "Preview": [
+    "Preview",
+    "预览"
+  ],
+  "Preview assimilation": [
+    "Preview assimilation",
+    "预览吸收"
+  ],
+  "Preview exceeds 1 MiB. Download to view.": [
+    "Preview exceeds 1 MiB. Download to view.",
+    "预览超过 1 MiB，请下载查看。"
+  ],
+  "Preview unsupported. Download to open locally.": [
+    "Preview unsupported. Download to open locally.",
+    "不支持预览，请下载后在本地打开。"
+  ],
+  "Previous": [
+    "Previous",
+    "上一步"
+  ],
+  "Previous automatic routing": [
+    "Previous automatic routing",
+    "之前的自动路由"
+  ],
+  "Previous cards": [
+    "Previous cards",
+    "上一组卡片"
+  ],
+  "Previous models": [
+    "Previous models",
+    "之前的模型"
+  ],
+  "Previous models are included in this draft. Save to keep them on the backend.": [
+    "Previous models are included in this draft. Save to keep them on the backend.",
+    "之前的模型已纳入此草稿，保存后将存储到后端。"
+  ],
+  "Process limit": [
+    "Process limit",
+    "进程上限"
+  ],
+  "Produced by": [
+    "Produced by",
+    "生成者"
+  ],
+  "Progress note": [
+    "Progress note",
+    "进度备注"
+  ],
+  "Prompt": [
+    "Prompt",
+    "提示词"
+  ],
+  "Proposal could not be applied. Inspect current state before proposing again.": [
+    "Proposal could not be applied. Inspect current state before proposing again.",
+    "无法应用提案。请先检查当前状态，再重新提出。"
+  ],
+  "Proposal rejected; no changes applied.": [
+    "Proposal rejected; no changes applied.",
+    "提案已拒绝，未应用任何更改。"
+  ],
+  "Provenance and usage": [
+    "Provenance and usage",
+    "来源与用法"
+  ],
+  "Provider ID": [
+    "Provider ID",
+    "服务商 ID"
+  ],
+  "Provider identifier": [
+    "Provider identifier",
+    "服务商标识"
+  ],
+  "Provider settings": [
+    "Provider settings",
+    "服务商设置"
+  ],
+  "Publication collection": [
+    "Publication collection",
+    "发布集合"
+  ],
+  "Publish retained version": [
+    "Publish retained version",
+    "发布保留版本"
+  ],
+  "Publish selected files (": [
+    "Publish selected files (",
+    "发布所选文件（"
+  ],
+  "Published versions": [
+    "Published versions",
+    "已发布版本"
+  ],
+  "Publishing…": [
+    "Publishing…",
+    "发布中…"
+  ],
+  "Radius": [
+    "Radius",
+    "半径"
+  ],
+  "Read & write": [
+    "Read & write",
+    "读写"
+  ],
+  "Read and write": [
+    "Read and write",
+    "读写"
+  ],
+  "Read only": [
+    "Read only",
+    "只读"
+  ],
+  "Ready": [
+    "Ready",
+    "就绪"
+  ],
+  "Ready for a command.": [
+    "Ready for a command.",
+    "准备执行命令。"
+  ],
+  "Ready for a scoped instruction.": [
+    "Ready for a scoped instruction.",
+    "准备接收限定范围的指令。"
+  ],
+  "Ready to activate": [
+    "Ready to activate",
+    "可以激活"
+  ],
+  "Ready to start": [
+    "Ready to start",
+    "可以开始"
+  ],
+  "Reclaim instance": [
+    "Reclaim instance",
+    "回收实例"
+  ],
+  "Recover this step": [
+    "Recover this step",
+    "恢复此步骤"
+  ],
+  "Recovery": [
+    "Recovery",
+    "恢复"
+  ],
+  "Refresh": [
+    "Refresh",
+    "刷新"
+  ],
+  "Refresh authoritative world state": [
+    "Refresh authoritative world state",
+    "刷新后端世界状态"
+  ],
+  "Refresh files": [
+    "Refresh files",
+    "刷新文件"
+  ],
+  "Refresh history": [
+    "Refresh history",
+    "刷新历史"
+  ],
+  "Refresh sandbox environment": [
+    "Refresh sandbox environment",
+    "刷新沙箱环境"
+  ],
+  "Refresh state": [
+    "Refresh state",
+    "刷新状态"
+  ],
+  "Reject": [
+    "Reject",
+    "拒绝"
+  ],
+  "Relationship": [
+    "Relationship",
+    "关系"
+  ],
+  "Relationship direction": [
+    "Relationship direction",
+    "关系方向"
+  ],
+  "Relationships": [
+    "Relationships",
+    "关系"
+  ],
+  "Release retained content…": [
+    "Release retained content…",
+    "释放保留内容…"
+  ],
+  "Reload": [
+    "Reload",
+    "重新加载"
+  ],
+  "Reload environment": [
+    "Reload environment",
+    "重新加载环境"
+  ],
+  "Reload storage settings": [
+    "Reload storage settings",
+    "重新加载存储设置"
+  ],
+  "Reload task board": [
+    "Reload task board",
+    "重新加载任务看板"
+  ],
+  "Reload the board and discard the open task draft": [
+    "Reload the board and discard the open task draft",
+    "重新加载看板并放弃当前任务草稿"
+  ],
+  "Reload toolbox": [
+    "Reload toolbox",
+    "重新加载工具箱"
+  ],
+  "Remove": [
+    "Remove",
+    "移除"
+  ],
+  "Remove access": [
+    "Remove access",
+    "撤销访问权限"
+  ],
+  "Remove empty folder": [
+    "Remove empty folder",
+    "移除空文件夹"
+  ],
+  "Remove from deck": [
+    "Remove from deck",
+    "从卡组移除"
+  ],
+  "Remove inspected card from deck": [
+    "Remove inspected card from deck",
+    "从卡组移除此卡片"
+  ],
+  "Remove object (Ctrl+Z to undo)": [
+    "Remove object (Ctrl+Z to undo)",
+    "移除对象（Ctrl+Z 撤销）"
+  ],
+  "Remove reference": [
+    "Remove reference",
+    "移除引用"
+  ],
+  "Remove saved key": [
+    "Remove saved key",
+    "移除已保存密钥"
+  ],
+  "Remove the container; keep members and their connections": [
+    "Remove the container; keep members and their connections",
+    "移除容器，保留成员及其连接"
+  ],
+  "Remove unsaved connection": [
+    "Remove unsaved connection",
+    "移除未保存连接"
+  ],
+  "Removing a card from a deck keeps it in your collection.": [
+    "Removing a card from a deck keeps it in your collection.",
+    "从卡组移除卡片后，收藏中仍会保留。"
+  ],
+  "Rename": [
+    "Rename",
+    "重命名"
+  ],
+  "Rename deck": [
+    "Rename deck",
+    "重命名卡组"
+  ],
+  "Rename session": [
+    "Rename session",
+    "重命名会话"
+  ],
+  "Reopen": [
+    "Reopen",
+    "重新打开"
+  ],
+  "Replace this draft with the latest saved variables": [
+    "Replace this draft with the latest saved variables",
+    "用最新保存的变量替换此草稿"
+  ],
+  "Replay Tutorial": [
+    "Replay Tutorial",
+    "重播教程"
+  ],
+  "Requested · prerequisites unavailable": [
+    "Requested · prerequisites unavailable",
+    "已请求 · 前置条件不可用"
+  ],
+  "Requested · setup failed": [
+    "Requested · setup failed",
+    "已请求 · 设置失败"
+  ],
+  "Requested · start to apply": [
+    "Requested · start to apply",
+    "已请求 · 启动后生效"
+  ],
+  "Requested · unsupported": [
+    "Requested · unsupported",
+    "已请求 · 不支持"
+  ],
+  "Reset": [
+    "Reset",
+    "重置"
+  ],
+  "Reset runtime cache": [
+    "Reset runtime cache",
+    "重置运行环境缓存"
+  ],
+  "Resize file sidebar": [
+    "Resize file sidebar",
+    "调整文件侧栏大小"
+  ],
+  "Resize terminal": [
+    "Resize terminal",
+    "调整终端大小"
+  ],
+  "Resolve the blocker in task details first": [
+    "Resolve the blocker in task details first",
+    "请先在任务详情中解决阻碍"
+  ],
+  "Resource": [
+    "Resource",
+    "资源"
+  ],
+  "Resource limits": [
+    "Resource limits",
+    "资源限制"
+  ],
+  "Resource preview": [
+    "Resource preview",
+    "资源预览"
+  ],
+  "Resources": [
+    "Resources",
+    "资源"
+  ],
+  "Restart tutorial": [
+    "Restart tutorial",
+    "重新开始教程"
+  ],
+  "Restore retained references": [
+    "Restore retained references",
+    "恢复保留引用"
+  ],
+  "Result, blocker, or next step": [
+    "Result, blocker, or next step",
+    "结果、阻碍或下一步"
+  ],
+  "Results and workspaces stay available after a Run. Follow up reuses the same nodes. Reclaim deletes the instance and its summoned descendants, including their workspaces.": [
+    "Results and workspaces stay available after a Run. Follow up reuses the same nodes. Reclaim deletes the instance and its summoned descendants, including their workspaces.",
+    "运行后仍可访问结果和工作区。跟进会复用原节点，回收则删除实例及其召唤的后代，包括工作区。"
+  ],
+  "Resume": [
+    "Resume",
+    "继续"
+  ],
+  "Resume team": [
+    "Resume team",
+    "恢复团队"
+  ],
+  "Retained backup (before the move)": [
+    "Retained backup (before the move)",
+    "保留备份（迁移前）"
+  ],
+  "Retained file versions": [
+    "Retained file versions",
+    "保留的文件版本"
+  ],
+  "Retained independently of producers. Removing a reference preserves its stored content.": [
+    "Retained independently of producers. Removing a reference preserves its stored content.",
+    "独立于生成者保留，移除引用不会删除已存储内容。"
+  ],
+  "Retention:": [
+    "Retention:",
+    "保留："
+  ],
+  "Retry": [
+    "Retry",
+    "重试"
+  ],
+  "Retry / Recheck": [
+    "Retry / Recheck",
+    "重试 / 重新检查"
+  ],
+  "Retry available": [
+    "Retry available",
+    "可以重试"
+  ],
+  "Retry backend connection": [
+    "Retry backend connection",
+    "重试后端连接"
+  ],
+  "Retry cancellation cleanup": [
+    "Retry cancellation cleanup",
+    "重试取消清理"
+  ],
+  "Retry cleanup": [
+    "Retry cleanup",
+    "重试清理"
+  ],
+  "Retry history": [
+    "Retry history",
+    "重试加载历史"
+  ],
+  "Retry resource cleanup": [
+    "Retry resource cleanup",
+    "重试资源清理"
+  ],
+  "Retry this task only": [
+    "Retry this task only",
+    "仅重试此任务"
+  ],
+  "Review canvas changes": [
+    "Review canvas changes",
+    "审阅画布更改"
+  ],
+  "Review memories": [
+    "Review memories",
+    "审阅记忆"
+  ],
+  "Reviewed knowledge": [
+    "Reviewed knowledge",
+    "已审阅知识"
+  ],
+  "Revoke": [
+    "Revoke",
+    "撤销"
+  ],
+  "Run": [
+    "Run",
+    "运行"
+  ],
+  "Run agent": [
+    "Run agent",
+    "运行智能体"
+  ],
+  "Run ready work": [
+    "Run ready work",
+    "运行就绪任务"
+  ],
+  "Run ready work continues through newly unlocked dependencies. Stop preserves completed work. Retry runs only the selected task; resume the remaining plan with Run ready work.": [
+    "Run ready work continues through newly unlocked dependencies. Stop preserves completed work. Retry runs only the selected task; resume the remaining plan with Run ready work.",
+    "“运行就绪任务”会继续执行新解锁的依赖任务。停止会保留已完成的工作。重试仅运行所选任务，使用“运行就绪任务”继续剩余计划。"
+  ],
+  "Run this task only": [
+    "Run this task only",
+    "仅运行此任务"
+  ],
+  "Run:": [
+    "Run:",
+    "运行："
+  ],
+  "Running work": [
+    "Running work",
+    "正在执行任务"
+  ],
+  "Runtime": [
+    "Runtime",
+    "运行环境"
+  ],
+  "Runtime & workspace": [
+    "Runtime & workspace",
+    "运行环境与工作区"
+  ],
+  "Runtime activity": [
+    "Runtime activity",
+    "运行动态"
+  ],
+  "Runtime cache cleared.": [
+    "Runtime cache cleared.",
+    "运行环境缓存已清除。"
+  ],
+  "Runtime details": [
+    "Runtime details",
+    "运行环境详情"
+  ],
+  "Runtime fixed after first start.": [
+    "Runtime fixed after first start.",
+    "首次启动后运行环境不可更改。"
+  ],
+  "Runtime folder": [
+    "Runtime folder",
+    "运行环境文件夹"
+  ],
+  "Runtime history": [
+    "Runtime history",
+    "运行历史"
+  ],
+  "Runtime unavailable": [
+    "Runtime unavailable",
+    "运行环境不可用"
+  ],
+  "SHARED WORK BOARD": [
+    "SHARED WORK BOARD",
+    "共享任务看板"
+  ],
+  "SKILL TOOLBOX": [
+    "SKILL TOOLBOX",
+    "技能工具箱"
+  ],
+  "SKILL TOOLBOX · OPEN SPACE": [
+    "SKILL TOOLBOX · OPEN SPACE",
+    "技能工具箱 · 开放空间"
+  ],
+  "Sandbox": [
+    "Sandbox",
+    "沙箱"
+  ],
+  "Sandbox files": [
+    "Sandbox files",
+    "沙箱文件"
+  ],
+  "Sandbox terminal": [
+    "Sandbox terminal",
+    "沙箱终端"
+  ],
+  "Sandbox window": [
+    "Sandbox window",
+    "沙箱窗口"
+  ],
+  "Save": [
+    "Save",
+    "保存"
+  ],
+  "Save changes": [
+    "Save changes",
+    "保存更改"
+  ],
+  "Save environment": [
+    "Save environment",
+    "保存环境"
+  ],
+  "Save name": [
+    "Save name",
+    "保存名称"
+  ],
+  "Save or close your draft before exporting": [
+    "Save or close your draft before exporting",
+    "导出前请保存或关闭草稿"
+  ],
+  "Save or reset settings before starting": [
+    "Save or reset settings before starting",
+    "启动前请保存或重置设置"
+  ],
+  "Save preset": [
+    "Save preset",
+    "保存预设"
+  ],
+  "Save settings": [
+    "Save settings",
+    "保存设置"
+  ],
+  "Save skill": [
+    "Save skill",
+    "保存技能"
+  ],
+  "Save task": [
+    "Save task",
+    "保存任务"
+  ],
+  "Save text": [
+    "Save text",
+    "保存文本"
+  ],
+  "Save the current command for reuse.": [
+    "Save the current command for reuse.",
+    "保存当前命令以供复用。"
+  ],
+  "Save this team to the library when ready. New copies include its settings and shared variables.": [
+    "Save this team to the library when ready. New copies include its settings and shared variables.",
+    "准备好后将团队保存到图书馆，新副本会包含设置和共享变量。"
+  ],
+  "Save to library": [
+    "Save to library",
+    "保存到图书馆"
+  ],
+  "Save toolbox": [
+    "Save toolbox",
+    "保存工具箱"
+  ],
+  "Save variables": [
+    "Save variables",
+    "保存变量"
+  ],
+  "Saved": [
+    "Saved",
+    "已保存"
+  ],
+  "Saved Legions": [
+    "Saved Legions",
+    "已保存军团"
+  ],
+  "Saved securely — leave blank to keep": [
+    "Saved securely — leave blank to keep",
+    "已安全保存，留空保留"
+  ],
+  "Saving…": [
+    "Saving…",
+    "保存中…"
+  ],
+  "Scheduled for next start:": [
+    "Scheduled for next start:",
+    "计划于下次启动迁移到："
+  ],
+  "Search": [
+    "Search",
+    "搜索"
+  ],
+  "Search cards": [
+    "Search cards",
+    "搜索卡片"
+  ],
+  "Search connections": [
+    "Search connections",
+    "搜索连接"
+  ],
+  "Search connections…": [
+    "Search connections…",
+    "搜索连接…"
+  ],
+  "Search knowledge": [
+    "Search knowledge",
+    "搜索知识"
+  ],
+  "Search knowledge…": [
+    "Search knowledge…",
+    "搜索知识…"
+  ],
+  "Search models…": [
+    "Search models…",
+    "搜索模型…"
+  ],
+  "Search nearby cards": [
+    "Search nearby cards",
+    "搜索附近卡片"
+  ],
+  "Search packs": [
+    "Search packs",
+    "搜索卡包"
+  ],
+  "Search skills": [
+    "Search skills",
+    "搜索技能"
+  ],
+  "Search your cards": [
+    "Search your cards",
+    "搜索你的卡片"
+  ],
+  "Secret": [
+    "Secret",
+    "密钥"
+  ],
+  "Secrets stay on this host and are readable by authorized commands.": [
+    "Secrets stay on this host and are readable by authorized commands.",
+    "密钥保留在此主机上，授权命令可以读取。"
+  ],
+  "Select Agent": [
+    "Select Agent",
+    "选择智能体"
+  ],
+  "Select a Skill": [
+    "Select a Skill",
+    "选择技能"
+  ],
+  "Select a card to inspect its purpose and origin.": [
+    "Select a card to inspect its purpose and origin.",
+    "选择卡片以查看用途和来源。"
+  ],
+  "Select a conversation session to inspect activity": [
+    "Select a conversation session to inspect activity",
+    "选择对话会话以查看动态"
+  ],
+  "Select a file to preview": [
+    "Select a file to preview",
+    "选择文件以预览"
+  ],
+  "Select a participant or include an explicit @name to request a response.": [
+    "Select a participant or include an explicit @name to request a response.",
+    "选择参与者，或使用明确的 @名称 请求回复。"
+  ],
+  "Select a participant, type an explicit @name, or keep an unaddressed note.": [
+    "Select a participant, type an explicit @name, or keep an unaddressed note.",
+    "选择参与者、输入明确的 @名称，或仅保存一条未指定接收者的笔记。"
+  ],
+  "Select a session to inspect agent activity.": [
+    "Select a session to inspect agent activity.",
+    "选择会话以查看智能体动态。"
+  ],
+  "Select an entry to inspect it. Double-click to expand its neighborhood.": [
+    "Select an entry to inspect it. Double-click to expand its neighborhood.",
+    "选择条目以查看详情，双击展开其邻域。"
+  ],
+  "Select nodes": [
+    "Select nodes",
+    "选择节点"
+  ],
+  "Select this Legion and other cards, then choose “Add selected cards”.": [
+    "Select this Legion and other cards, then choose “Add selected cards”.",
+    "选中此军团和其他卡片，再选择“添加所选卡片”。"
+  ],
+  "Select this card for each command. Connecting or equipping it grants access.": [
+    "Select this card for each command. Connecting or equipping it grants access.",
+    "为每条命令选择此卡片，连接或装备即可授予访问权限。"
+  ],
+  "Select workspace": [
+    "Select workspace",
+    "选择工作区"
+  ],
+  "Selected Skill": [
+    "Selected Skill",
+    "所选技能"
+  ],
+  "Selected deck": [
+    "Selected deck",
+    "所选卡组"
+  ],
+  "Selected formation actions": [
+    "Selected formation actions",
+    "所选编队操作"
+  ],
+  "Selected relationship": [
+    "Selected relationship",
+    "所选关系"
+  ],
+  "Selected session: runs, tools, output, and errors": [
+    "Selected session: runs, tools, output, and errors",
+    "所选会话：运行、工具、输出和错误"
+  ],
+  "Selecting…": [
+    "Selecting…",
+    "选择中…"
+  ],
+  "Selection actions": [
+    "Selection actions",
+    "所选项操作"
+  ],
+  "Semantic relationship": [
+    "Semantic relationship",
+    "语义关系"
+  ],
+  "Send could not be confirmed": [
+    "Send could not be confirmed",
+    "无法确认发送结果"
+  ],
+  "Send message": [
+    "Send message",
+    "发送消息"
+  ],
+  "Send not confirmed. Your text is kept here.": [
+    "Send not confirmed. Your text is kept here.",
+    "尚未确认发送结果，文本已保留在此。"
+  ],
+  "Sending...": [
+    "Sending...",
+    "发送中…"
+  ],
+  "Service model ID": [
+    "Service model ID",
+    "服务模型 ID"
+  ],
+  "Session actions": [
+    "Session actions",
+    "会话操作"
+  ],
+  "Session title": [
+    "Session title",
+    "会话标题"
+  ],
+  "Session was not created": [
+    "Session was not created",
+    "未能创建会话"
+  ],
+  "Session was not deleted": [
+    "Session was not deleted",
+    "未能删除会话"
+  ],
+  "Session was not renamed": [
+    "Session was not renamed",
+    "未能重命名会话"
+  ],
+  "Sessions": [
+    "Sessions",
+    "会话"
+  ],
+  "Setting": [
+    "Setting",
+    "设置项"
+  ],
+  "Settings": [
+    "Settings",
+    "设置"
+  ],
+  "Settings apply when a member starts its next Run.": [
+    "Settings apply when a member starts its next Run.",
+    "设置在成员下次开始运行时生效。"
+  ],
+  "Settings are saved on the backend and survive restarts. Workspaces in your chosen folder are retained when a Sandbox is deleted.": [
+    "Settings are saved on the backend and survive restarts. Workspaces in your chosen folder are retained when a Sandbox is deleted.",
+    "设置保存在后端，重启后仍有效。删除沙箱时，所选文件夹中的工作区会保留。"
+  ],
+  "Settings saved": [
+    "Settings saved",
+    "设置已保存"
+  ],
+  "Settings sections": [
+    "Settings sections",
+    "设置分区"
+  ],
+  "Shared by executions in this Sandbox. Local values override the profile.": [
+    "Shared by executions in this Sandbox. Local values override the profile.",
+    "此沙箱中的执行共享这些设置，本地值会覆盖配置文件。"
+  ],
+  "Shared instructions": [
+    "Shared instructions",
+    "共享说明"
+  ],
+  "Shared purpose and coordination rules": [
+    "Shared purpose and coordination rules",
+    "共享目标与协作规则"
+  ],
+  "Shared variables": [
+    "Shared variables",
+    "共享变量"
+  ],
+  "Shell": [
+    "Shell",
+    "命令解释器"
+  ],
+  "Show internal cards": [
+    "Show internal cards",
+    "显示内部卡片"
+  ],
+  "Show member cards": [
+    "Show member cards",
+    "显示成员卡片"
+  ],
+  "Show memories": [
+    "Show memories",
+    "显示记忆"
+  ],
+  "Show tutorial hint": [
+    "Show tutorial hint",
+    "显示教程提示"
+  ],
+  "Size": [
+    "Size",
+    "大小"
+  ],
+  "Skill": [
+    "Skill",
+    "技能"
+  ],
+  "Skill details": [
+    "Skill details",
+    "技能详情"
+  ],
+  "Skill files": [
+    "Skill files",
+    "技能文件"
+  ],
+  "Skill name": [
+    "Skill name",
+    "技能名称"
+  ],
+  "Skill resource": [
+    "Skill resource",
+    "技能资源"
+  ],
+  "Skill resources": [
+    "Skill resources",
+    "技能资源"
+  ],
+  "Skill root /": [
+    "Skill root /",
+    "技能根目录 /"
+  ],
+  "Skill sections": [
+    "Skill sections",
+    "技能分区"
+  ],
+  "Skills": [
+    "Skills",
+    "技能"
+  ],
+  "Skip tutorial": [
+    "Skip tutorial",
+    "跳过教程"
+  ],
+  "Skip tutorial and tidy temporary props": [
+    "Skip tutorial and tidy temporary props",
+    "跳过教程并清理临时道具"
+  ],
+  "Soon": [
+    "Soon",
+    "即将推出"
+  ],
+  "Source filter": [
+    "Source filter",
+    "来源筛选"
+  ],
+  "Source pack": [
+    "Source pack",
+    "来源卡包"
+  ],
+  "Source pack controls": [
+    "Source pack controls",
+    "来源卡包控制"
+  ],
+  "Source plugin": [
+    "Source plugin",
+    "来源插件"
+  ],
+  "Start": [
+    "Start",
+    "启动"
+  ],
+  "Start Directly": [
+    "Start Directly",
+    "直接开始"
+  ],
+  "Start Tutorial": [
+    "Start Tutorial",
+    "开始教程"
+  ],
+  "Start the sandbox to browse files.": [
+    "Start the sandbox to browse files.",
+    "启动沙箱以浏览文件。"
+  ],
+  "Start the sandbox to run commands.": [
+    "Start the sandbox to run commands.",
+    "启动沙箱以运行命令。"
+  ],
+  "Start with one useful tool.": [
+    "Start with one useful tool.",
+    "从一个实用工具开始。"
+  ],
+  "Starting…": [
+    "Starting…",
+    "启动中…"
+  ],
+  "Status": [
+    "Status",
+    "状态"
+  ],
+  "Status unavailable": [
+    "Status unavailable",
+    "状态不可用"
+  ],
+  "Stop": [
+    "Stop",
+    "停止"
+  ],
+  "Stop execution": [
+    "Stop execution",
+    "停止执行"
+  ],
+  "Stop to edit settings": [
+    "Stop to edit settings",
+    "停止后可编辑设置"
+  ],
+  "Stopped": [
+    "Stopped",
+    "已停止"
+  ],
+  "Stopping…": [
+    "Stopping…",
+    "停止中…"
+  ],
+  "Storage": [
+    "Storage",
+    "存储"
+  ],
+  "Store": [
+    "Store",
+    "商店"
+  ],
+  "Structure viewer": [
+    "Structure viewer",
+    "结构查看器"
+  ],
+  "Summary": [
+    "Summary",
+    "摘要"
+  ],
+  "Summon new instance": [
+    "Summon new instance",
+    "召唤新实例"
+  ],
+  "Synced": [
+    "Synced",
+    "已同步"
+  ],
+  "Syncing": [
+    "Syncing",
+    "同步中"
+  ],
+  "System instruction": [
+    "System instruction",
+    "系统指令"
+  ],
+  "System-managed location": [
+    "System-managed location",
+    "系统管理的位置"
+  ],
+  "TEAR TO OPEN": [
+    "TEAR TO OPEN",
+    "撕开卡包"
+  ],
+  "Tags": [
+    "Tags",
+    "标签"
+  ],
+  "Task / follow-up": [
+    "Task / follow-up",
+    "任务 / 跟进"
+  ],
+  "Task ID:": [
+    "Task ID:",
+    "任务 ID："
+  ],
+  "Task completion": [
+    "Task completion",
+    "任务完成情况"
+  ],
+  "Task dependency graph": [
+    "Task dependency graph",
+    "任务依赖图"
+  ],
+  "Task description": [
+    "Task description",
+    "任务描述"
+  ],
+  "Task details": [
+    "Task details",
+    "任务详情"
+  ],
+  "Task executor": [
+    "Task executor",
+    "任务执行者"
+  ],
+  "Task status": [
+    "Task status",
+    "任务状态"
+  ],
+  "Task title": [
+    "Task title",
+    "任务标题"
+  ],
+  "Task view": [
+    "Task view",
+    "任务视图"
+  ],
+  "Tasks": [
+    "Tasks",
+    "任务"
+  ],
+  "Tasks & dependencies": [
+    "Tasks & dependencies",
+    "任务与依赖"
+  ],
+  "Team instruction": [
+    "Team instruction",
+    "团队指令"
+  ],
+  "Team instructions and shared state are included at the start of each Run.": [
+    "Team instructions and shared state are included at the start of each Run.",
+    "每次运行开始时会纳入团队指令和共享状态。"
+  ],
+  "Team model override": [
+    "Team model override",
+    "团队模型覆盖"
+  ],
+  "Team settings were not saved. Try again before saving to the library.": [
+    "Team settings were not saved. Try again before saving to the library.",
+    "团队设置未保存。请重试后再保存到图书馆。"
+  ],
+  "Tear open": [
+    "Tear open",
+    "撕开"
+  ],
+  "Terminal": [
+    "Terminal",
+    "终端"
+  ],
+  "Terminal views": [
+    "Terminal views",
+    "终端视图"
+  ],
+  "Test connectivity": [
+    "Test connectivity",
+    "测试连通性"
+  ],
+  "Text": [
+    "Text",
+    "文本"
+  ],
+  "The Pack Store will be a place to discover and acquire new capabilities.": [
+    "The Pack Store will be a place to discover and acquire new capabilities.",
+    "卡包商店将提供发现和获取新能力的空间。"
+  ],
+  "The active deck is the hand shown at the bottom of your world.": [
+    "The active deck is the hand shown at the bottom of your world.",
+    "当前卡组就是显示在世界底部的手牌。"
+  ],
+  "The backend will grant exactly one permission": [
+    "The backend will grant exactly one permission",
+    "后端将授予一项权限"
+  ],
+  "The card is outside the visible canvas. Use Recover this step and retry.": [
+    "The card is outside the visible canvas. Use Recover this step and retry.",
+    "卡片在可见画布之外。请使用“恢复此步骤”后重试。"
+  ],
+  "The confirmed changes were applied. Send “continue” when Minister is ready to resume.": [
+    "The confirmed changes were applied. Send “continue” when Minister is ready to resume.",
+    "已应用确认的更改，管家就绪后可发送“继续”。"
+  ],
+  "The instruments are quiet": [
+    "The instruments are quiet",
+    "暂无动态"
+  ],
+  "The plugin defines readiness and result acceptance. Connect an executor using this plugin's execution relationship.": [
+    "The plugin defines readiness and result acceptance. Connect an executor using this plugin's execution relationship.",
+    "插件定义就绪条件和结果验收标准，请通过插件的执行关系连接执行者。"
+  ],
+  "The saved key will be removed when you save. Enter a new key to replace it instead.": [
+    "The saved key will be removed when you save. Enter a new key to replace it instead.",
+    "保存时将移除原密钥，也可以输入新密钥来替换。"
+  ],
+  "These tasks must finish first.": [
+    "These tasks must finish first.",
+    "这些任务必须先完成。"
+  ],
+  "This agent has not emitted a run, tool, or response event for the selected session.": [
+    "This agent has not emitted a run, tool, or response event for the selected session.",
+    "此智能体尚未在所选会话中产生运行、工具或回复事件。"
+  ],
+  "This card is created by a container or world action.": [
+    "This card is created by a container or world action.",
+    "此卡片由容器或世界操作创建。"
+  ],
+  "This content is unavailable. Install or enable its plugin to use it again.": [
+    "This content is unavailable. Install or enable its plugin to use it again.",
+    "此内容不可用，请安装或启用对应插件。"
+  ],
+  "This deck is ready for your cards.": [
+    "This deck is ready for your cards.",
+    "此卡组已准备好接收卡片。"
+  ],
+  "This file is not a supported structure. Open CIF, POSCAR, XYZ, or structure JSON.": [
+    "This file is not a supported structure. Open CIF, POSCAR, XYZ, or structure JSON.",
+    "不支持此结构文件，请打开 CIF、POSCAR、XYZ 或结构 JSON。"
+  ],
+  "This folder is empty. Create a file or import files here.": [
+    "This folder is empty. Create a file or import files here.",
+    "此文件夹为空，可创建或导入文件。"
+  ],
+  "This formation has unavailable dependencies.": [
+    "This formation has unavailable dependencies.",
+    "此编队有不可用的依赖。"
+  ],
+  "This location is controlled by startup configuration (OPEN_AGENT_WORLD_DATA_ROOT). Remove that override to manage storage here.": [
+    "This location is controlled by startup configuration (OPEN_AGENT_WORLD_DATA_ROOT). Remove that override to manage storage here.",
+    "此位置由启动配置 OPEN_AGENT_WORLD_DATA_ROOT 控制。移除该覆盖配置后，可在此管理存储。"
+  ],
+  "This plugin node exposes a workspace surface. Its frontend module can replace this generic view.": [
+    "This plugin node exposes a workspace surface. Its frontend module can replace this generic view.",
+    "此插件节点提供工作区界面，插件前端模块可替换此通用视图。"
+  ],
+  "This session has no Agents. Create a direct or group session from the left.": [
+    "This session has no Agents. Create a direct or group session from the left.",
+    "此会话没有智能体，请从左侧创建直接或群组会话。"
+  ],
+  "This session is ready": [
+    "This session is ready",
+    "会话已就绪"
+  ],
+  "Title": [
+    "Title",
+    "标题"
+  ],
+  "Toggle inspector": [
+    "Toggle inspector",
+    "切换检查器"
+  ],
+  "Toggle navigator": [
+    "Toggle navigator",
+    "切换导航器"
+  ],
+  "Tool debug details": [
+    "Tool debug details",
+    "工具调试详情"
+  ],
+  "Toolbox": [
+    "Toolbox",
+    "工具箱"
+  ],
+  "Toolbox name": [
+    "Toolbox name",
+    "工具箱名称"
+  ],
+  "Toolbox settings": [
+    "Toolbox settings",
+    "工具箱设置"
+  ],
+  "Toolset assimilated. Source package preserved in snapshots.": [
+    "Toolset assimilated. Source package preserved in snapshots.",
+    "工具集已吸收，来源包保留在快照中。"
+  ],
+  "Toolset to assimilate": [
+    "Toolset to assimilate",
+    "待吸收的工具集"
+  ],
+  "Trust": [
+    "Trust",
+    "可信度"
+  ],
+  "Trust ≥ 0.7": [
+    "Trust ≥ 0.7",
+    "可信度 ≥ 0.7"
+  ],
+  "Try an Agent": [
+    "Try an Agent",
+    "试用智能体"
+  ],
+  "Try another search, source pack or category.": [
+    "Try another search, source pack or category.",
+    "试试其他搜索词、来源卡包或分类。"
+  ],
+  "Tutorial guide": [
+    "Tutorial guide",
+    "教程向导"
+  ],
+  "Two-way": [
+    "Two-way",
+    "双向"
+  ],
+  "Unavailable": [
+    "Unavailable",
+    "不可用"
+  ],
+  "Unavailable model": [
+    "Unavailable model",
+    "不可用模型"
+  ],
+  "Unavailable model — choose another": [
+    "Unavailable model — choose another",
+    "模型不可用，请选择其他模型"
+  ],
+  "Unavailable · Reference preserved": [
+    "Unavailable · Reference preserved",
+    "不可用 · 引用已保留"
+  ],
+  "Unbound secret": [
+    "Unbound secret",
+    "未绑定密钥"
+  ],
+  "Uncharted terrain": [
+    "Uncharted terrain",
+    "未探索区域"
+  ],
+  "Unequip": [
+    "Unequip",
+    "卸下装备"
+  ],
+  "Unsaved changes": [
+    "Unsaved changes",
+    "未保存的更改"
+  ],
+  "Unsaved environment changes": [
+    "Unsaved environment changes",
+    "未保存的环境更改"
+  ],
+  "Unsaved variables. Saving to the library saves these changes too.": [
+    "Unsaved variables. Saving to the library saves these changes too.",
+    "变量尚未保存，保存到图书馆时会一并保存这些更改。"
+  ],
+  "Up to": [
+    "Up to",
+    "最多"
+  ],
+  "Update": [
+    "Update",
+    "更新"
+  ],
+  "Uploading files": [
+    "Uploading files",
+    "正在上传文件"
+  ],
+  "Usage details": [
+    "Usage details",
+    "使用详情"
+  ],
+  "Use a relative path such as scripts/build.py. Edit SKILL.md in Instructions.": [
+    "Use a relative path such as scripts/build.py. Edit SKILL.md in Instructions.",
+    "使用相对路径，例如 scripts/build.py。请在“说明”中编辑 SKILL.md。"
+  ],
+  "Use agent template default": [
+    "Use agent template default",
+    "使用智能体模板默认值"
+  ],
+  "Use an absolute local folder on the backend computer. Saving schedules a move for the next backend start. Data is copied and verified before switching; the original folder is retained as a backup.": [
+    "Use an absolute local folder on the backend computer. Saving schedules a move for the next backend start. Data is copied and verified before switching; the original folder is retained as a backup.",
+    "使用后端计算机上的本地绝对路径。保存后会在后端下次启动时迁移，切换前复制并验证数据，原文件夹保留为备份。"
+  ],
+  "Use board default": [
+    "Use board default",
+    "使用看板默认值"
+  ],
+  "Use each agent’s model": [
+    "Use each agent’s model",
+    "使用各智能体的模型"
+  ],
+  "Use provider default": [
+    "Use provider default",
+    "使用服务商默认值"
+  ],
+  "Use team model override": [
+    "Use team model override",
+    "使用团队模型覆盖"
+  ],
+  "Use the service’s API address, including /v1 if required. Leave blank for the provider default.": [
+    "Use the service’s API address, including /v1 if required. Leave blank for the provider default.",
+    "使用服务的 API 地址，按需包含 /v1。留空使用服务商默认地址。"
+  ],
+  "Use this deck": [
+    "Use this deck",
+    "使用此卡组"
+  ],
+  "Use through its container": [
+    "Use through its container",
+    "通过所属容器使用"
+  ],
+  "Used when a new Sandbox has no explicit runtime. You can choose a different runtime on the card before its first start.": [
+    "Used when a new Sandbox has no explicit runtime. You can choose a different runtime on the card before its first start.",
+    "新沙箱未指定运行环境时使用此值。首次启动前可在卡片上选择其他运行环境。"
+  ],
+  "Uses:": [
+    "Uses:",
+    "用途："
+  ],
+  "Using backend credentials. Enter a key here to use it instead.": [
+    "Using backend credentials. Enter a key here to use it instead.",
+    "正在使用后端凭据，可在此输入密钥以替换。"
+  ],
+  "Value": [
+    "Value",
+    "值"
+  ],
+  "Values all members can use, such as a goal, language or iteration limit.": [
+    "Values all members can use, such as a goal, language or iteration limit.",
+    "所有成员可用的值，例如目标、语言或迭代上限。"
+  ],
+  "Variable name, e.g. goal": [
+    "Variable name, e.g. goal",
+    "变量名，例如 goal"
+  ],
+  "Verification": [
+    "Verification",
+    "验证"
+  ],
+  "Version": [
+    "Version",
+    "版本"
+  ],
+  "View cards in": [
+    "View cards in",
+    "查看其中卡片"
+  ],
+  "Visit Packs and open one to discover its cards.": [
+    "Visit Packs and open one to discover its cards.",
+    "前往“卡包”并打开一个，发现其中的卡片。"
+  ],
+  "WORLD": [
+    "WORLD",
+    "世界"
+  ],
+  "Wait for shared variables to load before saving.": [
+    "Wait for shared variables to load before saving.",
+    "请等待共享变量加载完成后再保存。"
+  ],
+  "Waiting for prerequisites": [
+    "Waiting for prerequisites",
+    "等待前置条件"
+  ],
+  "Waiting for the world service to reconnect. Your progress is saved.": [
+    "Waiting for the world service to reconnect. Your progress is saved.",
+    "等待世界服务重新连接，进度已保存。"
+  ],
+  "Waiting or complete": [
+    "Waiting or complete",
+    "等待中或已完成"
+  ],
+  "Welcome to Open Agent World": [
+    "Welcome to Open Agent World",
+    "欢迎来到 Open Agent World"
+  ],
+  "What cards are inside your circle?": [
+    "What cards are inside your circle?",
+    "你的圆圈里有哪些卡片？"
+  ],
+  "What needs to be done?": [
+    "What needs to be done?",
+    "需要完成什么？"
+  ],
+  "What’s nearby?": [
+    "What’s nearby?",
+    "附近有什么？"
+  ],
+  "When to use": [
+    "When to use",
+    "适用场景"
+  ],
+  "When to use these skills, working conventions, and how the tools fit together.": [
+    "When to use these skills, working conventions, and how the tools fit together.",
+    "说明技能的适用场景、工作规范以及工具如何配合。"
+  ],
+  "When to use this Agent": [
+    "When to use this Agent",
+    "此智能体的适用场景"
+  ],
+  "Will be saved securely": [
+    "Will be saved securely",
+    "将安全保存"
+  ],
+  "Working folder": [
+    "Working folder",
+    "工作文件夹"
+  ],
+  "Workspace": [
+    "Workspace",
+    "工作区"
+  ],
+  "Workspace and runtime defaults for this backend.": [
+    "Workspace and runtime defaults for this backend.",
+    "此后端的工作区和运行环境默认设置。"
+  ],
+  "Workspace mode": [
+    "Workspace mode",
+    "工作区模式"
+  ],
+  "Workspace relative path": [
+    "Workspace relative path",
+    "工作区相对路径"
+  ],
+  "World runtime": [
+    "World runtime",
+    "世界运行环境"
+  ],
+  "World status and controls": [
+    "World status and controls",
+    "世界状态与控制"
+  ],
+  "Write a message; use @name to address a participant…": [
+    "Write a message; use @name to address a participant…",
+    "输入消息，使用 @名称 指定参与者…"
+  ],
+  "You": [
+    "You",
+    "你"
+  ],
+  "Your collection": [
+    "Your collection",
+    "你的收藏"
+  ],
+  "Your collection could not be loaded.": [
+    "Your collection could not be loaded.",
+    "无法加载你的收藏。"
+  ],
+  "Your collection starts with a pack": [
+    "Your collection starts with a pack",
+    "从一个卡包开始收藏"
+  ],
+  "Your decks": [
+    "Your decks",
+    "你的卡组"
+  ],
+  "Your models, your accounts": [
+    "Your models, your accounts",
+    "你的模型，你的账户"
+  ],
+  "Your turn": [
+    "Your turn",
+    "轮到你了"
+  ],
+  "Your walk is saved": [
+    "Your walk is saved",
+    "探索进度已保存"
+  ],
+  "Your world is open.": [
+    "Your world is open.",
+    "你的世界已开启。"
+  ],
+  "active participants": [
+    "active participants",
+    "活跃参与者"
+  ],
+  "active run(s) may be affected. Lifecycle checks still apply.": [
+    "active run(s) may be affected. Lifecycle checks still apply.",
+    "个活动运行可能受影响，仍会执行生命周期检查。"
+  ],
+  "agents": [
+    "agents",
+    "个智能体"
+  ],
+  "agents available in the workspace": [
+    "agents available in the workspace",
+    "个智能体可在工作区使用"
+  ],
+  "attempts": [
+    "attempts",
+    "次尝试"
+  ],
+  "backend-authoritative": [
+    "backend-authoritative",
+    "以后端为准"
+  ],
+  "bytes": [
+    "bytes",
+    "字节"
+  ],
+  "bytes ·": [
+    "bytes ·",
+    "字节 ·"
+  ],
+  "capacity released": [
+    "capacity released",
+    "容量已释放"
+  ],
+  "cards": [
+    "cards",
+    "张卡片"
+  ],
+  "cards ·": [
+    "cards ·",
+    "张卡片 ·"
+  ],
+  "catalog-driven": [
+    "catalog-driven",
+    "由目录定义"
+  ],
+  "characters · r": [
+    "characters · r",
+    "个字符 · 修订"
+  ],
+  "collected cards and saved formations · Grouped by source pack": [
+    "collected cards and saved formations · Grouped by source pack",
+    "张收藏卡片及已保存编队 · 按来源卡包分组"
+  ],
+  "connected": [
+    "connected",
+    "已连接"
+  ],
+  "connected agents": [
+    "connected agents",
+    "个已连接智能体"
+  ],
+  "connections": [
+    "connections",
+    "个连接"
+  ],
+  "e.g. Run tests": [
+    "e.g. Run tests",
+    "例如：运行测试"
+  ],
+  "e.g. scripts or build.py": [
+    "e.g. scripts or build.py",
+    "例如 scripts 或 build.py"
+  ],
+  "entries": [
+    "entries",
+    "个条目"
+  ],
+  "equipment items": [
+    "equipment items",
+    "件装备"
+  ],
+  "files": [
+    "files",
+    "个文件"
+  ],
+  "holds Agent capacity": [
+    "holds Agent capacity",
+    "占用智能体容量"
+  ],
+  "in": [
+    "in",
+    "位于"
+  ],
+  "in a terminal, then retry.": [
+    "in a terminal, then retry.",
+    "，然后重试。"
+  ],
+  "independent connections": [
+    "independent connections",
+    "个独立连接"
+  ],
+  "internal links": [
+    "internal links",
+    "条内部连线"
+  ],
+  "is responding": [
+    "is responding",
+    "正在回复"
+  ],
+  "links": [
+    "links",
+    "条连线"
+  ],
+  "live graph access": [
+    "live graph access",
+    "实时图谱访问"
+  ],
+  "live permissions": [
+    "live permissions",
+    "实时权限"
+  ],
+  "matches ·": [
+    "matches ·",
+    "个匹配 ·"
+  ],
+  "members ·": [
+    "members ·",
+    "个成员 ·"
+  ],
+  "of": [
+    "of",
+    "/"
+  ],
+  "opened. Click its empty wrapper to view cards.": [
+    "opened. Click its empty wrapper to view cards.",
+    "已打开。点击空包装查看卡片。"
+  ],
+  "operational log": [
+    "operational log",
+    "操作日志"
+  ],
+  "read-only resource": [
+    "read-only resource",
+    "只读资源"
+  ],
+  "ready": [
+    "ready",
+    "就绪"
+  ],
+  "results": [
+    "results",
+    "个结果"
+  ],
+  "selected": [
+    "selected",
+    "已选择"
+  ],
+  "selected cards": [
+    "selected cards",
+    "张所选卡片"
+  ],
+  "session": [
+    "session",
+    "会话"
+  ],
+  "sessions": [
+    "sessions",
+    "个会话"
+  ],
+  "skills": [
+    "skills",
+    "个技能"
+  ],
+  "skills · v": [
+    "skills · v",
+    "个技能 · 版本"
+  ],
+  "tasks in parallel": [
+    "tasks in parallel",
+    "个任务并行"
+  ],
+  "visible": [
+    "visible",
+    "可见"
+  ],
+  "workspace": [
+    "workspace",
+    "工作区"
+  ],
+  "world connections": [
+    "world connections",
+    "个世界连接"
+  ],
+  "· Cleanup:": [
+    "· Cleanup:",
+    "· 清理："
+  ],
+  "· Editable local copy": [
+    "· Editable local copy",
+    "· 可编辑的本地副本"
+  ],
+  "· Enter to send · Shift+Enter for new line": [
+    "· Enter to send · Shift+Enter for new line",
+    "· Enter 发送 · Shift+Enter 换行"
+  ],
+  "· Run": [
+    "· Run",
+    "· 运行"
+  ],
+  "· insert mention": [
+    "· insert mention",
+    "· 插入提及"
+  ],
+  "· trust": [
+    "· trust",
+    "· 可信度"
+  ],
+  "· unavailable": [
+    "· unavailable",
+    "· 不可用"
+  ],
+  "” and consume its card?": [
+    "” and consume its card?",
+    "”并消耗其卡片？"
+  ],
+  "” and its graph relationships? Source snapshots and Skill resources are kept.": [
+    "” and its graph relationships? Source snapshots and Skill resources are kept.",
+    "”及其图谱关系？来源快照和技能资源将保留。"
+  ],
+  "Use dark theme": [
+    "Use dark theme",
+    "使用深色主题"
+  ],
+  "Use light theme": [
+    "Use light theme",
+    "使用浅色主题"
+  ],
+  "Language": [
+    "Language",
+    "界面语言"
+  ],
+  "{cards} cards and {links} relationships": [
+    "{cards} cards and {links} relationships",
+    "{cards} 张卡片和 {links} 条关系"
+  ],
+  "Open runtime activity; event stream {status}": [
+    "Open runtime activity; event stream {status}",
+    "打开运行动态；事件流{status}"
+  ],
+  "Runtime stream: {status}": [
+    "Runtime stream: {status}",
+    "运行事件流：{status}"
+  ],
+  "live": [
+    "live",
+    "已连接"
+  ],
+  "disconnected": [
+    "disconnected",
+    "已断开"
+  ],
+  "connecting": [
+    "connecting",
+    "连接中"
+  ],
+  "Find your bearings": [
+    "Find your bearings",
+    "熟悉方位"
+  ],
+  "Make it tangible": [
+    "Make it tangible",
+    "动手操作"
+  ],
+  "Build a working world": [
+    "Build a working world",
+    "构建可运行的世界"
+  ],
+  "Stick together": [
+    "Stick together",
+    "粘合卡片"
+  ],
+  "Meet the Minister": [
+    "Meet the Minister",
+    "认识管家"
+  ],
+  "Oh, hello! There’s a whole world beyond this little ring. Come explore with me.": [
+    "Oh, hello! There’s a whole world beyond this little ring. Come explore with me.",
+    "你好！小小圆环外有一整个世界，跟我一起探索吧。"
+  ],
+  "Let’s go": [
+    "Let’s go",
+    "出发吧"
+  ],
+  "Follow me over here. Drag an empty patch of canvas to move around.": [
+    "Follow me over here. Drag an empty patch of canvas to move around.",
+    "跟我来。拖动画布空白处，就能四处移动。"
+  ],
+  "Drag the background, away from cards.": [
+    "Drag the background, away from cards.",
+    "避开卡片，拖动背景。"
+  ],
+  "A little closer… or a little further. Scroll to zoom. The + and − buttons work too.": [
+    "A little closer… or a little further. Scroll to zoom. The + and − buttons work too.",
+    "靠近一点，或远离一点。滚动鼠标即可缩放，也可以使用 + 和 − 按钮。"
+  ],
+  "Cards come from packs, then live in your deck. Let’s collect the essentials and add them to your active deck.": [
+    "Cards come from packs, then live in your deck. Let’s collect the essentials and add them to your active deck.",
+    "卡片来自卡包，收藏后放入卡组。我们先收集基本卡片，加入当前卡组。"
+  ],
+  "Prepare my deck": [
+    "Prepare my deck",
+    "准备卡组"
+  ],
+  "Watch this Text card travel from the deck into the world. This one is my temporary prop.": [
+    "Watch this Text card travel from the deck into the world. This one is my temporary prop.",
+    "看，这张文本卡片从卡组来到了世界。这是我的临时道具。"
+  ],
+  "Show me": [
+    "Show me",
+    "演示一下"
+  ],
+  "Your turn! Drag a Text card from the deck onto a clear patch. Clicking the deck card also places it.": [
+    "Your turn! Drag a Text card from the deck onto a clear patch. Clicking the deck card also places it.",
+    "轮到你了！从卡组拖出一张文本卡片，放到空白处。点击卡组中的卡片也能放置。"
+  ],
+  "Give your card a new home. Drag its title or an empty part of its frame.": [
+    "Give your card a new home. Drag its title or an empty part of its frame.",
+    "给卡片换个位置，拖动它的标题或边框空白处即可。"
+  ],
+  "Shift-click selects a card. You can select several this way, too.": [
+    "Shift-click selects a card. You can select several this way, too.",
+    "按住 Shift 点击可选中卡片，也可以这样选中多张。"
+  ],
+  "Now click your card normally to look inside.": [
+    "Now click your card normally to look inside.",
+    "现在正常点击卡片，看看里面。"
+  ],
+  "The × closes this inspector. The corner arrow folds a preview down to a small node.": [
+    "The × closes this inspector. The corner arrow folds a preview down to a small node.",
+    "× 可以关闭检查器，角落的箭头可以将预览收起为小节点。"
+  ],
+  "Close the inspector with × or Escape.": [
+    "Close the inspector with × or Escape.",
+    "点击 × 或按 Escape 关闭检查器。"
+  ],
+  "Lost your place? Select your card, then press F to focus it. The fit-view button can show the whole world.": [
+    "Lost your place? Select your card, then press F to focus it. The fit-view button can show the whole world.",
+    "找不到位置了？选中卡片后按 F 聚焦，适配视图按钮可以显示整个世界。"
+  ],
+  "Shift-click your card, then press F outside a text field.": [
+    "Shift-click your card, then press F outside a text field.",
+    "按住 Shift 点击卡片，在文本框外按 F。"
+  ],
+  "Let’s remove your practice card. Select it and press Delete. Ctrl / ⌘ Z can bring it back.": [
+    "Let’s remove your practice card. Select it and press Delete. Ctrl / ⌘ Z can bring it back.",
+    "我们移除练习卡片吧。选中后按 Delete，Ctrl / ⌘ Z 可以恢复。"
+  ],
+  "The normal Remove button inside the inspector works too.": [
+    "The normal Remove button inside the inspector works too.",
+    "也可以使用检查器中的“移除”按钮。"
+  ],
+  "Now for something useful: an Agent to think, a Conversation to talk in, and a Sandbox to work in. These cards will be yours to keep.": [
+    "Now for something useful: an Agent to think, a Conversation to talk in, and a Sandbox to work in. These cards will be yours to keep.",
+    "接下来做点实用的：用智能体思考、对话卡片交流、沙箱工作。这些卡片会保留给你。"
+  ],
+  "Build my first workflow": [
+    "Build my first workflow",
+    "构建第一个工作流"
+  ],
+  "Place an Agent from your deck. Leave some room beside it for its Conversation.": [
+    "Place an Agent from your deck. Leave some room beside it for its Conversation.",
+    "从卡组放置一个智能体，在旁边留些空间放对话卡片。"
+  ],
+  "Open your Agent. Give it a short system instruction, like “Help me plan a small garden.” Pick a model here, or use Manage models.": [
+    "Open your Agent. Give it a short system instruction, like “Help me plan a small garden.” Pick a model here, or use Manage models.",
+    "打开智能体，写一条简短系统指令，例如“帮我规划一个小花园”。在这里选择模型，或使用“管理模型”。"
+  ],
+  "Edits save when you leave the field. Continue when your settings are ready.": [
+    "Edits save when you leave the field. Continue when your settings are ready.",
+    "离开输入框时会保存更改，设置完成后继续。"
+  ],
+  "Keep these settings": [
+    "Keep these settings",
+    "保留这些设置"
+  ],
+  "Place a Conversation beside your Agent. It holds durable messages and sessions.": [
+    "Place a Conversation beside your Agent. It holds durable messages and sessions.",
+    "在智能体旁边放一张对话卡片，用来保存消息和会话。"
+  ],
+  "I’ll connect these with Participate. A connection grants a real capability: this Agent can now join the Conversation.": [
+    "I’ll connect these with Participate. A connection grants a real capability: this Agent can now join the Conversation.",
+    "我用“参与”连接它们。连接会授予实际能力：现在这个智能体可以加入对话了。"
+  ],
+  "Show the connection": [
+    "Show the connection",
+    "演示连接"
+  ],
+  "Click the Conversation, then its Open workspace button. That’s where your sessions and messages live.": [
+    "Click the Conversation, then its Open workspace button. That’s where your sessions and messages live.",
+    "点击对话卡片，再点击“打开工作区”，会话和消息都在里面。"
+  ],
+  "Try “Help me plan a small garden.” Choose the Agent in the session or @mention it, then send. A configured model is needed for its reply.": [
+    "Try “Help me plan a small garden.” Choose the Agent in the session or @mention it, then send. A configured model is needed for its reply.",
+    "试试“帮我规划一个小花园”。在会话中选择智能体或 @提及它，再发送。智能体回复需要已配置的模型。"
+  ],
+  "Your message stays in the Conversation even when a model is unavailable.": [
+    "Your message stays in the Conversation even when a model is unavailable.",
+    "即使模型不可用，你的消息也会保留在对话中。"
+  ],
+  "Try the model later": [
+    "Try the model later",
+    "稍后再试模型"
+  ],
+  "The Agent’s replies and tool activity appear in this session. Take a look around; your conversation stays here when you close the card.": [
+    "The Agent’s replies and tool activity appear in this session. Take a look around; your conversation stays here when you close the card.",
+    "智能体的回复和工具动态会出现在此会话中。四处看看吧，关闭卡片后对话也会保留。"
+  ],
+  "On to Sandbox": [
+    "On to Sandbox",
+    "接下来是沙箱"
+  ],
+  "Now place a Sandbox. It gives an Agent a workspace and the ability to execute commands.": [
+    "Now place a Sandbox. It gives an Agent a workspace and the ability to execute commands.",
+    "现在放置一个沙箱，为智能体提供工作区和执行命令的能力。"
+  ],
+  "Your turn to connect! Drag from an edge port of the Agent to the Sandbox. Choose Execute, or Execute + Start/Stop, then grant it.": [
+    "Your turn to connect! Drag from an edge port of the Agent to the Sandbox. Choose Execute, or Execute + Start/Stop, then grant it.",
+    "轮到你连接了！从智能体边缘端口拖到沙箱，选择“执行”或“执行 + 启动/停止”，然后授予权限。"
+  ],
+  "If a port is covered, move a card aside. Execute needs a running Sandbox; Start/Stop also lets the Agent manage it.": [
+    "If a port is covered, move a card aside. Execute needs a running Sandbox; Start/Stop also lets the Agent manage it.",
+    "端口被遮挡时，可移开卡片。“执行”需要已运行的沙箱，“启动/停止”还允许智能体管理沙箱。"
+  ],
+  "Open the Sandbox to see its runtime and workspace settings. Start it here when you’re ready to execute. Connections compose what an Agent can do.": [
+    "Open the Sandbox to see its runtime and workspace settings. Start it here when you’re ready to execute. Connections compose what an Agent can do.",
+    "打开沙箱查看运行环境和工作区设置，准备执行时在这里启动。不同的连接组合决定智能体能做什么。"
+  ],
+  "This is where you choose the runtime and workspace, then start your Sandbox. We can leave it stopped for now. Your three cards already describe a working system.": [
+    "This is where you choose the runtime and workspace, then start your Sandbox. We can leave it stopped for now. Your three cards already describe a working system.",
+    "在这里选择运行环境和工作区，再启动沙箱。现在可以先不启动，这三张卡片已构成一个工作系统。"
+  ],
+  "Try sticking cards": [
+    "Try sticking cards",
+    "试试粘合卡片"
+  ],
+  "Cards can stick together physically, too. Watch these two temporary Text cards meet at their edges and move as one.": [
+    "Cards can stick together physically, too. Watch these two temporary Text cards meet at their edges and move as one.",
+    "卡片也能在空间上粘合。看这两张临时文本卡片沿边缘相接，然后一起移动。"
+  ],
+  "Show me sticking": [
+    "Show me sticking",
+    "演示粘合"
+  ],
+  "See the seam? Sticking arranges cards; it doesn’t grant a capability. I’ll separate my props so you can try.": [
+    "See the seam? Sticking arranges cards; it doesn’t grant a capability. I’ll separate my props so you can try.",
+    "看到接缝了吗？粘合用于组织卡片位置，不会授予能力。我先分开道具，让你试试。"
+  ],
+  "My turn": [
+    "My turn",
+    "我来试试"
+  ],
+  "Switch on the droplet tool (Glue). Drag one of my two Text cards close to the other’s edge; release when the seam appears.": [
+    "Switch on the droplet tool (Glue). Drag one of my two Text cards close to the other’s edge; release when the seam appears.",
+    "开启水滴形的万能胶工具。将一张文本卡片拖近另一张的边缘，出现接缝时松手。"
+  ],
+  "Now drag either card. Its neighbour comes along! Select the pair to find Detach glue when you want to separate them.": [
+    "Now drag either card. Its neighbour comes along! Select the pair to find Detach glue when you want to separate them.",
+    "现在拖动任意一张卡片，旁边的卡片也会一起移动！想分开时，选中它们并点击“解除粘连”。"
+  ],
+  "One last neighbour: the Minister. It can help operate and configure the world inside its circle.": [
+    "One last neighbour: the Minister. It can help operate and configure the world inside its circle.",
+    "最后认识一位邻居：管家。它可以帮助操作和配置圆圈范围内的世界。"
+  ],
+  "Move onto the Minister’s circle or click it. You can speak right here on the canvas.": [
+    "Move onto the Minister’s circle or click it. You can speak right here on the canvas.",
+    "将鼠标移到管家的圆圈上或点击它，就能直接在画布上交流。"
+  ],
+  "Try asking “What cards are inside your circle?” Later, ask it to find a card, arrange your world, or help configure an Agent.": [
+    "Try asking “What cards are inside your circle?” Later, ask it to find a card, arrange your world, or help configure an Agent.",
+    "试着问“你的圆圈里有哪些卡片？”。之后也可以让它寻找卡片、整理世界或帮助配置智能体。"
+  ],
+  "The little settings button beside its circle opens history, settings, nearby cards, and confirmations. Open it now.": [
+    "The little settings button beside its circle opens history, settings, nearby cards, and confirmations. Open it now.",
+    "圆圈旁的小设置按钮可以打开历史、设置、附近卡片和操作确认，现在打开看看。"
+  ],
+  "You stay in charge. Review sensitive or destructive proposals in the Minister’s confirmations. Its control radius and canvas-edit setting define where it can help.": [
+    "You stay in charge. Review sensitive or destructive proposals in the Minister’s confirmations. Its control radius and canvas-edit setting define where it can help.",
+    "决定权始终在你手中。请在管家的操作确认中审阅敏感或破坏性提案。控制半径和画布编辑设置决定它能在哪些范围提供帮助。"
+  ],
+  "Got it": [
+    "Got it",
+    "明白了"
+  ],
+  "You’ve made a world! Your workflow stays. I’ll tidy my temporary props. Find Replay Tutorial at the compass in the world controls whenever you want another walk.": [
+    "You’ve made a world! Your workflow stays. I’ll tidy my temporary props. Find Replay Tutorial at the compass in the world controls whenever you want another walk.",
+    "你已经创建了一个世界！工作流会保留，我会清理临时道具。想再次探索时，点击世界控制区的指南针“重播教程”。"
+  ],
+  "Finish & keep my world": [
+    "Finish & keep my world",
+    "完成并保留我的世界"
+  ],
+  "A collection of possibilities.": [
+    "A collection of possibilities.",
+    "汇集无限可能。"
+  ],
+  "Your formations": [
+    "Your formations",
+    "你的编队"
+  ],
+  "Other collected cards": [
+    "Other collected cards",
+    "其他收藏卡片"
+  ],
+  "Custom connection": [
+    "Custom connection",
+    "自定义连接"
+  ],
+  "Local models": [
+    "Local models",
+    "本地模型"
+  ],
+  "Todo": [
+    "Todo",
+    "待办"
+  ],
+  "In progress": [
+    "In progress",
+    "进行中"
+  ],
+  "Blocked": [
+    "Blocked",
+    "受阻"
+  ],
+  "Done": [
+    "Done",
+    "完成"
+  ],
+  "Cancelled": [
+    "Cancelled",
+    "已取消"
+  ],
+  " / {v0} dependencies": [
+    " / {v0} dependencies",
+    " / {v0} 项依赖"
+  ],
+  " / {v0} external links retained": [
+    " / {v0} external links retained",
+    " / 保留 {v0} 条外部连线"
+  ],
+  " · Host folder: {v0}": [
+    " · Host folder: {v0}",
+    " · 主机文件夹：{v0}"
+  ],
+  " · Run {v0}": [
+    " · Run {v0}",
+    " · 运行 {v0}"
+  ],
+  " · Runtime: {v0}": [
+    " · Runtime: {v0}",
+    " · 运行环境：{v0}"
+  ],
+  " · Sessions: {v0}": [
+    " · Sessions: {v0}",
+    " · 会话数：{v0}"
+  ],
+  " · {v0} bytes": [
+    " · {v0} bytes",
+    " · {v0} 字节"
+  ],
+  " · {v0} bytes of stored content": [
+    " · {v0} bytes of stored content",
+    " · 已存储 {v0} 字节内容"
+  ],
+  "A durable field for human and agent conversations.": [
+    "A durable field for human and agent conversations.",
+    "持久保存人与智能体对话的空间。"
+  ],
+  "Add instructions, settings and files to this skill.": [
+    "Add instructions, settings and files to this skill.",
+    "为此技能添加说明、设置和文件。"
+  ],
+  "Add {v0} to session": [
+    "Add {v0} to session",
+    "将 {v0} 加入会话"
+  ],
+  "Admission interrupted": [
+    "Admission interrupted",
+    "准入过程已中断"
+  ],
+  "Browse for {v0}": [
+    "Browse for {v0}",
+    "浏览选择{v0}"
+  ],
+  "Chat with {v0}": [
+    "Chat with {v0}",
+    "与 {v0} 对话"
+  ],
+  "Check the JSON value for “{v0}”.": [
+    "Check the JSON value for “{v0}”.",
+    "请检查“{v0}”的 JSON 值。"
+  ],
+  "Close {v0} inspector": [
+    "Close {v0} inspector",
+    "关闭 {v0} 检查器"
+  ],
+  "Collect {v0} new {v1}": [
+    "Collect {v0} new {v1}",
+    "收藏 {v0} 张新{v1}"
+  ],
+  "Configure this Agent on the canvas.": [
+    "Configure this Agent on the canvas.",
+    "在画布上配置此智能体。"
+  ],
+  "Connect a file source": [
+    "Connect a file source",
+    "连接文件来源"
+  ],
+  "Connect {v0} left": [
+    "Connect {v0} left",
+    "连接 {v0} 左侧"
+  ],
+  "Connect {v0} right": [
+    "Connect {v0} right",
+    "连接 {v0} 右侧"
+  ],
+  "Connect {v0} {v1}": [
+    "Connect {v0} {v1}",
+    "连接 {v0} {v1}"
+  ],
+  "Created on first start": [
+    "Created on first start",
+    "首次启动时创建"
+  ],
+  "Default": [
+    "Default",
+    "默认"
+  ],
+  "Default model": [
+    "Default model",
+    "默认模型"
+  ],
+  "Delete file {v0}": [
+    "Delete file {v0}",
+    "删除文件 {v0}"
+  ],
+  "Delete saved Legion \"{v0}\"? Existing formations in the world will remain.": [
+    "Delete saved Legion \"{v0}\"? Existing formations in the world will remain.",
+    "删除已保存的军团“{v0}”？世界中的现有编队会保留。"
+  ],
+  "Delete session {v0}? Its conversation history will be deleted.": [
+    "Delete session {v0}? Its conversation history will be deleted.",
+    "删除会话 {v0}？其对话历史将一并删除。"
+  ],
+  "Delete {v0} and members": [
+    "Delete {v0} and members",
+    "删除 {v0} 及成员"
+  ],
+  "Delete {v0} and skills": [
+    "Delete {v0} and skills",
+    "删除 {v0} 及技能"
+  ],
+  "Delete {v0} relationship?": [
+    "Delete {v0} relationship?",
+    "删除 {v0} 关系？"
+  ],
+  "Depends on {v0}": [
+    "Depends on {v0}",
+    "依赖于 {v0}"
+  ],
+  "Deploy saved formation": [
+    "Deploy saved formation",
+    "部署已保存编队"
+  ],
+  "Detach {v0}": [
+    "Detach {v0}",
+    "分离 {v0}"
+  ],
+  "Download {v0}": [
+    "Download {v0}",
+    "下载 {v0}"
+  ],
+  "Edit skill {v0}": [
+    "Edit skill {v0}",
+    "编辑技能 {v0}"
+  ],
+  "Edit task {v0}": [
+    "Edit task {v0}",
+    "编辑任务 {v0}"
+  ],
+  "Empty file": [
+    "Empty file",
+    "空文件"
+  ],
+  "Enable model {v0}": [
+    "Enable model {v0}",
+    "启用模型 {v0}"
+  ],
+  "Enter a number for {v0}.": [
+    "Enter a number for {v0}.",
+    "请为 {v0} 输入数字。"
+  ],
+  "Enter a secret for {v0}, or remove the unused variable.": [
+    "Enter a secret for {v0}, or remove the unused variable.",
+    "请为 {v0} 输入密钥，或移除未使用的变量。"
+  ],
+  "Enter a valid number for “{v0}”.": [
+    "Enter a valid number for “{v0}”.",
+    "请为“{v0}”输入有效数字。"
+  ],
+  "Environment variable {v0} name": [
+    "Environment variable {v0} name",
+    "环境变量 {v0} 名称"
+  ],
+  "Environment variable {v0} type": [
+    "Environment variable {v0} type",
+    "环境变量 {v0} 类型"
+  ],
+  "Environment variable {v0} value": [
+    "Environment variable {v0} value",
+    "环境变量 {v0} 值"
+  ],
+  "Equipment for {v0}": [
+    "Equipment for {v0}",
+    "{v0} 的装备"
+  ],
+  "Getting ready…": [
+    "Getting ready…",
+    "准备中…"
+  ],
+  "Give “{v0}” a secret reference name.": [
+    "Give “{v0}” a secret reference name.",
+    "请为“{v0}”指定密钥引用名称。"
+  ],
+  "Group conversation": [
+    "Group conversation",
+    "群组对话"
+  ],
+  "Hide {v0} details": [
+    "Hide {v0} details",
+    "隐藏 {v0} 详情"
+  ],
+  "Imported {v0}. Save to apply.": [
+    "Imported {v0}. Save to apply.",
+    "已导入 {v0}，保存后生效。"
+  ],
+  "Inspect collection for details": [
+    "Inspect collection for details",
+    "检查集合以查看详情"
+  ],
+  "Inspect {v0}": [
+    "Inspect {v0}",
+    "检查 {v0}"
+  ],
+  "Loading execution...": [
+    "Loading execution...",
+    "正在加载执行信息…"
+  ],
+  "Loading skills…": [
+    "Loading skills…",
+    "正在加载技能…"
+  ],
+  "Loading toolbox…": [
+    "Loading toolbox…",
+    "正在加载工具箱…"
+  ],
+  "Managed workspace": [
+    "Managed workspace",
+    "托管工作区"
+  ],
+  "Message {v0}": [
+    "Message {v0}",
+    "向 {v0} 发消息"
+  ],
+  "Model {v0} ID": [
+    "Model {v0} ID",
+    "模型 {v0} ID"
+  ],
+  "Model {v0} display name": [
+    "Model {v0} display name",
+    "模型 {v0} 显示名称"
+  ],
+  "New card": [
+    "New card",
+    "新卡片"
+  ],
+  "New connection": [
+    "New connection",
+    "新连接"
+  ],
+  "No Conversation sessions yet.": [
+    "No Conversation sessions yet.",
+    "尚无对话会话。"
+  ],
+  "No additional details": [
+    "No additional details",
+    "无更多详情"
+  ],
+  "No result yet.": [
+    "No result yet.",
+    "尚无结果。"
+  ],
+  "No summary provided": [
+    "No summary provided",
+    "未提供摘要"
+  ],
+  "Not started": [
+    "Not started",
+    "未启动"
+  ],
+  "Open Minister {v0}": [
+    "Open Minister {v0}",
+    "打开管家 {v0}"
+  ],
+  "Open file {v0}": [
+    "Open file {v0}",
+    "打开文件 {v0}"
+  ],
+  "Open instructions": [
+    "Open instructions",
+    "打开说明"
+  ],
+  "Open {v0}": [
+    "Open {v0}",
+    "打开 {v0}"
+  ],
+  "Open {v0} to use this card. It is created inside the container.": [
+    "Open {v0} to use this card. It is created inside the container.",
+    "打开 {v0} 以使用此卡片，它创建于容器内部。"
+  ],
+  "Opening conversation…": [
+    "Opening conversation…",
+    "正在打开对话…"
+  ],
+  "Place {v0}": [
+    "Place {v0}",
+    "放置 {v0}"
+  ],
+  "Plugin-defined world object.": [
+    "Plugin-defined world object.",
+    "插件定义的世界对象。"
+  ],
+  "Preview of {v0}": [
+    "Preview of {v0}",
+    "{v0} 的预览"
+  ],
+  "Preview {v0}": [
+    "Preview {v0}",
+    "预览 {v0}"
+  ],
+  "Previous executor": [
+    "Previous executor",
+    "之前的执行者"
+  ],
+  "Published {v0} · {v1}": [
+    "Published {v0} · {v1}",
+    "已发布 {v0} · {v1}"
+  ],
+  "Remove attachment {v0}": [
+    "Remove attachment {v0}",
+    "移除附件 {v0}"
+  ],
+  "Remove environment variable {v0}": [
+    "Remove environment variable {v0}",
+    "移除环境变量 {v0}"
+  ],
+  "Remove model {v0}": [
+    "Remove model {v0}",
+    "移除模型 {v0}"
+  ],
+  "Remove variable {v0}": [
+    "Remove variable {v0}",
+    "移除变量 {v0}"
+  ],
+  "Remove {v0}": [
+    "Remove {v0}",
+    "移除 {v0}"
+  ],
+  "Remove {v0} from deck": [
+    "Remove {v0} from deck",
+    "从卡组移除 {v0}"
+  ],
+  "Remove {v0} from session": [
+    "Remove {v0} from session",
+    "从会话移除 {v0}"
+  ],
+  "Remove {v0} from the Legion library?": [
+    "Remove {v0} from the Legion library?",
+    "从军团图书馆移除 {v0}？"
+  ],
+  "Remove {v0} from {v1}?": [
+    "Remove {v0} from {v1}?",
+    "从 {v1} 移除 {v0}？"
+  ],
+  "Resize {v0} control radius": [
+    "Resize {v0} control radius",
+    "调整 {v0} 控制半径"
+  ],
+  "Saved formation": [
+    "Saved formation",
+    "已保存编队"
+  ],
+  "Search {v0}": [
+    "Search {v0}",
+    "搜索{v0}"
+  ],
+  "Secret reference “{v0}”": [
+    "Secret reference “{v0}”",
+    "密钥引用“{v0}”"
+  ],
+  "Select an available runtime.": [
+    "Select an available runtime.",
+    "请选择可用的运行环境。"
+  ],
+  "Select files or directories in the file tree.": [
+    "Select files or directories in the file tree.",
+    "在文件树中选择文件或目录。"
+  ],
+  "Select {v0} for publication": [
+    "Select {v0} for publication",
+    "选择 {v0} 以发布"
+  ],
+  "Send to {v0}": [
+    "Send to {v0}",
+    "发送给 {v0}"
+  ],
+  "Session actions for {v0}": [
+    "Session actions for {v0}",
+    "{v0} 的会话操作"
+  ],
+  "Settings and history for {v0}": [
+    "Settings and history for {v0}",
+    "{v0} 的设置与历史"
+  ],
+  "Show runtime history for {v0}": [
+    "Show runtime history for {v0}",
+    "显示 {v0} 的运行历史"
+  ],
+  "Start a relationship from the {v0} edge of {v1}": [
+    "Start a relationship from the {v0} edge of {v1}",
+    "从 {v1} 的{v0}边缘建立关系"
+  ],
+  "Stop {v0}": [
+    "Stop {v0}",
+    "停止 {v0}"
+  ],
+  "Team": [
+    "Team",
+    "团队"
+  ],
+  "The environment variable “{v0}” appears twice.": [
+    "The environment variable “{v0}” appears twice.",
+    "环境变量“{v0}”重复。"
+  ],
+  "The setting “{v0}” appears twice.": [
+    "The setting “{v0}” appears twice.",
+    "设置项“{v0}”重复。"
+  ],
+  "The variable “{v0}” appears twice. Use a different name.": [
+    "The variable “{v0}” appears twice. Use a different name.",
+    "变量“{v0}”重复，请使用其他名称。"
+  ],
+  "Unequip {v0}": [
+    "Unequip {v0}",
+    "卸下 {v0}"
+  ],
+  "Unknown": [
+    "Unknown",
+    "未知"
+  ],
+  "Unknown object": [
+    "Unknown object",
+    "未知对象"
+  ],
+  "Untitled connection": [
+    "Untitled connection",
+    "未命名连接"
+  ],
+  "User": [
+    "User",
+    "用户"
+  ],
+  "Variable {v0} name": [
+    "Variable {v0} name",
+    "变量 {v0} 名称"
+  ],
+  "Variable {v0} type": [
+    "Variable {v0} type",
+    "变量 {v0} 类型"
+  ],
+  "Variable {v0} value": [
+    "Variable {v0} value",
+    "变量 {v0} 值"
+  ],
+  "Variable “{v0}” must be a text value or secret reference.": [
+    "Variable “{v0}” must be a text value or secret reference.",
+    "变量“{v0}”必须是文本值或密钥引用。"
+  ],
+  "View {v0} cards": [
+    "View {v0} cards",
+    "查看 {v0} 的卡片"
+  ],
+  "Waiting · {v0}": [
+    "Waiting · {v0}",
+    "等待中 · {v0}"
+  ],
+  "Working · {v0} active": [
+    "Working · {v0} active",
+    "工作中 · {v0} 个活动任务"
+  ],
+  "Workspace unavailable": [
+    "Workspace unavailable",
+    "工作区不可用"
+  ],
+  "Your deck": [
+    "Your deck",
+    "你的卡组"
+  ],
+  "this setting": [
+    "this setting",
+    "此设置项"
+  ],
+  "{v0} \"{v1}\" into \"{v2}\"?": [
+    "{v0} \"{v1}\" into \"{v2}\"?",
+    "将“{v1}”{v0}到“{v2}”？"
+  ],
+  "{v0} / {v1} complete": [
+    "{v0} / {v1} complete",
+    "已完成 {v0} / {v1}"
+  ],
+  "{v0} barracks": [
+    "{v0} barracks",
+    "{v0} 营地"
+  ],
+  "{v0} can message {v1}.": [
+    "{v0} can message {v1}.",
+    "{v0} 可以向 {v1} 发消息。"
+  ],
+  "{v0} cards in this circle": [
+    "{v0} cards in this circle",
+    "圆圈内有 {v0} 张卡片"
+  ],
+  "{v0} cards · {v1} links": [
+    "{v0} cards · {v1} links",
+    "{v0} 张卡片 · {v1} 条连线"
+  ],
+  "{v0} collection": [
+    "{v0} collection",
+    "{v0} 集合"
+  ],
+  "{v0} connects to {v1}": [
+    "{v0} connects to {v1}",
+    "{v0} 连接到 {v1}"
+  ],
+  "{v0} container": [
+    "{v0} container",
+    "{v0} 容器"
+  ],
+  "{v0} contains unsupported field{v1}: {v2}.": [
+    "{v0} contains unsupported fields: {v2}.",
+    "{v0} 包含不支持的字段：{v2}。"
+  ],
+  "{v0} controls": [
+    "{v0} controls",
+    "{v0} 控制"
+  ],
+  "{v0} conversation": [
+    "{v0} conversation",
+    "{v0} 对话"
+  ],
+  "{v0} equipment": [
+    "{v0} equipment",
+    "{v0} 装备"
+  ],
+  "{v0} equipment slots": [
+    "{v0} equipment slots",
+    "{v0} 装备槽"
+  ],
+  "{v0} is responding": [
+    "{v0} is responding",
+    "{v0} 正在回复"
+  ],
+  "{v0} matching internal cards are hidden. Show internal cards to inspect their purpose and container.": [
+    "{v0} matching internal cards are hidden. Show internal cards to inspect their purpose and container.",
+    "已隐藏 {v0} 张匹配的内部卡片。显示内部卡片以查看其用途和所属容器。"
+  ],
+  "{v0} models": [
+    "{v0} models",
+    "{v0} 个模型"
+  ],
+  "{v0} must be a JSON object.": [
+    "{v0} must be a JSON object.",
+    "{v0} 必须是 JSON 对象。"
+  ],
+  "{v0} name": [
+    "{v0} name",
+    "{v0} 名称"
+  ],
+  "{v0} of {v1} tasks complete": [
+    "{v0} of {v1} tasks complete",
+    "已完成 {v0} / {v1} 个任务"
+  ],
+  "{v0} outputs": [
+    "{v0} outputs",
+    "{v0} 输出"
+  ],
+  "{v0} relationship": [
+    "{v0} relationship",
+    "{v0} 关系"
+  ],
+  "{v0} skill space": [
+    "{v0} skill space",
+    "{v0} 技能空间"
+  ],
+  "{v0} team space": [
+    "{v0} team space",
+    "{v0} 团队空间"
+  ],
+  "{v0} type": [
+    "{v0} type",
+    "{v0} 类型"
+  ],
+  "{v0} unavailable": [
+    "{v0} unavailable",
+    "{v0} 不可用"
+  ],
+  "{v0} value": [
+    "{v0} value",
+    "{v0} 值"
+  ],
+  "{v0} workspace": [
+    "{v0} workspace",
+    "{v0} 工作区"
+  ],
+  "{v0} {v1} card": [
+    "{v0} {v1} card",
+    "{v0} {v1} 卡片"
+  ],
+  "{v0}% terminal height": [
+    "{v0}% terminal height",
+    "终端高度 {v0}%"
+  ],
+  "“{v0}” already exists. Open it to edit its contents.": [
+    "“{v0}” already exists. Open it to edit its contents.",
+    "“{v0}”已存在，打开即可编辑内容。"
+  ],
+  "To do": [
+    "To do",
+    "待办"
+  ],
+  "card": [
+    "card",
+    "卡片"
+  ],
+  "closed": [
+    "closed",
+    "已关闭"
+  ],
+  "left": [
+    "left",
+    "左侧"
+  ],
+  "right": [
+    "right",
+    "右侧"
+  ],
+  "top": [
+    "top",
+    "顶部"
+  ],
+  "bottom": [
+    "bottom",
+    "底部"
+  ],
+  " · Active": [
+    " · Active",
+    " · 当前"
+  ],
+  "Add {v0} to deck": [
+    "Add {v0} to deck",
+    "将 {v0} 加入卡组"
+  ],
+  "Zoom in": [
+    "Zoom in",
+    "放大"
+  ],
+  "Zoom out": [
+    "Zoom out",
+    "缩小"
+  ],
+  "Fit view": [
+    "Fit view",
+    "适配视图"
+  ],
+  "Library": [
+    "Library",
+    "图书馆"
+  ],
+  "Paper": [
+    "Paper",
+    "论文"
+  ],
+  "Objects": [
+    "Objects",
+    "对象"
+  ],
+  "Fields": [
+    "Fields",
+    "空间"
+  ],
+  "Tools": [
+    "Tools",
+    "工具"
+  ],
+  "Science": [
+    "Science",
+    "科学"
+  ],
+  "Agent Barracks": [
+    "Agent Barracks",
+    "智能体营地"
+  ],
+  "Task Board": [
+    "Task Board",
+    "任务看板"
+  ],
+  "Skill Toolboxes": [
+    "Skill Toolboxes",
+    "技能工具箱"
+  ],
+  "Text file": [
+    "Text file",
+    "文本文件"
+  ],
+  "Image file": [
+    "Image file",
+    "图片文件"
+  ],
+  "Legion": [
+    "Legion",
+    "军团"
+  ],
+  "Virtual workspace": [
+    "Virtual workspace",
+    "虚拟工作区"
+  ],
+  "Generated workspace": [
+    "Generated workspace",
+    "生成的工作区"
+  ],
+  "Reasoning worker": [
+    "Reasoning worker",
+    "负责推理的工作者"
+  ],
+  "Temporary space for generated cards": [
+    "Temporary space for generated cards",
+    "容纳生成卡片的临时空间"
+  ],
+  "Team space with shared context and settings": [
+    "Team space with shared context and settings",
+    "共享上下文与设置的团队空间"
+  ],
+  "Shared communication field": [
+    "Shared communication field",
+    "共享交流空间"
+  ],
+  "Managed knowledge": [
+    "Managed knowledge",
+    "托管知识"
+  ],
+  "Visual resource": [
+    "Visual resource",
+    "视觉资源"
+  ],
+  "Secure work field": [
+    "Secure work field",
+    "安全工作空间"
+  ],
+  "Open Agent World Core": [
+    "Open Agent World Core",
+    "Open Agent World 核心"
+  ],
+  "Core essentials": [
+    "Core essentials",
+    "核心基础"
+  ],
+  "Agents, resources and workspaces for your world.": [
+    "Agents, resources and workspaces for your world.",
+    "为你的世界提供智能体、资源和工作区。"
+  ],
+  "Built-in nodes, relationships, state schemas, and runtimes.": [
+    "Built-in nodes, relationships, state schemas, and runtimes.",
+    "内置节点、关系、状态架构和运行环境。"
+  ],
+  "Research Library": [
+    "Research Library",
+    "研究图书馆"
+  ],
+  "Papers and reading spaces.": [
+    "Papers and reading spaces.",
+    "论文与阅读空间。"
+  ],
+  "PDF reading and native research spaces": [
+    "PDF reading and native research spaces",
+    "PDF 阅读与原生研究空间"
+  ],
+  "Literature field with native movable members": [
+    "Literature field with native movable members",
+    "包含可自由移动成员的文献空间"
+  ],
+  "PDF and reading notes": [
+    "PDF and reading notes",
+    "PDF 与阅读笔记"
+  ],
+  "Know-Do Graph": [
+    "Know-Do Graph",
+    "知行图谱"
+  ],
+  "Evolving scientific knowledge, resources and reviewed experience.": [
+    "Evolving scientific knowledge, resources and reviewed experience.",
+    "持续演化的科学知识、资源与已审阅经验。"
+  ],
+  "Scientific skills and a Know-Do Graph.": [
+    "Scientific skills and a Know-Do Graph.",
+    "科学技能与知行图谱。"
+  ],
+  "Reusable configured Agents with private equipment.": [
+    "Reusable configured Agents with private equipment.",
+    "配备私有装备、可复用的已配置智能体。"
+  ],
+  "Place configured Agents here to make them available for summoning.": [
+    "Place configured Agents here to make them available for summoning.",
+    "将已配置的智能体放在此处，以供召唤。"
+  ],
+  "Summoning": [
+    "Summoning",
+    "召唤"
+  ],
+  "Equip on an Agent, then connect this skill to an Agent Barracks to grant summons.": [
+    "Equip on an Agent, then connect this skill to an Agent Barracks to grant summons.",
+    "装备到智能体上，再将此技能连接到智能体营地以授予召唤能力。"
+  ],
+  "Reusable configured Agents and summoning.": [
+    "Reusable configured Agents and summoning.",
+    "可复用的已配置智能体与召唤能力。"
+  ],
+  "XRD analysis": [
+    "XRD analysis",
+    "XRD 分析"
+  ],
+  "Whole-pattern diffraction fitting.": [
+    "Whole-pattern diffraction fitting.",
+    "全谱衍射拟合。"
+  ],
+  "Candidate-CIF whole-pattern fitting in an isolated local interpreter": [
+    "Candidate-CIF whole-pattern fitting in an isolated local interpreter",
+    "在隔离的本地解释器中对候选 CIF 进行全谱拟合"
+  ],
+  "PyWPEM whole-pattern fit from intensity CSV and candidate CIF": [
+    "PyWPEM whole-pattern fit from intensity CSV and candidate CIF",
+    "使用强度 CSV 和候选 CIF 进行 PyWPEM 全谱拟合"
+  ],
+  "Build and share portable collections of skills.": [
+    "Build and share portable collections of skills.",
+    "构建并分享可移植的技能集合。"
+  ],
+  "Build reusable skills and toolboxes.": [
+    "Build reusable skills and toolboxes.",
+    "构建可复用的技能与工具箱。"
+  ],
+  "Codex Agent": [
+    "Codex Agent",
+    "Codex 智能体"
+  ],
+  "Local Codex with its own OAW session and connected tools.": [
+    "Local Codex with its own OAW session and connected tools.",
+    "拥有独立 OAW 会话和已连接工具的本地 Codex。"
+  ],
+  "A Codex worker with connected OAW tools.": [
+    "A Codex worker with connected OAW tools.",
+    "连接 OAW 工具的 Codex 工作者。"
+  ],
+  "Run Codex in a local project with OAW graph tools.": [
+    "Run Codex in a local project with OAW graph tools.",
+    "在本地项目中运行 Codex 并使用 OAW 图谱工具。"
+  ],
+  "MatterViz crystal and molecule rendering": [
+    "MatterViz crystal and molecule rendering",
+    "MatterViz 晶体与分子渲染"
+  ],
+  "Follow crystal and molecule files opened in connected windows.": [
+    "Follow crystal and molecule files opened in connected windows.",
+    "跟随已连接窗口中打开的晶体和分子文件。"
+  ],
+  "Interactive crystal and molecule visualization.": [
+    "Interactive crystal and molecule visualization.",
+    "交互式晶体与分子可视化。"
+  ],
+  "Shared planning with optional Agent execution.": [
+    "Shared planning with optional Agent execution.",
+    "共享规划，可选择由智能体执行。"
+  ],
+  "Plan tasks and dependencies; share only the permissions each Agent needs.": [
+    "Plan tasks and dependencies; share only the permissions each Agent needs.",
+    "规划任务与依赖，仅共享各智能体需要的权限。"
+  ],
+  "Shared planning and Agent execution.": [
+    "Shared planning and Agent execution.",
+    "共享规划与智能体执行。"
+  ],
+  "Communicate": [
+    "Communicate",
+    "通信"
+  ],
+  "Participate": [
+    "Participate",
+    "参与"
+  ],
+  "Meeting notes": [
+    "Meeting notes",
+    "会议记录"
+  ],
+  "Read": [
+    "Read",
+    "读取"
+  ],
+  "Read + edit": [
+    "Read + edit",
+    "读取 + 编辑"
+  ],
+  "View": [
+    "View",
+    "查看"
+  ],
+  "Execute": [
+    "Execute",
+    "执行"
+  ],
+  "Execute + Start/Stop": [
+    "Execute + Start/Stop",
+    "执行 + 启动/停止"
+  ],
+  "Mount read-only": [
+    "Mount read-only",
+    "只读挂载"
+  ],
+  "Mount read/write": [
+    "Mount read/write",
+    "读写挂载"
+  ],
+  "Read paper": [
+    "Read paper",
+    "阅读论文"
+  ],
+  "Research": [
+    "Research",
+    "研究"
+  ],
+  "Use knowledge": [
+    "Use knowledge",
+    "使用知识"
+  ],
+  "Use and learn": [
+    "Use and learn",
+    "使用并学习"
+  ],
+  "Curate knowledge": [
+    "Curate knowledge",
+    "整理知识"
+  ],
+  "Use Summoning": [
+    "Use Summoning",
+    "使用召唤"
+  ],
+  "Summon agents": [
+    "Summon agents",
+    "召唤智能体"
+  ],
+  "Execute with": [
+    "Execute with",
+    "交由执行"
+  ],
+  "Control execution": [
+    "Control execution",
+    "控制执行"
+  ],
+  "The agent can send a scoped message to this agent and receive its response.": [
+    "The agent can send a scoped message to this agent and receive its response.",
+    "智能体可以向此智能体发送限定范围的消息并接收回复。"
+  ],
+  "The agent can join sessions and speak inside this Conversation field.": [
+    "The agent can join sessions and speak inside this Conversation field.",
+    "智能体可以加入会话并在此对话空间中发言。"
+  ],
+  "Attach meeting notes. Participating agents can read and edit this text; disconnect to revoke access.": [
+    "Attach meeting notes. Participating agents can read and edit this text; disconnect to revoke access.",
+    "附加会议记录。参与的智能体可以读写此文本，断开连接即可撤销权限。"
+  ],
+  "The agent can inspect this text through a scoped tool.": [
+    "The agent can inspect this text through a scoped tool.",
+    "智能体可以通过授权工具查看此文本。"
+  ],
+  "The agent can inspect and modify this text through scoped tools.": [
+    "The agent can inspect and modify this text through scoped tools.",
+    "智能体可以通过授权工具查看和修改此文本。"
+  ],
+  "The agent can inspect the image content.": [
+    "The agent can inspect the image content.",
+    "智能体可以查看图片内容。"
+  ],
+  "The agent can run commands in this isolated workplace. Starting and stopping require manual control.": [
+    "The agent can run commands in this isolated workplace. Starting and stopping require manual control.",
+    "智能体可以在此隔离工作区运行命令，启动和停止需要手动控制。"
+  ],
+  "The agent can run commands, start this Sandbox and stop it, including active commands.": [
+    "The agent can run commands, start this Sandbox and stop it, including active commands.",
+    "智能体可以运行命令、启动或停止此沙箱，包括正在执行的命令。"
+  ],
+  "The resource is visible in the sandbox but cannot be changed there.": [
+    "The resource is visible in the sandbox but cannot be changed there.",
+    "此资源在沙箱中可见，但不可修改。"
+  ],
+  "The text resource can be read and changed inside the sandbox.": [
+    "The text resource can be read and changed inside the sandbox.",
+    "可在沙箱中读取和修改此文本资源。"
+  ],
+  "Read this paper's text": [
+    "Read this paper's text",
+    "读取此论文的文本"
+  ],
+  "Associate an Agent with a library; membership alone grants no paper access.": [
+    "Associate an Agent with a library; membership alone grants no paper access.",
+    "将智能体关联到图书馆，仅加入成员不会授予论文访问权限。"
+  ],
+  "Retrieve knowledge and read its resources. Execution requires a separate Sandbox grant.": [
+    "Retrieve knowledge and read its resources. Execution requires a separate Sandbox grant.",
+    "检索知识并读取资源，执行需要单独授予沙箱权限。"
+  ],
+  "Retrieve knowledge and record execution memories; durable review stays explicit.": [
+    "Retrieve knowledge and record execution memories; durable review stays explicit.",
+    "检索知识并记录执行记忆，持久审阅需要明确操作。"
+  ],
+  "Explicitly authorize editing local graph knowledge and reviewing memories; source snapshots stay immutable.": [
+    "Explicitly authorize editing local graph knowledge and reviewing memories; source snapshots stay immutable.",
+    "明确授权编辑本地图谱知识和审阅记忆，来源快照保持不可修改。"
+  ],
+  "Use this Agent's equipped Summoning skill.": [
+    "Use this Agent's equipped Summoning skill.",
+    "使用此智能体装备的召唤技能。"
+  ],
+  "Choose and instantiate a configured Agent from this Barracks.": [
+    "Choose and instantiate a configured Agent from this Barracks.",
+    "从此营地选择并实例化已配置的智能体。"
+  ],
+  "Allow this work source to dispatch tasks to this Agent. Task access is granted separately.": [
+    "Allow this work source to dispatch tasks to this Agent. Task access is granted separately.",
+    "允许此工作来源向智能体分派任务，任务访问权限需单独授予。"
+  ],
+  "Read tasks and explicitly start or stop work; does not grant plan editing.": [
+    "Read tasks and explicitly start or stop work; does not grant plan editing.",
+    "读取任务并明确启动或停止工作，不授予计划编辑权限。"
+  ],
+  "Created by an Agent or tool; retained until its workspace is reclaimed.": [
+    "Created by an Agent or tool; retained until its workspace is reclaimed.",
+    "由智能体或工具创建，保留至工作区被回收。"
+  ],
+  "message": [
+    "message",
+    "消息"
+  ],
+  "join": [
+    "join",
+    "参与"
+  ],
+  "notes": [
+    "notes",
+    "记录"
+  ],
+  "read": [
+    "read",
+    "读取"
+  ],
+  "read + edit": [
+    "read + edit",
+    "读取 + 编辑"
+  ],
+  "view": [
+    "view",
+    "查看"
+  ],
+  "execute": [
+    "execute",
+    "执行"
+  ],
+  "execute + manage": [
+    "execute + manage",
+    "执行 + 管理"
+  ],
+  "read-only": [
+    "read-only",
+    "只读"
+  ],
+  "read/write": [
+    "read/write",
+    "读写"
+  ],
+  "knowledge": [
+    "knowledge",
+    "知识"
+  ],
+  "learn": [
+    "learn",
+    "学习"
+  ],
+  "curate": [
+    "curate",
+    "整理"
+  ],
+  "summon": [
+    "summon",
+    "召唤"
+  ],
+  "use": [
+    "use",
+    "使用"
+  ],
+  "research": [
+    "research",
+    "研究"
+  ],
+  "executor": [
+    "executor",
+    "执行者"
+  ],
+  "execution": [
+    "execution",
+    "执行"
+  ],
+  "idle": [
+    "idle",
+    "空闲"
+  ],
+  "available": [
+    "available",
+    "可用"
+  ],
+  "running": [
+    "running",
+    "运行中"
+  ],
+  "waiting": [
+    "waiting",
+    "等待中"
+  ],
+  "error": [
+    "error",
+    "错误"
+  ],
+  "stopped": [
+    "stopped",
+    "已停止"
+  ],
+  "starting": [
+    "starting",
+    "启动中"
+  ],
+  "stopping": [
+    "stopping",
+    "停止中"
+  ],
+  "thinking": [
+    "thinking",
+    "思考中"
+  ],
+  "responding": [
+    "responding",
+    "回复中"
+  ],
+  "streaming": [
+    "streaming",
+    "生成中"
+  ],
+  "queued": [
+    "queued",
+    "排队中"
+  ],
+  "success": [
+    "success",
+    "成功"
+  ],
+  "failed": [
+    "failed",
+    "失败"
+  ],
+  "cancelled": [
+    "cancelled",
+    "已取消"
+  ],
+  "interrupted": [
+    "interrupted",
+    "已中断"
+  ],
+  "complete": [
+    "complete",
+    "完成"
+  ],
+  "active": [
+    "active",
+    "活跃"
+  ],
+  "My deck": [
+    "My deck",
+    "我的卡组"
+  ],
+  "Page {page}": [
+    "Page {page}",
+    "第 {page} 页"
+  ],
+  "Locate page {page}": [
+    "Locate page {page}",
+    "第 {page} 页 · 定位"
+  ],
+  "Contents ({count})": [
+    "Contents ({count})",
+    "目录（{count}）"
+  ],
+  "Annotations ({count})": [
+    "Annotations ({count})",
+    "批注（{count}）"
+  ],
+  "Text annotation · Page {page}": [
+    "Text annotation · Page {page}",
+    "划词批注 · 第 {page} 页"
+  ],
+  "Could not clean up empty node {id}: {error}": [
+    "Could not clean up empty node {id}: {error}",
+    "未能清理新建空节点 {id}：{error}"
+  ],
+  "万能胶": [
+    "Glue",
+    "万能胶"
+  ],
+  "万能胶 · 靠近边缘并松手粘合": [
+    "Glue · Move near an edge and release to join",
+    "万能胶 · 靠近边缘并松手粘合"
+  ],
+  "万能胶已开启 · 拖动卡片靠近另一张卡片的边缘，出现胶水时松手粘合。选中后可从自由角缩放，或解除粘连。": [
+    "Glue is on · Drag a card near another card's edge and release when the glue appears. Select joined cards to resize from a free corner or detach them.",
+    "万能胶已开启 · 拖动卡片靠近另一张卡片的边缘，出现胶水时松手粘合。选中后可从自由角缩放，或解除粘连。"
+  ],
+  "上一页": [
+    "Previous page",
+    "上一页"
+  ],
+  "上传完成 · 正在解析 PDF": [
+    "Upload complete · Processing PDF",
+    "上传完成 · 正在解析 PDF"
+  ],
+  "上传进度": [
+    "Upload progress",
+    "上传进度"
+  ],
+  "下一页": [
+    "Next page",
+    "下一页"
+  ],
+  "下载拟合结果（含曲线和 CIF）": [
+    "Download fitting results (curves and CIF)",
+    "下载拟合结果（含曲线和 CIF）"
+  ],
+  "仅点击翻译时发送选中文字 ·": [
+    "Selected text is sent only when you click Translate ·",
+    "仅点击翻译时发送选中文字 ·"
+  ],
+  "使用官方 Mn₂O₃ 示例": [
+    "Use the official Mn₂O₃ example",
+    "使用官方 Mn₂O₃ 示例"
+  ],
+  "保存": [
+    "Save",
+    "保存"
+  ],
+  "保存 DeepL 连接": [
+    "Save DeepL connection",
+    "保存 DeepL 连接"
+  ],
+  "保存中…": [
+    "Saving…",
+    "保存中…"
+  ],
+  "保存失败，请重试": [
+    "Could not save. Please retry.",
+    "保存失败，请重试"
+  ],
+  "保存失败：": [
+    "Could not save:",
+    "保存失败："
+  ],
+  "保存失败；草稿已保留。若正文被其他参与者更新，请先核对新版本，避免覆盖。": [
+    "Could not save; your draft is preserved. If another participant updated the text, review the new version before overwriting it.",
+    "保存失败；草稿已保留。若正文被其他参与者更新，请先核对新版本，避免覆盖。"
+  ],
+  "保存高亮与批注": [
+    "Save highlight and annotation",
+    "保存高亮与批注"
+  ],
+  "候选结构 CIF": [
+    "Candidate structure CIF",
+    "候选结构 CIF"
+  ],
+  "先运行结构预优化": [
+    "Pre-optimize the structure first",
+    "先运行结构预优化"
+  ],
+  "关闭 Library 设置": [
+    "Close Library settings",
+    "关闭图书馆设置"
+  ],
+  "关闭划词浮窗": [
+    "Close text selection popup",
+    "关闭划词浮窗"
+  ],
+  "关闭图钉工具": [
+    "Close pin tools",
+    "关闭图钉工具"
+  ],
+  "关闭导入提示": [
+    "Dismiss import message",
+    "关闭导入提示"
+  ],
+  "关闭摘录浮窗": [
+    "Close excerpt popup",
+    "关闭摘录浮窗"
+  ],
+  "关闭编辑": [
+    "Close editor",
+    "关闭编辑"
+  ],
+  "写下想法，留空则仅保存高亮": [
+    "Write your thoughts, or leave blank to save only the highlight",
+    "写下想法，留空则仅保存高亮"
+  ],
+  "切换滚动和翻页模式": [
+    "Switch between scrolling and paging",
+    "切换滚动和翻页模式"
+  ],
+  "切换移出模式：开启后拖到阴影边缘移出成员": [
+    "Toggle removal mode: drag members to the shadow edge to remove them",
+    "切换移出模式：开启后拖到阴影边缘移出成员"
+  ],
+  "切换阅读 / 批注模式": [
+    "Switch between reading and annotation modes",
+    "切换阅读 / 批注模式"
+  ],
+  "划词": [
+    "Select text",
+    "划词"
+  ],
+  "划词批注 · 第": [
+    "Text annotation · Page",
+    "划词批注 · 第"
+  ],
+  "划词批注与翻译": [
+    "Text annotation and translation",
+    "划词批注与翻译"
+  ],
+  "删除批注": [
+    "Delete annotation",
+    "删除批注"
+  ],
+  "单页翻页": [
+    "Single-page view",
+    "单页翻页"
+  ],
+  "原文 ·": [
+    "Source ·",
+    "原文 ·"
+  ],
+  "名称不能为空": [
+    "Name cannot be empty",
+    "名称不能为空"
+  ],
+  "图片请小于 4 MiB": [
+    "Images must be smaller than 4 MiB",
+    "图片请小于 4 MiB"
+  ],
+  "图钉": [
+    "Pins",
+    "图钉"
+  ],
+  "图钉 / 地图册": [
+    "Pins / Atlas",
+    "图钉 / 地图册"
+  ],
+  "地图册": [
+    "Atlas",
+    "地图册"
+  ],
+  "复位": [
+    "Reset",
+    "复位"
+  ],
+  "复制译文": [
+    "Copy translation",
+    "复制译文"
+  ],
+  "学习卡片": [
+    "Study cards",
+    "学习卡片"
+  ],
+  "学习画布": [
+    "Study canvas",
+    "学习画布"
+  ],
+  "学习画布名称": [
+    "Study canvas name",
+    "学习画布名称"
+  ],
+  "完成移出": [
+    "Finish removing",
+    "完成移出"
+  ],
+  "实验谱：无表头两列 CSV": [
+    "Experimental spectrum: two-column CSV without headers",
+    "实验谱：无表头两列 CSV"
+  ],
+  "密钥仅保存在后端；地址固定为 DeepL Free 官方接口。": [
+    "The key is stored only on the backend. Requests use the official DeepL Free endpoint.",
+    "密钥仅保存在后端；地址固定为 DeepL Free 官方接口。"
+  ],
+  "对所有文献生效。API 地址和密钥统一在 OAW 总设置中管理。": [
+    "Applies to all papers. Manage API endpoints and keys in OAW settings.",
+    "对所有文献生效。API 地址和密钥统一在 OAW 总设置中管理。"
+  ],
+  "导入 / 拖入 PDF": [
+    "Import / drop PDF",
+    "导入 / 拖入 PDF"
+  ],
+  "导入 PDF": [
+    "Import PDF",
+    "导入 PDF"
+  ],
+  "导入完成": [
+    "Import complete",
+    "导入完成"
+  ],
+  "尚未导入 PDF": [
+    "No PDF imported yet",
+    "尚未导入 PDF"
+  ],
+  "尚未载入": [
+    "Not loaded",
+    "尚未载入"
+  ],
+  "展开摘录正文": [
+    "Expand excerpt text",
+    "展开摘录正文"
+  ],
+  "展开目录与批注": [
+    "Expand contents and annotations",
+    "展开目录与批注"
+  ],
+  "展开集合堆叠": [
+    "Expand collection stack",
+    "展开集合堆叠"
+  ],
+  "已保存": [
+    "Saved",
+    "已保存"
+  ],
+  "已加密保存，留空保留": [
+    "Saved encrypted; leave blank to keep",
+    "已加密保存，留空保留"
+  ],
+  "已添加到学习": [
+    "Added to study",
+    "已添加到学习"
+  ],
+  "已载入": [
+    "Loaded",
+    "已载入"
+  ],
+  "截图批注": [
+    "Screenshot annotation",
+    "截图批注"
+  ],
+  "打开阅读器": [
+    "Open reader",
+    "打开阅读器"
+  ],
+  "批注": [
+    "Annotations",
+    "批注"
+  ],
+  "批注 ·": [
+    "Annotations ·",
+    "批注 ·"
+  ],
+  "批注列表": [
+    "Annotation list",
+    "批注列表"
+  ],
+  "批注模式": [
+    "Annotation mode",
+    "批注模式"
+  ],
+  "批注（": [
+    "Annotations (",
+    "批注（"
+  ],
+  "折叠摘录正文": [
+    "Collapse excerpt text",
+    "折叠摘录正文"
+  ],
+  "拟合上限 / °": [
+    "Upper fitting angle / °",
+    "拟合上限 / °"
+  ],
+  "拟合下限 / °": [
+    "Lower fitting angle / °",
+    "拟合下限 / °"
+  ],
+  "排版中…": [
+    "Arranging…",
+    "排版中…"
+  ],
+  "摘录": [
+    "Excerpt",
+    "摘录"
+  ],
+  "摘录标题": [
+    "Excerpt title",
+    "摘录标题"
+  ],
+  "收起为堆叠": [
+    "Collapse to stack",
+    "收起为堆叠"
+  ],
+  "收起为数字节点": [
+    "Collapse to count node",
+    "收起为数字节点"
+  ],
+  "收起目录与批注": [
+    "Collapse contents and annotations",
+    "收起目录与批注"
+  ],
+  "文件最大 8 MiB": [
+    "Files must not exceed 8 MiB",
+    "文件最大 8 MiB"
+  ],
+  "无法读取 DeepL 配置": [
+    "Could not load DeepL settings",
+    "无法读取 DeepL 配置"
+  ],
+  "日志会给出结果目录、R 因子及 stop_flag；达到迭代上限不等于收敛。": [
+    "Logs include the output directory, R factors, and stop_flag. Reaching the iteration limit does not mean convergence.",
+    "日志会给出结果目录、R 因子及 stop_flag；达到迭代上限不等于收敛。"
+  ],
+  "暂无批注": [
+    "No annotations yet",
+    "暂无批注"
+  ],
+  "最大迭代": [
+    "Maximum iterations",
+    "最大迭代"
+  ],
+  "标题": [
+    "Title",
+    "标题"
+  ],
+  "标题栏预设颜色": [
+    "Preset title bar colors",
+    "标题栏预设颜色"
+  ],
+  "标题栏颜色": [
+    "Title bar color",
+    "标题栏颜色"
+  ],
+  "框选截图": [
+    "Capture a region",
+    "框选截图"
+  ],
+  "此节点尚未导入 PDF。": [
+    "No PDF has been imported into this node.",
+    "此节点尚未导入 PDF。"
+  ],
+  "每个 PDF 最大 25 MiB": [
+    "Each PDF must not exceed 25 MiB",
+    "每个 PDF 最大 25 MiB"
+  ],
+  "波长 / Å": [
+    "Wavelength / Å",
+    "波长 / Å"
+  ],
+  "添加到学习": [
+    "Add to study",
+    "添加到学习"
+  ],
+  "添加图片": [
+    "Add image",
+    "添加图片"
+  ],
+  "点击保存，将译文和批注一起归档。": [
+    "Click Save to archive the translation with the annotation.",
+    "点击保存，将译文和批注一起归档。"
+  ],
+  "点击改名，Enter 保存": [
+    "Click to rename; Enter to save",
+    "点击改名，Enter 保存"
+  ],
+  "点击空白画布放置图钉 · 按 1–9 跳转 · Esc 收起": [
+    "Click empty canvas to place a pin · Press 1–9 to jump · Esc to close",
+    "点击空白画布放置图钉 · 按 1–9 跳转 · Esc 收起"
+  ],
+  "点击编辑标题，Enter 保存": [
+    "Click to edit title; Enter to save",
+    "点击编辑标题，Enter 保存"
+  ],
+  "画布工具": [
+    "Canvas tools",
+    "画布工具"
+  ],
+  "目录与批注": [
+    "Contents and annotations",
+    "目录与批注"
+  ],
+  "目录（": [
+    "Contents (",
+    "目录（"
+  ],
+  "目标语言": [
+    "Target language",
+    "目标语言"
+  ],
+  "移出成员": [
+    "Remove members",
+    "移出成员"
+  ],
+  "第": [
+    "Page",
+    "第"
+  ],
+  "红色": [
+    "Red",
+    "红色"
+  ],
+  "结果较大，请从运行日志中的本地目录读取。": [
+    "Results are large. Open the local directory listed in the run log.",
+    "结果较大，请从运行日志中的本地目录读取。"
+  ],
+  "结果：": [
+    "Results:",
+    "结果："
+  ],
+  "绿色": [
+    "Green",
+    "绿色"
+  ],
+  "编辑": [
+    "Edit",
+    "编辑"
+  ],
+  "编辑摘录": [
+    "Edit excerpt",
+    "编辑摘录"
+  ],
+  "缝合的连接 · 点击设置": [
+    "Joined connection · Click to configure",
+    "缝合的连接 · 点击设置"
+  ],
+  "翻译中…": [
+    "Translating…",
+    "翻译中…"
+  ],
+  "翻译服务": [
+    "Translation service",
+    "翻译服务"
+  ],
+  "翻译模型": [
+    "Translation model",
+    "翻译模型"
+  ],
+  "翻译选段": [
+    "Translate selection",
+    "翻译选段"
+  ],
+  "自动排版": [
+    "Auto arrange",
+    "自动排版"
+  ],
+  "蓝色": [
+    "Blue",
+    "蓝色"
+  ],
+  "解除粘连": [
+    "Detach glue",
+    "解除粘连"
+  ],
+  "论文封面快照": [
+    "Paper cover snapshot",
+    "论文封面快照"
+  ],
+  "请先启用 Library 插件": [
+    "Enable the Library plugin first",
+    "请先启用 Library 插件"
+  ],
+  "请求失败": [
+    "Request failed",
+    "请求失败"
+  ],
+  "请选择 PDF 文件": [
+    "Please select a PDF file",
+    "请选择 PDF 文件"
+  ],
+  "读取文件": [
+    "Reading file",
+    "读取文件"
+  ],
+  "调色盘": [
+    "Color palette",
+    "调色盘"
+  ],
+  "输入 DeepL Free 密钥": [
+    "Enter DeepL Free key",
+    "输入 DeepL Free 密钥"
+  ],
+  "返回文章": [
+    "Back to paper",
+    "返回文章"
+  ],
+  "返回窗口": [
+    "Back to window",
+    "返回窗口"
+  ],
+  "还没有图钉，点击画布记录第一个位置。": [
+    "No pins yet. Click the canvas to save your first location.",
+    "还没有图钉，点击画布记录第一个位置。"
+  ],
+  "连接 Agent": [
+    "Connected agents",
+    "已连接智能体"
+  ],
+  "连接配置：返回窗口后，打开 OAW 设置 → Models / DeepL。此处修改不影响 Agent 的模型选择。": [
+    "To configure connections, return to the window and open OAW settings → Models / DeepL. Changes here do not affect Agent model selection.",
+    "连接配置：返回窗口后，打开 OAW 设置 → 模型 / DeepL。此处修改不影响智能体的模型选择。"
+  ],
+  "连续滚动": [
+    "Continuous scrolling",
+    "连续滚动"
+  ],
+  "适应窗口": [
+    "Fit to window",
+    "适应窗口"
+  ],
+  "重试": [
+    "Retry",
+    "重试"
+  ],
+  "页": [
+    "pages",
+    "页"
+  ],
+  "页 ·": [
+    "pages ·",
+    "页 ·"
+  ],
+  "页 · 定位": [
+    "· Locate",
+    "页 · 定位"
+  ],
+  "页 · 封面快照": [
+    "pages · Cover snapshot",
+    "页 · 封面快照"
+  ],
+  "黄色": [
+    "Yellow",
+    "黄色"
+  ],
+  "默认": [
+    "Default",
+    "默认"
+  ],
+  "紫色": [
+    "Purple",
+    "紫色"
+  ],
+  "PDF 上传进度": [
+    "PDF upload progress",
+    "PDF 上传进度"
+  ],
+  "Library 翻译使用此连接；与 Agent 模型密钥独立保存。": [
+    "Library translation uses this connection, stored separately from Agent model keys.",
+    "图书馆翻译使用此连接，与智能体模型密钥分开保存。"
+  ],
+  "Library 设置": [
+    "Library settings",
+    "图书馆设置"
+  ],
+  "OAW 模型连接": [
+    "OAW model connection",
+    "OAW 模型连接"
+  ],
+  "PyWPEM · 候选 CIF 全谱拟合。下方 Run / Stop 使用 OAW 的运行管理。": [
+    "PyWPEM · Whole-pattern fitting of candidate CIF structures. Run / Stop below uses OAW run management.",
+    "PyWPEM · 候选 CIF 全谱拟合。下方运行 / 停止按钮使用 OAW 的运行管理。"
+  ],
+  "PDF 上传连接中断": [
+    "PDF upload connection interrupted",
+    "PDF 上传连接中断"
+  ],
+  "PDF 上传已取消": [
+    "PDF upload cancelled",
+    "PDF 上传已取消"
+  ],
+  "PDF 加载未完成，请重试或返回窗口。": [
+    "PDF loading did not finish. Retry or return to the window.",
+    "PDF 加载未完成，请重试或返回窗口。"
+  ],
+  "删除 {v0}": [
+    "Delete {v0}",
+    "删除 {v0}"
+  ],
+  "图钉 {v0}": [
+    "Pin {v0}",
+    "图钉 {v0}"
+  ],
+  "图钉 {v0} 名称": [
+    "Pin {v0} name",
+    "图钉 {v0} 名称"
+  ],
+  "展开集合 · {v0}": [
+    "Expand collection · {v0}",
+    "展开集合 · {v0}"
+  ],
+  "已导入 {v0} 篇 PDF": [
+    "Imported {v0} PDFs",
+    "已导入 {v0} 篇 PDF"
+  ],
+  "已导入 {v0} 篇；{v1}": [
+    "Imported {v0}; {v1}",
+    "已导入 {v0} 篇；{v1}"
+  ],
+  "打开连接设置：{v0}": [
+    "Open connection settings: {v0}",
+    "打开连接设置：{v0}"
+  ],
+  "文章": [
+    "Paper",
+    "文章"
+  ],
+  "正在导入 {v0}": [
+    "Importing {v0}",
+    "正在导入 {v0}"
+  ],
+  "缩放 {v0} {v1}": [
+    "Resize {v0} {v1}",
+    "缩放 {v0} {v1}"
+  ],
+  "跳转至 {v0}": [
+    "Jump to {v0}",
+    "跳转至 {v0}"
+  ],
+  "XRD 自动拟合": [
+    "XRD automatic fitting",
+    "XRD 自动拟合"
+  ],
+  "Anthropic": [
+    "Anthropic",
+    "Anthropic"
+  ],
+  "Anthropic Messages": [
+    "Anthropic Messages",
+    "Anthropic Messages"
+  ],
+  "Google Gemini": [
+    "Google Gemini",
+    "Google Gemini"
+  ],
+  "OpenAI": [
+    "OpenAI",
+    "OpenAI"
+  ],
+  "DeepL": [
+    "DeepL",
+    "DeepL"
+  ],
+  "DeepL Free": [
+    "DeepL Free",
+    "DeepL Free"
+  ],
+  "JSON": [
+    "JSON",
+    "JSON"
+  ],
+  "PDF": [
+    "PDF",
+    "PDF"
+  ],
+  "SHA-256": [
+    "SHA-256",
+    "SHA-256"
+  ],
+  "KiB": [
+    "KiB",
+    "KiB"
+  ],
+  "PNG, JPEG, GIF or WebP": [
+    "PNG, JPEG, GIF or WebP",
+    "PNG, JPEG, GIF or WebP"
+  ],
+  "Open Agent World": [
+    "Open Agent World",
+    "Open Agent World"
+  ],
+  "OPEN AGENT": [
+    "OPEN AGENT",
+    "OPEN AGENT"
+  ],
+  "DeepL Free API key": [
+    "DeepL Free API key",
+    "DeepL Free API 密钥"
+  ],
+  "\n尚未达到收敛判据": [
+    "\nConvergence criteria not met",
+    "\n尚未达到收敛判据"
+  ],
+  "\n达到收敛判据": [
+    "\nConvergence criteria met",
+    "\n达到收敛判据"
+  ],
+  " (not installed)": [
+    " (not installed)",
+    "（未安装）"
+  ],
+  " (unavailable)": [
+    " (unavailable)",
+    "（不可用）"
+  ],
+  "(not installed)": [
+    "(not installed)",
+    "（未安装）"
+  ]
+}

@@ -1,3 +1,4 @@
+import { t } from "@oaw/plugin-api";
 import {useCallback,useEffect,useRef,useState} from "react";
 import {READER_TRANSITION} from "./readerTransition";
 export type EntrancePhase="spreading"|"waiting"|"revealing"|"complete"|"concealing"|"retracting"|"failed"|"cancelled";
@@ -43,7 +44,7 @@ export function useReaderEntrance() {
       if(ready.current)beginReveal();else change("waiting");
     },reduced?0:READER_TRANSITION.spreadMs));
     // A stalled renderer is a recoverable failure, never fake readiness.
-    timers.current.push(setTimeout(()=>{if(["spreading","waiting"].includes(phaseRef.current))fail("PDF 加载未完成，请重试或返回窗口。");},READER_TRANSITION.failureMs));
+    timers.current.push(setTimeout(()=>{if(["spreading","waiting"].includes(phaseRef.current))fail(t("PDF 加载未完成，请重试或返回窗口。"));},READER_TRANSITION.failureMs));
     return()=>{alive.current=false;cancelAnimationFrame(first);cancelAnimationFrame(second);timers.current.forEach(clearTimeout);};
   },[beginReveal,change,fail,reduced]);
   return {phase,mountReader,failure,reduced,markReady,invalidate,fail,finish,cancel};

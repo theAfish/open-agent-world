@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import { Bot, Box, FileText, X } from "lucide-react";
 import { memo, useEffect, useId, useRef, useMemo } from "react";
@@ -10,6 +11,7 @@ import "./shadowCollection.css";
 import { ShadowGasBoundary } from "../effects/ShadowGasBoundary";
 
 function ShadowCollectionComponent({data,selected}:NodeProps<CanvasNode>) {
+  useLocale();
   const card=data.card;
   const cards=useWorldStore(s=>s.cards),catalog=useWorldStore(s=>s.catalog);
   const surfaces=useNodeSurfaceStore(s=>s.surfaceLevels);
@@ -42,7 +44,7 @@ function ShadowCollectionComponent({data,selected}:NodeProps<CanvasNode>) {
     lastCount.current=members.length;
   },[members.length,state,card.id,card.config,update,syncing]);
   const advance=()=>void update(card.id,{config:{...card.config,display_state:state==="minimal"?"stacked":"expanded"}});
-  return <section className={`shadow-collection container-frame ${selected?"is-selected":""} ${releasing?"is-releasing":""}`} data-card-id={card.id} data-card-type={card.type} data-state={state} aria-label={`${card.name} collection`} style={{width,height,transform:live&&origin?`translate(${rect.x-origin.x}px,${rect.y-origin.y}px)`:undefined}}>
+  return <section className={`shadow-collection container-frame ${selected?"is-selected":""} ${releasing?"is-releasing":""}`} data-card-id={card.id} data-card-type={card.type} data-state={state} aria-label={t("{v0} collection", { v0: String(card.name) })} style={{width,height,transform:live&&origin?`translate(${rect.x-origin.x}px,${rect.y-origin.y}px)`:undefined}}>
     <svg className="shadow-silhouette" width={width} height={height} style={{overflow:"visible"}} aria-hidden="true">
       <defs><filter id={`feather-${id}`} x="-30%" y="-30%" width="160%" height="160%">
         <feGaussianBlur stdDeviation={SHADOW.feather}/>
@@ -53,18 +55,18 @@ function ShadowCollectionComponent({data,selected}:NodeProps<CanvasNode>) {
         onPointerDown={e=>{pointer.current={x:e.clientX,y:e.clientY};}}
         onClick={e=>{if(pointer.current&&Math.hypot(e.clientX-pointer.current.x,e.clientY-pointer.current.y)<5&&state!=="expanded")advance();pointer.current=undefined;}} />
     </svg>
-    <div className="shadow-counts container-drag-region" role={state==="minimal"?"button":undefined} tabIndex={state==="minimal"?0:undefined} aria-label={state==="minimal"?"展开集合堆叠":undefined}
+    <div className="shadow-counts container-drag-region" role={state==="minimal"?"button":undefined} tabIndex={state==="minimal"?0:undefined} aria-label={state==="minimal"?t("展开集合堆叠"):undefined}
       onPointerDown={e=>{pointer.current={x:e.clientX,y:e.clientY};}}
       onClick={e=>{if(state!=="expanded"&&pointer.current&&Math.hypot(e.clientX-pointer.current.x,e.clientY-pointer.current.y)<5)advance();}}
       onKeyDown={e=>{if((e.key==="Enter"||e.key===" ")&&state!=="expanded"){e.preventDefault();advance();}}}>
-      <span title="PDF"><FileText size={17}/>{counts.pdf}</span>
-      {state!=="minimal"&&<span title="Other objects"><Box size={17}/>{counts.object}</span>}
-      <span title="Agents"><Bot size={17}/>{counts.agent}</span>
+      <span title={t("PDF")}><FileText size={17}/>{counts.pdf}</span>
+      {state!=="minimal"&&<span title={t("Other objects")}><Box size={17}/>{counts.object}</span>}
+      <span title={t("Agents")}><Bot size={17}/>{counts.agent}</span>
     </div>
-    {state!=="minimal"&&<button className="shadow-close nodrag nopan" aria-label={state==="expanded"?"收起为堆叠":"收起为数字节点"} onClick={e=>{e.stopPropagation();void update(card.id,{config:{...card.config,display_state:state==="expanded"?"stacked":"minimal"}});}}><X size={19}/></button>}
+    {state!=="minimal"&&<button className="shadow-close nodrag nopan" aria-label={state==="expanded"?t("收起为堆叠"):t("收起为数字节点")} onClick={e=>{e.stopPropagation();void update(card.id,{config:{...card.config,display_state:state==="expanded"?"stacked":"minimal"}});}}><X size={19}/></button>}
     {state==="stacked"&&<div className={`shadow-title ${title?"is-visible":""}`}>{title}</div>}
     {state==="expanded"&&<div className="shadow-actions nodrag nopan"><AddSelectedMembers card={card}/><ContainerActions card={card} releaseMode={{active:releasing,toggle:()=>useCollectionRelease.getState().set(card.id,!releasing)}}/></div>}
-    {([[Position.Top,"top",72],[Position.Right,"right",0],[Position.Bottom,"bottom",24],[Position.Left,"left",48]] as const).map(([position,side,index])=><Handle key={side} type="source" id={`boundary-${side}`} position={position} style={{left:points[index].x,top:points[index].y,right:"auto",bottom:"auto",transform:"translate(-50%,-50%)"}} className="shadow-port nodrag" data-connection-side={side} aria-label={`Connect ${card.name} ${side}`}/>)}
+    {([[Position.Top,"top",72],[Position.Right,"right",0],[Position.Bottom,"bottom",24],[Position.Left,"left",48]] as const).map(([position,side,index])=><Handle key={side} type="source" id={`boundary-${side}`} position={position} style={{left:points[index].x,top:points[index].y,right:"auto",bottom:"auto",transform:"translate(-50%,-50%)"}} className="shadow-port nodrag" data-connection-side={side} aria-label={t("Connect {v0} {v1}", { v0: String(card.name), v1: String(side) })}/>)}
   </section>;
 }
 // React Flow moves the wrapper; translation does not change the local silhouette.

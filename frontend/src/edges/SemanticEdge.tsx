@@ -1,3 +1,4 @@
+import { t, useLocale } from '../i18n';
 import {
   BaseEdge,
   useInternalNode,
@@ -37,6 +38,7 @@ export function SemanticEdge({
   selected,
   data,
 }: EdgeProps<CanvasEdge>) {
+  useLocale();
   const catalog = useWorldStore((state) => state.catalog);
   const sourceNode = useInternalNode<CanvasNode>(source);
   const targetNode = useInternalNode<CanvasNode>(target);
@@ -108,10 +110,10 @@ export function SemanticEdge({
         <div
           className={`semantic-edge-label ${selected ? "is-selected" : ""}`}
           style={{ transform: `translate(-50%, -50%) translate(${geometry.labelX}px, ${geometry.labelY}px)`,opacity:data?.fading?0:1,transition:"opacity 400ms ease",pointerEvents:data?.fading?"none":undefined }}
-          title={option.description}
+          title={t(option.description)}
         >
           <span aria-hidden="true" />
-          {option.shortLabel}
+          {t(option.shortLabel)}
         </div>
       </EdgeLabelRenderer>
     </>

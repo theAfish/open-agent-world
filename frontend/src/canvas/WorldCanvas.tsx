@@ -1,10 +1,10 @@
+import { t, useLocale } from "../i18n";
 import { GlueLayer } from "./GlueLayer";
 import { reportInteraction } from "../state/interactions";
 import { findGlue, glueGroup, reflowGlueSurfaces, refreshGlue, beginGlueEdit, cancelGlueRefresh, persistGlue, useGlueStore, type GlueBox, type GlueCandidate } from "../state/glue";
 import { MapAtlas } from "./MapAtlas";
+import { WorldBackground } from './WorldBackground';
 import {
-  Background,
-  BackgroundVariant,
   ConnectionMode,
   Controls,
   MarkerType,
@@ -100,6 +100,7 @@ function nodeFromCard(
 }
 
 export function WorldCanvas() {
+  useLocale();
   const [pinToolActive, setPinToolActive] = useState(false);
   const [glueActive, setGlueActive] = useState(false);
   const [gluePreview, setGluePreview] = useState<GlueCandidate>();
@@ -133,7 +134,7 @@ export function WorldCanvas() {
   useEffect(() => {
     if (dragging || activeGlueEdits) return;
     const timer = window.setTimeout(() => void refreshGlue(true).catch(reason =>
-      useWorldStore.getState().pushToast({ tone: 'error', title: 'Glue could not synchronize', detail: apiErrorMessage(reason) })), 120);
+      useWorldStore.getState().pushToast({ tone: 'error', title: t("Glue could not synchronize"), detail: apiErrorMessage(reason) })), 120);
     return () => window.clearTimeout(timer);
   }, [glueEvent, glueSocket, dragging, activeGlueEdits]);
   const closeInspector = useNodeSurfaceStore((state) => state.closeInspector);
@@ -176,7 +177,7 @@ export function WorldCanvas() {
     useGlueStore.getState().setLayout(glueBoxes);
     void updateCardPositions(Object.entries(glueBoxes).filter(([id, box]) => box !== storedGlueBoxes[id]).map(([id, box]) => ({
       id, position: nodePositionFromSurfacePosition(box, box.level),
-    }))).then(() => persistGlue()).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: 'Glue layout needs a retry', detail: apiErrorMessage(reason) })).finally(endEdit);
+    }))).then(() => persistGlue()).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: t("Glue layout needs a retry"), detail: apiErrorMessage(reason) })).finally(endEdit);
   }, [glueBoxes, storedGlueBoxes, updateCardPositions]);
   const surfaceObstacles = useMemo<SurfaceObstacle[]>(() => renderCards.flatMap<SurfaceObstacle>((card) => {
     if (isContainer(card, catalog) || card.parent_id || card.equipment) return [];
@@ -680,7 +681,7 @@ export function WorldCanvas() {
       glueDrag.current = undefined;
       setGluePreview(undefined);
       void updateCardPositions(Object.entries(layout).map(([id, b]) => ({ id, position: nodePositionFromSurfacePosition(b, b.level) })))
-        .then(() => persistGlue()).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: 'Glue layout needs a retry', detail: apiErrorMessage(reason) })).finally(() => {
+        .then(() => persistGlue()).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: t("Glue layout needs a retry"), detail: apiErrorMessage(reason) })).finally(() => {
         activeDragIds.current.clear(); setDragging(false);
       });
       return;
@@ -779,7 +780,7 @@ export function WorldCanvas() {
     if(event.dataTransfer.files.length){
       const files=Array.from(event.dataTransfer.files).filter(f=>/\.pdf$/i.test(f.name));
       if(!files.length||importingPdf.current)return;
-      if(!getNodeType(catalog,"library.paper")){setImportStatus("请先启用 Library 插件");return;}
+      if(!getNodeType(catalog,"library.paper")){setImportStatus(t("请先启用 Library 插件"));return;}
       const position=screenToFlowPosition({x:event.clientX,y:event.clientY});
       const parent=dropContainer(cards,{id:"",type:"library.paper"} as typeof cards[number],position,catalog);
       importingPdf.current=true;
@@ -792,8 +793,8 @@ export function WorldCanvas() {
             useWorldStore.getState().acceptImportedCard(card);
             completed++;
           }
-          setImportStatus(`已导入 ${completed} 篇 PDF`);
-        } catch(e) { setImportStatus(`已导入 ${completed} 篇；${String(e)}`); }
+          setImportStatus(t("已导入 {v0} 篇 PDF", { v0: String(completed) }));
+        } catch(e) { setImportStatus(t("已导入 {v0} 篇；{v1}", { v0: String(completed), v1: String(String(e)) })); }
         finally { importingPdf.current=false;setImportProgress(undefined); }
       })();
       return;
@@ -813,7 +814,7 @@ export function WorldCanvas() {
             const target = await worldApi.getNodeDocument(transformation.target.id);
             const request = { source_type: payload.type, expected_revision: target.revision };
             const preview = await worldApi.transformDocument(transformation.target.id, transformation.option[0], request);
-            if (window.confirm(`${String(preview.label)} "${definition.label}" into "${transformation.target.name}"?`)) {
+            if (window.confirm(t("{v0} \"{v1}\" into \"{v2}\"?", { v0: String(String(preview.label)), v1: String(definition.label), v2: String(transformation.target.name) }))) {
               await worldApi.transformDocument(transformation.target.id, transformation.option[0], { ...request, confirm: true });
               await useWorldStore.getState().refreshWorld();
             }
@@ -863,7 +864,7 @@ export function WorldCanvas() {
       }}
       onDrop={onDrop}
       onDragOver={(event) => {
-        if (!hasPaletteDrag(event.dataTransfer)&&!event.dataTransfer.types.includes("Files")) return;
+        if (!hasPaletteDrag(event.dataTransfer)&&!event.dataTransfer.types.includes(t("Files"))) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "copy";
         const resource = useEquipmentDrag.getState().resource;
@@ -878,6 +879,7 @@ export function WorldCanvas() {
       {importStatus&&<PdfImportIndicator status={importStatus} progress={importProgress} onDismiss={()=>setImportStatus("")} />}
       <ReactFlow<CanvasNode, CanvasEdge>
         id="oaw-world-map"
+        ariaLabelConfig={{ 'controls.zoomIn.ariaLabel': t('Zoom in'), 'controls.zoomOut.ariaLabel': t('Zoom out'), 'controls.fitView.ariaLabel': t('Fit view'), 'minimap.ariaLabel': t('Nearby canvas · drag to pan') }}
         nodes={nodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}
@@ -908,7 +910,7 @@ export function WorldCanvas() {
         onPaneClick={(event) => {
           if (pinToolActive) {
             const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-            useWorldStore.setState(state => ({ mapPins: [...state.mapPins, { id: crypto.randomUUID(), name: `图钉 ${state.mapPins.length + 1}`, ...point, zoom: getViewport().zoom }] }));
+            useWorldStore.setState(state => ({ mapPins: [...state.mapPins, { id: crypto.randomUUID(), name: t("图钉 {v0}", { v0: String(state.mapPins.length + 1) }), ...point, zoom: getViewport().zoom }] }));
             return;
           }
           selectEdge(undefined);
@@ -927,26 +929,21 @@ export function WorldCanvas() {
         edgesFocusable
         elevateNodesOnSelect={false}
         proOptions={{ hideAttribution: true }}
-        aria-label="Open Agent World spatial canvas"
+        aria-label={t("Open Agent World spatial canvas")}
       >
         <ContourLayer />
         <GlueLayer nodes={nodes} preview={gluePreview} />
         <GenerationLayer />
         {nodes.filter((node) => node.data.equipmentDetail && !node.hidden).map((node) =>
           <SurfaceBridge key={node.id} sourceId={equipmentOriginId(node.id)} targetId={node.id} />)}
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={24}
-          size={1.15}
-          color="var(--grid-dot)"
-        />
+        <WorldBackground />
         <LocalMiniMap />
         <MapAtlas active={pinToolActive} onActiveChange={active => { setPinToolActive(active); if (active) setGlueActive(false); }} glueActive={glueActive} onGlueChange={active => { setGlueActive(active); if (active) setPinToolActive(false); }} />
         <Controls
           className="world-controls"
           position="bottom-right"
           showInteractive={false}
-          aria-label="Canvas zoom controls"
+          aria-label={t("Canvas zoom controls")}
         />
       </ReactFlow>
       <EdgeInspector />

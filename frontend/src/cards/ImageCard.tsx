@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { ImagePlus, UploadCloud } from "lucide-react";
 import { useId, useState } from "react";
 import { useWorldStore } from "../state/worldStore";
@@ -6,13 +7,14 @@ import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { RelationshipList } from "./CardUtilities";
 
 function formatBytes(bytes: unknown): string {
-  if (typeof bytes !== "number" || !Number.isFinite(bytes)) return "No file imported";
+  if (typeof bytes !== "number" || !Number.isFinite(bytes)) return t("No file imported");
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function ImageCardBody({ card }: { card: WorldCard; level: NodeSurfaceLevel }) {
+  useLocale();
   const inputId = useId();
   const uploadImage = useWorldStore((state) => state.uploadImage);
   const [uploading, setUploading] = useState(false);
@@ -28,12 +30,12 @@ export function ImageCardBody({ card }: { card: WorldCard; level: NodeSurfaceLev
   };
 
   const preview = previewUrl ? (
-    <img src={previewUrl} alt={`Preview of ${filename}`} draggable={false} />
+    <img src={previewUrl} alt={t("Preview of {v0}", { v0: String(filename) })} draggable={false} />
   ) : (
-    <div className="image-placeholder" aria-label="No image imported">
+    <div className="image-placeholder" aria-label={t("No image imported")}>
       <span><ImagePlus size={26} /></span>
       <i /><i /><i />
-      <small>Awaiting image</small>
+      <small>{t("Awaiting image")}</small>
     </div>
   );
 
@@ -41,25 +43,25 @@ export function ImageCardBody({ card }: { card: WorldCard; level: NodeSurfaceLev
     <div className="expanded-stack">
       <div className="image-preview-expanded">{preview}</div>
       <div className="image-metadata-grid">
-        <div><span>Filename</span><strong title={filename}>{filename}</strong></div>
-        <div><span>Dimensions</span><strong>{card.config.image_width && card.config.image_height
+        <div><span>{t("Filename")}</span><strong title={filename}>{filename}</strong></div>
+        <div><span>{t("Dimensions")}</span><strong>{card.config.image_width && card.config.image_height
           ? `${card.config.image_width} × ${card.config.image_height}`
-          : "Not available"}</strong></div>
-        <div><span>Format</span><strong>{String(card.config.mime_type ?? "Unknown")}</strong></div>
-        <div><span>Size</span><strong>{formatBytes(card.config.bytes)}</strong></div>
+          : t("Not available")}</strong></div>
+        <div><span>{t("Format")}</span><strong>{String(card.config.mime_type ?? t("Unknown"))}</strong></div>
+        <div><span>{t("Size")}</span><strong>{formatBytes(card.config.bytes)}</strong></div>
       </div>
 
       {imported ? (
         <div className="upload-zone upload-zone--locked">
           <UploadCloud size={17} />
-          <span>Managed image imported</span>
-          <small>Image resources are immutable in this POC. Create a new Image card to import another file.</small>
+          <span>{t("Managed image imported")}</span>
+          <small>{t("Image resources are immutable in this POC. Create a new Image card to import another file.")}</small>
         </div>
       ) : (
         <label htmlFor={inputId} className={`upload-zone ${uploading ? "is-uploading" : ""}`}>
           <UploadCloud size={17} />
-          <span>{uploading ? "Importing managed copy…" : "Import image"}</span>
-          <small>PNG, JPEG, GIF or WebP</small>
+          <span>{uploading ? t("Importing managed copy…") : t("Import image")}</span>
+          <small>{t("PNG, JPEG, GIF or WebP")}</small>
           <input
             id={inputId}
             type="file"
@@ -74,7 +76,7 @@ export function ImageCardBody({ card }: { card: WorldCard; level: NodeSurfaceLev
       )}
 
       <section className="card-section">
-        <div className="section-heading"><span>Relationships</span><small>read-only resource</small></div>
+        <div className="section-heading"><span>{t("Relationships")}</span><small>{t("read-only resource")}</small></div>
         <RelationshipList card={card} />
       </section>
     </div>

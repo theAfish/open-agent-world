@@ -1,3 +1,4 @@
+import { t, useLocale } from "@oaw/plugin-api";
 import { useEffect, useState } from "react";
 import type { Annotation } from "./PdfReading";
 
@@ -7,6 +8,7 @@ const TITLE_COLORS = [
 ] as const;
 
 export function StudyCardContent({item,save}:{item:Annotation;save:(item:Annotation)=>Promise<void>}) {
+  useLocale();
   const [title,setTitle]=useState(item.title??"");
   const color=item.title_color??"#36423b";
   const [paletteOpen,setPaletteOpen]=useState(false);
@@ -21,15 +23,15 @@ export function StudyCardContent({item,save}:{item:Annotation;save:(item:Annotat
   const ink=rgb[0]*.299+rgb[1]*.587+rgb[2]*.114>150?"#17211c":"#ffffff";
   return <>
     <header className="library-study-card-heading" style={{background:color,color:ink}}>
-      <button aria-label={item.collapsed?"展开摘录正文":"折叠摘录正文"} aria-expanded={!item.collapsed} disabled={busy} onClick={()=>void update({collapsed:!item.collapsed})}>{item.collapsed?"▸":"▾"}</button>
-      <input aria-label="摘录标题" title="点击编辑标题，Enter 保存" placeholder="摘录" maxLength={300} value={title} disabled={busy} onChange={e=>setTitle(e.target.value)} onBlur={()=>{if(title!==(item.title??""))void update({title:title.trim()});}} onKeyDown={e=>{if(e.key==="Enter"&&!e.nativeEvent.isComposing)e.currentTarget.blur();}}/>
-      <button className="library-title-color-trigger" aria-label="标题栏颜色" title="标题栏颜色" aria-expanded={paletteOpen} disabled={busy} onClick={()=>setPaletteOpen(v=>!v)}>◉</button>
+      <button aria-label={item.collapsed?t("展开摘录正文"):t("折叠摘录正文")} aria-expanded={!item.collapsed} disabled={busy} onClick={()=>void update({collapsed:!item.collapsed})}>{item.collapsed?"▸":"▾"}</button>
+      <input aria-label={t("摘录标题")} title={t("点击编辑标题，Enter 保存")} placeholder={t("摘录")} maxLength={300} value={title} disabled={busy} onChange={e=>setTitle(e.target.value)} onBlur={()=>{if(title!==(item.title??""))void update({title:title.trim()});}} onKeyDown={e=>{if(e.key==="Enter"&&!e.nativeEvent.isComposing)e.currentTarget.blur();}}/>
+      <button className="library-title-color-trigger" aria-label={t("标题栏颜色")} title={t("标题栏颜色")} aria-expanded={paletteOpen} disabled={busy} onClick={()=>setPaletteOpen(v=>!v)}>◉</button>
     </header>
-    {paletteOpen&&<div className="library-title-palette" role="group" aria-label="标题栏预设颜色">
-      {TITLE_COLORS.map(([name,value])=><button key={value} title={name} aria-label={name} aria-pressed={color===value} disabled={busy} style={{background:value}} onClick={()=>{void update({title_color:value});setPaletteOpen(false);}}/>)}
+    {paletteOpen&&<div className="library-title-palette" role="group" aria-label={t("标题栏预设颜色")}>
+      {TITLE_COLORS.map(([name,value])=><button key={value} title={t(name)} aria-label={t(name)} aria-pressed={color===value} disabled={busy} style={{background:value}} onClick={()=>{void update({title_color:value});setPaletteOpen(false);}}/>)}
     </div>}
     {!item.collapsed&&(item.image?<img src={item.image} draggable={false}/>:<blockquote>{item.text}</blockquote>)}
     <p>{item.comment}</p>
-    {error&&<small role="alert">保存失败：{error}</small>}
+    {error&&<small role="alert">{t("保存失败：")}{error}</small>}
   </>;
 }

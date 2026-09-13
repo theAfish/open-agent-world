@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { Component, Suspense, useMemo, type ReactNode } from "react";
 import { worldApi, nodeDocumentDownloadUrl } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
@@ -10,13 +11,14 @@ class PluginBoundary extends Component<{ children: ReactNode }, { error: string 
   state: { error: string | null } = { error: null };
   static getDerivedStateFromError(error: unknown) { return { error: error instanceof Error ? error.message : String(error) }; }
   render() {
-    return this.state.error ? <div role="alert" className="mini-empty">Plugin view unavailable: {this.state.error}</div> : this.props.children;
+    return this.state.error ? <div role="alert" className="mini-empty">{t("Plugin view unavailable:")} {this.state.error}</div> : this.props.children;
   }
 }
 
 export function PluginSurface({ card, slot, level, children }: {
   card: WorldCard; slot: PluginSlot; level: PluginViewProps["level"]; children?: ReactNode;
 }) {
+  useLocale();
   const definition = useWorldStore((s) => s.catalog.node_types.find((d) => d.id === card.type));
   const updateCard = useWorldStore((s) => s.updateCard);
   const host = useMemo<PluginViewProps["host"]>(() => ({
@@ -38,7 +40,7 @@ export function PluginSurface({ card, slot, level, children }: {
   if (!reference || !definition) return <>{children}</>;
   const View = pluginView(definition.plugin_id, reference);
   return <PluginBoundary key={`${card.id}:${definition.plugin_id}:${reference}`}>
-    <Suspense fallback={<p role="status">Loading plugin view...</p>}>
+    <Suspense fallback={<p role="status">{t("Loading plugin view...")}</p>}>
       <View card={card} definition={definition} level={level} host={host} />
     </Suspense>
   </PluginBoundary>;

@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { SandboxWorkspace } from "./SandboxWorkspace";
 import { ArtifactCollection } from "./Artifacts";
 import { LifecycleStatus } from "./LifecycleStatus";
@@ -29,6 +30,7 @@ interface WorkspaceSurfaceProps {
 }
 
 function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
+  useLocale();
   const catalog = useWorldStore((state) => state.catalog);
   const closeWorkspace = useNodeSurfaceStore((state) => state.closeWorkspace);
 
@@ -36,17 +38,18 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
     <header className="workspace-titlebar node-drag-region">
       <div className="workspace-app-mark"><CatalogIcon definition={catalog.node_types.find((d) => d.id === card.type)} size={16} /></div>
       <div>
-        <span>{catalog.node_types.find((item) => item.id === card.type)?.label ?? card.type} workspace</span>
+        <span>{catalog.node_types.find((item) => item.id === card.type)?.label ?? card.type} {t("workspace")}</span>
         <strong>{card.name}</strong>
       </div>
       <div className="workspace-window-actions">
-        <IconButton icon={X} size="sm" quiet onClick={() => closeWorkspace(card.id)} label="Close workspace" />
+        <IconButton icon={X} size="sm" quiet onClick={() => closeWorkspace(card.id)} label={t("Close workspace")} />
       </div>
     </header>
   );
 }
 
 function AgentWorkspace({ card }: { card: WorldCard }) {
+  useLocale();
   const catalog = useWorldStore((state) => state.catalog);
   const edges = useWorldStore((state) => state.edges);
   const cards = useWorldStore((state) => state.cards);
@@ -81,8 +84,8 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
 
   return (
     <div className="agent-workspace-grid agent-activity-workspace">
-      <nav className="workspace-session-sidebar" aria-label="Agent conversation history">
-        <div className="workspace-nav-label"><MessageSquare size={11} /> Conversation history</div>
+      <nav className="workspace-session-sidebar" aria-label={t("Agent conversation history")}>
+        <div className="workspace-nav-label"><MessageSquare size={11} /> {t("Conversation history")}</div>
         <div className="conversation-sidebar-scroll">
           {sessions.map((session) => (
             <button
@@ -90,23 +93,23 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
               className={`workspace-session agent-history-session nodrag nopan ${session.id === activeSessionId ? "is-active" : ""}`}
               key={session.id}
               onClick={() => setActiveSessionId(session.id)}
-              aria-label={`Show runtime history for ${session.title}`}
+              aria-label={t("Show runtime history for {v0}", { v0: String(session.title) })}
             >
               <MessageSquare size={13} />
-              <span><strong>{session.title}</strong><small>{session.group_title ?? session.conversation_name ?? cards.find((item) => item.id === session.conversation_id)?.name ?? "Conversation"}</small></span>
+              <span><strong>{session.title}</strong><small>{session.group_title ?? session.conversation_name ?? cards.find((item) => item.id === session.conversation_id)?.name ?? t("Conversation")}</small></span>
             </button>
           ))}
-          {sessions.length === 0 ? <p>{historyError ?? "No Conversation sessions yet."}</p> : null}
+          {sessions.length === 0 ? <p>{historyError ?? t("No Conversation sessions yet.")}</p> : null}
         </div>
         <div className="workspace-agent-state">
           <span data-status={card.status} />
-          <div><strong>{card.status}</strong><small>{String(card.config.model ?? "Default model")}</small></div>
+          <div><strong>{card.status}</strong><small>{String(card.config.model ?? t("Default model"))}</small></div>
         </div>
       </nav>
 
       <main className="agent-run-history">
         <header>
-          <div><strong>Runtime history</strong><span>{activeSessionId ? "Selected session: runs, tools, output, and errors" : "Select a conversation session to inspect activity"}</span></div>
+          <div><strong>{t("Runtime history")}</strong><span>{activeSessionId ? t("Selected session: runs, tools, output, and errors") : t("Select a conversation session to inspect activity")}</span></div>
           <span className="agent-runtime-badge"><Radio size={12} /> {card.status}</span>
         </header>
         <div className="agent-run-timeline">
@@ -115,11 +118,11 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
             <article key={event.id} className={`agent-run-event is-${event.type}`}>
               <span><Clock3 size={12} /></span>
               <div>
-                <header><strong>{event.type.replaceAll("_", " ")}</strong><time>{new Date(event.timestamp).toLocaleTimeString()}</time></header>
-                <p>{String(event.payload.error ?? event.payload.text ?? event.payload.name ?? event.message ?? "No summary provided")}</p>
-                <small>Run {event.run_id?.slice(0, 8) ?? "unscoped"}</small>
+                <header><strong>{event.type.replaceAll("_", " ")}</strong><time>{new Date(event.timestamp).toLocaleTimeString(useLocale.getState().locale)}</time></header>
+                <p>{String(event.payload.error ?? event.payload.text ?? event.payload.name ?? event.message ?? t("No summary provided"))}</p>
+                <small>{t("Run")} {event.run_id?.slice(0, 8) ?? "unscoped"}</small>
                 <details>
-                  <summary>Event data</summary>
+                  <summary>{t("Event data")}</summary>
                   <pre>{JSON.stringify(event.payload, null, 2)}</pre>
                 </details>
               </div>
@@ -127,31 +130,31 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
           )) : (
             <div className="workspace-welcome">
               <span><Bot size={22} /></span>
-              <strong>No runtime activity for this session</strong>
-              <p>{activeSessionId ? "This agent has not emitted a run, tool, or response event for the selected session." : "Select a session to inspect agent activity."}</p>
+              <strong>{t("No runtime activity for this session")}</strong>
+              <p>{activeSessionId ? t("This agent has not emitted a run, tool, or response event for the selected session.") : t("Select a session to inspect agent activity.")}</p>
             </div>
           )}
         </div>
       </main>
 
       <aside className="workspace-context-panel">
-        <header><PanelRight size={13} /><strong>Agent context</strong></header>
+        <header><PanelRight size={13} /><strong>{t("Agent context")}</strong></header>
         <section>
-          <span className="workspace-panel-label">Connected objects</span>
+          <span className="workspace-panel-label">{t("Connected objects")}</span>
           {context.length > 0 ? context.map((item) => (
             <div className="workspace-context-item" key={item.id}>
               <span>{item.type.slice(0, 1).toUpperCase()}</span>
               <div><strong>{item.name}</strong><small>{catalog.node_types.find((definition) => definition.id === item.type)?.label ?? item.type}</small></div>
             </div>
-          )) : <p>No connected context yet.</p>}
+          )) : <p>{t("No connected context yet.")}</p>}
         </section>
         <section>
-          <span className="workspace-panel-label">Agent state</span>
+          <span className="workspace-panel-label">{t("Agent state")}</span>
           <dl>
-            <div><dt>Model</dt><dd>{String(card.config.model ?? "Default")}</dd></div>
-            <div><dt>Status</dt><dd>{card.status}</dd></div>
-            <div><dt>Connections</dt><dd>{context.length}</dd></div>
-            <div><dt>Sessions</dt><dd>{sessions.length}</dd></div>
+            <div><dt>{t("Model")}</dt><dd>{String(card.config.model ?? t("Default"))}</dd></div>
+            <div><dt>{t("Status")}</dt><dd>{card.status}</dd></div>
+            <div><dt>{t("Connections")}</dt><dd>{context.length}</dd></div>
+            <div><dt>{t("Sessions")}</dt><dd>{sessions.length}</dd></div>
           </dl>
         </section>
       </aside>
@@ -160,17 +163,18 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
 }
 
 export function WorkspaceSurface({ card }: WorkspaceSurfaceProps) {
+  useLocale();
   const catalog = useWorldStore((state) => state.catalog);
   const [agentTab, setAgentTab] = useState("activity");
   return (
-    <section className="node-workspace-window" role="dialog" aria-modal="false" aria-label={`${card.name} workspace`} data-workspace-node-id={card.id}>
+    <section className="node-workspace-window" role="dialog" aria-modal="false" aria-label={t("{v0} workspace", { v0: String(card.name) })} data-workspace-node-id={card.id}>
       <WorkspaceTitlebar card={card} />
       <div className="workspace-content">
       <PluginSurface card={card} slot="workspace" level="workspace">
       {catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("core.agent") ? <>
-        <nav className="agent-window-tabs nodrag nopan" role="tablist" aria-label="Agent window">
-          <button role="tab" aria-selected={agentTab === "activity"} onClick={() => setAgentTab("activity")}>Activity</button>
-          <button role="tab" aria-selected={agentTab === "settings"} onClick={() => setAgentTab("settings")}>Settings</button>
+        <nav className="agent-window-tabs nodrag nopan" role="tablist" aria-label={t("Agent window")}>
+          <button role="tab" aria-selected={agentTab === "activity"} onClick={() => setAgentTab("activity")}>{t("Activity")}</button>
+          <button role="tab" aria-selected={agentTab === "settings"} onClick={() => setAgentTab("settings")}>{t("Settings")}</button>
         </nav>
         <div className="agent-window-body">{agentTab === "settings"
           ? <div className="agent-settings-window nodrag nopan nowheel"><AgentCardBody card={card} level="workspace" /></div>
@@ -186,7 +190,7 @@ export function WorkspaceSurface({ card }: WorkspaceSurfaceProps) {
         : catalog.node_types.find((definition) => definition.id === card.type)?.has_execution ? <WorkSourceWorkspace nodeId={card.id} /> : (
           <div className="workspace-welcome">
             <strong>{card.name}</strong>
-            <p>This plugin node exposes a workspace surface. Its frontend module can replace this generic view.</p>
+            <p>{t("This plugin node exposes a workspace surface. Its frontend module can replace this generic view.")}</p>
           </div>
         )}
       </PluginSurface>

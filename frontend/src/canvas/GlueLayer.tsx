@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 ﻿import { useReactFlow } from '@xyflow/react';
 import { useEffect, useRef, type PointerEvent } from 'react';
 import { EdgeLabelRenderer } from './FlowPortal';
@@ -10,6 +11,7 @@ import type { CanvasNode } from '../cards/types';
 import './glue.css';
 
 export function GlueLayer({ nodes, preview }: { nodes: CanvasNode[]; preview?: GlueCandidate }) {
+  useLocale();
   const boxes = useGlueStore(s => s.boxes);
   const bonds = useGlueStore(s => s.bonds);
   const edges = useWorldStore(s => s.edges);
@@ -45,7 +47,7 @@ export function GlueLayer({ nodes, preview }: { nodes: CanvasNode[]; preview?: G
     drag.current = undefined;
     if (cancel) { useGlueStore.getState().setLayout({ [start.id]: start.box }); start.endEdit(); }
     else { const box = useGlueStore.getState().boxes[start.id]; void useWorldStore.getState().updateCardPositions([{ id: start.id, position: nodePositionFromSurfacePosition(box, box.level) }])
-      .then(() => persistGlue()).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: 'Glue resize needs a retry', detail: apiErrorMessage(reason) })).finally(start.endEdit); }
+      .then(() => persistGlue()).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: t("Glue resize needs a retry"), detail: apiErrorMessage(reason) })).finally(start.endEdit); }
   };
   return <EdgeLabelRenderer>
     {bonds.concat(preview ? [preview] : []).map((bond, index) => {
@@ -58,7 +60,7 @@ export function GlueLayer({ nodes, preview }: { nodes: CanvasNode[]; preview?: G
       return <div key={`${bond.a}-${bond.b}-${index}`} className={`glue-seam ${s.vertical ? 'vertical' : 'horizontal'} ${pending ? 'is-preview' : ''}`}
         style={s.vertical ? { left: s.axis - 6, top: s.start + 5, width: 12, height: Math.max(0, s.end - s.start - 10) } : { top: s.axis - 6, left: s.start + 5, height: 12, width: Math.max(0, s.end - s.start - 10) }}>
         {!pending && connected.map(edge => <button key={edge.id} className={`glue-stitch nodrag nopan ${selectedEdge === edge.id ? 'is-selected' : ''}`}
-          aria-label={`打开连接设置：${edge.relationship}`} title="缝合的连接 · 点击设置" onClick={() => useWorldStore.getState().selectEdge(edge.id)}>
+          aria-label={t("打开连接设置：{v0}", { v0: String(edge.relationship) })} title={t("缝合的连接 · 点击设置")} onClick={() => useWorldStore.getState().selectEdge(edge.id)}>
           <svg className="glue-stitch-marks" viewBox={s.vertical ? '0 0 12 56' : '0 0 56 12'} aria-hidden="true">
             <g transform={s.vertical ? undefined : 'translate(56 0) rotate(90)'}>
               <path d="M 2 9 L 10 15 M 2 25 L 10 31 M 2 41 L 10 47" />
@@ -70,12 +72,12 @@ export function GlueLayer({ nodes, preview }: { nodes: CanvasNode[]; preview?: G
     })}
     {nodes.filter(n => n.selected && !n.hidden && boxes[n.id]).flatMap(node => freeCorners(node.id, live, bonds).map(corner => {
       const box = { ...boxes[node.id], ...live[node.id] };
-      return <button key={`${node.id}-${corner}`} className={`glue-resize nodrag nopan ${corner}`} aria-label={`缩放 ${node.data.card.name} ${corner}`}
+      return <button key={`${node.id}-${corner}`} className={`glue-resize nodrag nopan ${corner}`} aria-label={t("缩放 {v0} {v1}", { v0: String(node.data.card.name), v1: String(corner) })}
         style={{ left: box.x + (corner.endsWith('right') ? box.width : 0) - 7, top: box.y + (corner.startsWith('bottom') ? box.height : 0) - 7 }}
         onPointerDown={event => { event.preventDefault(); event.stopPropagation(); const endEdit = beginGlueEdit(); event.currentTarget.setPointerCapture(event.pointerId); drag.current = { id: node.id, corner, x: event.clientX, y: event.clientY, box, endEdit }; }}
         onPointerMove={move} onPointerUp={() => finish()} onPointerCancel={() => finish(true)} onLostPointerCapture={() => finish()} />;
     }))}
     {nodes.filter(n => n.selected && boxes[n.id]).map(node => <button key={`detach-${node.id}`} className="glue-detach nodrag nopan"
-      style={{ left: node.position.x + 10, top: node.position.y - 29 }} onClick={() => { const endEdit = beginGlueEdit(); useGlueStore.getState().detach(node.id); void persistGlue([node.id]).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: 'Could not detach glue', detail: apiErrorMessage(reason) })).finally(endEdit); useNodeSurfaceStore.getState().setDragging(false); }}>解除粘连</button>)}
+      style={{ left: node.position.x + 10, top: node.position.y - 29 }} onClick={() => { const endEdit = beginGlueEdit(); useGlueStore.getState().detach(node.id); void persistGlue([node.id]).catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: t("Could not detach glue"), detail: apiErrorMessage(reason) })).finally(endEdit); useNodeSurfaceStore.getState().setDragging(false); }}>{t("解除粘连")}</button>)}
   </EdgeLabelRenderer>;
 }

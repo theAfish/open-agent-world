@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Play, Square } from "lucide-react";
 import { apiErrorMessage, worldApi } from "../api/client";
@@ -48,21 +49,22 @@ export function NodeExecutionControls({ execution, revision, readyCount, disable
   execution: ReturnType<typeof useNodeExecution>; revision?: number; readyCount: number; disabled?: boolean;
   titleForItem: (id: string) => string;
 }) {
+  useLocale();
   const { state, busy, error, run, stop } = execution;
   const unassigned = state?.items.some((item) => item.ready && !state.executors.some((agent) => agent.id === item.agent_id));
   return <div className="node-execution-controls">
     <div className="task-board-toolbar">
-      <span role="status">{state?.active ? "Running work" : state?.status === "idle" ? "Ready" : state?.status ?? "Loading execution..."}</span>
-      {state?.active ? <button type="button" className="secondary-button" disabled={busy} onClick={() => void stop()}><Square size={13} /> Stop execution</button>
-        : <button type="button" className="primary-button" disabled={busy || disabled || unassigned || revision === undefined || !readyCount || !state?.executors.length} onClick={() => void run(revision!)}><Play size={13} /> Run ready work</button>}
+      <span role="status">{state?.active ? t("Running work") : state?.status === "idle" ? t("Ready") : state?.status ?? t("Loading execution...")}</span>
+      {state?.active ? <button type="button" className="secondary-button" disabled={busy} onClick={() => void stop()}><Square size={13} /> {t("Stop execution")}</button>
+        : <button type="button" className="primary-button" disabled={busy || disabled || unassigned || revision === undefined || !readyCount || !state?.executors.length} onClick={() => void run(revision!)}><Play size={13} /> {t("Run ready work")}</button>}
     </div>
-    {unassigned && !!state?.executors.length && <p className="task-board-help">Assign connected executors to ready work before running.</p>}
+    {unassigned && !!state?.executors.length && <p className="task-board-help">{t("Assign connected executors to ready work before running.")}</p>}
     {(error || state?.error) && <p role="alert" className="task-board-error">{error || state?.error}</p>}
     {state?.attempts.map(attempt => <PublishedReferences key={attempt.run_id ?? attempt.item_id} references={attempt.artifacts} />)}
-    {!!state?.attempts.length && <details className="execution-history"><summary>Execution history ({state.attempts.length})</summary>
+    {!!state?.attempts.length && <details className="execution-history"><summary>{t("Execution history (")}{state.attempts.length})</summary>
       <ol>{state.attempts.slice(-30).reverse().map((attempt, index) => <li key={attempt.run_id ?? index}>
-        <strong>{titleForItem(attempt.item_id)}</strong><span>{attempt.status} · {state.executors.find((agent) => agent.id === attempt.agent_id)?.name ?? "Previous executor"}</span>
-        {attempt.error && <p>{attempt.error}</p>}<small>Run: {attempt.run_id ?? "Admission interrupted"}</small>
+        <strong>{titleForItem(attempt.item_id)}</strong><span>{attempt.status} · {state.executors.find((agent) => agent.id === attempt.agent_id)?.name ?? t("Previous executor")}</span>
+        {attempt.error && <p>{attempt.error}</p>}<small>{t("Run:")} {attempt.run_id ?? t("Admission interrupted")}</small>
       </li>)}</ol>
     </details>}
   </div>;
@@ -70,6 +72,7 @@ export function NodeExecutionControls({ execution, revision, readyCount, disable
 
 /** Baseline workspace for executable plugins without a specialized renderer. */
 export function WorkSourceWorkspace({ nodeId }: { nodeId: string }) {
+  useLocale();
   const [revision, setRevision] = useState<number>();
   const [error, setError] = useState("");
   const reload = useCallback(async () => {
@@ -79,11 +82,11 @@ export function WorkSourceWorkspace({ nodeId }: { nodeId: string }) {
   const execution = useNodeExecution(nodeId, reload);
   useEffect(() => { void reload(); }, [reload, execution.state]);
   return <div className="work-source-workspace">
-    <p>The plugin defines readiness and result acceptance. Connect an executor using this plugin's execution relationship.</p>
+    <p>{t("The plugin defines readiness and result acceptance. Connect an executor using this plugin's execution relationship.")}</p>
     {error && <p role="alert">{error}</p>}
     <NodeExecutionControls execution={execution} revision={revision} readyCount={execution.state?.items.filter((item) => item.ready).length ?? 0} titleForItem={(id) => id} />
-    <ul>{execution.state?.items.map((item) => <li key={item.id}><strong>{item.id}</strong> · {item.ready ? "Ready" : item.retryable ? "Retry available" : "Waiting or complete"}
-      {(item.ready || item.retryable) && <button className="secondary-button" disabled={execution.busy || execution.state?.active || revision === undefined} onClick={() => void execution.run(revision!, item.id)}>{item.retryable ? "Retry" : "Run"}</button>}
+    <ul>{execution.state?.items.map((item) => <li key={item.id}><strong>{item.id}</strong> · {item.ready ? t("Ready") : item.retryable ? t("Retry available") : t("Waiting or complete")}
+      {(item.ready || item.retryable) && <button className="secondary-button" disabled={execution.busy || execution.state?.active || revision === undefined} onClick={() => void execution.run(revision!, item.id)}>{item.retryable ? t("Retry") : t("Run")}</button>}
     </li>)}</ul>
   </div>;
 }

@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { Handle, Position, useInternalNode, useReactFlow, type NodeProps } from "@xyflow/react";
 import { Scan, Settings2 } from "lucide-react";
 import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
@@ -14,6 +15,7 @@ export const MINISTER_TYPE = "core.minister";
 const clampRadius = (value: number) => Math.max(200, Math.min(3000, Math.round(value / 50) * 50));
 
 export const MinisterNode = memo(function MinisterNode({ data, selected }: NodeProps<CanvasNode>) {
+  useLocale();
   const { card } = data;
   const level = useNodeSurfaceStore(s => s.surfaceLevels[card.id]);
   const open = level === "inspector" || level === "workspace";
@@ -40,18 +42,18 @@ export const MinisterNode = memo(function MinisterNode({ data, selected }: NodeP
       id={`boundary-${position}`} type="source" position={position} isConnectable={false}
       style={{ visibility: "hidden", pointerEvents: "none" }} />)}
     <div onPointerEnter={() => setAttention(true)} onFocus={() => setAttention(true)} className="minister-avatar-zone">
-    <div className="minister-orb minister-drag-region" role="button" tabIndex={0} aria-label={`Open Minister ${card.name}`} aria-expanded={attention}
+    <div className="minister-orb minister-drag-region" role="button" tabIndex={0} aria-label={t("Open Minister {v0}", { v0: String(card.name) })} aria-expanded={attention}
       onPointerDown={event => { pointer.current = { x: event.clientX, y: event.clientY }; }}
       onClick={event => {
         if (pointer.current && Math.hypot(event.clientX - pointer.current.x, event.clientY - pointer.current.y) > 5) return;
         if (!event.shiftKey && !event.ctrlKey && !event.metaKey) setAttention(true);
       }} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setAttention(true); } }}>
-      <Scan size={30} strokeWidth={1.35} /><span>Minister</span><i aria-label={card.status} />
+      <Scan size={30} strokeWidth={1.35} /><span>{t("Minister")}</span><i aria-label={card.status} />
     </div>
-    <button type="button" className="minister-manage nodrag nopan" aria-label={`Settings and history for ${card.name}`} onClick={toggle}><Settings2 size={14} /></button>
+    <button type="button" className="minister-manage nodrag nopan" aria-label={t("Settings and history for {v0}", { v0: String(card.name) })} onClick={toggle}><Settings2 size={14} /></button>
     </div>
     <MinisterPresence card={card} active={attention} setActive={setAttention} panelOpen={open} />
-    <button type="button" className="minister-radius-handle nodrag nopan" aria-label={`Resize ${card.name} control radius`} title="Drag to change control radius"
+    <button type="button" className="minister-radius-handle nodrag nopan" aria-label={t("Resize {v0} control radius", { v0: String(card.name) })} title={t("Drag to change control radius")}
       onPointerDown={event => { event.stopPropagation(); resizing.current = true; event.currentTarget.setPointerCapture(event.pointerId); }}
       onPointerMove={event => {
         if (!resizing.current) return;

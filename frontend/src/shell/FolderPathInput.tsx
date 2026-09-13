@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { FolderOpen } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { worldApi } from "../api/client";
@@ -11,6 +12,7 @@ export function FolderPathInput({ value, onChange, disabled, label, describedBy,
   placeholder?: string;
   onPickingChange?: (picking: boolean) => void;
 }) {
+  useLocale();
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState("");
   const alive = useRef(true);
@@ -29,7 +31,7 @@ export function FolderPathInput({ value, onChange, disabled, label, describedBy,
       const result = await worldApi.pickFolder(value.trim() || null);
       if (alive.current && result.path !== null) onChange(result.path);
     } catch (cause) {
-      if (alive.current) setError(cause instanceof Error ? cause.message : "Could not open folder selection. Enter the path manually.");
+      if (alive.current) setError(cause instanceof Error ? cause.message : t("Could not open folder selection. Enter the path manually."));
     } finally {
       if (alive.current) {
         setPicking(false);
@@ -43,11 +45,11 @@ export function FolderPathInput({ value, onChange, disabled, label, describedBy,
       <input aria-label={label} aria-describedby={[describedBy, error ? errorId : null].filter(Boolean).join(" ") || undefined}
         value={value} disabled={disabled || picking} placeholder={placeholder} spellCheck={false} autoComplete="off"
         onChange={(event) => { setError(""); onChange(event.target.value); }} />
-      <button type="button" className="secondary-button" aria-label={`Browse for ${label}`} disabled={disabled || picking} onClick={() => void browse()}>
-        <FolderOpen size={13} /> {picking ? "Selecting…" : "Browse…"}
+      <button type="button" className="secondary-button" aria-label={t("Browse for {v0}", { v0: String(label) })} disabled={disabled || picking} onClick={() => void browse()}>
+        <FolderOpen size={13} /> {picking ? t("Selecting…") : t("Browse…")}
       </button>
     </div>
-    {picking && <small role="status">Choose a folder in the system window.</small>}
+    {picking && <small role="status">{t("Choose a folder in the system window.")}</small>}
     {error && <small role="alert" id={errorId} className="settings-error">{error}</small>}
   </div>;
 }

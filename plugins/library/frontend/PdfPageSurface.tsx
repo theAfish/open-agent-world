@@ -1,7 +1,9 @@
+import { t, useLocale } from "@oaw/plugin-api";
 import { useEffect, useRef, useState, type HTMLAttributes } from "react";
 import { TextLayer, type PDFDocumentProxy } from "pdfjs-dist";
 
 export function PdfPageSurface({pdf,number,scale,children,onReady,onPreparing,onLoadError,layoutVersion=0,...props}:HTMLAttributes<HTMLDivElement>&{pdf:PDFDocumentProxy;number:number;scale:number;layoutVersion?:number;onReady?:(scale:number)=>void;onPreparing?:()=>void;onLoadError?:(error:string)=>void}) {
+  useLocale();
   const readyRef=useRef(onReady);readyRef.current=onReady;
   const preparingRef=useRef(onPreparing);preparingRef.current=onPreparing;
   const errorRef=useRef(onLoadError);errorRef.current=onLoadError;
@@ -29,7 +31,7 @@ export function PdfPageSurface({pdf,number,scale,children,onReady,onPreparing,on
     return()=>{active=false;cancelAnimationFrame(frame1);cancelAnimationFrame(frame2);render?.cancel();text?.cancel();};
   },[pdf,number,scale,near,dpr,layoutVersion]);
   return <div {...props} ref={host} data-pdf-page={number} className="library-pdf-page" style={size}>
-    {near?<><canvas ref={canvas} style={size}/><div ref={layer} className="textLayer"/>{children}</>:<small>第 {number} 页</small>}
+    {near?<><canvas ref={canvas} style={size}/><div ref={layer} className="textLayer"/>{children}</>:<small>{t("第")} {number} {t("页")}</small>}
     {error&&<p role="alert">{error}</p>}
   </div>;
 }

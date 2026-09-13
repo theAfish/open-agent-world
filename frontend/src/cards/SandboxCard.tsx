@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { CircleStop, Folder, Play, RefreshCw, Settings2, SquareArrowOutUpRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { worldApi, apiErrorMessage } from "../api/client";
@@ -20,31 +21,32 @@ function useSandboxRuntime(card: WorldCard) {
   ));
   const ready = card.status === "ready" || card.status === "running";
   const stopped = card.status === "stopped";
-  const statusLabel = busy === "starting" ? "Starting…"
-    : busy === "stopping" ? "Stopping…"
-    : busy === "executing" || card.status === "running" ? "Command running"
-    : !info ? "Status unavailable"
-    : !info.available ? "Runtime unavailable"
-    : card.status === "error" ? "Needs attention"
-    : card.status === "ready" ? "Ready"
-    : stopped ? "Stopped"
+  const statusLabel = busy === "starting" ? t("Starting…")
+    : busy === "stopping" ? t("Stopping…")
+    : busy === "executing" || card.status === "running" ? t("Command running")
+    : !info ? t("Status unavailable")
+    : !info.available ? t("Runtime unavailable")
+    : card.status === "error" ? t("Needs attention")
+    : card.status === "ready" ? t("Ready")
+    : stopped ? t("Stopped")
     : card.status;
   const network = info ?? selectedRuntime;
   const enabled = info?.network_enabled ?? Boolean(card.config.network_enabled);
-  const networkLabel = !enabled ? "Disabled" : network?.network_status === "unsupported" ? "Requested · unsupported"
-    : network?.network_status === "setup_failed" ? "Requested · setup failed"
-    : !network?.network_available ? "Requested · prerequisites unavailable"
-    : ready ? "Enabled · runtime ready" : "Requested · start to apply";
+  const networkLabel = !enabled ? t("Disabled") : network?.network_status === "unsupported" ? t("Requested · unsupported")
+    : network?.network_status === "setup_failed" ? t("Requested · setup failed")
+    : !network?.network_available ? t("Requested · prerequisites unavailable")
+    : ready ? t("Enabled · runtime ready") : t("Requested · start to apply");
   const runtimeIssue = !info && selectedRuntime && !selectedRuntime.available ? selectedRuntime.reason : undefined;
   return {
     info, busy, selectedRuntime, network, networkLabel, ready, stopped, statusLabel,
-    runtimeLabel: selectedRuntime?.label ?? info?.runtime_id ?? "Sandbox",
+    runtimeLabel: selectedRuntime?.label ?? info?.runtime_id ?? t("Sandbox"),
     issue: (enabled && network?.network_available === false ? network.network_reason : undefined)
       ?? error ?? info?.unavailable_reason ?? runtimeIssue ?? (!info ? runtimesError : undefined),
   };
 }
 
 export function SandboxRuntimeControls({ card, disabled = false }: { card: WorldCard; disabled?: boolean }) {
+  useLocale();
   const startSandbox = useWorldStore((state) => state.startSandbox);
   const stopSandbox = useWorldStore((state) => state.stopSandbox);
   const { info, busy, selectedRuntime, network, ready, stopped, statusLabel, runtimeLabel } = useSandboxRuntime(card);
@@ -58,15 +60,16 @@ export function SandboxRuntimeControls({ card, disabled = false }: { card: World
     <button type="button" className={canStop ? "secondary-button" : "primary-button"}
       disabled={canStop ? !!busy && busy !== "executing"
         : disabled || !!busy || !info?.available || !stopped || (enabled && !supported)}
-      title={!canStop && disabled ? "Save or reset settings before starting" : undefined}
+      title={!canStop && disabled ? t("Save or reset settings before starting") : undefined}
       onClick={() => void (canStop ? stopSandbox(card.id) : startSandbox(card.id))}>
       {canStop ? <CircleStop size={14} /> : <Play size={14} fill="currentColor" />}
-      {canStop ? "Stop" : retry ? "Retry / Recheck" : "Start"}
+      {canStop ? t("Stop") : retry ? t("Retry / Recheck") : t("Start")}
     </button>
   </div>;
 }
 
 export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeSurfaceLevel }) {
+  useLocale();
   const loadRuntimes = useWorldStore((state) => state.loadSandboxRuntimes);
   const refreshSandbox = useWorldStore((state) => state.refreshSandbox);
   const socketState = useWorldStore((state) => state.socketState);
@@ -77,7 +80,7 @@ export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeS
     void loadRuntimes();
     void refreshSandbox(card.id);
   }, [card.id, level, loadRuntimes, refreshSandbox, socketState]);
-  const workspace = card.config.workspace_path ?? "Managed workspace";
+  const workspace = card.config.workspace_path ?? t("Managed workspace");
   const openWindow = (tab: "workspace" | "settings") => {
     useNodeSurfaceStore.getState().setDraft(`sandbox-tab:${card.id}`, tab);
     useNodeSurfaceStore.getState().openWorkspace(card.id);
@@ -85,23 +88,24 @@ export function SandboxCardBody({ card, level }: { card: WorldCard; level: NodeS
   return <div className="expanded-stack sandbox-card-summary nowheel">
     <SandboxRuntimeControls card={card} disabled={dirty} />
     <dl className="sandbox-summary-list">
-      <div><dt><Folder size={12} /> Folder</dt><dd title={workspace}>{workspace}</dd></div>
-      <div><dt>Access</dt><dd>{(info?.workspace_access ?? card.config.workspace_access) === "read_only" ? "Read only" : "Read & write"}</dd></div>
-      <div><dt>Network</dt><dd>{networkLabel}</dd></div>
+      <div><dt><Folder size={12} /> {t("Folder")}</dt><dd title={workspace}>{workspace}</dd></div>
+      <div><dt>{t("Access")}</dt><dd>{(info?.workspace_access ?? card.config.workspace_access) === "read_only" ? t("Read only") : t("Read & write")}</dd></div>
+      <div><dt>{t("Network")}</dt><dd>{networkLabel}</dd></div>
     </dl>
     {card.config.active_command && <code className="sandbox-current-command" title={card.config.active_command}>{card.config.active_command}</code>}
     {issue && <p className="sandbox-error" role="alert">{issue}</p>}
-    {level === "inspector" && <details className="sandbox-settings"><summary>Configuration</summary>
+    {level === "inspector" && <details className="sandbox-settings"><summary>{t("Configuration")}</summary>
       <SandboxSettings card={card} compact onDirtyChange={setDirty} />
     </details>}
     <div className="action-row">
-      <button type="button" className="primary-button" onClick={() => openWindow("workspace")}><SquareArrowOutUpRight size={14} /> Open Window</button>
-      <button type="button" className="secondary-button" onClick={() => openWindow("settings")}><Settings2 size={14} /> Settings</button>
+      <button type="button" className="primary-button" onClick={() => openWindow("workspace")}><SquareArrowOutUpRight size={14} /> {t("Open Window")}</button>
+      <button type="button" className="secondary-button" onClick={() => openWindow("settings")}><Settings2 size={14} /> {t("Settings")}</button>
     </div>
   </div>;
 }
 
 export function SandboxSettings({ card, onDirtyChange, compact = false }: { card: WorldCard; onDirtyChange?: (dirty: boolean) => void; compact?: boolean }) {
+  useLocale();
   const edges = useWorldStore((state) => state.edges);
   const saveConfig = useWorldStore((state) => state.saveSandboxConfig);
   const refreshSandbox = useWorldStore((state) => state.refreshSandbox);
@@ -160,89 +164,89 @@ export function SandboxSettings({ card, onDirtyChange, compact = false }: { card
         }).then(saved => { if (saved) useNodeSurfaceStore.getState().setDraft(draftKey, ""); });
       }}>
         <div className="section-heading">
-          <span>Runtime & workspace</span>
-          <button type="button" className="sandbox-refresh" aria-label="Refresh sandbox environment"
+          <span>{t("Runtime & workspace")}</span>
+          <button type="button" className="sandbox-refresh" aria-label={t("Refresh sandbox environment")}
             disabled={!!busy || runtimesLoading}
             onClick={() => { void loadRuntimes(true).then(() => refreshSandbox(card.id, true)); }}>
-            <RefreshCw size={12} /> {runtimesLoading ? "Checking…" : "Refresh"}
+            <RefreshCw size={12} /> {runtimesLoading ? t("Checking…") : t("Refresh")}
           </button>
         </div>
         <div className="sandbox-settings-grid">
           <label className="field-label sandbox-setting-wide">
-            <span>Runtime</span>
+            <span>{t("Runtime")}</span>
             <select value={runtime} disabled={!canConfigure || info?.runtime_locked} onChange={(event) => setRuntime(event.target.value)}>
-              <option value="auto">Automatic{runtimes?.default_runtime
+              <option value="auto">{t("Automatic")}{runtimes?.default_runtime
                 ? ` · ${runtimes.runtimes.find((item) => item.id === runtimes.default_runtime)?.label ?? runtimes.default_runtime}` : ""}</option>
               {runtime !== "auto" && !runtimes?.runtimes.some((item) => item.id === runtime)
-                && <option value={runtime}>{runtime} · unavailable</option>}
+                && <option value={runtime}>{runtime} {t("· unavailable")}</option>}
               {runtimes?.runtimes.map((item) => <option key={item.id} value={item.id} disabled={!item.available}>
                 {item.label}{item.available ? "" : " · unavailable"}
               </option>)}
             </select>
           </label>
-          {info?.runtime_locked && <p className="sandbox-help sandbox-setting-wide">Runtime fixed after first start.</p>}
+          {info?.runtime_locked && <p className="sandbox-help sandbox-setting-wide">{t("Runtime fixed after first start.")}</p>}
           <div className="field-label sandbox-setting-wide">
-            <span title="Absolute folder path on the server. When using WSL from Windows, enter a Windows path."><Folder size={12} /> Working folder</span>
-            <FolderPathInput label="Working folder" value={workspace} disabled={!canConfigure}
+            <span title={t("Absolute folder path on the server. When using WSL from Windows, enter a Windows path.")}><Folder size={12} /> {t("Working folder")}</span>
+            <FolderPathInput label={t("Working folder")} value={workspace} disabled={!canConfigure}
               onPickingChange={setPickingFolder}
               onChange={(path) => edit({ workspace: path, ...(!path.trim() ? { access: "read_write" } : {}) })}
-              placeholder="Managed workspace (default)" describedBy={`workspace-help-${card.id}`} />
+              placeholder={t("Managed workspace (default)")} describedBy={`workspace-help-${card.id}`} />
           </div>
           <p className="sandbox-help sandbox-setting-wide" id={`workspace-help-${card.id}`}>
-            {workspace.trim() ? (access === "read_write" ? "Edits change files in this folder directly." : "Files in this folder are read only.")
-              : "Leave empty to create a managed workspace."}
+            {workspace.trim() ? (access === "read_write" ? t("Edits change files in this folder directly.") : t("Files in this folder are read only."))
+              : t("Leave empty to create a managed workspace.")}
           </p>
-          <label className="field-label"><span>Folder access</span>
+          <label className="field-label"><span>{t("Folder access")}</span>
             <select value={access} disabled={!canConfigure || !workspace.trim()} onChange={(event) => setAccess(event.target.value as SandboxWorkspaceAccess)}>
-              <option value="read_write">Read & write</option><option value="read_only">Read only</option>
+              <option value="read_write">{t("Read & write")}</option><option value="read_only">{t("Read only")}</option>
             </select>
           </label>
-          <label className="field-label"><span>Networking</span>
-            <select aria-label="Networking" value={network ? "enabled" : "disabled"} disabled={!canConfigure} onChange={event => setNetwork(event.target.value === "enabled")}>
-              <option value="disabled">Disabled</option>
-              <option value="enabled" disabled={!selectedNetwork?.supported_network_modes?.includes("enabled")}>Enabled</option>
+          <label className="field-label"><span>{t("Networking")}</span>
+            <select aria-label={t("Networking")} value={network ? "enabled" : "disabled"} disabled={!canConfigure} onChange={event => setNetwork(event.target.value === "enabled")}>
+              <option value="disabled">{t("Disabled")}</option>
+              <option value="enabled" disabled={!selectedNetwork?.supported_network_modes?.includes("enabled")}>{t("Enabled")}</option>
             </select>
           </label>
           {selectedNetwork?.network_reason && (network || !selectedNetwork.network_available)
             && <details className="sandbox-settings sandbox-setting-wide">
-              <summary>Network details</summary>
+              <summary>{t("Network details")}</summary>
               <p className="sandbox-help">{selectedNetwork.network_reason}</p>
             </details>}
         </div>
-        <details className="sandbox-settings"><summary>Resource limits</summary>
+        <details className="sandbox-settings"><summary>{t("Resource limits")}</summary>
           <div className="sandbox-limits-grid">
-            <label className="field-label">Memory (MiB)<input type="number" min={16} max={8192} disabled={!canConfigure} value={memory / 1048576} onChange={event => setMemory(Number(event.target.value) * 1048576)} /></label>
-            <label className="field-label">Process limit<input type="number" min={1} max={256} disabled={!canConfigure} value={processes} onChange={event => setProcesses(Number(event.target.value))} /></label>
-            <label className="field-label">Command timeout (seconds)<input type="number" min={1} max={600} disabled={!canConfigure} value={timeout} onChange={event => setTimeoutValue(Number(event.target.value))} /></label>
+            <label className="field-label">{t("Memory (MiB)")}<input type="number" min={16} max={8192} disabled={!canConfigure} value={memory / 1048576} onChange={event => setMemory(Number(event.target.value) * 1048576)} /></label>
+            <label className="field-label">{t("Process limit")}<input type="number" min={1} max={256} disabled={!canConfigure} value={processes} onChange={event => setProcesses(Number(event.target.value))} /></label>
+            <label className="field-label">{t("Command timeout (seconds)")}<input type="number" min={1} max={600} disabled={!canConfigure} value={timeout} onChange={event => setTimeoutValue(Number(event.target.value))} /></label>
           </div>
-          <p className="sandbox-help">On Linux/WSL, the process limit includes threads. npm installers may need 64 or more.</p>
+          <p className="sandbox-help">{t("On Linux/WSL, the process limit includes threads. npm installers may need 64 or more.")}</p>
         </details>
         <div className="sandbox-config-actions">
-          <span>{busy === "saving" ? "Saving…" : dirty ? "Unsaved changes" : stopped ? "Settings saved" : "Stop to edit settings"}</span>
+          <span>{busy === "saving" ? t("Saving…") : dirty ? t("Unsaved changes") : stopped ? t("Settings saved") : t("Stop to edit settings")}</span>
           <button type="button" className="secondary-button" disabled={!canConfigure || !dirty} onClick={() => {
             useNodeSurfaceStore.getState().setDraft(draftKey, "");
-          }}>Reset</button>
-          <button type="submit" className="primary-button" disabled={!canConfigure || !dirty}>Save</button>
+          }}>{t("Reset")}</button>
+          <button type="submit" className="primary-button" disabled={!canConfigure || !dirty}>{t("Save")}</button>
         </div>
       </form>
     </section>
     {settingsIssue && <p className="sandbox-error" role="alert">{settingsIssue}</p>}
     <SandboxEnvironment card={card} />
-    {!compact && <><details className="sandbox-settings card-section"><summary>Attached objects <span>{connectionCount} connected</span></summary>
+    {!compact && <><details className="sandbox-settings card-section"><summary>{t("Attached objects")} <span>{connectionCount} {t("connected")}</span></summary>
       <RelationshipList card={card} empty="No objects connected." />
     </details>
-    <details className="sandbox-settings card-section"><summary>Runtime details</summary>
+    <details className="sandbox-settings card-section"><summary>{t("Runtime details")}</summary>
       <dl className="sandbox-runtime-details">
-        <div><dt>Shell</dt><dd>{info?.shell.length ? info.shell.join(" ") : "Unavailable"}</dd></div>
-        <div><dt>Runtime folder</dt><dd>{info?.workspace ?? "Created on first start"}</dd></div>
-        <div><dt>Isolation</dt><dd>{info?.security_boundary ?? "Select an available runtime."}</dd></div>
+        <div><dt>{t("Shell")}</dt><dd>{info?.shell.length ? info.shell.join(" ") : t("Unavailable")}</dd></div>
+        <div><dt>{t("Runtime folder")}</dt><dd>{info?.workspace ?? t("Created on first start")}</dd></div>
+        <div><dt>{t("Isolation")}</dt><dd>{info?.security_boundary ?? t("Select an available runtime.")}</dd></div>
       </dl>
     </details>
-    <details className="sandbox-settings card-section"><summary>Recovery</summary>
-      <p className="sandbox-help">Clear the runtime cache. Workspace files are preserved.</p>
+    <details className="sandbox-settings card-section"><summary>{t("Recovery")}</summary>
+      <p className="sandbox-help">{t("Clear the runtime cache. Workspace files are preserved.")}</p>
       <button type="button" className="secondary-button" disabled={!stopped || !!busy} onClick={() => void worldApi.sandboxWorkspace(card.id, "reset-cache", {})
-        .then(() => setCacheMessage("Runtime cache cleared."))
-        .catch(error => setCacheMessage(apiErrorMessage(error)))}>Reset runtime cache</button>
+        .then(() => setCacheMessage(t("Runtime cache cleared.")))
+        .catch(error => setCacheMessage(apiErrorMessage(error)))}>{t("Reset runtime cache")}</button>
       {cacheMessage && <p className="sandbox-help" role="status">{cacheMessage}</p>}
     </details></>}
   </div>;

@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { MessageCircleMore, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { worldApi } from "../api/client";
@@ -7,6 +8,7 @@ import type { WorldCard } from "../types/world";
 import { RelationshipList } from "./CardUtilities";
 
 export function ConversationCardBody({ card }: { card: WorldCard; level: NodeSurfaceLevel }) {
+  useLocale();
   const accessEventId = useWorldStore((state) => state.events.find((event) => {
     if (event.type !== "permission_changed") return false;
     const edge = event.payload.edge as Record<string, unknown> | undefined;
@@ -35,23 +37,23 @@ export function ConversationCardBody({ card }: { card: WorldCard; level: NodeSur
       <section className="conversation-field-summary">
         <MessageCircleMore size={19} />
         <div>
-          <strong>{sessionCount} sessions</strong>
-          <span>{agentCount} connected agents</span>
+          <strong>{sessionCount} {t("sessions")}</strong>
+          <span>{agentCount} {t("connected agents")}</span>
         </div>
       </section>
       <p className="conversation-field-description">
-        {String(card.config.description ?? "A durable field for human and agent conversations.")}
+        {String(card.config.description ?? t("A durable field for human and agent conversations."))}
       </p>
       <section className="card-section">
-        <div className="section-heading"><span>Available participants</span><small>live graph access</small></div>
+        <div className="section-heading"><span>{t("Available participants")}</span><small>{t("live graph access")}</small></div>
         <div className="capability-chips">
           {agentCount > 0
-            ? <span><Users size={10} /> {agentCount} agents available in the workspace</span>
-            : <em>Connect an Agent with Participate to make it available here.</em>}
+            ? <span><Users size={10} /> {agentCount} {t("agents available in the workspace")}</span>
+            : <em>{t("Connect an Agent with Participate to make it available here.")}</em>}
         </div>
       </section>
       <section className="card-section">
-        <div className="section-heading"><span>Relationships</span><small>backend-authoritative</small></div>
+        <div className="section-heading"><span>{t("Relationships")}</span><small>{t("backend-authoritative")}</small></div>
         <RelationshipList card={card} />
       </section>
     </div>

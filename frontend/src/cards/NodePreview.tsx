@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { Bot, FileText, Image as ImageIcon, MessagesSquare, ShieldCheck, Workflow } from "lucide-react";
 import { TaskBoardPreview } from "./TaskBoard";
 import { SkillToolboxPreview } from "./SkillToolbox";
@@ -13,10 +14,12 @@ function compactText(value: unknown, fallback: string): string {
 }
 
 export function NodePreview({ card }: { card: WorldCard }) {
+  useLocale();
   return <PluginSurface card={card} slot="preview" level="preview"><DefaultNodePreview card={card} /></PluginSurface>;
 }
 
 function DefaultNodePreview({ card }: { card: WorldCard }) {
+  useLocale();
   const sandbox = useWorldStore(s => s.sandboxInfo[card.id]);
   const sandboxError = useWorldStore(s => s.sandboxErrors[card.id]);
   const edges = useWorldStore((state) => state.edges);
@@ -38,13 +41,13 @@ function DefaultNodePreview({ card }: { card: WorldCard }) {
     const configuredModel = modelCatalog.connections.flatMap(connection => connection.models)
       .find(model => modelRef(model.id) === reference);
     const modelName = configuredModel?.name || (reference.startsWith("oaw:model:")
-      ? "Unavailable model" : reference || "Default model");
+      ? t("Unavailable model") : reference || t("Default model"));
     return (
       <div className="node-preview-summary">
-        <p>{compactText(card.config.system_instruction, "Ready for a scoped instruction.")}</p>
+        <p>{compactText(card.config.system_instruction, t("Ready for a scoped instruction."))}</p>
         <div className="node-preview-metadata">
           <span title={modelName}><Bot size={12} /> {modelName}</span>
-          <span>{connectionCount} world connections</span>
+          <span>{connectionCount} {t("world connections")}</span>
         </div>
       </div>
     );
@@ -53,21 +56,21 @@ function DefaultNodePreview({ card }: { card: WorldCard }) {
   if (card.type === "conversation") {
     return (
       <div className="node-preview-summary">
-        <p>{compactText(card.config.description, "A shared field for durable conversations.")}</p>
+        <p>{compactText(card.config.description, t("A shared field for durable conversations."))}</p>
         <div className="node-preview-metadata">
-          <span><MessagesSquare size={12} /> Conversation field</span>
-          <span>{connectionCount} agents</span>
+          <span><MessagesSquare size={12} /> {t("Conversation field")}</span>
+          <span>{connectionCount} {t("agents")}</span>
         </div>
       </div>
     );
   }
 
-  if (card.type === "core.artifact-collection") return <div className="node-preview-summary"><p>Retained file versions</p><small>Open workspace to inspect, copy, or release published content.</small></div>;
+  if (card.type === "core.artifact-collection") return <div className="node-preview-summary"><p>{t("Retained file versions")}</p><small>{t("Open workspace to inspect, copy, or release published content.")}</small></div>;
 
   if (card.type === "text") {
     return (
       <div className="node-preview-summary">
-        <p>{compactText(card.config.preview ?? card.config.content, "Empty managed text resource.")}</p>
+        <p>{compactText(card.config.preview ?? card.config.content, t("Empty managed text resource."))}</p>
         <div className="node-preview-metadata">
           <span><FileText size={12} /> {String(card.config.filename ?? card.name)}</span>
           <span>r{Number(card.config.revision ?? 0)}</span>
@@ -83,11 +86,11 @@ function DefaultNodePreview({ card }: { card: WorldCard }) {
           ? <img src={card.config.preview_url} alt="" draggable={false} />
           : <span className="node-preview-thumbnail"><ImageIcon size={20} /></span>}
         <div>
-          <p>{String(card.config.filename ?? "No image imported")}</p>
+          <p>{String(card.config.filename ?? t("No image imported"))}</p>
           <div className="node-preview-metadata">
             <span>{card.config.image_width && card.config.image_height
               ? `${card.config.image_width} × ${card.config.image_height}`
-              : "Dimensions unavailable"}</span>
+              : t("Dimensions unavailable")}</span>
           </div>
         </div>
       </div>
@@ -96,11 +99,11 @@ function DefaultNodePreview({ card }: { card: WorldCard }) {
 
   if (card.type === "sandbox") return (
     <div className="node-preview-summary">
-      <p>{String(sandbox?.runtime_id ?? card.config.runtime ?? "auto")} · {(sandbox?.network_enabled ?? card.config.network_enabled) ? "Network enabled" : "Network disabled"}</p>
-      <p>{String(sandboxError || sandbox?.unavailable_reason || card.config.active_command || card.config.last_error || "Idle")}</p>
+      <p>{String(sandbox?.runtime_id ?? card.config.runtime ?? "auto")} · {(sandbox?.network_enabled ?? card.config.network_enabled) ? t("Network enabled") : t("Network disabled")}</p>
+      <p>{String(sandboxError || sandbox?.unavailable_reason || card.config.active_command || card.config.last_error || t("Idle"))}</p>
       <div className="node-preview-metadata">
-        <span><Workflow size={12} /> {connectionCount} connections</span>
-        <span><ShieldCheck size={12} /> {card.config.workspace_access === "read_only" ? "Read only" : "Read & write"} · {card.status}</span>
+        <span><Workflow size={12} /> {connectionCount} {t("connections")}</span>
+        <span><ShieldCheck size={12} /> {card.config.workspace_access === "read_only" ? t("Read only") : t("Read & write")} · {card.status}</span>
       </div>
     </div>
   );
@@ -108,10 +111,10 @@ function DefaultNodePreview({ card }: { card: WorldCard }) {
   const definition = catalog.node_types.find((item) => item.id === card.type);
   return (
     <div className="node-preview-summary">
-      <p>{compactText(card.config.summary ?? card.config.description, definition?.description ?? "Plugin-defined world object.")}</p>
+      <p>{compactText(card.config.summary ?? card.config.description, definition?.description ?? t("Plugin-defined world object."))}</p>
       <div className="node-preview-metadata">
         <span>{definition?.label ?? card.type}</span>
-        <span>{connectionCount} connections</span>
+        <span>{connectionCount} {t("connections")}</span>
       </div>
     </div>
   );

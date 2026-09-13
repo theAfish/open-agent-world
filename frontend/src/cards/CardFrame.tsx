@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { EquipmentToggle } from "./Equipment";
 import { ExecutionConfigurationBody } from "./ExecutionConfiguration";
 import { BarracksBody } from "./Barracks";
@@ -53,21 +54,22 @@ const BODIES: Partial<Record<CardType, ComponentType<BodyProps>>> = {
 };
 
 function GenericCardBody({ card }: BodyProps) {
+  useLocale();
   const entries = Object.entries(card.config).filter(([, value]) => (
     typeof value === "string" || typeof value === "number" || typeof value === "boolean"
   ));
   return (
     <div className="expanded-stack">
       <section className="card-section">
-        <div className="section-heading"><span>Plugin configuration</span><small>catalog-driven</small></div>
+        <div className="section-heading"><span>{t("Plugin configuration")}</span><small>{t("catalog-driven")}</small></div>
         {entries.length > 0 ? (
           <dl className="plugin-config-list">
             {entries.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}
           </dl>
-        ) : <div className="mini-empty"><span>No public configuration fields.</span></div>}
+        ) : <div className="mini-empty"><span>{t("No public configuration fields.")}</span></div>}
       </section>
       <section className="card-section">
-        <div className="section-heading"><span>Relationships</span><small>backend-authoritative</small></div>
+        <div className="section-heading"><span>{t("Relationships")}</span><small>{t("backend-authoritative")}</small></div>
         <RelationshipList card={card} />
       </section>
     </div>
@@ -75,6 +77,7 @@ function GenericCardBody({ card }: BodyProps) {
 }
 
 export function CardContent({ card, level }: BodyProps) {
+  useLocale();
   const catalog = useWorldStore((s) => s.catalog);
   const definition = catalog.node_types.find((t) => t.id === card.type);
   const Body = definition?.traits.includes("ui.agent-barracks.v1") ? BarracksBody : definition?.traits.includes("ui.skill.v1") ? SkillNodeBody : definition?.traits.includes("ui.skill-package.v1") ? SkillToolboxBody : definition?.traits.includes("ui.task-board.v1") ? TaskBoardBody : definition?.traits.includes("core.agent") ? AgentCardBody : BODIES[card.type] ?? GenericCardBody;
@@ -87,6 +90,7 @@ function statusLabel(status: WorldCard["status"]): string {
 }
 
 function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNode>) {
+  useLocale();
   const card = data.card;
   const activity = useNodeActivity(card);
   const generation = useNodeGeneration(card.id);
@@ -109,7 +113,7 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
   const level = surfaceLevelForNode(card.id, surfaceLevels);
   const visualLevel = level;
   const definition = catalog.node_types.find((item) => item.id === card.type);
-  const label = definition?.label ?? card.type;
+  const label = t(definition?.label ?? card.type);
 
   const support = nodeSurfaceSupport(card.type, catalog);
 
@@ -192,7 +196,7 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
       ] as const).map(([position, side]) => (
         <Handle key={side} id={`boundary-${side}`} type="source" position={position}
           className={`semantic-handle semantic-handle--${side}`} data-connection-side={side}
-          aria-label={`Start a relationship from the ${side} edge of ${card.name}`} />
+          aria-label={t("Start a relationship from the {v0} edge of {v1}", { v0: String(side), v1: String(card.name) })} />
       )) : null}
 
       {visualLevel !== "inspector" && <EquipmentToggle card={card} />}
@@ -203,15 +207,15 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
             <span className="card-eyebrow">{label}</span>
             <h2 title={card.name}>{card.name}</h2>
             <input className="card-name-input nodrag nopan" defaultValue={card.name}
-              aria-label={`${label} name`}
+              aria-label={t("{v0} name", { v0: String(label) })}
               onBlur={(event) => {
                 const name = event.currentTarget.value.trim();
                 if (name && name !== card.name) void updateCard(card.id, { name });
               }}
               onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
           </div>
-          <div className="card-status" data-status={displayStatus} title={`Status: ${statusLabel(displayStatus)}`}>
-            <span aria-hidden="true" /><span>{statusLabel(displayStatus)}</span>
+          <div className="card-status" data-status={displayStatus} title={`${t('Status')}: ${t(statusLabel(displayStatus))}`}>
+            <span aria-hidden="true" /><span>{t(statusLabel(displayStatus))}</span>
           </div>
           {(visualLevel === "node" || visualLevel === "preview") && support.preview ? (
             <IconButton
@@ -219,20 +223,20 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
               size={visualLevel === "node" ? "xs" : "sm"}
               quiet={visualLevel === "preview"}
               className={`node-surface-toggle ${visualLevel === "node" ? "node-surface-restore" : ""}`}
-              label={`${visualLevel === "node" ? "Expand" : "Collapse"} ${card.name} card`}
-              title={visualLevel === "node" ? "Expand card" : "Collapse to node"}
+              label={t("{v0} {v1} card", { v0: String(visualLevel === "node" ? t("Expand") : t("Collapse")), v1: String(card.name) })}
+              title={visualLevel === "node" ? t("Expand card") : t("Collapse to node")}
               onClick={() => {
                 if (visualLevel === "node") showPreview(card.id);
                 else hidePreview(card.id);
               }} />
           ) : null}
           <IconButton icon={X} size="sm" quiet className="node-surface-close"
-            onClick={() => closeInspector(card.id)} label={`Close ${card.name} inspector`} />
+            onClick={() => closeInspector(card.id)} label={t("Close {v0} inspector", { v0: String(card.name) })} />
         </header>
 
         <div className="node-preview-content" aria-hidden={visualLevel !== "preview"}>
           <NodePreview card={card} />
-          <span className="node-preview-hint">Click for details</span>
+          <span className="node-preview-hint">{t("Click for details")}</span>
         </div>
 
         <div className="card-body node-inspector-content" aria-hidden={visualLevel !== "inspector"}>
@@ -244,14 +248,14 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
             : <span className="card-id">{card.ephemeral ? "synthetic" : card.id.slice(0, 8)}</span>}
           <div className="card-footer-actions">
             {!card.ephemeral ? <IconButton icon={Trash2} danger
-              onClick={() => { dismissSurface(card.id); void deleteCard(card.id); }} label={`Remove ${card.name}`}
-              title="Remove object (Ctrl+Z to undo)" /> : null}
+              onClick={() => { dismissSurface(card.id); void deleteCard(card.id); }} label={t("Remove {v0}", { v0: String(card.name) })}
+              title={t("Remove object (Ctrl+Z to undo)")} /> : null}
             {support.workspace ? (
-              <button type="button" className="card-expand-button" aria-label={definition?.traits.includes("library.readable") ? "打开阅读器" : "Open workspace"} title={definition?.traits.includes("library.readable") ? "打开阅读器" : "Open workspace"} onClick={() => {
+              <button type="button" className="card-expand-button" aria-label={definition?.traits.includes("library.readable") ? t("打开阅读器") : t("Open workspace")} title={definition?.traits.includes("library.readable") ? t("打开阅读器") : t("Open workspace")} onClick={() => {
                 if (definition?.traits.includes("library.readable")) cardRef.current?.dispatchEvent(new Event("oaw:expand-reader"));
                 else openWorkspace(card.id);
               }}>
-                {definition?.traits.includes("library.readable") ? <BookOpen size={18}/> : <>Open workspace <ExternalLink size={13}/></>}
+                {definition?.traits.includes("library.readable") ? <BookOpen size={18}/> : <>{t("Open workspace")} <ExternalLink size={13}/></>}
               </button>
             ) : null}
           </div>
@@ -262,6 +266,7 @@ function WorldCardNodeComponent({ data, selected, dragging }: NodeProps<CanvasNo
 }
 
 function CollectionAwareCard(props:NodeProps<CanvasNode>) {
+  useLocale();
   const owner=props.data.collectionOwner as string|undefined;
   const hovered=useCollectionHover(s=>owner?s.members[owner]:undefined);
   const setHover=useCollectionHover(s=>s.set);
@@ -271,7 +276,7 @@ function CollectionAwareCard(props:NodeProps<CanvasNode>) {
   const neighbor=hovered&&Math.abs(cards.filter(c=>c.parent_id===owner).findIndex(c=>c.id===hovered)-Number(props.data.stackIndex))===1;
   return <div className={`shadow-stack-member ${hovered===props.id?"is-hovered":neighbor?"is-neighbor":""}`} onPointerEnter={()=>setHover(owner,props.id)} onPointerLeave={()=>setHover(owner)}>
     <div className="shadow-stack-face" {...{inert:""}} aria-hidden="true"><WorldCardNodeComponent {...props}/></div>
-    <button className="nodrag nopan" disabled={Boolean(props.data.collectionFading)} aria-label={`展开集合 · ${props.data.card.name}`} onClick={e=>{e.stopPropagation();if(collection)void useWorldStore.getState().updateCard(owner,{config:{...collection.config,display_state:"expanded"}});}}/>
+    <button className="nodrag nopan" disabled={Boolean(props.data.collectionFading)} aria-label={t("展开集合 · {v0}", { v0: String(props.data.card.name) })} onClick={e=>{e.stopPropagation();if(collection)void useWorldStore.getState().updateCard(owner,{config:{...collection.config,display_state:"expanded"}});}}/>
   </div>;
 }
 export const WorldCardNode = memo(CollectionAwareCard);

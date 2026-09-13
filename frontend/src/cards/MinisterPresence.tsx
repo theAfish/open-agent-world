@@ -1,3 +1,4 @@
+import { t, useLocale } from "../i18n";
 import { useEffect, useRef, useState } from 'react';
 import { useInternalNode } from '@xyflow/react';
 import { ViewportPortal } from '../canvas/FlowPortal';
@@ -12,6 +13,7 @@ import { reportInteraction } from '../state/interactions';
 export function MinisterPresence({ card, active, setActive, panelOpen }: {
   card: WorldCard; active: boolean; setActive: (value: boolean) => void; panelOpen: boolean;
 }) {
+  useLocale();
   const node = useInternalNode(card.id);
   const origin = node?.internals.positionAbsolute ?? card.position;
   const [chat, setChat] = useState<MinisterChat>();
@@ -61,10 +63,10 @@ export function MinisterPresence({ card, active, setActive, panelOpen }: {
     hidden={!active || panelOpen} style={{ left: origin.x + card.size.width + 16, top: origin.y + card.size.height / 2 }}
     onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}
     onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') { (document.activeElement as HTMLElement)?.blur(); setActive(false); setGreeting(false); } }}>
-    {greeting && <div className="minister-greeting">Hi! Need a hand with this part of your canvas?</div>}
+    {greeting && <div className="minister-greeting">{t("Hi! Need a hand with this part of your canvas?")}</div>}
     {chat ? <MinisterConversation card={card} chat={chat} presence /> : <div className="minister-presence-loading" role="status">
-      {error ?? 'Getting ready…'}{error && <button onClick={() => setAttempt(value => value + 1)}>Retry</button>}
+      {error ?? t("Getting ready…")}{error && <button onClick={() => setAttempt(value => value + 1)}>{t("Retry")}</button>}
     </div>}
-    <button className="minister-presence-history" onClick={() => useNodeSurfaceStore.getState().openInspector(card.id)}>History & confirmations</button>
+    <button className="minister-presence-history" onClick={() => useNodeSurfaceStore.getState().openInspector(card.id)}>{t("History & confirmations")}</button>
   </div></ViewportPortal>;
 }

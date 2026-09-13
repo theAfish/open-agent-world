@@ -13,8 +13,11 @@ import { ToastStack } from "./shell/ToastStack";
 import { TopBar } from "./shell/TopBar";
 import { CardLibrary } from "./shell/CardLibrary";
 import { useWorldStore } from "./state/worldStore";
+import { useLocale } from "./i18n";
 
 export function App() {
+  const locale = useLocale(state => state.locale);
+  useEffect(() => { document.documentElement.lang = locale; }, [locale]);
   const initialize = useWorldStore((state) => state.initialize);
   const theme = useWorldStore((state) => state.theme);
 

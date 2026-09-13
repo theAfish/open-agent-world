@@ -1,9 +1,11 @@
+import { t, useLocale } from "../i18n";
 import { ArrowLeftRight, ArrowRight, Link2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useWorldStore } from "../state/worldStore";
 import type { EdgeDirection, Relationship } from "../types/world";
 
 export function ConnectionDialog() {
+  useLocale();
   const pending = useWorldStore((state) => state.pendingConnection);
   const cards = useWorldStore((state) => state.cards);
   const catalog = useWorldStore((state) => state.catalog);
@@ -51,24 +53,24 @@ export function ConnectionDialog() {
         <header>
           <div className="dialog-icon"><Link2 size={18} /></div>
           <div>
-            <span>Semantic relationship</span>
-            <h2 id="connection-dialog-title">Choose a capability</h2>
+            <span>{t("Semantic relationship")}</span>
+            <h2 id="connection-dialog-title">{t("Choose a capability")}</h2>
           </div>
-          <button ref={closeButton} type="button" className="icon-button" onClick={close} aria-label="Close capability chooser">
+          <button ref={closeButton} type="button" className="icon-button" onClick={close} aria-label={t("Close capability chooser")}>
             <X size={16} />
           </button>
         </header>
 
-        <div className="connection-route" aria-label={`${source?.name} connects to ${target?.name}`}>
-          <div><small>{catalog.node_types.find((item) => item.id === source?.type)?.label ?? source?.type}</small><strong>{source?.name ?? pending.source}</strong></div>
+        <div className="connection-route" aria-label={t("{v0} connects to {v1}", { v0: String(source?.name), v1: String(target?.name) })}>
+          <div><small>{t(catalog.node_types.find((item) => item.id === source?.type)?.label ?? source?.type ?? "")}</small><strong>{source?.name ?? pending.source}</strong></div>
           {direction === "bidirectional"
             ? <ArrowLeftRight size={18} aria-hidden="true" />
             : <ArrowRight size={18} aria-hidden="true" />}
-          <div><small>{catalog.node_types.find((item) => item.id === target?.type)?.label ?? target?.type}</small><strong>{target?.name ?? pending.target}</strong></div>
+          <div><small>{t(catalog.node_types.find((item) => item.id === target?.type)?.label ?? target?.type ?? "")}</small><strong>{target?.name ?? pending.target}</strong></div>
         </div>
 
         <fieldset className="permission-options">
-          <legend>The backend will grant exactly one permission</legend>
+          <legend>{t("The backend will grant exactly one permission")}</legend>
           {pending.options.map((option) => (
             <label key={option.value} className={selected === option.value ? "is-selected" : ""}>
               <input
@@ -82,17 +84,17 @@ export function ConnectionDialog() {
                 }}
               />
               <span className="radio-indicator" aria-hidden="true" />
-              <span><strong>{option.label}</strong><small>{option.description}</small></span>
+              <span><strong>{t(option.label)}</strong><small>{t(option.description)}</small></span>
             </label>
           ))}
         </fieldset>
 
         {canBeBidirectional && (
           <fieldset className="permission-options direction-options">
-            <legend>Communication direction</legend>
+            <legend>{t("Communication direction")}</legend>
             {([
-              ["forward", "One-way", `${source?.name} can message ${target?.name}.`],
-              ["bidirectional", "Two-way", "Both agents can message each other directly."],
+              ["forward", t("One-way"), t("{v0} can message {v1}.", { v0: String(source?.name), v1: String(target?.name) })],
+              ["bidirectional", t("Two-way"), t("Both agents can message each other directly.")],
             ] as const).map(([value, label, description]) => (
               <label key={value} className={direction === value ? "is-selected" : ""}>
                 <input
@@ -110,15 +112,14 @@ export function ConnectionDialog() {
         )}
 
         <footer>
-          <button type="button" className="secondary-button" onClick={close}>Cancel</button>
+          <button type="button" className="secondary-button" onClick={close}>{t("Cancel")}</button>
           <button
             type="button"
             className="primary-button"
             disabled={!selected}
             onClick={() => selected && void create(selected, direction)}
           >
-            <Link2 size={14} /> Grant capability
-          </button>
+            <Link2 size={14} /> {t("Grant capability")} </button>
         </footer>
       </section>
     </div>
