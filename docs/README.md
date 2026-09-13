@@ -7,6 +7,7 @@ Use these guides to look up a feature or understand how it works. Start with set
 | I want to... | Read |
 | --- | --- |
 | Install, launch, or contribute | [Getting started](getting-started.md) |
+| Install the desktop app or use F3 development resets | [Desktop installation and development](desktop.md) |
 | Understand cards, connections, agents, and capabilities | [Core concepts](concepts.md) |
 | Configure models, credentials, or application storage | [Configuration](configuration.md) |
 | Collect cards and organize the bottom tray | [Packs, Card Library, and Decks](card-library.md) |

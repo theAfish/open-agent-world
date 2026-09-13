@@ -1,0 +1,2 @@
+.application-startup { min-height: 100vh; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 16px; padding: 36px; box-sizing: border-box; background: #f6f5f1; color: #353a3b; font: 14px system-ui; }
+.application-startup button { background: white; border: 1px solid #c9cbbf; color: inherit; border-radius: 8px; padding: 8px 18px; cursor: pointer; }

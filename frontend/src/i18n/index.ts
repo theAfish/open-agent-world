@@ -1,13 +1,15 @@
 import { create } from 'zustand';
 import messages from './messages.json';
+import { profileStorage } from '../state/profileStorage';
 
 export type Locale = 'en' | 'zh-CN';
 const STORAGE_KEY = 'oaw.locale';
 const dictionary: Record<string, readonly string[]> = messages;
 
 function initialLocale(): Locale {
+  if (typeof window === 'undefined') return 'en';
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = profileStorage.getItem(STORAGE_KEY);
     if (saved === 'en' || saved === 'zh-CN') return saved;
   } catch { /* Private browsing may disable storage. */ }
   return typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
@@ -16,7 +18,7 @@ function initialLocale(): Locale {
 export const useLocale = create<{ locale: Locale; setLocale: (locale: Locale) => void }>(set => ({
   locale: initialLocale(),
   setLocale(locale) {
-    try { localStorage.setItem(STORAGE_KEY, locale); } catch { /* Session switching still works. */ }
+    try { profileStorage.setItem(STORAGE_KEY, locale); } catch { /* Session switching still works. */ }
     set({ locale });
   },
 }));

@@ -3,7 +3,8 @@ import { create } from "zustand";
 import { EMPTY_MODEL_CATALOG, type ModelCatalog } from "./modelConnections";
 import { useGenerationStore } from "../effects/generation";
 import { isShadow } from "./shadowCollection";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { profileStorage } from "./profileStorage";
 import { apiErrorMessage, normalizeCard, normalizeEdge, resourceContentUrl, worldApi, type CardCreateInput } from "../api/client";
 import type {
   CardType,
@@ -196,7 +197,7 @@ const INITIAL_VIEWPORT: FlowViewportState = {
 
 function preferredTheme(): "light" | "dark" {
   if (typeof window === "undefined") return "light";
-  const saved = window.localStorage.getItem("oaw-theme");
+  const saved = profileStorage.getItem("oaw-theme");
   if (saved === "dark" || saved === "light") return saved;
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
@@ -1823,7 +1824,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   toggleTheme: () => {
     const theme = get().theme === "light" ? "dark" : "light";
     document.documentElement.dataset.theme = theme;
-    window.localStorage.setItem("oaw-theme", theme);
+    profileStorage.setItem("oaw-theme", theme);
     set({ theme });
   },
 
@@ -2148,5 +2149,6 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   },
 }), {
   name: "oaw-canvas-viewport-v1",
+  storage: createJSONStorage(() => profileStorage),
   partialize: (state) => ({ viewport: state.viewport, mapPins: state.mapPins }),
 }));

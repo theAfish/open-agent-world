@@ -1,5 +1,6 @@
 ﻿import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
+import { profileStorage } from './profileStorage';
 import { NODE_SURFACE_SIZE, WORKSPACE_MIN_SIZE, type NodeSurfaceLevel, type SurfaceSize } from './nodeSurfaces';
 import { worldApi } from '../api/client';
 import { reportInteraction } from './interactions';
@@ -122,7 +123,7 @@ export const useGlueStore = create<GlueState>()(persist((set) => ({
     const ids = new Set(bonds.flatMap(b => [b.a, b.b]));
     return { bonds, boxes: Object.fromEntries(Object.entries(state.boxes).filter(([key]) => ids.has(key))) };
   }),
-}), { name: 'oaw-glue-v1', partialize: ({ boxes, bonds }) => ({ boxes, bonds }) }));
+}), { name: 'oaw-glue-v1', storage: createJSONStorage(() => profileStorage), partialize: ({ boxes, bonds }) => ({ boxes, bonds }) }));
 
 export interface SharedGlue { revision: number; boxes: Record<string, GlueBox>; bonds: GlueBond[] }
 let sharedRevision: number | undefined;

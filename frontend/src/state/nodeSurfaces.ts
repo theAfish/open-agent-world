@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { profileStorage } from "./profileStorage";
 import type { CardType, PluginCatalog } from "../types/world";
 
 export type NodeSurfaceLevel = "node" | "preview" | "inspector" | "workspace";
@@ -165,6 +166,7 @@ export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set) => (
   endConnection: () => set({ connectingNodeId: undefined }),
 }), {
   name: "oaw-node-surfaces-v1",
+  storage: createJSONStorage(() => profileStorage),
   version: 3,
   migrate: (persisted, version) => {
     if (version >= 3) return persisted;

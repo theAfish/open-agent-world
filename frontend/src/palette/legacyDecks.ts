@@ -1,4 +1,5 @@
 import type { CardType, PluginCatalog } from "../types/world";
+import { profileStorage } from "../state/profileStorage";
 
 // Read only during the one-time server-authorized pre-Pack migration.
 type DeckIconKey = "bot" | "boxes" | "workflow" | "folder" | "layers" | "sparkles" | "star" | "zap";
@@ -111,12 +112,12 @@ function parseStoredDecks(value: string | null): StoredDeck[] {
 export function loadLegacyDecks(catalog: PluginCatalog): StoredDeck[] {
   const defaults = defaultDecks(catalog);
   if (typeof window === "undefined") return defaults;
-  const stored = parseStoredDecks(window.localStorage.getItem(DECKS_KEY));
+  const stored = parseStoredDecks(profileStorage.getItem(DECKS_KEY));
   if (stored.length > 0) {
     return normalizeDecks(stored, catalog);
   }
 
-  const legacy = parseStoredDecks(window.localStorage.getItem(LEGACY_CUSTOM_DECKS_KEY));
+  const legacy = parseStoredDecks(profileStorage.getItem(LEGACY_CUSTOM_DECKS_KEY));
   const migrated = defaults.map((deck) => ({ ...deck, cardTypes: [...deck.cardTypes] }));
   legacy.forEach((legacyDeck) => {
     legacyDeck.cardTypes.forEach((type) => {

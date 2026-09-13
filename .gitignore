@@ -12,6 +12,9 @@ frontend/dist/
 frontend/coverage/
 frontend/test-results/
 frontend/playwright-report/
+desktop/node_modules/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
 
 # Local application state and secrets
 .env

@@ -35,12 +35,15 @@ from backend.sandbox import (
 )
 from backend.services import ApplicationServices, create_services
 from backend.sandbox.models import SandboxNetworkError
+from backend.application import router as application_router
 
 
 def create_app(
     settings: Settings | None = None,
     *,
     services: ApplicationServices | None = None,
+    development=None,
+    frontend_directory=None,
 ) -> FastAPI:
     selected_settings = settings or Settings.from_environment()
 
@@ -56,9 +59,21 @@ def create_app(
                 await active_services.startup()
                 yield
             finally:
-                await active_services.shutdown()
-                if owned:
-                    active_services.close()
+                try:
+                    await active_services.shutdown()
+                    if development is not None and development.pending and active_services.sandbox_backend:
+                        # Normal shutdown logs individual Sandbox failures and continues.
+                        # Reset must instead stop if any native cleanup is still failing.
+                        for card in active_services.world.list_cards():
+                            if card.type == "sandbox":
+                                try:
+                                    await active_services.sandbox_backend.terminate(card.id)
+                                except SandboxNotFoundError:
+                                    pass
+                finally:
+                    if owned:
+                        active_services.close()
+                application.state.clean_shutdown = True
 
     application = FastAPI(
         title="Open Agent World",
@@ -77,7 +92,13 @@ def create_app(
     )
     application.add_middleware(ControlPlaneMiddleware, token=selected_settings.control_plane_token)
     application.include_router(api_router)
+    application.include_router(application_router)
     application.add_api_websocket_route("/ws/events", websocket_route)
+    application.state.clean_shutdown = False
+    if development is not None:
+        if selected_settings.application_mode != "development":
+            raise ValueError("Development controls require development mode")
+        development.install(application)
 
     @application.exception_handler(DomainError)
     async def handle_domain_error(request: Request, exc: DomainError) -> JSONResponse:
@@ -138,6 +159,9 @@ def create_app(
             content={"error": {"code": code, "message": str(exc)}},
         )
 
+    if frontend_directory is not None:
+        from starlette.staticfiles import StaticFiles
+        application.mount("/", StaticFiles(directory=frontend_directory, html=True), name="frontend")
     return application
 
 

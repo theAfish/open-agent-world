@@ -14,17 +14,19 @@ Windows PowerShell:
 
 ```powershell
 ./scripts/setup.ps1
-./scripts/dev.ps1
+./scripts/start.ps1
 ```
 
 Linux, WSL2, or macOS:
 
 ```bash
 bash scripts/setup.sh
-python3 scripts/dev.py
+python3 scripts/start.py
 ```
 
-Setup installs the backend development dependencies, Google ADK and LiteLLM adapters, and frontend dependencies. The launcher selects available local ports and prints the application URL; use that URL rather than assuming a fixed port. Ctrl+C stops the launcher.
+Setup installs the backend development dependencies, Google ADK and LiteLLM adapters, frontend dependencies, and builds the production frontend. `start` serves that build from the Python backend and opens the local application URL. Ctrl+C stops the launcher. Rebuild after frontend changes with `npm --prefix frontend run build`.
+
+The Windows desktop installer includes its own Python runtime and opens an independent Tauri window. Building an installer and using development profiles are covered in [Desktop installation and development](desktop.md).
 
 Application setup and Sandbox provisioning are separate. Placing a card does not provision an execution environment. See [Sandbox workspace](sandbox-workspace.md) for prerequisites and starting a Sandbox.
 
@@ -56,8 +58,8 @@ The mock runtime is a debugging substitute, not a language model. Real Agent res
 - Model authentication or routing failures: check the connection's enabled state, credential source, endpoint, and exact model ID in [Configuration](configuration.md).
 - Empty tray: collect cards and select deck contents in [Card Library](card-library.md).
 - Unavailable Sandbox: inspect its runtime diagnostics, install the reported prerequisites, and refresh discovery. OAW does not substitute unisolated execution.
-- For a disposable development store, set `OPEN_AGENT_WORLD_DATA_ROOT` before launch. See [storage](configuration.md#application-storage).
-- Windows `scripts/dev.ps1` waits for backend readiness without a fixed deadline and reports migration progress. Use `-StartupTimeoutSeconds 300` for an explicit deadline. The portable `scripts/dev.py` has a bounded readiness wait, so a large storage migration can exceed it.
+- `dev` always uses `.open-agent-world/development/profiles/default`, independently of the formal user directory and `OPEN_AGENT_WORLD_DATA_ROOT`. Use `-Profile tutorial` / `--profile tutorial` for another development profile. F3 provides selective resets with backups.
+- Windows `scripts/dev.ps1` waits for backend readiness without a fixed deadline and reports progress. Use `-StartupTimeoutSeconds 300` for an explicit deadline. The portable launcher also waits for readiness or backend exit.
 
 ## Development and verification
 

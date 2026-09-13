@@ -5,6 +5,9 @@ param(
 
     [string[]]$PluginPath = @(),
 
+    [ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$')]
+    [string]$Profile = "default",
+
     # Zero waits until ready or process exit; migrations can take much longer than normal startup.
     [ValidateRange(0, 2147483)]
     [int]$StartupTimeoutSeconds = 0
@@ -167,6 +170,7 @@ function Read-BackendState {
 }
 
 $env:OPEN_AGENT_WORLD_AGENT_RUNTIME = $AgentRuntime
+$env:OPEN_AGENT_WORLD_MODE = "development"
 $backendOut = Join-Path $runtimeDirectory "backend.out.log"
 $backendError = Join-Path $runtimeDirectory "backend.err.log"
 
@@ -212,8 +216,8 @@ try {
         $resolved.Path
     }
     $backendArguments += @(
-        "uvicorn", "backend.main:app",
-        "--host", "127.0.0.1", "--port", $backendPort, "--no-proxy-headers"
+        "python", "-m", "backend.launcher", "--mode", "development",
+        "--profile", $Profile, "--port", $backendPort, "--strict-port"
     )
 
     $existingListener = Get-BackendListener -Port $backendPort
@@ -254,6 +258,7 @@ try {
 
     Write-Host "Open Agent World: http://127.0.0.1:$frontendPort/"
     Write-Host "Backend API: $backendHttpUrl"
+    Write-Host "Development profile: $Profile; press F3 for debugging and reset controls."
     if ($resolvedPluginPaths.Count -gt 0) {
         Write-Host "Backend plugins: $($resolvedPluginPaths -join ', ')"
     }

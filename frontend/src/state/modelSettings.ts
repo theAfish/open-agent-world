@@ -1,3 +1,5 @@
+import { profileStorage } from "./profileStorage";
+
 export interface ModelSettings {
   baseUrl: string;
   apiKey: string;
@@ -29,7 +31,7 @@ export function readModelSettings(): ModelSettings {
   if (typeof window === "undefined") return { ...DEFAULT_MODEL_SETTINGS };
   let stored: Partial<ModelSettings> = {};
   try {
-    const raw = window.localStorage.getItem(MODEL_SETTINGS_KEY);
+    const raw = profileStorage.getItem(MODEL_SETTINGS_KEY);
     stored = raw ? JSON.parse(raw) as Partial<ModelSettings> : {};
   } catch {
     stored = {};
@@ -50,7 +52,7 @@ export function readModelSettings(): ModelSettings {
 export function persistModelSettings(settings: ModelSettings): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(
+    profileStorage.setItem(
       MODEL_SETTINGS_KEY,
       JSON.stringify({ baseUrl: settings.baseUrl, models: settings.models }),
     );

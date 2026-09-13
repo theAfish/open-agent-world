@@ -27,6 +27,15 @@ def available_port(preferred: int) -> int:
 def stop(process: subprocess.Popen) -> None:
     if process.poll() is not None:
         return
+    if process.stdin:
+        try:
+            process.stdin.write(b"shutdown\n")
+            process.stdin.flush()
+            process.stdin.close()
+            process.wait(timeout=40)
+            return
+        except (OSError, subprocess.TimeoutExpired):
+            pass
     if os.name == "nt":
         process.terminate()
     else:
@@ -48,6 +57,7 @@ def main() -> None:
     parser.add_argument("--agent-runtime", default="google.adk")
     parser.add_argument("--backend-port", type=int, default=8000)
     parser.add_argument("--frontend-port", type=int, default=5173)
+    parser.add_argument("--profile", default="default")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     python = root / "backend" / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -61,15 +71,16 @@ def main() -> None:
         frontend_port = available_port(frontend_port + 1)
     env = dict(os.environ)
     env["OPEN_AGENT_WORLD_AGENT_RUNTIME"] = args.agent_runtime
+    env["OPEN_AGENT_WORLD_MODE"] = "development"
     env["OAW_DEV_BACKEND_HTTP_URL"] = f"http://127.0.0.1:{backend_port}"
     env["OAW_DEV_BACKEND_WS_URL"] = f"ws://127.0.0.1:{backend_port}"
     options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True}
     processes = []
     try:
-        backend = subprocess.Popen([str(python), "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1",
-                                    "--port", str(backend_port), "--no-proxy-headers"], cwd=root, env=env, **options)
+        backend = subprocess.Popen([str(python), "-m", "backend.launcher", "--mode", "development",
+                                    "--profile", args.profile, "--port", str(backend_port), "--strict-port", "--desktop"], cwd=root, env=env, stdin=subprocess.PIPE, **options)
         processes.append(backend)
-        for _ in range(100):
+        while True:
             if backend.poll() is not None:
                 raise RuntimeError("Backend exited during startup; see its error above")
             try:
@@ -77,12 +88,11 @@ def main() -> None:
                     break
             except (urllib.error.URLError, TimeoutError):
                 time.sleep(0.2)
-        else:
-            raise RuntimeError("Backend did not become ready")
         frontend = subprocess.Popen([node, str(vite), "--host", "127.0.0.1", "--port", str(frontend_port), "--strictPort"],
                                     cwd=root / "frontend", env=env, **options)
         processes.append(frontend)
         print(f"Open Agent World: http://127.0.0.1:{frontend_port}", flush=True)
+        print(f"Development profile: {args.profile}; press F3 for debugging and reset controls.", flush=True)
         while backend.poll() is None and frontend.poll() is None:
             time.sleep(0.3)
     except KeyboardInterrupt:

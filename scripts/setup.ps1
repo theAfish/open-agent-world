@@ -16,6 +16,8 @@ try {
 
     & npm.cmd --prefix frontend ci --ignore-scripts --no-audit --no-fund
     if ($LASTEXITCODE -ne 0) { throw "Frontend environment setup failed." }
+    & npm.cmd --prefix frontend run build
+    if ($LASTEXITCODE -ne 0) { throw "Production frontend build failed." }
 }
 finally {
     Pop-Location

@@ -1,5 +1,5 @@
 import { ReactFlowProvider } from "@xyflow/react";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { WorldCanvas } from "./canvas/WorldCanvas";
 import { ConnectionDialog } from "./edges/ConnectionDialog";
 import { ComponentPalette } from "./palette/ComponentPalette";
@@ -14,6 +14,8 @@ import { TopBar } from "./shell/TopBar";
 import { CardLibrary } from "./shell/CardLibrary";
 import { useWorldStore } from "./state/worldStore";
 import { useLocale } from "./i18n";
+
+const DevelopmentPanel = import.meta.env.DEV ? lazy(() => import("./debug/DevelopmentPanel")) : null;
 
 export function App() {
   const locale = useLocale(state => state.locale);
@@ -44,6 +46,7 @@ export function App() {
         <RuntimeConnection />
         <SettingsPanel />
         <CardLibrary />
+        {DevelopmentPanel && <Suspense fallback={null}><DevelopmentPanel /></Suspense>}
       </main>
     </ReactFlowProvider>
   );

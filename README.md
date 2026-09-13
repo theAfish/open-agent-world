@@ -29,19 +29,21 @@ Clone this repository and run from its root. You need **Python 3.11+**, **uv**, 
 
 ```powershell
 ./scripts/setup.ps1
-./scripts/dev.ps1
+./scripts/start.ps1
 ```
 
 **Linux / WSL2**
 
 ```bash
 bash scripts/setup.sh
-python3 scripts/dev.py
+python3 scripts/start.py
 ```
 
 Open the local URL printed by the launcher. In **Settings > Models**, add a connection and model, then choose a default. Open **Pack & Card Library** to collect cards and add them to your deck.
 
 See [Getting started](docs/getting-started.md) for setup details, macOS limitations, and trying the canvas without model credentials.
+
+For development, use `./scripts/dev.ps1` or `python3 scripts/dev.py`, then press **F3** for selective state resets and stress cards. Development uses a separate profile; existing daily-use data stays in its original location. See [Desktop installation and development](docs/desktop.md) for the Windows installer, release preview, profile locations, and recovery backups.
 
 ## The mental model
 

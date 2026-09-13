@@ -34,9 +34,13 @@ class Settings:
     run_cleanup_timeout_seconds: float = 10.0
     control_plane_token: str | None = field(default=None, repr=False)
     storage_config_path: Path | None = None
+    application_mode: str = "production"
 
     @classmethod
     def from_environment(cls) -> "Settings":
+        mode = os.environ.get("OPEN_AGENT_WORLD_MODE", "production")
+        if mode not in {"production", "development", "preview"}:
+            raise ValueError("OPEN_AGENT_WORLD_MODE must be production, development, or preview")
         root = _default_data_root().resolve()
         runtime = os.environ.get("OPEN_AGENT_WORLD_AGENT_RUNTIME", "google.adk")
         runtime = {"google-adk": "google.adk", "mock": "core.mock"}.get(
@@ -63,6 +67,7 @@ class Settings:
                 ) from exc
             inactivity_timeout = parsed if parsed > 0 else None
         return cls(
+            application_mode=mode,
             data_root=root,
             storage_config_path=None if os.environ.get("OPEN_AGENT_WORLD_DATA_ROOT") else root.with_name(root.name + ".storage.json"),
             database_path=root / "database" / "world.sqlite3",

@@ -1,5 +1,6 @@
 import { create as createStore } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
+import { profileStorage } from '../state/profileStorage';
 import { worldApi, apiErrorMessage } from '../api/client';
 import { useWorldStore, mergeCards } from '../state/worldStore';
 import { useCardLibrary } from '../state/cardLibrary';
@@ -34,6 +35,7 @@ export const useTutorialStore = createStore<TutorialState>()(persist((): Tutoria
   status: 'new', view: 'hidden', busy: false, celebration: 0, ready: false,
 }), {
   name: 'oaw-onboarding-v1', version: 1,
+  storage: createJSONStorage(() => profileStorage),
   partialize: ({ status, session }) => ({ status, session }),
   // Future incompatible step sequences resume at a reviewable entrance.
   merge: (saved, current) => {
