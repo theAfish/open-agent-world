@@ -20,6 +20,7 @@ To disable a plugin, first remove its world objects, relationships, dependent Ag
 | [Codex](../plugins/codex/README.md) | A Codex runtime integration |
 | [Structure viewer](../plugins/structure_viewer/README.md) | Viewing connected structure files |
 | [MatCreator](../plugins/matcreator/README.md) | Materials-oriented graph and workflow tools |
+| [AtomSculptor](../plugins/atomsculptor/README.md) | Atomistic structure editing and modelling Agents |
 
 Plugin-specific documentation can remain in its own package or repository. These links are a directory, not a requirement to copy all plugin content into OAW's docs. In-app plugin documentation and tutorial delivery are not implemented; no new manifest or framework is required here.
 
@@ -28,7 +29,10 @@ Plugin-specific documentation can remain in its own package or repository. These
 Start with the installable [Greeter example](../examples/plugins/greeter/README.md), then consult [package discovery](#package-structure-and-discovery), [the public API](#public-plugin-api), and the contracts below.
 
 Plugin API 1.16 adds `NodePresentation` for supported surfaces, initial appearance,
-and compact-card opening behavior (see the node definition contract below).
+and compact-card opening behavior (see the node definition contract below). It also
+lets a trusted Agent runtime opt into an OAW-managed model connection resolver. The
+resolver is injected only in the backend and returns the selected adapter, model,
+base URL and secret without storing credentials in plugin card state or frontend code.
 Plugin API 1.15 adds optional pack artwork and accent colors through registered
 public image assets (see [Card Library](card-library.md#pack-appearance)).
 Plugin API 1.14 adds `PackDefinition` and `registration.register_pack(...)`.
@@ -270,11 +274,16 @@ or render displays a local error instead of silently substituting another view.
 
 Views receive the current card, definition, surface level, and a card-scoped host
 adapter with `updateConfig` and `getAgentInfo`. Updates go through existing host
-actions and backend validation. `SchemaFields` is also exported for scalar schema
-controls. Import host contracts only from `@oaw/plugin-api`; React is shared with
-the host. Do not import host stores or internal components. UI extensions are
-trusted application code, not a security sandbox; error boundaries isolate
-rendering and module-load errors, not arbitrary asynchronous side effects.
+actions and backend validation. The adapter also provides document reads/actions,
+transforms, file-viewer access, `openWorkspace(nodeId)`, `runAgent(nodeId, prompt)`
+and `onDocumentChange(listener)`. The latter observes future authoritative
+`node_document` mutations and returns an unsubscribe function; it must not be
+used as a replacement for a plugin's own initial document load. `SchemaFields` is
+also exported for scalar schema controls. Import host contracts only from
+`@oaw/plugin-api`; React is shared with the host. Do not import host stores or
+internal components. UI extensions are trusted application code, not a security
+sandbox; error boundaries isolate rendering and module-load errors, not arbitrary
+asynchronous side effects.
 
 Vite discovers immediate `plugins/*/frontend` entries at startup/build time and
 loads their view modules on demand. Restart development servers after adding a

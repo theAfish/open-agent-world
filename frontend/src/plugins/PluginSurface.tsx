@@ -3,9 +3,33 @@ import { Component, Suspense, useMemo, type ReactNode } from "react";
 import { worldApi, nodeDocumentDownloadUrl } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import { useOpenFiles } from "../state/openFiles";
+import { useNodeSurfaceStore } from "../state/nodeSurfaces";
 import type { WorldCard } from "../types/world";
 import { pluginView } from "./registry";
-import type { PluginSlot, PluginViewProps } from "./sdk";
+import type { PluginDocumentChange, PluginSlot, PluginViewProps } from "./sdk";
+
+function subscribeToDocumentChanges(listener: (change: PluginDocumentChange) => void): () => void {
+  // Events are prepended and bounded by the world store. Snapshot existing IDs
+  // so mounting a view never replays a mutation that happened before it existed.
+  const seen = new Set(useWorldStore.getState().events.map((event) => event.id));
+  return useWorldStore.subscribe((state) => {
+    for (const event of state.events) {
+      if (seen.has(event.id)) continue;
+      seen.add(event.id);
+      const { payload } = event;
+      if (payload.scope_kind !== "node_document" || payload.key !== "document") continue;
+      const nodeId = typeof payload.owner_id === "string" ? payload.owner_id : undefined;
+      const revision = typeof payload.revision === "number" ? payload.revision : undefined;
+      if (!nodeId || revision === undefined) continue;
+      listener({
+        nodeId,
+        revision,
+        actorId: typeof payload.actor_id === "string" ? payload.actor_id : undefined,
+        runId: typeof payload.run_id === "string" ? payload.run_id : undefined,
+      });
+    }
+  });
+}
 
 class PluginBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   state: { error: string | null } = { error: null };
@@ -33,6 +57,12 @@ export function PluginSurface({ card, slot, level, children }: {
     readDocument: (nodeId = card.id) => worldApi.getNodeDocument(nodeId),
     transform: (operation, request) => worldApi.transformDocument(card.id, operation, request),
     documentDownloadUrl: (name) => nodeDocumentDownloadUrl(card.id, name),
+    openWorkspace: (nodeId) => {
+      useWorldStore.getState().selectCards([nodeId], { syncCanvas: true });
+      useNodeSurfaceStore.getState().openWorkspace(nodeId);
+    },
+    runAgent: (nodeId, prompt) => useWorldStore.getState().runAgent(nodeId, prompt),
+    onDocumentChange: subscribeToDocumentChanges,
     readFile: (reference, signal) => worldApi.readFilePreview(card.id, reference, signal),
     openFile: (reference, name) => useOpenFiles.getState().open({ ...reference, source_id: card.id }, name),
     clearOpenedFile: () => useOpenFiles.getState().clear(card.id),

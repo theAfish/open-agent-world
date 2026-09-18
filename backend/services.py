@@ -3743,6 +3743,7 @@ def create_services(
     services.sandbox_operations = SandboxOperations(services)
     services.summoning = SummoningService(services)
     from backend.security.model_connections import ModelConnectionStore
+    model_connections = ModelConnectionStore(services.llm_settings)
     services.run_manager = RunManager(
         store=RunStore(database),
         world=world,
@@ -3758,11 +3759,12 @@ def create_services(
             else settings.agent_runtime
         ),
         provider_options={
-            "google.adk": {"app_name": "open-agent-world", "model_connections": ModelConnectionStore(services.llm_settings)},
+            "google.adk": {"app_name": "open-agent-world", "model_connections": model_connections},
             "openai.codex": {
                 "workspace_root": SandboxSettingsStore(database, settings.data_root).resolve_workspace_root,
             },
         },
+        model_connection_resolver=model_connections,
         inactivity_timeout_seconds=settings.run_inactivity_timeout_seconds,
         execution_deadline_seconds=settings.run_execution_deadline_seconds,
         cleanup_timeout_seconds=settings.run_cleanup_timeout_seconds,

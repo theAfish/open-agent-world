@@ -16,7 +16,7 @@ from backend.plugins.presets import LegionPresetDefinition
 
 if TYPE_CHECKING:
     from backend.plugins.summoning import NodeSummoningDefinition
-    from backend.agents import AgentCapabilityProvider, RuntimeProvider
+    from backend.agents import AgentCapabilityProvider, ModelConnectionResolver, RuntimeProvider
     from backend.capabilities import Capability
     from backend.plugins.capability import CapabilityContext
     from backend.state.schema import StateSchema
@@ -368,6 +368,7 @@ class PluginRegistration:
         self.capability_handlers: dict[str, CapabilityHandler] = {}
         self.capabilities: dict[str, CapabilityDefinition] = {}
         self.runtime_provider_factories: dict[str, RuntimeProviderFactory] = {}
+        self.runtime_provider_model_resolvers: set[str] = set()
         self.state_schemas: dict[str, StateSchema] = {}
         self.assets: dict[str, PluginAsset] = {}
         self.packs: dict[str, PackDefinition] = {}
@@ -404,7 +405,8 @@ class PluginRegistration:
         self.register_capability_handler(definition.kind, handler)
 
     def register_runtime_provider(
-        self, provider_id: str, factory: RuntimeProviderFactory
+        self, provider_id: str, factory: RuntimeProviderFactory,
+        *, needs_model_connection_resolver: bool = False,
     ) -> None:
         self._add(
             self.runtime_provider_factories,
@@ -412,6 +414,8 @@ class PluginRegistration:
             factory,
             "runtime provider",
         )
+        if needs_model_connection_resolver:
+            self.runtime_provider_model_resolvers.add(provider_id)
 
     def register_state_schema(self, schema: StateSchema) -> None:
         self._add(self.state_schemas, schema.id, schema, "state schema")
@@ -435,6 +439,7 @@ class PluginRegistry:
         self._capability_handlers: dict[str, CapabilityHandler] = {}
         self._capabilities: dict[str, CapabilityDefinition] = {}
         self._runtime_provider_factories: dict[str, RuntimeProviderFactory] = {}
+        self._runtime_provider_model_resolvers: set[str] = set()
         self._state_schemas: dict[str, StateSchema] = {}
         self._owners: dict[tuple[str, str], str] = {}
         self._assets: dict[tuple[str, str], PluginAsset] = {}
@@ -493,6 +498,7 @@ class PluginRegistry:
             self._runtime_provider_factories,
             staged.runtime_provider_factories,
         )
+        self._runtime_provider_model_resolvers.update(staged.runtime_provider_model_resolvers)
         self._commit_owned(
             "state_schema", descriptor.id, self._state_schemas, staged.state_schemas
         )
@@ -845,6 +851,7 @@ class PluginRegistry:
         self,
         provider_id: str,
         capability_provider: AgentCapabilityProvider,
+        model_connection_resolver: "ModelConnectionResolver | None" = None,
         **options: Any,
     ) -> RuntimeProvider:
         self._assert_enabled("runtime_provider", provider_id)
@@ -854,6 +861,10 @@ class PluginRegistry:
             raise ValueError(
                 f"runtime provider {provider_id!r} is not registered"
             ) from exc
+        if provider_id in self._runtime_provider_model_resolvers:
+            if model_connection_resolver is None:
+                raise RuntimeError(f"runtime provider {provider_id!r} requires OAW model connections")
+            options["model_connection_resolver"] = model_connection_resolver
         provider = factory(capability_provider, **options)
         from backend.agents import RuntimeProvider
 

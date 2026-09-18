@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Protocol
 
-from .models import AgentConfig, AgentEvent, AgentInfo, ScopedToolDefinition
+from .models import AgentConfig, AgentEvent, AgentInfo, RuntimeModelConnection, ScopedToolDefinition
 
 if TYPE_CHECKING:
     from backend.runs.models import InvocationContext, RuntimeInput
@@ -28,6 +28,12 @@ class AgentCapabilityProvider(Protocol):
         capability_id: str,
         arguments: Mapping[str, Any],
     ) -> Any: ...
+
+
+class ModelConnectionResolver(Protocol):
+    """Resolve a managed OAW model reference for a trusted runtime provider."""
+
+    def resolve_runtime(self, model_reference: str) -> RuntimeModelConnection: ...
 
 
 class RuntimeProvider(ABC):

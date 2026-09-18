@@ -1,6 +1,6 @@
 """Public RuntimeProvider surface; provider SDKs remain behind this package."""
 
-from .base import AgentCapabilityProvider, RuntimeProvider
+from .base import AgentCapabilityProvider, ModelConnectionResolver, RuntimeProvider
 from .google_adk import GoogleAdkAgentRuntime
 from .mock import MockAgentRuntime
 from .models import (
@@ -14,6 +14,7 @@ from .models import (
     AgentRuntimeError,
     AgentStateError,
     AgentStatus,
+    RuntimeModelConnection,
     ScopedToolDefinition,
     ToolParameter,
 )
@@ -32,7 +33,9 @@ __all__ = [
     "AgentStatus",
     "GoogleAdkAgentRuntime",
     "MockAgentRuntime",
+    "ModelConnectionResolver",
     "RuntimeProvider",
+    "RuntimeModelConnection",
     "ScopedToolDefinition",
     "ToolParameter",
 ]

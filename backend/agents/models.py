@@ -16,6 +16,20 @@ class AgentStatus(StrEnum):
     ERROR = "error"
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeModelConnection:
+    """One resolved OAW model connection for a trusted Agent runtime.
+
+    This object is created only in the backend process.  Its API key is never
+    serialized into cards, events, documents, or frontend plugin contracts.
+    """
+
+    adapter: str
+    model_id: str
+    base_url: str
+    api_key: str | None = field(repr=False)
+
+
 class AgentEventType(StrEnum):
     STARTED = "agent_started"
     STATUS_CHANGED = "agent_status_changed"

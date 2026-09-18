@@ -18,6 +18,8 @@
     "paths": {
       "@oaw/plugin-api": ["./src/plugins/sdk.ts"],
       "matterviz/*": ["./node_modules/matterviz/dist/*"],
+      "three": ["./node_modules/@types/three"],
+      "three/*": ["./node_modules/@types/three/*"],
       "svelte": ["./node_modules/svelte/types/index.d.ts"],
       "pdfjs-dist": ["./node_modules/pdfjs-dist"],
       "@xyflow/react": ["./node_modules/@xyflow/react"],

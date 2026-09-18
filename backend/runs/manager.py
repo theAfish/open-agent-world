@@ -15,6 +15,7 @@ from backend.agents import (
     AgentEvent,
     AgentNotFoundError,
     AgentStatus,
+    ModelConnectionResolver,
     RuntimeProvider,
 )
 from backend.errors import RuntimeUnavailableError
@@ -83,6 +84,7 @@ class RunManager:
     state: StateStore
     default_runtime_provider_id: str | None = None
     provider_options: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    model_connection_resolver: ModelConnectionResolver | None = None
     inactivity_timeout_seconds: float | None = DEFAULT_INACTIVITY_TIMEOUT_SECONDS
     _providers: dict[str, RuntimeProvider] = field(default_factory=dict)
     _agent_provider_ids: dict[str, str] = field(default_factory=dict)
@@ -821,7 +823,9 @@ class RunManager:
             return existing
         options = dict(self.provider_options.get(provider_id, {}))
         provider = self.plugins.create_runtime_provider(
-            provider_id, self.capability_provider, **options
+            provider_id, self.capability_provider,
+            model_connection_resolver=self.model_connection_resolver,
+            **options,
         )
         self._providers[provider_id] = provider
         return provider

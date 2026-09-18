@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.errors import ResourceValidationError, RevisionConflictError
+from backend.agents.models import RuntimeModelConnection
 from backend.security.llm_settings import LlmSettingsStore
 
 MODEL_REF_PREFIX = "oaw:model:"
@@ -195,6 +196,16 @@ class ModelConnectionStore:
                     key = "oaw-no-auth"
                 return connection["adapter"], model["model_id"], connection["base_url"], key
         raise ResourceValidationError("Selected model connection is missing on this backend. Choose a model in Settings.")
+
+    def resolve_runtime(self, model_reference: str) -> RuntimeModelConnection:
+        """Resolve an OAW model reference for a trusted runtime provider."""
+        reference = model_reference
+        if reference == "oaw:default":
+            reference = self.read().default_model or ""
+            if not reference:
+                raise ResourceValidationError("Choose a default model and configure its connection in Settings / Models.")
+        adapter, model_id, base_url, api_key = self.resolve(reference)
+        return RuntimeModelConnection(adapter, model_id, base_url, api_key)
 
 
 def _provider_environment_variable(adapter: str) -> str:
