@@ -1,0 +1,229 @@
+.atomsculptor-workspace { height: 100%; min-height: 420px; color: #d7d8e4; background: #181825; font: 13px/1.4 Inter, ui-sans-serif, system-ui, sans-serif; }
+.atomsculptor-summary { margin: 0; color: #9ca1b9; }
+.atomsculptor-header { height: 46px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; background: #202033; border-bottom: 1px solid #34354b; }
+.atomsculptor-header strong { display: block; color: #f2f2fa; }.atomsculptor-header small { color: #8d91aa; }.atomsculptor-header > span { color: #aeb3ca; }
+.atomsculptor-editor-toolbar { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; padding: 7px 10px; background: #212135; border-bottom: 1px solid #34354b; }
+.atomsculptor-editor-toolbar button, .atomsculptor-editor-toolbar select, .atomsculptor-inspector button, .atomsculptor-atoms-panel button { border: 1px solid #44455d; background: #2a2b42; color: #dfe1ef; border-radius: 4px; min-height: 27px; padding: 3px 8px; cursor: pointer; }
+.atomsculptor-editor-toolbar button:hover:not(:disabled), .atomsculptor-inspector button:hover, .atomsculptor-atoms-panel button:hover { background: #3b3d5c; }.atomsculptor-editor-toolbar button.active, .atomsculptor-inspector button.selected, .atom-row.selected button { background: #3d5b98; border-color: #6e9cff; color: white; }.atomsculptor-editor-toolbar button:disabled { opacity: .45; cursor: default; }.atomsculptor-editor-toolbar i { height: 22px; border-left: 1px solid #4a4b63; margin: 0 2px; }
+.atomsculptor-file-input { display: none; }.atomsculptor-editor-grid { height: calc(100% - 91px); min-height: 329px; display: grid; grid-template-columns: 188px minmax(300px, 1fr) minmax(260px, 32%); }
+.atomsculptor-inspector, .atomsculptor-atoms-panel { overflow: auto; background: #202033; border-right: 1px solid #34354b; }.atomsculptor-atoms-panel { border-left: 1px solid #34354b; border-right: 0; }
+.atomsculptor-inspector section { padding: 10px; border-bottom: 1px solid #34354b; }.atomsculptor-inspector h3, .atomsculptor-atoms-panel h3 { margin: 0 0 8px; font-size: 12px; color: #aeb3ca; text-transform: uppercase; letter-spacing: .04em; }.atomsculptor-inspector p { margin: 5px 0; }.atomsculptor-hint, .muted { color: #8d91aa; }.atomsculptor-layer-row { display: grid; grid-template-columns: 1fr 30px; gap: 4px; margin: 4px 0; }.atomsculptor-layer-row button:first-child { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.atomsculptor-button-row { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.atomsculptor-inspector label { display: grid; gap: 3px; margin: 6px 0; color: #aeb3ca; }.atomsculptor-inspector select { min-width: 0; color: #e7e8f2; background: #171723; border: 1px solid #45475e; border-radius: 3px; padding: 4px; }
+.atomsculptor-hover { padding: 6px; color: #d9e5ff; background: #292d45; border-left: 2px solid #75a6ff; border-radius: 2px; font-family: ui-monospace, monospace; font-size: 11px; }
+.atomsculptor-canvas-panel { min-width: 0; min-height: 0; position: relative; }.atomsculptor-legacy-viewport { height: 100%; width: 100%; position: relative; }.atomsculptor-legacy-viewport canvas { display: block; width: 100%; height: 100%; touch-action: none; }.atomsculptor-box-overlay { position: absolute; pointer-events: none; display: none; border: 1px solid #78a8ff; background: rgb(91 145 255 / 20%); }.atomsculptor-empty { display: grid; height: 100%; margin: 0; place-items: center; color: #8d91aa; text-align: center; padding: 20px; }
+.atomsculptor-add-panel { position: absolute; z-index: 2; top: 12px; left: 12px; width: min(430px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow: auto; box-sizing: border-box; padding: 12px; background: #25263b; border: 1px solid #53577a; border-radius: 7px; box-shadow: 0 10px 35px rgb(0 0 0 / 40%); }.atomsculptor-add-panel h3 { margin: 0 0 8px; }.atomsculptor-add-panel label { display: grid; gap: 4px; margin-top: 10px; }.atomsculptor-add-panel input { color: #e7e8f2; background: #171723; border: 1px solid #45475e; border-radius: 3px; padding: 6px; }.atomsculptor-periodic { display: grid; grid-template-columns: repeat(18, minmax(18px, 1fr)); gap: 3px; }.atomsculptor-periodic button { min-width: 0; border: 1px solid #4b4e69; border-radius: 3px; background: #30324b; color: #dfe1ef; font-size: 10px; padding: 3px 1px; cursor: pointer; }.atomsculptor-periodic button.selected { color: white; background: #3d5b98; border-color: #80aaff; }
+.atomsculptor-atoms-panel { padding: 10px; }.atomsculptor-atom-list { display: grid; gap: 4px; }.atom-row { display: grid; grid-template-columns: 42px 44px repeat(3, minmax(54px, 1fr)); gap: 3px; align-items: center; }.atom-row input { min-width: 0; width: 100%; box-sizing: border-box; color: #e7e8f2; background: #171723; border: 1px solid #45475e; border-radius: 3px; padding: 4px; }.atom-row.selected input { border-color: #6e9cff; }
+.atomsculptor-lattice-panel { display: grid; gap: 6px; margin-top: 8px; }.atomsculptor-lattice-panel label { display: grid; gap: 3px; color: #aeb3ca; }.atomsculptor-lattice-panel input { min-width: 0; color: #e7e8f2; background: #171723; border: 1px solid #45475e; border-radius: 3px; padding: 4px; }.atomsculptor-lattice-panel .atomsculptor-check { display: flex; align-items: center; gap: 6px; }.atomsculptor-lattice-panel .atomsculptor-check input { width: auto; }
+.atomsculptor-builder-panel { display: grid; gap: 4px; margin-top: 8px; padding: 8px; background: #26273c; border: 1px solid #4a4d6b; border-radius: 5px; }.atomsculptor-builder-panel label { display: grid; gap: 3px; margin: 2px 0; color: #aeb3ca; }.atomsculptor-builder-panel input, .atomsculptor-builder-panel select { min-width: 0; color: #e7e8f2; background: #171723; border: 1px solid #45475e; border-radius: 3px; padding: 4px; }.atomsculptor-builder-panel .atomsculptor-check { display: flex; align-items: center; gap: 6px; }.atomsculptor-builder-panel .atomsculptor-check input { width: auto; }.atomsculptor-builder-panel button { border: 1px solid #44455d; background: #2a2b42; color: #dfe1ef; border-radius: 4px; min-height: 27px; padding: 3px 8px; cursor: pointer; }.atomsculptor-builder-panel button:hover { background: #3b3d5c; }
+@media (max-width: 900px) { .atomsculptor-editor-grid { grid-template-columns: 155px minmax(300px, 1fr); }.atomsculptor-atoms-panel { grid-column: 1 / -1; max-height: 210px; border-left: 0; border-top: 1px solid #34354b; }.atom-row { grid-template-columns: 42px 44px repeat(3, minmax(70px, 1fr)); } }
+
+/* The OAW workspace keeps its own shell, but the editor below deliberately
+   mirrors the retained AtomSculptor workbench: compact VS Code-like chrome,
+   restrained blue selection state, dense tools, and on-canvas readouts. */
+.atomsculptor-legacy-shell {
+  --as-bg0: #181818;
+  --as-bg1: #1e1e1e;
+  --as-bg2: #252526;
+  --as-bg3: #2d2d2d;
+  --as-hover: #37373d;
+  --as-border: #3c3c3c;
+  --as-text: #d4d4d4;
+  --as-muted: #a0a0a0;
+  --as-faint: #6a6a6a;
+  --as-accent: #007acc;
+  --as-accent-light: #1a8cdb;
+  background: var(--as-bg0);
+  color: var(--as-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13px;
+}
+
+.atomsculptor-legacy-shell .atomsculptor-header {
+  height: 36px;
+  min-height: 36px;
+  padding: 0 12px;
+  background: var(--as-bg2);
+  border-bottom: 1px solid var(--as-border);
+}
+.atomsculptor-brand { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.atomsculptor-brand > span { color: var(--as-accent-light); font-size: 17px; line-height: 1; }
+.atomsculptor-brand strong { color: var(--as-accent-light); font-size: 14px; letter-spacing: .35px; }
+.atomsculptor-brand small { max-width: min(48vw, 430px); overflow: hidden; color: var(--as-muted); text-overflow: ellipsis; white-space: nowrap; }
+.atomsculptor-runtime-state { display: inline-flex; align-items: center; gap: 5px; color: var(--as-faint) !important; font-size: 11px; }
+.atomsculptor-runtime-state i { width: 7px; height: 7px; border-radius: 50%; background: #81c784; box-shadow: 0 0 0 2px #81c78422; }
+
+.atomsculptor-legacy-shell .atomsculptor-editor-toolbar {
+  min-height: 43px;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--as-bg1);
+  border-bottom: 1px solid var(--as-border);
+  box-shadow: inset 0 -1px #0004;
+}
+.atomsculptor-legacy-shell .atomsculptor-editor-toolbar button,
+.atomsculptor-legacy-shell .atomsculptor-editor-toolbar select,
+.atomsculptor-legacy-shell .atomsculptor-inspector button,
+.atomsculptor-legacy-shell .atomsculptor-atoms-panel button {
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid var(--as-border);
+  border-radius: 4px;
+  background: var(--as-bg3);
+  color: var(--as-muted);
+  font-size: 11px;
+  transition: background .1s, color .1s, border-color .1s, box-shadow .1s;
+}
+.atomsculptor-legacy-shell .atomsculptor-editor-toolbar button:hover:not(:disabled),
+.atomsculptor-legacy-shell .atomsculptor-inspector button:hover,
+.atomsculptor-legacy-shell .atomsculptor-atoms-panel button:hover { background: var(--as-hover); color: var(--as-text); }
+.atomsculptor-legacy-shell .atomsculptor-editor-toolbar button.active,
+.atomsculptor-legacy-shell .atomsculptor-inspector button.active,
+.atomsculptor-legacy-shell .atomsculptor-inspector button.selected,
+.atomsculptor-legacy-shell .atom-row.selected button { background: var(--as-accent); border-color: var(--as-accent-light); color: #fff; box-shadow: inset 0 1px #ffffff22; }
+.atomsculptor-legacy-shell .atomsculptor-editor-toolbar i { height: 22px; border-left-color: var(--as-border); }
+.atomsculptor-legacy-shell .atomsculptor-editor-toolbar select { background: var(--as-bg2); }
+.atomsculptor-legacy-shell .atomsculptor-editor-toolbar .atomsculptor-tool-button {
+  display: inline-grid;
+  width: 29px;
+  min-width: 29px;
+  padding: 0;
+  place-items: center;
+  color: var(--as-muted);
+  line-height: 1;
+}
+.atomsculptor-legacy-shell .atomsculptor-editor-toolbar .atomsculptor-tool-button svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+.atomsculptor-legacy-shell .atomsculptor-editor-toolbar .atomsculptor-axis-button {
+  width: 24px;
+  min-width: 24px;
+  padding: 0;
+  color: var(--as-faint);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.atomsculptor-legacy-shell .atomsculptor-editor-toolbar .atomsculptor-projection-button {
+  width: 25px;
+  min-width: 25px;
+  padding: 0;
+  color: var(--as-accent-light);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.atomsculptor-legacy-shell .atomsculptor-editor-grid {
+  height: calc(100% - 79px);
+  min-height: 341px;
+  grid-template-columns: 218px minmax(340px, 1fr) minmax(260px, 29%);
+  background: var(--as-bg0);
+}
+.atomsculptor-legacy-shell .atomsculptor-inspector,
+.atomsculptor-legacy-shell .atomsculptor-atoms-panel {
+  background: var(--as-bg1);
+  border-color: var(--as-border);
+  scrollbar-color: var(--as-border) var(--as-bg1);
+}
+.atomsculptor-legacy-shell .atomsculptor-inspector section { padding: 10px 11px; border-bottom-color: var(--as-border); }
+.atomsculptor-legacy-shell .atomsculptor-inspector h3,
+.atomsculptor-legacy-shell .atomsculptor-atoms-panel h3 {
+  margin: -10px -11px 9px;
+  padding: 7px 11px;
+  background: var(--as-bg2);
+  border-bottom: 1px solid var(--as-border);
+  color: var(--as-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .8px;
+}
+.atomsculptor-legacy-shell .atomsculptor-atoms-panel { padding: 10px 11px; }
+.atomsculptor-legacy-shell .atomsculptor-atom-list { gap: 3px; }
+.atomsculptor-legacy-shell .atom-row {
+  min-height: 29px;
+  padding: 2px 3px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+.atomsculptor-legacy-shell .atom-row:hover { background: #ffffff08; border-color: #ffffff0d; }
+.atomsculptor-legacy-shell .atomsculptor-inspector label { color: var(--as-muted); font-size: 11px; }
+.atomsculptor-legacy-shell .atomsculptor-inspector select,
+.atomsculptor-legacy-shell .atomsculptor-inspector input,
+.atomsculptor-legacy-shell .atomsculptor-atoms-panel input,
+.atomsculptor-legacy-shell .atomsculptor-builder-panel input,
+.atomsculptor-legacy-shell .atomsculptor-builder-panel select,
+.atomsculptor-legacy-shell .atomsculptor-lattice-panel input,
+.atomsculptor-legacy-shell .atomsculptor-add-panel input {
+  background: #1a1a1a;
+  border-color: var(--as-border);
+  border-radius: 3px;
+  color: var(--as-text);
+}
+.atomsculptor-legacy-shell .atomsculptor-inspector select:focus,
+.atomsculptor-legacy-shell input:focus { border-color: var(--as-accent-light); outline: 1px solid #007acc55; }
+.atomsculptor-legacy-shell .atomsculptor-hint,
+.atomsculptor-legacy-shell .muted { color: var(--as-faint); font-size: 11px; line-height: 1.45; }
+.atomsculptor-legacy-shell .atomsculptor-layer-row { margin: 3px 0; }
+.atomsculptor-legacy-shell .atomsculptor-hover { background: #202b33; border-left-color: var(--as-accent-light); color: var(--as-text); }
+.atomsculptor-legacy-shell .atomsculptor-builder-panel,
+.atomsculptor-legacy-shell .atomsculptor-lattice-panel { background: var(--as-bg2); border-color: var(--as-border); border-radius: 4px; }
+.atomsculptor-legacy-shell .atomsculptor-builder-panel button { background: var(--as-bg3); border-color: var(--as-border); }
+
+.atomsculptor-legacy-shell .atomsculptor-canvas-panel { background: #181818; overflow: hidden; }
+.atomsculptor-legacy-shell .atomsculptor-legacy-viewport { background: radial-gradient(circle at 48% 38%, #25252a 0, #181818 62%); }
+.atomsculptor-legacy-shell .atomsculptor-box-overlay { border: 2px dashed var(--as-accent-light); background: #007acc18; }
+.atomsculptor-legacy-shell .atomsculptor-empty { color: var(--as-faint); }
+.atomsculptor-legacy-shell .atomsculptor-add-panel {
+  top: 10px; left: 10px; border-color: var(--as-border); border-radius: 5px; background: var(--as-bg2); box-shadow: 0 8px 24px #0009;
+}
+.atomsculptor-legacy-shell .atomsculptor-add-panel h3 { color: var(--as-accent-light); font-size: 12px; text-transform: uppercase; letter-spacing: .7px; }
+.atomsculptor-legacy-shell .atomsculptor-periodic button { background: var(--as-bg3); border-color: var(--as-border); color: var(--as-muted); }
+.atomsculptor-legacy-shell .atomsculptor-periodic button:hover { color: var(--as-text); background: var(--as-hover); }
+.atomsculptor-legacy-shell .atomsculptor-periodic button.selected { background: var(--as-accent); border-color: var(--as-accent-light); }
+
+.atomsculptor-atom-info {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: grid;
+  min-width: 154px;
+  max-width: calc(100% - 16px);
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--as-border);
+  border-radius: 5px;
+  background: #252526ed;
+  box-shadow: 0 5px 18px #0006;
+  color: var(--as-muted);
+  font-size: 11px;
+  pointer-events: none;
+}
+.atomsculptor-atom-info strong { color: var(--as-accent-light); font-size: 12px; }
+.atomsculptor-atom-info strong small { color: var(--as-muted); font-weight: 400; }
+.atomsculptor-statusbar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  height: 23px;
+  padding: 0 9px;
+  border-top: 1px solid var(--as-border);
+  background: #181818e8;
+  color: var(--as-faint);
+  font-size: 10px;
+  pointer-events: none;
+}
+.atomsculptor-statusbar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.atomsculptor-legacy-shell .atom-row { gap: 4px; }
+.atomsculptor-legacy-shell .atom-row.selected { background: #007acc1c; box-shadow: inset 2px 0 var(--as-accent); }
+.atomsculptor-legacy-shell .atom-row.selected input { border-color: #007acc99; }
+
+@media (max-width: 900px) {
+  .atomsculptor-legacy-shell .atomsculptor-editor-grid { grid-template-columns: 185px minmax(300px, 1fr); }
+  .atomsculptor-runtime-state { display: none; }
+}
