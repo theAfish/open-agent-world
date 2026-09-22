@@ -63,7 +63,7 @@ async def test_saved_layout_and_four_states_survive_restart_and_unwrap(tmp_path:
         group, *_ = await services.form_legion_group("Four states", [a.id for a in agents])
         from backend.world.models import EdgeCreate
         await services.create_edge(EdgeCreate(source=agents[0].id, target=agents[1].id, relationship="communicate"))
-        presentation = {a.id: {"level": level, "base_level": "node", "workspace_size": {"width": 1200, "height": 800}}
+        presentation = {a.id: {"level": level, "base_level": "node", "workspace_size": {"width": 1200, "height": 800}, "surface_sizes": {"inspector": {"width": 640, "height": 480}}}
                         for a, level in zip(agents, ("node", "preview", "inspector", "workspace"), strict=True)}
         saved = await services.capture_legion(LegionCapture(name="Layout", node_ids=[group.id, *[a.id for a in agents]], presentation=presentation))
     finally:
@@ -77,6 +77,7 @@ async def test_saved_layout_and_four_states_survive_restart_and_unwrap(tmp_path:
             members = sorted((n for n in copy.nodes if n.type == "agent"), key=lambda n: n.name)
             assert [copy.presentation[n.id].level for n in members] == ["node", "preview", "inspector", "workspace"]
             assert copy.presentation[members[3].id].workspace_size.width == 1200
+            assert copy.presentation[members[2].id].surface_sizes["inspector"].width == 640
             assert [n.position.x - members[0].position.x for n in members] == [0, 500, 1000, 1500]
             assert [n.position.y - members[0].position.y for n in members] == [0, 80, 160, 240]
             assert all(n.status == "idle" for n in members)

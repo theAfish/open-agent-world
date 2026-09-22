@@ -198,6 +198,39 @@ class ConversationStore:
             )
         return self.get_session(conversation_id, session_id)
 
+    def rename_group(self, conversation_id: str, group_id: str, title: str) -> list[ConversationSession]:
+        if not title.strip():
+            raise ConversationValidationError("group title must not be empty")
+        with self.database.transaction(immediate=True) as connection:
+            changed = connection.execute(
+                "UPDATE conversation_groups SET title = ? WHERE id = ? AND conversation_id = ?",
+                (title.strip(), group_id, conversation_id),
+            )
+            if not changed.rowcount:
+                raise NotFoundError("conversation group does not exist in this conversation")
+            connection.execute(
+                "UPDATE conversation_sessions SET revision = revision + 1 WHERE group_id = ? AND conversation_id = ?",
+                (group_id, conversation_id),
+            )
+        return [session for session in self.list_sessions(conversation_id) if session.group_id == group_id]
+
+    def delete_group(self, conversation_id: str, group_id: str) -> list[str]:
+        with self.database.transaction(immediate=True) as connection:
+            if connection.execute("SELECT 1 FROM conversation_groups WHERE id = ? AND conversation_id = ?",
+                                  (group_id, conversation_id)).fetchone() is None:
+                raise NotFoundError("conversation group does not exist in this conversation")
+            sessions = connection.execute(
+                "SELECT id, is_default FROM conversation_sessions WHERE group_id = ? AND conversation_id = ?",
+                (group_id, conversation_id),
+            ).fetchall()
+            if any(session["is_default"] for session in sessions):
+                raise ConversationValidationError("the group containing the default General session cannot be deleted")
+            connection.execute("DELETE FROM conversation_sessions WHERE group_id = ? AND conversation_id = ?",
+                               (group_id, conversation_id))
+            connection.execute("DELETE FROM conversation_groups WHERE id = ? AND conversation_id = ?",
+                               (group_id, conversation_id))
+        return [str(session["id"]) for session in sessions]
+
     def delete_session(self, conversation_id: str, session_id: str) -> None:
         self.get_session(conversation_id, session_id)
         with self.database.transaction(immediate=True) as connection:

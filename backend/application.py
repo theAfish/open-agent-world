@@ -14,7 +14,7 @@ KEY = "ui_preferences.v1"
 IDENTITY = "application_identity.v1"
 PREFERENCE_KEYS = frozenset({
     "oaw-onboarding-v1", "oaw-minister-role-learned", "oaw-canvas-viewport-v1", "oaw-glue-v1",
-    "oaw-node-surfaces-v1", "oaw-library-preferences", "oaw-theme", "oaw.locale",
+    "oaw-node-surfaces-v1", "oaw-conversation-view-v1", "oaw-library-preferences", "oaw-theme", "oaw.locale",
     "oaw-model-settings", "open-agent-world.decks.v2", "open-agent-world.custom-decks.v1",
 })
 

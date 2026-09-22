@@ -72,3 +72,33 @@ The frontend's `nodeDisplacement.ts` handles temporary movement around locally
 expanded surfaces. It has different inputs and interaction semantics, and is
 separate from backend placement. Backend plans do not disable dragging or move
 existing regions when a local panel opens.
+
+## Canvas resizing
+
+`frontend/src/canvas/ResizeLayer.tsx` owns canvas resize gestures and renders the
+same arc handles for selected details (`inspector`), workspaces and rectangular
+containers. Glued cards retain resize support at their compact levels. A corner
+is free when no glue seam touches it. Shadow collection contours continue to
+derive their bounds from their members rather than expose rectangular handles.
+
+`resizeGeometry.ts` is the shared corner solver: the opposite edges stay fixed,
+member bounds constrain containers, and glue pins bonded edges while retaining
+at least 24 world units of overlap. Snapping, minimum and maximum dimensions are
+applied in this calculation, not corrected after rendering. Pointer capture,
+Escape, cancellation and background refresh protection share one lifecycle.
+Controls use the existing viewport portal so card surfaces cannot intercept them.
+Plugin card bodies and container shells must not install another resize control.
+
+`state/surfaceGeometry.ts` defines default/minimum dimensions and `surfaceSizeFor`.
+Presentation sizes are stored by card ID and surface level in `surfaceSizes`;
+profile schema v4 migrates the former `workspaceSizes`. Container bounds,
+expanded-surface obstacles, equipment placement and shadow contours read these
+same sizes. The canonical node anchor still uses the default level offset;
+resizing a left/top edge persists its inverse through `nodePositionFromSurfacePosition`.
+Legion templates carry `surface_sizes` and still accept legacy `workspace_size`.
+
+Container resize commits size and origin together using the existing history
+transaction. When the origin changes, descendant positions are explicit in the
+batch, preventing the backend's normal group-move behavior. Members retain their
+visible placement through resize, undo and redo. Glue geometry remains shared
+backend state; ordinary presentation sizes remain profile preferences.

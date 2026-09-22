@@ -9,6 +9,16 @@ async function start() {
   root.classList.add("application-startup");
   root.textContent = "Open Agent World · 正在连接工作区 / Connecting to your workspace…";
   try {
+    const apiBase = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? '/api';
+    const response = await fetch(`${apiBase}/deployment`, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw new Error('Deployment mode unavailable');
+    const mode = await response.json();
+    if (mode.mode === 'runtime') {
+      const { RuntimeApp } = await import('./deployment/RuntimeApp');
+      root.classList.remove('application-startup');
+      ReactDOM.createRoot(root).render(<RuntimeApp name={mode.name} />);
+      return;
+    }
     await initializeProfile();
     const { App } = await import("./App");
     root.classList.remove("application-startup");

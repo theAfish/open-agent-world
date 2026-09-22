@@ -23,7 +23,7 @@ class Config(BaseModel):
 
 
 class AgentBarracksPlugin:
-    descriptor = PluginDescriptor(id="oaw.barracks", version="0.2.0", plugin_api_version="1.14",
+    descriptor = PluginDescriptor(id="oaw.barracks", version="0.3.0", plugin_api_version="1.22",
         name="Agent Barracks", description="Reusable configured Agents with private equipment.")
 
     def register(self, registration):
@@ -53,7 +53,7 @@ class AgentBarracksPlugin:
             description="Choose and instantiate a configured Agent from this Barracks.",
             source_traits=frozenset({"oaw.summoner"}), target_types=frozenset({"oaw.barracks"}), templateable=True,
             capabilities=(CapabilityGrantDefinition(kind=kind, tool_prefix="summon_agents",
-                description="List Agents in {target_name!r}, then summon with agent_id and prompt. Each instance owns fresh equipment and keeps external connections shared. message continues an instance; inspect, stop and reclaim manage your instances. Recursive summons share root task limits.",
+                description="List Agents in {target_name!r}, then summon with agent_id and a bounded task prompt. Set wait=false to launch independent tasks concurrently; wait with instance_ids and wait_mode any/all to collect results. Task context is private: supply inputs, acceptance criteria and output paths. message starts a follow-up turn on an idle instance; it is not a message to a running Agent. inspect, stop and reclaim manage your instances. Fresh equipment and shared external connections retain graph permissions. Recursive summons share root task limits.",
                 input_schema=SummoningAction.model_json_schema()),)))
         registration.register_pack(PackDefinition(id='oaw.barracks.default', name='Agent Barracks',
             description='Reusable configured Agents and summoning.', cards=tuple(registration.nodes)))

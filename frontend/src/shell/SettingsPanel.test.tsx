@@ -24,6 +24,48 @@ describe("Application settings", () => {
   });
   afterEach(cleanup);
 
+  it("edits global environment values and removes inherited defaults", async () => {
+    vi.spyOn(worldApi, "getSandboxSettings").mockResolvedValue({ workspace_root: null, runtime: "auto", environment_variables: { OLD: "remove", REGION: "before" } });
+    const save = vi.spyOn(worldApi, "saveSandboxSettings").mockResolvedValue({ workspace_root: null, runtime: "auto", environment_variables: { REGION: " after=change " } });
+    render(<SettingsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Sandbox" }));
+    await screen.findByDisplayValue("before");
+    fireEvent.click(screen.getByLabelText("Remove environment variable 1"));
+    fireEvent.change(screen.getByLabelText("Environment variable 1 value"), { target: { value: " after=change " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(save).toHaveBeenCalledWith({ workspace_root: null, runtime: "auto", environment_variables: { REGION: " after=change " } }));
+  });
+
+  it("shows numeric model defaults and saves edited limits", async () => {
+    const save = vi.spyOn(worldApi, "saveModelConnections").mockResolvedValue(savedCatalog());
+    render(<SettingsPanel />);
+    const windowInput = await screen.findByLabelText("Model 1 context window") as HTMLInputElement;
+    const outputInput = screen.getByLabelText("Model 1 maximum output") as HTMLInputElement;
+    expect(windowInput.value).toBe("128000");
+    expect(outputInput.value).toBe("8192");
+    fireEvent.click(screen.getByText("Context & output limits"));
+    fireEvent.change(windowInput, { target: { value: "1000000" } });
+    fireEvent.change(outputInput, { target: { value: "16384" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].connections[0].models[0]).toMatchObject({ context_window: 1000000, max_output_tokens: 16384 });
+  });
+
+  it("allows clearing numeric drafts and reveals invalid limits", async () => {
+    render(<SettingsPanel />);
+    const windowInput = await screen.findByLabelText("Model 1 context window") as HTMLInputElement;
+    const outputInput = screen.getByLabelText("Model 1 maximum output") as HTMLInputElement;
+    fireEvent.change(windowInput, { target: { value: "" } });
+    expect(windowInput.value).toBe("");
+    expect(windowInput.checkValidity()).toBe(false);
+    expect(windowInput.closest("details")!.open).toBe(true);
+    fireEvent.change(windowInput, { target: { value: "4096" } });
+    expect(outputInput.checkValidity()).toBe(false);
+    fireEvent.change(outputInput, { target: { value: "1024" } });
+    expect(windowInput.checkValidity()).toBe(true);
+    expect(outputInput.checkValidity()).toBe(true);
+  });
+
   it("schedules storage without moving the current location and can cancel", async () => {
     const initial = { current_path: "D:/Data", pending_path: null, previous_path: null, last_error: null, revision: 0, editable: true, managed_by: "settings" };
     vi.spyOn(worldApi, "getStorageSettings").mockResolvedValue(initial);
@@ -75,7 +117,7 @@ describe("Application settings", () => {
     fireEvent.change(screen.getByLabelText("Default runtime"), { target: { value: "windows" } });
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
     await waitFor(() => expect(useWorldStore.getState().settingsOpen).toBe(false));
-    expect(save).toHaveBeenCalledWith({ workspace_root: "E:\\Projects", runtime: "windows" });
+    expect(save).toHaveBeenCalledWith({ workspace_root: "E:\\Projects", runtime: "windows", environment_variables: {} });
     expect(saveModel).not.toHaveBeenCalled();
   });
 
@@ -91,14 +133,14 @@ describe("Application settings", () => {
     await screen.findByText("Workspace settings saved.");
     expect(useWorldStore.getState().settingsOpen).toBe(true);
     for (const path of saved.backup_paths) expect(screen.getByText(path)).toBeTruthy();
-    expect(screen.getByText(/please delete them manually/)).toBeTruthy();
+    expect(screen.getByText(/please delete unused backup folders manually/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Close$/ })).toBeTruthy();
     rendered.unmount();
     vi.mocked(worldApi.getSandboxSettings).mockResolvedValue(saved);
     render(<SettingsPanel />);
     fireEvent.click(screen.getByRole("button", { name: "Sandbox" }));
     await screen.findByText(saved.backup_paths[0]);
-    expect(screen.getByText(/will not clean them up automatically/)).toBeTruthy();
+    expect(screen.getByText(/please delete unused backup folders manually/)).toBeTruthy();
   });
 
   it("keeps the dialog and draft after a rejected path, and supports clearing the default", async () => {
@@ -111,7 +153,7 @@ describe("Application settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
     expect((await screen.findByRole("alert")).textContent).toContain("Folder is not accessible");
     expect(useWorldStore.getState().settingsOpen).toBe(true);
-    expect(save).toHaveBeenCalledWith({ workspace_root: null, runtime: "auto" });
+    expect(save).toHaveBeenCalledWith({ workspace_root: null, runtime: "auto", environment_variables: {} });
     expect(folder.value).toBe("");
   });
 
@@ -167,7 +209,7 @@ describe("Application settings", () => {
     fireEvent.change(screen.getAllByLabelText("Authentication source").at(-1)!, { target: { value: "environment" } });
     expect((screen.getByLabelText("API key") as HTMLInputElement).disabled).toBe(false);
     expect((screen.getByLabelText("Backend environment variable") as HTMLInputElement).placeholder).toBe("OPENAI_API_KEY");
-    expect(screen.getByText(/managed deployments/)).toBeTruthy();
+    expect(screen.getByText("Set this variable on the server before starting OAW.")).toBeTruthy();
   });
 
   it.each(["none", "environment"] as const)("accepts a key directly from %s without opening advanced options", async (auth_mode) => {

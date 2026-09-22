@@ -1,7 +1,9 @@
 ﻿import { describe, expect, it } from 'vitest';
 import { vi } from 'vitest';
+import { freeCorners, resizeFromCorner, RESIZE_CORNERS } from '../canvas/resizeGeometry';
+import { minimumSurfaceSize } from './surfaceGeometry';
 import { worldApi } from '../api/client';
-import { findGlue, freeCorners, glueGroup, resizeGlued, reflowGlueSurfaces, refreshGlue, cancelGlueRefresh, beginGlueEdit, useGlueStore, type GlueBox, type SharedGlue } from './glue';
+import { findGlue, glueGroup, reflowGlueSurfaces, refreshGlue, cancelGlueRefresh, beginGlueEdit, useGlueStore, type GlueBox, type SharedGlue } from './glue';
 const box = (x: number, y: number, width = 200, height = 160): GlueBox => ({ x, y, width, height, level: 'preview' });
 describe('glue geometry', () => {
   it('defers background refreshes until all overlapping layout edits finish', async () => {
@@ -18,10 +20,10 @@ describe('glue geometry', () => {
       expect(get).toHaveBeenCalledOnce();
     } finally { first(); second(); get.mockRestore(); }
   });
-  it.each(['top-left', 'top-right', 'bottom-left', 'bottom-right'])('keeps workspace content usable when shrinking from %s', corner => {
+  it.each(RESIZE_CORNERS)('keeps workspace content usable when shrinking from %s', corner => {
     const workspace: GlueBox = { ...box(10, 20, 1020, 700), level: 'workspace' };
-    const resized = resizeGlued(workspace, corner, corner.endsWith('left') ? 2000 : -2000,
-      corner.startsWith('top') ? 2000 : -2000, [], 10);
+    const resized = resizeFromCorner(workspace, corner, corner.endsWith('left') ? 2000 : -2000,
+      corner.startsWith('top') ? 2000 : -2000, { min: minimumSurfaceSize('workspace') });
     expect(resized).toMatchObject({ width: 640, height: 420 });
     expect(corner.endsWith('left') ? resized.x + resized.width : resized.x).toBe(corner.endsWith('left') ? 1030 : 10);
     expect(corner.startsWith('top') ? resized.y + resized.height : resized.y).toBe(corner.startsWith('top') ? 720 : 20);
@@ -71,7 +73,7 @@ describe('glue geometry', () => {
     expect(restored.a).toMatchObject({ width: 320, height: 200 });
     expect(restored.b.x).toBe(320);
     expect(reflowGlueSurfaces(restored, bonds, new Map([['a', 'preview']]), {})).toBe(restored);
-    const workspace = reflowGlueSurfaces(restored, bonds, new Map([['a', 'workspace']]), { a: { width: 1200, height: 800 } });
+    const workspace = reflowGlueSurfaces(restored, bonds, new Map([['a', 'workspace']]), { a: { workspace: { width: 1200, height: 800 } } });
     expect(workspace.a).toMatchObject({ width: 1200, height: 800 });
     expect(workspace.b.x).toBe(1200);
   });
@@ -89,8 +91,8 @@ describe('glue geometry', () => {
     expect(freeCorners('a', { a: box(0, 0), b: box(200, 0) }, bonds.slice(0, 1))).toEqual(['top-left', 'bottom-left']);
   });
   it('snaps unequal bottom edges and preserves opposite edges during top-left resize', () => {
-    expect(resizeGlued(box(0, 0), 'bottom-left', 0, 35, [box(200, 0, 200, 200)], 10).height).toBe(200);
-    const resized = resizeGlued(box(0, 0), 'top-left', -50, -30, [], 10);
+    expect(resizeFromCorner(box(0, 0), 'bottom-left', 0, 35, { min: minimumSurfaceSize('preview'), snap: { peers: [box(200, 0, 200, 200)], threshold: 10 } }).height).toBe(200);
+    const resized = resizeFromCorner(box(0, 0), 'top-left', -50, -30, { min: minimumSurfaceSize('preview') });
     expect(resized.x + resized.width).toBe(200);
     expect(resized.y + resized.height).toBe(160);
   });

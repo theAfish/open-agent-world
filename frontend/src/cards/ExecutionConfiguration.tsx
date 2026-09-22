@@ -48,9 +48,10 @@ export function environmentVariablesToValue(rows: EnvironmentVariableRow[]): Rec
   return { variables };
 }
 
-export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, onSecretsChange, bindings }: {
+export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, onSecretsChange, bindings, allowSecrets = true }: {
   rows: EnvironmentVariableRow[]; onChange(rows: EnvironmentVariableRow[]): void; disabled: boolean;
   secrets: Record<string, string>; onSecretsChange(secrets: Record<string, string>): void; bindings: Record<string, boolean>;
+  allowSecrets?: boolean;
 }) {
   useLocale();
   const patch = (id: number, change: Partial<EnvironmentVariableRow>) => onChange(rows.map((row) => row.id === id ? { ...row, ...change } : row));
@@ -64,11 +65,11 @@ export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, 
           onClick={() => onChange(rows.filter((item) => item.id !== row.id))}><X size={14} /></button>
       </div>
       <div className="variable-value-row">
-        <select aria-label={t("Environment variable {v0} type", { v0: String(index + 1) })} value={row.kind}
+        {allowSecrets && <select aria-label={t("Environment variable {v0} type", { v0: String(index + 1) })} value={row.kind}
           onChange={(event) => patch(row.id, { kind: event.target.value as EnvironmentVariableKind,
             value: event.target.value === "secret" ? crypto.randomUUID() : "" })}>
           <option value="value">{t("Value")}</option><option value="secret">{t("Secret")}</option>
-        </select>
+        </select>}
         <input aria-label={t("Environment variable {v0} value", { v0: String(index + 1) })} value={row.kind === "secret" ? secrets[row.value] ?? "" : row.value}
           type={row.kind === "secret" ? "password" : "text"} autoComplete="off"
           placeholder={row.kind === "secret" ? (bindings[row.value] ? t("Configured — enter to replace") : t("Enter secret")) : t("Value")}

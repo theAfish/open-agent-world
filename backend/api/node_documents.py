@@ -42,6 +42,11 @@ async def execution(node_id: str, services: ApplicationServices = Depends(get_se
         return services.node_execution.snapshot(node_id)
 
 
+@router.post("/{node_id}/execution/actions/{action}")
+async def delegation_action(node_id: str, action: str, request: DocumentActionRequest, services: ApplicationServices = Depends(get_services)):
+    return await services.node_execution.delegation_action(node_id, action, request.arguments)
+
+
 @router.post("/{node_id}/execution/start")
 async def start_execution(node_id: str, request: ExecutionRequest, services: ApplicationServices = Depends(get_services)):
     return await services.node_execution.start(node_id, request)

@@ -2,7 +2,7 @@ import { reportInteraction } from "../state/interactions";
 import { t, useLocale } from "../i18n";
 import { Plus, Server, Star, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { availableModels, modelRef, type ModelCatalog, type ModelConnection } from "../state/modelConnections";
+import { availableModels, DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_OUTPUT_TOKENS, modelRef, type ModelCatalog, type ModelConnection } from "../state/modelConnections";
 
 const presets = {
   openai: { name: "OpenAI", base_url: "https://api.openai.com/v1", auth_mode: "api_key" as const },
@@ -41,7 +41,7 @@ export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
     reportInteraction({ type: "model-connection-selected" });
   };
   return <fieldset className="model-editor" disabled={busy}>
-    <div className="settings-page-heading"><h3>{t("Models & connections")}</h3><p>{t("Connect your accounts, then choose the models your agents can use.")}</p></div>
+    <div className="settings-page-heading"><h3>{t("Models & connections")}</h3></div>
     <label className="field-label"><span>{t("Default for new agents")}</span>
       <select value={value.default_model ?? ""} onChange={e => onChange({ ...value, default_model: e.target.value || null })}>
         <option value="">{t("Choose a default model")}</option>
@@ -80,7 +80,7 @@ export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
           {connection.adapter === "legacy" && <option value="legacy">{t("Previous automatic routing")}</option>}
         </select></label>
         <label className="field-label"><span>{t("Base URL")}</span><input type="url" value={connection.base_url} onChange={e => update({ base_url: e.target.value })} placeholder={t("Use provider default")} spellCheck={false} />
-          <small>{t("Use the service’s API address, including /v1 if required. Leave blank for the provider default.")}</small></label>
+        </label>
         <div className="field-label connection-key-field">
           <label htmlFor="connection-key">{t("API key")}</label><input id="connection-key" type="password" value={connection.api_key ?? ""}
             autoComplete="new-password" spellCheck={false} data-1p-ignore
@@ -89,10 +89,10 @@ export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
               const api_key = e.target.value;
               update({ api_key, ...(api_key.trim() ? { auth_mode: "api_key", clear_api_key: false } : {}) });
             }} />
-          <small>{connection.clear_api_key ? t("The saved key will be removed when you save. Enter a new key to replace it instead.")
+          {(connection.clear_api_key || connection.auth_mode !== "api_key") && <small>{connection.clear_api_key ? t("The saved key will be removed when you save.")
             : connection.auth_mode === "none" ? t("Optional for this connection. Leave blank to use no key, or enter a key to use it.")
             : connection.auth_mode === "environment" ? t("Using backend credentials. Enter a key here to use it instead.")
-            : t("Keys are encrypted on the backend. Their values are never returned to the browser.")}</small>
+            : ""}</small>}
           {connection.api_key_configured && <button type="button" className="secondary-button" onClick={() => update({ clear_api_key: !connection.clear_api_key, api_key: "" })}>{connection.clear_api_key ? t("Keep saved key") : t("Remove saved key")}</button>}
         </div>
         </div>
@@ -108,12 +108,12 @@ export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
           </select>
             {connection.auth_mode === "environment" && <label className="field-label"><span>{t("Environment variable name")}</span><input aria-label={t("Backend environment variable")} aria-describedby="connection-environment-help" value={connection.environment_variable ?? ""} maxLength={128} spellCheck={false}
               placeholder={defaultEnvironmentVariable(connection.adapter)} onChange={e => update({ environment_variable: e.target.value || null })} />
-              <small id="connection-environment-help">{t("Enter a variable name, not an API key. For managed deployments, set its value on the server before starting OAW. Leave blank to use")} {defaultEnvironmentVariable(connection.adapter)}.</small>
+              <small id="connection-environment-help">{t("Set this variable on the server before starting OAW.")}</small>
             </label>}
           </div>}
         </div>
         <div data-tutorial="model-list">
-        <div className="connection-model-heading"><h4>{t("Models")}</h4><button type="button" className="secondary-button" disabled={connection.models.length >= 100} onClick={() => update({ models: [...connection.models, { id: crypto.randomUUID(), name: "", model_id: "", enabled: true }] })}><Plus size={13} /> {t("Add model")}</button></div>
+        <div className="connection-model-heading"><h4>{t("Models")}</h4><button type="button" className="secondary-button" disabled={connection.models.length >= 100} onClick={() => update({ models: [...connection.models, { id: crypto.randomUUID(), name: "", model_id: "", enabled: true, context_window: DEFAULT_CONTEXT_WINDOW, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS }] })}><Plus size={13} /> {t("Add model")}</button></div>
         {!connection.models.length && <p className="settings-description">{t("Add a model using the model ID supplied by your service.")}</p>}
         {connection.models.map((model, index) => <div className="connection-model-row" key={model.id}>
           <label className="field-label"><span>{t("Display name")}{value.default_model === modelRef(model.id) && <Star className="model-default-icon" size={12} role="img" aria-label={t("Default for new agents")}><title>{t("Default for new agents")}</title></Star>}</span><input aria-label={t("Model {v0} display name", { v0: String(index + 1) })} required maxLength={120} value={model.name}
@@ -124,9 +124,22 @@ export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
             onChange={e => update({ models: connection.models.map(m => m.id === model.id ? { ...m, enabled: e.target.checked } : m) })} />{t("On")}</label>
           {!saved.connections.some(c => c.models.some(m => m.id === model.id)) && <button type="button" className="icon-button" aria-label={t("Remove model {v0}", { v0: String(index + 1) })} onClick={() => update({ models: connection.models.filter(m => m.id !== model.id) })}><Trash2 size={13} /></button>}
           </div>
+          <details className="connection-model-limits" onInvalid={event => { event.currentTarget.open = true; }}>
+            <summary>{t("Context & output limits")}</summary>
+            <div className="connection-fields">
+              <label className="field-label"><span>{t("Context window (tokens)")}</span><input type="number" required min={1024} max={2147483647} step={1}
+                aria-label={t("Model {v0} context window", { v0: String(index + 1) })}
+                value={Number.isNaN(model.context_window) ? "" : model.context_window ?? DEFAULT_CONTEXT_WINDOW}
+                onChange={e => update({ models: connection.models.map(m => m.id === model.id ? { ...m, context_window: e.target.valueAsNumber } : m) })} /></label>
+              <label className="field-label"><span>{t("Maximum output (tokens)")}</span><input type="number" required min={1} step={1}
+                max={Number.isNaN(model.context_window) ? 2147483646 : (model.context_window ?? DEFAULT_CONTEXT_WINDOW) - 1}
+                aria-label={t("Model {v0} maximum output", { v0: String(index + 1) })}
+                value={Number.isNaN(model.max_output_tokens) ? "" : model.max_output_tokens ?? DEFAULT_MAX_OUTPUT_TOKENS}
+                onChange={e => update({ models: connection.models.map(m => m.id === model.id ? { ...m, max_output_tokens: e.target.valueAsNumber } : m) })} /></label>
+            </div>
+          </details>
         </div>)}
         </div>
-        <p className="settings-description">{t("Changes apply to new runs. Disable saved models or connections to preserve existing agent references.")}</p>
       </div> : <div className="connection-empty"><Server size={32} /><h4>{t("Your models, your accounts")}</h4><p>{t("Add multiple accounts from the same provider, or connect your own service.")}</p></div>}
     </div>
   </fieldset>;

@@ -8,7 +8,9 @@ Open [GitHub Releases](https://github.com/theAfish/open-agent-world/releases), s
 | Apple Silicon Mac | `Open-Agent-World-<version>-macos-arm64.dmg` |
 | Intel Mac | `Open-Agent-World-<version>-macos-x86_64.dmg` |
 
-普通用户请选择上面的安装包，**不要下载 Source code (zip / tar.gz)**，那是开发者使用的源码。Mac 可在“关于本机”查看芯片类型。`.sha256` 是可选的文件校验信息，不是安装包。
+Choose an installer above, rather than **Source code (zip / tar.gz)**. On a Mac, check **About This Mac** for your chip type. A `.sha256` file is optional checksum information, not an installer.
+
+中文：请选择安装包，不要下载 Source code。Mac 可在“关于本机”查看芯片类型；`.sha256` 是校验信息。
 
 ## Windows
 
@@ -22,16 +24,33 @@ Open the DMG and drag **Open Agent World** into **Applications**, then launch it
 
 macOS currently has **no local Sandbox runtime**. The desktop preview does not imply support for plugins or actions requiring that runtime.
 
+## Linux / WSL2
+
+Linux currently uses the source installation and opens the application in your browser. Install Git, Python 3.11 or newer, uv, and Node.js 20 or newer (including npm), then run:
+
+```bash
+git clone https://github.com/theAfish/open-agent-world.git
+cd open-agent-world
+bash scripts/setup.sh
+bash scripts/start.sh
+```
+
+Setup installs application dependencies and builds the frontend. Later launches only need `bash scripts/start.sh`; stop with Ctrl+C. For WSL2, run these commands inside your Linux distribution. Local Sandbox execution also requires the isolation prerequisites described in [Sandbox workspace](sandbox-workspace.md).
+
+中文：Linux / WSL2 可使用以上脚本安装并在浏览器中运行；后续只需执行 `bash scripts/start.sh`，按 Ctrl+C 退出。前置工具须安装在运行脚本的 Linux 环境中，详见[入门指南](getting-started.zh-CN.md)。
+
 ## First use
 
-1. 在 **Settings → Models** 添加模型连接、API 凭据和模型，选择默认模型。
-2. 跟随画布上的首次使用教程；也可以使用指南针按钮重播。
-3. 打开 **Pack & Card Library** 收集卡片，然后添加到画布。
+1. In **Settings → Models**, add your connection, credentials, and model; choose a default.
+2. Follow the first-use tutorial on the canvas, or replay it with the compass button.
+3. Open **Pack & Card Library**, collect cards, add them to your active deck, then place them on the canvas.
+
+Continue with [Your first team](user-guide/first-team.md), or [中文使用入门](user-guide/index.zh-CN.md).
 
 You can explore the canvas before configuring a model. Model calls require your configured service; some plugins and Sandbox environments download dependencies on first use.
 
 ## Updates and troubleshooting
 
-Download and install the next release manually; automatic updates are not configured. User data is stored separately and retained across upgrades and uninstall. See [desktop profiles and logs](desktop.md) for data locations and startup diagnostics.
+Download and install the next release manually; automatic updates are not configured. User data is stored separately and retained across upgrades and uninstall. See [Troubleshooting](user-guide/troubleshooting.md) for common problems.
 
 When reporting a problem, include your OS, CPU architecture, release version and the error shown. Remove credentials from any logs you share.

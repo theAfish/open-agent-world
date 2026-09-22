@@ -91,8 +91,8 @@ test("packs, collection and active decks persist and recover from plugin disable
   await library.getByLabel("Search cards", { exact: true }).fill("Task Board");
   await library.getByRole("button", { name: "Add Task Board to deck" }).click();
   const sourceControls = library.getByLabel("Source pack controls");
-  await sourceControls.getByRole("button", { name: "Disable plugin" }).click();
-  await expect(sourceControls).toContainText("Plugin disabled");
+  await sourceControls.getByRole("button", { name: "Disable Pack" }).click();
+  await expect(sourceControls).toContainText("Pack disabled");
   await library.getByRole("button", { name: "Close Library" }).click();
   await tray.hover();
   await expect(tray.getByRole("button", { name: "Task Board unavailable" })).toBeDisabled();
@@ -103,7 +103,7 @@ test("packs, collection and active decks persist and recover from plugin disable
   await expect(tray.getByRole("button", { name: "Task Board unavailable" })).toBeDisabled();
   await page.getByRole("button", { name: "Open Pack and Card Library" }).click();
   await taskPack.getByRole("button", { name: "View cards in Task Board", exact: true }).click();
-  await sourceControls.getByRole("button", { name: "Enable plugin" }).click();
+  await sourceControls.getByRole("button", { name: "Enable Pack" }).click();
   await expect(sourceControls).toContainText("Installed · Enabled");
   await library.getByRole("button", { name: /^Store/ }).click();
   await expect(library.getByText("Coming later", { exact: true })).toBeVisible();

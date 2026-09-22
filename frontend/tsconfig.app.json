@@ -28,5 +28,5 @@
       "react/*": ["./node_modules/@types/react/*"]
     }
   },
-  "include": ["src", "../plugins/*/frontend/**/*.ts", "../plugins/*/frontend/**/*.tsx"]
+  "include": ["src", "../plugins/*/frontend/**/*.ts", "../plugins/*/frontend/**/*.tsx", "../examples/deployed-workspace/plugins/*/frontend/**/*.tsx"]
 }

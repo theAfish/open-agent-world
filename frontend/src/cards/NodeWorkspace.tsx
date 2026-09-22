@@ -1,3 +1,4 @@
+import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
 import { t, useLocale } from "../i18n";
 import { SandboxWorkspace } from "./SandboxWorkspace";
 import { ArtifactCollection } from "./Artifacts";
@@ -18,6 +19,7 @@ import { CardName } from "./CardName";
 import { IconButton } from "../components/IconButton";
 import { collapsedSurface, nodePresentation, useNodeSurfaceStore } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
+import { useConversationView } from "../state/conversationView";
 import type { ConversationSession, WorldCard } from "../types/world";
 import { TaskBoardBody } from "./TaskBoard";
 import { SkillToolboxBody, SkillNodeBody } from "./SkillToolbox";
@@ -101,7 +103,10 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
               type="button"
               className={`workspace-session agent-history-session nodrag nopan ${session.id === activeSessionId ? "is-active" : ""}`}
               key={session.id}
-              onClick={() => setActiveSessionId(session.id)}
+              onClick={() => {
+                setActiveSessionId(session.id);
+                useConversationView.getState().showSession(session.conversation_id, session.id);
+              }}
               aria-label={t("Show runtime history for {v0}", { v0: String(session.title) })}
             >
               <MessageSquare size={13} />
@@ -183,12 +188,13 @@ export function WorkspaceSurface({ card }: WorkspaceSurfaceProps) {
 export function WorkspaceContent({ card }: WorkspaceSurfaceProps) {
   useLocale();
   const catalog = useWorldStore((state) => state.catalog);
+  const { deployed } = useWorkspaceAccess();
   const [agentTab, setAgentTab] = useState("activity");
   const ministerTab = useMinisterRole(s => s.settingsCardId === card.id) && Boolean(card.minister);
   return (
       <div className="workspace-content">
       <PluginSurface card={card} slot="workspace" level="workspace">
-      {catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("core.agent") ? <>
+      {catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("core.agent") ? deployed ? <div className="workspace-welcome"><Bot size={22} /><strong>{card.name}</strong><p>{t(card.status)}</p></div> : <>
         <nav className="agent-window-tabs nodrag nopan" role="tablist" aria-label={t("Agent window")}>
           <button role="tab" aria-selected={!ministerTab && agentTab === "activity"} onClick={() => { useMinisterRole.setState({ settingsCardId: undefined }); setAgentTab("activity"); }}>{t("Activity")}</button>
           <button role="tab" aria-selected={!ministerTab && agentTab === "settings"} onClick={() => { useMinisterRole.setState({ settingsCardId: undefined }); setAgentTab("settings"); }}>{t("Settings")}</button>

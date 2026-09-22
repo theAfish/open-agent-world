@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { normalizeRuntimeEvent, runtimeWebSocketUrl } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import { useCardLibrary } from "../state/cardLibrary";
+import type { RuntimeEvent } from "../types/world";
 
 // The stream stays honest about liveness: a half-open TCP connection is
 // detected through the ping/pong heartbeat instead of stalling silently.
@@ -9,7 +10,7 @@ const HEARTBEAT_INTERVAL_MS = 15_000;
 const STALE_CONNECTION_MS = 45_000;
 
 export function RuntimeConnection() {
-  const ingestEvent = useWorldStore((state) => state.ingestEvent);
+  const ingestEvents = useWorldStore((state) => state.ingestEvents);
   const setSocketState = useWorldStore((state) => state.setSocketState);
   const refreshWorld = useWorldStore((state) => state.refreshWorld);
 
@@ -20,6 +21,20 @@ export function RuntimeConnection() {
     let heartbeatTimer: number | undefined;
     let attempts = 0;
     let lastMessageAt = 0;
+    let eventTimer: number | undefined;
+    let pending: RuntimeEvent[] = [];
+    const flushEvents = () => {
+      if (eventTimer !== undefined) window.clearTimeout(eventTimer);
+      eventTimer = undefined;
+      if (!pending.length) return;
+      const events = pending;
+      pending = [];
+      ingestEvents(events);
+      if (events.some(event => event.type === "card_library_updated")) {
+        void useCardLibrary.getState().refresh();
+        void refreshWorld();
+      }
+    };
 
     const stopHeartbeat = () => {
       if (heartbeatTimer) window.clearInterval(heartbeatTimer);
@@ -31,6 +46,7 @@ export function RuntimeConnection() {
       setSocketState("connecting");
       socket = new WebSocket(runtimeWebSocketUrl());
       socket.addEventListener("open", () => {
+        if (!active) return;
         attempts = 0;
         lastMessageAt = Date.now();
         setSocketState("live");
@@ -49,28 +65,24 @@ export function RuntimeConnection() {
         }, HEARTBEAT_INTERVAL_MS);
       });
       socket.addEventListener("message", (event) => {
+        if (!active) return;
         lastMessageAt = Date.now();
         try {
           const payload = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
           const items = Array.isArray(payload) ? payload : [payload];
           for (const item of items) {
-            const normalized = normalizeRuntimeEvent(item);
-            // Heartbeat pongs only prove liveness; keep them out of the event log.
-            if (normalized.type === "connection_ready" && normalized.payload.message === "pong") {
-              ingestEvent(normalized); // The stream watermark also detects lost graph events.
-              continue;
-            }
-            if (normalized.type === "card_library_updated") {
-              void useCardLibrary.getState().refresh();
-              void refreshWorld();
-            }
-            ingestEvent(normalized);
+            pending.push(normalizeRuntimeEvent(item));
+            // Bound work per flush, including when a background tab throttles timers.
+            if (pending.length >= 512) flushEvents();
           }
+          // A timer also flushes in hidden tabs, where animation frames may stop.
+          if (pending.length && eventTimer === undefined) eventTimer = window.setTimeout(flushEvents, 16);
         } catch {
           // Malformed events are ignored; the typed stream remains operational.
         }
       });
       socket.addEventListener("close", () => {
+        flushEvents();
         stopHeartbeat();
         if (!active) return;
         setSocketState("closed");
@@ -83,11 +95,12 @@ export function RuntimeConnection() {
     connect();
     return () => {
       active = false;
+      flushEvents();
       stopHeartbeat();
       if (retryTimer) window.clearTimeout(retryTimer);
       socket?.close();
     };
-  }, [ingestEvent, refreshWorld, setSocketState]);
+  }, [ingestEvents, refreshWorld, setSocketState]);
 
   return null;
 }

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 from typing import Any, Callable
+from backend.plugins.state import CardStateStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +18,7 @@ class NodeResourceContext:
     cancelled: Event
     actor_id: str | None = None
     confirmed: bool = False  # Desktop only; never accepted from Agent arguments.
+    state: CardStateStore | None = None
 
 
 @dataclass(frozen=True, slots=True)

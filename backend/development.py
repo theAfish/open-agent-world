@@ -227,7 +227,7 @@ def reset_profile(settings: Settings, request: ResetRequest) -> Path:
                     if "interface" in scopes:
                         old["values"] = {k: v for k, v in old["values"].items() if k in {"oaw-onboarding-v1", "oaw-minister-role-learned", "oaw-model-settings"}}
                     elif "workspace" in scopes:
-                        for key in ("oaw-canvas-viewport-v1", "oaw-glue-v1", "oaw-node-surfaces-v1"):
+                        for key in ("oaw-canvas-viewport-v1", "oaw-glue-v1", "oaw-node-surfaces-v1", "oaw-conversation-view-v1"):
                             old["values"].pop(key, None)
                 if "workspace" in scopes:
                     from backend.world.terrain import reset_terrain_seed

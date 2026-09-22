@@ -954,6 +954,10 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .connection-model-heading { margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
 .connection-model-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px; gap: 8px; align-items: end; }
 .connection-model-actions { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-height: 34px; }
+.connection-model-limits { grid-column: 1 / -1; min-width: 0; margin-bottom: 10px; }
+.connection-model-limits > summary { width: fit-content; color: var(--ink-soft); cursor: pointer; font-size: 12px; padding: 4px 0; }
+.connection-model-limits[open] > summary { margin-bottom: 8px; }
+.connection-model-limits .settings-description { margin: 8px 0 0; }
 .model-default-icon { flex-shrink: 0; color: var(--accent); fill: var(--accent-soft); }
 .settings-form .settings-check { display: flex; align-items: center; gap: 5px; font-size: 11px; white-space: nowrap; min-height: 34px; }
 .settings-form .settings-check input { width: 14px; height: 14px; box-shadow: none; accent-color: var(--accent); }
@@ -1233,30 +1237,6 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 
 /* Membership preview only; no overlay can intercept the existing drag gesture. */
 .container-frame[data-member-drop] { --drop-color:#7edbc1; outline:1px solid color-mix(in srgb,var(--drop-color) 65%,transparent); outline-offset:2px; box-shadow:0 0 12px color-mix(in srgb,var(--drop-color) 28%,transparent),0 0 36px color-mix(in srgb,var(--drop-color) 15%,transparent),inset 0 0 20px color-mix(in srgb,var(--drop-color) 8%,transparent); }
-/* Port the legacy Library corner grip without changing native resize behavior. */
-.react-flow__resize-control.container-resize-arc {
-  z-index:33;
-  width:22px;
-  height:22px;
-  border:0;
-  border-radius:0;
-  background:transparent;
-  box-shadow:none;
-  cursor:nwse-resize;
-}
-.react-flow__resize-control.container-resize-arc::after {
-  content:"";
-  position:absolute;
-  inset:5px;
-  border-right:2px solid #4f957d;
-  border-bottom:2px solid #4f957d;
-  border-radius:0 0 7px;
-  opacity:0;
-  transition:opacity 130ms ease;
-  pointer-events:none;
-}
-.react-flow__resize-control.container-resize-arc:hover::after,
-.react-flow__resize-control.container-resize-arc:active::after { opacity:1; }
 .container-frame[data-member-drop="enter"] { --drop-color:#79baff; }
 .container-frame[data-member-drop="leave"] { --drop-color:#efb17f; }
 .container-frame[data-member-drop]::after { content:"";position:absolute;inset:-2px;border:3px solid transparent;border-radius:inherit;pointer-events:none;z-index:2;filter:drop-shadow(0 0 5px var(--drop-color)) drop-shadow(0 0 12px color-mix(in srgb,var(--drop-color) 45%,transparent)); }
@@ -1482,7 +1462,7 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 }
 
 .component-palette:hover,
-.component-palette:focus-within { box-shadow: 0 16px 34px var(--shadow-deep), inset 0 1px 0 var(--highlight); }
+.component-palette:has(:focus-visible, .deck-editor:focus-within) { box-shadow: 0 16px 34px var(--shadow-deep), inset 0 1px 0 var(--highlight); }
 
 .deck-tabs {
   display: grid;
@@ -1588,8 +1568,9 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
     visibility 0s linear 260ms;
 }
 
+/* Pointer clicks retain focus; only keyboard focus or active editing pins the deck open. */
 .component-palette:hover .deck-stage,
-.component-palette:focus-within .deck-stage,
+.component-palette:has(:focus-visible, .deck-editor:focus-within) .deck-stage,
 .component-palette[data-tutorial-highlight] .deck-stage,
 .component-palette:has([data-palette-card][data-tutorial-highlight]) .deck-stage,
 body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stage {
@@ -1901,7 +1882,7 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
 
 .chunk-readout { display: none; }
 .edge-inspector { top: 68px; bottom: auto; transition: top 260ms cubic-bezier(0.22, 1, 0.36, 1); }
-.world-shell:has(.component-palette:is(:hover, :focus-within)) .edge-inspector { top: 206px; }
+.world-shell:has(.component-palette:hover, .component-palette :focus-visible, .component-palette .deck-editor:focus-within) .edge-inspector { top: 206px; }
 .backend-unavailable { top: 18px; }
 .activity-panel { top: 20px; }
 .toast-stack { top: 20px; }
@@ -1919,9 +1900,9 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
   .top-bar { top: auto; right: auto; bottom: 82px; left: 10px; transition: bottom 260ms cubic-bezier(0.22, 1, 0.36, 1); }
   .world-controls.react-flow__controls { right: 10px; bottom: 82px; transition: bottom 260ms cubic-bezier(0.22, 1, 0.36, 1); }
   .edge-inspector { top: 62px; bottom: auto; }
-  .world-shell:has(.component-palette:is(:hover, :focus-within)) .top-bar,
-  .world-shell:has(.component-palette:is(:hover, :focus-within)) .world-controls.react-flow__controls,
-  .world-shell:has(.component-palette:is(:hover, :focus-within)) .edge-inspector { bottom: 222px; }
+  .world-shell:has(.component-palette:hover, .component-palette :focus-visible, .component-palette .deck-editor:focus-within) .top-bar,
+  .world-shell:has(.component-palette:hover, .component-palette :focus-visible, .component-palette .deck-editor:focus-within) .world-controls.react-flow__controls,
+  .world-shell:has(.component-palette:hover, .component-palette :focus-visible, .component-palette .deck-editor:focus-within) .edge-inspector { bottom: 222px; }
 }
 
 @media (max-width: 620px) {
@@ -1952,16 +1933,15 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
   .legion-palette-entry .palette-item,
   .legion-palette-entry .palette-item:hover { min-height: var(--compact-card-height); height: var(--compact-card-height); }
   .component-palette .palette-item-icon { width: 38px; height: 38px; }
-  .world-shell:has(.component-palette:is(:hover, :focus-within)) .top-bar,
-  .world-shell:has(.component-palette:is(:hover, :focus-within)) .world-controls.react-flow__controls,
-  .world-shell:has(.component-palette:is(:hover, :focus-within)) .edge-inspector { bottom: 200px; }
+  .world-shell:has(.component-palette:hover, .component-palette :focus-visible, .component-palette .deck-editor:focus-within) .top-bar,
+  .world-shell:has(.component-palette:hover, .component-palette :focus-visible, .component-palette .deck-editor:focus-within) .world-controls.react-flow__controls,
+  .world-shell:has(.component-palette:hover, .component-palette :focus-visible, .component-palette .deck-editor:focus-within) .edge-inspector { bottom: 200px; }
 }
 .legion-container { width: 100%; height: 100%; border: 1px solid #82958c; border-radius: 24px; background: color-mix(in srgb, var(--surface, #f6f4ec) 82%, transparent); box-shadow: inset 0 0 0 7px #82958c0c; position: relative; }
 /* Empty team space belongs to the canvas; only its controls intercept gestures. */
 .legion-container { pointer-events: none; }
 .legion-container > .container-header,
-.legion-container > .legion-controls,
-.legion-container > .container-resize-arc { pointer-events: auto; }
+.legion-container > .legion-controls { pointer-events: auto; }
 /* Labels sit above container backgrounds (0), below member card surfaces (12+). */
 .world-canvas > .react-flow .react-flow__edgelabel-renderer { z-index: 1; }
 .legion-container.is-selected { outline: 2px solid #698b7d; outline-offset: 4px; }
@@ -2338,7 +2318,6 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
 .conversation-session-row:hover summary, .conversation-session-row:focus-within summary, .conversation-session-actions[open] > summary { opacity: 1; }
 .conversation-session-actions[open] { z-index: 2; }
 .conversation-session-menu { position: relative; width: 155px; margin-left: -131px; display: grid; gap: 3px; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); box-shadow: 0 4px 12px var(--shadow); }
-.conversation-session-row:has(.conversation-session-actions[open]) { padding-bottom: 70px; }
 .conversation-session-menu button, .conversation-session-rename button { display: flex; align-items: center; gap: 6px; padding: 6px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); font-size: 10px; cursor: pointer; }
 .conversation-session-menu button:hover, .conversation-session-rename button:hover { background: var(--surface-soft); }
 .conversation-session-menu button.is-danger { color: var(--danger); }
@@ -2374,10 +2353,14 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
 .node-surface.is-preview .card-status { position: absolute; left: 12px; top: 12px; padding: 0; border: 0; background: transparent; }
 .node-surface.is-preview .card-status > span:last-child { display: none; }
 .node-surface.is-preview .node-surface-toggle { position: absolute; top: 9px; right: 9px; }
-.node-surface.is-preview .node-preview-content { inset: 150px 16px 14px; padding-top: 12px; padding-bottom: 18px; border-top: 1px solid var(--line); overflow: hidden; }
-.node-surface.is-preview .node-preview-summary p { font-size: 11px; line-height: 1.55; -webkit-line-clamp: 4; }
-.node-surface.is-preview .node-preview-metadata { flex-wrap: wrap; font-size: 9px; }
-.node-surface.is-preview .node-preview-hint { font-size: 8px; }
+.node-surface.is-preview .node-preview-content { inset: 150px 16px 14px; display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); overflow: hidden; }
+.node-preview-body { flex: 1; min-width: 0; min-height: 0; overflow: hidden; overflow-wrap: anywhere; }
+.node-preview-body > * { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.node-surface.is-preview .node-preview-summary p { font-size: 11px; line-height: 1.55; -webkit-line-clamp: 2; }
+.node-surface.is-preview .node-preview-metadata { flex-wrap: nowrap; font-size: 9px; }
+.node-preview-metadata span { display: block; }
+.node-preview-metadata svg { vertical-align: middle; }
+.node-surface.is-preview .node-preview-hint { position: static; flex-shrink: 0; align-self: flex-end; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 8px; }
 
 /* Keep the rename action beside the rendered title and leave title dragging native. */
 .card-name { display: flex; align-items: center; gap: 4px; width: fit-content; max-width: 100%; min-width: 0; }
@@ -2398,3 +2381,22 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
 .deck-edit-button:hover { color: var(--accent-strong); border-color: var(--line-strong); background: var(--surface-raised); }
 .deck-edit-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .deck-edit-button:disabled { opacity: .45; cursor: default; }
+
+/* Body drop targets only intercept input during a connection gesture. Containers
+   restrict this surface to their header so members retain their own hit areas. */
+.container-header { position: relative; }
+.react-flow__handle.connection-drop-surface {
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  transform: none !important;
+  border: 0 !important;
+  border-radius: inherit;
+  background: transparent !important;
+  pointer-events: none !important;
+  z-index: 30;
+}
+.react-flow__handle.connection-drop-surface[data-active] { pointer-events: all !important; }
+.react-flow__handle.connection-drop-surface.valid {
+  box-shadow: inset 0 0 0 2px var(--accent, #69aa96);
+}

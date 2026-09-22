@@ -14,8 +14,8 @@ From the repository root, start the application with the example attached:
 ./scripts/dev.ps1 -AgentRuntime mock -PluginPath ./examples/plugins/greeter
 ```
 
-In the UI, the **Community examples** deck and **Greeter** card are supplied
-entirely by this package. Connect an Agent to a Greeter with **Greet with**.
+In **Pack & Card Library**, open the **Greeter** pack, collect its card, and add
+it to your active deck. Place it, then connect an Agent with **Greet with**.
 The edge authorizes that Greeter as a target of `greet(target, name)`. Multiple
 Greeters share one tool, with readable target aliases. Removing the edge or
 Greeter revokes the tool immediately.
@@ -35,5 +35,6 @@ uv run --project backend --with-editable ./examples/plugins/greeter `
   python -m pytest -p no:cacheprovider examples/plugins/greeter/tests
 ```
 
+Start with the [Agent tool walkthrough](../../../docs/developers/agent-tools.md).
 See [`docs/plugins.md`](../../../docs/plugins.md) for the complete contract,
 additional extension patterns, packaging, validation, and security guidance.

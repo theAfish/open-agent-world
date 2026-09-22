@@ -13,7 +13,7 @@
 
 连接智能体、文件和工具，让每个智能体各司其职，在同一个工作空间里协作。
 
-[下载](https://github.com/theAfish/open-agent-world/releases) · [开始使用](docs/install.md) · [文档](docs/README.zh-CN.md)
+[下载](https://github.com/theAfish/open-agent-world/releases) · [使用指南](https://theafish.github.io/open-agent-world/user-guide/index.zh-CN/) · [开发插件](https://theafish.github.io/open-agent-world/developers/index.zh-CN/) · [文档](https://theafish.github.io/open-agent-world/README.zh-CN/)
 
 </div>
 
@@ -29,6 +29,20 @@
 给智能体共享资料，也给它们协作的方式。拖出一条连线，选择允许它做什么：读取文档、使用工具，或与另一个智能体交流。
 
 ![连接两个智能体，并选择双向通信权限](docs/assets/demos/connect-cards.gif)
+
+### 给团队一个 Legion 工作区
+
+把相连的卡片组成 **Legion**，再进入**工作区模式**，并排使用对话、笔记和工具。分屏、叠放标签页，保存属于这个 Legion 的布局；需要共享指令和状态时，还可以开启团队模式。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/demos/legion-canvas-dark.png" />
+  <img src="docs/assets/demos/legion-canvas.png" alt="Research studio Legion 将两个智能体、项目说明、对话和任务板组成一组，保留已有连接" width="1600" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/demos/legion-workspace-dark.png" />
+  <img src="docs/assets/demos/legion-workspace.png" alt="同一个 Legion 的工作区模式：项目说明、对话和任务板排列在可直接操作的面板中" width="1600" />
+</picture>
 
 ### 把计划变成看得见的进展
 
@@ -48,9 +62,9 @@
 
 1. [下载桌面应用](https://github.com/theAfish/open-agent-world/releases)，按[安装指南](docs/install.md)完成安装。
 2. 在 **设置 → 模型** 中添加你的模型连接。
-3. 跟随画布教程收集卡牌、放置智能体，建立第一条连接。
+3. 跟随画布教程连接第一组卡片、组建 Legion，并布置它的工作区。
 
-想从源码运行？查看[入门指南](docs/getting-started.zh-CN.md)。
+Linux 用户可在源码目录运行 `bash scripts/setup.sh` 安装，再用 `bash scripts/start.sh` 启动。前置依赖和各平台的源码运行方式见[入门指南](docs/getting-started.zh-CN.md)。
 
 [交互教程](docs/tutorial.zh-CN.md) · [插件（英文）](docs/plugins.md) · [参与贡献](docs/getting-started.zh-CN.md#开发与验证)
 

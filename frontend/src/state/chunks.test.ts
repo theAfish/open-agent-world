@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { CHUNK_SIZE, filterCardsToChunks, getViewportChunkKeys, positionToChunk } from "./chunks";
+import { CHUNK_SIZE, filterCardsToChunks, getViewportChunkBounds, getViewportChunkKeys, positionToChunk } from "./chunks";
 import { buildCardDraft } from "./helpers";
 
 describe("world chunks", () => {
+  it("keeps coverage stable within a tile and detects negative boundary and resize crossings", () => {
+    const viewport = { x: 100, y: 100, zoom: 0.12, width: 1920, height: 1080 };
+    const bounds = getViewportChunkBounds(viewport, 0);
+    expect(bounds).toEqual({ minX: -1, maxX: 7, minY: -1, maxY: 3 });
+    expect(getViewportChunkBounds({ ...viewport, x: 110 }, 0)).toEqual(bounds);
+    expect(getViewportChunkBounds({ ...viewport, x: 246 }, 0).minX).toBe(-2);
+    expect(getViewportChunkBounds({ ...viewport, width: 2560 }, 0).maxX).toBe(10);
+    expect(getViewportChunkBounds(viewport)).toEqual({ minX: -2, maxX: 8, minY: -2, maxY: 4 });
+    expect(getViewportChunkKeys(viewport)).toHaveLength(77);
+  });
   it("keeps a spanning Legion and its members together across chunk boundaries", () => {
     const group = { id: "group", ...buildCardDraft("agent", { x: 1800, y: 100 }), type: "legion", size: { width: 1100, height: 700 } };
     const member = { id: "member", ...buildCardDraft("agent", { x: 2400, y: 200 }), parent_id: group.id };

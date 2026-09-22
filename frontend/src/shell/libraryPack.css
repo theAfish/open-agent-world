@@ -32,8 +32,11 @@
 .pack-print-footer b { font-size: 17px; font-weight: 550; line-height: 1; }
 .pack-print-footer b small { font-size: 7px; letter-spacing: .06em; }
 .pack-print-footer > span { font-size: 6px; line-height: 1.4; letter-spacing: .16em; text-align: right; }
-.pack-foil { position: absolute; inset: 0; mix-blend-mode: soft-light; background: radial-gradient(ellipse at var(--light-x, 24%) var(--light-y, 18%), #fff 0%, #ffffffa0 13%, transparent 46%), linear-gradient(112deg, #102b2955 0%, transparent 13%, #fff9 14%, #123d3735 16%, transparent 19% 54%, #fff9 55%, #234c4860 56%, transparent 58%), repeating-linear-gradient(88deg, transparent 0 17px, #fff5 18px, #152e3040 19px, transparent 21px 36px); }
-.pack-wrapper::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(103deg, transparent 12%, #fff4 13%, transparent 14% 71%, #22363020 72%, transparent 73%), radial-gradient(ellipse at var(--light-x, 24%) var(--light-y, 18%), #fff8, transparent 48%); opacity: .65; }
+/* A distant strip light reflects across the whole plane. Its angle and sweep
+   follow surface orientation, never a point hotspot beneath the pointer. */
+.pack-foil { position: absolute; inset: 0; mix-blend-mode: soft-light; background: linear-gradient(calc(112deg + var(--surface-rx, 0deg)), #102b2940 0%, #17352e25 20%, transparent 33%, #ffffff60 42%, #ffffffe0 49%, #ffffff90 56%, transparent 69%, #102b2945 87%, #102b2920 100%); background-size: 220% 160%; background-position: calc(50% + var(--surface-ry, 0deg) / 1deg * 2.4%) calc(50% + var(--surface-rx, 0deg) / 1deg * 1%); transition: background-position 220ms ease-out; }
+.pack-wrapper::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(calc(112deg + var(--surface-rx, 0deg)), transparent 30%, #ffffff08 40%, #ffffff55 47%, #ffffff70 49%, #ffffff18 53%, transparent 64%), linear-gradient(96deg, #ffffff35, transparent 5% 94%, #18362e25), repeating-linear-gradient(2deg, #ffffff0b 0 1px, #18362e08 1px 2px, transparent 2px 4px); background-size: 220% 160%, 100% 100%, 100% 100%; background-position: calc(50% + var(--surface-ry, 0deg) / 1deg * 2.4%) calc(50% + var(--surface-rx, 0deg) / 1deg * 1%), 0 0, 0 0; transition: background-position 220ms ease-out; }
+.pack-touch-area[data-tilting] .pack-foil, .pack-touch-area[data-tilting] .pack-wrapper::after { transition-duration: 90ms; }
 .pack-top-seal, .pack-bottom-seal { position: absolute; left: -1px; right: -1px; height: 20px; border: 1px solid #6e7e7670; background: repeating-linear-gradient(90deg, #f5f7e580 0 1px, #5b706460 1px 2px, transparent 2px 4px), linear-gradient(100deg, #9eaca0, #e9eee3 22%, #9aaea1 52%, #ecf0e4 82%, #7c9085); box-shadow: 0 1px 1px #f5ffea90 inset, 0 -1px 2px #52685d50 inset; }
 .pack-top-seal { z-index: 3; top: 0; display: flex; align-items: center; justify-content: center; gap: 12px; color: #30483e; clip-path: polygon(0 3px, 4% 0, 8% 3px, 12% 0, 16% 3px, 20% 0, 24% 3px, 28% 0, 32% 3px, 36% 0, 40% 3px, 44% 0, 48% 3px, 52% 0, 56% 3px, 60% 0, 64% 3px, 68% 0, 72% 3px, 76% 0, 80% 3px, 84% 0, 88% 3px, 92% 0, 96% 3px, 100% 0, 100% 100%, 0 100%); }
 .pack-top-seal > span { font-size: 6px; font-weight: 650; letter-spacing: .22em; }
@@ -50,7 +53,8 @@
 .library-pack.is-opened .pack-wrapper { clip-path: polygon(0 3px, 7% 0, 13% 5px, 21% 1px, 28% 4px, 34% 0, 43% 4px, 51% 1px, 59% 5px, 67% 0, 75% 4px, 82% 1px, 90% 5px, 96% 0, 100% 3px, 100% 100%, 0 100%); }
 .library-pack.is-opened .pack-top-seal, .library-pack.is-opened .pack-facet-top { opacity: 0; }
 .library-pack.is-opened .pack-mouth { opacity: 1; }
-.library-pack.is-opened .pack-foil { background-size: 100% 100%, 75% 100%, 65% 100%; opacity: .8; }
+.library-pack.is-opened .pack-foil { opacity: .8; }
+@media (prefers-reduced-motion: reduce) { .pack-foil, .pack-wrapper::after { transition: none; } }
 .library-pack.is-revealing .pack-touch-area { height: 424px; padding-top: 160px; }
 .library-pack.is-revealing .pack-object { animation: packDeflate 1900ms ease-in-out both; }
 .library-pack.is-revealing .pack-shadow { animation: packShadowSettle 1900ms ease-in-out both; }

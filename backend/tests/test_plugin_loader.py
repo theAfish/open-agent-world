@@ -7,7 +7,7 @@ import pytest
 from backend.plugins import loader
 
 
-def write_plugin(directory: Path, name: str, *, src: bool = False) -> EntryPoint:
+def write_plugin(directory: Path, name: str, *, src: bool = False, requires_plugins: tuple[str, ...] = ()) -> EntryPoint:
     package = directory / name
     source = package / "src" if src else package
     source.mkdir(parents=True)
@@ -15,7 +15,7 @@ def write_plugin(directory: Path, name: str, *, src: bool = False) -> EntryPoint
         "from open_agent_world.plugin_api import PluginDefinition, PluginDescriptor\n"
         "def create_plugin():\n"
         "    return PluginDefinition(\n"
-        f"        PluginDescriptor(id='test.{name}', version='1.0', plugin_api_version='1.0'),\n"
+        f"        PluginDescriptor(id='test.{name}', version='1.0', plugin_api_version='1.20', requires_plugins={requires_plugins!r}),\n"
         "        lambda registration: None)\n",
         encoding="utf-8",
     )
@@ -91,3 +91,34 @@ def test_default_backend_publishes_codex_card_in_agents_deck(client):
     assert card["frontend"] == {"settings": "settings"}
     assert card["user_creatable"] is True
     assert "workspace_path" in card["config_schema"]["properties"]
+
+
+def test_declared_dependencies_load_before_consumers_across_sources(tmp_path, monkeypatch):
+    write_plugin(tmp_path, 'autoload_consumer', requires_plugins=('test.autoload_dependency',))
+    dependency = write_plugin(tmp_path / 'external', 'autoload_dependency')
+    monkeypatch.syspath_prepend(str(tmp_path / 'external' / 'autoload_dependency'))
+    monkeypatch.setattr(loader, 'entry_points', lambda: EntryPoints([dependency]))
+    registry = loader.load_plugin_registry(tmp_path)
+    ids = [plugin.id for plugin in registry.plugins()]
+    assert ids.index('test.autoload_dependency') < ids.index('test.autoload_consumer')
+
+
+@pytest.mark.parametrize('cycle', [False, True])
+def test_missing_or_cyclic_dependencies_report_owners(tmp_path, cycle):
+    name = 'autoload_cycle' if cycle else 'autoload_missing'
+    write_plugin(tmp_path, name, requires_plugins=('test.' + name if cycle else 'test.absent',))
+    with pytest.raises(RuntimeError, match='Missing or cyclic plugin dependencies: test.' + name):
+        loader.load_plugin_registry(tmp_path)
+
+
+def test_direct_registration_checks_dependencies_before_registering():
+    from open_agent_world.plugin_api import PluginDefinition, PluginDescriptor
+    from backend.errors import PluginCompatibilityError
+    registry = loader.create_builtin_registry()
+    def register(_):
+        pytest.fail('Registration must not run with missing dependencies')
+    plugin = PluginDefinition(PluginDescriptor(id='test.dependent', version='1', plugin_api_version='1.20',
+        requires_plugins=('test.absent',)), register)
+    with pytest.raises(PluginCompatibilityError, match='requires plugin'):
+        registry.install(plugin)
+    assert not registry.has_plugin('test.dependent')

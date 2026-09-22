@@ -2,6 +2,15 @@
 
 [Documentation](README.md)
 
+This is the detailed plugin contract reference. New authors should follow
+[Build a plugin](developers/index.md), starting with a small working card.
+For everyday use, see [Plugins and packs](user-guide/plugins.md).
+
+For third-party installation in a production/desktop host, use the
+[`.oawpack` distribution contract](pack-distribution.md). It combines one Pack,
+one version and one runtime owner with a dynamically loaded frontend. The source
+plugin contracts below remain the internal runtime and development interface.
+
 ## Using plugins
 
 Plugins add cards, relationships, tools, and runtime integrations. The backend discovers packages under the repository's `plugins/` directory and installed Python entry points at startup. Install only reviewed code: plugins execute inside the trusted backend process.
@@ -25,6 +34,24 @@ To disable a plugin, first remove its world objects, relationships, dependent Ag
 Plugin-specific documentation can remain in its own package or repository. These links are a directory, not a requirement to copy all plugin content into OAW's docs. In-app plugin documentation and tutorial delivery are not implemented; no new manifest or framework is required here.
 
 ## Developing a plugin
+
+Plugin API 1.23 adds declarative `state` policies, bound `ctx.state` / `host.state`,
+and host-owned shared/session namespaces. Legacy plugins remain unchanged. See
+[Card state lifecycle](card-state.md) for declarations, migration, defaults and
+stateless capabilities.
+
+Plugin API 1.22 adds Agent-directed delegation to `NodeExecutionDefinition` with
+`summoning=True`. Plugins reuse `WorkItem`/`WorkOutcome` for task readiness and
+acceptance; the host owns the attempt ledger, Run binding and Summoning admission.
+`CapabilityContext.node_delegation_action` supports `delegate`, `wait`, `collect`
+and `stop`. Dispatch requires both the work-source control capability and a live
+Summoning grant to the selected Barracks. `DelegationRequest`, `DelegationWait`
+and `DelegationStop` define bounded inputs. `WorkItem.metadata` provides display
+references. Preset nodes can use `owner_key` and `equipment_relationship` for
+private equipment. Frontend views use `host.delegationAction` for collection and
+targeted Stop; see the MatCreator plugin for a complete example.
+
+Plugin API 1.21 adds opt-in deployment of existing plugin Workspace views and sections through `NodeDeploymentDefinition` and `DeploymentSurface`. See [plugin deployment](plugin-deployment.md) for scoped fields/actions, frontend integration and a runnable example.
 
 Start with the installable [Greeter example](../examples/plugins/greeter/README.md), then consult [package discovery](#package-structure-and-discovery), [the public API](#public-plugin-api), and the contracts below.
 
@@ -164,6 +191,13 @@ The repository's [Greeter plugin](../examples/plugins/greeter/README.md) is the
 canonical compact example.
 
 ## Native file resources
+
+Plugin API 1.20 adds `PluginDescriptor.requires_plugins`, a tuple of plugin IDs.
+The loader orders local and installed plugins by these dependencies before
+registration, and reports missing dependencies or cycles before installing them.
+Direct registry installation also requires dependencies to be installed first.
+Declare these when a preset references another plugin's node types, for example
+MatCreator's `requires_plugins=("science.structure-viewer",)`.
 
 Plugin API 1.19 adds host observation budgets to Sandbox execution and package
 installation, plus `CapabilityContext.wait_sandbox_operation(...)`. Long operations

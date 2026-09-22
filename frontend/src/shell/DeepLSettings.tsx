@@ -28,10 +28,9 @@ export function DeepLSettings() {
     finally { setBusy(false); }
   }
   return <div className="settings-form">
-    <p>{t("Library 翻译使用此连接；与 Agent 模型密钥独立保存。")}</p>
+    <div className="settings-page-heading"><h3>{t("DeepL")}</h3></div>
     <label className="field-label">{t("DeepL Free API key")} <input type="password" autoComplete="new-password" value={key} disabled={!loaded || busy} placeholder={ready ? t("已加密保存，留空保留") : t("输入 DeepL Free 密钥")} onChange={event => setKey(event.target.value)} />
     </label>
-    <small>{t("密钥仅保存在后端；地址固定为 DeepL Free 官方接口。")}</small>
     <button type="button" className="primary-button" disabled={!loaded || busy || !key.trim()} onClick={() => void save()}>{busy ? t("保存中…") : t("保存 DeepL 连接")}</button>
     {message && <p role="status">{message}</p>}
   </div>;

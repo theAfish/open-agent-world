@@ -105,6 +105,7 @@ def plugin_preset_record(preset: LegionPresetDefinition, registry: PluginRegistr
             definition.document.model.model_validate(item.initial_document)
         nodes.append(LegionTemplateNode(
             key=item.key, type=item.type, parent_key=item.parent_key,
+            owner_key=item.owner_key, equipment_relationship=item.equipment_relationship,
             plugin_id=registry.node_type_owner_id(item.type), name=item.name,
             position={"x": item.x, "y": item.y},
             size={"width": definition.default_size[0], "height": definition.default_size[1]},

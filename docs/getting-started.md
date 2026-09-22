@@ -23,10 +23,12 @@ Linux, WSL2, or macOS:
 
 ```bash
 bash scripts/setup.sh
-python3 scripts/start.py
+bash scripts/start.sh
 ```
 
 Setup installs the backend development dependencies, Google ADK and LiteLLM adapters, frontend dependencies, and builds the production frontend. `start` serves that build from the Python backend and opens the local application URL. Ctrl+C stops the launcher. Rebuild after frontend changes with `npm --prefix frontend run build`.
+
+The shell launcher uses the installed backend environment; Node.js and uv are only needed for setup and rebuilds. It accepts launcher options, for example `bash scripts/start.sh --mode preview --profile demo` or `bash scripts/start.sh --port 38474`. On a machine without a graphical browser, open the printed local URL manually on that machine. In WSL2, install the prerequisites and run both scripts inside the Linux distribution.
 
 The Windows desktop installer includes its own Python runtime and opens an independent Tauri window. Building an installer and using development profiles are covered in [Desktop installation and development](desktop.md).
 
@@ -49,7 +51,7 @@ For deterministic local debugging, use the mock runtime:
 Or with the portable launcher:
 
 ```bash
-python3 scripts/dev.py --agent-runtime core.mock
+bash scripts/dev.sh --agent-runtime core.mock
 ```
 
 The mock runtime is a debugging substitute, not a language model. Real Agent responses require a configured model service. Existing Agents with an explicitly selected runtime retain that selection.

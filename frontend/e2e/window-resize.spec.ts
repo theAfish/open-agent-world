@@ -18,7 +18,7 @@ for (const type of ["agent", "sandbox"]) {
       const card = page.locator(`.world-card[data-card-id="${id}"]`);
       await expect(card).toHaveAttribute("data-surface-level", "workspace");
       await card.locator(".workspace-titlebar strong").click();
-      const grip = card.locator(".react-flow__resize-control");
+      const grip = page.locator(`[data-resize-node="${id}"][data-resize-corner="bottom-right"]`);
       await expect(grip).toBeVisible();
       await page.waitForTimeout(500);
       const before = (await card.boundingBox())!;

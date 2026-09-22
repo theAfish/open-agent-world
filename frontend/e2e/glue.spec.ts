@@ -21,7 +21,7 @@ test('glue joins cards, moves the group, resizes from a free corner and survives
     await expect(page.locator('.glue-seam.is-preview')).toBeVisible();
     await page.mouse.up();
     await expect(first).toHaveClass(/is-glued/); await expect(second).toHaveClass(/is-glued/);
-    await expect(page.locator('.glue-resize')).toHaveCount(2);
+    await expect(page.locator('.surface-resize-arc')).toHaveCount(2);
     const glued1 = (await first.boundingBox())!, glued2 = (await second.boundingBox())!;
     expect(Math.abs(glued1.x + glued1.width - glued2.x)).toBeLessThan(2);
     await page.mouse.move(glued1.x + 35, glued1.y + 25); await page.mouse.down();
@@ -30,16 +30,16 @@ test('glue joins cards, moves the group, resizes from a free corner and survives
       // Check while the mouse is held: persisted layout only changes on release.
       await expect.poll(async () => {
         const card = (await first.boundingBox())!;
-        const grip = (await page.locator('.glue-resize.bottom-left').boundingBox())!;
+        const grip = (await page.locator('.surface-resize-arc.bottom-left').boundingBox())!;
         return Math.hypot(grip.x + grip.width / 2 - card.x, grip.y + grip.height / 2 - card.y - card.height);
       }).toBeLessThan(2);
     }
     await page.mouse.up();
     await expect.poll(async () => (await second.boundingBox())!.x - glued2.x).toBeGreaterThan(20);
     expect(Math.abs(((await second.boundingBox())!.x - glued2.x) - ((await first.boundingBox())!.x - glued1.x))).toBeLessThan(2);
-    const handle = page.locator('.glue-resize.bottom-left');
+    const handle = page.locator('.surface-resize-arc.bottom-left');
     const h = (await handle.boundingBox())!;
-    await page.mouse.move(h.x + 7, h.y + 7); await page.mouse.down(); await page.mouse.move(h.x + 7, h.y + 47, { steps: 10 }); await page.mouse.up();
+    await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2); await page.mouse.down(); await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2 + 40, { steps: 10 }); await page.mouse.up();
     await expect.poll(async () => Math.round((await first.boundingBox())!.height)).toBe(Math.round(glued1.height + 40));
     await first.getByRole('button', { name: `Collapse ${a} card` }).click();
     await expect.poll(async () => Math.round((await first.boundingBox())!.width)).toBe(96);
@@ -66,7 +66,7 @@ test('glue joins cards, moves the group, resizes from a free corner and survives
     await expect.poll(async () => Math.round((await first.boundingBox())!.width)).toBe(96);
     await first.getByRole('button', { name: `Expand ${a} card` }).click();
     await expect.poll(async () => Math.round((await first.boundingBox())!.width)).toBe(224);
-    await expect.poll(async () => Math.round((await first.boundingBox())!.height)).toBe(300);
+    await expect.poll(async () => Math.round((await first.boundingBox())!.height)).toBe(Math.round(glued1.height + 40));
   } finally { await request.delete(`/api/nodes/${a}`); await request.delete(`/api/nodes/${b}`); }
 });
 
@@ -77,6 +77,10 @@ test('stitched relationship opens the original settings and detaching restores t
   const edge = await request.post('/api/edges', { data: { source: a, target: b, relationship: 'participate' } });
   expect(edge.ok()).toBeTruthy();
   try {
+    const profile = await (await request.get('/api/application')).json();
+    expect((await request.patch('/api/application/preferences', { data: { profile_id: profile.profile_id, generation: profile.generation,
+      changes: { 'oaw-node-surfaces-v1': JSON.stringify({ version: 3, state: { surfaceLevels: { [a]: 'preview', [b]: 'preview' } } }) },
+    } })).ok()).toBe(true);
     const glue = await (await request.get('/api/canvas/glue')).json();
     expect((await request.patch('/api/canvas/glue', { data: { revision: glue.revision, boxes: {
       [a]: { x: 155, y: 220, width: 224, height: 300, level: 'preview' },
@@ -87,10 +91,10 @@ test('stitched relationship opens the original settings and detaching restores t
     await expect(page.getByRole('complementary', { name: 'Selected relationship' })).toBeVisible();
     const first = page.locator(`.react-flow__node[data-id="${a}"]`);
     await first.click({ modifiers: ['Shift'], position: { x: 35, y: 25 } });
-    const handle = page.locator('.glue-resize.bottom-left');
+    const handle = page.locator('.surface-resize-arc.bottom-left');
     const h = (await handle.boundingBox())!;
-    await page.mouse.move(h.x + 7, h.y + 7); await page.mouse.down();
-    await page.mouse.move(h.x + 7, h.y + 43, { steps: 10 }); await page.mouse.up();
+    await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2); await page.mouse.down();
+    await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2 + 36, { steps: 10 }); await page.mouse.up();
     await expect.poll(async () => Math.round((await first.boundingBox())!.height)).toBe(336);
     await page.screenshot({ path: 'test-results/glue-stitched.png' });
     await page.getByRole('button', { name: 'Detach glue', exact: true }).click();

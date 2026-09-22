@@ -12,6 +12,7 @@ import type { SandboxSettings, StorageSettings } from "../api/client";
 import type { SandboxRuntime } from "../types/world";
 import { FolderPathInput } from "./FolderPathInput";
 import { DeepLSettings } from "./DeepLSettings";
+import { EnvironmentVariablesEditor, environmentVariablesFromValue, environmentVariablesToValue, type EnvironmentVariableRow } from "../cards/ExecutionConfiguration";
 
 export function SettingsPanel() {
   const { locale, setLocale } = useLocale();
@@ -40,6 +41,7 @@ export function SettingsPanel() {
   }, [open, section, storageRetry]);
   const [sandbox, setSandbox] = useState<SandboxSettings>({ workspace_root: null, runtime: "auto" });
   const [sandboxSaved, setSandboxSaved] = useState(false);
+  const [environmentRows, setEnvironmentRows] = useState<EnvironmentVariableRow[]>([]);
   const [runtimes, setRuntimes] = useState<SandboxRuntime[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [saving, setBusy] = useState(false);
@@ -77,6 +79,7 @@ export function SettingsPanel() {
       .then(([value, catalog]) => {
         if (!active) return;
         setSandbox(value);
+        setEnvironmentRows(environmentVariablesFromValue({ variables: value.environment_variables ?? {} }));
         setRuntimes(catalog.runtimes);
         setLoaded(true);
       })
@@ -101,7 +104,8 @@ export function SettingsPanel() {
         setStorage(saved);
         setStoragePath(saved.pending_path ?? "");
       } else if (section === "sandbox") {
-        const saved = await worldApi.saveSandboxSettings({ runtime: sandbox.runtime, workspace_root: sandbox.workspace_root?.trim() || null });
+        const variables = environmentVariablesToValue(environmentRows).variables as Record<string, string>;
+        const saved = await worldApi.saveSandboxSettings({ runtime: sandbox.runtime, workspace_root: sandbox.workspace_root?.trim() || null, environment_variables: variables });
         setSandbox(saved);
         setSandboxSaved(true);
         if (!saved.backup_paths?.length) setOpen();
@@ -151,15 +155,14 @@ export function SettingsPanel() {
             <ModelConnectionsEditor value={draft} onChange={setDraft} saved={savedCatalog} busy={busy} />
           </>}
         </div> : section === "storage" ? <div className="settings-form">
-          <div className="settings-page-heading"><h3>{t("Storage")}</h3><p>{t("Application data on the backend computer.")}</p></div>
+          <div className="settings-page-heading"><h3>{t("Storage")}</h3></div>
           {!storage && !error && <p role="status">{t("Loading storage settings?")}</p>}
           {storage && <>
             <label className="field-label"><span>{t("Current data location")}</span><input readOnly value={storage.current_path} /></label>
-            <p className="settings-description">{t("Includes conversations, sessions, settings, credentials, artifacts and managed Sandbox files. External workspaces stay in their current folders.")}</p>
             {storage.editable ? <div className="field-label">
               <span>{t("New data location")}</span>
               <FolderPathInput label={t("New data location")} describedBy="storage-help" value={storagePath} disabled={busy} onChange={setStoragePath} onPickingChange={setPicking} placeholder={t("Choose a new or empty folder")} />
-              <small id="storage-help">{t("Use an absolute local folder on the backend computer. Saving schedules a move for the next backend start. Data is copied and verified before switching; the original folder is retained as a backup.")}</small>
+              <small id="storage-help">{t("Moves on next restart. The original folder is kept as a backup.")}</small>
             </div> : <p className="settings-description">{t("This location is controlled by startup configuration (OPEN_AGENT_WORLD_DATA_ROOT). Remove that override to manage storage here.")}</p>}
             {storage.pending_path && <p role="status" className="settings-description">{t("Scheduled for next start:")} {storage.pending_path}</p>}
             {storage.pending_path && <button type="button" className="secondary-button" disabled={busy} onClick={async () => {
@@ -173,34 +176,37 @@ export function SettingsPanel() {
           </>}
           {error && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setError(""); setStorageRetry(value => value + 1); }}>{t("Reload storage settings")}</button>}
         </div> : <div className="settings-form">
-          <div className="settings-page-heading"><h3>{t("Sandbox")}</h3><p>{t("Workspace and runtime defaults for this backend.")}</p></div>
+          <div className="settings-page-heading"><h3>{t("Sandbox")}</h3></div>
           {!!sandbox.backup_paths?.length && <section className="settings-workspace-backups" aria-label={t("Old workspace folders")}>
             <strong>{t("Old workspace folders")}</strong>
             {sandboxSaved && <p role="status">{t("Workspace settings saved.")}</p>}
-            <p>{t("These old folders were retained after migration. After verifying the files in the new location and confirming these folders are no longer in use, please delete them manually. The app will not clean them up automatically.")}</p>
+            <p>{t("After verifying the new files, please delete unused backup folders manually.")}</p>
             <ul>{sandbox.backup_paths.map(path => <li key={path}><code>{path}</code></li>)}</ul>
           </section>}
-          <p className="settings-description">{t("Saving this location migrates all existing Sandbox workspaces into separate subfolders, including custom working folders. Their runtimes stay unchanged. Stop Sandboxes and Agents first.")}</p>
           {!loaded && !error && <p role="status">{t("Loading Sandbox settings…")}</p>}
           <div className="field-label">
             <span id="sandbox-default-workspace-label">{t("Default Workspace location")}</span>
             <FolderPathInput label={t("Default Workspace location")} describedBy="sandbox-default-workspace-help"
               value={sandbox.workspace_root ?? ""} disabled={!loaded || busy} placeholder={t("System-managed location")}
               onChange={(path) => setSandbox((current) => ({ ...current, workspace_root: path }))} onPickingChange={setPicking} />
-            <small id="sandbox-default-workspace-help">{t("Enter an existing absolute folder on the backend computer, for example D:\\Workspaces. Each new Sandbox gets its own subfolder. Leave blank to use the system-managed location.")}</small>
-            <small>{t("The shared codex-workspace also migrates. Files are copied and verified before switching; original folders remain as backups. Conflicting destination files are never overwritten.")}</small>
-            {busy && <small role="status">{t("Saving and migrating workspaces. Large folders may take a while; please keep this window open.")}</small>}
+            <small id="sandbox-default-workspace-help">{t("Changing this folder moves all Sandbox workspaces and keeps backups. Stop Sandboxes and Agents first.")}</small>
+            {saving && <small role="status">{t("Saving settings. Please keep this window open.")}</small>}
           </div>
           <label className="field-label">
             <span id="sandbox-default-runtime-label">{t("Default runtime")}</span>
-            <select aria-labelledby="sandbox-default-runtime-label" aria-describedby="sandbox-default-runtime-help" value={sandbox.runtime} disabled={!loaded || busy} onChange={(event) => setSandbox({ ...sandbox, runtime: event.target.value })}>
+            <select aria-labelledby="sandbox-default-runtime-label" value={sandbox.runtime} disabled={!loaded || busy} onChange={(event) => setSandbox({ ...sandbox, runtime: event.target.value })}>
               <option value="auto">{t("Automatic")}</option>
               {sandbox.runtime !== "auto" && !runtimes.some((runtime) => runtime.id === sandbox.runtime) && <option value={sandbox.runtime}>{sandbox.runtime} {t("(not installed)")}</option>}
               {runtimes.map((runtime) => <option key={runtime.id} value={runtime.id}>{runtime.label}{runtime.available ? "" : " (unavailable)"}</option>)}
             </select>
-            <small id="sandbox-default-runtime-help">{t("Used when a new Sandbox has no explicit runtime. You can choose a different runtime on the card before its first start.")}</small>
           </label>
-          <p className="settings-description">{t("Settings are saved on the backend and survive restarts. Workspaces in your chosen folder are retained when a Sandbox is deleted.")}</p>
+          <section aria-label={t("Global environment variables")}>
+            <h3>{t("Global environment variables")}</h3>
+            <p className="settings-description">{t("Applies to all Sandboxes on their next command. Local values take priority.")}</p>
+            <EnvironmentVariablesEditor rows={environmentRows} onChange={setEnvironmentRows} disabled={!loaded || busy}
+              allowSecrets={false} secrets={{}} bindings={{}} onSecretsChange={() => {}} />
+            {environmentRows.length > 0 && <small>{t("Plain text values. Store credentials as Sandbox secrets.")}</small>}
+          </section>
         </div>}
         {(error || (section === "model" && modelError)) && <p role="alert" className="settings-error">{error || modelError} {section === "sandbox" && !loaded && <button type="button" className="secondary-button" onClick={() => setRetry((value) => value + 1)}>{t("Retry")}</button>} {section === "model" && <button type="button" className="secondary-button" onClick={() => { setError(""); setModelRetry((value) => value + 1); }}>{modelLoaded ? t("Discard draft and reload") : t("Retry")}</button>}</p>}
 

@@ -13,7 +13,7 @@
 
 Connect agents, files, and tools. Give each agent a role and a place to work together.
 
-[Download](https://github.com/theAfish/open-agent-world/releases) · [Get started](docs/install.md) · [Documentation](docs/README.md)
+[Download](https://github.com/theAfish/open-agent-world/releases) · [User guide](https://theafish.github.io/open-agent-world/user-guide/) · [Build plugins](https://theafish.github.io/open-agent-world/developers/) · [Documentation](https://theafish.github.io/open-agent-world/)
 
 </div>
 
@@ -29,6 +29,20 @@ Connect agents, files, and tools. Give each agent a role and a place to work tog
 Give agents shared context and a way to collaborate. Drag a connection and choose what it allows: reading a document, using a tool, or talking to another agent.
 
 ![Connect two agents and choose two-way communication](docs/assets/demos/connect-cards.gif)
+
+### Give your team a Legion workspace
+
+Group connected cards into a **Legion**, then open **Workspace mode** to work with conversations, notes and tools side by side. Split panels, stack tabs, and save a layout that stays with your Legion. Enable team mode when you need shared instructions and state.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/demos/legion-canvas-dark.png" />
+  <img src="docs/assets/demos/legion-canvas.png" alt="A Research studio Legion groups two agents, a project brief, a conversation and a task board, retaining their connections" width="1600" />
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/demos/legion-workspace-dark.png" />
+  <img src="docs/assets/demos/legion-workspace.png" alt="The same Legion in Workspace mode, with a project brief, conversation and task board arranged in live panels" width="1600" />
+</picture>
 
 ### Turn a plan into visible progress
 
@@ -48,10 +62,10 @@ Add skill toolboxes, isolated Sandboxes, and specialized viewers through plugins
 
 1. [Download the desktop app](https://github.com/theAfish/open-agent-world/releases) and follow the [installation guide](docs/install.md).
 2. Add your model connection in **Settings → Models**.
-3. Follow the canvas tutorial to collect cards, place an Agent, and make your first connections.
+3. Follow the canvas tutorial to connect your first cards, form a Legion, and arrange its workspace.
 
-Prefer running from source? See [Getting started](docs/getting-started.md).
+On Linux, run `bash scripts/setup.sh`, then `bash scripts/start.sh` from a source checkout. See [Getting started](docs/getting-started.md) for prerequisites and source installation on all platforms.
 
-[Tutorial](docs/tutorial.md) · [Plugins](docs/plugins.md) · [Contributing](docs/getting-started.md#development-and-verification)
+[First team](docs/user-guide/first-team.md) · [Plugins and packs](docs/user-guide/plugins.md) · [Plugin development](docs/developers/index.md) · [Contributing](docs/getting-started.md#development-and-verification)
 
 OAW is an experimental project. No repository license file is currently included.

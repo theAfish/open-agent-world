@@ -26,6 +26,7 @@ class EventType(StrEnum):
     CONVERSATION_SESSION_UPDATED = "conversation_session_updated"
     CONVERSATION_SESSION_DELETED = "conversation_session_deleted"
     CONVERSATION_MESSAGE = "conversation_message"
+    CONTEXT_STATUS = "context_status"
     AGENT_STARTED = "agent_started"
     AGENT_STATUS_CHANGED = "agent_status_changed"
     AGENT_MESSAGE = "agent_message"

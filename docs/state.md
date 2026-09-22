@@ -41,6 +41,12 @@ debugging and future checkpointing. State mutation events are live descriptions
 of committed changes; the SQLite state tables remain authoritative.
 
 
+## Card state lifecycle
+
+[Card state lifecycle](card-state.md) adds an opt-in namespace adapter over this
+store. Its public policy is only `none` or `shared/session`; it does not expose
+this lower-level inherited scope stack to card plugins.
+
 ## Node documents
 
 Plugin API 1.2 adds `node_document:<node_id>` scopes using `core.node_document`.

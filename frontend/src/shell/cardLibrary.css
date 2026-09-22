@@ -96,3 +96,8 @@
   .library-card-layout { grid-template-columns: minmax(0, 1fr); }
   .library-card-sidebar { position: static; overflow: visible; }
 }
+.pack-installer { padding: 12px 20px; border-bottom: 1px solid var(--border, #d6d8da); font-size: 13px; }
+.pack-installer p { margin: 8px 0; }
+.pack-installer summary { cursor: pointer; margin-top: 10px; }
+.pack-install-record { display: flex; flex-direction: column; gap: 5px; padding: 12px 0; }
+.pack-install-review { padding: 10px 0; }

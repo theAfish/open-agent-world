@@ -1,9 +1,13 @@
+import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
 import { t, useLocale } from "../i18n";
 import { useConversationTimeline } from "../state/useConversationTimeline";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { ConversationAttachments } from "./ConversationAttachments";
-import { ArrowDown, Bot, Info, LoaderCircle, MessageSquare, MoreHorizontal, Paperclip, Pencil, Plus, Send, Trash2, UserMinus, UserRound, Users, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ConversationActions } from "./ConversationActions";
+import { ContextAvatar } from "./ContextAvatar";
+import { ArrowDown, Bot, Check, Info, LoaderCircle, MessageSquare, Paperclip, Pencil, Plus, Send, Trash2, UserMinus, UserRound, Users, X } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type SetStateAction } from "react";
+import { createPortal } from "react-dom";
 import { apiErrorMessage, worldApi } from "../api/client";
 import {
   appendMention,
@@ -12,8 +16,9 @@ import {
   resolveConversationTargets,
 } from "../state/conversationMentions";
 import { useWorldStore } from "../state/worldStore";
+import { useConversationView } from "../state/conversationView";
 import { useOpenFiles } from "../state/openFiles";
-import type { ConversationAgent, ConversationAttachment, ConversationMessage, ConversationSession, WorldCard } from "../types/world";
+import type { ContextStatus, ConversationAgent, ConversationAttachment, ConversationMessage, ConversationSession, WorldCard } from "../types/world";
 import { reportInteraction } from '../state/interactions';
 import { WorkspaceSection, useWorkspaceSections } from '../workspace/WorkspaceSection';
 import './conversationWorkspace.css';
@@ -22,6 +27,7 @@ type OutgoingMessage = { message: ConversationMessage; status: "sending" | "conf
 
 export function ConversationWorkspace({ card }: { card: WorldCard }) {
   useLocale();
+  const { deployed, permissions } = useWorkspaceAccess();
   const sections = useWorkspaceSections();
   const sessionsInline = sections.isInline("sessions");
   const conversationInline = sections.isInline("conversation");
@@ -58,7 +64,19 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const socketLive = useWorldStore((state) => state.socketState === "live");
   const [sessions, setSessions] = useState<ConversationSession[]>([]);
   const [agents, setAgents] = useState<ConversationAgent[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string>();
+  const [contextStatuses, setContextStatuses] = useState<Record<string, Record<string, ContextStatus>>>({});
+  const contextEvent = useWorldStore((state) => state.events.find((event) => (
+    event.type === "context_status" && event.conversation_id === card.id
+  ))?.id);
+  const activeSessionId = useConversationView(state => state.sessions[card.id]);
+  const activateConversation = useCallback(() => useConversationView.getState().activate(card.id), [card.id]);
+  const setActiveSessionId = useCallback((value: SetStateAction<string | undefined>) => {
+    const view = useConversationView.getState();
+    view.selectSession(card.id, typeof value === 'function' ? value(view.sessions[card.id]) : value);
+  }, [card.id]);
+  useEffect(() => {
+    if (!useConversationView.getState().activeConversationId) activateConversation();
+  }, [activateConversation]);
   useEffect(() => () => useOpenFiles.getState().clear(card.id), [card.id, activeSessionId]);
 
   const [draft, setDraft] = useState("");
@@ -71,6 +89,11 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [groupTitle, setGroupTitle] = useState("");
   const [groupAgentIds, setGroupAgentIds] = useState<string[]>([]);
+  const groupRow = useRef<HTMLFormElement>(null);
+  const groupNameInput = useRef<HTMLInputElement>(null);
+  const groupPicker = useRef<HTMLDivElement>(null);
+  const [sessionRegion, setSessionRegion] = useState<HTMLDivElement | null>(null);
+  const newGroupButton = useRef<HTMLButtonElement>(null);
   const [addingParticipants, setAddingParticipants] = useState(false);
   const [participantAgentIds, setParticipantAgentIds] = useState<string[]>([]);
   const [mentionCaret, setMentionCaret] = useState<number>();
@@ -85,10 +108,44 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
 
   const activeSession = sessions.find((session) => session.id === activeSessionId);
   const connectedAgents = agents.filter((agent) => agent.connected);
+  const selectedGroupAgents = groupAgentIds.filter((id) => connectedAgents.some((agent) => agent.id === id));
+  useLayoutEffect(() => {
+    if (!creatingGroup) return;
+    const picker = groupPicker.current;
+    const row = groupRow.current;
+    if (!picker || !row || !sessionRegion) return;
+    const position = () => {
+      const anchor = row.getBoundingClientRect();
+      const origin = sessionRegion.getBoundingClientRect();
+      const scale = sessionRegion.offsetWidth ? origin.width / sessionRegion.offsetWidth || 1 : 1;
+      const bounds = sessionRegion.closest(".conversation-workspace-grid, .legion-pane-content")?.getBoundingClientRect() ?? origin;
+      const right = (anchor.right - origin.left) / scale + 8;
+      const availableRight = (bounds.right - origin.left) / scale;
+      const fitsBeside = right + picker.offsetWidth <= availableRight;
+      const left = fitsBeside ? right : Math.max(4, (anchor.left - origin.left) / scale);
+      picker.style.left = `${left}px`;
+      picker.style.top = `${((fitsBeside ? anchor.top : anchor.bottom) - origin.top) / scale + (fitsBeside ? 0 : 4)}px`;
+      picker.style.maxWidth = `${Math.max(0, availableRight - left - 4)}px`;
+    };
+    position();
+    groupNameInput.current?.focus();
+    groupNameInput.current?.select();
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(position);
+    observer?.observe(row);
+    observer?.observe(picker);
+    observer?.observe(sessionRegion);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
+    };
+  }, [creatingGroup, sessionRegion]);
   const participants = (activeSession?.participant_ids ?? [])
     .map((id) => agents.find((item) => item.id === id))
     .filter((item): item is ConversationAgent => Boolean(item?.connected));
-  const history = useConversationTimeline(card.id, activeSessionId, refreshEvent, socketLive, transcript, runtimeEvents);
+  const history = useConversationTimeline(card.id, !deployed || permissions[card.id]?.includes('conversation') ? activeSessionId : undefined, refreshEvent, socketLive, transcript, runtimeEvents);
   const visibleOutgoing = outgoing.filter((item) => item.message.conversation_id === card.id
     && item.message.session_id === activeSessionId && !history.messages.some((message) => message.id === item.message.id));
   const messages = [...history.messages, ...visibleOutgoing.map((item) => item.message)];
@@ -109,6 +166,8 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const groupSessions = sessions.filter((session) => (session.group_id ?? session.id) === activeGroupId);
   const [renaming, setRenaming] = useState<string>();
   const [sessionTitle, setSessionTitle] = useState("");
+  const [renamingGroup, setRenamingGroup] = useState<string>();
+  const [renamedGroupTitle, setRenamedGroupTitle] = useState("");
   const availableAgents = connectedAgents.filter((agent) => (
     !activeSession?.participant_ids.includes(agent.id)
   ));
@@ -120,10 +179,11 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     // REST owns the durable snapshot. Socket liveness only invalidates that
     // snapshot on reconnect; it never gates historical reads.
     let current = true;
-    void worldApi.getConversation(card.id).then((summary) => {
+    const refresh = () => worldApi.getConversation(card.id).then((summary) => {
       if (!current) return;
       setSessions(summary.sessions);
       setAgents(summary.agents);
+      setContextStatuses(summary.context_statuses ?? {});
       setActiveSessionId((selected) => (
         selected && summary.sessions.some((session) => session.id === selected)
           ? selected
@@ -131,8 +191,10 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       ));
       setError(undefined);
     }).catch((reason) => current && setError(apiErrorMessage(reason)));
-    return () => { current = false; };
-  }, [accessEvent, card.id, refreshEvent, socketLive]);
+    void refresh();
+    const timer = deployed ? window.setInterval(() => { void refresh(); }, 3000) : undefined;
+    return () => { current = false; window.clearInterval(timer); };
+  }, [accessEvent, card.id, refreshEvent, socketLive, contextEvent, deployed, setActiveSessionId]);
 
   useEffect(() => {
     const eligible = activeSession?.participant_ids.filter((id) => agents.some((agent) => agent.id === id && agent.connected)) ?? [];
@@ -175,19 +237,6 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     } finally {
       setBusy(false);
     }
-  };
-
-  const openDirectSession = async (agent: ConversationAgent) => {
-    const existing = sessions.find((session) => (
-      !session.is_default && session.participant_ids.length === 1 && session.participant_ids[0] === agent.id
-    ));
-    if (existing) {
-      setActiveSessionId(existing.id);
-      setSelectedAgentId(agent.id);
-      return;
-    }
-    const created = await createSession(t("Chat with {v0}", { v0: String(agent.name) }), [agent.id]);
-    if (created) setSelectedAgentId(agent.id);
   };
 
   const addParticipants = async () => {
@@ -238,6 +287,23 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const deleteGroup = async (target: ConversationSession) => {
+    const groupId = target.group_id ?? target.id;
+    const members = sessions.filter((session) => (session.group_id ?? session.id) === groupId);
+    if (busy || members.some((session) => session.is_default)) return;
+    if (!window.confirm(t("Delete group {v0}? All its sessions and conversation history will be deleted.", { v0: target.group_title ?? target.title }))) return;
+    setBusy(true);
+    try {
+      await worldApi.deleteConversationGroup(card.id, groupId);
+      setSessions((current) => current.filter((session) => (session.group_id ?? session.id) !== groupId));
+      setActiveSessionId((current) => members.some((session) => session.id === current)
+        ? sessions.find((session) => (session.group_id ?? session.id) !== groupId)?.id : current);
+      setRenamingGroup(undefined);
+    } catch (reason) {
+      pushToast({ tone: "error", title: t("Group was not deleted"), detail: apiErrorMessage(reason) });
+    } finally { setBusy(false); }
   };
 
   const deleteSession = async (target: ConversationSession) => {
@@ -303,57 +369,97 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   };
 
   return (
-    <div className="conversation-workspace-grid" style={{ gridTemplateColumns: columns }}>
+    <div className="conversation-workspace-grid" style={{ gridTemplateColumns: columns }}
+      onPointerDownCapture={activateConversation} onFocusCapture={activateConversation}>
       <WorkspaceSection id="sessions" title={t("Sessions")} className={`conversation-sessions-section${conversationInline || participantsInline ? " has-neighbor" : ""}`}>
-      <nav className="workspace-session-sidebar conversation-session-navigation nodrag nopan nowheel" aria-label={t("Conversation sessions and agents")}>
-        <button type="button" className="workspace-new-session" onClick={() => setCreatingGroup(true)}>
-          <Plus size={13} /> {t("New group")} </button>
+      <div ref={setSessionRegion} className="conversation-session-region">
+      <nav className="workspace-session-sidebar conversation-session-navigation nodrag nopan nowheel" aria-label={t("Sessions")}>
+        <div className="workspace-nav-label">
+          <Users size={11} /> {t("Groups")}
+          <button ref={newGroupButton} type="button" className="conversation-nav-add" aria-label={t("New group")} title={t("New group")} disabled={busy} onClick={() => {
+            if (creatingGroup) { groupNameInput.current?.focus(); return; }
+            setGroupTitle(t("New group"));
+            setGroupAgentIds(connectedAgents.length === 1 ? [connectedAgents[0].id] : []);
+            setCreatingGroup(true);
+          }}><Plus size={13} aria-hidden="true" /></button>
+        </div>
         {creatingGroup ? (
-          <div className="conversation-group-builder">
-            <header><strong>{t("Create session")}</strong><button type="button" onClick={() => setCreatingGroup(false)} aria-label={t("Cancel group")}><X size={12} /></button></header>
-            <input value={groupTitle} onChange={(event) => setGroupTitle(event.target.value)} placeholder={t("Group name")} aria-label={t("Group name")} />
-            {connectedAgents.map((agent) => (
-              <label key={agent.id}>
-                <input type="checkbox" checked={groupAgentIds.includes(agent.id)} onChange={() => setGroupAgentIds((current) => current.includes(agent.id) ? current.filter((id) => id !== agent.id) : [...current, agent.id])} />
-                <span>{agent.name}</span>
-              </label>
-            ))}
-            <button type="button" disabled={busy || groupAgentIds.length === 0} onClick={() => void createSession(groupTitle || t("Group conversation"), groupAgentIds)}>{t("Create group")}</button>
-          </div>
+          <form ref={groupRow} className="conversation-group-draft" onSubmit={(event) => {
+            event.preventDefault();
+            if (busy || !groupTitle.trim() || selectedGroupAgents.length === 0) return;
+            void createSession(groupTitle, selectedGroupAgents);
+          }} onKeyDown={(event) => {
+            if (event.key === "Escape" && !busy) {
+              event.preventDefault(); event.stopPropagation(); setCreatingGroup(false); newGroupButton.current?.focus();
+            }
+            if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault();
+          }}>
+            <Users size={13} aria-hidden="true" />
+            <input ref={groupNameInput} value={groupTitle} maxLength={200} disabled={busy} onChange={(event) => setGroupTitle(event.target.value)} aria-label={t("Group name")} />
+            <button type="submit" aria-label={t("Create group")} title={t("Create group")} disabled={busy || !groupTitle.trim() || selectedGroupAgents.length === 0}><Check size={13} /></button>
+            <button type="button" disabled={busy} onClick={() => { setCreatingGroup(false); newGroupButton.current?.focus(); }} aria-label={t("Cancel group")} title={t("Cancel group")}><X size={13} /></button>
+            {sessionRegion ? createPortal(<div ref={groupPicker} className="conversation-group-agent-picker nodrag nopan nowheel" role="group" aria-label={t("Participants")}>
+              <strong>{t("Participants")}</strong>
+              <div className="conversation-group-agent-options">
+                {connectedAgents.map((agent) => (
+                  <label key={agent.id}>
+                    <input type="checkbox" disabled={busy} checked={selectedGroupAgents.includes(agent.id)} onChange={() => setGroupAgentIds((current) => current.includes(agent.id) ? current.filter((id) => id !== agent.id) : [...current, agent.id])} />
+                    <span>{agent.name}</span>
+                  </label>
+                ))}
+                {connectedAgents.length === 0 ? <p>{t("Connect an Agent using Participate.")}</p> : null}
+              </div>
+            </div>, sessionRegion) : null}
+          </form>
         ) : null}
-        <div className="workspace-nav-label"><Users size={11} /> {t("Groups")}</div>
         <div className="conversation-sidebar-scroll">
           {groups.map((group) => (
-            <button type="button" className={`workspace-session ${(group.group_id ?? group.id) === activeGroupId ? "is-active" : ""}`} key={group.group_id ?? group.id} onClick={() => setActiveSessionId(sessions.find((item) => (item.group_id ?? item.id) === (group.group_id ?? group.id))?.id)}>
+            <div className="conversation-session-row conversation-group-row" key={group.group_id ?? group.id}>
+            <button type="button" className={`workspace-session ${(group.group_id ?? group.id) === activeGroupId ? "is-active" : ""}`} onClick={() => setActiveSessionId(sessions.find((item) => (item.group_id ?? item.id) === (group.group_id ?? group.id))?.id)}>
               <Users size={13} /><span><strong>{group.group_title ?? group.title}</strong></span>
             </button>
+            <ConversationActions host={sessionRegion} label={t("Group actions for {v0}", { v0: group.group_title ?? group.title })} title={t("Group actions")}>
+                <button type="button" disabled={busy} onClick={(event) => {
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                  setRenamedGroupTitle(group.group_title ?? group.title); setRenamingGroup(group.group_id ?? group.id);
+                }}><Pencil size={12} /> {t("Rename group")}</button>
+                <button type="button" className="is-danger" disabled={busy || sessions.some((session) => (session.group_id ?? session.id) === (group.group_id ?? group.id) && session.is_default)} onClick={(event) => {
+                  event.currentTarget.closest("details")?.removeAttribute("open"); void deleteGroup(group);
+                }}><Trash2 size={12} /> {t("Delete group")}</button>
+            </ConversationActions>
+            {renamingGroup === (group.group_id ?? group.id) ? <form className="conversation-session-rename" onSubmit={(event) => {
+              event.preventDefault();
+              if (busy || !renamedGroupTitle.trim()) return;
+              setBusy(true);
+              void worldApi.renameConversationGroup(card.id, group.group_id ?? group.id, renamedGroupTitle.trim()).then((updated) => {
+                setSessions((current) => current.map((session) => updated.find((item) => item.id === session.id) ?? session));
+                setRenamingGroup(undefined);
+              }).catch((reason) => pushToast({ tone: "error", title: t("Group was not renamed"), detail: apiErrorMessage(reason) })).finally(() => setBusy(false));
+            }}>
+              <input autoFocus aria-label={t("Group name")} maxLength={200} value={renamedGroupTitle} disabled={busy} onChange={(event) => setRenamedGroupTitle(event.target.value)} onKeyDown={(event) => {
+                if (event.key === "Escape" && !busy) { event.stopPropagation(); setRenamingGroup(undefined); }
+                if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault();
+              }} />
+              <button type="submit" disabled={busy || !renamedGroupTitle.trim()}>{t("Save name")}</button><button type="button" disabled={busy} onClick={() => setRenamingGroup(undefined)}>{t("Cancel")}</button>
+            </form> : null}
+            </div>
           ))}
-        </div>
-        <div className="workspace-nav-label"><Bot size={11} /> {t("Connected agents")}</div>
-        <div className="conversation-sidebar-scroll conversation-contact-list">
-          {connectedAgents.map((agent) => (
-            <button type="button" className="workspace-session" key={agent.id} onClick={() => void openDirectSession(agent)}>
-              <Bot size={13} /><span><strong>{agent.name}</strong><small>{agent.status}</small></span>
-            </button>
-          ))}
-          {connectedAgents.length === 0 ? <p>{t("Connect an Agent using Participate.")}</p> : null}
         </div>
         <div className="conversation-session-list">
-          <div className="workspace-nav-label"><MessageSquare size={11} /> {t("Sessions")}</div>
-          <button type="button" className="workspace-new-session" disabled={!activeSession || busy} onClick={() => void createSession(t("New session"), activeSession?.participant_ids ?? [], activeGroupId)}><Plus size={13} /> {t("New session")}</button>
+          <div className="workspace-nav-label">
+            <MessageSquare size={11} /> {t("Sessions")}
+            <button type="button" className="conversation-nav-add" aria-label={t("New session")} title={t("New session")} disabled={!activeSession || busy} onClick={() => void createSession(t("New session"), activeSession?.participant_ids ?? [], activeGroupId)}><Plus size={13} aria-hidden="true" /></button>
+          </div>
           <div className="conversation-sidebar-scroll">
             {groupSessions.map((session) => (
               <div className="conversation-session-row" key={session.id}>
                 <button type="button" className={`workspace-session ${session.id === activeSessionId ? "is-active" : ""}`} title={session.title} aria-current={session.id === activeSessionId ? "true" : undefined} onClick={() => setActiveSessionId(session.id)}>
                   <MessageSquare size={13} /><span><strong>{session.title}</strong><small>{new Date(session.created_at).toLocaleString(useLocale.getState().locale)}</small></span>
                 </button>
-                <details className="conversation-session-actions" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }} onKeyDown={(event) => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}>
-                  <summary aria-label={t("Session actions for {v0}", { v0: String(session.title) })} title={t("Session actions")}><MoreHorizontal size={15} /></summary>
-                  <div className="conversation-session-menu">
+                <ConversationActions host={sessionRegion} label={t("Session actions for {v0}", { v0: String(session.title) })} title={t("Session actions")}>
                     <button type="button" disabled={busy} onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); setSessionTitle(session.title); setRenaming(session.id); }}><Pencil size={12} /> {t("Rename session")}</button>
                     <button type="button" className="is-danger" disabled={busy || session.is_default} onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); void deleteSession(session); }}><Trash2 size={12} /> {t("Delete session")}</button>
-                  </div>
-                </details>
+                </ConversationActions>
                 {renaming === session.id ? <form className="conversation-session-rename" onSubmit={(event) => {
                   event.preventDefault();
                   if (!sessionTitle.trim() || busy) return;
@@ -371,12 +477,13 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
           </div>
         </div>
       </nav>
+      </div>
       </WorkspaceSection>
 
       <WorkspaceSection id="conversation" title={t("Conversation")} className="conversation-thread-section">
       <main className="workspace-conversation conversation-thread nodrag nopan nowheel">
         <header>
-          <div className="conversation-heading"><strong title={activeSession?.title}>{activeSession?.title ?? t("Conversation")}</strong><span>{participants.length} {t("active participants")}</span></div>
+          <div className="conversation-heading"><strong title={activeSession?.title}>{activeSession?.title ?? t("Conversation")}</strong></div>
           <div className="conversation-header-tools">
             <button type="button" className="conversation-add-agent" aria-label={t("Add agents to session")} disabled={!activeSession || availableAgents.length === 0} onClick={() => setAddingParticipants((value) => !value)}><Plus size={12} /> {t("Add")}</button>
             {addingParticipants ? (
@@ -524,17 +631,17 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
                 setSelectedAgentId(agent.id);
                 setDraft((value) => appendMention(value, agent.name));
               }}>
-                <span><Bot size={12} /></span><div><strong>{agent.name}</strong><small>{agent.status} {t("· insert mention")}</small></div>
+                <ContextAvatar key={`${activeSessionId}/${agent.id}`} status={activeSessionId ? contextStatuses[activeSessionId]?.[agent.id] : undefined} /><div><strong>{agent.name}</strong><small>{agent.status} {t("· insert mention")}</small></div>
               </button>
               <button type="button" className="conversation-kick-agent" aria-label={t("Remove {v0} from session", { v0: String(agent.name) })} disabled={busy} onClick={() => void removeParticipant(agent)} title={t("Remove {v0}", { v0: String(agent.name) })}><UserMinus size={12} /></button>
             </div>
           ))}
           {participants.length === 0 ? <p>{t("This session has no Agents. Create a direct or group session from the left.")}</p> : null}
         </section>
-        <section>
+        {!deployed && <section>
           <span className="workspace-panel-label">{t("Field policy")}</span>
           <p>{t("Canvas connections authorize access. Session membership selects the group. Removing an edge keeps history but blocks future turns.")}</p>
-        </section>
+        </section>}
         </div>
       </aside>
       </WorkspaceSection>

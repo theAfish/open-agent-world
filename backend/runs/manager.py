@@ -723,7 +723,8 @@ class RunManager:
                         awaiting=str(event.payload.get('name', 'tool execution')) if active_tools else None,
                         last_signal=event.type.value)
                     text = event.payload.get("text")
-                    if event.type.value == "agent_message" and isinstance(text, str):
+                    if isinstance(text, str) and (event.type.value == "agent_message"
+                            or (event.type.value == "agent_completed" and text.strip())):
                         self.state.set(context.state_context.local_scope, "output_text", text, run_id=record.run_id)
                     if event.run_status is not None:
                         current = self.get_run(record.run_id)
@@ -853,6 +854,18 @@ class RunManager:
                 "agent runtime is not configured; set OPEN_AGENT_WORLD_AGENT_RUNTIME explicitly"
             )
         return provider_id
+
+    def uses_oaw_context(self, card: Card) -> bool:
+        """Ownership, not core.agent membership, selects host compaction."""
+        from backend.agents.google_adk import GoogleAdkAgentRuntime
+        provider_id = card.config.get("runtime_provider_id") or self.default_runtime_provider_id
+        if provider_id != "google.adk":
+            return False
+        installed = self._providers.get(provider_id)
+        if installed is not None:
+            return type(installed) is GoogleAdkAgentRuntime and installed.context_store is not None
+        return (self.plugins.has_runtime_provider(provider_id)
+                and self.plugins.runtime_provider_owner_id(provider_id) == "open-agent-world.core")
 
     def _optional_provider_id(self, card: Card) -> str | None:
         configured = card.config.get("runtime_provider_id")

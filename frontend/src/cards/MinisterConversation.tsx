@@ -5,6 +5,7 @@ import { apiErrorMessage, worldApi } from '../api/client';
 import { useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { useConversationTimeline } from '../state/useConversationTimeline';
 import { useWorldStore } from '../state/worldStore';
+import { useConversationView } from '../state/conversationView';
 import type { MinisterChat } from '../types/minister';
 import type { WorldCard } from '../types/world';
 import { MarkdownMessage } from './MarkdownMessage';
@@ -40,7 +41,8 @@ export function MinisterConversation({ card, chat, presence = false }: { card: W
     } catch (reason) { setError(apiErrorMessage(reason)); }
     finally { setSending(false); }
   };
-  return <div className="minister-conversation">
+  const activateSession = () => useConversationView.getState().showSession(chat.conversation_id, chat.session_id);
+  return <div className="minister-conversation" onPointerDownCapture={activateSession} onFocusCapture={activateSession}>
     <div className="minister-messages nowheel" ref={log} onScroll={timeline.onScroll} role="log" aria-label={t("{v0} conversation", { v0: String(card.name) })} aria-live="polite">
       {!presence && timeline.hasBefore && <button type="button" className="minister-text-button" onClick={() => void timeline.loadOlder()}>{t("Earlier messages")}</button>}
       {!presence && !timeline.loading && !timeline.messages.length && <div className="minister-welcome">

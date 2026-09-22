@@ -53,7 +53,7 @@ test("task board edits dependencies, rejects cycles, stays live and restores aft
     await card.locator(".card-kind-icon").click();
     await card.getByRole("button", { name: "Remove Research plan", exact: true }).click();
     await expect(card).toHaveCount(0);
-    await page.getByRole("button", { name: "Undo last canvas action", exact: true }).click();
+    await page.keyboard.press("Control+z");
     await expect(card).toHaveCount(1);
     const restored = await (await request.get(url + "/document")).json();
     expect(restored.value.tasks).toHaveLength(2);

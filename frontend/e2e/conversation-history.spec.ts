@@ -52,7 +52,7 @@ test("durable grouped sessions page both ways with stable scroll anchors", async
     await expect(transcript.getByText("Historical message 220", { exact: true })).toBeVisible();
     await workspace.getByRole("button", { name: "New session", exact: true }).click();
     await expect(transcript.getByText("Historical message 220", { exact: true })).toHaveCount(0);
-    await workspace.locator('.conversation-session-row:has(.workspace-session.is-active) summary').click();
+    await workspace.locator('.conversation-session-list .conversation-session-row:has(.workspace-session.is-active) summary').click();
     await workspace.getByRole("button", { name: "Rename session" }).click();
     await workspace.getByLabel("Session title").fill("Second topic");
     await workspace.getByRole("button", { name: "Save name" }).click();

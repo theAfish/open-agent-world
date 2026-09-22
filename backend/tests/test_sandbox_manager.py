@@ -352,7 +352,7 @@ def test_global_sandbox_location_migrates_existing_cards_and_persists(tmp_path):
         folder.mkdir()
     services = create_services(settings, sandbox_backend=manager)
     with TestClient(create_app(settings, services=services)) as client:
-        assert client.get("/api/settings/sandbox").json() == {"workspace_root": None, "runtime": "auto", "backup_paths": []}
+        assert client.get("/api/settings/sandbox").json() == {"workspace_root": None, "runtime": "auto", "backup_paths": [], "environment_variables": {}}
         old = client.post("/api/nodes", json={"type": "sandbox"}).json()
         response = client.put("/api/settings/sandbox", json={"workspace_root": str(root), "runtime": "test-linux"})
         assert response.status_code == 200, response.text
@@ -407,7 +407,7 @@ def test_invalid_sandbox_defaults_do_not_replace_saved_settings(tmp_path):
             response = client.put("/api/settings/sandbox", json={"workspace_root": root})
             assert response.status_code == 422, response.text
         assert client.put("/api/settings/sandbox", json={"runtime": "unknown"}).status_code == 422
-        assert client.get("/api/settings/sandbox").json() == {"workspace_root": None, "runtime": "auto", "backup_paths": []}
+        assert client.get("/api/settings/sandbox").json() == {"workspace_root": None, "runtime": "auto", "backup_paths": [], "environment_variables": {}}
     services.close()
 
 

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { WorldCard, PluginCatalog } from "../types/world";
-import { NODE_SURFACE_SIZE, type NodeSurfaceLevel } from "./nodeSurfaces";
+import { surfaceSizeFor, type SurfaceSizes, type NodeSurfaceLevel } from "./nodeSurfaces";
 import { positionSurfaceAtNodeCenter } from "../canvas/nodeDisplacement";
 
 export const SHADOW = { type:"core.shadow-collection", hoverMs:150, absorbMs:300, expandMs:500, collapseMs:400,
@@ -49,15 +49,15 @@ export type ShadowRect={x:number;y:number;width:number;height:number};
 export function collectionAnchorFromSurface(surface:{x:number;y:number},anchor:{x:number;y:number},origin:{x:number;y:number}) {
   return {x:surface.x+anchor.x-origin.x,y:surface.y+anchor.y-origin.y};
 }
-export function shadowLayout(card:WorldCard,cards:WorldCard[],levels=new Map<string,NodeSurfaceLevel>(),catalog?:PluginCatalog):ShadowRect & {rects:ShadowRect[]} {
+export function shadowLayout(card:WorldCard,cards:WorldCard[],levels=new Map<string,NodeSurfaceLevel>(),catalog?:PluginCatalog,surfaceSizes:SurfaceSizes={}):ShadowRect & {rects:ShadowRect[]} {
   const state=collectionState(card);
   if(state!=="expanded")return {...card.position,width:state==="minimal"?132:SHADOW.stackWidth,height:state==="minimal"?128:SHADOW.stackHeight,rects:[] as ShadowRect[]};
   const rects=cards.filter(c=>c.parent_id===card.id).map(c=>{
-    if(isShadow(c))return shadowLayout(c,cards,levels,catalog);
+    if(isShadow(c))return shadowLayout(c,cards,levels,catalog,surfaceSizes);
     const container=catalog?.node_types.find(t=>t.id===c.type)?.container;
     if(container)return {...c.position,width:Math.max(c.size.width,container.min_size[0]),height:Math.max(c.size.height,container.min_size[1])};
     const level=levels.get(c.id)??"preview";
-    return {...positionSurfaceAtNodeCenter(c.position,level),...NODE_SURFACE_SIZE[level]};
+    return {...positionSurfaceAtNodeCenter(c.position,level),...surfaceSizeFor(c.id,level,surfaceSizes)};
   });
   const x=Math.min(card.position.x,...rects.map(r=>r.x-SHADOW.padding));
   const y=Math.min(card.position.y,...rects.map(r=>r.y-90));
@@ -65,9 +65,9 @@ export function shadowLayout(card:WorldCard,cards:WorldCard[],levels=new Map<str
   const bottom=Math.max(card.position.y+320,...rects.map(r=>r.y+r.height+90));
   return {x,y,width:right-x,height:bottom-y,rects:rects.map(r=>({...r,x:r.x-x,y:r.y-y}))};
 }
-export function shadowPresentation(card:WorldCard,cards:WorldCard[],levels:Map<string,NodeSurfaceLevel>,positions:Record<string,{x:number;y:number}>,catalog?:PluginCatalog) {
+export function shadowPresentation(card:WorldCard,cards:WorldCard[],levels:Map<string,NodeSurfaceLevel>,positions:Record<string,{x:number;y:number}>,catalog?:PluginCatalog,surfaceSizes:SurfaceSizes={}) {
   const live=collectionState(card)==="expanded"?cards.map(c=>positions[c.id]?{...c,position:positions[c.id]}:c):cards;
-  return shadowLayout(card,live,levels,catalog);
+  return shadowLayout(card,live,levels,catalog,surfaceSizes);
 }
 
 /** Outer hull bridges the gaps between members instead of creating radial spokes. */

@@ -198,6 +198,7 @@ class CardCreate(BaseModel):
     size: Size | None = None
     expanded: bool = False
     status: str | None = None
+    state_scope: Literal["shared", "session"] | None = None
     config: dict[str, Any] = Field(default_factory=dict)
     content: str | None = None
     data_base64: str | None = None
@@ -218,12 +219,15 @@ class CardPatch(BaseModel):
     expanded: bool | None = None
     status: str | None = None
     config: dict[str, Any] | None = None
+    state_scope: Literal["shared", "session"] | None = None
 
 
 class CardsDelete(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    node_ids: Annotated[list[str], Field(min_length=1, max_length=101)]
+    # A canvas selection can exceed the formation/edit batch size. Keep deletion
+    # atomic instead of making the client split it into partially committed chunks.
+    node_ids: Annotated[list[str], Field(min_length=1, max_length=10_000)]
     expected_revisions: dict[str, Annotated[int, Field(ge=1, strict=True)]] | None = None
 
     @field_validator("node_ids")
@@ -269,6 +273,8 @@ class Card(BaseModel):
     expanded: bool
     status: str
     config: dict[str, Any]
+    state_scope: Literal["shared", "session"] | None = None
+    state_scope_override: Literal["shared", "session"] | None = None
     chunk: tuple[int, int]
     resource: ResourceSummary | None = None
     created_at: datetime

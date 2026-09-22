@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict
-from open_agent_world.plugin_api import NodeTypeDefinition, PackDefinition, PluginDescriptor
+from open_agent_world.plugin_api import NodeTypeDefinition, PackDefinition, PluginDescriptor, StatelessStateSpec
 
 
 class ViewerConfig(BaseModel):
@@ -7,7 +7,7 @@ class ViewerConfig(BaseModel):
 
 
 class StructureViewerPlugin:
-    descriptor = PluginDescriptor(id="science.structure-viewer", version="0.1.0", plugin_api_version="1.14",
+    descriptor = PluginDescriptor(id="science.structure-viewer", version="0.1.0", plugin_api_version="1.23",
                                   name="Structure viewer", description="MatterViz crystal and molecule rendering")
 
     def register(self, registration):
@@ -15,6 +15,7 @@ class StructureViewerPlugin:
             id="science.structure-viewer", label="Structure viewer", description="Follow crystal and molecule files opened in connected windows.",
             icon="atom", color="#67a69b", deck_id="science", deck_label="Science", deck_icon="atom",
             default_name="Structure viewer", default_size=(340, 240), default_status="ready", statuses=frozenset({"ready"}),
+            state=StatelessStateSpec(),
             config_model=ViewerConfig, traits=frozenset({"core.file-viewer"}), templateable=True,
             frontend={"preview": "preview", "body": "viewer", "workspace": "viewer"},
             surfaces={"preview": True, "inspector": True, "workspace": True},

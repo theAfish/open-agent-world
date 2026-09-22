@@ -12,9 +12,14 @@ def main():
         raise SystemExit("Run setup, then npm --prefix frontend run build before starting the source checkout.")
     env = dict(os.environ)
     env["OPEN_AGENT_WORLD_MODE"] = "production"
+    command = [str(python), "-m", "backend.launcher", "--frontend", str(root / "frontend/dist"),
+               "--open", *sys.argv[1:]]
+    if os.name != "nt":
+        # Keep the launcher as the foreground process so signals reach the server.
+        os.chdir(root)
+        os.execve(str(python), command, env)
     try:
-        result = subprocess.run([str(python), "-m", "backend.launcher", "--frontend", str(root / "frontend/dist"),
-                                 "--open", *sys.argv[1:]], cwd=root, env=env)
+        result = subprocess.run(command, cwd=root, env=env)
         raise SystemExit(result.returncode)
     except KeyboardInterrupt:
         pass

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from typing import Any, Protocol
+from backend.plugins.state import CardStateStore
 
 
 class CapabilityContext(Protocol):
     """Narrow host operations available to trusted capability handlers."""
+
+    @property
+    def state(self) -> CardStateStore | None: ...
 
     async def node_resource_action(self, capability: Any, action: str, arguments: dict[str, Any]) -> dict[str, Any]: ...
 
@@ -24,6 +28,8 @@ class CapabilityContext(Protocol):
     async def node_document_action(self, capability: Any, action: str, arguments: dict[str, Any], expected_revision: int | None = None) -> dict[str, Any]: ...
 
     async def node_execution_action(self, capability: Any, action: str, arguments: dict[str, Any]) -> dict[str, Any]: ...
+
+    async def node_delegation_action(self, capability: Any, action: str, arguments: dict[str, Any]) -> dict[str, Any]: ...
 
     async def communicate(
         self, source_agent_id: str, target_agent_id: str, message: str

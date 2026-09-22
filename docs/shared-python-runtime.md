@@ -18,6 +18,14 @@ Windows and Linux venvs are not binary-compatible. WSL distributions each share
 one Linux venv under `runtime/platforms/<distribution-key>/runtime/python/venv`.
 There are no per-sandbox or per-plugin environments.
 
+Installed `.oawpack` manifests declare `runtime.sandbox.python`; discovery feeds
+the same bootstrap used by bundled plugins. All enabled Pack requirements are
+aggregated and checked for obvious conflicts before selection/enable. The shared
+runtime performs a complete `uv` dry-run before installing under its mutation
+lock. Interactive Agent installs include these Pack requirements too. Installation
+and environment state remain separate, and failed preparation can be retried
+without reinstalling the Pack. See [Pack distribution](pack-distribution.md).
+
 ## Installing missing dependencies
 
 Agents with an execute relationship receive `install_python_packages`. For example:

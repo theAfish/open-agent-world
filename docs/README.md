@@ -1,38 +1,55 @@
-# Open Agent World documentation
+---
+hide:
+  - navigation
+  - toc
+---
 
-**English** | [简体中文](README.zh-CN.md)
+<div class="hero" markdown>
 
-[Project home](../README.md)
+# Your AI team, on one canvas.
 
-Use these guides to look up a feature or understand how it works. Start with setup if you are new; the other pages can be read independently.
+Connect agents, files, and tools. Give each agent a role and a place to work together.
 
-| I want to... | Read |
+[Start using OAW](user-guide/index.md){ .md-button .md-button--primary }
+[Build a plugin](developers/index.md){ .md-button }
+
+[简体中文](README.zh-CN.md)
+
+</div>
+
+![An OAW workspace with agents, a conversation, documents, and a task board](assets/demos/world-overview.png)
+
+<div class="grid cards" markdown>
+
+- **Use Open Agent World**
+
+    Install the app, choose a model, and connect your first team. No programming required.
+
+    [User guide →](user-guide/index.md)
+
+- **Develop a plugin**
+
+    Start with a small Python package. Make a card, give an Agent a tool, then add your own interface.
+
+    [Plugin developer guide →](developers/index.md)
+
+- **Look up a contract**
+
+    Find API details, lifecycle rules, runtime behavior, and host architecture when you need them.
+
+    [Technical reference →](reference/index.md)
+
+</div>
+
+## Pick your next step
+
+| Your goal | Start here |
 | --- | --- |
-| Install, launch, or contribute | [Getting started](getting-started.md) |
-| Install the desktop app or use F3 development resets | [Desktop installation and development](desktop.md) |
-| Understand cards, connections, agents, and capabilities | [Core concepts](concepts.md) |
-| Configure models, credentials, or application storage | [Configuration](configuration.md) |
-| Collect cards and organize the bottom tray | [Packs, Card Library, and Decks](card-library.md) |
-| Organize and reuse a team | [Legion team spaces](legions.md) |
-| Inspect and tidy a local area of the canvas | [Minister](minister.md) |
-| Use or develop an extension | [Plugins](plugins.md) |
-| Work with files and run commands | [Sandbox workspace](sandbox-workspace.md) |
-| Configure command variables, secrets, and targets | [Execution configuration](execution-configuration.md) |
-| Enable Sandbox networking | [Sandbox networking](sandbox-networking.md) |
-| Use the managed Python environment | [Shared Python runtime](shared-python-runtime.md) |
+| Install the desktop app | [Download and install](install.md) |
+| Get an Agent working with a document | [Your first team](user-guide/first-team.md) |
+| Add a model connection | [Models and settings](user-guide/models.md) |
+| Find a card or plugin | [Plugins and packs](user-guide/plugins.md) |
+| Create a new kind of card | [Your first plugin](developers/first-plugin.md) |
+| Run or contribute to OAW itself | [Development setup](developers/setup.md) |
 
-## Technical reference
-
-- [Architecture](architecture.md): authority, persistence, interaction flows, and canvas scaling.
-- [Scoped canvas automation](canvas-control.md): host-issued control scopes, field policy, revisions, and synchronization.
-- [Runs and runtime providers](runs.md), [runtime state](state.md), and [execution lifecycle and durable outputs](lifecycle-artifacts.md).
-- [Plugin work-source execution](execution.md), [node effects](node-effects.md), and [canvas placement](layout.md).
-- [Security and isolation contract](security.md): trust zones and platform boundaries.
-
-## Scope and future learning
-
-The [interactive tutorial](tutorial.md) starts on an empty canvas and guides a small working example. Replay it with the compass button in the world controls; use these docs for deeper explanations.
-
-This repository documents OAW, core functionality, bundled plugins, and plugin development. Plugin-specific guides can live with their packages; see the [plugin guide directory](plugins.md#bundled-plugin-guides). In-app viewing of plugin documentation and tutorials is a future direction, with no documentation delivery API promised here.
-
-[MatCreator demo plan](matcreator-demo-plan.md) is a design/planning document, not a guide to guaranteed current behavior.
+OAW is experimental. See [GitHub Releases](https://github.com/theAfish/open-agent-world/releases) for available downloads and [report a problem](https://github.com/theAfish/open-agent-world/issues) with your app version and the steps to reproduce it.

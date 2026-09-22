@@ -1,3 +1,4 @@
+import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
 import { t, useLocale } from "../i18n";
 import { Check, FileClock, Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -9,6 +10,7 @@ import { worldApi, apiErrorMessage } from "../api/client";
 
 export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurfaceLevel }) {
   useLocale();
+  const { deployed } = useWorkspaceAccess();
   const saveText = useWorldStore((state) => state.saveText);
   const [content, setContent] = useState("");
   const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving">("saved");
@@ -39,7 +41,7 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
   const filename = String(card.config.filename ?? `${card.name}.txt`);
 
   const performSave = async () => {
-    if (!ready || !draft.current.dirty || saving.current) return;
+    if (deployed || !ready || !draft.current.dirty || saving.current) return;
     saving.current = true;
     const submitted = draft.current.content;
     setSaveState("saving");
@@ -76,6 +78,7 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
           className="text-editor"
           value={content}
           disabled={!ready}
+          readOnly={deployed}
           spellCheck
           onChange={(event) => {
             draft.current = { content: event.target.value, dirty: true };
@@ -91,7 +94,7 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
           aria-describedby={`text-save-state-${card.id}`}
         />
       </label>
-      <div className="editor-actions">
+      {!deployed && <><div className="editor-actions">
         <span id={`text-save-state-${card.id}`}>{content.length.toLocaleString(useLocale.getState().locale)} {t("characters · r")}{revision ?? "—"}</span>
         <button
           type="button"
@@ -121,7 +124,7 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
             ))}
           </ul>
         ) : <div className="mini-empty"><FileClock size={14} /><span>{t("History begins after the first save.")}</span></div>}
-      </section>
+      </section></>}
     </div>
   );
 }

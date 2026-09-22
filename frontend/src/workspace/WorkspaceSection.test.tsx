@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceSection, WorkspaceSectionProvider, useWorkspaceSections, type WorkspaceSectionRegistration } from './WorkspaceSection';
+import { WorkspaceAccess } from './WorkspaceAccess';
 
 afterEach(cleanup);
 
@@ -14,6 +15,19 @@ const defaults = {
 const OwnerContext = createContext('missing');
 
 describe('workspace sections', () => {
+  it('does not mount undeclared or hidden plugin sections in a deployment', () => {
+    const mounted = vi.fn();
+    function PrivateContent() { useEffect(mounted, []); return <p>Private controls</p>; }
+    render(<WorkspaceAccess.Provider value={{ deployed: true, permissions: { 'card-one': ['public'] }, plugin_access: {
+      'card-one': { config_fields: [], document_fields: [], summary_fields: [], document_actions: [], downloads: [], resource_actions: {}, execution: false },
+    } }}><WorkspaceSectionProvider {...defaults}>
+      <WorkspaceSection id="public" title="Public"><p>Public controls</p></WorkspaceSection>
+      <WorkspaceSection id="private" title="Private"><PrivateContent /></WorkspaceSection>
+    </WorkspaceSectionProvider></WorkspaceAccess.Provider>);
+    expect(screen.getByText('Public controls')).toBeTruthy();
+    expect(screen.queryByText('Private controls')).toBeNull();
+    expect(mounted).not.toHaveBeenCalled();
+  });
   it('uses the ordinary card layout outside a Legion and connects content before layout measurement', () => {
     const connected = vi.fn();
     function Pane() {

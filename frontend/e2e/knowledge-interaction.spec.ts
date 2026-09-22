@@ -102,7 +102,7 @@ test('container members reflow during resize and persist through reload and undo
     await page.goto('/');
     const frame = page.locator(`[data-card-id="${parent.id}"]`);
     await frame.locator('.container-header strong').click();
-    const grip = frame.locator('.container-resize-arc');
+    const grip = page.locator(`[data-resize-node="${parent.id}"][data-resize-corner="bottom-right"]`);
     await expect(grip).toBeVisible();
     const start = (await grip.boundingBox())!;
     await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
@@ -236,7 +236,7 @@ test('large graph keeps resource cards out of the canvas and pages knowledge on 
     await node.click();
     await expect(container.locator('.kdg-inspector h3')).toHaveText('Entry 129');
     await container.locator('.container-header strong').click();
-    const grip = container.locator('.container-resize-arc');
+    const grip = page.locator(`[data-resize-node="${graph.id}"][data-resize-corner="bottom-right"]`);
     const bounds = (await grip.boundingBox())!;
     await page.mouse.move(bounds.x + 10, bounds.y + 10);
     await page.mouse.down();

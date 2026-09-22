@@ -30,7 +30,8 @@ async def invoke_resource_action(services, node_id, action, request, *, capabili
             if request.confirm:
                 raise PermissionDeniedError("Agents cannot supply desktop confirmation")
         context = NodeResourceContext(node_id, services.resources.node_storage_path(node_id), Event(),
-            actor_id=capability.agent_id if capability else None, confirmed=request.confirm)
+            actor_id=capability.agent_id if capability else None, confirmed=request.confirm,
+            state=services.card_state.bind(node_id))
         task = asyncio.create_task(asyncio.to_thread(operation.handler, context, request.arguments))
         try:
             return await asyncio.shield(task)

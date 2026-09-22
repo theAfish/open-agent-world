@@ -163,7 +163,8 @@ test("procedural terrain streams deterministic chunks across distant canvas coor
   await expect(chunks.locator("path.contour").first()).toHaveAttribute("d", /M/);
 });
 
-test("an Agent relationship can be dragged between boundaries and exposes real endpoints", async ({
+for (const destination of ["boundary", "body"] as const) {
+test(`an Agent relationship can be dragged to ${destination} and exposes real endpoints`, async ({
   page,
   request,
 }) => {
@@ -199,12 +200,16 @@ test("an Agent relationship can be dragged between boundaries and exposes real e
     });
     expect(await page.evaluate(() => window.getSelection()?.isCollapsed)).toBe(false);
     const start = await handleCenter(sourceCard, "right");
-    const end = await handleCenter(targetCard, "left");
+    const targetBox = await cardBox(targetCard, "Connection target");
+    const end = destination === "body"
+      ? { x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height / 2 }
+      : await handleCenter(targetCard, "left");
     await page.mouse.move(start.x, start.y);
     await page.mouse.down();
     expect(await page.evaluate(() => window.getSelection()?.isCollapsed)).toBe(true);
     await page.mouse.move(end.x, end.y, { steps: 10 });
     expect(await page.evaluate(() => window.getSelection()?.isCollapsed)).toBe(true);
+    if (destination === "body") await expect(targetCard.locator(".connection-drop-surface")).toHaveClass(/valid/);
     await page.mouse.up();
 
     const dialog = page.getByRole("dialog", { name: "Choose a capability" });
@@ -223,6 +228,54 @@ test("an Agent relationship can be dragged between boundaries and exposes real e
   } finally {
     await request.delete(`/api/nodes/${source.id}`);
     await request.delete(`/api/nodes/${target.id}`);
+  }
+});
+
+}
+
+test("connection body targets preserve container headers and member ownership", async ({ page, request }) => {
+  await page.setViewportSize({ width: 1800, height: 1200 });
+  const suffix = Date.now();
+  const source = await createCard(request, `body-source-${suffix}`, "agent", "Outside", { x: 150, y: 220 });
+  const response = await request.post("/api/nodes", { data: {
+    type: "oaw.barracks", name: "Body target container", position: { x: 700, y: 160 },
+  } });
+  expect(response.status()).toBe(201);
+  const container = await response.json();
+  const memberResponse = await request.post("/api/nodes", { data: {
+    type: "agent", name: "Body target member", parent_id: container.id, position: { x: 850, y: 320 },
+  } });
+  expect(memberResponse.status()).toBe(201);
+  const member = await memberResponse.json();
+  try {
+    await page.goto("/");
+    const sourceCard = page.locator(`[data-card-id="${source.id}"]`);
+    const containerCard = page.locator(`[data-card-id="${container.id}"]`);
+    const memberCard = page.locator(`[data-card-id="${member.id}"]`);
+    await expect(memberCard).toBeVisible();
+    const start = await handleCenter(sourceCard, "right");
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    const frame = await cardBox(containerCard, "Container frame");
+    expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.classList.contains("connection-drop-surface"),
+      { x: frame.x + frame.width - 40, y: frame.y + frame.height - 40 })).toBe(false);
+    const header = await cardBox(containerCard.locator(".container-header"), "Container header");
+    await page.mouse.move(header.x + header.width / 2, header.y + header.height / 2, { steps: 10 });
+    expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.getAttribute("data-nodeid"),
+      { x: header.x + header.width / 2, y: header.y + header.height / 2 })).toBe(container.id);
+    const body = await cardBox(memberCard, "Container member");
+    await page.mouse.move(body.x + body.width / 2, body.y + body.height / 2, { steps: 10 });
+    await expect(memberCard.locator(".connection-drop-surface")).toHaveClass(/\bvalid\b/);
+    await page.mouse.up();
+    const dialog = page.getByRole("dialog", { name: "Choose a capability" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Grant capability" }).click();
+    await expect(page.locator(`path.semantic-edge-path[data-source-id="${source.id}"][data-target-id="${member.id}"]`)).toHaveCount(1);
+    await expect(memberCard.locator(".connection-drop-surface")).not.toHaveAttribute("data-active");
+  } finally {
+    await request.delete(`/api/nodes/${source.id}`);
+    await request.delete(`/api/nodes/${member.id}`);
+    await request.delete(`/api/nodes/${container.id}`);
   }
 });
 

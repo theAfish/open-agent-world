@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useSt
 import { createPortal } from 'react-dom';
 import { EyeOff, GripVertical } from 'lucide-react';
 import { t } from '../i18n';
+import { useWorkspaceAccess } from './WorkspaceAccess';
 import './workspaceSection.css';
 
 export interface WorkspaceSectionRegistration {
@@ -32,7 +33,9 @@ export function useWorkspaceSections(): { isInline: (id: string) => boolean } {
   const context = useContext(WorkspaceSectionContext);
   const detached = context?.detachedSectionIds;
   const hidden = context?.hiddenSectionIds;
-  const isInline = useCallback((id: string) => !detached?.has(id) && !hidden?.has(id), [detached, hidden]);
+  const access = useWorkspaceAccess();
+  const allowed = context && access.plugin_access?.[context.cardId] ? access.permissions[context.cardId] : undefined;
+  const isInline = useCallback((id: string) => (allowed === undefined || allowed.includes(id)) && !detached?.has(id) && !hidden?.has(id), [detached, hidden, allowed]);
   return useMemo(() => ({ isInline }), [isInline]);
 }
 
@@ -47,6 +50,8 @@ export interface WorkspaceSectionProps {
 /** A semantic card pane whose DOM can move without changing its React owner. */
 export function WorkspaceSection({ id, title, children, className, style }: WorkspaceSectionProps) {
   const context = useContext(WorkspaceSectionContext);
+  const access = useWorkspaceAccess();
+  const permitted = !context || !access.plugin_access?.[context.cardId] || access.permissions[context.cardId]?.includes(id);
   const { isInline } = useWorkspaceSections();
   const inline = isInline(id);
   const [contentReady, setContentReady] = useState(inline);
@@ -61,16 +66,18 @@ export function WorkspaceSection({ id, title, children, className, style }: Work
   const register = context?.register;
 
   useLayoutEffect(() => {
+    if (!permitted) return;
     host.dataset.workspaceSectionContent = id;
     const unregister = register?.({ id, title, host });
     // Initially detached panes need one registration commit so their destination
     // can attach the host before children measure it in their layout effects.
     setContentReady(true);
     return unregister;
-  }, [host, id, title, register]);
+  }, [host, id, title, register, permitted]);
 
   // Keep this portal at the same React position, including while hidden. Only its
   // DOM host moves; rendering another copy in the destination would reset state.
+  if (!permitted) return null;
   return <>
     {inline && <div ref={attachInline} className={['workspace-section', context?.editing && 'is-editing', className].filter(Boolean).join(' ')}
       style={style} data-workspace-section={id} data-workspace-card={context?.cardId}>

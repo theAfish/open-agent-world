@@ -117,7 +117,7 @@ export function LegionCardNode({ data, selected }: NodeProps<CanvasNode>) {
         onBlur={(e) => { const name = e.target.value.trim(); if (name && name !== card.name) void updateCard(card.id, { name }); }} /></div>
       <span className="legion-count">{members.length} {t("members")}{team && card.config.paused ? ` · ${t("Paused")}` : ''}</span>
       <AddSelectedMembers card={card} />
-      <button className="secondary-button nodrag nopan" onClick={() => useLegionWorkspace.getState().open(card.id)}><PanelsTopLeft size={14} /> {t('Workspace mode')}</button>
+      <button data-tutorial="legion-open" className="secondary-button nodrag nopan" onClick={() => useLegionWorkspace.getState().open(card.id)}><PanelsTopLeft size={14} /> {t('Workspace mode')}</button>
       <button ref={settingsButtonRef} onFocus={event => event.stopPropagation()} className="secondary-button nodrag nopan" aria-expanded={settingsOpen} aria-controls={`legion-settings-${card.id}`} onClick={() => setSettingsOpen(open => !open)}><Settings2 size={14} /> {t("Legion settings")}</button>
       <button className="primary-button nodrag nopan" disabled={members.length === 0 || busy || positionBusy || dragging}
         onClick={() => void saveTemplate()} title={t("Save nodes, connections, positions and display states (1–4).") }><Save size={14} /> {t("Save to library")}</button>

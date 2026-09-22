@@ -6,7 +6,7 @@ Open Agent World has three entry points sharing the same application code:
 | --- | --- | --- | --- | --- |
 | Installed Windows app | Start menu / desktop shortcut | Built assets | Formal user directory | Absent |
 | Formal use from source | `scripts/start.ps1` / `python3 scripts/start.py` | Built assets, served by Python | Formal user directory | Absent |
-| Development | `scripts/dev.ps1` / `python3 scripts/dev.py` | Vite with hot updates | Checkout-owned development profile | Debug panel |
+| Development | `scripts/dev.ps1` / `bash scripts/dev.sh` | Vite with hot updates | Checkout-owned development profile | Debug panel |
 | Release preview | `scripts/start.ps1 -Preview` / `python3 scripts/start.py --mode preview` | Built assets | Checkout-owned preview profile | Absent |
 
 ## Daily use
@@ -40,8 +40,8 @@ Setup now also builds the frontend. After later frontend edits, run `npm --prefi
 Portable equivalents:
 
 ```bash
-python3 scripts/dev.py
-python3 scripts/dev.py --agent-runtime core.mock --profile tutorial
+bash scripts/dev.sh
+bash scripts/dev.sh --agent-runtime core.mock --profile tutorial
 ```
 
 Development data is always below `.open-agent-world/development/profiles/<profile>`. The launcher does not adopt the previous formal store or a directory passed in `OPEN_AGENT_WORLD_DATA_ROOT`. Existing formal data is left in place; use `start` to reopen it. New development profiles begin empty and require their own model configuration.

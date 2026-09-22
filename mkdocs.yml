@@ -1,0 +1,133 @@
+site_name: Open Agent World
+site_description: Build your AI team on one canvas. Guides for users and plugin developers.
+site_url: https://theafish.github.io/open-agent-world/
+repo_url: https://github.com/theAfish/open-agent-world
+repo_name: theAfish/open-agent-world
+edit_uri: edit/dev/docs/
+docs_dir: docs
+site_dir: .tmp/docs-site
+strict: true
+theme:
+  name: material
+  custom_dir: scripts/docs_theme
+  language: en
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  font: false
+  palette:
+    - media: '(prefers-color-scheme: light)'
+      scheme: default
+      primary: custom
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: '(prefers-color-scheme: dark)'
+      scheme: slate
+      primary: custom
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+plugins:
+  - search:
+      lang: [en, zh]
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.details
+hooks:
+  - scripts/docs_hooks.py
+extra_css:
+  - stylesheets/extra.css
+exclude_docs: |
+  /SHADOW_COLLECTION.md
+  /SHADOW_GAS_BOUNDARY.md
+  /READER_TRANSITION.md
+  /matcreator-demo-plan.md
+  /assets/demos/README.md
+validation:
+  nav:
+    omitted_files: warn
+  links:
+    not_found: warn
+    anchors: warn
+    unrecognized_links: warn
+nav:
+  - Home: README.md
+  - User guide:
+      - user-guide/index.md
+      - Install OAW: install.md
+      - Your first team: user-guide/first-team.md
+      - Models and settings: user-guide/models.md
+      - Cards and connections: user-guide/canvas.md
+      - Packs and cards: user-guide/plugins.md
+      - Troubleshooting: user-guide/troubleshooting.md
+  - Build plugins:
+      - developers/index.md
+      - Development setup: developers/setup.md
+      - Your first plugin: developers/first-plugin.md
+      - Give an Agent a tool: developers/agent-tools.md
+      - Add a custom interface: developers/frontend.md
+      - Test and distribute: developers/testing.md
+      - Local Pack distribution: pack-distribution.md
+      - Choose an extension point: developers/extension-points.md
+  - Technical reference:
+      - reference/index.md
+      - Plugin contracts:
+          - Plugin API: plugins.md
+          - Card state: card-state.md
+          - Lifecycle and artifacts: lifecycle-artifacts.md
+          - Work-source execution: execution.md
+          - Node effects: node-effects.md
+          - Plugin deployment: plugin-deployment.md
+      - Application behavior:
+          - Core concepts: concepts.md
+          - Configuration: configuration.md
+          - Packs and decks: card-library.md
+          - Legions: legions.md
+          - Minister: minister.md
+          - Runs: runs.md
+          - Context management: context-management.md
+          - Runtime state: state.md
+      - Sandbox and execution:
+          - Workspace: sandbox-workspace.md
+          - Execution configuration: execution-configuration.md
+          - Networking: sandbox-networking.md
+          - Shared Python: shared-python-runtime.md
+          - Security: security.md
+      - Host development:
+          - Run from source: getting-started.md
+          - Architecture: architecture.md
+          - Canvas control: canvas-control.md
+          - Canvas placement: layout.md
+          - Canvas performance: canvas-performance.md
+          - Tutorial implementation: tutorial.md
+          - Desktop development: desktop.md
+          - Workspace deployment: deployment.md
+          - Releases: releasing.md
+          - Release notes: release-notes.md
+          - Maintain this site: developers/documentation.md
+  - 简体中文:
+      - README.zh-CN.md
+      - 使用入门: user-guide/index.zh-CN.md
+      - 插件开发路线: developers/index.zh-CN.md
+      - 从源码运行: getting-started.zh-CN.md
+      - 交互教程与实现: tutorial.zh-CN.md
+      - 工作区部署: deployment.zh-CN.md

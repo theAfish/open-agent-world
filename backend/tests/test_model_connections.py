@@ -46,6 +46,59 @@ def test_catalog_rejects_stale_edits_and_preserves_references(client):
     assert client.put("/api/settings/models", json=saved).status_code == 200
 
 
+def test_model_limit_defaults_upgrade_old_catalog_and_edits_survive_restart(tmp_path):
+    db = Database(tmp_path / "limits.db")
+    # Existing persisted JSON predates the two new fields.
+    old = dict(revision=1, default_model="oaw:model:work", connections=[connection(), connection("personal")])
+    for item in old["connections"]:
+        item.pop("api_key")
+    with db.transaction() as sql:
+        sql.execute("INSERT INTO application_settings VALUES (?,?)", ("model_connections", json.dumps(old)))
+    store = ModelConnectionStore(LlmSettingsStore(db, tmp_path))
+    assert store.context_limits("oaw:default") == (128000, 8192)
+    assert store.context_limits("openai/same-model") is None
+    draft = store.read().model_dump()
+    draft["connections"][0]["models"][0].update(context_window=1_000_000, max_output_tokens=16384)
+    draft["connections"][1]["models"][0].update(context_window=32000, max_output_tokens=2048)
+    store.save(CatalogEdit.model_validate(draft))
+    db.close()
+    db = Database(tmp_path / "limits.db")
+    try:
+        store = ModelConnectionStore(LlmSettingsStore(db, tmp_path))
+        runtime = GoogleAdkAgentRuntime(None, model_connections=store)
+        assert store.context_limits("oaw:default") == (1_000_000, 16384)
+        assert store.context_limits("oaw:model:personal") == (32000, 2048)
+        assert runtime._context_budget("oaw:model:work", "openai/same-model").output == 16384
+        assert runtime._context_budget("oaw:model:personal", "openai/same-model").limit == 32000
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("limits", [
+    dict(context_window=0), dict(context_window=1023), dict(context_window=128000.5),
+    dict(max_output_tokens=0), dict(max_output_tokens=True), dict(max_output_tokens=None),
+    dict(context_window=8192, max_output_tokens=8192), dict(max_output_tokens=128001),
+])
+def test_model_limits_reject_invalid_values_without_echoing_secrets(client, limits):
+    item = connection()
+    item["models"][0].update(limits)
+    response = client.put("/api/settings/models", json=dict(revision=0, connections=[item]))
+    assert response.status_code == 422
+    assert "secret-work" not in response.text
+
+
+def test_model_limit_api_defaults_and_updates(client):
+    response = client.put("/api/settings/models", json=dict(revision=0, connections=[connection()]))
+    assert response.status_code == 200
+    draft = response.json()
+    assert draft["connections"][0]["models"][0]["context_window"] == 128000
+    assert draft["connections"][0]["models"][0]["max_output_tokens"] == 8192
+    draft["connections"][0]["models"][0].update(context_window=65536, max_output_tokens=16384)
+    assert client.put("/api/settings/models", json=draft).status_code == 200
+    saved = client.get("/api/settings/models").json()["connections"][0]["models"][0]
+    assert (saved["context_window"], saved["max_output_tokens"]) == (65536, 16384)
+
+
 def test_validation_never_echoes_secret_input(client):
     payload = dict(revision=0, connections=[connection()], default_model="missing")
     response = client.put("/api/settings/models", json=payload)

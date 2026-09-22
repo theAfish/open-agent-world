@@ -123,9 +123,12 @@ def linked_environment(services, sandbox_id):
 
 def effective_variables(services, sandbox_id, environment_id=None):
     from backend.node_documents import read_document
+    from backend.sandbox.settings import SandboxSettingsStore
     profile_id = environment_id or linked_environment(services, sandbox_id)
     layers = [(profile_id, "invocation" if environment_id else "linked"), (sandbox_id, "local")]
-    effective = {}
+    defaults = SandboxSettingsStore(services.database, services.settings.data_root).read()
+    effective = {name.upper(): (name, value, "global", "global")
+                 for name, value in defaults.environment_variables.items()}
     for node_id, source in layers:
         if node_id is None:
             continue

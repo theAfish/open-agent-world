@@ -32,10 +32,9 @@ function Preview({ host, card }: PluginViewProps) {
   const tables = schema?.objects.filter(item => item.type === "table") ?? [];
   return <div className="sqlite-preview">
     <span className="sqlite-badge">SQLite · persistent</span>
-    {error ? <p role="alert">{error}</p> : !schema ? <p role="status">Loading database…</p> : <>
+    {error ? <p role="alert" title={error}>Database unavailable</p> : !schema ? <p role="status">Loading database…</p> : <>
       <strong>{tables.length}{schema.truncated ? "+" : ""} {tables.length === 1 ? "table" : "tables"}</strong>
-      <p>{tables.length ? tables.slice(0, 4).map(item => item.name).join(" · ") : "Ready for your data"}</p>
-      <small>Open to inspect tables and run SQL.</small>
+      {!tables.length && <p>Ready for your data</p>}
     </>}
   </div>;
 }

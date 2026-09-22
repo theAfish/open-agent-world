@@ -31,6 +31,10 @@ including restoration of saved shared variables. Library presets are unaffected.
 
 ## Workspace mode
 
+A saved workspace can be published as a locked application with **Publish application**.
+See [deployment](deployment.md) for the operator surface contract, independent data
+copies, access passwords, server hosting, updates and rollback.
+
 Unplaced member cards appear as compact icons in the bottom bar. Click an icon to
 open its workspace or inspector in a temporary panel for viewing and configuration;
 click again, use the close button, or press Escape to collapse it. Switching or
@@ -201,7 +205,7 @@ GET /api/legion-groups/{legion_id}/state
 PUT /api/legion-groups/{legion_id}/state      {value, expected_revision}
 GET /api/legions/presets
 POST /api/legions/presets/{id}/instances     {position, unwrap: true}
-POST /api/legions                           {name, node_ids, presentation: {node_id: {level, base_level, workspace_size}}}
+POST /api/legions                           {name, node_ids, presentation: {node_id: {level, base_level, surface_sizes}}}
 POST /api/legions/{id}/instances            {position, as_group | unwrap}
 ```
 

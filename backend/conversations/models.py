@@ -5,6 +5,7 @@ from uuid import UUID
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from backend.agents.context import ContextStatus
 
 
 class ConversationSessionCreate(BaseModel):
@@ -103,6 +104,7 @@ class ConversationSummary(BaseModel):
     conversation_id: str
     sessions: list[ConversationSession]
     agents: list[ConversationAgent]
+    context_statuses: dict[str, dict[str, ContextStatus]] = Field(default_factory=dict)
 
 
 class ConversationSessionRename(BaseModel):

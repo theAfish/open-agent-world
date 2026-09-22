@@ -1,3 +1,4 @@
+import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
 import { t, useLocale } from "../i18n";
 import { ChevronDown, ChevronRight, Download, File, FileText, Folder, FolderOpen, History, LayoutPanelLeft, RefreshCw, Settings, Square, Terminal } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
@@ -33,6 +34,9 @@ const boundedSize = (value: number, min: number, max: number, fallback: number) 
 
 export function SandboxWorkspace({ card }: { card: WorldCard }) {
   useLocale();
+  const { deployed, permissions } = useWorkspaceAccess();
+  const terminalAllowed = !deployed || permissions[card.id]?.includes("terminal");
+  const filesAllowed = !deployed || permissions[card.id]?.some(p => p === "files" || p === "preview");
   const sections = useWorkspaceSections();
   const filesInline = sections.isInline("files");
   const previewInline = sections.isInline("preview");
@@ -46,7 +50,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const socket = useWorldStore(s => s.socketState);
   const cards = useWorldStore(s => s.cards);
   const loadRuntimes = useWorldStore(s => s.loadSandboxRuntimes);
-  const tab = useNodeSurfaceStore(s => s.drafts[`sandbox-tab:${card.id}`] === "settings" ? "settings" : "workspace");
+  const tab = useNodeSurfaceStore(s => !deployed && s.drafts[`sandbox-tab:${card.id}`] === "settings" ? "settings" : "workspace");
   const setTab = (value: string) => useNodeSurfaceStore.getState().setDraft(`sandbox-tab:${card.id}`, value);
   const [settingsDirty, setSettingsDirty] = useState(false);
   const draft = useNodeSurfaceStore(s => s.drafts[`sandbox:${card.id}`] ?? "");
@@ -121,8 +125,9 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   useEffect(() => {
     if (followOutput.current && terminalScroll.current) terminalScroll.current.scrollTop = terminalScroll.current.scrollHeight;
   }, [output, draft, terminalTab, tab]);
-  async function refreshHistory() { setHistory(await worldApi.sandboxWorkspace<Receipt[]>(card.id, "history")); }
+  async function refreshHistory() { if (!terminalAllowed) return; setHistory(await worldApi.sandboxWorkspace<Receipt[]>(card.id, "history")); }
   async function refreshFiles() {
+    if (!filesAllowed) return;
     const current = fileRequest("roots");
     setLoading(s => ({ ...s, roots: true }));
     try {
@@ -150,7 +155,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     void refreshFiles();
     return () => { context.live = false; context.generation++; context.requests.clear(); useOpenFiles.getState().clear(card.id); };
   }, [context]);
-  useEffect(() => { void loadRuntimes(); void refreshSandbox(card.id); void refreshHistory().catch(e => setError(apiErrorMessage(e))); }, [card.id, socket]);
+  useEffect(() => { if (!deployed) void loadRuntimes(); void refreshSandbox(card.id); void refreshHistory().catch(e => setError(apiErrorMessage(e))); }, [card.id, socket]);
   const previousStatus = useRef(card.status);
   useEffect(() => {
     const becameReady = previousStatus.current !== "ready" && card.status === "ready";
@@ -277,7 +282,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   return <div className="sandbox-workspace nodrag nopan nowheel">
     <header className="sandbox-window-toolbar">
       <nav className="sandbox-tabs" role="tablist" aria-label={t("Sandbox window")} onKeyDown={tabKeys}>
-        {(["workspace", "settings"] as const).map(view => <button key={view} role="tab" id={`${card.id}-${view}-tab`}
+        {(deployed ? ["workspace"] as const : ["workspace", "settings"] as const).map(view => <button key={view} role="tab" id={`${card.id}-${view}-tab`}
           aria-selected={tab === view} aria-controls={`${card.id}-${view}-panel`} tabIndex={tab === view ? 0 : -1}
           onClick={() => setTab(view)}>
           {view === "workspace" ? <LayoutPanelLeft size={13} /> : <Settings size={13} />}
@@ -326,7 +331,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
       <main ref={workArea} className="sandbox-work-area" hidden={!hasWorkArea}>
         <WorkspaceSection id="preview" title={t("File preview")} className="sandbox-preview-section">
         <section className="sandbox-preview nodrag nopan nowheel" aria-label={t("File preview")}>
-          <PublishFiles card={card} paths={publishPaths.length ? publishPaths : selection?.root === "workspace" ? [selection.path] : []}>
+          {!deployed && <PublishFiles card={card} paths={publishPaths.length ? publishPaths : selection?.root === "workspace" ? [selection.path] : []}>
             {Object.entries(tree).filter(([key]) => key.startsWith("workspace:")).flatMap(([key, value]) =>
               (value.entries ?? []).filter(entry => !entry.blocked).map(entry => {
                 const parent = key.slice("workspace:".length);
@@ -335,7 +340,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
                   aria-label={t("Select {v0} for publication", { v0: String(path) })} checked={publishPaths.includes(path)}
                   onChange={event => setPublishPaths(current => event.target.checked ? [...current, path] : current.filter(p => p !== path))} />{path}</label>;
               }))}
-          </PublishFiles>
+          </PublishFiles>}
           <header className="sandbox-pane-heading">
             <span title={selection?.path}><FileText size={13} />{selection?.label ?? t("File preview")}</span>
             {selection && <div className="sandbox-pane-actions">
@@ -404,7 +409,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
         </WorkspaceSection>
       </main>
     </div>
-    <div className="sandbox-settings-window" role="tabpanel" id={`${card.id}-settings-panel`} aria-labelledby={`${card.id}-settings-tab`} hidden={tab !== "settings"}>
+    {!deployed && <div className="sandbox-settings-window" role="tabpanel" id={`${card.id}-settings-panel`} aria-labelledby={`${card.id}-settings-tab`} hidden={tab !== "settings"}>
       <div className="sandbox-settings-content">
         <SandboxSettings card={card} onDirtyChange={setSettingsDirty} />
         <details className="sandbox-settings"><summary>{t("Command presets")}</summary><div className="sandbox-config-form">
@@ -431,6 +436,6 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
           {diagnosticBusy && <p className="sandbox-help">{t("Checking…")}</p>}{notice && <pre className="sandbox-diagnostic-output">{notice}</pre>}
         </div></details>
       </div>
-    </div>
+    </div>}
   </div>;
 }

@@ -1,3 +1,4 @@
+import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
 import { t, useLocale } from "../i18n";
 import { ImagePlus, UploadCloud } from "lucide-react";
 import { useId, useState } from "react";
@@ -15,6 +16,7 @@ function formatBytes(bytes: unknown): string {
 
 export function ImageCardBody({ card }: { card: WorldCard; level: NodeSurfaceLevel }) {
   useLocale();
+  const { deployed } = useWorkspaceAccess();
   const inputId = useId();
   const uploadImage = useWorldStore((state) => state.uploadImage);
   const [uploading, setUploading] = useState(false);
@@ -51,7 +53,7 @@ export function ImageCardBody({ card }: { card: WorldCard; level: NodeSurfaceLev
         <div><span>{t("Size")}</span><strong>{formatBytes(card.config.bytes)}</strong></div>
       </div>
 
-      {imported ? (
+      {!deployed && <>{imported ? (
         <div className="upload-zone upload-zone--locked">
           <UploadCloud size={17} />
           <span>{t("Managed image imported")}</span>
@@ -78,7 +80,7 @@ export function ImageCardBody({ card }: { card: WorldCard; level: NodeSurfaceLev
       <section className="card-section">
         <div className="section-heading"><span>{t("Relationships")}</span><small>{t("read-only resource")}</small></div>
         <RelationshipList card={card} />
-      </section>
+      </section></>}
     </div>
   );
 }

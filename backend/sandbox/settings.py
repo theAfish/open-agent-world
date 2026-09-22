@@ -1,14 +1,15 @@
-"""Persisted defaults for newly created Sandbox cards on this backend host."""
+"""Persisted Sandbox creation defaults and live global environment settings."""
 from __future__ import annotations
 
 from pathlib import Path
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 
 from backend.persistence.database import Database
 from .manager import SandboxManager
 from .registry import SandboxRuntimeRegistry
+from .environment import validate_command_environment
 
 
 class SandboxSettings(BaseModel):
@@ -16,6 +17,12 @@ class SandboxSettings(BaseModel):
 
     workspace_root: str | None = Field(default=None, max_length=4096)
     runtime: str = Field(default="auto", min_length=1, max_length=200)
+    environment_variables: dict[str, StrictStr] = Field(default_factory=dict)
+
+    @field_validator("environment_variables")
+    @classmethod
+    def validate_environment(cls, value: dict[str, str]) -> dict[str, str]:
+        return validate_command_environment(value, allow_target=False)
 
     @field_validator("workspace_root", "runtime")
     @classmethod

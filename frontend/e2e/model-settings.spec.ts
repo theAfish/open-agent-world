@@ -2,14 +2,14 @@ import { expect, test } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 
 test("manage multiple accounts, persist models, and keep settings navigation on the left", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("oaw.locale", "en");
+    localStorage.setItem("oaw-onboarding-v1", JSON.stringify({ state: { status: "skipped" }, version: 1 }));
+  });
   await page.goto("/");
   await page.getByRole("button", { name: "Open settings", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
-  await expect(dialog.getByLabel("Connection name")).toBeVisible();
   await expect(dialog.getByText("Authentication source")).toHaveCount(0);
-  // The initial imported connection exposes its key directly.
-  await expect(dialog.getByLabel("API key", { exact: true })).toBeVisible();
-  await dialog.getByLabel("API key", { exact: true }).fill("e2e-legacy-secret");
   await dialog.getByLabel("New connection type").selectOption("openai");
   await dialog.getByRole("button", { name: "Add connection", exact: true }).click();
   await dialog.getByLabel("Connection name").fill("Work account");
@@ -17,6 +17,12 @@ test("manage multiple accounts, persist models, and keep settings navigation on 
   await dialog.getByRole("button", { name: "Add model", exact: true }).click();
   await dialog.getByLabel("Model 1 display name").fill("Work assistant");
   await dialog.getByLabel("Model 1 ID", { exact: true }).fill("gpt-4o-mini");
+  await expect(dialog.getByLabel("Model 1 context window")).not.toBeVisible();
+  await dialog.getByText("Context & output limits", { exact: true }).click();
+  await expect(dialog.getByLabel("Model 1 context window")).toHaveValue("128000");
+  await expect(dialog.getByLabel("Model 1 maximum output")).toHaveValue("8192");
+  await dialog.getByLabel("Model 1 context window").fill("1000000");
+  await dialog.getByLabel("Model 1 maximum output").fill("16384");
   await dialog.getByRole("combobox", { name: /^Default for new agents/ }).selectOption({ label: "Work account / Work assistant" });
 
   await dialog.getByLabel("New connection type").selectOption("anthropic");
@@ -25,7 +31,10 @@ test("manage multiple accounts, persist models, and keep settings navigation on 
   await dialog.getByLabel("API key", { exact: true }).fill("e2e-personal-secret");
   await dialog.getByRole("button", { name: "Add model", exact: true }).click();
   await dialog.getByLabel("Model 1 display name").fill("Writing assistant");
-  await dialog.getByLabel("Model 1 ID", { exact: true }).fill("claude-test");
+  await dialog.getByLabel("Model 1 ID", { exact: true }).fill("gpt-4o-mini");
+  await dialog.getByText("Context & output limits", { exact: true }).click();
+  await dialog.getByLabel("Model 1 context window").fill("32000");
+  await dialog.getByLabel("Model 1 maximum output").fill("2048");
   await dialog.getByRole("button", { name: "Sandbox", exact: true }).click();
   await expect(dialog.getByLabel("Default Workspace location", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Models", exact: true }).click();
@@ -48,12 +57,28 @@ test("manage multiple accounts, persist models, and keep settings navigation on 
   await expect(dialog.getByLabel("API key", { exact: true })).toHaveValue("");
   await expect(dialog.getByLabel("API key", { exact: true })).toHaveAttribute("placeholder", /Saved securely/);
   await expect(dialog.getByRole("combobox", { name: /^Default for new agents/ })).toContainText("Work account / Work assistant");
+  await dialog.getByText("Context & output limits", { exact: true }).click();
+  await expect(dialog.getByLabel("Model 1 context window")).toHaveValue("1000000");
+  await expect(dialog.getByLabel("Model 1 maximum output")).toHaveValue("16384");
   await mkdir("../.outputs/model-settings", { recursive: true });
   await page.screenshot({ path: "../.outputs/model-settings/desktop.png", animations: "disabled" });
   await page.setViewportSize({ width: 540, height: 800 });
-  await expect(dialog.getByLabel("Connection name")).toBeVisible();
+  await dialog.getByLabel("Model 1 maximum output").scrollIntoViewIfNeeded();
+  await expect(dialog.getByLabel("Model 1 context window")).toBeVisible();
+  await expect(dialog.getByLabel("Model 1 maximum output")).toBeVisible();
   const fits = await dialog.evaluate(element => element.scrollWidth <= element.clientWidth);
   expect(fits).toBe(true);
   await page.screenshot({ path: "../.outputs/model-settings/narrow.png", animations: "disabled" });
+  await dialog.getByRole("button", { name: /Personal account 1 models/ }).click();
+  await dialog.getByText("Context & output limits", { exact: true }).click();
+  await expect(dialog.getByLabel("Model 1 context window")).toHaveValue("32000");
+  await expect(dialog.getByLabel("Model 1 maximum output")).toHaveValue("2048");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await dialog.getByLabel("Language", { exact: true }).selectOption("zh-CN");
+  const chineseDialog = page.getByRole("dialog", { name: "设置", exact: true });
+  await chineseDialog.getByLabel("模型 1 最大输出", { exact: true }).scrollIntoViewIfNeeded();
+  await expect(chineseDialog.getByText("上下文与输出限制", { exact: true })).toBeVisible();
+  await page.screenshot({ path: "../.outputs/model-settings/chinese.png", animations: "disabled" });
+  await chineseDialog.getByLabel("界面语言", { exact: true }).selectOption("en");
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
 });

@@ -1,0 +1,8 @@
+{
+  "name": "example-greeter-pack",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "node build.mjs" },
+  "devDependencies": { "@oaw/plugin-api": "1.0.0", "react": "18.3.1", "react-dom": "18.3.1", "@types/react": "^18.3.0" }
+}

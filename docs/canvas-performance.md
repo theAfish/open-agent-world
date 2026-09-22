@@ -1,5 +1,55 @@
 # Canvas interaction performance
 
+## Wide viewport terrain (2026-09-21)
+
+At zoom 0.12, a 1920 x 1080 viewport retains 77 terrain SVG tiles, with
+4,414,821 characters of path data. Geometry already runs in a worker, but the
+browser still rasterizes these paths while panning. Hiding terrain or promoting
+the small overview tiles to compositor layers removed the sustained frame gap
+in the same scene. Main-thread `Paint` duration alone did not capture this cost.
+
+`ContourLayer` now promotes tiles only below zoom 0.45, releasing that hint at
+higher zoom to avoid retaining large textures. Terrain paths and resolution are
+unchanged. Memoized tiles reuse their SVG elements across worker publications
+and LOD replacements. A constant-time chunk-boundary signature avoids building
+and sorting the entire coverage list on every pointer move; the shared chunk
+bounds calculation preserves prefetch and visible-first worker scheduling.
+
+Matching before/after runs in isolated headless Chrome, with 4x CPU throttling
+and no cards (to isolate terrain), measured 180 pointer moves across four sweeps:
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| 95th percentile frame interval | 33.4 ms | 16.8 ms |
+| Maximum frame interval | 49.9 ms | 17.3 ms |
+| Accumulated JavaScript duration | 1.572 s | 0.597 s |
+| Accumulated main-thread task duration | 3.703 s | 2.474 s |
+
+These are local browser measurements, not universal FPS or populated-world
+guarantees. The in-app browser bridge rejected the connection, so these runs
+used the repository's independent browser runner. Report artifacts are under
+`.outputs/viewport-wide-before.json` and `.outputs/viewport-wide-after.json`.
+
+`viewport-wide.spec.ts` checks real pan displacement, overview coverage across
+uncached terrain, theme screenshots, high-zoom layer release and stroke width,
+and resizing to 2560 x 1440. Frame timings remain diagnostics rather than
+hardware-dependent pass/fail thresholds. Run from `frontend`:
+
+```powershell
+$env:OAW_WIDE_REPORT = '../.outputs/viewport-wide.json'
+node scripts/run-e2e.mjs e2e/viewport-wide.spec.ts
+```
+
+Set `OAW_WIDE_COMPARE=1` to additionally profile hidden and unpromoted terrain
+in the same browser and capture the unpromoted dark-theme comparison.
+
+Validation: 12 focused unit tests, the production build, and five focused
+browser cases passed (wide viewport, uncached terrain, grid, minimap, populated
+pan). The first wide-viewport regression used a fixed count of zoom clicks and
+stopped at LOD 56; the test now waits for each actual zoom target and passed on
+rerun. Light/dark screenshots were inspected against unpromoted rendering.
+The full frontend and browser suites were not run.
+
 ## Findings and changes (2026-09-16)
 
 Dragging updated the controlled React Flow nodes on every pointer move. Several

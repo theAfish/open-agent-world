@@ -1,3 +1,4 @@
+import { ConnectionDropSurface } from "./ConnectionDropSurface";
 import { t, useLocale } from "../i18n";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Backpack, ExternalLink, Plus, X } from "lucide-react";
@@ -82,6 +83,7 @@ export function EquipmentCardNode({ data }: NodeProps<CanvasNode>) {
   };
   return <div className={`equipment-card nodrag nopan ${origin ? "is-open-origin" : ""}`} data-card-id={origin ? undefined : card.id}
     data-equipment-origin={origin ? card.id : undefined} data-activity={activity.phase} aria-label={t("{v0} equipment", { v0: String(card.name) })} onClick={onOriginClick}>
+    {!origin && <ConnectionDropSurface nodeId={card.id} />}
     <ActivityGlow phase={activity.phase} />
     {!origin && <Handle type="source" position={Position.Left} id="boundary-left" aria-label={t("Connect {v0} left", { v0: String(card.name) })} />}
     <button type="button" className="equipment-item-open" onClick={inspect} title={origin ? t("Hide details") : card.name}

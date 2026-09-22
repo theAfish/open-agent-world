@@ -72,9 +72,13 @@ the batch. Stop it through the board or the execution tool.
 
 ## Persistence and reuse
 
-Task data lives in host StateStore (`node_document:<board_id>`), independently of
-card config. Reloads and backend restarts preserve it. Deleting a board removes its
-document; canvas undo restores its exact saved progress and notes.
+Task data lives in the host's [scoped state store](../../docs/card-state.md),
+independently of card config. The same card follows the active conversation:
+a new session starts empty; switching back restores the original plan. The plugin
+declares a session default and has no session-management code or persistence UI.
+Existing documents are adopted once into the host's default session. Reloads and
+backend restarts preserve all namespaces. Deleting a board removes them; canvas
+undo restores all saved plans, progress and notes.
 
 Saving a Legion captures task structure/descriptions/dependencies and resets task
 statuses to `todo` and progress notes to empty in the preset. Each deployment gets
@@ -99,6 +103,6 @@ one document-backed node, five relationships, and five scoped capability handler
 The host supplies the reviewed `ui.task-board.v1` renderer; no arbitrary plugin
 browser code is executed. DAG validation and mutation policies live in this package.
 
-Host integration tests: `backend/tests/test_task_board.py`.
+Host integration tests: `backend/tests/test_task_board.py`, `backend/tests/test_card_state.py`.
 Execution and non-DAG contract tests: `backend/tests/test_node_execution.py`.
-Browser workflow: `frontend/e2e/task-board.spec.ts`.
+Browser workflow: `frontend/e2e/task-board.spec.ts`, `frontend/e2e/card-state-lifecycle.spec.ts`.

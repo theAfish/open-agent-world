@@ -2,38 +2,30 @@
 
 [English](README.md) | **简体中文**
 
-[项目首页](../README.zh-CN.md)
+在同一张画布上连接智能体、文件和工具，让你的 AI 团队协作。
 
-这些指南用于查找功能用法或了解其工作原理。新用户可以从入门指南开始，其余页面可独立阅读。尚未翻译的页面标有“英文”。
+## 使用 OAW
 
-| 我想…… | 阅读 |
-| --- | --- |
-| 安装、启动或参与贡献 | [入门指南](getting-started.zh-CN.md) |
-| 跟随向导学习画布操作 | [交互教程](tutorial.zh-CN.md) |
-| 安装桌面应用或使用 F3 开发重置 | [桌面安装与开发（英文）](desktop.md) |
-| 理解卡牌、连线、智能体和能力 | [核心概念（英文）](concepts.md) |
-| 配置模型、凭据或应用存储 | [配置（英文）](configuration.md) |
-| 收集卡牌并整理底部托盘 | [卡包、卡牌库与牌组（英文）](card-library.md) |
-| 组织和复用团队 | [军团团队空间（英文）](legions.md) |
-| 查看并整理画布局部区域 | [Minister（英文）](minister.md) |
-| 使用或开发扩展 | [插件（英文）](plugins.md) |
-| 操作文件和执行命令 | [沙盒工作空间（英文）](sandbox-workspace.md) |
-| 配置命令变量、密钥和目标 | [执行配置（英文）](execution-configuration.md) |
-| 启用沙盒网络 | [沙盒网络（英文）](sandbox-networking.md) |
-| 使用托管的 Python 环境 | [共享 Python 运行时（英文）](shared-python-runtime.md) |
+从 [中文使用入门](user-guide/index.zh-CN.md) 开始：安装应用、配置模型、收集卡片，再让智能体读一份文档。无需了解内部架构或编写代码。
 
-## 技术参考（英文）
+- [下载与安装](install.md)
+- [第一支团队（英文）](user-guide/first-team.md)
+- [模型与设置（英文）](user-guide/models.md)
+- [插件与卡包（英文）](user-guide/plugins.md)
+- [常见问题（英文）](user-guide/troubleshooting.md)
 
-- [架构](architecture.md)：权限归属、持久化、交互流程和画布扩展。
-- [限定范围的画布自动化](canvas-control.md)：宿主签发的控制范围、字段策略、修订版本与同步。
-- [运行记录与运行时提供方](runs.md)、[运行时状态](state.md)、[执行生命周期与持久化输出](lifecycle-artifacts.md)。
-- [插件任务源执行](execution.md)、[节点效果](node-effects.md)、[画布布局](layout.md)。
-- [安全与隔离约定](security.md)：信任区域与平台边界。
+## 开发插件
 
-## 文档范围与后续学习
+从 [中文插件开发路线](developers/index.zh-CN.md) 开始。先做一张最小卡片，再逐步添加工具和界面。
 
-[交互教程](tutorial.zh-CN.md) 从空画布开始，引导你完成一个小型工作示例。可通过世界控制区的指南针按钮重放；更深入的说明请查阅相应文档。
+- [开发环境（英文）](developers/setup.md)
+- [从零创建插件（英文）](developers/first-plugin.md)
+- [为 Agent 提供工具（英文）](developers/agent-tools.md)
+- [添加自定义界面（英文）](developers/frontend.md)
+- [测试和分发（英文）](developers/testing.md)
 
-本仓库文档涵盖 OAW、核心功能、内置插件和插件开发。插件专属指南可以随插件包提供，见[插件指南目录（英文）](plugins.md#bundled-plugin-guides)。在应用内查看插件文档和教程属于未来方向，此处不承诺文档交付 API。
+## 深入阅读
 
-[MatCreator 演示计划（英文）](matcreator-demo-plan.md) 是设计与规划文档，不代表当前功能保证。
+站点以英文文档为主，中文页面保留独立入口；尚未翻译的内容明确标注为英文。
+
+[技术参考（英文）](reference/index.md) 面向开发者，包含 API、运行时和架构说明。[从源码运行](getting-started.zh-CN.md)、[交互教程与实现](tutorial.zh-CN.md)、[工作区部署](deployment.zh-CN.md) 保留中文版本。

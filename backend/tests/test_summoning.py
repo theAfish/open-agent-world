@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from backend.agents import AgentEvent, AgentEventType
 from backend.capabilities.provider import WorldAgentCapabilityProvider
 from backend.config import Settings
+from backend.conversations.models import ConversationSessionCreate
 from backend.errors import ConflictError, PermissionDeniedError
 from backend.main import create_app
 from backend.node_documents import read_document, write_document
@@ -179,6 +180,118 @@ async def recursive_world(tmp_path, policy):
     current = read_document(services, box.id)
     write_document(services, box.id, {**current["value"], "policy": policy}, current["revision"])
     return services, box, caller, services.run_manager.default_provider()
+
+
+@pytest.mark.asyncio
+async def test_session_workspace_reused_across_turns_recursion_and_reclaim(tmp_path):
+    services, box, caller, runtime = await recursive_world(tmp_path, {})
+    try:
+        room = await services.create_card(CardCreate(type="conversation"))
+        session = services.conversations.create_session(room.id, ConversationSessionCreate(title="Research"))
+
+        async def summon(prompt="chain:1", session_id=session.id):
+            run = await services.run_manager.start_run(caller.id, prompt, caller_kind="conversation",
+                                                       caller_id=room.id, context_id=session_id)
+            await asyncio.wait_for(services.run_manager.wait_execution(run.run_id), 10)
+            assert services.run_manager.get_run(run.run_id).status == RunStatus.SUCCEEDED
+            return services.summoning.records()[-1]
+
+        first = await summon()
+        workspace = services.world.get_card(first["workspace_id"])
+        assert workspace.config == {"conversation_id": room.id, "session_id": session.id}
+        # Manual member placement survives adding more Agents.
+        manual = await services.update_card(first["entry_agent_id"], CardPatch(position={
+            "x": workspace.position.x + 220, "y": workspace.position.y + 180}))
+        await summon("chain:2")
+        records = services.summoning.records()
+        assert len(records) == 3 and {r["workspace_id"] for r in records} == {workspace.id}
+        assert all(r["session_id"] == session.id and r["context_id"].startswith("summon:") for r in records)
+        assert services.world.get_card(manual.id).position == manual.position
+        assert services.world.get_card(workspace.id).position == workspace.position
+        assert len(services.world.list_members(workspace.id)) == 3
+        sibling = records[1]
+        await services.summoning.teardown(first, "reclaim")
+        assert services.world.get_card(sibling["entry_agent_id"])
+        assert services.world.get_card(workspace.id)
+        await services.summoning.teardown(sibling, "reclaim")
+        assert not services.world.list_members(workspace.id)
+        assert (await summon())["workspace_id"] == workspace.id
+        second_session = services.conversations.create_session(room.id, ConversationSessionCreate(title="Other"))
+        other = await summon(session_id=second_session.id)
+        assert other["workspace_id"] != workspace.id
+        assert services.world.get_card(other["workspace_id"]).position == workspace.position
+        assert (await summon())["workspace_id"] == workspace.id
+        assert len([n for n in services.world.list_cards() if n.type == "core.virtual-workspace"]) == 2
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_session_workspace_concurrent_summons_and_failed_append(tmp_path, monkeypatch):
+    services, box, caller, runtime = await recursive_world(tmp_path, {})
+    try:
+        room = await services.create_card(CardCreate(type="conversation"))
+        session = services.conversations.create_session(room.id, ConversationSessionCreate(title="Research"))
+        worker = services.summoning.agents(box.id)[0]
+        runs = await asyncio.gather(*(services.run_manager.start_run(agent_id, "chain:1", caller_kind="conversation",
+            caller_id=room.id, context_id=session.id) for agent_id in (caller.id, worker.id)))
+        await asyncio.wait_for(asyncio.gather(*(services.run_manager.wait_execution(run.run_id) for run in runs)), 10)
+        records = services.summoning.records()
+        assert len(records) == 2 and len({r["workspace_id"] for r in records}) == 1
+        before = {n.id: (n.position, n.size) for n in services.world.list_cards()}
+
+        async def fail_edge(*args):
+            raise RuntimeError("Cannot create provenance")
+
+        monkeypatch.setattr(services.summoning, "generated_edge", fail_edge)
+        run = await services.run_manager.start_run(caller.id, "chain:1", caller_kind="conversation",
+                                                   caller_id=room.id, context_id=session.id)
+        await asyncio.wait_for(services.run_manager.wait_execution(run.run_id), 10)
+        assert len(services.summoning.records()) == 2
+        assert {n.id: (n.position, n.size) for n in services.world.list_cards()} == before
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_legacy_session_workspaces_merge_and_recover_idempotently(tmp_path):
+    services, box, caller, runtime = await recursive_world(tmp_path, {})
+    try:
+        room = await services.create_card(CardCreate(type="conversation"))
+        session = services.conversations.create_session(room.id, ConversationSessionCreate(title="Research"))
+        run = await services.run_manager.start_run(caller.id, "twice:1", caller_kind="conversation",
+                                                   caller_id=room.id, context_id=session.id)
+        await asyncio.wait_for(services.run_manager.wait_execution(run.run_id), 10)
+        records = services.summoning.records()
+        assert len(records) == 2
+        canonical_id = records[0]["workspace_id"]
+        old = await services._create_card(CardCreate(type="core.virtual-workspace", position={"x": 2000, "y": 2000}))
+        await services.update_card(records[1]["entry_agent_id"], CardPatch(parent_id=old.id))
+        records[1]["workspace_id"] = old.id
+        await services.summoning.generated_edge(box.id, old.id)
+        # Reproduce the pre-upgrade durable representation.
+        for record in records:
+            record.pop("conversation_id")
+            record.pop("session_id")
+            services.summoning.save(record)
+            await services.update_card(record["workspace_id"], CardPatch(config={}))
+        registry = services.plugins
+        services.close()
+        services = create_services(replace(Settings.for_data_root(tmp_path), agent_runtime="test.summoner"), plugins=registry)
+        await services.summoning.recover()
+        recovered = services.summoning.records()
+        assert {r["workspace_id"] for r in recovered} == {canonical_id}
+        assert len(services.world.list_members(canonical_id)) == 2
+        assert services.world.maybe_get_card(old.id) is None
+        positions = {n.id: n.position for n in services.world.list_cards()}
+        await services.summoning.recover()
+        assert {n.id: n.position for n in services.world.list_cards()} == positions
+        run = await services.run_manager.start_run(caller.id, "chain:1", caller_kind="conversation",
+                                                   caller_id=room.id, context_id=session.id)
+        await asyncio.wait_for(services.run_manager.wait_execution(run.run_id), 10)
+        assert services.summoning.records()[-1]["workspace_id"] == canonical_id
+    finally:
+        services.close()
 
 
 @pytest.mark.asyncio

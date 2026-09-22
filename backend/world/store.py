@@ -15,8 +15,10 @@ from backend.errors import (
     NotFoundError,
     PluginUnavailableError,
     RevisionConflictError,
+    PermissionDeniedError,
 )
 from backend.plugins.registry import PluginRegistry
+from backend.card_state import effective_scope, validate_override
 from backend.persistence.database import Database
 from backend.world.terrain import ensure_terrain_seed
 from backend.world.models import (
@@ -66,6 +68,7 @@ class WorldStore:
         if chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
         self.database = database
+        self.structure_locked = False
         self.registry = registry
         self.chunk_size = chunk_size
         self.terrain_seed = ensure_terrain_seed(database, new_world=new_world)
@@ -75,6 +78,10 @@ class WorldStore:
     def validate_minister(self, card_type, minister) -> None:
         if minister is not None and not self.registry.has_trait(card_type, "core.agent"):
             raise GraphValidationError("Only an Agent can receive the Minister role")
+
+    def _require_structure_edit(self, patch=None):
+        if self.structure_locked and (patch is None or patch.model_fields_set - {"status", "expected_revision"}):
+            raise PermissionDeniedError("Published application structure is locked")
 
     @staticmethod
     def _patched_minister(current, request):
@@ -253,6 +260,7 @@ class WorldStore:
         return Size(width=max(size.width, spec.min_size[0]), height=max(size.height, spec.min_size[1])) if spec else size
 
     def preview_card(self, request: CardCreate, *, card_id: str | None = None) -> Card:
+        self._require_structure_edit()
         """Validate a create request and materialize its node without persistence."""
 
         resolved_id = _id_or_new(card_id if card_id is not None else request.id)
@@ -260,6 +268,8 @@ class WorldStore:
         self.validate_equipment(resolved_id, request.type, request.parent_id, request.equipment)
         now = utc_now()
         definition = self.registry.node_type(request.type)
+        if request.state_scope is not None:
+            validate_override(definition.state, request.state_scope)
         self.validate_minister(request.type, request.minister)
         self.registry.validate_creation_fields(
             request.type, content=request.content, data_base64=request.data_base64
@@ -275,6 +285,8 @@ class WorldStore:
             raw_config["status"] = request.status
         config = self._validate_config(request.type, raw_config)
         return Card(
+            state_scope=effective_scope(definition.state, request.state_scope),
+            state_scope_override=request.state_scope,
             id=resolved_id,
             parent_id=request.parent_id,
             equipment=request.equipment,
@@ -312,6 +324,7 @@ class WorldStore:
             card.parent_id,
             card.equipment.model_dump_json() if card.equipment else None,
             card.minister.model_dump_json() if card.minister else None,
+            card.state_scope_override,
         )
         try:
             with (nullcontext(_connection) if _connection is not None else self.database.transaction(immediate=True)) as connection:
@@ -319,8 +332,8 @@ class WorldStore:
                     """
                     INSERT INTO cards (
                         id, type, plugin_id, name, x, y, width, height, expanded,
-                        config_json, chunk_x, chunk_y, created_at, updated_at, parent_id, equipment_json, minister_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        config_json, chunk_x, chunk_y, created_at, updated_at, parent_id, equipment_json, minister_json, state_scope
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     values,
                 )
@@ -360,8 +373,11 @@ class WorldStore:
         return [self._card_from_row(row) for row in rows]
 
     def update_card(self, card_id: str, request: CardPatch) -> Card:
+        self._require_structure_edit(request)
         current = self.get_card(card_id)
         self.check_revision(current, request.expected_revision)
+        if "state_scope" in request.model_fields_set:
+            validate_override(self.registry.node_type(current.type).state, request.state_scope)
         changes = request.model_dump(exclude_unset=True, exclude={"expected_revision"})
         if not changes:
             return current
@@ -392,7 +408,7 @@ class WorldStore:
                 UPDATE cards
                 SET name = ?, x = ?, y = ?, width = ?, height = ?, expanded = ?,
                     config_json = ?, chunk_x = ?, chunk_y = ?, updated_at = ?,
-                    revision = revision + 1, parent_id = ?, equipment_json = ?, minister_json = ?
+                    revision = revision + 1, parent_id = ?, equipment_json = ?, minister_json = ?, state_scope = ?
                 WHERE id = ? AND revision = ?
                 """,
                 (
@@ -409,6 +425,7 @@ class WorldStore:
                     parent_id,
                     equipment.model_dump_json() if equipment else None,
                     minister.model_dump_json() if minister else None,
+                    request.state_scope if "state_scope" in request.model_fields_set else current.state_scope_override,
                     card_id,
                     current.revision,
                 ),
@@ -440,7 +457,7 @@ class WorldStore:
                         UPDATE cards
                         SET name = ?, x = ?, y = ?, width = ?, height = ?, expanded = ?,
                             config_json = ?, chunk_x = ?, chunk_y = ?, updated_at = ?,
-                            revision = revision + 1, parent_id = ?, equipment_json = ?, minister_json = ?
+                            revision = revision + 1, parent_id = ?, equipment_json = ?, minister_json = ?, state_scope = ?
                         WHERE id = ? AND revision = ?
                         """,
                         (
@@ -457,6 +474,7 @@ class WorldStore:
                             preview.parent_id,
                             preview.equipment.model_dump_json() if preview.equipment else None,
                             preview.minister.model_dump_json() if preview.minister else None,
+                            preview.state_scope_override,
                             item.node_id,
                             preview.revision - 1,
                         ),
@@ -471,10 +489,13 @@ class WorldStore:
         return [self.get_card(item.node_id) for item in items]
 
     def preview_update_card(self, card_id: str, request: CardPatch) -> Card:
+        self._require_structure_edit(request)
         """Validate an update and return its resulting node without persisting it."""
 
         current = self.get_card(card_id)
         self.check_revision(current, request.expected_revision)
+        if "state_scope" in request.model_fields_set:
+            validate_override(self.registry.node_type(current.type).state, request.state_scope)
         changes = request.model_dump(exclude_unset=True, exclude={"expected_revision"})
         if not changes:
             return current
@@ -496,7 +517,10 @@ class WorldStore:
             if self._config_accepts_status(current.type):
                 config = {**config, "status": request.status}
         config = self._validate_config(current.type, config)
+        override = request.state_scope if "state_scope" in request.model_fields_set else current.state_scope_override
         return current.model_copy(update={
+            "state_scope_override": override,
+            "state_scope": effective_scope(self.registry.node_type(current.type).state, override),
             "parent_id": parent_id,
             "equipment": equipment,
             "minister": minister,
@@ -515,6 +539,7 @@ class WorldStore:
         return self.delete_cards([card_id])[0]
 
     def delete_cards(self, card_ids: Iterable[str]) -> list[Card]:
+        self._require_structure_edit()
         ids = list(dict.fromkeys(card_ids))
         if not ids:
             return []
@@ -544,6 +569,7 @@ class WorldStore:
         return cards
 
     def create_edge(self, request: EdgeCreate) -> Edge:
+        self._require_structure_edit()
         request = self.normalize_edge_request(request)
         edge_id = _id_or_new(request.id)
         now = utc_now().isoformat()
@@ -668,6 +694,7 @@ class WorldStore:
         return [self._edge_from_row(row) for row in rows]
 
     def update_edge(self, edge_id: str, request: EdgePatch) -> Edge:
+        self._require_structure_edit()
         now = utc_now().isoformat()
         with self.database.transaction(immediate=True) as connection:
             row = connection.execute(
@@ -714,6 +741,7 @@ class WorldStore:
         return self.get_edge(edge_id)
 
     def delete_edge(self, edge_id: str) -> Edge:
+        self._require_structure_edit()
         edge = self.get_edge(edge_id)
         with self.database.transaction(immediate=True) as connection:
             cursor = connection.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
@@ -787,6 +815,8 @@ class WorldStore:
         if not self._config_accepts_status(card_type):
             config.pop("status", None)
         return Card(
+            state_scope=effective_scope(definition.state, row["state_scope"]),
+            state_scope_override=row["state_scope"],
             id=row["id"],
             parent_id=row["parent_id"],
             equipment=json.loads(row["equipment_json"]) if row["equipment_json"] else None,

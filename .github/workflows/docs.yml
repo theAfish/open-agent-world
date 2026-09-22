@@ -1,0 +1,57 @@
+name: Documentation
+
+on:
+  push:
+    branches: [dev]
+    paths: ['docs/**', 'mkdocs.yml', 'scripts/docs*', 'scripts/docs_theme/**', 'examples/plugins/**', 'plugins/**', '.github/workflows/docs.yml']
+  pull_request:
+    paths: ['docs/**', 'mkdocs.yml', 'scripts/docs*', 'scripts/docs_theme/**', 'examples/plugins/**', 'plugins/**', '.github/workflows/docs.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/docs-requirements.txt
+      - run: python -m pip install -r scripts/docs-requirements.txt
+      - run: python scripts/docs_tests.py
+      - run: python -m mkdocs build --strict
+      - run: python scripts/docs_check_site.py
+      - uses: astral-sh/setup-uv@v6
+      - name: Verify tutorial plugin packages
+        run: uv run --project backend --with-editable ./examples/plugins/hello_world --with-editable ./examples/plugins/greeter python -m pytest -p no:cacheprovider examples/plugins/hello_world/tests examples/plugins/greeter/tests
+      - name: Configure Pages
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
+        uses: actions/configure-pages@v5
+      - name: Upload site
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: .tmp/docs-site
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish documentation
+        id: deployment
+        uses: actions/deploy-pages@v4

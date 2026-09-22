@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
@@ -7,6 +7,9 @@ import { TEST_CATALOG } from "../state/catalog.fixture";
 import type { WorldCard } from "../types/world";
 import { PluginSurface } from "./PluginSurface";
 import { CatalogIcon } from "../components/CatalogIcon";
+import * as registry from './registry';
+import { useConversationView } from '../state/conversationView';
+import type { PluginViewProps } from './sdk';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const card: WorldCard = { id: "extension-card", type: "example.agent", name: "Extension", status: "idle",
@@ -61,4 +64,36 @@ it("renders a plugin resource icon without a vendor mapping", () => {
   const icon = container.querySelector(".catalog-asset-icon") as HTMLElement;
   expect(icon.style.mask).toContain("/api/plugins/example/assets/logo");
   expect(icon.style.width).toBe("var(--catalog-icon-size, 25px)");
+});
+
+it('omits persistent state and persistence controls for a stateless plugin', async () => {
+  install('test.viewer', { settings: 'view' });
+  const definition = useWorldStore.getState().catalog.node_types[0];
+  useWorldStore.setState({ cards: [card], catalog: { ...TEST_CATALOG, node_types: [{ ...definition, state: { mode: 'none' } }] } });
+  let props!: PluginViewProps;
+  vi.spyOn(registry, 'pluginView').mockReturnValue(((value: PluginViewProps) => { props = value; return <p>Viewer</p>; }) as ReturnType<typeof registry.pluginView>);
+  render(<PluginSurface card={card} slot="settings" level="inspector" />);
+  await screen.findByText('Viewer');
+  expect(props.host.state).toBeUndefined();
+  expect(props.host.setDataPersistence).toBeUndefined();
+});
+
+it('binds the SDK to the originating session while exposing no session argument to plugins', async () => {
+  install('test.state', { settings: 'view' });
+  const definition = useWorldStore.getState().catalog.node_types[0];
+  const scoped = { ...card, state_scope: 'session' as const };
+  useWorldStore.setState({ cards: [scoped, { ...card, id: "chat", type: "conversation" }], catalog: { ...TEST_CATALOG, node_types: [{ ...definition,
+    state: { mode: 'scoped', supportedScopes: ['shared', 'session'], defaultScope: 'session', userConfigurable: true } }] } });
+  useConversationView.setState({ activeConversationId: 'chat', sessions: { chat: 'A' } });
+  let props!: PluginViewProps;
+  vi.spyOn(registry, 'pluginView').mockReturnValue(((value: PluginViewProps) => { props = value; return <p>Stateful</p>; }) as ReturnType<typeof registry.pluginView>);
+  const api = vi.spyOn(worldApi, 'cardState').mockResolvedValue({ value: {}, revision: 1 });
+  render(<PluginSurface card={scoped} slot="settings" level="inspector" />);
+  await screen.findByText('Stateful');
+  const stateA = props.host.state!;
+  expect(props.host.setDataPersistence).toBeTypeOf('function');
+  act(() => useConversationView.getState().selectSession('chat', 'B'));
+  await stateA.set({ saved: 'A' }, 0);
+  expect(api).toHaveBeenCalledWith(card.id, 'PUT', { saved: 'A' }, 0, 'A');
+  act(() => useConversationView.setState({ activeConversationId: undefined, sessions: {} }));
 });

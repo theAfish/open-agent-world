@@ -23,6 +23,7 @@ class LegionNodePresentation(BaseModel):
     level: Literal["node", "preview", "inspector", "workspace"]
     base_level: Literal["node", "preview"] | None = None
     workspace_size: Size | None = None
+    surface_sizes: dict[Literal["node", "preview", "inspector", "workspace"], Size] = Field(default_factory=dict)
 
 
 class LegionCapture(BaseModel):
@@ -91,6 +92,7 @@ class LegionTemplateNode(BaseModel):
     parent_key: str | None = None
     owner_key: str | None = None
     equipment_relationship: str | None = None
+    state_scope: Literal["shared", "session"] | None = None
     initial_document: dict[str, Any] | None = None
     initial_shared_state: dict[str, Any] | None = None
     type: str

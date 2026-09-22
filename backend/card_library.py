@@ -322,6 +322,22 @@ class CardLibraryStore:
                     raise GraphValidationError("Provide the plugin enabled state")
                 if request.id == CORE and not request.enabled:
                     raise GraphValidationError("The core plugin is required by the application")
+                enabled = {key for key, value in state.plugins.items() if value.installed and value.enabled}
+                if request.enabled:
+                    enabled.add(request.id)
+                else:
+                    enabled.discard(request.id)
+                from backend.packs.requirements import aggregate_requirements
+                declarations = {}
+                for descriptor in self.registry.plugins():
+                    if descriptor.id in enabled:
+                        if not set(descriptor.requires_plugins) <= enabled:
+                            raise ConflictError(f"Pack {descriptor.name or descriptor.id} requires its dependency Packs to be enabled")
+                        declarations[descriptor.id] = self.registry.runtime_requirements.get(descriptor.id, descriptor.python_requirements)
+                try:
+                    aggregate_requirements(declarations)
+                except ValueError as exc:
+                    raise ConflictError(str(exc)) from exc
                 plugin.enabled = request.enabled
             state.migration_pending = False
             state.revision += 1

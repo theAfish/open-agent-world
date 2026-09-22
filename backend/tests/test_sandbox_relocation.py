@@ -33,6 +33,22 @@ def location(client, path):
     return client.put('/api/settings/sandbox', json={'workspace_root': str(path) if path else None})
 
 
+def test_global_environment_save_does_not_migrate_running_custom_workspace(relocation_client, tmp_path):
+    client, services, manager, runtime = relocation_client
+    root = tmp_path / 'default'
+    root.mkdir()
+    assert location(client, root).status_code == 200
+    node = create(client)
+    custom = tmp_path / 'custom'
+    custom.mkdir()
+    response = client.patch(f'/api/nodes/{node}', json={'config': {'workspace_path': str(custom)}})
+    assert response.status_code == 200, response.text
+    assert client.post(f'/api/sandboxes/{node}/start').status_code == 200
+    response = client.put('/api/settings/sandbox', json={'workspace_root': str(root), 'environment_variables': {'REGION': 'global'}})
+    assert response.status_code == 200, response.text
+    assert services.world.get_card(node).config['workspace_path'] == str(custom)
+
+
 def test_provisioned_managed_files_migrate_and_binding_survives_reload(relocation_client, tmp_path):
     client, services, manager, runtime = relocation_client
     node = create(client)

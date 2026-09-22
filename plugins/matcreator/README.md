@@ -12,14 +12,20 @@ cards to the current world beforehand.
 
 The layout provides Sessions and Files on the left, Conversation in the middle,
 and Research tasks / File preview / Research knowledge / Participants
-as tabs on the right. Below those tabs, Sandbox controls, settings and the terminal
-stay directly accessible. Scientific Toolsets and the MatCreator Agent stay available
-in the workspace's bottom bar. Edit layout with the standard Legion controls;
+as tabs on the right. The lower-right tabs contain Sandbox controls/settings/terminal
+and **Structure viewer**. The viewer follows structure files opened from either
+the Conversation or Sandbox through their `core.file-preview` connections.
+All scientific skills are stored directly inside Research knowledge, including their
+scripts, reference files and source snapshots. No external Toolset cards are deployed.
+The MatCreator Agent stays available in the workspace's bottom bar. Edit layout with the standard Legion controls;
 saving to the library preserves its arrangement and remaps owners on deployment.
 
+The plugin requires the bundled `science.structure-viewer` plugin (loaded first
+through its declared plugin dependency). New deployments include this viewer;
+existing canvas formations keep their user-edited layout and connections.
+
 The preset connects one native OAW Agent to a Conversation, a stopped Sandbox,
-the task board, all four scientific Toolsets, and the Know-Do Graph with **Use and
-learn**. It uses the user's default model. Configure that model and the Sandbox
+the task board, and the prepopulated Know-Do Graph with **Use and learn**. It uses the user's default model. Configure that model and the Sandbox
 runtime/environment before a real computation. No host path, credentials, package
 installation or automatic Sandbox startup is embedded in the preset. Files use
 the ordinary Sandbox workspace; the Agent is instructed to use a separate output
@@ -31,17 +37,30 @@ orchestrator](https://github.com/AI4MS/MatCreator/blob/75c705c3c2bae7f2392c2d4bc
 plan dependent steps, execute, verify results, revise blocked work and record
 experience. OAW owns model calls, tools, Runs, cancellation, conversations and
 files. This preset uses a scientific system instruction on the existing Agent;
-it does not launch the upstream ADK server or implement its DAG scheduler,
-parallel step executors or remote-job reconciliation.
+it does not launch the upstream ADK server. Revision 4 includes equipped Summoning,
+a Research Executors Barracks and an Executor blueprint sharing the research
+Sandbox and Know-Do Graph, which owns all skills from the four scientific packages. OAW supplies asynchronous Run
+dispatch and collection; the coordinator chooses tasks and verifies results.
+Remote-job reconciliation remains outside this workflow.
 
 ### Research tasks
 
-The board supports multiple named plans with optional session references, task
-dependencies, **To do / In progress / Blocked / Done**, result notes and output
-paths. A session reference is a label; switching conversation sessions does not
-automatically switch the selected plan or Sandbox folder. Choose the matching
-plan from **Research plans**. Output paths are recorded references; inspect the
-files in the Files and File preview sections.
+The board supports multiple named plans within each conversation session, task
+dependencies, **To do / In progress / Awaiting review / Blocked / Done**, acceptance criteria, result notes and output
+paths. OAW automatically binds plans, progress and execution attempts to the
+active conversation session: a new session starts with an empty board, and
+returning to an earlier session restores its plans. The card, its configuration
+and connections stay the same. No session field or persistence setting is needed.
+**Research plans** chooses among plans in the current session. Output paths are
+recorded references; inspect files in the Files and File preview sections.
+Sandbox files and the Know-Do Graph retain their shared behavior.
+
+Existing board documents and execution attempts are lazily retained in the
+workspace's default conversation session. Old plan `session_id` labels remain
+readable for compatibility but are not namespace keys or displayed in the UI;
+new Agent tool schemas do not request them. The host handles namespace creation,
+deletion and recovery. Switching sessions never redirects pending results, and
+live delegated work blocks deleting its card or originating session.
 
 Both human edits and `task_board_*` Agent tools use the same revision-checked
 document. Live updates are polled every three seconds. A concurrent edit retains
@@ -54,6 +73,48 @@ immediately. Saving a reusable Legion keeps task structure and descriptions, but
 clears session references, results and output references and resets all tasks in
 the copy. The new Sandbox does not contain the source project's computed files.
 Ordinary reloads and backend restarts preserve the live board's progress.
+
+### Delegating research
+
+The coordinator discovers Executor IDs using Summoning `list`, then uses
+`task_board_execute` with `action=collect` to read runnable work IDs and attempts.
+`delegate` takes `item_id`, `library_id`, `agent_id`, `expected_revision` and a
+unique `request_id`. Admission persists a stable attempt and supplies the Executor
+with task inputs, verified dependency results, acceptance criteria and its own
+`research/<board>/<task>/<attempt>/` output folder. Repeat the same request ID
+only to recover an uncertain dispatch response; a deliberate retry gets a new ID.
+
+Launch independent tasks, then use `wait` with `instance_ids`, `wait_mode=any|all`
+and a bounded `timeout_seconds` (0–60). A timeout leaves work running. Continue
+waiting or doing useful independent work until the results arrive. `collect`
+reconciles terminal Runs and retains failures. Success enters **Awaiting review**;
+the coordinator must inspect actual files, record evidence/output paths and mark
+**Done**. Return inadequate results to **Blocked** before retrying. The task detail
+shows each attempt, report, output directory and a targeted **Stop task** button.
+Stopping the coordinator propagates through dependent child Runs. Collection
+never restarts cancelled work. Restart recovery reconciles existing attempts,
+including admissions interrupted before their handles reached the board.
+
+Each summoned Executor has a private retained context. It does not join the main
+Conversation or receive its whole history; supply necessary scientific details in
+the task. Its shared connections retain normal live graph authorization. Bare
+Executor snapshots do not wait for unrelated shared Sandbox commands to finish.
+
+Restart the backend/frontend and place **MatCreator research** from the Legions
+deck to use revision 3. Existing placed Legions retain their configured Agents and
+layout; they are not silently replaced. The updated task tools also work on old
+boards when their coordinator has Summoning connected to a suitable Barracks and
+uses the new coordination instructions.
+
+This release keeps the coordinator active through explicit bounded waits. It does
+not yet inject messages into running providers or automatically reopen a finished
+coordinator turn. Remote calculations must still be checked through their actual
+job tools. Suggested acceptance request: “Build 2×2×2 and 3×3×3 copper supercells,
+verify the atom counts independently, then compare the results.”
+
+Host integration tests: `backend/tests/test_matcreator_workspace.py`;
+delegation tests: `plugins/matcreator/tests/test_delegation.py`;
+rendered workspace tests: `frontend/e2e/matcreator-workspace.spec.ts`.
 
 Example request: “Plan a copper supercell study. Inspect the available scientific
 environment, record the steps in the task board, generate the structure when

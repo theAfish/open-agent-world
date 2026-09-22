@@ -30,7 +30,9 @@ def test_research_preset_deploys_complete_independent_workspaces_and_can_be_save
     a, b = first['node_ids'], second['node_ids']
     assert set(a.values()).isdisjoint(b.values())
     nodes = {node['id']: node for node in first['nodes']}
-    assert all(nodes[a[key]]['parent_id'] == a['group'] for key in a if key != 'group')
+    assert all(nodes[a[key]]['parent_id'] == a['group'] for key in a if key not in {'group', 'executor', 'summoning'})
+    assert nodes[a['executor']]['parent_id'] == a['barracks']
+    assert nodes[a['summoning']]['equipment']['owner_id'] == a['agent']
     assert nodes[a['sandbox']]['status'] == 'stopped'
     assert nodes[a['agent']]['config']['model'] == 'oaw:default'
     assert 'task board' in nodes[a['agent']]['config']['system_instruction']
@@ -39,8 +41,21 @@ def test_research_preset_deploys_complete_independent_workspaces_and_can_be_save
     assert all(a[key] in layout_text for key in ['conversation', 'sandbox', 'tasks', 'knowledge'])
     assert all(section in layout_text for section in ['sessions', 'files', 'conversation', 'preview'])
     assert {'card_id': a['sandbox']} in _views(layout['root'])
-    assert len(first['edges']) == 8
-    assert document(client, a['core'])['value']['skills']
+    assert nodes[a['structure']]['type'] == 'science.structure-viewer'
+    lower_right = layout['root']['second']['second']['second']
+    assert lower_right['kind'] == 'tabs'
+    assert lower_right['views'] == [{'card_id': a['sandbox']}, {'card_id': a['structure']}]
+    assert {(edge['source'], edge['target'], edge['relationship']) for edge in first['edges']
+            if edge['source'] == a['structure']} == {
+        (a['structure'], a[target], 'core.file-preview') for target in ('conversation', 'sandbox')}
+    assert len(first['edges']) == 9
+    assert not {'core', 'simulation', 'ai', 'research'} & a.keys()
+    graph = document(client, a['knowledge'])['value']
+    assert len(graph['snapshots']) == 4
+    assert graph['skills']
+    assert all(client.get(f"/api/nodes/{skill['node_id']}").json()['parent_id'] == a['knowledge'] for skill in graph['skills'])
+    assert {skill['node_id'] for skill in graph['skills']}.isdisjoint(
+        skill['node_id'] for skill in document(client, b['knowledge'])['value']['skills'])
     created = edit(client, a['tasks'], 'create_plan', {'title': 'Copper', 'session_id': 'source-session', 'tasks': [
         {'id': 'build', 'title': 'Build copper', 'status': 'done', 'result': '32 atoms', 'outputs': ['copper.xyz']}]})
     assert created.status_code == 200, created.text
@@ -49,12 +64,20 @@ def test_research_preset_deploys_complete_independent_workspaces_and_can_be_save
     assert saved.status_code == 201, saved.text
     copy = client.post(f"/api/legions/{saved.json()['id']}/instances", json={})
     assert copy.status_code == 201, copy.text
+    copied_graph = next(node for node in copy.json()['nodes'] if node['type'] == 'matcreator.kdg')
+    copied_value = document(client, copied_graph['id'])['value']
+    assert len(copied_value['skills']) == len(graph['skills'])
+    assert copied_value['snapshots'] == graph['snapshots']
+    assert {s['node_id'] for s in copied_value['skills']}.isdisjoint(s['node_id'] for s in graph['skills'])
     board = next(node for node in copy.json()['nodes'] if node['type'] == 'matcreator.tasks')
     plan = document(client, board['id'])['value']['plans'][0]
     assert plan['session_id'] == '' and plan['tasks'][0]['status'] == 'pending'
     assert plan['tasks'][0]['result'] == '' and plan['tasks'][0]['outputs'] == []
     group = next(node for node in copy.json()['nodes'] if node['type'] == 'legion')
     assert board['id'] in json.dumps(group['config']['workspace_layout'])
+    viewer = next(node for node in copy.json()['nodes'] if node['type'] == 'science.structure-viewer')
+    assert viewer['id'] in json.dumps(group['config']['workspace_layout'])
+    assert len([edge for edge in copy.json()['edges'] if edge['source'] == viewer['id']]) == 2
     assert not any(node_id in json.dumps(group['config']['workspace_layout']) for node_id in a.values())
 
 
@@ -133,6 +156,14 @@ def test_invalid_plugin_presets_do_not_partially_install():
         registry.install(PluginDefinition(PluginDescriptor(id='example', version='1', plugin_api_version='1.18'), register))
     assert not registry.has_plugin('example')
     assert registry.legion_presets() == ()
+
+
+def test_research_preset_requires_enabled_structure_viewer(client):
+    services = client.app.state.services
+    services.plugins.set_enabled('science.structure-viewer', False)
+    assert 'matcreator.research' not in {item['id'] for item in client.get('/api/legions/presets').json()}
+    services.plugins.set_enabled('science.structure-viewer', True)
+    assert 'matcreator.research' in {item['id'] for item in client.get('/api/legions/presets').json()}
 
 
 def test_research_board_survives_restart_and_scoped_tool_projection(tmp_path):

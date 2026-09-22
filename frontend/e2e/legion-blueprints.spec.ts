@@ -87,11 +87,14 @@ test('header settings are optional; saving restores four display states and layo
   await group.getByRole('button', { name: 'Legion settings', exact: true }).click();
   const settings = page.getByRole('complementary', { name: 'Legion settings', exact: true });
   await expect(settings).toBeVisible();
-  const sidebarBounds = await settings.boundingBox();
-  const groupBounds = await group.boundingBox();
-  expect(sidebarBounds!.x - (groupBounds!.x + groupBounds!.width)).toBeCloseTo(12, 0);
-  expect(sidebarBounds!.x + sidebarBounds!.width).toBeLessThanOrEqual(1800 - 15);
-  expect(sidebarBounds!.y).toBeGreaterThanOrEqual(15);
+  // Opening settings can pan the viewport on the next animation frame.
+  await expect(async () => {
+    const sidebarBounds = await settings.boundingBox();
+    const groupBounds = await group.boundingBox();
+    expect(sidebarBounds!.x - (groupBounds!.x + groupBounds!.width)).toBeCloseTo(12, 0);
+    expect(sidebarBounds!.x + sidebarBounds!.width).toBeLessThanOrEqual(1800 - 15);
+    expect(sidebarBounds!.y).toBeGreaterThanOrEqual(15);
+  }).toPass();
   // The member workspace remains interactive while settings stay open.
   const workspace = page.locator(`.world-card[data-card-id="${members[3].id}"]`);
   await workspace.getByRole('tab', { name: 'Settings', exact: true }).click();
@@ -125,7 +128,7 @@ test('header settings are optional; saving restores four display states and layo
   expect(saved.status()).toBe(201);
   const presentation = saved.request().postDataJSON().presentation;
   expect(members.map(n => presentation[n.id].level)).toEqual(levels);
-  expect(presentation[members[3].id].workspace_size).toEqual({ width: 1100, height: 740 });
+  expect(presentation[members[3].id].surface_sizes.workspace).toEqual({ width: 1100, height: 740 });
   expect((await (await request.get(`/api/legion-groups/${groupId}/state`)).json()).value).toEqual({ goal: 'Reusable goal' });
   const positions = await Promise.all(members.map(async n => (await (await request.get(`/api/nodes/${n.id}`)).json()).position));
   const instanceResponse = page.waitForResponse(r => r.url().includes('/instances') && r.request().method() === 'POST');

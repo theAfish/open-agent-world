@@ -72,6 +72,169 @@ describe("authoritative world synchronization", () => {
     });
   });
 
+  it("deletes a large selection in one request and redoes it as one transaction", async () => {
+    const cards = Array.from({ length: 1000 }, (_, i) => card(`bulk-${i}`, "agent"));
+    const kept = card("kept", "agent");
+    const synthetic = { ...card("synthetic", "agent"), ephemeral: true };
+    useWorldStore.setState({ cards: [...cards, kept], stressCards: [synthetic], selectedCardIds: [...cards.map(c => c.id), synthetic.id] });
+    const batch = vi.spyOn(worldApi, "deleteNodes").mockResolvedValue(cards);
+    const single = vi.spyOn(worldApi, "deleteNode");
+    vi.spyOn(worldApi, "restoreNode").mockImplementation(async input => input as WorldCard);
+    await useWorldStore.getState().deleteCards([...cards.map(c => c.id), synthetic.id]);
+    expect(batch).toHaveBeenCalledTimes(1);
+    expect(batch).toHaveBeenCalledWith(cards.map(c => c.id));
+    expect(single).not.toHaveBeenCalled();
+    expect(useWorldStore.getState().cards).toEqual([kept]);
+    expect(useWorldStore.getState().stressCards).toEqual([]);
+    expect(useWorldStore.getState().undoStack).toHaveLength(1);
+    await useWorldStore.getState().undo();
+    expect(useWorldStore.getState().cards).toHaveLength(1001);
+    expect(useWorldStore.getState().stressCards).toEqual([synthetic]);
+    await useWorldStore.getState().redo();
+    expect(batch).toHaveBeenCalledTimes(2);
+    expect(useWorldStore.getState().cards).toEqual([kept]);
+  });
+
+  it("keeps the selection and undo history intact when a batch is rejected", async () => {
+    const cards = [card("first", "agent"), card("second", "agent")];
+    const ids = cards.map(c => c.id);
+    useWorldStore.setState({ cards, selectedCardIds: ids });
+    const batch = vi.spyOn(worldApi, "deleteNodes").mockRejectedValue(new Error("A selected card is busy"));
+    const single = vi.spyOn(worldApi, "deleteNode");
+    await useWorldStore.getState().deleteCards(ids);
+    expect(batch).toHaveBeenCalledTimes(1);
+    expect(single).not.toHaveBeenCalled();
+    expect(useWorldStore.getState().cards).toEqual(cards);
+    expect(useWorldStore.getState().selectedCardIds).toEqual(ids);
+    expect(useWorldStore.getState().undoStack).toEqual([]);
+    expect(useWorldStore.getState().toasts.at(-1)?.tone).toBe("error");
+  });
+
+  it("limits snapshot requests and preserves every text body for undo", async () => {
+    const cards = Array.from({ length: 32 }, (_, i) => card(`text-${i}`, "text"));
+    const gate = deferred<void>();
+    let inFlight = 0, peak = 0;
+    useWorldStore.setState({ cards });
+    const read = vi.spyOn(worldApi, "getTextContent").mockImplementation(async id => {
+      peak = Math.max(peak, ++inFlight);
+      await gate.promise;
+      inFlight--;
+      return `body of ${id}`;
+    });
+    const remove = vi.spyOn(worldApi, "deleteNodes").mockResolvedValue(cards);
+    const pending = useWorldStore.getState().deleteCards(cards.map(c => c.id));
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(8));
+    expect(remove).not.toHaveBeenCalled();
+    gate.resolve();
+    await pending;
+    expect(peak).toBe(8);
+    expect(read).toHaveBeenCalledTimes(32);
+    const operation = useWorldStore.getState().undoStack[0];
+    expect(operation.kind).toBe("cards-deleted");
+    if (operation.kind === "cards-deleted") expect(operation.cards.map(c => c.restoreContent)).toEqual(cards.map(c => `body of ${c.id}`));
+  });
+
+  it("applies a thousand deletion events with one world notification", () => {
+    const cards = Array.from({ length: 1000 }, (_, i) => ({ ...card(`burst-${i}`, "agent"), revision: 1 }));
+    const kept = card("kept", "agent");
+    const edges: WorldEdge[] = cards.map(c => ({ id: `edge-${c.id}`, source: kept.id, target: c.id, relationship: "related", direction: "forward", revision: 1 }));
+    useWorldStore.setState({ cards: [...cards, kept], edges, selectedCardIds: [...cards.map(c => c.id), kept.id], selectedEdgeId: edges[0].id });
+    const notify = vi.fn();
+    const unsubscribe = useWorldStore.subscribe(notify);
+    const started = performance.now();
+    try {
+      useWorldStore.getState().ingestEvents(cards.map((node, i) => ({ id: `deleted-${i}`, type: "card_deleted", timestamp: "now", payload: { node }, stream_id: "burst", sequence: i + 1 })));
+    } finally { unsubscribe(); }
+    console.info(`1000 deletion events: ${(performance.now() - started).toFixed(1)} ms, ${notify.mock.calls.length} world notification`);
+    expect(notify).toHaveBeenCalledTimes(1);
+    const state = useWorldStore.getState();
+    expect(state.cards).toEqual([kept]);
+    expect(state.edges).toEqual([]);
+    expect(state.selectedCardIds).toEqual([kept.id]);
+    expect(state.selectedEdgeId).toBeUndefined();
+    expect(Object.keys(state.cardTombstones)).toHaveLength(1000);
+    expect(Object.keys(state.edgeTombstones)).toHaveLength(1000);
+    expect(state.events).toHaveLength(160);
+    expect(state.events[0].id).toBe("deleted-999");
+    expect(state.eventSequence).toBe(1000);
+    expect(state.undoStack).toEqual([]);
+  });
+
+  it("keeps graph, runtime output and restored incarnations in stream order within a batch", () => {
+    const node = { ...card("ordered", "agent"), revision: 1, created_at: "2026-09-21T00:00:00Z" };
+    const restored = { ...node, created_at: "2026-09-21T00:01:00Z" };
+    useWorldStore.setState({ cards: [node], selectedCardIds: [node.id] });
+    const events = [
+      { type: "card_deleted", payload: { node } },
+      { type: "card_created", payload: { node } }, // Stale response cannot revive the old object.
+      { type: "card_created", payload: { node: restored } },
+      { type: "stdout", payload: { text: "after restore" } },
+      { type: "card_updated", payload: { node: { ...restored, revision: 2, name: "Updated" } } },
+      { type: "card_deleted", payload: { node } }, // Delayed deletion cannot remove its replacement.
+    ].map((event, i) => ({ ...event, id: `ordered-${i}`, node_id: node.id, timestamp: "now", stream_id: "ordered", sequence: i + 1 }));
+    useWorldStore.getState().ingestEvents(events);
+    expect(useWorldStore.getState().cards[0]).toMatchObject({ name: "Updated", created_at: restored.created_at, config: { output: ["after restore"] } });
+    expect(useWorldStore.getState().selectedCardIds).toEqual([]);
+    const before = useWorldStore.getState();
+    useWorldStore.getState().ingestEvents(events);
+    expect(useWorldStore.getState()).toBe(before);
+  });
+
+  it("refreshes once for gaps in a graph burst and still checks heartbeat watermarks", () => {
+    const refresh = vi.spyOn(useWorldStore.getState(), "refreshWorld").mockResolvedValue();
+    useWorldStore.setState({ eventStream: "gaps", eventSequence: 1 });
+    useWorldStore.getState().ingestEvents([3, 5, 6].map(sequence => ({ id: `gap-${sequence}`, type: sequence === 6 ? "connection_ready" : "card_deleted", node_id: "absent", timestamp: "now", payload: {}, stream_id: "gaps", sequence })));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(useWorldStore.getState().eventSequence).toBe(6);
+    expect(useWorldStore.getState().events).toHaveLength(2);
+  });
+
+  it("coalesces interleaved edge deletion and permission events without rewriting the surviving Agent", () => {
+    const agent = { ...card("surviving-agent", "agent"), config: { output: ["keep output"], active_command: "running" } };
+    const edges: WorldEdge[] = Array.from({ length: 200 }, (_, i) => ({ id: `link-${i}`, source: agent.id, target: `target-${i}`, relationship: "read", direction: "forward" }));
+    useWorldStore.setState({ cards: [agent], edges, selectedEdgeId: edges[0].id });
+    const beforeCards = useWorldStore.getState().cards;
+    const notify = vi.fn();
+    const unsubscribe = useWorldStore.subscribe(notify);
+    try {
+      useWorldStore.getState().ingestEvents(edges.flatMap(edge => ["edge_deleted", "permission_changed"].map(type => ({ id: `${type}-${edge.id}`, type, node_id: agent.id, timestamp: "now", payload: { edge } }))));
+    } finally { unsubscribe(); }
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(useWorldStore.getState().cards).toBe(beforeCards);
+    expect(useWorldStore.getState().cards[0]).toBe(agent);
+    expect(useWorldStore.getState().edges).toEqual([]);
+    expect(useWorldStore.getState().selectedEdgeId).toBeUndefined();
+    expect(useWorldStore.getState().events[0].type).toBe("permission_changed");
+  });
+
+  it("tracks changed edge endpoints after the first deletion in a batch", () => {
+    const cards = ["first", "second", "third", "kept"].map(id => card(id, "agent"));
+    const edge: WorldEdge = { id: "moving-link", source: "second", target: "kept", relationship: "related", direction: "forward", revision: 1 };
+    useWorldStore.setState({ cards, edges: [edge] });
+    useWorldStore.getState().ingestEvents([
+      { id: "delete-first", type: "card_deleted", timestamp: "now", payload: { node: cards[0] } },
+      { id: "move-edge", type: "edge_updated", timestamp: "now", payload: { edge: { ...edge, source: "third", revision: 2 } } },
+      { id: "delete-old-endpoint", type: "card_deleted", timestamp: "now", payload: { node: cards[1] } },
+    ]);
+    expect(useWorldStore.getState().edges).toEqual([{ ...edge, source: "third", revision: 2 }]);
+    useWorldStore.getState().ingestEvent({ id: "delete-new-endpoint", type: "card_deleted", timestamp: "now", payload: { node: cards[2] } });
+    expect(useWorldStore.getState().edges).toEqual([]);
+    expect(useWorldStore.getState().edgeTombstones[edge.id].revision).toBe(2);
+  });
+
+  it("does not lose valid graph changes when a malformed message arrives in the same burst", () => {
+    const cards = [card("first-valid", "agent"), card("second-valid", "agent")];
+    useWorldStore.setState({ cards });
+    useWorldStore.getState().ingestEvents([
+      { id: "first", type: "card_deleted", timestamp: "now", payload: { node: cards[0] } },
+      { id: "malformed", type: "card_updated", timestamp: "now", payload: { node: { id: "invalid" } } },
+      { id: "second", type: "card_deleted", timestamp: "now", payload: { node: cards[1] } },
+    ].map((event, i) => ({ ...event, stream_id: "malformed", sequence: i + 1 })));
+    expect(useWorldStore.getState().cards).toEqual([]);
+    expect(useWorldStore.getState().eventSequence).toBe(3);
+    expect(useWorldStore.getState().events.map(event => event.id)).toEqual(["second", "first"]);
+  });
+
   it("does not revive a deleted incarnation from a delayed create response", async () => {
     const node = { ...card("new", "text"), revision: 1, created_at: "2026-09-11T00:00:00Z" };
     const response = deferred<WorldCard>();
@@ -251,7 +414,7 @@ describe("authoritative world synchronization", () => {
     useWorldStore.setState({ cards: [a, b], edges: [edge, { ...edge, id: "external", target: "outside" }], selectedCardIds: ["a", "b"], clipboard: undefined });
     vi.spyOn(worldApi, "restoreNode").mockImplementation(async input => input as WorldCard);
     vi.spyOn(worldApi, "createEdge").mockImplementation(async input => input as WorldEdge);
-    vi.spyOn(worldApi, "deleteNode").mockResolvedValue(undefined);
+    const remove = vi.spyOn(worldApi, "deleteNodes").mockResolvedValue([]);
     expect(await useWorldStore.getState().copySelection()).toBe(true);
     a.config.changed = true;
     await useWorldStore.getState().pasteSelection();
@@ -263,6 +426,7 @@ describe("authoritative world synchronization", () => {
     expect(useWorldStore.getState().edges.at(-1)).toMatchObject({ source: pasted[0].id, target: pasted[1].id });
     expect(useWorldStore.getState().selectedCardIds).toEqual(pasted.map(c => c.id));
     await useWorldStore.getState().undo();
+    expect(remove).toHaveBeenCalledWith(pasted.map(c => c.id));
     expect(useWorldStore.getState().cards).toHaveLength(2);
     await useWorldStore.getState().redo();
     expect(useWorldStore.getState().cards).toHaveLength(4);
@@ -805,6 +969,32 @@ describe("authoritative world synchronization", () => {
     expect(deleteNodes).toHaveBeenCalledWith([first.id, second.id]);
     expect(useWorldStore.getState().cards).toEqual([existing]);
     expect(useWorldStore.getState().edges).toEqual([]);
+  });
+
+  it('explicitly holds descendants when resizing a container from its top-left corner', async () => {
+    const group = { ...card('group', 'legion'), position: { x: 100, y: 100 }, size: { width: 1400, height: 900 } };
+    const nested = { ...card('nested', 'legion'), parent_id: group.id, position: { x: 400, y: 300 } };
+    const member = { ...card('member', 'text'), parent_id: nested.id, position: { x: 650, y: 500 } };
+    useWorldStore.setState({ cards: [group, nested, member] });
+    const update = vi.spyOn(worldApi, 'batchUpdateNodes').mockImplementation(async patches => patches.map(p => ({ ...useWorldStore.getState().cards.find(c => c.id === p.node_id)!, ...p.patch })));
+    await useWorldStore.getState().resizeContainer(group.id, { width: 1500, height: 1000 }, { x: 0, y: 0 });
+    expect(update.mock.calls[0][0].map(p => [p.node_id, p.patch.position])).toEqual([
+      [group.id, { x: 0, y: 0 }], [nested.id, nested.position], [member.id, member.position],
+    ]);
+    await useWorldStore.getState().undo();
+    expect(useWorldStore.getState().cards).toEqual([group, nested, member]);
+  });
+
+  it('keeps glued peers explicit when saving a resized surface anchor', async () => {
+    const first = card('first', 'text'), peer = card('peer', 'text');
+    useWorldStore.setState({ cards: [first, peer] });
+    const update = vi.spyOn(worldApi, 'batchUpdateNodes').mockImplementation(async patches => patches.map(p => ({ ...useWorldStore.getState().cards.find(c => c.id === p.node_id)!, ...p.patch })));
+    await useWorldStore.getState().updateCardPositions([{ id: first.id, position: { x: -50, y: -30 } }], [peer.id]);
+    expect(update.mock.calls[0][0]).toEqual([
+      { node_id: first.id, patch: { position: { x: -50, y: -30 } } },
+      { node_id: peer.id, patch: { position: peer.position } },
+    ]);
+    expect(useWorldStore.getState().cards[1].position).toEqual(peer.position);
   });
 
   it("deploys and redoes a plugin preset through its preset route with only the group selected", async () => {

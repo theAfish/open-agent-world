@@ -31,12 +31,14 @@ def definition(services, node_id):
     return result
 
 
-def read_document(services, node_id):
+def read_document(services, node_id, *, state_identity=None):
     spec = definition(services, node_id)
-    scope = services.state.ensure_scope("node_document", node_id, schema_id="core.node_document")
+    scope = services.card_state.scope(node_id, state_identity)
     current = services.state.resolve(StateContext((scope,)), "document")
     try:
-        value = spec.model.model_validate(current.value).model_dump(mode="json")
+        initial = spec.initial_value if (services.plugins.node_type(services.world.get_card(node_id).type).state is not None
+            and current.revision == 0 and spec.initial_value is not None) else current.value
+        value = spec.model.model_validate(initial).model_dump(mode="json")
     except ValueError as error:
         raise ResourceValidationError("Stored document is incompatible with this plugin: " + validation_message(error)) from error
     container = services.plugins.node_type(services.world.get_card(node_id).type).container
@@ -46,17 +48,17 @@ def read_document(services, node_id):
     return {"value": value, "revision": current.revision, "summary": spec.summarize(value)}
 
 
-def write_document(services, node_id, value, expected_revision, *, actor_id=None, run_id=None):
+def write_document(services, node_id, value, expected_revision, *, actor_id=None, run_id=None, state_identity=None):
     spec = definition(services, node_id)
     try:
         value = spec.model.model_validate(value).model_dump(mode="json")
         if spec.validate_update is not None:
-            spec.validate_update(read_document(services, node_id)["value"], value)
+            spec.validate_update(read_document(services, node_id, state_identity=state_identity)["value"], value)
     except (ValidationError, ValueError) as exc:
         raise ResourceValidationError(validation_message(exc)) from exc
     if len(json.dumps(value).encode("utf-8")) > spec.max_size_bytes:
         raise ResourceValidationError(f"This document is limited to {spec.max_size_bytes // 1024} KiB")
-    scope = services.state.ensure_scope("node_document", node_id, schema_id="core.node_document")
+    scope = services.card_state.scope(node_id, state_identity)
     node = services.world.get_card(node_id)
     container = services.plugins.node_type(node.type).container
     entries = value.get(container.document_field) if container and container.document_field else None
@@ -67,7 +69,7 @@ def write_document(services, node_id, value, expected_revision, *, actor_id=None
     if entries is not None:
         sync_members(services, node_id, entries)
     touch_parent(services, node.parent_id)
-    return read_document(services, node_id)
+    return read_document(services, node_id, state_identity=state_identity)
 
 
 async def invoke_document_action(services, node_id, action, request, *, capability=None):
@@ -75,7 +77,7 @@ async def invoke_document_action(services, node_id, action, request, *, capabili
         spec = definition(services, node_id)
         handler = spec.actions.get(action)
         if action == "replace" or (handler is not None and not handler.read_only):
-            services.node_execution.assert_editable(node_id)
+            services.node_execution.assert_editable(node_id, allow_delegated=True)
         if capability is not None:
             live = services.capabilities.capability_for_id(capability.agent_id, capability.id)
             if live.target_id != node_id or handler is None or handler.capability_kind != live.kind:

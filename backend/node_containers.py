@@ -3,6 +3,8 @@ from backend.events import EventType
 from backend.events.models import RuntimeEvent
 from backend.state import StateContext
 from backend.world.models import CardCreate, CardPatch
+from backend.world.layout import compact_member_region
+from backend.spatial import Rectangle
 
 
 def touch_parent(services, parent_id):
@@ -31,13 +33,15 @@ def sync_members(services, node_id, entries):
     spec = services.plugins.node_type(parent.type).container
     members = {member.id: member for member in services.world.list_members(node_id)}
     kept = set()
-    for index, entry in enumerate(entries):
+    occupied = [Rectangle(member.position.x, member.position.y, 96, 96) for member in members.values()]
+    for entry in entries:
         key = entry.get("node_id")
         member = members.get(key)
         if member is None:
+            region = compact_member_region(96, 96, occupied, spec, parent.position)
             member = services.world.create_card(CardCreate(type=spec.member_type, parent_id=node_id,
-                name=entry["name"], position={"x": parent.position.x + spec.content_inset[0] + 100 + index % 3 * 310,
-                                            "y": parent.position.y + spec.content_inset[1] + 40 + index // 3 * 210}))
+                name=entry["name"], position={"x": region.x, "y": region.y}))
+            occupied.append(region)
             services._publish_card_created_nowait(member)
         kept.add(member.id)
         current = read_document(services, member.id)

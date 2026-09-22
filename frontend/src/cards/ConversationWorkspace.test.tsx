@@ -4,9 +4,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
+import { useConversationView } from "../state/conversationView";
 import type {
   ConversationMessage,
   ConversationSession,
+  ConversationSummary,
   WorldCard,
 } from "../types/world";
 import { ConversationWorkspace } from "./ConversationWorkspace";
@@ -52,6 +54,7 @@ describe("ConversationWorkspace snapshots", () => {
       value: vi.fn(),
     });
     useWorldStore.setState({ events: [], socketState: "closed", toasts: [] });
+    useConversationView.setState({ sessions: {}, activeConversationId: undefined });
     vi.spyOn(worldApi, "getConversation").mockResolvedValue({
       conversation_id: card.id,
       sessions: [session],
@@ -61,6 +64,128 @@ describe("ConversationWorkspace snapshots", () => {
   });
 
   afterEach(() => cleanup());
+
+  it('restores session selection after remount and switches the canvas scope between open conversations', async () => {
+    const otherSession = { ...session, id: 'session-2', title: 'Second', group_id: 'group', group_title: 'Research' };
+    vi.mocked(worldApi.getConversation).mockResolvedValue({
+      conversation_id: card.id, sessions: [{ ...session, group_id: 'group', group_title: 'Research' }, otherSession], agents: [],
+    });
+    const first = render(<ConversationWorkspace card={card} />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Second/ }));
+    expect(useConversationView.getState().sessions[card.id]).toBe(otherSession.id);
+    first.unmount();
+    const restored = render(<ConversationWorkspace card={card} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Second/ }).getAttribute('aria-current')).toBe('true'));
+    const otherCard = { ...card, id: 'other-room' };
+    vi.mocked(worldApi.getConversation).mockResolvedValue({
+      conversation_id: otherCard.id, sessions: [{ ...session, conversation_id: otherCard.id }], agents: [],
+    });
+    const other = render(<ConversationWorkspace card={otherCard} />);
+    await waitFor(() => expect(useConversationView.getState().sessions[otherCard.id]).toBe(session.id));
+    // A background chat mounting/loading must not take over the active canvas.
+    expect(useConversationView.getState().activeConversationId).toBe(card.id);
+    fireEvent.pointerDown(other.container.querySelector('.conversation-workspace-grid')!);
+    expect(useConversationView.getState().activeConversationId).toBe(otherCard.id);
+    fireEvent.pointerDown(restored.container.querySelector('.conversation-workspace-grid')!);
+    expect(useConversationView.getState().activeConversationId).toBe(card.id);
+    expect(useConversationView.getState().sessions[card.id]).toBe(otherSession.id);
+    other.unmount();
+  });
+
+  it("creates an inline named group with the only connected agent selected by default", async () => {
+    vi.mocked(worldApi.getConversation).mockResolvedValue({
+      conversation_id: card.id, sessions: [session],
+      agents: [
+        { id: "atlas", name: "Atlas", status: "idle", model: "mock", connected: true },
+        { id: "offline", name: "Offline", status: "idle", model: "mock", connected: false },
+      ],
+    });
+    const create = vi.spyOn(worldApi, "createConversationSession").mockResolvedValue({
+      ...session, id: "new-session", group_id: "new-group", group_title: "Research", participant_ids: ["atlas"],
+    });
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    fireEvent.click(screen.getByRole("button", { name: "New group" }));
+    const input = screen.getByRole("textbox", { name: "Group name" }) as HTMLInputElement;
+    expect(input.value).toBe("New group");
+    expect(document.activeElement).toBe(input);
+    expect(input.selectionEnd).toBe(input.value.length);
+    expect((screen.getByRole("checkbox", { name: "Atlas" }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByRole("checkbox", { name: "Offline" })).toBeNull();
+    expect(screen.queryByText("Create session")).toBeNull();
+    fireEvent.change(input, { target: { value: "Research" } });
+    fireEvent.submit(input.closest("form")!);
+    await waitFor(() => expect(create).toHaveBeenCalledWith(card.id, expect.objectContaining({
+      group_title: "Research", participant_ids: ["atlas"],
+    })));
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Group name" })).toBeNull());
+  });
+
+  it("requires a group name and agent selection, retaining the draft on failure and allowing cancellation", async () => {
+    vi.mocked(worldApi.getConversation).mockResolvedValue({
+      conversation_id: card.id, sessions: [session],
+      agents: ["Atlas", "Boreal"].map((name) => ({ id: name, name, status: "idle", model: "mock", connected: true })),
+    });
+    const create = vi.spyOn(worldApi, "createConversationSession").mockRejectedValue(new Error("Unavailable"));
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    fireEvent.click(screen.getByRole("button", { name: "New group" }));
+    const input = screen.getByRole("textbox", { name: "Group name" }) as HTMLInputElement;
+    const confirm = screen.getByRole("button", { name: "Create group" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Boreal" }));
+    fireEvent.change(input, { target: { value: " " } });
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(input, { target: { value: "My group" } });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(confirm.disabled).toBe(false));
+    expect(create).toHaveBeenCalledWith(card.id, expect.objectContaining({ group_title: "My group", participant_ids: ["Boreal"] }));
+    expect(input.value).toBe("My group");
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: "Group name" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "New group" }));
+    fireEvent.click(screen.getByRole("button", { name: "New group" }));
+    expect((screen.getByRole("textbox", { name: "Group name" }) as HTMLInputElement).value).toBe("New group");
+    expect((screen.getByRole("checkbox", { name: "Boreal" }) as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("scopes quiet participant rings to the selected session and refreshes on context events", async () => {
+    const participants = ["atlas", "boreal", "plugin"];
+    const first = { ...session, participant_ids: participants, group_id: "group" };
+    const second = { ...first, id: "session-2", title: "Second topic" };
+    const summary: ConversationSummary = {
+      conversation_id: card.id, sessions: [first, second],
+      agents: participants.map((id) => ({ id, name: id, model: "test", status: "idle", connected: true })),
+      context_statuses: {
+        [first.id]: {
+          atlas: { pressure: .92, state: "high" as const, compaction_count: 1 },
+          boreal: { pressure: .3, state: "normal" as const, compaction_count: 0 },
+        },
+        [second.id]: { atlas: { pressure: .1, state: "normal" as const, compaction_count: 0 } },
+      },
+    };
+    vi.mocked(worldApi.getConversation).mockResolvedValue(summary);
+    const view = render(<ConversationWorkspace card={card} />);
+    await screen.findByTitle("Context 92% · compacted 1 times");
+    expect(view.container.querySelectorAll(".context-pressure-ring")).toHaveLength(2);
+    expect(view.container.querySelectorAll(".workspace-message .context-pressure-ring")).toHaveLength(0);
+    fireEvent.click(screen.getByTitle("Second topic"));
+    expect(screen.getByTitle("Context 10% · compacted 0 times")).toBeTruthy();
+    expect(screen.queryByTitle("Context 92% · compacted 1 times")).toBeNull();
+    fireEvent.click(screen.getByTitle("General"));
+    expect(screen.getByTitle("Context 30% · compacted 0 times")).toBeTruthy();
+    vi.mocked(worldApi.getConversation).mockResolvedValue({ ...summary, context_statuses: {
+      ...summary.context_statuses, [first.id]: { ...summary.context_statuses![first.id],
+        atlas: { pressure: .2, state: "normal", compaction_count: 2 } },
+    } });
+    const historyCalls = vi.mocked(worldApi.getConversationTimeline).mock.calls.length;
+    act(() => useWorldStore.getState().ingestEvent({ id: "context-update", type: "context_status", timestamp: "now",
+      conversation_id: card.id, session_id: first.id, agent_id: "atlas", payload: {} }));
+    await screen.findByTitle("Context 20% · compacted 2 times");
+    expect(screen.getByTitle("Context 30% · compacted 0 times")).toBeTruthy();
+    expect(worldApi.getConversationTimeline).toHaveBeenCalledTimes(historyCalls);
+    expect(useWorldStore.getState().toasts).toHaveLength(0);
+  });
 
   it("keeps the active conversation and composer alive when detached and returned", async () => {
     const hosts = new Map<string, HTMLDivElement>();
@@ -231,7 +356,7 @@ describe("ConversationWorkspace snapshots", () => {
     await waitFor(() => expect(worldApi.createConversationSession).toHaveBeenCalledWith(card.id,
       expect.objectContaining({ group_id: "group-1", title: "New session" })));
     fireEvent.click(screen.getByLabelText("Session actions for New session"));
-    fireEvent.click(within(screen.getByLabelText("Session actions for New session").closest("details")!).getByRole("button", { name: "Rename session" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rename session" }));
     fireEvent.change(screen.getByLabelText("Session title"), { target: { value: "Design review" } });
     fireEvent.click(screen.getByRole("button", { name: "Save name" }));
     await waitFor(() => expect(worldApi.renameConversationSession).toHaveBeenCalledWith(card.id, "session-2", "Design review"));

@@ -14,10 +14,10 @@ export function positionToChunk(position: WorldPosition): { x: number; y: number
   return { x, y, key: chunkKey(x, y) };
 }
 
-export function getViewportChunkKeys(
+export function getViewportChunkBounds(
   viewport: FlowViewportState,
   ring = PREFETCH_RING,
-): string[] {
+) {
   const safeZoom = Math.max(viewport.zoom, 0.01);
   const left = -viewport.x / safeZoom;
   const top = -viewport.y / safeZoom;
@@ -27,6 +27,14 @@ export function getViewportChunkKeys(
   const maxX = Math.floor(right / CHUNK_SIZE) + ring;
   const minY = Math.floor(top / CHUNK_SIZE) - ring;
   const maxY = Math.floor(bottom / CHUNK_SIZE) + ring;
+  return { minX, maxX, minY, maxY };
+}
+
+export function getViewportChunkKeys(
+  viewport: FlowViewportState,
+  ring = PREFETCH_RING,
+): string[] {
+  const { minX, maxX, minY, maxY } = getViewportChunkBounds(viewport, ring);
   const keys: string[] = [];
 
   for (let y = minY; y <= maxY; y += 1) {

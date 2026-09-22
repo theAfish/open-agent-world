@@ -2,8 +2,22 @@
 from backend.plugins.containers import NodeContainerDefinition
 from backend.spatial import Rectangle, find_free_region
 from backend.tests.conftest import create_node
-from backend.world.layout import WorldLayout, card_footprints
+from backend.world.layout import WorldLayout, card_footprints, compact_member_region
 from backend.world.models import Point
+
+
+def test_compact_members_wrap_without_overlap_or_long_strip():
+    spec = NodeContainerDefinition()
+    occupied = []
+    for _ in range(40):
+        region = compact_member_region(96, 96, occupied, spec, Point(x=100, y=200))
+        assert all(not region.overlaps(other, gap=24) for other in occupied)
+        occupied.append(region)
+    width = max(rect.x + rect.width for rect in occupied) - 100 + 24
+    height = max(rect.y + rect.height for rect in occupied) - 200 + 24
+    assert width / height < 1.5
+    assert height / width < 1.5
+    assert len({rect.y for rect in occupied}) > 1
 
 
 def test_free_region_preserves_clear_positions_and_respects_gap():
@@ -24,6 +38,26 @@ def test_layout_can_ignore_a_moving_card_without_mutating_world(client):
     assert layout.place_region(preferred, exclude_ids=[node["id"]]) == preferred
     assert layout.place_region(preferred) != preferred
     assert world.get_card(node["id"]).position == Point(x=600, y=400)
+
+
+def test_virtual_workspace_append_fills_rows_and_preserves_existing_members(client):
+    from backend.world.models import CardCreate, CardPatch
+    world = client.app.state.services.world
+    container = world.create_card(CardCreate(type="core.virtual-workspace"))
+    spec = world.registry.node_type(container.type).container
+    saved = {}
+    for _ in range(12):
+        node = world.create_card(CardCreate(type="text", position={"x": 4000, "y": 4000}))
+        plan = WorldLayout.capture(world).plan_container_append(container, world.list_members(container.id), [node], spec)
+        position = Point(x=node.position.x + plan.offset.x, y=node.position.y + plan.offset.y)
+        world.update_card(node.id, CardPatch(position=position, parent_id=container.id))
+        container = world.update_card(container.id, CardPatch(size=plan.size))
+        saved[node.id] = position
+    assert container.size.width / container.size.height < 1.6
+    assert container.size.height / container.size.width < 1.6
+    assert len({point.x for point in saved.values()}) > 1
+    assert len({point.y for point in saved.values()}) > 1
+    assert all(world.get_card(key).position == point for key, point in saved.items())
 
 
 def test_generic_container_plan_uses_its_spec_and_preserves_group_geometry(client):

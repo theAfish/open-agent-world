@@ -15,6 +15,7 @@ function ShadowCollectionComponent({data,selected}:NodeProps<CanvasNode>) {
   const card=data.card;
   const cards=useWorldStore(s=>s.cards),catalog=useWorldStore(s=>s.catalog);
   const surfaces=useNodeSurfaceStore(s=>s.surfaceLevels);
+  const surfaceSizes=useNodeSurfaceStore(s=>s.surfaceSizes);
   const levels=useMemo(()=>new Map(cards.map(c=>[c.id,surfaceLevelForNode(c.id,surfaces)])),[cards,surfaces]);
   const members=useMemo(()=>cards.filter(c=>c.parent_id===card.id),[cards,card.id]);
   const state=collectionState(card),counts=collectionCounts(members,catalog);
@@ -22,7 +23,7 @@ function ShadowCollectionComponent({data,selected}:NodeProps<CanvasNode>) {
   useEffect(()=>{if(state!=="expanded")useCollectionRelease.getState().set(card.id,false);},[state,card.id]);
   useEffect(()=>()=>useCollectionRelease.getState().set(card.id,false),[card.id]);
   const positions=useCollectionDrag(s=>s.positions);
-  const rect=useMemo(()=>shadowPresentation(card,cards,levels,positions,catalog),[card,cards,levels,positions,catalog]);
+  const rect=useMemo(()=>shadowPresentation(card,cards,levels,positions,catalog,surfaceSizes),[card,cards,levels,positions,catalog,surfaceSizes]);
   const live=state==="expanded"&&members.some(member=>Boolean(positions[member.id]));
   const origin=data.shadowOrigin as {x:number;y:number}|undefined;
   const width=live?rect.width:Number(data.shadowWidth??rect.width),height=live?rect.height:Number(data.shadowHeight??rect.height);

@@ -164,6 +164,18 @@ async def list_agent_conversation_sessions(
     return services.list_agent_conversation_sessions(agent_id)
 
 
+@router.patch("/conversations/{conversation_id}/groups/{group_id}", response_model=list[ConversationSession])
+async def rename_conversation_group(conversation_id: str, group_id: str, request: ConversationSessionRename,
+                                    services: ApplicationServices = Depends(get_services)) -> list[ConversationSession]:
+    return await services.rename_conversation_group(conversation_id, group_id, request.title)
+
+
+@router.delete("/conversations/{conversation_id}/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation_group(conversation_id: str, group_id: str,
+                                    services: ApplicationServices = Depends(get_services)) -> None:
+    await services.delete_conversation_group(conversation_id, group_id)
+
+
 @router.patch("/conversations/{conversation_id}/sessions/{session_id}", response_model=ConversationSession)
 async def rename_conversation_session(conversation_id: str, session_id: str, request: ConversationSessionRename,
                                       services: ApplicationServices = Depends(get_services)) -> ConversationSession:

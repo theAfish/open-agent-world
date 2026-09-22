@@ -125,6 +125,16 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
 CREATE INDEX IF NOT EXISTS conversation_messages_session_idx
     ON conversation_messages (session_id, created_at, id);
 
+-- OAW execution continuation, separate from canonical conversation history.
+CREATE TABLE IF NOT EXISTS agent_contexts (
+    agent_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    context_id TEXT NOT NULL,
+    session_id TEXT REFERENCES conversation_sessions(id) ON DELETE CASCADE,
+    checkpoint_json TEXT NOT NULL,
+    status_json TEXT NOT NULL,
+    PRIMARY KEY (agent_id, context_id)
+);
+
 CREATE TABLE IF NOT EXISTS runs (
     run_id TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,
@@ -257,12 +267,28 @@ class Database:
             self._migrate_open_card_types()
             with self.transaction(immediate=True):
                 self._migrate_conversations()
+            self._connection.executescript("""
+                CREATE TABLE IF NOT EXISTS card_state_instances (
+                    card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+                    scope_type TEXT NOT NULL CHECK(scope_type IN ('shared','session')),
+                    scope_id TEXT NOT NULL,
+                    state_scope_id TEXT NOT NULL UNIQUE REFERENCES state_scopes(scope_id) ON DELETE CASCADE,
+                    PRIMARY KEY(card_id, scope_type, scope_id),
+                    CHECK(scope_type != 'shared' OR scope_id = '*')
+                );
+                CREATE TRIGGER IF NOT EXISTS card_state_cleanup AFTER DELETE ON card_state_instances
+                BEGIN DELETE FROM state_scopes WHERE scope_id=OLD.state_scope_id; END;
+                CREATE TRIGGER IF NOT EXISTS session_card_state_cleanup BEFORE DELETE ON conversation_sessions
+                BEGIN DELETE FROM card_state_instances WHERE scope_type='session' AND scope_id=OLD.id; END;
+            """)
             run_columns = {row['name'] for row in self._connection.execute('PRAGMA table_info(runs)')}
             if 'lifecycle_json' not in run_columns:
                 self._connection.execute("ALTER TABLE runs ADD COLUMN lifecycle_json TEXT NOT NULL DEFAULT '{}'")
             card_columns = {
                 row["name"] for row in self._connection.execute("PRAGMA table_info(cards)")
             }
+            if "state_scope" not in card_columns:
+                self._connection.execute("ALTER TABLE cards ADD COLUMN state_scope TEXT CHECK(state_scope IN ('shared', 'session'))")
             if "equipment_json" not in card_columns:
                 self._connection.execute("ALTER TABLE cards ADD COLUMN equipment_json TEXT")
             if "minister_json" not in card_columns:

@@ -57,6 +57,10 @@ async def save_settings(services, request):
         root = store.validator.validate_workspace(request.workspace_root)
         request = request.model_copy(update={"workspace_root": root})
         old = store.read()
+        # Changing environment defaults must not relocate custom workspaces or
+        # require stopping running Sandboxes when the location is unchanged.
+        if old.workspace_root == root and "environment_variables" in request.model_fields_set:
+            return store.save(request)
         if old.workspace_root is None and root is None:
             return store.save(request)
         old_root = Path(old.workspace_root) if old.workspace_root else services.settings.data_root

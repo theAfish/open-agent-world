@@ -14,6 +14,8 @@ from backend.security.llm_settings import LlmSettingsStore
 
 MODEL_REF_PREFIX = "oaw:model:"
 _KEY = "model_connections"
+DEFAULT_CONTEXT_WINDOW = 128_000
+DEFAULT_MAX_OUTPUT_TOKENS = 8192
 
 
 class ModelEntry(BaseModel):
@@ -22,6 +24,14 @@ class ModelEntry(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     model_id: str = Field(min_length=1, max_length=200)
     enabled: bool = True
+    context_window: int = Field(default=DEFAULT_CONTEXT_WINDOW, strict=True, ge=1024, le=2_147_483_647)
+    max_output_tokens: int = Field(default=DEFAULT_MAX_OUTPUT_TOKENS, strict=True, ge=1, le=2_147_483_646)
+
+    @model_validator(mode="after")
+    def validate_limits(self):
+        if self.max_output_tokens >= self.context_window:
+            raise ValueError("Maximum output tokens must be smaller than the context window.")
+        return self
 
 
 class ModelConnection(BaseModel):
@@ -113,6 +123,25 @@ class ModelConnectionStore:
     def read(self):
         with self.database.locked() as db:
             return self._public(self._read(db))
+
+    def context_limits(self, reference: str) -> tuple[int, int] | None:
+        """Saved per-connection model limits, including defaults for older rows.
+
+        Raw legacy runtime model strings have no catalog entry. Do not match
+        them by model ID: two connections can host the same ID at different limits.
+        """
+        if reference != "oaw:default" and not reference.startswith(MODEL_REF_PREFIX):
+            return None
+        catalog = self.read()
+        if reference == "oaw:default":
+            reference = catalog.default_model
+        for connection in catalog.connections:
+            for model in connection.models:
+                if MODEL_REF_PREFIX + model.id == reference:
+                    if not connection.enabled or not model.enabled:
+                        raise ResourceValidationError("Selected model or connection is disabled. Choose another model in Settings.")
+                    return model.context_window, model.max_output_tokens
+        raise ResourceValidationError("Selected model connection is missing on this backend. Choose a model in Settings.")
 
     def save(self, edit: CatalogEdit):
         with self.database.transaction(immediate=True) as db:

@@ -42,6 +42,7 @@ class SandboxManager(SandboxBackend):
         self._bindings_root = self.root / "sandbox-bindings"
         self._bindings: dict[str, _Binding] = {}
         self._backends: dict[str, SandboxBackend] = {}
+        self.pack_requirements = lambda: {}
 
     def _manifest(self, sandbox_id: str) -> Path:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", sandbox_id):
@@ -303,6 +304,9 @@ class SandboxManager(SandboxBackend):
         return await self._backend(binding.resolved_runtime or "").bundle_status(sandbox_id, bundle)
 
     async def prepare_python(self, runtime_id, requirements=(), bootstrap_key=None):
+        from backend.packs.requirements import aggregate_requirements
+        # Agent-requested installs must preserve every enabled Pack as well.
+        requirements = aggregate_requirements({**self.pack_requirements(), "requested installation": requirements})
         backend = self._backend(runtime_id)
         if hasattr(backend, "prepare_python"):
             return await backend.prepare_python(requirements, bootstrap_key=bootstrap_key)

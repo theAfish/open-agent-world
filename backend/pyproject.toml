@@ -10,6 +10,7 @@ dependencies = [
     "cryptography>=45,<51; sys_platform != 'darwin' or platform_machine != 'x86_64'",
     "fastapi>=0.116,<1",
     "pydantic>=2.11,<3",
+    "packaging>=24,<27",
     "uvicorn[standard]>=0.35,<1",
 ]
 

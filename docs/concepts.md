@@ -30,6 +30,8 @@ An Agent has instructions, a selected model, and access to connected resources a
 
 [Configuration](configuration.md) covers model connections. [Runs](runs.md) explains concurrency, cancellation, sessions, and runtime providers.
 
+Agents summoned from a Conversation session share one virtual workspace, including recursive summons and later turns. The canvas shows the workspace for the currently selected chat and session; switching back restores its saved members and layout. Switching sessions does not stop background work. Reclaiming an instance removes its own summoned family and private equipment while retaining the session workspace and other members. Existing workspaces with traceable session history are consolidated on startup. Standalone Barracks trials remain independent.
+
 ## Teams and reusable arrangements
 
 A **Legion** groups ordinary cards into a team space with shared instructions, optional model settings, and shared state. Existing connections can cross its boundary. Group membership alone is not a replacement for resource permissions.

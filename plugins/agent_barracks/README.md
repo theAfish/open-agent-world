@@ -1,26 +1,31 @@
 # Agent Barracks
 
-A first-party Open Agent World plugin for callable Agent and team templates.
-Requires Plugin API 1.6. The source checkout loads it by default; an installed
-entry-point distribution takes precedence.
+Configured Agents in a Barracks are live summon blueprints. Drag an Agent into
+the Barracks as an ordinary container move. Its private equipment is cloned with
+each instance; authorized templateable external connections stay shared.
 
-1. Create an Agent Barracks card from the Agents deck.
-2. Drag an Agent or Legion into the barracks to open a prefilled capture form,
-   or open barracks and choose **Save selected as template**. Choose one entry
-   Agent and the equipped subgraph to copy. Original nodes stay in place.
-3. Give it a name and a useful **When to use** description. Decide which connected
-   resources to copy, share, or omit. Copied Sandboxes start with fresh workspaces.
-4. Equip **Summoning** on an Agent, then connect that skill to the
-   barracks using **Summon agents**. The Agent receives a tool that can list and
-   choose templates, summon them for a task, and follow up on retained instances.
-   Connecting to one template card grants access only to that template.
-5. Use **Try a template** to run from the UI. Review results, continue with the
-   same instance, stop it, or reclaim its nodes and workspaces.
+Equip **Summoning** on the calling Agent and connect it to the Barracks using
+**Summon agents**. The scoped tool can `list`, `summon`, `inspect`, `message`,
+`wait`, `stop` and `reclaim`. Private equipment follows the instance's lifecycle;
+reclaiming an instance never deletes its shared Sandbox or knowledge graph.
 
-To allow recursive summoning, explicitly share the barracks connection when
-saving the template. The entire root task shares the configured depth, concurrency
-and total-instance limits. Spatial membership does not grant extra permissions.
+Use `summon` with `agent_id`, a specific task `prompt` and `wait=false` to start
+independent work and receive an instance handle immediately. `wait` accepts
+`instance_ids`, `wait_mode=any|all` and `timeout_seconds` from 0 to 60. Timeout
+does not stop the work. An Agent's legacy default `wait=true` waits for the
+provider turn; explicit `wait` joins the durable Run's terminal state.
 
-The plugin owns its node documents, relationship and tool schema. The host owns
-subgraph restoration, capability checks, durable instance records and child Runs.
-See [the host contract](../../docs/plugins.md#callable-subgraphs-and-agent-barracks-plugin-api-16).
+New instances default to `context_mode=task`: they have a private context that
+is retained for follow-up turns. Supply objectives, inputs, output paths and
+acceptance criteria in the prompt. `context_mode=inherit` explicitly uses the
+calling context instead. `message` starts a follow-up turn on an available
+instance; it does not inject text into a busy provider.
+
+All recursive instances share root depth, concurrency and total-instance limits.
+Parent Run cancellation propagates to dependent children. Every invocation
+rechecks graph authorization, including after a bounded wait.
+
+MatCreator adds task-ledger dispatch through the host's existing work-source
+contract. See [MatCreator](../matcreator/README.md#delegating-research).
+The plugin requires Plugin API 1.22. The host owns Run lifecycle, resource
+restoration, capability checks and durable instance records.

@@ -15,7 +15,7 @@ test('workspace backup notice fits and remains visible after save', async ({ pag
   await expect(dialog.getByLabel('Default Workspace location', { exact: true })).toBeEnabled();
   await dialog.getByRole('button', { name: 'Save settings', exact: true }).click();
   await expect(dialog.getByText('Workspace settings saved.', { exact: true })).toBeVisible();
-  await expect(dialog.getByText(/please delete them manually/)).toBeVisible();
+  await expect(dialog.getByText(/please delete unused backup folders manually/)).toBeVisible();
   const panel = dialog.locator('.settings-workspace-backups');
   for (const width of [1280, 540]) {
     await page.setViewportSize({ width, height: 800 });

@@ -31,6 +31,45 @@ def profile(client, variables=None, name="Environment"):
     return card
 
 
+def test_global_environment_is_live_for_existing_and_new_sandboxes(runtime_client):
+    client, backend, native = runtime_client
+    agent, sandbox, *_ = setup_skill(client)
+    def save(variables):
+        response = client.put('/api/settings/sandbox', json={'environment_variables': variables})
+        assert response.status_code == 200, response.text
+        assert client.get('/api/settings/sandbox').json()['environment_variables'] == variables
+    def execute(agent, sandbox):
+        provider, definitions = tools(client, agent)
+        invoke(client, provider, agent, definitions['execute_command'], sandbox=sandbox['id'], argv=['cmd.exe'])
+        return native.last_environment
+    save({'REGION': 'global', 'SHARED_VALUE': ' one=two '})
+    assert execute(agent, sandbox)['REGION'] == 'global'
+    second_agent, second, *_ = setup_skill(client)
+    assert execute(second_agent, second)['SHARED_VALUE'] == ' one=two '
+    env = profile(client, {'region': 'profile'})
+    connect(client, env, sandbox, 'environment.default')
+    assert execute(agent, sandbox)['region'] == 'profile'
+    edit(client, sandbox, 'replace', {'variables': {'Region': 'local'}})
+    merged = execute(agent, sandbox)
+    assert merged['Region'] == 'local'
+    assert 'REGION' not in merged and 'region' not in merged
+    save({'REGION': 'updated'})
+    assert execute(second_agent, second)['REGION'] == 'updated'
+    assert 'SHARED_VALUE' not in native.last_environment
+    save({})
+    assert 'REGION' not in execute(second_agent, second)
+
+
+@pytest.mark.parametrize('variables', [
+    {'PATH': '/unsafe'}, {'OAW_TARGET_CONFIG_JSON': '{}'}, {'A': '1', 'a': '2'},
+    {'BAD-NAME': 'x'}, {'VALUE': 'nul\0'}, {'VALUE': 12}, {'VALUE': 'x' * 24000},
+])
+def test_global_environment_validation(client, variables):
+    response = client.put('/api/settings/sandbox', json={'environment_variables': variables})
+    assert response.status_code == 422, response.text
+    assert client.get('/api/settings/sandbox').json()['environment_variables'] == {}
+
+
 @pytest.mark.parametrize("node_type", ["environment", "compute-target"])
 def test_execution_configuration_nodes_accept_their_default_status(client, node_type):
     card = create_node(client, node_type, status="available")

@@ -1,7 +1,7 @@
 import type { PluginCatalog, WorldCard, WorldPosition, WorldSize } from "../types/world";
 import { cardIndex } from './cardIndex';
-import { NODE_SURFACE_SIZE, type NodeSurfaceLevel, type SurfaceSize } from "./nodeSurfaces";
-import { positionSurfaceAtNodeCenter } from "../canvas/nodeDisplacement";
+import { surfaceSizeFor, type NodeSurfaceLevel, type SurfaceSizes } from "./nodeSurfaces";
+import { nodePositionFromSurfacePosition, positionSurfaceAtNodeCenter } from "../canvas/nodeDisplacement";
 import { isShadow, shadowLayout, insideShadow } from "./shadowCollection";
 
 export const containerDefinition = (card: WorldCard, catalog: PluginCatalog) => catalog.node_types.find((type) => type.id === card.type)?.container;
@@ -28,11 +28,11 @@ export function containerDisplayOwners(cards: WorldCard[], catalog: PluginCatalo
 }
 
 /** Content bounds exclude the header; formation adds container insets outside them. */
-export function containerContentBounds(cards: WorldCard[], catalog: PluginCatalog, levels: Map<string, NodeSurfaceLevel>, workspaceSizes: Record<string, SurfaceSize> = {}) {
-  const sizes = containerSizes(cards, catalog, levels, workspaceSizes);
+export function containerContentBounds(cards: WorldCard[], catalog: PluginCatalog, levels: Map<string, NodeSurfaceLevel>, surfaceSizes: SurfaceSizes = {}) {
+  const sizes = containerSizes(cards, catalog, levels, surfaceSizes);
   const surfaces = cards.filter(card => !card.equipment).map(card => {
     const level = levels.get(card.id) ?? 'preview';
-    const size = sizes.get(card.id) ?? (level === 'workspace' ? workspaceSizes[card.id] : undefined) ?? NODE_SURFACE_SIZE[level];
+    const size = sizes.get(card.id) ?? surfaceSizeFor(card.id, level, surfaceSizes);
     const position = isContainer(card, catalog) ? card.position : positionSurfaceAtNodeCenter(card.position, level);
     return { ...position, ...size };
   });
@@ -58,6 +58,28 @@ export function descendants(cards: WorldCard[], id: string): WorldCard[] {
 export function ownedDescendants(cards: WorldCard[], id: string): WorldCard[] {
   return cards.filter((c) => c.parent_id === id || c.equipment?.owner_id === id).flatMap((c) => [c, ...ownedDescendants(cards, c.id)]);
 }
+// Expand many roots together: build ownership once and visit each member once.
+export function ownedCardIds(cards: WorldCard[], roots: Iterable<string>): Set<string> {
+  const children = new Map<string, string[]>();
+  for (const card of cards) {
+    for (const owner of new Set([card.parent_id, card.equipment?.owner_id])) {
+      if (!owner) continue;
+      const members = children.get(owner) ?? [];
+      members.push(card.id);
+      children.set(owner, members);
+    }
+  }
+  const ids = new Set(roots);
+  const pending = [...ids];
+  while (pending.length) {
+    for (const child of children.get(pending.pop()!) ?? []) {
+      if (ids.has(child)) continue;
+      ids.add(child);
+      pending.push(child);
+    }
+  }
+  return ids;
+}
 export function ancestors(cards: WorldCard[], card: WorldCard): WorldCard[] {
   const parentId = card.equipment?.owner_id ?? card.parent_id;
   const parent = parentId ? cardIndex(cards).get(parentId) : undefined;
@@ -74,18 +96,18 @@ export function acceptsMember(container: WorldCard, member: WorldCard, catalog: 
   return spec.member_traits.every((trait) => traits.includes(trait));
 }
 
-export function containerSizes(cards: WorldCard[], catalog: PluginCatalog, levels: Map<string, NodeSurfaceLevel>, workspaceSizes: Record<string, SurfaceSize> = {}) {
+export function containerSizes(cards: WorldCard[], catalog: PluginCatalog, levels: Map<string, NodeSurfaceLevel>, surfaceSizes: SurfaceSizes = {}) {
   const sizes = new Map<string, WorldSize>();
   for (const card of parentFirst(cards).reverse()) {
     const spec = containerDefinition(card, catalog);
     if (!spec) continue;
-    if(isShadow(card)){const layout=shadowLayout(card,cards,levels,catalog);sizes.set(card.id,{width:layout.width,height:layout.height});continue;}
+    if(isShadow(card)){const layout=shadowLayout(card,cards,levels,catalog,surfaceSizes);sizes.set(card.id,{width:layout.width,height:layout.height});continue;}
     const size = { width: Math.max(card.size.width, spec.min_size[0]), height: Math.max(card.size.height, spec.min_size[1]) };
     if (containerShowsWorkspace(card, catalog, levels.get(card.id))) { sizes.set(card.id, size); continue; }
     for (const member of cards.filter((node) => node.parent_id === card.id)) {
       const level = levels.get(member.id) ?? "preview";
       const nested = sizes.get(member.id);
-      const memberSize = nested ?? (level === "workspace" ? workspaceSizes[member.id] : undefined) ?? NODE_SURFACE_SIZE[level];
+      const memberSize = nested ?? surfaceSizeFor(member.id, level, surfaceSizes);
       const position = nested ? member.position : memberSurfacePosition(member, card, level, catalog);
       size.width = Math.max(size.width, position.x - card.position.x + memberSize.width + spec.content_inset[2]);
       size.height = Math.max(size.height, position.y - card.position.y + memberSize.height + spec.content_inset[3]);
@@ -96,11 +118,25 @@ export function containerSizes(cards: WorldCard[], catalog: PluginCatalog, level
 }
 
 /** Resize the frame around the current layout without rearranging its members. */
-export function resizeContainerLayout(cards: WorldCard[], catalog: PluginCatalog, levels: Map<string, NodeSurfaceLevel>, id: string, requested: WorldSize, workspaceSizes: Record<string, SurfaceSize> = {}) {
-  const resized = cards.map(card => card.id === id ? { ...card, size: requested } : card);
+export function resizeContainerLayout(cards: WorldCard[], catalog: PluginCatalog, levels: Map<string, NodeSurfaceLevel>, id: string, requested: WorldSize, surfaceSizes: SurfaceSizes = {}, position?: WorldPosition) {
+  const parent = cards.find(card => card.id === id)!;
+  const positions = new Map<string, WorldPosition>();
+  // Expanded members can be visually clamped under the old header. Preserve
+  // that visible placement when the frame's origin changes, without reflow.
+  if (position && !containerShowsWorkspace(parent, catalog, levels.get(id))) {
+    const moved = { ...parent, position };
+    for (const member of cards.filter(card => card.parent_id === id && !isContainer(card, catalog))) {
+      const level = levels.get(member.id) ?? 'preview';
+      const before = memberSurfacePosition(member, parent, level, catalog);
+      const after = memberSurfacePosition(member, moved, level, catalog);
+      if (before.x !== after.x || before.y !== after.y) positions.set(member.id, nodePositionFromSurfacePosition(before, level));
+    }
+  }
+  const resized = cards.map(card => card.id === id ? { ...card, size: requested, position: position ?? card.position }
+    : positions.has(card.id) ? { ...card, position: positions.get(card.id)! } : card);
   return {
-    size: containerSizes(resized, catalog, levels, workspaceSizes).get(id)!,
-    positions: new Map<string, WorldPosition>(),
+    size: containerSizes(resized, catalog, levels, surfaceSizes).get(id)!,
+    positions,
   };
 }
 

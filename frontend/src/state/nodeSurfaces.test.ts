@@ -5,15 +5,38 @@ import type { NodePresentation, NodeSurfaceLevel } from "../types/world";
 import { buildCardDraft } from './helpers';
 
 describe("node surface state", () => {
+  it('starts new container members at node level and preserves explicit choices', () => {
+    useNodeSurfaceStore.setState({ surfaceLevels: { saved: 'inspector' }, baseLevels: {} });
+    useNodeSurfaceStore.getState().syncCards([
+      { id: 'member', type: 'text', parent_id: 'room' },
+      { id: 'saved', type: 'text', parent_id: 'room' },
+      { id: 'outside', type: 'text' },
+    ], TEST_CATALOG);
+    expect(useNodeSurfaceStore.getState().surfaceLevels).toMatchObject({
+      member: 'node', saved: 'inspector', outside: 'preview',
+    });
+  });
+  it('migrates legacy workspace sizes and keeps resized details independent across collapse', async () => {
+    const migrated = await useNodeSurfaceStore.persist.getOptions().migrate!({ workspaceSizes: { a: { width: 1234, height: 876 } }, surfaceLevels: { a: 'workspace' } }, 3);
+    expect(migrated).toEqual({ surfaceSizes: { a: { workspace: { width: 1234, height: 876 } } }, surfaceLevels: { a: 'workspace' } });
+    const actions = useNodeSurfaceStore.getState();
+    actions.resizeSurface('a', 'inspector', { width: 530, height: 440 });
+    actions.resizeSurface('a', 'workspace', { width: 1400, height: 950 });
+    actions.openInspector('a');
+    actions.closeInspector('a');
+    actions.openInspector('a');
+    expect(useNodeSurfaceStore.getState().surfaceSizes.a).toEqual({ inspector: { width: 530, height: 440 }, workspace: { width: 1400, height: 950 } });
+  });
   it('restores template state to new IDs and preserves workspace size and compact return state', () => {
     const original = { id: 'source', ...buildCardDraft('agent', { x: 0, y: 0 }) };
-    useNodeSurfaceStore.setState({ surfaceLevels: { source: 'workspace' }, baseLevels: { source: 'node' }, workspaceSizes: { source: { width: 1250, height: 900 } } });
+    useNodeSurfaceStore.setState({ surfaceLevels: { source: 'workspace' }, baseLevels: { source: 'node' }, surfaceSizes: { source: { workspace: { width: 1250, height: 900 }, inspector: { width: 600, height: 500 } } } });
     const saved = useNodeSurfaceStore.getState().capturePresentation([original], TEST_CATALOG);
     const restored = { ...original, id: 'copy' };
     useNodeSurfaceStore.getState().restorePresentation([restored], TEST_CATALOG, { copy: saved.source });
     useNodeSurfaceStore.getState().syncCards([restored], TEST_CATALOG);
     expect(useNodeSurfaceStore.getState().surfaceLevels.copy).toBe('workspace');
-    expect(useNodeSurfaceStore.getState().workspaceSizes.copy).toEqual({ width: 1250, height: 900 });
+    expect(useNodeSurfaceStore.getState().surfaceSizes.copy.workspace).toEqual({ width: 1250, height: 900 });
+    expect(useNodeSurfaceStore.getState().surfaceSizes.copy.inspector).toEqual({ width: 600, height: 500 });
     useNodeSurfaceStore.getState().closeWorkspace('copy');
     useNodeSurfaceStore.getState().closeInspector('copy');
     expect(useNodeSurfaceStore.getState().surfaceLevels.copy).toBe('node');
@@ -21,6 +44,7 @@ describe("node surface state", () => {
   beforeEach(() => {
     useNodeSurfaceStore.setState({
       surfaceLevels: {},
+      surfaceSizes: {},
       presentations: {},
       baseLevels: {},
       dragging: false,

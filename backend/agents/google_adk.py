@@ -6,11 +6,13 @@ import asyncio
 import hashlib
 import importlib.metadata
 from collections.abc import AsyncIterator, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any
 
 from ._state import AgentRecord, validate_agent_config
 from .base import AgentCapabilityProvider, RuntimeProvider
+from .context import ContextBudget, ContextStore
 from .models import (
     AgentConfig,
     AgentDependencyError,
@@ -69,6 +71,7 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
         app_name: str = "open-agent-world",
         adk_bindings: _AdkBindings | None = None,
         model_connections: Any = None,
+        context_store: ContextStore | None = None,
     ) -> None:
         self._provider = capability_provider
         self._app_name = app_name
@@ -79,6 +82,7 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
         self._records_lock = asyncio.Lock()
         self._litellm_connection: dict[str, str] = {}
         self.model_connections = model_connections
+        self.context_store = context_store
 
     def configure_litellm_connection(
         self, *, api_base: str | None = None, api_key: str | None = None
@@ -147,12 +151,38 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
         context: InvocationContext,
         runtime_input: RuntimeInput,
     ) -> AsyncIterator[AgentEvent]:
+        if self.context_store is None:
+            async with aclosing(self._execute(config, context, runtime_input)) as events:
+                async for event in events:
+                    yield event
+            return
+        # Different sessions may run together; one session x Agent must serialize
+        # checkpoint reads/updates even if the Agent permits concurrent Runs.
+        async with self.context_store.lock(context.agent_id, context.context_id or ""):
+            async with aclosing(self._execute(config, context, runtime_input)) as events:
+                async for event in events:
+                    yield event
+
+    async def _execute(
+        self,
+        config: AgentConfig,
+        context: InvocationContext,
+        runtime_input: RuntimeInput,
+    ) -> AsyncIterator[AgentEvent]:
         agent_id = context.agent_id
         prompt = runtime_input.prompt
         if not isinstance(prompt, str) or not prompt.strip():
             raise AgentStateError("prompt must not be empty")
         record = await self._record(agent_id)
         session_id = await self._context_session(record, context.context_id)
+        if self.context_store is not None:
+            # The durable OAW checkpoint owns replay. Keep ADK's transient event
+            # log bounded between invocations without discarding session state.
+            session_args = dict(app_name=self._app_name, user_id=self._user_id(agent_id), session_id=session_id)
+            previous = await self._sessions.get_session(**session_args)
+            if previous and previous.events:
+                await self._sessions.delete_session(**session_args)
+                await self._sessions.create_session(**session_args, state=previous.state)
 
         async with record.lock:
             record.config = config
@@ -160,17 +190,30 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
         run_id = context.run_id
         final_text = ""
         run_secret = None
+        managed = None
         try:
             definitions = tuple(await self._provider.list_tools(agent_id))
             tools = build_scoped_tool_callables(self._provider, agent_id, definitions)
             selected_model = self._adk_model(record.config.model)
             run_secret = getattr(selected_model, "_additional_args", {}).get("api_key")
+            context_options = {}
+            if self.context_store is not None:
+                from google.adk.models import LLMRegistry
+                from .context import ManagedContext
+                model = LLMRegistry.new_llm(selected_model) if isinstance(selected_model, str) else selected_model
+                selected_model = model
+                managed = ManagedContext(self.context_store, agent_id, context.context_id or "",
+                                         run_id, model, prompt.strip(),
+                                         budget=self._context_budget(record.config.model, model.model))
+                context_options = {"before_model_callback": managed.before_model,
+                                   "after_model_callback": managed.after_model, "include_contents": "none"}
             agent = self._adk.Agent(
                 name=self._adk_agent_name(agent_id),
                 description=record.config.name,
                 model=selected_model,
                 instruction=record.config.system_instruction,
                 tools=tools,
+                **context_options,
             )
             app = self._adk.App(name=self._app_name, root_agent=agent)
             message = self._adk.types.Content(
@@ -180,17 +223,20 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
             async with self._adk.Runner(
                 app=app, session_service=self._sessions
             ) as runner:
-                async for event in runner.run_async(
+                async with aclosing(runner.run_async(
                     user_id=self._user_id(agent_id),
                     session_id=session_id,
                     new_message=message,
-                ):
-                    async for translated in self._translate_event(
-                        record, run_id, event
-                    ):
-                        if translated.type == AgentEventType.MESSAGE:
-                            final_text = str(translated.payload.get("text", final_text))
-                        yield translated
+                )) as events:
+                    async for event in events:
+                        if managed is not None:
+                            managed.observe(event)
+                        async for translated in self._translate_event(
+                            record, run_id, event
+                        ):
+                            if translated.type == AgentEventType.MESSAGE:
+                                final_text = str(translated.payload.get("text", final_text))
+                            yield translated
 
             yield AgentEvent(
                 agent_id,
@@ -282,6 +328,13 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
             )
             self._context_sessions[key] = session.id
             return session.id
+
+    def _context_budget(self, configured_model: str, resolved_model: str) -> ContextBudget:
+        limits = self.model_connections.context_limits(configured_model) if self.model_connections else None
+        if limits is not None:
+            window, output = limits
+            return ContextBudget(window, output, max_output=output)
+        return ContextBudget.for_model(resolved_model)
 
     def _adk_model(self, configured_model: str) -> Any:
         """Return a configured LiteLlm object only when ADK selects that adapter."""

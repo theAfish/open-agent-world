@@ -1,0 +1,17 @@
+.deployment-login { min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: radial-gradient(ellipse at top, var(--surface-raised), var(--canvas)); }
+.deployment-login form { width: min(420px, 100%); display: grid; gap: 18px; border: 1px solid var(--line); border-radius: 24px; padding: 34px; background: var(--surface-solid); box-shadow: 0 16px 60px var(--shadow); }
+.deployment-login h1 { margin: 0; font-size: 26px; overflow-wrap: anywhere; }
+.deployment-login p { margin: 0; color: var(--ink-soft); line-height: 1.6; }
+.deployment-login label, .publish-dialog > label { display: grid; gap: 8px; }
+.deployment-login input, .publish-dialog input:not([type=checkbox]), .publish-dialog select { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-raised); color: var(--ink); }
+.deployment-error { margin: 10px; padding: 10px 12px; background: var(--danger-soft); border-radius: 8px; color: var(--danger) !important; font-size: 13px; overflow-wrap: anywhere; }
+.publish-overlay { position: absolute; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: #24221e60; border-radius: inherit; }
+.publish-dialog { width: min(680px, 100%); max-height: 100%; overflow: auto; background: var(--surface-solid); color: var(--ink); padding: 24px; border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 20px 60px var(--shadow-deep); display: grid; gap: 14px; }
+.publish-dialog header { display: flex; align-items: center; justify-content: space-between; }
+.publish-dialog h2, .publish-dialog h3, .publish-dialog p { margin: 0; }
+.publish-dialog p, .publish-dialog li { line-height: 1.65; }
+.publish-dialog .publish-checkbox { display: flex; align-items: center; gap: 8px; }
+.publish-hint { font-size: 12px; color: var(--ink-soft); }
+.publish-next { display: grid; gap: 12px; border-top: 1px solid var(--line); padding-top: 16px; }
+.publish-next pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: var(--surface-soft); border-radius: 8px; user-select: text; }
+@media (max-width: 760px) { .publish-dialog { padding: 16px; } }

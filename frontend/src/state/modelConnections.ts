@@ -1,6 +1,12 @@
 import type { ModelSettings } from "./modelSettings";
 
-export interface ConfiguredModel { id: string; name: string; model_id: string; enabled: boolean }
+export const DEFAULT_CONTEXT_WINDOW = 128_000;
+export const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
+export interface ConfiguredModel {
+  id: string; name: string; model_id: string; enabled: boolean;
+  // Older catalog snapshots may not have these fields yet.
+  context_window?: number; max_output_tokens?: number;
+}
 export interface ModelConnection {
   id: string; name: string; adapter: "openai" | "anthropic" | "gemini" | "legacy";
   base_url: string; enabled: boolean; auth_mode: "api_key" | "none" | "environment";
@@ -23,6 +29,7 @@ export function importLegacyModels(catalog: ModelCatalog, legacy: ModelSettings)
   };
   return { ...catalog, connections: [{ ...connection, models: legacy.models.map(model => ({
     id: crypto.randomUUID(), name: model, model_id: model, enabled: true,
+    context_window: DEFAULT_CONTEXT_WINDOW, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
   })) }] };
 }
 

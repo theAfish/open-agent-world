@@ -6,6 +6,7 @@ import { useWorldStore, mergeCards } from '../state/worldStore';
 import { t } from '../i18n';
 import { hasDefaultModelConfiguration, hasModelConfiguration } from '../state/modelConnections';
 import { useCardLibrary } from '../state/cardLibrary';
+import { useLegionWorkspace } from '../state/legionWorkspace';
 import { NODE_SURFACE_SIZE, useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { beginGlueEdit, persistGlue, useGlueStore, type GlueBox } from '../state/glue';
 import { observeInteractions, type WorldInteraction } from '../state/interactions';
@@ -14,7 +15,7 @@ import { getConnectionOptions } from '../state/relationships';
 import { STEPS, stepComplete, type Baseline, type Demonstration, type Observation, type Role, type Target } from './steps';
 import type { LegionSummary, WorldCard, WorldSnapshot, WorldPosition } from '../types/world';
 
-const TYPES: Record<Role, string> = { demo: 'text', practice: 'text', agent: 'agent', conversation: 'conversation', sandbox: 'sandbox', glueA: 'text', glueB: 'text', ministerRole: 'core.minister-role', minister: 'agent' };
+const TYPES: Record<Role, string> = { demo: 'text', practice: 'text', agent: 'agent', conversation: 'conversation', sandbox: 'sandbox', glueA: 'text', glueB: 'text', ministerRole: 'core.minister-role', minister: 'agent', legion: 'legion' };
 export interface DemoRecord { id: string; name: string; created_at?: string; contentRevision?: number }
 export interface TutorialSession {
   id: string;
@@ -77,7 +78,7 @@ function saveSession(patch: Partial<TutorialSession>) {
 function observation(): Observation {
   const w = world(), surfaces = useNodeSurfaceStore.getState();
   return { cards: w.cards, edges: w.edges, selected: w.selectedCardIds, surfaces: surfaces.surfaceLevels,
-    bonds: useGlueStore.getState().bonds, viewport: w.viewport, settingsOpen: w.settingsOpen, library: useCardLibrary.getState(),
+    bonds: useGlueStore.getState().bonds, viewport: w.viewport, settingsOpen: w.settingsOpen, library: useCardLibrary.getState(), legionWorkspaceId: useLegionWorkspace.getState().activeId,
     settled: !surfaces.dragging && !w.positionCommitBusy && !w.historyBusy && w.syncState === 'online',
     deleted: [...Object.keys(w.cardTombstones), ...w.undoStack.flatMap(op => op.kind === 'cards-deleted' ? op.cards.map(card => card.id) : [])],
   };
@@ -95,7 +96,7 @@ function goNext() {
   transitioning = true;
   try {
     // Close only this tutorial's working surfaces, at chapter boundaries the user chose.
-    if (['conversation', 'sandbox', 'glue-demo', 'minister-card', 'minister'].includes(next.id)) {
+    if (['conversation', 'sandbox', 'glue-demo', 'minister-card', 'minister', 'legion-form'].includes(next.id)) {
       for (const id of Object.values(state().session?.refs ?? {})) useNodeSurfaceStore.getState().dismiss(id);
     }
     if (next.id === 'minister' && state().session?.refs.agent) void visuals?.focus([state().session!.refs.agent!, state().session!.refs.ministerRole!].filter(Boolean));
@@ -104,6 +105,11 @@ function goNext() {
     saveSession({ step: next.id, completedDemo: undefined });
     useTutorialStore.setState(s => ({ error: undefined, target: undefined, ready: false, celebration: s.celebration + (step.expects ? 1 : 0) }));
     rebase();
+    if (next.id === 'legion-form') {
+      world().selectCards([], { syncCanvas: true });
+      void visuals?.focus(['agent', 'conversation', 'sandbox'].flatMap(role => state().session?.refs[role as Role] ?? []));
+    }
+    if (next.id === 'legion-open' && cardFor('legion')) void visuals?.focus([cardFor('legion')!.id]);
     if (next.expects === 'select' && next.role) {
       world().selectCards(world().selectedCardIds.filter(id => id !== state().session?.refs[next.role!]), { syncCanvas: true });
     }
@@ -126,6 +132,12 @@ function observe(event?: WorldInteraction) {
     if (card) saveSession({ refs: { ...s.session.refs, [step.role]: card.id } });
   }
   if (step.id === 'minister' && cardFor('agent')?.minister) saveSession({ refs: { ...state().session!.refs, minister: cardFor('agent')!.id } });
+  if (step.id === 'legion-form') {
+    const parentId = cardFor('agent')?.parent_id;
+    if (parentId && cardFor('conversation')?.parent_id === parentId && cardFor('sandbox')?.parent_id === parentId
+      && world().cards.some(card => card.id === parentId && card.type === 'legion') && s.session.refs.legion !== parentId)
+      saveSession({ refs: { ...state().session!.refs, legion: parentId } });
+  }
   const complete = stepComplete(step, state().session!.refs, baseline, observation(), event);
   if (step.review) { if (state().ready !== complete) useTutorialStore.setState({ ready: complete }); }
   else if (complete) goNext();
@@ -339,7 +351,9 @@ export const tutorial = {
       if (state().view === 'welcome' && !state().busy && world().cards.length) void tutorial.directly();
       observe(); void checkWelcome();
     }),
-      useNodeSurfaceStore.subscribe(() => observe()), useCardLibrary.subscribe(() => observe()), observeInteractions(observe)];
+      useNodeSurfaceStore.subscribe(() => observe()), useCardLibrary.subscribe(() => observe()),
+      useLegionWorkspace.subscribe((next, previous) => observe(previous.activeId && !next.activeId
+        ? { type: 'legion-workspace-closed', cardId: previous.activeId } : undefined)), observeInteractions(observe)];
     void checkWelcome();
     return () => { unsubscribers.forEach(off => off()); if (visuals === bridge) visuals = undefined; };
   },
@@ -435,7 +449,8 @@ export const tutorial = {
       }
       // Refresh missing subjects from the authoritative world before deciding a
       // replacement is necessary. Panning/culling is not deletion.
-      const needed: Role[] = step.action === 'connect' || step.expects === 'connect' ? ['agent', step.action === 'connect' ? 'conversation' : 'sandbox']
+      const needed: Role[] = step.id.startsWith('legion-') ? ['agent', 'conversation', 'sandbox', ...(step.id === 'legion-form' ? [] : ['legion' as const])]
+        : step.action === 'connect' || step.expects === 'connect' ? ['agent', step.action === 'connect' ? 'conversation' : 'sandbox']
         : ['glue', 'unglue'].includes(step.action ?? '') || step.id.startsWith('glue') ? ['glueA', 'glueB'] : role ? [role] : [];
       if (needed.some(item => state().session?.refs[item] && !cardFor(item))) {
         const snapshot = await worldApi.getWorld();
@@ -444,6 +459,13 @@ export const tutorial = {
         useWorldStore.setState(s => ({ cards: mergeCards(s.cards, snapshot.nodes.filter(card => ids.has(card.id)), s.cardTombstones) }));
       }
       const absent = needed.find(item => !cardFor(item));
+      if (step.id.startsWith('legion-') && (!absent || absent === 'legion')) {
+        if (absent === 'legion') { saveSession({ step: 'legion-form' }); rebase(); }
+        if (!cardFor('legion') || step.id === 'legion-form') await visuals?.focus(['agent', 'conversation', 'sandbox'].map(role => requireCard(role as Role).id));
+        else if (['legion-layout', 'legion-return'].includes(step.id)) useLegionWorkspace.getState().open(cardFor('legion')!.id);
+        else await visuals?.focus([cardFor('legion')!.id]);
+        return;
+      }
       if (absent && absent !== role) {
         const placement = STEPS.find(item => item.expects === 'place' && item.role === absent);
         saveSession({ step: placement?.id ?? (absent === 'minister' ? 'minister' : 'glue-demo') });

@@ -87,7 +87,7 @@ test('MatterViz renders Conversation structures, pins selection, rotates locally
     await page.mouse.move(heading.x + 210, heading.y + 65, { steps: 8 });
     await page.mouse.up();
     expect((await display.boundingBox())!.y).toBeGreaterThan(oldWindow.y + 20);
-    const grip = page.locator(`[data-card-id="${viewer.id}"] .container-resize-arc`);
+    const grip = page.locator(`[data-resize-node="${viewer.id}"][data-resize-corner="bottom-right"]`);
     await expect(grip).toBeVisible();
     const handle = (await grip.boundingBox())!;
     const oldWidth = await display.evaluate(el => el.clientWidth);

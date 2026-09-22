@@ -3,10 +3,11 @@ from __future__ import annotations
 import re
 import keyword
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator, TypeAdapter
+from backend.plugins.state import PluginStateSpec, LEGACY_STATE
 
 from backend.errors import GraphValidationError, PluginCompatibilityError, PluginUnavailableError
 from backend.plugins.lifecycle import NodeLifecycleHandler
@@ -23,10 +24,11 @@ if TYPE_CHECKING:
 
 
 from backend.plugins.documents import NodeDocumentDefinition
+from backend.plugins.deployment import NodeDeploymentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.19"
+PLUGIN_API_VERSION = "1.23"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -52,6 +54,8 @@ class PluginDescriptor(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=500)
     python_requirements: tuple[str, ...] = ()
+    requires_plugins: tuple[str, ...] = ()
+    state: PluginStateSpec | None = None
 
 
 class PackDefinition(BaseModel):
@@ -69,6 +73,7 @@ class PackDefinition(BaseModel):
 class PackCatalogItem(PackDefinition):
     plugin_id: str
     artwork_url: str | None = None
+    source: Literal["bundled", "installed"] = "bundled"
 
 
 class Plugin(Protocol):
@@ -139,6 +144,8 @@ class NodeTypeCatalogItem(BaseModel):
     traits: list[str]
     surfaces: dict[str, bool]
     presentation: NodePresentation
+    state: PluginStateSpec = LEGACY_STATE
+    has_scoped_state: bool = False
     has_document: bool = False
     transformations: dict[str, dict[str, Any]] = Field(default_factory=dict)
     has_execution: bool = False
@@ -149,6 +156,7 @@ class NodeTypeCatalogItem(BaseModel):
     user_creatable: bool
     templateable: bool
     deletion_warning: str | None = None
+    deployment: dict[str, Any] | None = None
 
 
 class RelationshipCatalogItem(BaseModel):
@@ -175,6 +183,7 @@ class PluginCatalog(BaseModel):
     node_types: list[NodeTypeCatalogItem]
     relationships: list[RelationshipCatalogItem]
     packs: list[PackCatalogItem] = Field(default_factory=list)
+    frontend_modules: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,6 +280,8 @@ class NodeTypeDefinition:
     summoning: NodeSummoningDefinition | None = None
     # Ordinary creation is autonomous; plugins explicitly mark sensitive initialization.
     canvas_create_requires_confirmation: bool = False
+    deployment: NodeDeploymentDefinition | None = None
+    state: PluginStateSpec | None = None
 
     def resolved_presentation(self) -> NodePresentation:
         if self.presentation is not None:
@@ -306,6 +317,8 @@ class NodeTypeDefinition:
             presentation=presentation,
             default_config=default_config,
             config_schema=self.config_model.model_json_schema(),
+            state=self.state or LEGACY_STATE,
+            has_scoped_state=self.state is not None and self.state.mode == "scoped",
             has_document=self.document is not None,
             transformations={key: {"label": item.label, "source_traits": sorted(item.source_traits)} for key, item in self.document.transformations.items()} if self.document else {},
             has_execution=self.execution is not None,
@@ -314,6 +327,7 @@ class NodeTypeDefinition:
             user_creatable=self.user_creatable,
             templateable=self.templateable,
             deletion_warning=self.deletion_warning,
+            deployment=self.deployment.model_dump(mode="json") if self.deployment else None,
         )
 
 
@@ -433,6 +447,8 @@ class PluginRegistry:
 
     def __init__(self) -> None:
         self.runtime_requirements: dict[str, tuple[str, ...]] = {}
+        self.installed_packs: dict[str, Any] = {}
+        self.frontend_modules: dict[str, dict[str, Any]] = {}
         self._plugins: dict[str, PluginDescriptor] = {}
         self._nodes: dict[str, NodeTypeDefinition] = {}
         self._relationships: dict[str, RelationshipDefinition] = {}
@@ -447,7 +463,7 @@ class PluginRegistry:
         self._legion_presets: dict[str, LegionPresetDefinition] = {}
         self._disabled: set[str] = set()
 
-    def install(self, plugin: Plugin) -> None:
+    def install(self, plugin: Plugin, *, distribution=None) -> None:
         descriptor = getattr(plugin, "descriptor", None)
         if not isinstance(descriptor, PluginDescriptor):
             raise TypeError("plugin descriptor must be a PluginDescriptor")
@@ -459,12 +475,32 @@ class PluginRegistry:
             )
         if descriptor.id in self._plugins:
             raise ValueError(f"plugin {descriptor.id!r} is already installed")
+        for dependency in descriptor.requires_plugins:
+            self.validate_identifier(dependency, "plugin dependency")
+            if not self.has_plugin(dependency):
+                raise PluginCompatibilityError(
+                    f"plugin {descriptor.id!r} requires plugin {dependency!r} to be installed first"
+                )
         register = getattr(plugin, "register", None)
         if not callable(register):
             raise TypeError(f"plugin {descriptor.id!r} must define register(registration)")
 
         staged = PluginRegistration(descriptor)
         register(staged)
+        if distribution is not None:
+            if set(staged.packs) != {distribution.id}:
+                raise ValueError("An external Pack must register exactly one Pack with its distribution ID")
+            if any(not key.startswith(distribution.id + ".") for key in staged.nodes):
+                raise ValueError("External card IDs must belong to the Pack namespace")
+            if any(card not in staged.nodes for card in staged.packs[distribution.id].cards):
+                raise ValueError("An external Pack may include only its own cards")
+        for key, node in tuple(staged.nodes.items()):
+            policy = node.state if node.state is not None else descriptor.state
+            if policy is not None:
+                policy = TypeAdapter(PluginStateSpec).validate_python(policy)
+                if policy.mode == "none" and (node.document or node.execution):
+                    raise ValueError("Stateless cards cannot declare persistent documents or execution")
+                staged.nodes[key] = replace(node, state=policy)
         if bool(staged.nodes) and not staged.packs:
             staged.register_pack(PackDefinition(
                 id=f"{descriptor.id}.default", name=descriptor.name or descriptor.id,
@@ -476,7 +512,7 @@ class PluginRegistry:
         self._plugins[descriptor.id] = descriptor
         self._commit_owned("legion_preset", descriptor.id, self._legion_presets, staged.legion_presets)
         self._commit_owned("pack", descriptor.id, self._packs, {
-            key: PackCatalogItem(**pack.model_dump(), plugin_id=descriptor.id,
+            key: PackCatalogItem(**pack.model_dump(), plugin_id=descriptor.id, source="installed" if distribution else "bundled",
                 artwork_url=f"/api/plugins/{descriptor.id}/assets/{pack.artwork_asset}" if pack.artwork_asset else None)
             for key, pack in staged.packs.items()
         })
@@ -660,6 +696,10 @@ class PluginRegistry:
                     raise ValueError("resource actions require a valid name and handler")
                 if action.capability_kind and action.capability_kind not in staged.capability_handlers:
                     raise ValueError("resource action capabilities must be owned by the same plugin")
+            if definition.deployment is not None:
+                if not isinstance(definition.deployment, NodeDeploymentDefinition):
+                    raise TypeError("deployment must be a NodeDeploymentDefinition")
+                definition.deployment.validate_node(definition)
             if definition.document is not None:
                 document = definition.document
                 document.model()
@@ -698,7 +738,7 @@ class PluginRegistry:
                     raise ValueError("executable nodes require a document")
                 if not all(callable(fn) for fn in (execution.items, execution.apply_outcome, execution.policy)):
                     raise TypeError("execution callbacks must be callable")
-                if execution.executor_relationship not in staged.relationships:
+                if not execution.summoning and execution.executor_relationship not in staged.relationships:
                     raise ValueError("executor relationship must be owned by the same plugin")
                 if execution.control_capability_kind and execution.control_capability_kind not in staged.capability_handlers:
                     raise ValueError("execution control capability must be owned by the same plugin")
@@ -975,6 +1015,7 @@ class PluginRegistry:
         return PluginCatalog(
             plugins=list(self._plugins.values()),
             packs=list(self._packs.values()),
+            frontend_modules={key: value for key, value in self.frontend_modules.items() if self.is_enabled(key)},
             node_types=[
                 item.catalog_item(self.node_type_owner_id(item.id))
                 for item in self._nodes.values()

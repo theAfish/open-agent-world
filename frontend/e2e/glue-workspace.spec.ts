@@ -21,7 +21,7 @@ test('repairs a flattened glued workspace and enforces its resize minimum', asyn
     await expect(card).toHaveClass(/is-glued/);
     await expect.poll(async () => (await (await request.get('/api/canvas/glue')).json()).boxes[a].height).toBe(420);
     await card.click({ modifiers: ['Shift'], position: { x: 40, y: 15 } });
-    const grip = page.locator('.glue-resize.bottom-left');
+    const grip = page.locator('.surface-resize-arc.bottom-left');
     await expect(grip).toBeVisible();
     // An unrelated card event used to refresh persisted geometry mid-gesture.
     const start = (await grip.boundingBox())!;
