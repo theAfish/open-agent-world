@@ -55,6 +55,12 @@ Plugin API 1.21 adds opt-in deployment of existing plugin Workspace views and se
 
 Start with the installable [Greeter example](../examples/plugins/greeter/README.md), then consult [package discovery](#package-structure-and-discovery), [the public API](#public-plugin-api), and the contracts below.
 
+Plugin API 1.20 adds an opt-in, transient plugin visual-capture path. A trusted
+plugin may register an active workspace renderer with the frontend host; the
+backend sends its pixels to a model only through an explicitly granted visual
+capability. Screenshots are revision-checked and never stored in node documents
+or runtime logs.
+
 Plugin API 1.16 adds `NodePresentation` for supported surfaces, initial appearance,
 and compact-card opening behavior (see the node definition contract below). It also
 lets a trusted Agent runtime opt into an OAW-managed model connection resolver. The

@@ -27,6 +27,10 @@ class ModelEntry(BaseModel):
     context_window: int = Field(default=DEFAULT_CONTEXT_WINDOW, strict=True, ge=1024, le=2_147_483_647)
     max_output_tokens: int = Field(default=DEFAULT_MAX_OUTPUT_TOKENS, strict=True, ge=1, le=2_147_483_646)
 
+    # Providers and OpenAI-compatible proxies cannot be identified reliably
+    # from a model name. This explicit declaration keeps image tools opt-in.
+    supports_images: bool = False
+
     @model_validator(mode="after")
     def validate_limits(self):
         if self.max_output_tokens >= self.context_window:
@@ -234,7 +238,14 @@ class ModelConnectionStore:
             if not reference:
                 raise ResourceValidationError("Choose a default model and configure its connection in Settings / Models.")
         adapter, model_id, base_url, api_key = self.resolve(reference)
-        return RuntimeModelConnection(adapter, model_id, base_url, api_key)
+        with self.database.locked() as db:
+            raw = self._read(db)
+        supports_images = any(
+            MODEL_REF_PREFIX + model["id"] == reference and bool(model.get("supports_images", False))
+            for connection in raw["connections"]
+            for model in connection["models"]
+        )
+        return RuntimeModelConnection(adapter, model_id, base_url, api_key, supports_images=supports_images)
 
 
 def _provider_environment_variable(adapter: str) -> str:

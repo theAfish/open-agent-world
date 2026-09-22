@@ -9,6 +9,7 @@ import type { WorldCard } from "../types/world";
 import { pluginView } from "./registry";
 import type { PluginDocumentChange, PluginSlot, PluginViewProps } from "./sdk";
 import { useWorkspaceAccess } from "../workspace/WorkspaceAccess";
+import { registerPluginVisualCapture } from "./visualCapture";
 
 function subscribeToDocumentChanges(listener: (change: PluginDocumentChange) => void): () => void {
   // Events are prepended and bounded by the world store. Snapshot existing IDs
@@ -78,6 +79,7 @@ export function PluginSurface({ card, slot, level, children }: {
     },
     runAgent: (nodeId, prompt) => useWorldStore.getState().runAgent(nodeId, prompt),
     onDocumentChange: subscribeToDocumentChanges,
+    registerVisualCapture: (captureKind, capture) => registerPluginVisualCapture(card.id, captureKind, capture),
     readFile: (reference, signal) => worldApi.readFilePreview(card.id, reference, signal),
     openFile: (reference, name) => useOpenFiles.getState().open({ ...reference, source_id: card.id }, name),
     clearOpenedFile: () => useOpenFiles.getState().clear(card.id),

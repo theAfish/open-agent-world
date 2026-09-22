@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import type { PluginVisualCapture, PluginVisualCaptureRequest, PluginVisualCaptureResult } from "./visualCapture";
 import type { NodeSurfaceLevel, NodeTypeCatalogItem, WorldCard } from "../types/world";
 export type { NodePresentation, NodeSurfaceLevel, PluginStateSpec } from "../types/world";
 export { SchemaFields } from "./SchemaFields";
@@ -52,11 +53,18 @@ export interface PluginViewProps {
     runAgent(nodeId: string, prompt: string): Promise<void>;
     /** Observe future node-document mutations received by the OAW event stream. */
     onDocumentChange(listener: (change: PluginDocumentChange) => void): () => void;
+    /**
+     * Register a transient capture of this card's active plugin workspace.
+     * The host sends it only after the backend has authorized a matching
+     * visual capability; image bytes are never persisted in the document.
+     */
+    registerVisualCapture(captureKind: string, capture: PluginVisualCapture): () => void;
     readFile(reference: import("../state/openFiles").FileReference, signal?: AbortSignal): Promise<{ name: string; size_bytes: number; data: string }>;
     openFile(reference: import("../state/openFiles").FileReference, name: string): void;
     clearOpenedFile(): void;
   };
 }
+export type { PluginVisualCaptureRequest, PluginVisualCaptureResult };
 export interface FrontendPlugin {
   apiVersion: 1;
   views: Record<string, ComponentType<PluginViewProps>>;

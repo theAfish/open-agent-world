@@ -28,6 +28,7 @@ class RuntimeModelConnection:
     model_id: str
     base_url: str
     api_key: str | None = field(repr=False)
+    supports_images: bool = False
 
 
 class AgentEventType(StrEnum):

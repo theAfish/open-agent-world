@@ -6,6 +6,8 @@ export interface ConfiguredModel {
   id: string; name: string; model_id: string; enabled: boolean;
   // Older catalog snapshots may not have these fields yet.
   context_window?: number; max_output_tokens?: number;
+  // Image input is opt-in because a model name alone is not reliable evidence.
+  supports_images?: boolean;
 }
 export interface ModelConnection {
   id: string; name: string; adapter: "openai" | "anthropic" | "gemini" | "legacy";
@@ -29,7 +31,7 @@ export function importLegacyModels(catalog: ModelCatalog, legacy: ModelSettings)
   };
   return { ...catalog, connections: [{ ...connection, models: legacy.models.map(model => ({
     id: crypto.randomUUID(), name: model, model_id: model, enabled: true,
-    context_window: DEFAULT_CONTEXT_WINDOW, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
+    supports_images: false, context_window: DEFAULT_CONTEXT_WINDOW, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
   })) }] };
 }
 

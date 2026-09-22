@@ -952,8 +952,8 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .connection-detail-title, .connection-model-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .connection-detail h4 { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
 .connection-model-heading { margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
-.connection-model-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px; gap: 8px; align-items: end; }
-.connection-model-actions { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-height: 34px; }
+.connection-model-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(128px, max-content); gap: 8px; align-items: end; }
+.connection-model-actions { display: flex; align-items: center; justify-content: flex-start; gap: 7px; min-height: 34px; white-space: nowrap; }
 .connection-model-limits { grid-column: 1 / -1; min-width: 0; margin-bottom: 10px; }
 .connection-model-limits > summary { width: fit-content; color: var(--ink-soft); cursor: pointer; font-size: 12px; padding: 4px 0; }
 .connection-model-limits[open] > summary { margin-bottom: 8px; }

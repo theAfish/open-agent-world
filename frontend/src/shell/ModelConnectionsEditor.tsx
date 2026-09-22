@@ -113,7 +113,7 @@ export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
           </div>}
         </div>
         <div data-tutorial="model-list">
-        <div className="connection-model-heading"><h4>{t("Models")}</h4><button type="button" className="secondary-button" disabled={connection.models.length >= 100} onClick={() => update({ models: [...connection.models, { id: crypto.randomUUID(), name: "", model_id: "", enabled: true, context_window: DEFAULT_CONTEXT_WINDOW, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS }] })}><Plus size={13} /> {t("Add model")}</button></div>
+        <div className="connection-model-heading"><h4>{t("Models")}</h4><button type="button" className="secondary-button" disabled={connection.models.length >= 100} onClick={() => update({ models: [...connection.models, { id: crypto.randomUUID(), name: "", model_id: "", enabled: true, supports_images: false, context_window: DEFAULT_CONTEXT_WINDOW, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS }] })}><Plus size={13} /> {t("Add model")}</button></div>
         {!connection.models.length && <p className="settings-description">{t("Add a model using the model ID supplied by your service.")}</p>}
         {connection.models.map((model, index) => <div className="connection-model-row" key={model.id}>
           <label className="field-label"><span>{t("Display name")}{value.default_model === modelRef(model.id) && <Star className="model-default-icon" size={12} role="img" aria-label={t("Default for new agents")}><title>{t("Default for new agents")}</title></Star>}</span><input aria-label={t("Model {v0} display name", { v0: String(index + 1) })} required maxLength={120} value={model.name}
@@ -122,6 +122,8 @@ export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
             placeholder={t("Service model ID")} spellCheck={false} onChange={e => update({ models: connection.models.map(m => m.id === model.id ? { ...m, model_id: e.target.value } : m) })} /></label>
           <div className="connection-model-actions"><label className="settings-check"><input type="checkbox" aria-label={t("Enable model {v0}", { v0: String(index + 1) })} checked={model.enabled}
             onChange={e => update({ models: connection.models.map(m => m.id === model.id ? { ...m, enabled: e.target.checked } : m) })} />{t("On")}</label>
+          <label className="settings-check"><input type="checkbox" aria-label={t("Model {v0} supports image input", { v0: String(index + 1) })} checked={model.supports_images ?? false}
+            onChange={e => update({ models: connection.models.map(m => m.id === model.id ? { ...m, supports_images: e.target.checked } : m) })} />{t("Vision")}</label>
           {!saved.connections.some(c => c.models.some(m => m.id === model.id)) && <button type="button" className="icon-button" aria-label={t("Remove model {v0}", { v0: String(index + 1) })} onClick={() => update({ models: connection.models.filter(m => m.id !== model.id) })}><Trash2 size={13} /></button>}
           </div>
           <details className="connection-model-limits" onInvalid={event => { event.currentTarget.open = true; }}>

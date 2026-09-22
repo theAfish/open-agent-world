@@ -48,6 +48,13 @@ class _CapabilityContext:
         return await invoke_resource_action(self.services, capability.target_id, action,
             ResourceActionRequest(arguments=arguments), capability=capability)
 
+    async def capture_plugin_view(self, capability, *, capture_kind, required_capability_kind, capture_options=None):
+        from backend.visual_observation import observe_plugin_view
+        return await observe_plugin_view(
+            self.services, capability, capture_kind=capture_kind,
+            required_capability_kind=required_capability_kind, capture_options=capture_options,
+        )
+
     async def minister_action(self, capability, arguments):
         from backend.minister import invoke
         return await invoke(self.services, capability, arguments)
