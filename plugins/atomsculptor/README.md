@@ -32,6 +32,13 @@ Sandbox, package installer or command allow-list.
   Sandbox UI.
 - A managed model is resolved from **Settings → Models** at provider invocation.
   The credential does not enter card state, events, the browser or a Sandbox.
+- **Visual structure observation** is available only when the selected model is
+  marked **Vision** in **Settings → Models**, the Agent has an ordinary
+  **Inspect structure** or **Modify structure** relationship to the Atom
+  Structure, and that structure's workspace is open. The Agent can then call
+  `observe_atom_structure` when a current 3D view materially helps. It receives
+  one bounded transient PNG plus camera/selection metadata; no screenshot is
+  written to the structure document, an Artifact, a Sandbox, or runtime logs.
 
 ## Setup
 

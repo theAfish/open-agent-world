@@ -12,6 +12,7 @@ python3 scripts/interface_builder.py build_interface \
   --structure-1 Fe.extxyz --structure-2 SiO2.extxyz \
   --miller-1 '[1,0,0]' --miller-2 '[0,0,1]' \
   --gap 2.5 --thickness-1 4 --thickness-2 4 \
+  --max-interfaces 3 \
   --max-area 400 --max-length-tol 0.03 --max-angle-tol 0.01 \
   --output-file-name Fe-SiO2_interface.extxyz
 ```

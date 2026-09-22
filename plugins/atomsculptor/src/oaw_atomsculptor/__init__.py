@@ -31,6 +31,8 @@ from .runtime import AtomSculptorRuntime
 
 READ = "atomsculptor.structure.read"
 WRITE = "atomsculptor.structure.write"
+RECORD_CANDIDATES = "atomsculptor.structure.record_interface_candidates"
+OBSERVE = "atomsculptor.structure.observe"
 WRITE_INPUT_SCHEMA = structure.ReplaceStructure.model_json_schema()
 WRITE_INPUT_SCHEMA["properties"]["expected_revision"] = {
     "type": "integer",
@@ -38,6 +40,13 @@ WRITE_INPUT_SCHEMA["properties"]["expected_revision"] = {
     "description": "Revision returned by inspect_atom_structure. Re-inspect after a conflict.",
 }
 WRITE_INPUT_SCHEMA["required"].append("expected_revision")
+RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA = structure.RecordInterfaceCandidates.model_json_schema()
+RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA["properties"]["expected_revision"] = {
+    "type": "integer",
+    "minimum": 0,
+    "description": "Revision returned by inspect_atom_structure. Re-inspect after a conflict.",
+}
+RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA.setdefault("required", []).append("expected_revision")
 
 
 class StructureConfig(BaseModel):
@@ -64,6 +73,20 @@ class AtomSculptorAgentConfig(BaseModel):
     system_instruction: str = "Coordinate atomistic modelling through the connected OAW resources."
 
 
+class ObserveStructure(BaseModel):
+    """A bounded, non-persistent camera request for a visual observation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # ``current`` preserves the researcher\'s active orbit.  The other values
+    # are fixed, canonical views which the frontend captures transiently and
+    # then restores, rather than exposing arbitrary browser-camera control.
+    view: Literal["current", "iso", "x", "y", "z"] = "current"
+
+
+OBSERVE_INPUT_SCHEMA = ObserveStructure.model_json_schema()
+
+
 async def _read(context, capability, arguments):
     return await context.node_document_action(capability, "inspect", arguments)
 
@@ -76,11 +99,29 @@ async def _write(context, capability, arguments):
     )
 
 
+async def _observe(context, capability, arguments):
+    request = ObserveStructure.model_validate(arguments)
+    return await context.capture_plugin_view(
+        capability,
+        capture_kind="atomsculptor.structure-viewport",
+        required_capability_kind=READ,
+        capture_options={"view": request.view},
+    )
+
+
+async def _record_interface_candidates(context, capability, arguments):
+    payload = dict(arguments)
+    expected_revision = payload.pop("expected_revision", None)
+    return await context.node_document_action(
+        capability, "record_interface_candidates", payload, expected_revision=expected_revision
+    )
+
+
 class AtomSculptorPlugin:
     descriptor = PluginDescriptor(
         id="atomsculptor",
         version="0.1.0",
-        plugin_api_version="1.16",
+        plugin_api_version="1.20",
         name="AtomSculptor",
         description="Agent-assisted atomistic structure modelling.",
     )
@@ -113,6 +154,24 @@ class AtomSculptorPlugin:
                 input_schema=WRITE_INPUT_SCHEMA,
             ),
             _write,
+        )
+        registration.register_capability(
+            CapabilityDefinition(
+                kind=RECORD_CANDIDATES,
+                tool_name="record_interface_candidates",
+                description="Record structured interface candidates for a current Atom Structure after generating their Sandbox files. Inspect first and pass its revision.",
+                input_schema=RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA,
+            ),
+            _record_interface_candidates,
+        )
+        registration.register_capability(
+            CapabilityDefinition(
+                kind=OBSERVE,
+                tool_name="observe_atom_structure",
+                description="Capture an open 3D Atom Structure workspace as a transient image. Set view to current, iso, x, y, or z; fixed views are captured briefly and never alter the researcher\'s camera. Use only when visual geometry or visible selection materially helps; inspect the structure document for exact coordinates.",
+                input_schema=OBSERVE_INPUT_SCHEMA,
+            ),
+            _observe,
         )
         registration.register_node_type(
             NodeTypeDefinition(
@@ -167,6 +226,7 @@ class AtomSculptorPlugin:
                         "replace_structure": NodeDocumentAction(structure.replace, capability_kind=WRITE),
                         "select_atoms": NodeDocumentAction(structure.select),
                         "select_layers": NodeDocumentAction(structure.select_layers),
+                        "record_interface_candidates": NodeDocumentAction(structure.record_interface_candidates, capability_kind=RECORD_CANDIDATES),
                     },
                     max_size_bytes=16 * 1024 * 1024,
                 ),
@@ -177,10 +237,10 @@ class AtomSculptorPlugin:
                 id="atomsculptor.structure.inspect",
                 label="Inspect structure",
                 short_label="inspect",
-                description="Allow an Agent to inspect the current structure and stable selected atom IDs.",
+                description="Allow an Agent to inspect the current structure and stable selected atom IDs, and, for Vision-capable models, observe the currently open 3D view.",
                 source_traits=frozenset({"core.agent"}),
                 target_types=frozenset({"atomsculptor.structure"}),
-                capabilities=(CapabilityGrantDefinition(READ),),
+                capabilities=(CapabilityGrantDefinition(READ), CapabilityGrantDefinition(OBSERVE)),
                 templateable=True,
             )
         )
@@ -189,10 +249,10 @@ class AtomSculptorPlugin:
                 id="atomsculptor.structure.modify",
                 label="Modify structure",
                 short_label="modify",
-                description="Allow an Agent to atomically replace a validated structure revision.",
+                description="Allow an Agent to inspect and atomically replace a validated structure revision, and, for Vision-capable models, observe the currently open 3D view.",
                 source_traits=frozenset({"core.agent"}),
                 target_types=frozenset({"atomsculptor.structure"}),
-                capabilities=(CapabilityGrantDefinition(READ), CapabilityGrantDefinition(WRITE)),
+                capabilities=(CapabilityGrantDefinition(READ), CapabilityGrantDefinition(WRITE), CapabilityGrantDefinition(RECORD_CANDIDATES), CapabilityGrantDefinition(OBSERVE)),
                 templateable=True,
             )
         )

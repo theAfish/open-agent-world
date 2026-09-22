@@ -56,6 +56,20 @@ class Layer(BaseModel):
     metadata: str = Field(default="", max_length=8_192)
 
 
+class InterfaceCandidate(BaseModel):
+    """A selectable interface result backed by a Sandbox output file."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int = Field(ge=1, le=1000)
+    file_name: str = Field(min_length=1, max_length=1_024)
+    formula: str = Field(default="", max_length=255)
+    atom_count: int = Field(default=0, ge=0, le=20_000)
+    von_mises_strain: float | None = None
+    area: float | None = Field(default=None, ge=0)
+    termination_index: int | None = Field(default=None, ge=0)
+
+
 class StructureDocument(BaseModel):
     """The canonical editable model for one AtomSculptor Structure card."""
 
@@ -71,6 +85,7 @@ class StructureDocument(BaseModel):
     selected_atom_ids: list[int] = Field(default_factory=list, max_length=20_000)
     source_name: str = Field(default="", max_length=255)
     source_metadata: dict[str, str | float | bool | None] = Field(default_factory=dict)
+    interface_candidates: list[InterfaceCandidate] = Field(default_factory=list, max_length=100)
 
     @model_validator(mode="after")
     def validate_structure(self) -> "StructureDocument":
@@ -110,6 +125,12 @@ class SelectLayers(BaseModel):
     layer_ids: list[str] = Field(default_factory=list, max_length=256)
 
 
+class RecordInterfaceCandidates(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: list[InterfaceCandidate] = Field(default_factory=list, max_length=100)
+
+
 def replace(value: dict, arguments: dict) -> dict:
     request = ReplaceStructure.model_validate(arguments)
     return request.structure.model_dump(mode="json")
@@ -133,6 +154,15 @@ def select_layers(value: dict, arguments: dict) -> dict:
     return document.model_copy(update={"active_layer_ids": request.layer_ids}).model_dump(mode="json")
 
 
+def record_interface_candidates(value: dict, arguments: dict) -> dict:
+    request = RecordInterfaceCandidates.model_validate(arguments)
+    document = StructureDocument.model_validate(value)
+    ids = [candidate.id for candidate in request.candidates]
+    if len(ids) != len(set(ids)):
+        raise ValueError("interface candidate ids must be unique")
+    return document.model_copy(update={"interface_candidates": request.candidates}).model_dump(mode="json")
+
+
 def summary(value: dict) -> dict:
     document = StructureDocument.model_validate(value)
     return {
@@ -141,4 +171,5 @@ def summary(value: dict) -> dict:
         "active_layer_count": len(document.active_layer_ids),
         "selected_atom_count": len(document.selected_atom_ids),
         "source_name": document.source_name,
+        "interface_candidate_count": len(document.interface_candidates),
     }

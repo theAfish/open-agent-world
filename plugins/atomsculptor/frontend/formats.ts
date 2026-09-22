@@ -12,6 +12,15 @@ export type Layer = {
   pbc?: [boolean, boolean, boolean] | null;
   metadata?: string;
 };
+export type InterfaceCandidate = {
+  id: number;
+  file_name: string;
+  formula: string;
+  atom_count: number;
+  von_mises_strain?: number | null;
+  area?: number | null;
+  termination_index?: number | null;
+};
 export type Structure = {
   format_version?: 1;
   atoms: Atom[];
@@ -21,6 +30,7 @@ export type Structure = {
   selected_atom_ids: number[];
   source_name: string;
   source_metadata?: AtomMetadata;
+  interface_candidates?: InterfaceCandidate[];
   cell: number[][] | null;
   pbc: [boolean, boolean, boolean];
 };

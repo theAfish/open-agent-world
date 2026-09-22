@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactElement } from "react";
 import { useFileViewer } from "@oaw/plugin-api";
 import type { FrontendPlugin, PluginViewProps } from "@oaw/plugin-api";
-import { downloadStructure, exportStructure, parseStructure, type Atom, type Structure, type StructureFormat } from "./formats";
-import { StructureViewport, type CameraProjection, type CameraView, type EditorMode } from "./legacy/StructureViewport";
+import { downloadStructure, exportStructure, parseStructure, type Atom, type InterfaceCandidate, type Structure, type StructureFormat } from "./formats";
+import { ELEMENT_COLORS, StructureViewport, type CameraProjection, type CameraView, type EditorMode, type ObservationCameraView, type StructureViewportCapture } from "./legacy/StructureViewport";
 import { addLayer as createLayer, applyLattice, deleteActiveLayers, expandSelection, extractSelection, invertSelection, mergeActiveLayers, selectByTypes, useLayerLattice, wrapToCell } from "./operations";
 import { minimumImageDistance } from "./periodic";
 import "./workspace.css";
@@ -28,6 +28,14 @@ const decimal = (label: string, raw: string): number => {
   if (!Number.isFinite(value)) throw new Error(`${label} must be a number.`);
   return value;
 };
+const matrix = (label: string, raw: string): number[][] => {
+  const values = raw.split(/[\s,]+/).filter(Boolean).map(Number);
+  if (values.length !== 9 || values.some(value => !Number.isFinite(value))) throw new Error(`${label} must contain nine finite numbers.`);
+  return [values.slice(0, 3), values.slice(3, 6), values.slice(6, 9)];
+};
+const multiplyMatrices = (left: number[][], right: number[][]) => left.map((row, rowIndex) => row.map((_, columnIndex) => left[rowIndex].reduce((sum, value, index) => sum + value * right[index][columnIndex], 0)));
+type SaveFileHandle = { createWritable: () => Promise<{ write: (content: string) => Promise<void>; close: () => Promise<void> }> };
+type SavePickerWindow = Window & { showSaveFilePicker?: (options: { suggestedName: string; types: Array<{ description: string; accept: Record<string, string[]> }> }) => Promise<SaveFileHandle> };
 
 function AtomField({ label, value, numeric, onCommit }: {
   label: string; value: string | number; numeric?: boolean; onCommit: (value: string) => void;
@@ -69,7 +77,7 @@ function ToolIcon({ name }: { name: ToolIconName }) {
     paste: <><path d="M9 5V3h6v2" /><rect x="6" y="5" width="12" height="16" rx="2" /><path d="M9 12h6m-3-3v6" /></>,
     undo: <><path d="M9 7 4 12l5 5" /><path d="M5 12h9a6 6 0 0 1 6 6" /></>,
     redo: <><path d="m15 7 5 5-5 5" /><path d="M19 12h-9a6 6 0 0 0-6 6" /></>,
-    import: <><path d="M12 3v12m-5-5 5 5 5-5M5 20h14" /></>,
+    import: <><path d="M12 21V9m-5 5 5-5 5 5" /><path d="M5 4h14" /></>,
     reset: <><circle cx="12" cy="12" r="8" /><path d="M12 2v5m0 10v5M2 12h5m10 0h5" /></>,
   };
   return <svg viewBox="0 0 24 24" aria-hidden="true" {...common}>{art[name]}</svg>;
@@ -81,7 +89,7 @@ function Preview({ card, host }: PluginViewProps) {
   return <p className="atomsculptor-summary">{structure ? `${structure.atoms.length} atoms · ${structure.selected_atom_ids.length} selected` : card.name}</p>;
 }
 
-function Workspace({ card, host }: PluginViewProps) {
+function Workspace({ card, host, level }: PluginViewProps) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [undo, setUndo] = useState<Snapshot[]>([]);
   const [redo, setRedo] = useState<Snapshot[]>([]);
@@ -91,6 +99,7 @@ function Workspace({ card, host }: PluginViewProps) {
   const [projection, setProjection] = useState<CameraProjection>("perspective");
   const [cameraNonce, setCameraNonce] = useState(0);
   const [measurement, setMeasurement] = useState<number[]>([]);
+  const [selectionVisible, setSelectionVisible] = useState(true);
   const [hoveredAtomId, setHoveredAtomId] = useState<number | null>(null);
   const [agents, setAgents] = useState<Array<{ id: string; name: string }>>([]);
   const [sandboxes, setSandboxes] = useState<Array<{ id: string; name: string }>>([]);
@@ -99,7 +108,9 @@ function Workspace({ card, host }: PluginViewProps) {
   const [newSymbol, setNewSymbol] = useState("H");
   const [newCoordinates, setNewCoordinates] = useState("0, 0, 0");
   const [latticePanelOpen, setLatticePanelOpen] = useState(false);
+  const [latticeMode, setLatticeMode] = useState<"scale" | "real">("scale");
   const [latticeDraft, setLatticeDraft] = useState("");
+  const [latticeScaleDraft, setLatticeScaleDraft] = useState("1, 0, 0, 0, 1, 0, 0, 0, 1");
   const [scaleWithLattice, setScaleWithLattice] = useState(true);
   const [builderPanel, setBuilderPanel] = useState<"" | "surface" | "supercell" | "interface" | "molecule" | "export">("");
   const [surfaceParams, setSurfaceParams] = useState({ miller: "1 0 0", layers: "3", vacuum: "10", conventional: true });
@@ -112,6 +123,8 @@ function Workspace({ card, host }: PluginViewProps) {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
+  const viewportCapture = useRef<StructureViewportCapture | null>(null);
+  const setViewportCapture = useCallback((capture: StructureViewportCapture | null) => { viewportCapture.current = capture; }, []);
   const reload = useCallback(async () => {
     try { const result = await host.readDocument(); setSnapshot({ structure: result.value as Structure, revision: result.revision }); setError(""); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
@@ -132,7 +145,7 @@ function Workspace({ card, host }: PluginViewProps) {
     if (!snapshot) return;
     const selected = [...new Set(atomIds)].filter(id => snapshot.structure.atoms.some(atom => atom.id === id));
     if (selected.length === snapshot.structure.selected_atom_ids.length && selected.every(id => snapshot.structure.selected_atom_ids.includes(id))) return;
-    try { const result = await host.documentAction("select_atoms", { atom_ids: selected }, snapshot.revision); setSnapshot({ structure: result.value as Structure, revision: result.revision }); }
+    try { const result = await host.documentAction("select_atoms", { atom_ids: selected }, snapshot.revision); setSelectionVisible(true); setSnapshot({ structure: result.value as Structure, revision: result.revision }); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   }, [host, snapshot]);
   const setLayers = useCallback(async (layerIds: string[]) => {
@@ -204,11 +217,13 @@ function Workspace({ card, host }: PluginViewProps) {
   const chooseTypes = () => { const raw = window.prompt("Elements to select (comma-separated)", "C,O"); if (raw !== null) void setSelection(selectByTypes(snapshot!.structure, raw)); };
   const chooseRadius = () => { const raw = window.prompt("Expand selected atoms by radius (Å)", "1.5"); if (raw === null) return; const radius = Number(raw); if (!Number.isFinite(radius) || radius <= 0) { setError("Radius must be a positive number."); return; } void setSelection(expandSelection(snapshot!.structure, radius)); };
   const chooseLattice = () => {
-    if (!snapshot) return; setLatticeDraft((snapshot.structure.cell ?? [[1, 0, 0], [0, 1, 0], [0, 0, 1]]).flat().join(", ")); setLatticePanelOpen(true);
+    if (!snapshot) return; setLatticeMode("scale"); setLatticeScaleDraft("1, 0, 0, 0, 1, 0, 0, 0, 1"); setLatticeDraft((snapshot.structure.cell ?? [[1, 0, 0], [0, 1, 0], [0, 0, 1]]).flat().join(", ")); setLatticePanelOpen(true);
   };
   const applyLatticePanel = () => {
-    const values = latticeDraft.split(/[\s,]+/).filter(Boolean).map(Number); if (values.length !== 9 || values.some(value => !Number.isFinite(value))) { setError("Lattice must contain nine finite numbers."); return; }
-    runStructureOperation(value => applyLattice(value, [values.slice(0, 3), values.slice(3, 6), values.slice(6, 9)], scaleWithLattice), "Could not apply lattice."); setLatticePanelOpen(false);
+    try {
+      const cell = latticeMode === "scale" ? multiplyMatrices(snapshot?.structure.cell ?? [[1, 0, 0], [0, 1, 0], [0, 0, 1]], matrix("Scale matrix", latticeScaleDraft)) : matrix("Cell matrix", latticeDraft);
+      runStructureOperation(value => applyLattice(value, cell, scaleWithLattice), "Could not apply lattice."); setLatticePanelOpen(false);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
   const links = card.config as StructureLinks;
   const updateLink = (field: keyof StructureLinks, id: string) => { void host.updateConfig({ agent_id: links.agent_id ?? null, sandbox_id: links.sandbox_id ?? null, skill_id: links.skill_id ?? null, [field]: id || null }); };
@@ -251,7 +266,7 @@ function Workspace({ card, host }: PluginViewProps) {
         vacuum_between: decimal("Vacuum", interfaceParams.vacuum),
         thickness_1: decimal("Film thickness", interfaceParams.thickness1),
         thickness_2: decimal("Substrate thickness", interfaceParams.thickness2),
-        candidates: integer("Candidates", interfaceParams.candidates),
+        max_interfaces: integer("Candidates", interfaceParams.candidates),
       }, "Prefer the interface-builder Skill. Write numbered candidate files, summarize each, and stop for the user's choice.");
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
@@ -263,8 +278,22 @@ function Workspace({ card, host }: PluginViewProps) {
     const name = (exportParams.name.trim() || structure.source_name || "structure").replace(/[/\\?%*:|"<>\s]+/g, "_");
     launchRequest("export", { format: exportParams.format, file_name: `${name}.${structureExtension(exportParams.format)}`, publish_artifact: true }, "Write the file into your authorized Sandbox and publish it as an Artifact when an artifact collection is connected.");
   };
+  const saveAs = async (format: StructureFormat) => {
+    if (!snapshot) return;
+    const name = `${snapshot.structure.source_name || "structure"}.${structureExtension(format)}`;
+    const content = exportStructure(snapshot.structure, format);
+    try {
+      const picker = (window as SavePickerWindow).showSaveFilePicker;
+      if (!picker) { downloadStructure(name, content); return; }
+      const handle = await picker({ suggestedName: name, types: [{ description: `${format.toUpperCase()} structure`, accept: { "text/plain": [`.${structureExtension(format)}`] } }] });
+      const writable = await handle.createWritable(); await writable.write(content); await writable.close();
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
   const adoptCandidate = () => {
-    try { launchRequest("interface_select", { candidate: integer("Candidate", candidateChoice) }, "Convert the named interface_candidate_N.extxyz file from the previous run and write it back to this structure."); }
+    try { launchRequest("interface_select", { candidate: integer("Candidate", candidateChoice) }, "Inspect the structure's recorded interface_candidates, find this exact candidate ID and convert only its stored file_name back into this structure."); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
   const selectableIds = snapshot?.structure.atoms.filter(atom => snapshot.structure.layers.find(layer => layer.id === atom.layer_id)?.visible !== false).map(atom => atom.id) ?? [];
@@ -281,6 +310,42 @@ function Workspace({ card, host }: PluginViewProps) {
     void reload();
     host.openWorkspace(card.id);
   }), [card.id, host, reload]);
+  useEffect(() => {
+    // Compact card bodies may be mounted elsewhere on the canvas.  Only the
+    // explicit workspace surface can offer its rendered structure to a model.
+    if (level !== "workspace") return;
+    return host.registerVisualCapture("atomsculptor.structure-viewport", async request => {
+      if (!snapshot || request.documentRevision !== snapshot.revision) {
+        throw new Error("The structure changed before its viewport could be captured.");
+      }
+      const capture = viewportCapture.current;
+      if (!capture) throw new Error("Open a rendered 3D structure before requesting visual observation.");
+      const requested = request.captureOptions?.view;
+      const observationView: ObservationCameraView = requested === "iso" || requested === "x" || requested === "y" || requested === "z" || requested === "current" ? requested : "current";
+      const image = await capture(request.maxImageDimension, observationView);
+      const visibleLayerIds = new Set(snapshot.structure.layers.filter(layer => layer.visible).map(layer => layer.id));
+      const selectedAtomIds = new Set(snapshot.structure.selected_atom_ids);
+      const renderedElements = [...new Set(snapshot.structure.atoms
+        .filter(atom => visibleLayerIds.has(atom.layer_id) && (selectionVisible || !selectedAtomIds.has(atom.id)))
+        .map(atom => atom.symbol))];
+      const element_colors = Object.fromEntries(renderedElements.map(symbol => [symbol, ELEMENT_COLORS[symbol] ?? ELEMENT_COLORS.default]));
+      return {
+        dataBase64: image.dataBase64,
+        metadata: {
+          document_revision: snapshot.revision,
+          selected_atom_ids: snapshot.structure.selected_atom_ids.slice(0, 500),
+          selected_count: snapshot.structure.selected_atom_ids.length,
+          editor_mode: mode,
+          camera_view: observationView === "current" ? cameraView : observationView,
+          requested_camera_view: observationView,
+          projection,
+          rendered_width: image.width,
+          rendered_height: image.height,
+          element_colors,
+        },
+      };
+    });
+  }, [cameraView, host, level, mode, projection, selectionVisible, snapshot]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) return;
@@ -311,7 +376,7 @@ function Workspace({ card, host }: PluginViewProps) {
   }, [measurement, snapshot]);
   if (error) return <section className="atomsculptor-workspace"><p role="alert">{error}</p><button onClick={() => void reload()}>Reload structure</button></section>;
   if (!snapshot) return <p role="status">Loading structure…</p>;
-  const { structure } = snapshot; const activeLayerIds = structure.active_layer_ids ?? []; const active = new Set(activeLayerIds); const selected = new Set(structure.selected_atom_ids);
+  const { structure } = snapshot; const activeLayerIds = structure.active_layer_ids ?? []; const active = new Set(activeLayerIds); const selected = new Set(structure.selected_atom_ids); const interfaceCandidates: InterfaceCandidate[] = structure.interface_candidates ?? [];
   const visibleAtoms = structure.atoms.filter(atom => structure.layers.find(layer => layer.id === atom.layer_id)?.visible !== false);
   const hoveredAtom = hoveredAtomId === null ? null : structure.atoms.find(atom => atom.id === hoveredAtomId) ?? null;
   return <section className="atomsculptor-workspace atomsculptor-legacy-shell" aria-label="AtomSculptor structure editor">
@@ -326,9 +391,10 @@ function Workspace({ card, host }: PluginViewProps) {
       <button className={`atomsculptor-tool-button ${addPanelOpen ? "active" : ""}`} title="Add atom" aria-label="Add atom" disabled={saving} onClick={() => setAddPanelOpen(value => !value)}><ToolIcon name="add" /></button><button className="atomsculptor-tool-button" title="Delete selected atoms" aria-label="Delete selected atoms" disabled={!selected.size || saving} onClick={deleteSelected}><ToolIcon name="delete" /></button>
       <button className="atomsculptor-tool-button" title="Copy selected atoms" aria-label="Copy selected atoms" disabled={!selected.size} onClick={copy}><ToolIcon name="copy" /></button><button className="atomsculptor-tool-button" title="Cut selected atoms" aria-label="Cut selected atoms" disabled={!selected.size || saving} onClick={() => { copy(); deleteSelected(); }}><ToolIcon name="cut" /></button><button className="atomsculptor-tool-button" title="Paste atoms" aria-label="Paste atoms" disabled={!clipboard.length || saving} onClick={paste}><ToolIcon name="paste" /></button>
       <button className="atomsculptor-tool-button" title="Undo" aria-label="Undo" disabled={!undo.length || saving} onClick={() => void restore("undo")}><ToolIcon name="undo" /></button><button className="atomsculptor-tool-button" title="Redo" aria-label="Redo" disabled={!redo.length || saving} onClick={() => void restore("redo")}><ToolIcon name="redo" /></button><i />
-      <button className="atomsculptor-tool-button" title="Import structure" aria-label="Import structure" disabled={saving} onClick={() => importRef.current?.click()}><ToolIcon name="import" /></button><select aria-label="Export structure" defaultValue="" onChange={event => { const format = event.target.value as StructureFormat; if (format) { downloadStructure(`${structure.source_name || "structure"}.${structureExtension(format)}`, exportStructure(structure, format)); event.target.value = ""; } }}><option value="" disabled>Export…</option><option value="xyz">XYZ</option><option value="extxyz">ExtXYZ</option><option value="lxyz">LXYZ</option><option value="cif">CIF</option><option value="poscar">POSCAR</option><option value="pdb">PDB</option><option value="sdf">SDF</option><option value="mol2">MOL2</option><option value="json">JSON</option></select>
+      <button className="atomsculptor-tool-button" title="Import structure" aria-label="Import structure" disabled={saving} onClick={() => importRef.current?.click()}><ToolIcon name="import" /></button><select aria-label="Export structure" defaultValue="" onChange={event => { const [destination, format] = event.target.value.split(":") as ["download" | "save", StructureFormat]; if (format) { if (destination === "save") void saveAs(format); else downloadStructure(`${structure.source_name || "structure"}.${structureExtension(format)}`, exportStructure(structure, format)); event.target.value = ""; } }}><option value="" disabled>Export…</option><optgroup label="Download"><option value="download:xyz">XYZ</option><option value="download:extxyz">ExtXYZ</option><option value="download:lxyz">LXYZ</option><option value="download:cif">CIF</option><option value="download:poscar">POSCAR</option><option value="download:pdb">PDB</option><option value="download:sdf">SDF</option><option value="download:mol2">MOL2</option><option value="download:json">JSON</option></optgroup><optgroup label="Choose location"><option value="save:xyz">Save XYZ as…</option><option value="save:extxyz">Save ExtXYZ as…</option><option value="save:cif">Save CIF as…</option><option value="save:poscar">Save POSCAR as…</option><option value="save:json">Save JSON as…</option></optgroup></select>
       <i /><button className="atomsculptor-tool-button" title="Reset view" aria-label="Reset view" onClick={() => { setCameraView("iso"); setCameraNonce(value => value + 1); }}><ToolIcon name="reset" /></button><button className="atomsculptor-axis-button" title="View along X" onClick={() => { setCameraView("x"); setCameraNonce(value => value + 1); }}>X</button><button className="atomsculptor-axis-button" title="View along Y" onClick={() => { setCameraView("y"); setCameraNonce(value => value + 1); }}>Y</button><button className="atomsculptor-axis-button" title="View along Z" onClick={() => { setCameraView("z"); setCameraNonce(value => value + 1); }}>Z</button><button className="atomsculptor-projection-button" title="Toggle camera projection" onClick={() => setProjection(value => value === "perspective" ? "orthographic" : "perspective")}>{projection === "perspective" ? "P" : "O"}</button>
       <input ref={importRef} className="atomsculptor-file-input" type="file" accept=".json,.xyz,.extxyz,.lxyz,.cif,.mcif,.vasp,.pdb,.sdf,.mol,.mol2,text/plain,application/json" onChange={event => void importFile(event)} />
+      <button className="atomsculptor-tool-button" title={selectionVisible ? "Hide selected atoms" : "Show selected atoms"} aria-label={selectionVisible ? "Hide selected atoms" : "Show selected atoms"} disabled={!selected.size} onClick={() => setSelectionVisible(value => !value)}>{selectionVisible ? "◉" : "○"}</button>
     </div>
     <div className="atomsculptor-editor-grid">
       <aside className="atomsculptor-inspector"><section><h3>OAW links</h3><label>Agent<select value={links.agent_id ?? ""} onChange={event => updateLink("agent_id", event.target.value)}><option value="">None</option>{agents.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Sandbox<select value={links.sandbox_id ?? ""} onChange={event => updateLink("sandbox_id", event.target.value)}><option value="">None</option>{sandboxes.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Skill<select value={links.skill_id ?? ""} onChange={event => updateLink("skill_id", event.target.value)}><option value="">None</option>{skills.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><div className="atomsculptor-button-row">{links.agent_id && <button onClick={() => host.openWorkspace(links.agent_id!)}>Open Agent</button>}{links.sandbox_id && <button onClick={() => host.openWorkspace(links.sandbox_id!)}>Open Sandbox</button>}{links.skill_id && <button onClick={() => host.openWorkspace(links.skill_id!)}>Open Skill</button>}</div></section>
@@ -336,11 +402,11 @@ function Workspace({ card, host }: PluginViewProps) {
       <section><h3>Model</h3><div className="atomsculptor-button-row">{(["surface", "supercell", "interface", "molecule", "export"] as const).map(kind => <button key={kind} className={builderPanel === kind ? "active" : ""} onClick={() => setBuilderPanel(builderPanel === kind ? "" : kind)}>{kind === "surface" ? "Surface" : kind === "supercell" ? "Supercell" : kind === "interface" ? "Interface" : kind === "molecule" ? "SMILES" : "Publish"}</button>)}</div><label className="atomsculptor-check"><input type="checkbox" checked={trackTasks} onChange={event => setTrackTasks(event.target.checked)} /> Track on Task Board</label>
       {builderPanel === "surface" && <div className="atomsculptor-builder-panel"><label>Miller (h k l)<input value={surfaceParams.miller} onChange={event => setSurfaceParams({ ...surfaceParams, miller: event.target.value })} /></label><label>Layers<input value={surfaceParams.layers} onChange={event => setSurfaceParams({ ...surfaceParams, layers: event.target.value })} /></label><label>Vacuum (Å)<input value={surfaceParams.vacuum} onChange={event => setSurfaceParams({ ...surfaceParams, vacuum: event.target.value })} /></label><label className="atomsculptor-check"><input type="checkbox" checked={surfaceParams.conventional} onChange={event => setSurfaceParams({ ...surfaceParams, conventional: event.target.checked })} /> Conventional cell first</label><div className="atomsculptor-button-row"><button onClick={runSurfacePanel}>Build surface</button></div></div>}
       {builderPanel === "supercell" && <div className="atomsculptor-builder-panel"><label>Repetitions (n1 n2 n3)<input value={supercellParams.repeats} onChange={event => setSupercellParams({ repeats: event.target.value })} /></label><div className="atomsculptor-button-row"><button onClick={runSupercellPanel}>Build supercell</button></div></div>}
-      {builderPanel === "interface" && <div className="atomsculptor-builder-panel"><label>Substrate / second structure<input value={interfaceParams.second} onChange={event => setInterfaceParams({ ...interfaceParams, second: event.target.value })} placeholder="path in Sandbox, description, or card ID" /></label><label>Film Miller<input value={interfaceParams.miller1} onChange={event => setInterfaceParams({ ...interfaceParams, miller1: event.target.value })} /></label><label>Substrate Miller<input value={interfaceParams.miller2} onChange={event => setInterfaceParams({ ...interfaceParams, miller2: event.target.value })} /></label><label>Gap (Å)<input value={interfaceParams.gap} onChange={event => setInterfaceParams({ ...interfaceParams, gap: event.target.value })} /></label><label>Vacuum (Å)<input value={interfaceParams.vacuum} onChange={event => setInterfaceParams({ ...interfaceParams, vacuum: event.target.value })} /></label><label>Film layers<input value={interfaceParams.thickness1} onChange={event => setInterfaceParams({ ...interfaceParams, thickness1: event.target.value })} /></label><label>Substrate layers<input value={interfaceParams.thickness2} onChange={event => setInterfaceParams({ ...interfaceParams, thickness2: event.target.value })} /></label><label>Candidates<input value={interfaceParams.candidates} onChange={event => setInterfaceParams({ ...interfaceParams, candidates: event.target.value })} /></label><div className="atomsculptor-button-row"><button onClick={runInterfacePanel}>Build candidates</button></div><label>Use candidate #<input value={candidateChoice} onChange={event => setCandidateChoice(event.target.value)} /></label><button onClick={adoptCandidate}>Write candidate back</button></div>}
+      {builderPanel === "interface" && <div className="atomsculptor-builder-panel"><label>Substrate / second structure<input value={interfaceParams.second} onChange={event => setInterfaceParams({ ...interfaceParams, second: event.target.value })} placeholder="path in Sandbox, description, or card ID" /></label><label>Film Miller<input value={interfaceParams.miller1} onChange={event => setInterfaceParams({ ...interfaceParams, miller1: event.target.value })} /></label><label>Substrate Miller<input value={interfaceParams.miller2} onChange={event => setInterfaceParams({ ...interfaceParams, miller2: event.target.value })} /></label><label>Gap (Å)<input value={interfaceParams.gap} onChange={event => setInterfaceParams({ ...interfaceParams, gap: event.target.value })} /></label><label>Vacuum (Å)<input value={interfaceParams.vacuum} onChange={event => setInterfaceParams({ ...interfaceParams, vacuum: event.target.value })} /></label><label>Film layers<input value={interfaceParams.thickness1} onChange={event => setInterfaceParams({ ...interfaceParams, thickness1: event.target.value })} /></label><label>Substrate layers<input value={interfaceParams.thickness2} onChange={event => setInterfaceParams({ ...interfaceParams, thickness2: event.target.value })} /></label><label>Candidates<input value={interfaceParams.candidates} onChange={event => setInterfaceParams({ ...interfaceParams, candidates: event.target.value })} /></label><div className="atomsculptor-button-row"><button onClick={runInterfacePanel}>Build candidates</button></div>{interfaceCandidates.length > 0 && <div className="atomsculptor-interface-candidates" role="list" aria-label="Interface candidates">{interfaceCandidates.map(candidate => <button key={candidate.id} type="button" role="listitem" className={candidateChoice === String(candidate.id) ? "selected" : ""} onClick={() => setCandidateChoice(String(candidate.id))}><strong>#{candidate.id} · {candidate.formula || "Interface"}</strong><span>ε {candidate.von_mises_strain == null ? "—" : `${(candidate.von_mises_strain * 100).toFixed(2)}%`} · A {candidate.area == null ? "—" : `${candidate.area.toFixed(1)} Å²`}</span><span>{candidate.atom_count} atoms · T{candidate.termination_index ?? "—"}</span></button>)}</div>}<label>Use candidate #<input value={candidateChoice} onChange={event => setCandidateChoice(event.target.value)} /></label><button disabled={!interfaceCandidates.some(candidate => candidate.id === Number(candidateChoice))} onClick={adoptCandidate}>Write candidate back</button></div>}
       {builderPanel === "molecule" && <div className="atomsculptor-builder-panel"><label>SMILES<input value={moleculeParams.smiles} onChange={event => setMoleculeParams({ smiles: event.target.value })} /></label><div className="atomsculptor-button-row"><button onClick={runMoleculePanel}>Add molecule</button></div></div>}
       {builderPanel === "export" && <div className="atomsculptor-builder-panel"><label>Format<select value={exportParams.format} onChange={event => setExportParams({ ...exportParams, format: event.target.value as StructureFormat })}><option value="extxyz">ExtXYZ</option><option value="xyz">XYZ</option><option value="cif">CIF</option><option value="poscar">POSCAR</option><option value="json">JSON</option></select></label><label>File name (without extension)<input value={exportParams.name} onChange={event => setExportParams({ ...exportParams, name: event.target.value })} placeholder={structure.source_name || "structure"} /></label><div className="atomsculptor-button-row"><button onClick={runExportPanel}>Write to Sandbox + publish</button></div></div>}
-      <p className="atomsculptor-hint">Runs through the linked Agent; its graph connections authorize the Sandbox and Skill. Dependencies, output files, progress and failures appear in OAW's native Sandbox UI.</p></section><section><h3>Layers</h3><button onClick={addLayer} disabled={saving}>+ Add layer</button><div className="atomsculptor-button-row"><button onClick={() => runStructureOperation(deleteActiveLayers, "Select layers to delete; one atom layer must remain.")}>Delete</button><button onClick={() => runStructureOperation(mergeActiveLayers, "Select at least two atom layers to merge.")}>Merge</button><button disabled={!selected.size} onClick={() => runStructureOperation(extractSelection, "Select atoms to extract.")}>Extract</button></div>{structure.layers.map(layer => <div className="atomsculptor-layer-row" key={layer.id}><button className={active.has(layer.id) ? "selected" : ""} onClick={() => void setLayers(active.has(layer.id) ? [...active].filter(id => id !== layer.id) : [...active, layer.id])}>{layer.name}</button><button aria-label={`Toggle ${layer.name}`} onClick={() => toggleLayer(layer.id)}>{layer.visible ? "◉" : "○"}</button></div>)}</section><section><h3>Selection</h3><p>{selected.size} atom{selected.size === 1 ? "" : "s"}</p><div className="atomsculptor-button-row"><button onClick={chooseTypes}>By element</button><button disabled={!selected.size} onClick={chooseRadius}>Expand</button><button onClick={() => void setSelection(invertSelection(structure))}>Invert</button></div><p className="atomsculptor-hint">Click selects; Shift-drag draws a selection box.</p>{hoveredAtom && <p className="atomsculptor-hover">#{hoveredAtom.id} · {hoveredAtom.symbol}<br />{hoveredAtom.x.toFixed(4)}, {hoveredAtom.y.toFixed(4)}, {hoveredAtom.z.toFixed(4)} Å</p>}</section><section><h3>Lattice</h3><div className="atomsculptor-button-row"><button onClick={chooseLattice}>Edit cell</button><button onClick={() => runStructureOperation(wrapToCell, "A non-singular cell is required to wrap atoms.")}>Wrap</button>{activeLayerIds.length === 1 && <button onClick={() => runStructureOperation(value => useLayerLattice(value, activeLayerIds[0]), "This layer has no lattice metadata.")}>Use layer cell</button>}</div>{latticePanelOpen && <div className="atomsculptor-lattice-panel"><label>Matrix<input value={latticeDraft} onChange={event => setLatticeDraft(event.target.value)} /></label><label className="atomsculptor-check"><input type="checkbox" checked={scaleWithLattice} onChange={event => setScaleWithLattice(event.target.checked)} /> Scale atoms</label><div className="atomsculptor-button-row"><button onClick={applyLatticePanel}>Apply</button><button onClick={() => setLatticePanelOpen(false)}>Cancel</button></div></div>}</section><section className={mode === "measure" ? "" : "muted"}><h3>Distance</h3><p>{measureDistance === null ? "Choose two atoms" : `${measureDistance.toFixed(4)} Å`}</p></section></aside>
-      <main className="atomsculptor-canvas-panel">{visibleAtoms.length ? <StructureViewport structure={structure} mode={mode} cameraView={cameraView} projection={projection} cameraNonce={cameraNonce} onSelect={ids => void setSelection(ids)} onMeasure={setMeasurement} onHover={setHoveredAtomId} onAdd={position => { insertAtom(position.x, position.y, position.z); setMode("select"); }} onTransform={replaceAtoms} /> : <p className="atomsculptor-empty">Add an atom, import a structure, or ask an Agent to create one.</p>}<ViewportReadout structure={structure} selected={selected} hoveredAtom={hoveredAtom} mode={mode} distance={measureDistance} />{addPanelOpen && <section className="atomsculptor-add-panel"><h3>Add atom</h3><div className="atomsculptor-periodic">{ELEMENTS.map(symbol => <button className={newSymbol === symbol ? "selected" : ""} key={symbol} title={symbol} onClick={() => setNewSymbol(symbol)}>{symbol}</button>)}</div><label>Coordinates (Å)<input value={newCoordinates} onChange={event => setNewCoordinates(event.target.value)} placeholder="x, y, z" /></label><div className="atomsculptor-button-row"><button onClick={addAtom}>Add</button><button onClick={() => { setAddPanelOpen(false); setMode("add"); }}>Place in canvas</button><button onClick={() => setAddPanelOpen(false)}>Cancel</button></div></section>}</main>
+      <p className="atomsculptor-hint">Runs through the linked Agent; its graph connections authorize the Sandbox and Skill. Dependencies, output files, progress and failures appear in OAW's native Sandbox UI.</p></section><section><h3>Layers</h3><button onClick={addLayer} disabled={saving}>+ Add layer</button><div className="atomsculptor-button-row"><button onClick={() => runStructureOperation(deleteActiveLayers, "Select layers to delete; one atom layer must remain.")}>Delete</button><button onClick={() => runStructureOperation(mergeActiveLayers, "Select at least two atom layers to merge.")}>Merge</button><button disabled={!selected.size} onClick={() => runStructureOperation(extractSelection, "Select atoms to extract.")}>Extract</button></div>{structure.layers.map(layer => <div className="atomsculptor-layer-row" key={layer.id}><button className={active.has(layer.id) ? "selected" : ""} onClick={() => void setLayers(active.has(layer.id) ? [...active].filter(id => id !== layer.id) : [...active, layer.id])}>{layer.name}</button><button aria-label={`Toggle ${layer.name}`} onClick={() => toggleLayer(layer.id)}>{layer.visible ? "◉" : "○"}</button></div>)}</section><section><h3>Selection</h3><p>{selected.size} atom{selected.size === 1 ? "" : "s"}</p><div className="atomsculptor-button-row"><button onClick={chooseTypes}>By element</button><button disabled={!selected.size} onClick={chooseRadius}>Expand</button><button onClick={() => void setSelection(invertSelection(structure))}>Invert</button></div><p className="atomsculptor-hint">Click selects; Shift-drag draws a selection box.</p>{hoveredAtom && <p className="atomsculptor-hover">#{hoveredAtom.id} · {hoveredAtom.symbol}<br />{hoveredAtom.x.toFixed(4)}, {hoveredAtom.y.toFixed(4)}, {hoveredAtom.z.toFixed(4)} Å</p>}</section><section><h3>Lattice</h3><div className="atomsculptor-button-row"><button onClick={chooseLattice}>Edit cell</button><button onClick={() => runStructureOperation(wrapToCell, "A non-singular cell is required to wrap atoms.")}>Wrap</button>{activeLayerIds.length === 1 && <button onClick={() => runStructureOperation(value => useLayerLattice(value, activeLayerIds[0]), "This layer has no lattice metadata.")}>Use layer cell</button>}</div>{latticePanelOpen && <div className="atomsculptor-lattice-panel"><div className="atomsculptor-button-row"><button className={latticeMode === "scale" ? "active" : ""} onClick={() => setLatticeMode("scale")}>Scale matrix</button><button className={latticeMode === "real" ? "active" : ""} onClick={() => setLatticeMode("real")}>Cell matrix</button></div><label>{latticeMode === "scale" ? "Scale matrix" : "Cell matrix"}<input value={latticeMode === "scale" ? latticeScaleDraft : latticeDraft} onChange={event => latticeMode === "scale" ? setLatticeScaleDraft(event.target.value) : setLatticeDraft(event.target.value)} /></label><label className="atomsculptor-check"><input type="checkbox" checked={scaleWithLattice} onChange={event => setScaleWithLattice(event.target.checked)} /> Scale atoms</label><div className="atomsculptor-button-row"><button onClick={applyLatticePanel}>Apply</button><button onClick={() => setLatticePanelOpen(false)}>Cancel</button></div></div>}</section><section className={mode === "measure" ? "" : "muted"}><h3>Distance</h3><p>{measureDistance === null ? "Choose two atoms" : `${measureDistance.toFixed(4)} Å`}</p></section></aside>
+      <main className="atomsculptor-canvas-panel">{visibleAtoms.length ? <StructureViewport structure={structure} mode={mode} cameraView={cameraView} projection={projection} cameraNonce={cameraNonce} selectionVisible={selectionVisible} onSelect={ids => void setSelection(ids)} onMeasure={setMeasurement} onHover={setHoveredAtomId} onAdd={position => { insertAtom(position.x, position.y, position.z); setMode("select"); }} onTransform={replaceAtoms} onCaptureReady={setViewportCapture} /> : <p className="atomsculptor-empty">Add an atom, import a structure, or ask an Agent to create one.</p>}<ViewportReadout structure={structure} selected={selected} hoveredAtom={hoveredAtom} mode={mode} distance={measureDistance} />{addPanelOpen && <section className="atomsculptor-add-panel"><h3>Add atom</h3><div className="atomsculptor-periodic">{ELEMENTS.map(symbol => <button className={newSymbol === symbol ? "selected" : ""} key={symbol} title={symbol} onClick={() => setNewSymbol(symbol)}>{symbol}</button>)}</div><label>Coordinates (Å)<input value={newCoordinates} onChange={event => setNewCoordinates(event.target.value)} placeholder="x, y, z" /></label><div className="atomsculptor-button-row"><button onClick={addAtom}>Add</button><button onClick={() => { setAddPanelOpen(false); setMode("add"); }}>Place in canvas</button><button onClick={() => setAddPanelOpen(false)}>Cancel</button></div></section>}</main>
       <aside className="atomsculptor-atoms-panel"><h3>Atoms</h3><div className="atomsculptor-atom-list">{visibleAtoms.map(atom => <div className={selected.has(atom.id) ? "atom-row selected" : "atom-row"} key={atom.id}><button title="Click to select; Shift/⌘-click to add or remove" onClick={event => { const additive = event.shiftKey || event.metaKey || event.ctrlKey; void setSelection(additive ? (selected.has(atom.id) ? [...selected].filter(id => id !== atom.id) : [...selected, atom.id]) : [atom.id]); }}>#{atom.id}</button><AtomField label={`Element ${atom.id}`} value={atom.symbol} onCommit={value => updateAtom(atom.id, "symbol", value)} /><AtomField label={`X ${atom.id}`} value={atom.x} numeric onCommit={value => updateAtom(atom.id, "x", value)} /><AtomField label={`Y ${atom.id}`} value={atom.y} numeric onCommit={value => updateAtom(atom.id, "y", value)} /><AtomField label={`Z ${atom.id}`} value={atom.z} numeric onCommit={value => updateAtom(atom.id, "z", value)} /></div>)}</div></aside>
     </div>
   </section>;

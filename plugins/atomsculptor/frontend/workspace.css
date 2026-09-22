@@ -168,6 +168,10 @@
 .atomsculptor-legacy-shell .atomsculptor-builder-panel,
 .atomsculptor-legacy-shell .atomsculptor-lattice-panel { background: var(--as-bg2); border-color: var(--as-border); border-radius: 4px; }
 .atomsculptor-legacy-shell .atomsculptor-builder-panel button { background: var(--as-bg3); border-color: var(--as-border); }
+.atomsculptor-legacy-shell .atomsculptor-interface-candidates { display: grid; gap: 4px; max-height: 164px; overflow: auto; margin: 4px 0; }
+.atomsculptor-legacy-shell .atomsculptor-interface-candidates button { display: grid; gap: 2px; width: 100%; padding: 6px 7px; text-align: left; color: var(--as-muted); font-size: 10px; }
+.atomsculptor-legacy-shell .atomsculptor-interface-candidates button strong { color: var(--as-text); font-size: 11px; }
+.atomsculptor-legacy-shell .atomsculptor-interface-candidates button.selected { border-color: var(--as-accent-light); background: #007acc2b; box-shadow: inset 2px 0 var(--as-accent); }
 
 .atomsculptor-legacy-shell .atomsculptor-canvas-panel { background: #181818; overflow: hidden; }
 .atomsculptor-legacy-shell .atomsculptor-legacy-viewport { background: radial-gradient(circle at 48% 38%, #25252a 0, #181818 62%); }

@@ -76,6 +76,7 @@ def build_interface(
     thickness_1: int = 2,
     thickness_2: int = 2,
     in_layers: Optional[bool] = True,
+    max_interfaces: int = 3,
 ) -> dict:
     """Build a coherent ZSL-matched interface from two bulk structures.
 
@@ -113,6 +114,7 @@ def build_interface(
             max_angle_tol = float(max_angle_tol)
         thickness_1 = int(thickness_1)
         thickness_2 = int(thickness_2)
+        max_interfaces = max(1, min(100, int(max_interfaces)))
 
         analyzer = SubstrateAnalyzer(
             max_area_ratio_tol=0.09,
@@ -140,39 +142,58 @@ def build_interface(
         terminations = builder.terminations
         if not terminations:
             return {"error": "No terminations available for the selected slabs."}
-        termination = terminations[0]
-
         effective_vacuum = vacuum_between if vacuum_between != 0 else gap
-        interfaces = list(builder.get_interfaces(
-            termination=termination,
-            gap=gap,
-            vacuum_over_film=effective_vacuum,
-            film_thickness=thickness_1,
-            substrate_thickness=thickness_2,
-            in_layers=in_layers,
-        ))
-        if not interfaces:
+        candidates = []
+        for termination_index, termination in enumerate(terminations):
+            for interface in builder.get_interfaces(
+                termination=termination,
+                gap=gap,
+                vacuum_over_film=effective_vacuum,
+                film_thickness=thickness_1,
+                substrate_thickness=thickness_2,
+                in_layers=in_layers,
+            ):
+                candidates.append((termination_index, interface))
+                if len(candidates) >= max_interfaces:
+                    break
+            if len(candidates) >= max_interfaces:
+                break
+        if not candidates:
             return {"error": "No interfaces generated. Check parameters."}
-
-        interface = interfaces[0]
-        interface.translate_sites(range(len(interface)), [0, 0, 0])
     except Exception as exc:
         return {"error": f"Error during matching: {str(exc)}"}
 
-    if output_file_name:
-        output_path = resolve_output_path(output_file_name)
-    else:
-        film_name = Path(structure_1).stem
-        substrate_name = Path(structure_2).stem
-        output_path = resolve_output_path(f"{film_name}-{substrate_name}_interface.extxyz")
-
     try:
-        interface = interface.to_ase_atoms()
-        write(output_path, interface)
+        # Candidate files are intentionally stable and numbered.  The OAW
+        # document stores this metadata and the later adoption request names
+        # one exact file; nothing is selected merely from prose output.
+        prefix = Path(output_file_name).stem if output_file_name else f"{Path(structure_1).stem}-{Path(structure_2).stem}_interface"
+        generated = []
+        for candidate_id, (termination_index, interface) in enumerate(candidates, start=1):
+            interface.translate_sites(range(len(interface)), [0, 0, 0])
+            output_path = resolve_output_path(f"{prefix}_candidate_{candidate_id}.extxyz")
+            atoms = interface.to_ase_atoms()
+            write(output_path, atoms)
+            vector_a, vector_b = interface.lattice.matrix[0], interface.lattice.matrix[1]
+            cross = (
+                vector_a[1] * vector_b[2] - vector_a[2] * vector_b[1],
+                vector_a[2] * vector_b[0] - vector_a[0] * vector_b[2],
+                vector_a[0] * vector_b[1] - vector_a[1] * vector_b[0],
+            )
+            area = sum(component * component for component in cross) ** 0.5
+            generated.append({
+                "id": candidate_id,
+                "file_name": display_path(output_path),
+                "formula": interface.composition.reduced_formula,
+                "atom_count": len(interface),
+                "von_mises_strain": float(match.von_mises_strain),
+                "area": area,
+                "termination_index": termination_index,
+            })
     except Exception as exc:
         return {"error": f"Failed to write interface to file: {str(exc)}"}
 
-    return {"output_interface_file": display_path(output_path)}
+    return {"interface_candidates": generated}
 
 
 _TOOLS = {"build_interface": build_interface}

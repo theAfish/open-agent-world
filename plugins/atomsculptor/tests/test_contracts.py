@@ -8,17 +8,27 @@ import unittest
 from open_agent_world.plugin_api import AgentConfig
 from open_agent_world.plugin_api import RuntimeModelConnection
 
-from oaw_atomsculptor import AtomSculptorAgentConfig, AtomSculptorPlugin, WRITE_INPUT_SCHEMA, _write, create_plugin
+from oaw_atomsculptor import AtomSculptorAgentConfig, AtomSculptorPlugin, OBSERVE, OBSERVE_INPUT_SCHEMA, ObserveStructure, RECORD_CANDIDATES, RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA, WRITE_INPUT_SCHEMA, _observe, _write, create_plugin
 from oaw_atomsculptor.runtime import (
     AtomSculptorRuntime,
     BUILDER_INSTRUCTION,
     PLANNER_INSTRUCTION,
     STRUCTURED_REQUEST_INSTRUCTION,
+    _trace_value,
 )
 from oaw_atomsculptor.structure import Atom, Layer, StructureDocument, select, select_layers
 
 
 class StructureContractTests(unittest.TestCase):
+    def test_trace_values_are_bounded_and_redact_sensitive_binary_payloads(self) -> None:
+        traced = _trace_value({"data_base64": "image-bytes", "atoms": [{"id": 1}] * 17, "message": "x" * 1_100})
+        self.assertEqual(traced["data_base64"], "<redacted>")
+        self.assertEqual(traced["atoms"], {"count": 17})
+        self.assertTrue(str(traced["message"]).endswith("<truncated>"))
+
+    def test_candidate_record_schema_requires_a_revision(self) -> None:
+        self.assertIn("expected_revision", RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA["required"])
+
     def test_selection_uses_stable_atom_ids(self) -> None:
         document = StructureDocument(
             atoms=[
@@ -76,6 +86,23 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertEqual(calls, [("capability", "replace_structure", {
             "structure": StructureDocument().model_dump(mode="json"),
         }, 7)])
+
+    def test_visual_observation_uses_the_host_capture_boundary(self) -> None:
+        calls = []
+
+        class Context:
+            async def capture_plugin_view(self, capability, *, capture_kind, required_capability_kind, capture_options=None):
+                calls.append((capability, capture_kind, required_capability_kind, capture_options))
+                return {"ok": True}
+
+        self.assertEqual(asyncio.run(_observe(Context(), "capability", {})), {"ok": True})
+        self.assertEqual(calls, [("capability", "atomsculptor.structure-viewport", "atomsculptor.structure.read", {"view": "current"})])
+        self.assertEqual(asyncio.run(_observe(Context(), "capability", {"view": "x"})), {"ok": True})
+        self.assertEqual(calls[-1], ("capability", "atomsculptor.structure-viewport", "atomsculptor.structure.read", {"view": "x"}))
+        self.assertEqual(ObserveStructure(view="iso").view, "iso")
+        self.assertIn("view", OBSERVE_INPUT_SCHEMA["properties"])
+        with self.assertRaises(ValueError):
+            asyncio.run(_observe(Context(), "capability", {"view": "arbitrary"}))
 
     def test_run_start_context_contains_selected_atom_records(self) -> None:
         calls = []
@@ -171,10 +198,18 @@ class RuntimeContractTests(unittest.TestCase):
         real = PluginRegistration(plugin.descriptor)
         plugin.register(real)
         self.assertIn("atomsculptor.adk-team", real.runtime_provider_model_resolvers)
+        self.assertEqual(plugin.descriptor.plugin_api_version, "1.20")
+        self.assertIn(OBSERVE, real.capability_handlers)
+        self.assertNotIn("atomsculptor.structure.observe", real.relationships)
+        self.assertIn(OBSERVE, {grant.kind for grant in real.relationships["atomsculptor.structure.inspect"].capabilities})
+        self.assertIn(OBSERVE, {grant.kind for grant in real.relationships["atomsculptor.structure.modify"].capabilities})
         structure_node = real.nodes["atomsculptor.structure"]
         self.assertIn("replace_structure", structure_node.document.actions)
         self.assertIn("select_atoms", structure_node.document.actions)
         self.assertIn("select_layers", structure_node.document.actions)
+        self.assertIn("record_interface_candidates", structure_node.document.actions)
+        self.assertIn(RECORD_CANDIDATES, real.capability_handlers)
+        self.assertIn(RECORD_CANDIDATES, {grant.kind for grant in real.relationships["atomsculptor.structure.modify"].capabilities})
 
     def test_structure_card_is_a_native_file_viewer(self) -> None:
         plugin = create_plugin()
