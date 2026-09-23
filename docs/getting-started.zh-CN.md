@@ -9,8 +9,8 @@
 克隆仓库后，所有命令均在仓库根目录运行。
 
 - Python 3.11 或更新版本、uv，以及 Node.js 20 或更新版本。
-- 本地沙盒执行支持 Windows 10/11 或 Linux（包括 WSL2）。
-- macOS 可以运行应用，但没有本地沙盒运行时。
+- 本地沙盒执行支持 Windows 10/11、Linux（包括 WSL2）以及 macOS 13 或更高版本。
+- macOS 可使用系统自带的 Seatbelt；macOS 26+ 的 Apple Silicon 设备可安装 Apple Container 0.6.0+，使用优先级更高的虚拟机沙盒。
 
 Windows PowerShell：
 

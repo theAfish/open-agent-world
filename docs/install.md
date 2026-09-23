@@ -22,7 +22,7 @@ The initial builds are unsigned. If Windows shows a reputation warning, check th
 
 Open the DMG and drag **Open Agent World** into **Applications**, then launch it. Builds currently use ad-hoc signing and are not notarized by Apple. If macOS blocks opening, review **System Settings → Privacy & Security** for the blocked app and an **Open Anyway** option, if available and you trust this download. Do not disable system security globally. Report a damaged-app error with the release version and Mac architecture if it cannot be opened.
 
-macOS currently has **no local Sandbox runtime**. The desktop preview does not imply support for plugins or actions requiring that runtime.
+macOS 13+ can use the built-in **Seatbelt** Sandbox. On Apple Silicon with macOS 26+, install Apple `container` 0.6.0+ and run `container system start` to enable the preferred VM Sandbox. Scientific plugin dependencies are prepared on first use and may require a download. See [Sandbox workspace](sandbox-workspace.md) for the security and resource-limit differences.
 
 ## Linux / WSL2
 

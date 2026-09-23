@@ -35,7 +35,9 @@ function useSandboxRuntime(card: WorldCard) {
   const networkLabel = !enabled ? t("Disabled") : network?.network_status === "unsupported" ? t("Requested · unsupported")
     : network?.network_status === "setup_failed" ? t("Requested · setup failed")
     : !network?.network_available ? t("Requested · prerequisites unavailable")
-    : ready ? t("Enabled · runtime ready") : t("Requested · start to apply");
+    : ready ? network?.network_transport === "proxy_tcp"
+      ? t("Enabled · proxy TCP") : t("Enabled · runtime ready")
+      : t("Requested · start to apply");
   const runtimeIssue = !info && selectedRuntime && !selectedRuntime.available ? selectedRuntime.reason : undefined;
   return {
     info, busy, selectedRuntime, network, networkLabel, ready, stopped, statusLabel,
@@ -148,6 +150,8 @@ export function SandboxSettings({ card, onDirtyChange, compact = false }: { card
   const selectedRuntimeIssue = selectedRuntime && info?.runtime_id !== selectedRuntime.id && !selectedRuntime.available ? selectedRuntime.reason : undefined;
   const settingsIssue = issue ?? selectedRuntimeIssue;
   const selectedNetwork = info && info.network_status && (info.runtime_locked || runtime === (card.config.runtime ?? "auto")) ? info : selectedRuntime;
+  const selectedLimits = info && (info.runtime_locked || runtime === (card.config.runtime ?? "auto")) ? info : selectedRuntime;
+  const limitsAvailable = selectedLimits?.resource_limits_available !== false;
 
   return <div className="expanded-stack sandbox-controls sandbox-settings-page nowheel">
     <section className="sandbox-settings-section">
@@ -207,6 +211,8 @@ export function SandboxSettings({ card, onDirtyChange, compact = false }: { card
               <option value="enabled" disabled={!selectedNetwork?.supported_network_modes?.includes("enabled")}>{t("Enabled")}</option>
             </select>
           </label>
+          {selectedNetwork?.network_transport === "proxy_tcp" && network
+            && <p className="sandbox-help sandbox-setting-wide">{t("Proxy TCP only; direct sockets and UDP remain blocked.")}</p>}
           {selectedNetwork?.network_reason && (network || !selectedNetwork.network_available)
             && <details className="sandbox-settings sandbox-setting-wide">
               <summary>{t("Network details")}</summary>
@@ -215,11 +221,13 @@ export function SandboxSettings({ card, onDirtyChange, compact = false }: { card
         </div>
         <details className="sandbox-settings"><summary>{t("Resource limits")}</summary>
           <div className="sandbox-limits-grid">
-            <label className="field-label">{t("Memory (MiB)")}<input type="number" min={16} max={8192} disabled={!canConfigure} value={memory / 1048576} onChange={event => setMemory(Number(event.target.value) * 1048576)} /></label>
-            <label className="field-label">{t("Process limit")}<input type="number" min={1} max={256} disabled={!canConfigure} value={processes} onChange={event => setProcesses(Number(event.target.value))} /></label>
+            <label className="field-label">{t("Memory (MiB)")}<input type="number" min={16} max={8192} disabled={!canConfigure || (!limitsAvailable && memory === 536870912)} value={memory / 1048576} onChange={event => setMemory(Number(event.target.value) * 1048576)} /></label>
+            <label className="field-label">{t("Process limit")}<input type="number" min={1} max={256} disabled={!canConfigure || (!limitsAvailable && processes === 64)} value={processes} onChange={event => setProcesses(Number(event.target.value))} /></label>
             <label className="field-label">{t("Command timeout (seconds)")}<input type="number" min={1} max={3600} disabled={!canConfigure} value={timeout} onChange={event => setTimeoutValue(Number(event.target.value))} /></label>
           </div>
-          <p className="sandbox-help">{t("On Linux/WSL, the process limit includes threads. npm installers may need 64 or more.")}</p>
+          <p className="sandbox-help">{t("On Linux-based runtimes, the process limit includes threads. npm installers may need 64 or more.")}</p>
+          {!limitsAvailable && selectedLimits?.resource_limit_reason
+            && <p className="sandbox-help">{selectedLimits.resource_limit_reason}</p>}
         </details>
         <div className="sandbox-config-actions">
           <span>{busy === "saving" ? t("Saving…") : dirty ? t("Unsaved changes") : stopped ? t("Settings saved") : t("Stop to edit settings")}</span>

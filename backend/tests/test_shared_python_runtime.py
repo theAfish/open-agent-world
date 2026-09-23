@@ -17,7 +17,10 @@ from backend.plugins.registry import PluginDefinition, PluginDescriptor, PluginR
 from backend.sandbox.environment import validate_command_environment
 from backend.sandbox.linux import bubblewrap_command, minimal_linux_environment
 from backend.sandbox.models import ResourceAccess, SandboxValidationError
-from backend.sandbox.python_runtime import SharedPythonRuntime, mutation_lock, validate_requirements
+from backend.sandbox.python_runtime import (
+    DARWIN_MANAGED_PYTHON, SharedPythonRuntime, mutation_lock,
+    validate_requirements,
+)
 
 
 def test_timeout_preserves_live_progress_and_uses_package_deadline(tmp_path, monkeypatch):
@@ -107,6 +110,36 @@ def test_linux_runtime_mount_is_readonly_and_workspace_is_separate(tmp_path):
     assert 'PYTHONPATH' not in env
     assert env['PATH'].startswith(str(runtime.bin))
     assert command[-3] == str(runtime.python)
+
+
+def test_darwin_managed_python_is_private_and_uv_provisioned(tmp_path, monkeypatch):
+    runtime = SharedPythonRuntime(tmp_path)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(runtime, "_ensure_uv", lambda: "/managed/uv")
+    calls = []
+
+    def run(argv):
+        calls.append([str(value) for value in argv])
+        if "install" in argv:
+            interpreter = (runtime.base /
+                f"cpython-{DARWIN_MANAGED_PYTHON}-macos-aarch64-none" /
+                "bin" / f"python{DARWIN_MANAGED_PYTHON}")
+            interpreter.parent.mkdir(parents=True)
+            interpreter.touch()
+        else:
+            runtime.bin.mkdir(parents=True)
+            runtime.python.touch()
+            (runtime.venv / "pyvenv.cfg").touch()
+
+    monkeypatch.setattr(runtime, "_run", run)
+    runtime.root.mkdir(parents=True)
+    runtime._ensure()
+
+    assert calls[0][-2:] == ["--no-bin", DARWIN_MANAGED_PYTHON]
+    assert calls[1][-2:] == ["--clear", str(runtime.venv)]
+    assert str(runtime.installer_python).startswith(str(runtime.base))
+    metadata = json.loads((runtime.root / "ready.json").read_text())
+    assert metadata["base_python"] == str(runtime.installer_python)
 
 
 def test_lock_serializes_separate_backend_processes(tmp_path):

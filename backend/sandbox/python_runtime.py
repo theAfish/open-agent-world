@@ -27,6 +27,8 @@ RUNTIME_SETUP_TIMEOUT = 600
 # Setup, uv bootstrap, dependency preflight, and dependency installation.
 PREPARATION_TIMEOUT = 60 + RUNTIME_SETUP_TIMEOUT + 3 * PACKAGE_INSTALL_TIMEOUT + 120
 LAUNCHER_VERSION = 1
+DARWIN_MANAGED_PYTHON = "3.12"
+DARWIN_RUNTIME_VERSION = 1
 
 
 def validate_requirements(requirements):
@@ -92,11 +94,66 @@ class SharedPythonRuntime:
         self.base = self.root / "base"
         self.bin = self.venv / ("Scripts" if os.name == "nt" else "bin")
         self.python = self.bin / ("python.exe" if os.name == "nt" else "python")
-        self.installer_python = self.base / "python.exe" if os.name == "nt" else Path("/usr/bin/python3")
+
+    @property
+    def installer_python(self) -> Path:
+        if os.name == "nt":
+            return self.base / "python.exe"
+        if sys.platform == "darwin":
+            managed = self._darwin_base_python()
+            if managed is None:
+                raise SandboxPreparationError("The managed macOS Python runtime has not been prepared")
+            return managed
+        return Path("/usr/bin/python3")
 
     def _uv(self):
         managed = self.root / "tools" / "bin" / ("uv.exe" if os.name == "nt" else "uv")
         return str(managed) if managed.is_file() else shutil.which("uv")
+
+    def _darwin_base_python(self) -> Path | None:
+        """Locate CPython inside OAW's private uv installation directory."""
+        if not self.base.is_dir():
+            return None
+        names = (f"python{DARWIN_MANAGED_PYTHON}", "python3", "python")
+        for name in names:
+            candidates = sorted(self.base.glob(f"cpython-{DARWIN_MANAGED_PYTHON}-*/bin/{name}"))
+            for candidate in candidates:
+                if candidate.is_file():
+                    return candidate
+        return None
+
+    def _ensure_uv(self) -> str:
+        """Return uv, bootstrapping a private copy with the backend Python."""
+        uv = self._uv()
+        if uv:
+            return uv
+        bootstrap_python = Path(sys.executable)
+        if not bootstrap_python.is_file():
+            raise SandboxPreparationError(
+                "Cannot bootstrap uv: the Python interpreter running the OAW backend is unavailable")
+        tools = self.root / "tools"
+        tools.mkdir(parents=True, exist_ok=True)
+        self._run([bootstrap_python, "-I", "-m", "pip", "--isolated", "install",
+            "--only-binary", ":all:", "--no-deps", "--target", tools, "uv"])
+        uv = self._uv()
+        if not uv:
+            raise SandboxPreparationError(
+                f"uv was installed but its executable was not found below {tools}")
+        return uv
+
+    def _ensure_darwin(self) -> None:
+        """Provision self-contained CPython and a venv below OAW storage."""
+        uv = self._ensure_uv()
+        self.base.mkdir(parents=True, exist_ok=True)
+        self._run([uv, "--no-config", "--cache-dir", self.root / "cache",
+            "python", "install", "--install-dir", self.base, "--no-bin",
+            DARWIN_MANAGED_PYTHON])
+        base = self._darwin_base_python()
+        if base is None:
+            raise SandboxPreparationError(
+                f"uv did not create a usable CPython {DARWIN_MANAGED_PYTHON} below {self.base}")
+        self._run([uv, "--no-config", "--cache-dir", self.root / "cache",
+            "venv", "--python", base, "--no-python-downloads", "--clear", self.venv])
 
     def snapshot(self):
         """Read bounded progress without acquiring a mutation lock or running code.
@@ -166,6 +223,18 @@ class SharedPythonRuntime:
     def _ensure(self):
         ready = self.root / "ready.json"
         if ready.is_file() and self.python.is_file() and (self.venv / "pyvenv.cfg").is_file():
+            try:
+                metadata = json.loads(ready.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                metadata = {}
+            if sys.platform != "darwin" or (
+                metadata.get("darwin_runtime_version") == DARWIN_RUNTIME_VERSION
+                and self._darwin_base_python() is not None
+            ):
+                return
+        if sys.platform == "darwin":
+            self._ensure_darwin()
+            self._write_ready(launchers_ready=False)
             return
         base = getattr(sys, "_base_executable", sys.executable) if os.name == "nt" else "/usr/bin/python3"
         if os.name == "nt":
@@ -196,11 +265,19 @@ class SharedPythonRuntime:
     def prepare_sync(self, requirements=(), bootstrap_key=None):
         requirements = validate_requirements(requirements)
         ready = self.root / "ready.json"
-        if (not requirements and ready.is_file() and self.python.is_file()
-            and json.loads(ready.read_text(encoding="utf-8")).get("launcher_version") == LAUNCHER_VERSION):
+        try:
+            metadata = json.loads(ready.read_text(encoding="utf-8")) if ready.is_file() else {}
+        except (OSError, ValueError):
+            metadata = {}
+        runtime_current = (sys.platform != "darwin" or (
+            metadata.get("darwin_runtime_version") == DARWIN_RUNTIME_VERSION
+            and self._darwin_base_python() is not None
+        ))
+        if (not requirements and self.python.is_file() and runtime_current
+            and metadata.get("launcher_version") == LAUNCHER_VERSION):
             return {"kind": self.kind, "python": str(self.python), "requirements": []}
         with mutation_lock(self.root):
-            existed = self.python.is_file()
+            existed = self.python.is_file() and runtime_current
             self._ensure()
             self._repair_launchers()
             receipts_path = self.root / "bootstrap.json"
@@ -242,8 +319,12 @@ class SharedPythonRuntime:
     def _write_ready(self, *, launchers_ready):
         ready = self.root / "ready.json"
         temporary = ready.with_suffix(".tmp")
-        temporary.write_text(json.dumps({"python": str(self.python),
-            "launcher_version": LAUNCHER_VERSION if launchers_ready else 0}), encoding="utf-8")
+        payload = {"python": str(self.python),
+            "launcher_version": LAUNCHER_VERSION if launchers_ready else 0}
+        if sys.platform == "darwin":
+            payload["darwin_runtime_version"] = DARWIN_RUNTIME_VERSION
+            payload["base_python"] = str(self.installer_python)
+        temporary.write_text(json.dumps(payload), encoding="utf-8")
         temporary.replace(ready)
 
     async def prepare(self, requirements=(), bootstrap_key=None):

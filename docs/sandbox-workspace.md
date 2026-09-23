@@ -8,7 +8,7 @@ Open the Sandbox inspector, select a runtime, and save its configuration before 
 
 Writes change real files immediately. Deleting a Sandbox removes its owned storage and permissions, never the selected external folder. Stop before changing the working folder. The runtime is pinned on first start; use a new card to change runtime after that point. Host folder bindings are excluded from Legion templates.
 
-Automatic discovery prefers a usable existing WSL2 distribution on Windows, otherwise native Windows. Native Linux uses its own kernel. Linux/WSL needs Bubblewrap, libseccomp, Python 3.10+ for the trusted worker, and a systemd user manager with cgroup-v2 memory/process limits; the application backend needs Python 3.11+. No Docker or VM image is required. macOS has no local Sandbox runtime.
+Automatic discovery prefers a usable existing WSL2 distribution on Windows, otherwise native Windows. Native Linux uses its own kernel. Linux/WSL needs Bubblewrap, libseccomp, Python 3.10+ for the trusted worker, and a systemd user manager with cgroup-v2 memory/process limits; the application backend needs Python 3.11+. No Docker or VM image is required. macOS offers two runtimes: **Container VM** (preferred when available; macOS 26+ on Apple Silicon with Apple `container` 0.6.0+) runs each command in its own lightweight Linux VM, while **Seatbelt** is a zero-install native fallback on macOS 13+. Container VM defaults to an offline network and enforces a read-only root filesystem, memory budget and per-command process budget; its opt-in public-IPv4 mode requires a separately prepared firewall-equipped image. Seatbelt uses a deny-default `sandbox-exec` profile and a backend-liveness watchdog, but macOS has no safe native equivalent to cgroup/Job Object whole-tree memory and process limits; changing those two defaults is therefore rejected with guidance to select Container VM. Seatbelt does not depend on a system `/usr/bin/python3`: on first Python use, the trusted backend bootstraps a private `uv` when needed, installs an OAW-managed CPython 3.12, and exposes its base runtime and shared environment read-only to sandboxed commands. Container VM separately creates its Python 3.12 environment inside Linux, so Darwin wheels are never reused in the VM.
 
 Discovery reports missing prerequisites. Use **Refresh** after fixing them. Missing isolation never falls back to a normal host subprocess. Networking has [separate prerequisites](sandbox-networking.md).
 
@@ -63,10 +63,12 @@ The Skill panel distinguishes the selected document revision, available files, c
 | --- | --- | --- |
 | Windows AppContainer | Disabled (default), Enabled | Outbound Internet capability plus fixed per-profile WFP destination blocks; requires the narrow elevated broker, with no private/server capability or loopback exemption |
 | Linux / WSL2 | Disabled (default), Enabled | slirp4netns in an isolated network namespace with public IPv4 egress enforcement; retained seccomp, host/alias denial and cgroup cleanup |
+| macOS Seatbelt | Disabled (default), Enabled via proxy | Only command-scoped authenticated proxy ports are admitted. Proxy-aware public IPv4 TCP works; direct sockets, UDP, private/host targets and IPv6 remain blocked. |
+| macOS Container VM | Disabled by default; opt-in public IPv4 | Offline uses `--network none`; enabled commands install a guest nftables filter before command admission and drop setup privileges. The enabled mode requires separate preparation and a setup probe. |
 
 Enable public outbound networking using **Stop → Save → Start**. Missing networking components are reported separately from offline runtime availability. Mount isolation, dropped capabilities, resource limits and deadlines remain enforced. No privileged host socket is mounted. The execution contract remains arbitrary executable/argv, independent of network protocol. See [network policies, prerequisites, lifecycle and real acceptance results](sandbox-networking.md).
 
-**Check execution environment** runs through the selected Sandbox and reports working directory, configured access, configuration readiness, common tool availability/versions and network policy. **Test connectivity** probes a user-entered HTTP(S) destination with `curl` through that same Sandbox policy, without URL credentials or disabling certificate verification. It distinguishes setup failure, DNS failure, TLS verification failure, connection failure, HTTP authentication refusal and missing tools. Offline mode reports disabled without making a request. Diagnostics never install packages or modify system settings.
+**Check execution environment** runs through the selected Sandbox and reports working directory, configured access, configuration readiness, common tool availability/versions and network policy. **Test connectivity** probes a user-entered HTTP(S) destination with `curl` through that same Sandbox policy, without URL credentials or disabling certificate verification. It distinguishes setup failure, DNS failure, TLS verification failure, connection failure, HTTP authentication refusal and missing tools. Offline mode reports disabled without making a request. On macOS Seatbelt, this system-only diagnostic does not prepare managed Python. Diagnostics never install packages or modify system settings.
 
 ## Console and recovery
 
@@ -84,7 +86,7 @@ Commands from multiple Agents can execute concurrently in one Sandbox, sharing i
 
 **Cancel command** targets a specific command ID and cleans up only that process tree. Agents can cancel their own commands; cancelling another Agent's command requires Sandbox management authority. A stale ID never selects a newer command. Cancellation and timeout leave other commands running. **Stop Sandbox** closes admission, terminates all commands and stops/revokes runtime workspace access. Resource limits apply to each command's process tree, so concurrent commands can consume more resources in aggregate.
 
-Special shared operations retain protection: changing workspace/runtime bindings, resetting caches and publishing artifacts require the relevant environment to be idle. Shared Python package mutations retain their OS file lock. On Windows, Skill bundle ACLs and enabled-network policies belong to the shared AppContainer identity, so commands using them require exclusive admission and return a retryable busy error if another command is active. Ordinary Windows commands and Linux/WSL commands can overlap. Linux/WSL Skill revisions use immutable cache paths so a new revision cannot replace files mounted by a running command.
+Special shared operations retain protection: changing workspace/runtime bindings, resetting caches and publishing artifacts require the relevant environment to be idle. Shared Python package mutations retain their OS file lock. On Windows, Skill bundle ACLs and enabled-network policies belong to the shared AppContainer identity, so commands using them require exclusive admission and return a retryable busy error if another command is active. Ordinary Windows commands and Linux/WSL commands can overlap. Linux/WSL Skill revisions use immutable cache paths so a new revision cannot replace files mounted by a running command. Container VM executions use scoped names and force-delete recovery on the next Start; their in-guest worker also retains the deadline if the backend transport exits. Seatbelt commands run below a trusted liveness watchdog whose pipe closes when the backend exits, terminating the sandbox process group.
 
 **Reset runtime cache** requires a stopped Sandbox and removes host-managed Skill materializations, preserving workspace outputs and external folders.
 
@@ -107,6 +109,12 @@ See [network acceptance setup](sandbox-networking.md#real-runtime-acceptance)
 for the separate networking prerequisites and verification boundaries. Preserve
 per-run logs, failures, skips and unresolved platform evidence in `.outputs/` or CI.
 
+On macOS, set `OAW_RUN_NATIVE_MACOS_SANDBOX_TESTS=1` and run
+`backend/tests/test_darwin_seatbelt.py backend/tests/test_macos_container.py`.
+The tests verify read-only workspace enforcement, Seatbelt attachment paths,
+Container VM offline interfaces and its Linux-managed Python. Container VM tests
+require the system service to be running and may pull the runtime base images.
+
 Concurrency regression coverage is in `backend/tests/test_sandbox_concurrency.py`.
 Set `OAW_TEST_WSL_DISTRO` to an existing distribution to run its real WSL overlap
 and command cancellation test. `frontend/e2e/sandbox-concurrency.spec.ts` verifies
@@ -115,7 +123,7 @@ the window using mocked API responses; it does not prove native isolation.
 
 ## Execution continuity and installation
 
-Linux/WSL Sandboxes have a private persistent `HOME=/sandbox/home`, stored under
+Linux/WSL and macOS Container VM Sandboxes have a private persistent `HOME=/sandbox/home`, stored under
 that Sandbox's managed root. `$HOME/.local/bin` and `$HOME/bin` are on PATH.
 CLI installations and private venvs there survive commands, Stop/Start and backend
 restart, independently of the selected workspace. Destroy removes this home;
@@ -159,7 +167,10 @@ For an older backend, `npm install -g --prefix "$HOME/.local" <package>` selects
 the same destination explicitly.
 
 New Sandboxes default to a process limit of 64. On Linux/WSL this is a cgroup task
-limit, counting threads and command helpers as well as processes. The previous
+limit, counting threads and command helpers as well as processes. Container VM
+uses a VM-local non-root UID and `nproc` limit, reserving one process for its trusted
+worker. Seatbelt cannot safely apply a per-login-UID `nproc` limit and rejects custom
+memory/process values rather than claiming to enforce them. The previous
 16-task default can prevent npm install scripts from forking. Existing saved
 limits are preserved: Stop, set Process limit to 64 (or a suitable explicit
 budget), Save, then Start. The cap remains enforced.

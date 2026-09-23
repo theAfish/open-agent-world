@@ -6,7 +6,7 @@
 
 Install Git, Python 3.11 or newer, [uv](https://docs.astral.sh/uv/getting-started/installation/), and Node.js 20 or newer. Python is enough for the plugin code; Node builds and serves OAW's frontend.
 
-Windows and Linux/WSL support local Sandbox execution with the required isolation runtime. macOS can run OAW and the first plugin tutorial, but currently has no local Sandbox runtime.
+Windows, Linux/WSL and macOS support local Sandbox execution with their required isolation runtime. macOS has a built-in Seatbelt fallback; Apple Container 0.6.0+ on macOS 26+ Apple Silicon provides the preferred VM boundary.
 
 ## Clone and install
 

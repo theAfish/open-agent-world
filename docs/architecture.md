@@ -20,7 +20,7 @@ FastAPI application
   |-- StateStore + StateContext (scoped runtime state and inherited reads)
   |-- RunManager + durable RunStore
   |    `-- RuntimeProvider (Google ADK built-in; plugins may add others)
-  `-- SandboxBackend (Windows, Linux, or WSL2 isolation)
+  `-- SandboxBackend (Windows, Linux, WSL2, or macOS isolation)
 ```
 
 The frontend may request a mutation, but it cannot grant a capability. Every protected operation asks the capability broker to resolve the current graph inside the backend request. No capability is cached across an operation boundary, so changing or deleting an edge takes effect immediately.
@@ -74,7 +74,7 @@ Direct resource tools never route through a Sandbox.
 1. Resource-to-Sandbox edges define mounts and their access mode.
 2. Agent-to-Sandbox `execute` grants inspection and execution; `execute_manage` also grants Start/Stop. Both use live capability checks.
 3. The runtime exposes the configured workspace and currently authorized attachments.
-4. Commands run with a minimal environment and process-tree limits inside the selected boundary: AppContainer/Job Objects on Windows, or Bubblewrap, seccomp, and cgroup v2 on Linux and WSL2.
+4. Commands run with a minimal environment inside the selected boundary: AppContainer/Job Objects on Windows; Bubblewrap, seccomp, and cgroup v2 on Linux/WSL2; or Seatbelt / Apple Container VM on macOS. Container VM supplies hard memory/process limits; Seatbelt rejects custom limits it cannot safely enforce.
 5. Networking is disabled by default. Explicit enabled networking requires the platform's separate policy components.
 6. stdout, stderr, lifecycle changes, and resource changes are published as typed events. Revocation prevents subsequent unauthorized access.
 

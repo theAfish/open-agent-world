@@ -135,6 +135,7 @@ class SandboxManager(SandboxBackend):
 
     async def _provision(self, binding: _Binding, runtime_id: str) -> None:
         backend = self._backend(runtime_id)
+        backend.validate_execution_policy(binding.policy)
         created = False
         try:
             await backend.get(binding.sandbox_id)
@@ -163,6 +164,8 @@ class SandboxManager(SandboxBackend):
             raise SandboxValidationError(selected.network_reason)
         if policy.get("network_enabled") and not selected.network_available:
             raise SandboxValidationError(selected.network_reason or "Networking prerequisites are missing; refresh runtime discovery after setup")
+        if selected.available:
+            self._backend(selected.id).validate_execution_policy(policy)
         policy_changed = policy != binding.policy
         unchanged = not policy_changed and (binding.runtime, binding.workspace_path, binding.workspace_access) == (runtime, config.get("workspace_path"), access)
         if unchanged and not binding.provisioned:
@@ -247,6 +250,7 @@ class SandboxManager(SandboxBackend):
                     raise SandboxSecurityError(runtime.network_reason or "Networking is unavailable for the pinned runtime")
                 binding.network_error = None
             backend = self._backend(runtime.id)
+            backend.validate_execution_policy(binding.policy)
             if not binding.provisioned:
                 # Pin before execution. A failed start can be retried with the same data.
                 await self._provision(binding, runtime.id)
@@ -265,10 +269,13 @@ class SandboxManager(SandboxBackend):
         if binding.network_error and runtime.network_available:
             status = "setup_failed"
         return {"network_enabled": binding.policy.get("network_enabled", False),
+            "network_transport": runtime.network_transport,
             "supported_network_modes": runtime.supported_network_modes,
             "network_available": runtime.network_available,
             "network_status": status,
-            "network_reason": (binding.network_error if runtime.network_available else None) or runtime.network_reason}
+            "network_reason": (binding.network_error if runtime.network_available else None) or runtime.network_reason,
+            "resource_limits_available": runtime.resource_limits_available,
+            "resource_limit_reason": runtime.resource_limit_reason}
 
     async def execute(self, sandbox_id: str, argv: Sequence[str], *, timeout_seconds: float | None = None,
                       env: Mapping[str, str] | None = None,

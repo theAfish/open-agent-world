@@ -23,9 +23,12 @@ class SandboxRuntime:
     reason: str | None = None
     supports_workspace: bool = True
     supported_network_modes: tuple[str, ...] = ("disabled",)
+    network_transport: str = "none"
     network_reason: str = "Networking unavailable: isolated egress protecting host control services is not implemented"
     network_available: bool = False
     network_status: str = "not_implemented"
+    resource_limits_available: bool = True
+    resource_limit_reason: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +38,8 @@ class SandboxRuntimeRegistration:
     probe: Callable[[], Awaitable[tuple[bool, str | None]]]
     priority: int = 0
     network_probe: Callable[[], Awaitable[tuple[bool, str | None]]] | None = None
+    probe_timeout: float = 15
+    network_probe_timeout: float = 20
 
 
 class SandboxRuntimeRegistry:
@@ -65,7 +70,8 @@ class SandboxRuntimeRegistry:
 
             async def probe(registration: SandboxRuntimeRegistration) -> SandboxRuntime:
                 try:
-                    available, reason = await asyncio.wait_for(registration.probe(), 15)
+                    available, reason = await asyncio.wait_for(
+                        registration.probe(), registration.probe_timeout)
                 except (OSError, SandboxSecurityError, TimeoutError) as exc:
                     available, reason = False, str(exc) or "Runtime probe timed out"
                 runtime = replace(registration.runtime, available=available, reason=reason)
@@ -81,7 +87,8 @@ class SandboxRuntimeRegistry:
             return runtime
         status = "missing_component"
         try:
-            available, reason = await asyncio.wait_for(registration.network_probe(), 20)
+            available, reason = await asyncio.wait_for(
+                registration.network_probe(), registration.network_probe_timeout)
         except TimeoutError:
             available, reason = False, "Networking setup failed: prerequisite probe timed out"
             status = "setup_failed"
@@ -147,9 +154,36 @@ def builtin_sandbox_registry(root: Path, event_sink: SandboxEventSink | None) ->
         registry.register(SandboxRuntimeRegistration(
             SandboxRuntime("linux", "Linux · Bubblewrap", "linux", ("/bin/sh", "-c"),
                 supported_network_modes=("disabled", "enabled"),
+                network_transport="direct_public_ipv4",
                 network_reason="Public outbound IPv4 only; private networks, host services and IPv6 are blocked."),
             lambda: LinuxSandboxBackend(root, event_sink=event_sink, python_runtime=python_runtime),
             LinuxSandboxBackend.probe, 100, LinuxSandboxBackend.probe_network,
+        ))
+    elif sys.platform == "darwin":
+        from .darwin_seatbelt import DarwinSeatbeltBackend
+        registry.register(SandboxRuntimeRegistration(
+            SandboxRuntime("darwin", "macOS · Seatbelt", "macos", ("/bin/zsh", "-c"),
+                supported_network_modes=("disabled", "enabled"),
+                network_transport="proxy_tcp",
+                network_reason="Proxy-mediated public IPv4 TCP only; direct sockets and UDP are unavailable.",
+                resource_limits_available=False,
+                resource_limit_reason=("Seatbelt cannot hard-limit aggregate command-tree memory or process count; "
+                    "use macOS Container VM for those controls.")),
+            lambda: DarwinSeatbeltBackend(root, event_sink=event_sink, python_runtime=python_runtime),
+            DarwinSeatbeltBackend.probe, 50,
+            DarwinSeatbeltBackend.probe_network,
+            network_probe_timeout=30,
+        ))
+        from .macos_container import MacosContainerSandboxBackend
+        registry.register(SandboxRuntimeRegistration(
+            SandboxRuntime("macos-container", "macOS · Container VM", "linux", ("/bin/sh", "-c"),
+                supported_network_modes=("disabled", "enabled"),
+                network_transport="direct_public_ipv4",
+                network_reason="Public outbound IPv4 only; private networks, host services and IPv6 are blocked."),
+            lambda: MacosContainerSandboxBackend(root, event_sink=event_sink),
+            MacosContainerSandboxBackend.probe, 100,
+            MacosContainerSandboxBackend.probe_network,
+            probe_timeout=75, network_probe_timeout=75,
         ))
     elif os.name == "nt":
         from .windows import WindowsSandboxBackend
@@ -166,6 +200,7 @@ def builtin_sandbox_registry(root: Path, event_sink: SandboxEventSink | None) ->
         registry.register(SandboxRuntimeRegistration(
             SandboxRuntime("windows", "Windows · AppContainer", "windows", shell,
                 supported_network_modes=("disabled", "enabled"),
+                network_transport="direct_public_ipv4",
                 network_reason="Public outbound IPv4 with AppContainer and enforced destination restrictions; private networks, host services and IPv6 are blocked."),
             lambda: WindowsSandboxBackend(root, event_sink=event_sink, python_runtime=python_runtime), windows_probe, 50, WindowsSandboxBackend.probe_network,
         ))
@@ -199,6 +234,7 @@ def builtin_sandbox_registry(root: Path, event_sink: SandboxEventSink | None) ->
                 registry.register(SandboxRuntimeRegistration(
                     SandboxRuntime(runtime_id, f"WSL2 · {distribution}", "linux", ("/bin/sh", "-c"),
                         supported_network_modes=("disabled", "enabled"),
+                        network_transport="direct_public_ipv4",
                         network_reason="Public outbound IPv4 only; private networks, host services and IPv6 are blocked."),
                     lambda name=distribution, key=runtime_id: WslSandboxBackend(
                         root, distribution=name, runtime_id=key, event_sink=event_sink,

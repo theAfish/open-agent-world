@@ -33,9 +33,12 @@ export interface SandboxRuntime {
   shell: string[];
   supports_workspace: boolean;
   supported_network_modes?: string[];
+  network_transport?: string;
   network_reason?: string;
   network_available?: boolean;
   network_status?: string;
+  resource_limits_available?: boolean;
+  resource_limit_reason?: string;
 }
 
 export interface SandboxRuntimeCatalog {
@@ -58,10 +61,13 @@ export interface SandboxInfo {
   resources_path: string | null;
   security_boundary: string | null;
   network_enabled?: boolean;
+  network_transport?: string;
   supported_network_modes?: string[];
   network_reason?: string;
   network_available?: boolean;
   network_status?: string;
+  resource_limits_available?: boolean;
+  resource_limit_reason?: string;
 }
 export type CardStatus = AgentStatus | SandboxStatus | "available" | "modified" | string;
 

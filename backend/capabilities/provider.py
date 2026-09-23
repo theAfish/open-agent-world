@@ -278,6 +278,8 @@ class _CapabilityContext:
             "network_enabled": info.network_enabled,
             "supported_network_modes": list(info.supported_network_modes),
             "network_reason": info.network_reason,
+            "resource_limits_available": info.resource_limits_available,
+            "resource_limit_reason": info.resource_limit_reason,
             "configuration": configuration_summary(self.services, sandbox_id),
             "active_commands": [{key: item.get(key) for key in ("id", "operation_kind", "requirements", "caller", "run_id", "argv", "started_at")} for item in active],
             "current_caller": current["caller"] if current else None,
@@ -286,7 +288,7 @@ class _CapabilityContext:
             "shared_python": python_status,
             "console_mode": "non-interactive; each command starts in the configured workspace; cd/export/activation do not persist",
             "command_timeout": self.services.world.get_card(sandbox_id).config.get("command_timeout", 600),
-            "installation": "Use install_python_packages for the shared read-only Python environment. On Linux/WSL, HOME=/sandbox/home persists; use $HOME/.local/bin or $HOME/bin for local CLI tools, or create a private venv in HOME/workspace and invoke its interpreter explicitly. npm -g defaults to $HOME/.local, with bins on PATH. /tmp is ephemeral.",
+            "installation": "Use install_python_packages for the shared read-only Python environment. HOME persists (at /sandbox/home on Linux, WSL and macOS Container VM); use $HOME/.local/bin or $HOME/bin for local CLI tools, or create a private venv in HOME/workspace and invoke its interpreter explicitly. npm -g defaults to $HOME/.local, with bins on PATH. /tmp is ephemeral.",
             "attachments": [
                 {"resource_id": item.resource_id,
                  "path": str(info.resources_path / item.relative_path.replace("\\", "/")) if info.resources_path else None,

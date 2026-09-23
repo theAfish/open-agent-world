@@ -1551,6 +1551,10 @@
     "Enabled · runtime ready",
     "已启用 · 运行环境就绪"
   ],
+  "Enabled · proxy TCP": [
+    "Enabled · proxy TCP",
+    "已启用 · TCP 代理"
+  ],
   "Enter API key": [
     "Enter API key",
     "输入 API 密钥"
@@ -2166,6 +2170,14 @@
   "Managed image imported": [
     "Managed image imported",
     "已导入托管图片"
+  ],
+  "Managed Python": [
+    "Managed Python",
+    "托管 Python"
+  ],
+  "Prepare OAW's managed Python for commands that invoke Python inside a shell.": [
+    "Prepare OAW's managed Python for commands that invoke Python inside a shell.",
+    "当命令会在 shell 内调用 Python 时，先准备 OAW 的托管 Python。"
   ],
   "Managed resource": [
     "Managed resource",
@@ -2830,6 +2842,10 @@
   "Provider settings": [
     "Provider settings",
     "服务商设置"
+  ],
+  "Proxy TCP only; direct sockets and UDP remain blocked.": [
+    "Proxy TCP only; direct sockets and UDP remain blocked.",
+    "仅支持通过代理访问 TCP；直接连接和 UDP 仍被阻止。"
   ],
   "Publication collection": [
     "Publication collection",

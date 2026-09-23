@@ -341,6 +341,29 @@ def test_connectivity_diagnostics_classify_results(runtime_client, monkeypatch, 
     assert client.post(f"/api/sandboxes/{sandbox['id']}/diagnostics", json={"destination": "https://user:secret@example.com"}).status_code == 422
 
 
+def test_connectivity_diagnostics_preserve_seatbelt_proxy(runtime_client, monkeypatch):
+    from dataclasses import replace
+    from backend.sandbox.models import CommandResult
+    from backend.services import ApplicationServices
+    client, _, _ = runtime_client
+    _, sandbox, _, _, _ = setup_skill(client)
+    services = client.app.state.services
+    info = client.portal.call(services.get_sandbox, sandbox["id"])
+
+    async def network_info(self, sandbox_id):
+        return replace(info, network_enabled=True, network_transport="proxy_tcp", platform="macos")
+
+    async def execute(self, sandbox_id, argv=None, **kwargs):
+        assert "--noproxy" not in argv
+        return CommandResult(sandbox_id, tuple(argv), 0, "200", "", 0.1)
+
+    monkeypatch.setattr(ApplicationServices, "get_sandbox", network_info)
+    monkeypatch.setattr(ApplicationServices, "execute_sandbox", execute)
+    response = client.post(f"/api/sandboxes/{sandbox['id']}/diagnostics",
+        json={"destination": "https://example.com"})
+    assert response.status_code == 200 and response.json()["status"] == "connected"
+
+
 @pytest.mark.skipif(not os.environ.get("OAW_TEST_WSL_DISTRO"), reason="Select an installed WSL2 distribution")
 @pytest.mark.asyncio
 async def test_real_wsl_network_policy_blocks_control_plane_access(tmp_path):

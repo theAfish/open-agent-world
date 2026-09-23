@@ -20,7 +20,7 @@ Check that its plugin is enabled and its pack has been opened. Add the collected
 
 ## A Sandbox cannot start
 
-Read the runtime diagnostics in the Sandbox card and address the reported missing prerequisite. Creating a Sandbox card does not start its environment. macOS currently has no local Sandbox runtime; ordinary Agent conversations and direct document access can still be used.
+Read the runtime diagnostics in the Sandbox card and address the reported missing prerequisite. Creating a Sandbox card does not start its environment. On macOS, refresh discovery after starting Apple Container, or select Seatbelt when the VM runtime is unavailable. Seatbelt rejects custom whole-tree memory/process limits; use Container VM for those controls.
 
 ## The tutorial gets in the way
 

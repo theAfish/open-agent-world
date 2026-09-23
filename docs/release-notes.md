@@ -22,7 +22,7 @@ Expand **Assets** below and choose your installer:
 ## Preview limitations / 预览版限制
 
 - Windows packages are currently unsigned; Windows may show a publisher/reputation warning.
-- macOS packages have ad-hoc signing, without Apple notarization. macOS may block opening them. See the installation guide; these are preview builds, and macOS has no local Sandbox runtime.
+- macOS packages have ad-hoc signing, without Apple notarization. macOS may block opening them. See the installation guide; these are preview builds. Seatbelt is available locally, while the preferred Container VM requires macOS 26+ on Apple Silicon and Apple Container 0.6.0+.
 - Updates are manual: download the new installer. Application data is stored separately from the installed app.
 
 [Installation guide / 安装说明](https://github.com/theAfish/open-agent-world/blob/main/docs/install.md)

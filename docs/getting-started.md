@@ -9,8 +9,8 @@
 Run all commands from the repository root after cloning it.
 
 - Python 3.11 or newer, uv, and Node.js 20 or newer.
-- Windows 10/11 or Linux, including WSL2, for local Sandbox execution.
-- macOS can run the application, but has no local Sandbox runtime.
+- Windows 10/11, Linux (including WSL2), or macOS 13+ for local Sandbox execution.
+- macOS uses built-in Seatbelt; macOS 26+ on Apple Silicon can install Apple Container 0.6.0+ for the preferred VM runtime.
 
 Windows PowerShell:
 

@@ -30,6 +30,11 @@ class SandboxBackend(ABC):
 
     supports_invocation_environment: bool = False
     supports_execution_policy: bool = False
+    supports_optional_python_runtime: bool = False
+
+    def validate_execution_policy(self, policy: Mapping[str, object]) -> None:
+        """Validate saved host policy before provisioning or command admission."""
+        del policy
 
     async def managed_workspace(self, sandbox_id: str) -> Path:
         """Host path of this runtime's internal workspace, even when overridden."""

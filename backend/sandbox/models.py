@@ -50,7 +50,7 @@ class SandboxEventType(_StringEnum):
 
 @dataclass(frozen=True, slots=True)
 class SandboxLimits:
-    """Limits applied to the complete command process tree by every runtime."""
+    """Requested command-tree limits; unsupported custom values must fail closed."""
 
     memory_bytes: int = 512 * 1024 * 1024
     active_process_limit: int = 64
@@ -82,6 +82,7 @@ class SandboxInfo:
     attachments: tuple[ResourceAttachment, ...] = ()
     security_boundary: str = "unknown"
     network_enabled: bool = False
+    network_transport: str = "none"
     supported_network_modes: tuple[str, ...] = ("disabled",)
     network_reason: str = "This runtime only enforces disabled networking"
     active_command: tuple[str, ...] | None = None
@@ -96,6 +97,8 @@ class SandboxInfo:
     runtime_locked: bool = True
     network_available: bool = False
     network_status: str = "not_implemented"
+    resource_limits_available: bool = True
+    resource_limit_reason: str = ""
 
 
 @dataclass(frozen=True, slots=True)
