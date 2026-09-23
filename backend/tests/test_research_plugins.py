@@ -5,7 +5,7 @@ import pymupdf
 import pytest
 
 from backend.tests.conftest import create_node
-from oaw_library import LibraryPlugin, import_pdf, annotate
+from oaw_library import LibraryPlugin, annotate
 
 
 def test_study_excerpt_upsert():
@@ -46,22 +46,18 @@ def test_pdf_document_membership_and_revision(client):
     region = formed.json()[0]
     agent = create_node(client, "agent", parent_id=region["id"])
     path = f"/api/nodes/{paper['id']}"
-    before = client.get(path + "/document").json()
     raw = sample_pdf()
-    response = client.post(path + "/actions/import", json={
-        "expected_revision": before["revision"],
-        "arguments": {"filename": "evidence.pdf", "pdf": base64.b64encode(raw).decode()},
-    })
+    response = client.post(path + "/resource/import", json={
+        "arguments": {"filename": "evidence.pdf", "pdf": base64.b64encode(raw).decode()}})
     assert response.status_code == 200, response.text
-    document = response.json()
-    assert base64.b64decode(document["value"]["pdf"]) == raw
-    assert document["value"]["pages"] == 1
-    assert "Research evidence" in document["value"]["text"][0]
+    assert response.json()["pages"] == 1
+    assert client.get(path + "/files/raw.pdf").content == raw
+    document = client.get(path + "/document").json()
     preview = client.get(f"/api/library/papers/{paper['id']}/preview")
     assert preview.status_code == 200
     assert preview.json()["revision"] == document["revision"]
-    assert set(preview.json()["value"]) == {"thumbnail", "pages", "filename"}
-    assert preview.json()["value"]["thumbnail"] == document["value"]["thumbnail"]
+    assert set(preview.json()["value"]) == {"thumbnail", "pages", "filename", "sha256", "extraction"}
+    assert client.get(preview.json()["value"]["thumbnail"]).content.startswith(b"\x89PNG")
     details = client.get(f"/api/library/papers/{paper['id']}/preview?details=true")
     assert details.status_code == 200
     assert details.json()["value"]["annotations"] == document["value"]["annotations"]
@@ -83,18 +79,19 @@ def test_pdf_document_membership_and_revision(client):
     assert moved.json()["parent_id"] is None
 
 
-def test_invalid_pdf_is_rejected():
-    with pytest.raises(ResourceValidationError):
-        import_pdf({}, {"pdf": base64.b64encode(b"not a PDF").decode()})
+def test_invalid_pdf_is_rejected(client):
+    paper = create_node(client, "library.paper")
+    response = client.post(f"/api/nodes/{paper['id']}/resource/import", json={
+        "arguments": {"pdf": base64.b64encode(b"not a PDF").decode()}})
+    assert response.status_code == 422
 
 
 def test_annotations_round_trip_and_delete(client):
     paper = create_node(client, "library.paper")
     path = f"/api/nodes/{paper['id']}"
+    assert client.post(path + "/resource/import", json={"arguments": {"pdf": base64.b64encode(sample_pdf()).decode()}}).status_code == 200
     doc = client.get(path + "/document").json()
-    imported = client.post(path + "/actions/import", json={"expected_revision": doc["revision"],
-        "arguments": {"pdf": base64.b64encode(sample_pdf()).decode()}}).json()
-    response = client.post(path + "/actions/annotate", json={"expected_revision": imported["revision"],
+    response = client.post(path + "/actions/annotate", json={"expected_revision": doc["revision"],
         "arguments": {"page": 1, "annotation": {"text": "Research evidence", "comment": "Check", "translation": "研究证据", "rects": [[.1,.1,.2,.02]]}}})
     assert response.status_code == 200, response.text
     restored = client.get(path + "/document").json()
@@ -114,16 +111,17 @@ def test_translation_without_credentials(client):
 
 @pytest.mark.asyncio
 async def test_paper_tool_returns_only_requested_text():
-    value = import_pdf({}, {"pdf": base64.b64encode(sample_pdf()).decode()})
-    value["notes"] = "note"
-
     class Context:
+        async def node_resource_action(self, capability, action, arguments):
+            assert (action, arguments) == ("page_text", {"page": 1})
+            return {"filename": "paper.pdf", "pages": 1, "page": 1, "text": "Research evidence page"}
+
         async def node_document_action(self, capability, action, arguments):
             assert action == "read"
-            return {"value": value}
+            return {"value": {"notes": "note", "page": 1}}
 
     answer = await LibraryPlugin().read_paper(Context(), object(), {"page": 1})
-    assert "Research evidence" in answer["text"]
+    assert "Research evidence" in answer["text"] and answer["notes"] == "note"
     assert "pdf" not in answer and "thumbnail" not in answer
 
 

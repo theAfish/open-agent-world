@@ -1,0 +1,18 @@
+.vectors-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.vectors-header button { margin-left: auto; }
+.vectors-mode { margin-left: 0; font-weight: 600; }
+.vectors-hybrid { color: var(--knowledge-accent); border-color: #5f8fb077; }
+.vectors-lexical { color: var(--ink-soft); }
+.vectors-hint { margin: 0; font-size: 12px; }
+.vectors-form { display: flex; gap: 6px; }
+.vectors-form input { flex: 1; min-width: 0; }
+.vectors-warning { margin: 0; color: #a0522d; font-size: 12px; }
+.vectors-results { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.vectors-results > li { border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+.vectors-hit-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.vectors-hit-head .knowledge-tag { margin-left: 0; }
+.vectors-hit-head button { margin-left: auto; font-size: 11px; padding: 2px 7px; }
+.vectors-scores { font-size: 11px; }
+.vectors-text { margin: 6px 0 0; white-space: pre-wrap; max-height: 9em; overflow: auto; line-height: 1.45; }
+.vectors-job-failed, .vectors-job-interrupted { color: #a0522d; border-color: #a0522d77; }
+.vectors-job-running { color: var(--knowledge-accent); }

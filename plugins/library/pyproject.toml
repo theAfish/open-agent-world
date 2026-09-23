@@ -1,8 +1,8 @@
 [project]
 name = "oaw-library"
-version = "0.2.0"
-requires-python = ">=3.11"
-dependencies = ["pydantic>=2.11,<3", "pymupdf>=1.25"]
+version = "0.4.0"
+requires-python = ">=3.12"
+dependencies = ["httpx[socks]>=0.28,<1", "pydantic>=2.11,<3", "pymupdf>=1.25"]
 [project.entry-points."open_agent_world.plugins"]
 library = "oaw_library:create_plugin"
 [build-system]

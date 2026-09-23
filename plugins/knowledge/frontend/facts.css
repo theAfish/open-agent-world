@@ -1,0 +1,37 @@
+.facts-layout { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 12px; min-height: 0; }
+@container (max-width: 640px) { .facts-layout { grid-template-columns: 1fr; } }
+.facts-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.facts-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.facts-filters input { width: 9em; }
+.facts-filters input[inputmode=decimal] { width: 5em; }
+.facts-check { display: inline-flex; gap: 4px; align-items: center; color: var(--ink-soft); }
+.knowledge-app .facts-check input { width: auto; padding: 0; }
+.facts-table tr[aria-selected=true] td { background: #5f8fb014; }
+.facts-table .facts-retracted td { opacity: .6; }
+.facts-table .facts-retracted td:first-child button { text-decoration: line-through; }
+.knowledge-app .facts-link { border: 0; background: none; padding: 0; color: var(--knowledge-accent); text-align: left; }
+.knowledge-app .facts-link:hover { background: none; text-decoration: underline; }
+.facts-note { margin: 0; padding: 6px 9px; border-left: 3px solid #a0522d88; background: #a0522d10; color: var(--ink-soft); font-size: 12px; }
+.facts-note p { margin: 2px 0; }
+.facts-pager { display: flex; gap: 8px; align-items: center; }
+.facts-detail { border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.facts-detail header { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.facts-detail dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; }
+.facts-detail dt { color: var(--ink-soft); font-size: 12px; }
+.facts-detail dd { margin: 0; overflow-wrap: anywhere; }
+.facts-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.facts-actions fieldset { display: flex; flex-wrap: wrap; gap: 6px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin: 0; }
+.facts-actions legend { color: var(--ink-soft); font-size: 12px; padding: 0 4px; }
+.facts-actions input { width: 8em; }
+.facts-add { display: flex; flex-direction: column; gap: 8px; border: 1px dashed var(--line-strong); border-radius: 8px; padding: 10px 12px; }
+.facts-add p { margin: 0; }
+.facts-add-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.facts-add > button { align-self: flex-start; }
+.facts-vocabulary { border-left: 1px solid var(--line); padding-left: 12px; overflow: auto; }
+@container (max-width: 640px) { .facts-vocabulary { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 8px; } }
+.facts-vocabulary h3 { margin: 4px 0; font-size: 12px; color: var(--ink-soft); font-weight: 600; }
+.facts-vocabulary ul { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.facts-vocabulary li { display: flex; justify-content: space-between; gap: 6px; align-items: baseline; }
+.facts-vocabulary li span { font-size: 11px; text-align: right; overflow-wrap: anywhere; }
+.knowledge-app .facts-vocabulary button { border: 0; background: none; padding: 1px 0; color: var(--knowledge-accent); text-align: left; overflow-wrap: anywhere; }
+.facts-preview-list { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

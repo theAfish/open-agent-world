@@ -29,6 +29,43 @@ Plugin-specific documentation can remain in its own package or repository. These
 
 ## Developing a plugin
 
+Plugin API 1.26 adds `CapabilityContext.agent_capability(capability, kind, target_id)`:
+the calling Agent's own live capability of `kind` on another node, or
+`PermissionDeniedError` when it holds none (a missing node reports the same way).
+A handler can pass it to `node_resource_action` to check a source the Agent cites,
+for example that a quoted passage is on a Paper page the Agent can read, without
+the plugin gaining any access of its own. The Knowledge plugin uses it for provenance.
+
+Plugin API 1.25 lets a connection to a container reach its members. A
+`CapabilityGrantDefinition(kind, scope="members", member_traits=...)` in a
+relationship grants `kind` on each current direct member of the target container
+that has those traits, instead of on the container itself. Membership is read on
+every derivation, so moving a member in grants it and moving it out revokes it
+on the next call; grants from a direct edge and from a container merge into one
+tool. Container nodes' resource actions also receive `NodeResourceContext.members`
+(`NodeMember`: id, type, name, `storage_path`, config), a read-only view of their
+direct members for derived data such as a search index. When a tool has more than
+40 authorized targets its target parameter lists no enum; a listing tool should
+return node IDs instead. The Library's `library.collection` uses all three.
+
+Plugin API 1.24 lets the trusted UI read plugin files. A node type lists
+`served_files`: `/`-separated patterns under its `storage_path`, matched segment by
+segment (`*` never crosses a `/`), e.g. `("raw.pdf", "figures/*.png")`. The UI reads
+them at `GET /api/nodes/{id}/files/{key}` (ETag revalidation, optional
+`?download=name`); unlisted files stay private and Agents never reach that route.
+Write served files atomically (temporary file, then rename), since the ETag is
+derived from size and modification time. As before, the plugin owns its directory
+and removes it in a delete finalizer, as the SQLite card and the Library Paper do.
+
+Slow work must not hold the graph barrier. `NodeResourceContext.background(work,
+commit)` runs `work(cancelled)` in a daemon thread without host locks, then
+`commit(context, outcome)` as a resource write on the same node (`outcome` is the
+return value or the raised exception). The commit is skipped if the node was
+deleted or the host is stopping, and fails while an interrupted deletion awaits
+recovery; pass `background(work, commit, abandon)` to hear about a skipped or
+failed commit while the host keeps running. Jobs do not survive a restart, so
+record enough state to report an interrupted job.
+
 Plugin API 1.23 adds declarative `state` policies, bound `ctx.state` / `host.state`,
 and host-owned shared/session namespaces. Legacy plugins remain unchanged. See
 [Card state lifecycle](card-state.md) for declarations, migration, defaults and
@@ -136,7 +173,7 @@ Declare a zero-argument plugin factory as the entry point:
 [project]
 name = "acme-open-agent-world-plugin"
 version = "1.2.0"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = ["pydantic>=2.11,<3"]
 
 [project.entry-points."open_agent_world.plugins"]

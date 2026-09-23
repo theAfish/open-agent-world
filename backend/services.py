@@ -560,6 +560,7 @@ class ApplicationServices:
     summoning: SummoningService | None = None
     sandbox_backend: SandboxBackend | None = None
     plugin_bootstrap: Any = None
+    resource_jobs: Any = None
     _node_mutation_lock: asyncio.Lock = field(
         default_factory=asyncio.Lock, init=False, repr=False
     )
@@ -694,6 +695,7 @@ class ApplicationServices:
             await self.plugin_bootstrap.shutdown()
         await self.node_execution.shutdown()
         await self.sandbox_operations.shutdown()
+        await self.resource_jobs.shutdown()
         context = self._node_lifecycle_context()
         for card in self.world.list_cards():
             lifecycle = self.plugins.node_type(card.type).lifecycle
@@ -3807,6 +3809,8 @@ def create_services(
     from backend.sandbox.operations import SandboxOperations
     services.sandbox_operations = SandboxOperations(services)
     services.summoning = SummoningService(services)
+    from backend.node_resources import ResourceJobs
+    services.resource_jobs = ResourceJobs(services)
     from backend.security.model_connections import ModelConnectionStore
     services.run_manager = RunManager(
         store=RunStore(database),

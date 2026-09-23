@@ -1,4 +1,6 @@
 """Small host bridge: translation uses the existing protected LLM connection."""
+import asyncio
+import json
 import httpx
 from typing import Literal
 from backend.security.llm_settings import LlmSettingsStore
@@ -18,7 +20,14 @@ async def paper_preview(node_id: str, details: bool = False, services=Depends(ge
             raise HTTPException(422, "Expected a Paper node")
         document = read_document(services, node_id)
         value = document["value"]
-        preview = {"thumbnail": value["thumbnail"], "pages": value["pages"], "filename": value["filename"]}
+        # Raw PDF metadata lives in the Paper's manifest file; the document is the reader layer.
+        path = services.resources.node_storage_path(node_id) / "manifest.json"
+        manifest = await asyncio.to_thread(lambda: json.loads(path.read_bytes()) if path.is_file() else None)
+        preview = {"thumbnail": "", "pages": 0, "filename": "", "sha256": None, "extraction": None}
+        if manifest:
+            active = next((item for item in manifest["extractions"] if item["id"] == manifest["active"]), None)
+            preview.update(thumbnail=f"/api/nodes/{node_id}/files/{manifest['thumbnail']}?v={manifest['sha256'][:16]}",
+                           pages=manifest["pages"], filename=manifest["filename"], sha256=manifest["sha256"], extraction=active)
         if details:
             preview.update(annotations=value["annotations"], page=value["page"])
         return {"revision": document["revision"], "value": preview}

@@ -11,7 +11,7 @@ from backend.plugins.summoning import NodeSummoningDefinition, SummoningAction, 
 from backend.plugins.documents import NodeDocumentAction, NodeDocumentDefinition, NodeDocumentDownload
 from backend.plugins.documents import NodeDocumentTransformation
 from backend.plugins.deployment import DeploymentSurface, NodeDeploymentDefinition
-from backend.plugins.resources import NodeResourceAction, NodeResourceContext
+from backend.plugins.resources import NodeMember, NodeResourceAction, NodeResourceContext
 from backend.plugins.state import PluginStateSpec, ScopedStateSpec, StatelessStateSpec, CardStateStore
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import ExecutionPolicy, NodeExecutionDefinition, WorkItem, WorkOutcome
@@ -87,7 +87,7 @@ __all__ = [
     "DelegationRequest", "DelegationWait", "DelegationStop",
     "DeploymentSurface", "NodeDeploymentDefinition",
     "LegionPresetDefinition", "PresetNode", "PresetEdge",
-    "NodeResourceAction", "NodeResourceContext",
+    "NodeMember", "NodeResourceAction", "NodeResourceContext",
     "ToolImage", "VisualToolResult", "codex_tool_content",
     "PackDefinition",
     "NodePresentation",

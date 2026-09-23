@@ -2,7 +2,7 @@ import { t, useLocale } from "@oaw/plugin-api";
 import { useEffect, useRef, useState } from "react";
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from "pdfjs-dist";
 import { PdfPageSurface } from "./PdfPageSurface";
-import { decodePdf } from "./decodePdf";
+import { fetchPdf } from "./fetchPdf";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "pdfjs-dist/web/pdf_viewer.css";
 import { useLibrarySettings } from "../../../frontend/src/state/librarySettings";
@@ -12,7 +12,7 @@ import { StudyCanvas } from "./StudyCanvas";
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 export type Annotation = {id:string;page:number;text:string;comment:string;translation:string;rects:number[][];title?:string;color?:string;title_color?:string;collapsed?:boolean;image?:string;learning?:boolean;position?:{x:number;y:number}};
-export type ReadingValue = {pdf:string;page:number;pages:number;annotations?:Annotation[];study_layout?:boolean;study_title?:string;filename?:string};
+export type ReadingValue = {pdfUrl:string;page:number;pages:number;annotations?:Annotation[];study_layout?:boolean;study_title?:string;filename?:string};
 type Selection = {page:number;text:string;rects:number[][];anchor:number[];annotation?:Annotation};
 async function request(path:string, init?:RequestInit) {
   const response=await fetch(`/api/${path}`,init);
@@ -21,7 +21,7 @@ async function request(path:string, init?:RequestInit) {
   return data;
 }
 
-export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettingsOpen,onReady,onPreparing,onLoadError}:{value:ReadingValue;save:(args:Record<string,unknown>)=>Promise<void>;fullscreen?:boolean;settingsOpen:boolean;setSettingsOpen:(open:boolean)=>void;onReady?:()=>void;onPreparing?:()=>void;onLoadError?:(error:string)=>void}) {
+export function PdfReading({value,focus,save,fullscreen=false,settingsOpen,setSettingsOpen,onReady,onPreparing,onLoadError}:{value:ReadingValue;focus?:{page:number;bbox:number[]|null;key:number};save:(args:Record<string,unknown>)=>Promise<void>;fullscreen?:boolean;settingsOpen:boolean;setSettingsOpen:(open:boolean)=>void;onReady?:()=>void;onPreparing?:()=>void;onLoadError?:(error:string)=>void}) {
   useLocale();
   const [pdf,setPdf]=useState<PDFDocumentProxy>();
   const [page,setPage]=useState(value.page);
@@ -128,12 +128,12 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
 
   useEffect(()=>{
     const abort=new AbortController();let task:ReturnType<typeof getDocument>|undefined;
-    void decodePdf(value.pdf,abort.signal).then(data=>{
+    void fetchPdf(value.pdfUrl,abort.signal).then(data=>{
       if(abort.signal.aborted)return;
       task=getDocument({data,isEvalSupported:false});return task.promise;
     }).then(async doc=>{if(doc&&!abort.signal.aborted){setPdf(doc);const items=await doc.getOutline();if(!abort.signal.aborted)setOutline(items??[]);}}).catch(e=>{if(!abort.signal.aborted){setError(String(e));loadError.current?.(String(e));}});
     return()=>{abort.abort();void task?.destroy();};
-  },[value.pdf]);
+  },[value.pdfUrl]);
   function jumpToPage(next:number){requestAnimationFrame(()=>{const el=scroll.current?.querySelector<HTMLElement>(`[data-pdf-page="${next}"]`);if(el&&scroll.current){const box=scroll.current.getBoundingClientRect();scroll.current.scrollTop+=(el.getBoundingClientRect().top-box.top)/(box.height/scroll.current.offsetHeight);}});}
   useEffect(()=>{
     const el=scroll.current;if(!pdf||!el||!autoFit||studyOpen)return;
@@ -174,6 +174,14 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
     setSelection({page,text,rects,anchor:focusAtEnd?rects[rects.length-1]:rects[0]});setTranslation("");setComment("");
   }
   async function go(next:number){if(busy)return;dismissSelection();setPage(next);jumpToPage(next);try{await save({page:next});}catch(e){setError(String(e));}}
+  // A structured element chosen outside the reader: show its page and briefly mark GROBID's box.
+  const [flash,setFlash]=useState<{page:number;bbox:number[]}>();
+  useEffect(()=>{
+    if(!pdf||!focus||focus.page<1||focus.page>value.pages)return;
+    void go(focus.page);
+    if(!focus.bbox)return;
+    setFlash({page:focus.page,bbox:focus.bbox});const timer=setTimeout(()=>setFlash(undefined),3200);return()=>clearTimeout(timer);
+  },[pdf,focus?.key]);
   async function translate(){if(!selection)return;const epoch=selectionEpoch.current;setBusy(true);setError("");try{const result=await request("library/translate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:selection.text,model,target,provider})});if(epoch===selectionEpoch.current)setTranslation(result.translation);}catch(e){if(epoch===selectionEpoch.current)setError(String(e));}finally{setBusy(false);}}
   async function add(){if(!selection||saving)return;setSaving(true);try{await save({page,annotation:{text:selection.text,rects:selection.rects,comment,translation}});dismissSelection();setTranslation("");setComment("");window.getSelection()?.removeAllRanges();}catch(e){setError(String(e));}finally{setSaving(false);}}
   const selectedRects=selection?.rects??[];
@@ -217,6 +225,7 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
       if(a)setSelection({page:pageNumber,text:a.text,rects:a.rects,anchor:[x,y,0,0],annotation:a});
     }}>
       <div className="library-highlight-layer">{(value.annotations??[]).filter(a=>a.page===pageNumber).flatMap(a=>a.rects.map((r,i)=><span key={`${a.id}-${i}`} style={{background:`${a.color??"#f4d144"}66`,left:`${r[0]*100}%`,top:`${r[1]*100}%`,width:`${r[2]*100}%`,height:`${r[3]*100}%`}}/>))}</div>
+      {flash?.page===pageNumber&&<div className="library-locate-flash" aria-hidden="true" style={{left:`${flash.bbox[0]*100}%`,top:`${flash.bbox[1]*100}%`,width:`${(flash.bbox[2]-flash.bbox[0])*100}%`,height:`${(flash.bbox[3]-flash.bbox[1])*100}%`}}/>}
       {selectionBounds&&selection?.page===pageNumber&&<div className="library-selected-outline" aria-hidden="true" style={{left:`${selectionBounds.left*100}%`,top:`${selectionBounds.top*100}%`,width:`${(selectionBounds.right-selectionBounds.left)*100}%`,height:`${(selectionBounds.bottom-selectionBounds.top)*100}%`}}/>}
       {annotating&&tool==="crop"&&<div className="library-crop-layer" onPointerDown={e=>{e.stopPropagation();const b=e.currentTarget.getBoundingClientRect();cropStart.current=[(e.clientX-b.left)/b.width,(e.clientY-b.top)/b.height];e.currentTarget.setPointerCapture(e.pointerId);}}
         onPointerMove={e=>{if(!cropStart.current)return;const b=e.currentTarget.getBoundingClientRect(),x=Math.max(0,Math.min(1,(e.clientX-b.left)/b.width)),y=Math.max(0,Math.min(1,(e.clientY-b.top)/b.height));const [sx,sy]=cropStart.current;setCrop([Math.min(x,sx),Math.min(y,sy),Math.abs(x-sx),Math.abs(y-sy)]);}}

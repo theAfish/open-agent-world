@@ -344,7 +344,7 @@ The application should own:
 
 Use:
 
-* Python 3.11+;
+* Python 3.12+;
 * FastAPI;
 * Pydantic;
 * SQLite for POC persistence;

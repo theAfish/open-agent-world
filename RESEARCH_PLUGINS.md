@@ -22,12 +22,19 @@ LLM agents use OAW model settings; XRD runs locally without an LLM API key.
 
 ## Library
 
-`plugins/library` registers `library.region`, `library.paper`, and the explicit
-`library.read` capability. PDF bytes, extracted page text, thumbnail, notes and
-reading page are revisioned OAW node documents, not browser-only storage.
+`plugins/library` registers `library.region`, `library.paper` and the
+`library.read` / `library.curate` relationships. The raw PDF, page text, thumbnail,
+figure crops and versioned structured extractions are files in the Paper's
+node storage; notes, annotations and reading page are its revisioned node document.
+Structured extraction uses a GROBID service (`OAW_GROBID_URL`, default
+`http://localhost:8070`); without it PDFs still import and read. See
+[plugins/library/README.md](plugins/library/README.md).
 Each PDF is limited to 25 MiB. Scanned PDFs are viewable but require separate OCR
 before an agent can read their text. No automatic web search/downloader is added.
 
+- Place a **Literature library** from Objects to keep Papers in a searchable card
+  folder; connecting an Agent with **Read library** or **Curate library** grants
+  every Paper inside (see the Library README).
 - Create Paper nodes from Objects and import PDFs with the file picker.
 - Use native Legion team spaces to organize Papers and Agents. New standalone
   Library Regions are no longer offered; existing migrated Regions retain their
@@ -42,6 +49,17 @@ Host integration includes container-body `PluginSurface`, reader expansion,
 translation settings/routes, PDF.js resolution, palette registration and focused
 canvas interaction changes. The legacy file-drop hook attaches to the shared
 `.container-frame` shell and handles native file events only.
+
+## Knowledge
+
+`plugins/knowledge` adds four Data cards that Agents write explicitly: a Fact table,
+a Vector store, an Ontology and a Structure database. They connect only to Agents
+(Read / Curate); nothing is synchronised from Papers. Agent writes cite Paper pages,
+verified with the writing Agent's own live grant (Plugin API 1.26) and pinned to the
+Paper's fingerprint; `check_knowledge_provenance` marks records whose source changed.
+The Vector store embeds through an OpenAI-compatible service (`OAW_EMBEDDING_URL`) and
+falls back to keyword search without one. See
+[plugins/knowledge/README.md](plugins/knowledge/README.md).
 
 ## XRD
 

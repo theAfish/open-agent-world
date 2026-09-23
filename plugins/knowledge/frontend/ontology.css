@@ -1,0 +1,25 @@
+.ontology-counts { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; font-size: 12px; }
+.ontology-counts li { display: contents; }
+.ontology-counts li span:first-child { color: var(--ink-soft); }
+.ontology-split { display: grid; grid-template-columns: minmax(220px, 1fr) 2fr; gap: 14px; min-height: 0; flex: 1; }
+@container (max-width: 640px) { .ontology-split { grid-template-columns: 1fr; } }
+.ontology-list, .ontology-detail { display: flex; flex-direction: column; gap: 8px; min-width: 0; overflow: auto; }
+.ontology-filters { display: flex; gap: 6px; }
+.ontology-filters input { flex: 1; min-width: 0; }
+.ontology-entities { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.ontology-app .ontology-entities button { width: 100%; text-align: left; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
+.ontology-app .ontology-entities button[aria-pressed=true] { background: #5f8fb020; border-color: #5f8fb077; }
+.ontology-name { font-weight: 600; }
+.ontology-why, .ontology-aliases { flex-basis: 100%; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ontology-entity { display: flex; flex-direction: column; gap: 6px; }
+.ontology-entity header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.ontology-entity h3 { margin: 0; font-size: 15px; }
+.ontology-entity h4 { margin: 8px 0 0; font-size: 12px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .04em; }
+.ontology-entity p { margin: 0; }
+.ontology-alias-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.ontology-inline { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.ontology-inline input { flex: 1; min-width: 120px; }
+.ontology-app .ontology-retract { margin-left: 6px; padding: 1px 7px; font-size: 11px; }
+.ontology-app .ontology-link { border: none; background: none; padding: 0; color: var(--knowledge-accent); text-decoration: underline; }
+.ontology-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); }
+.ontology-retracted td { opacity: .6; }

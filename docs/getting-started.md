@@ -8,7 +8,7 @@
 
 Run all commands from the repository root after cloning it.
 
-- Python 3.11 or newer, uv, and Node.js 20 or newer.
+- Python 3.12 or newer, uv, and Node.js 20 or newer.
 - Windows 10/11 or Linux, including WSL2, for local Sandbox execution.
 - macOS can run the application, but has no local Sandbox runtime.
 

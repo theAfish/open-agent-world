@@ -11,7 +11,7 @@ from backend.plugins.state import PluginStateSpec, LEGACY_STATE
 
 from backend.errors import GraphValidationError, PluginCompatibilityError, PluginUnavailableError
 from backend.plugins.lifecycle import NodeLifecycleHandler
-from backend.plugins.resources import NodeResourceAction
+from backend.plugins.resources import NodeResourceAction, served_file_pattern_valid
 from backend.plugins.template import NodeTemplateHandler
 from backend.plugins.presets import LegionPresetDefinition
 
@@ -28,7 +28,7 @@ from backend.plugins.deployment import NodeDeploymentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.23"
+PLUGIN_API_VERSION = "1.26"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -186,11 +186,18 @@ class PluginCatalog(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class CapabilityGrantDefinition:
-    """Relationships grant kinds; inline metadata is a legacy install input."""
+    """Relationships grant kinds; inline metadata is a legacy install input.
+
+    ``scope="members"`` grants the kind on each current direct member of the
+    target container (with ``member_traits``) instead of on the target itself.
+    Membership is read live, so moving a member out revokes it immediately.
+    """
     kind: str
     tool_prefix: str = ""
     description: str = ""
     input_schema: Mapping[str, Any] = field(default_factory=dict)
+    scope: Literal["target", "members"] = "target"
+    member_traits: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,6 +278,10 @@ class NodeTypeDefinition:
     template_remap_config: Callable[[dict[str, Any], Mapping[str, str]], dict[str, Any]] | None = None
     document: NodeDocumentDefinition | None = None
     resource_actions: Mapping[str, NodeResourceAction] = field(default_factory=dict)
+    # Files under storage_path the trusted UI may read (GET /api/nodes/{id}/files/{key}),
+    # as '/'-separated patterns matched segment by segment, e.g. "figures/*.png".
+    # Anything not listed stays private to the plugin; Agents never reach the route.
+    served_files: tuple[str, ...] = ()
     # Native state with no browser snapshot must never masquerade as undoable.
     deletion_warning: str | None = None
     execution: NodeExecutionDefinition | None = None
@@ -526,6 +537,8 @@ class PluginRegistry:
         # Legacy input is normalized once. Projection uses the same registry.
         for relationship in staged.relationships.values():
             for grant in relationship.capabilities:
+                if grant.scope not in {"target", "members"}:
+                    raise ValueError(f"Capability grant {grant.kind!r} has an unknown scope {grant.scope!r}")
                 existing = staged.capabilities.get(grant.kind) or self._capabilities.get(grant.kind)
                 if grant.tool_prefix:
                     definition = CapabilityDefinition(grant.kind, grant.tool_prefix,
@@ -679,6 +692,9 @@ class PluginRegistry:
                     raise ValueError("resource actions require a valid name and handler")
                 if action.capability_kind and action.capability_kind not in staged.capability_handlers:
                     raise ValueError("resource action capabilities must be owned by the same plugin")
+            for pattern in definition.served_files:
+                if not isinstance(pattern, str) or not served_file_pattern_valid(pattern):
+                    raise ValueError(f"node type {definition.id!r} has an invalid served file pattern {pattern!r}")
             if definition.deployment is not None:
                 if not isinstance(definition.deployment, NodeDeploymentDefinition):
                     raise TypeError("deployment must be a NodeDeploymentDefinition")

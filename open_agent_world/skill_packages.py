@@ -144,7 +144,7 @@ def export_plugin(value: dict[str, Any]) -> NodeDocumentDownload:
     manifest = f'''[project]
 name = "{distribution}"
 version = "{package.version}"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = ["pydantic>=2.11,<3"]
 
 [project.entry-points."open_agent_world.plugins"]

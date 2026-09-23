@@ -85,6 +85,15 @@ class _CapabilityContext:
                 for member in self.services.world.list_members(capability.target_id)
             ], "permissions": "Member content and execution require independent connections."}
 
+    async def agent_capability(self, capability, kind, target_id):
+        from backend.errors import PermissionDeniedError
+        async with self.services._node_mutation():
+            self.services.capabilities.capability_for_id(capability.agent_id, capability.id)
+            try:
+                return self.services.capabilities.capability_for_id(capability.agent_id, f"{kind}:{target_id}")
+            except PermissionDeniedError:
+                raise PermissionDeniedError(f"You cannot currently use {kind} on {target_id!r}; it needs its own connection") from None
+
     async def artifact_action(self, capability, arguments):
         from backend.resources.artifact_models import ArtifactPublish, ArtifactMaterialize
         from backend.errors import ResourceValidationError
@@ -357,6 +366,8 @@ class WorldAgentCapabilityProvider:
 
 
 def _python_type(schema_type: object) -> type[Any]:
+    if isinstance(schema_type, list):  # A union such as ["integer", "string"]: use its first non-null type.
+        schema_type = next((item for item in schema_type if item != "null"), None)
     return {
         "boolean": bool,
         "integer": int,

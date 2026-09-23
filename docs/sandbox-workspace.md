@@ -8,7 +8,7 @@ Open the Sandbox inspector, select a runtime, and save its configuration before 
 
 Writes change real files immediately. Deleting a Sandbox removes its owned storage and permissions, never the selected external folder. Stop before changing the working folder. The runtime is pinned on first start; use a new card to change runtime after that point. Host folder bindings are excluded from Legion templates.
 
-Automatic discovery prefers a usable existing WSL2 distribution on Windows, otherwise native Windows. Native Linux uses its own kernel. Linux/WSL needs Bubblewrap, libseccomp, Python 3.10+ for the trusted worker, and a systemd user manager with cgroup-v2 memory/process limits; the application backend needs Python 3.11+. No Docker or VM image is required. macOS has no local Sandbox runtime.
+Automatic discovery prefers a usable existing WSL2 distribution on Windows, otherwise native Windows. Native Linux uses its own kernel. Linux/WSL needs Bubblewrap, libseccomp, Python 3.10+ for the trusted worker, and a systemd user manager with cgroup-v2 memory/process limits; the application backend needs Python 3.12+. No Docker or VM image is required. macOS has no local Sandbox runtime.
 
 Discovery reports missing prerequisites. Use **Refresh** after fixing them. Missing isolation never falls back to a normal host subprocess. Networking has [separate prerequisites](sandbox-networking.md).
 

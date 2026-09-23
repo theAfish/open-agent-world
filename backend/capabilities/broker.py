@@ -40,7 +40,7 @@ class CapabilityBroker:
                      if edge.direction == EdgeDirection.BIDIRECTIONAL)
         for edge, target in edges:
             relationship = self.plugins.relationship(edge.relationship)
-            if target == target_id and not relationship.generated and any(grant.kind == kind for grant in relationship.capabilities):
+            if target == target_id and not relationship.generated and any(grant.kind == kind and grant.scope == "target" for grant in relationship.capabilities):
                 return
         raise PermissionDeniedError("Connect the viewer to this file source before reading")
 
@@ -67,26 +67,36 @@ class CapabilityBroker:
             if relationship.generated:
                 continue
             directed_edges.extend(self.forwarded_connections(edge, target_id))
+            members = None
             for grant in relationship.capabilities:
                 operation = self.plugins.capability_definition(grant.kind)
-                capability_id = f"{grant.kind}:{target.id}"
-                if capability_id in capability_ids:
-                    continue
-                capability_ids.add(capability_id)
-                capabilities.append(
-                    Capability(
-                        id=capability_id,
-                        tool_name=operation.tool_name,
-                        kind=grant.kind,
-                        agent_id=agent.id,
-                        target_id=target.id,
-                        target_type=target.type,
-                        target_name=target.name,
-                        source_node_id=edge.source if edge.target == target_id else edge.target,
-                        description=operation.description,
-                        input_schema=dict(operation.input_schema),
+                if grant.scope == "members":
+                    # A container grant reaches its current direct members only.
+                    if members is None:
+                        members = self.world.list_members(target.id)
+                    scoped = [member for member in members
+                              if grant.member_traits <= self.plugins.node_type(member.type).traits]
+                else:
+                    scoped = [target]
+                for node in scoped:
+                    capability_id = f"{grant.kind}:{node.id}"
+                    if capability_id in capability_ids:
+                        continue
+                    capability_ids.add(capability_id)
+                    capabilities.append(
+                        Capability(
+                            id=capability_id,
+                            tool_name=operation.tool_name,
+                            kind=grant.kind,
+                            agent_id=agent.id,
+                            target_id=node.id,
+                            target_type=node.type,
+                            target_name=node.name,
+                            source_node_id=edge.source if edge.target == target_id else edge.target,
+                            description=operation.description,
+                            input_schema=dict(operation.input_schema),
+                        )
                     )
-                )
         if (group := member_team(self.world, agent)) is not None:
             for operation in ("read", "patch"):
                 if operation == "patch" and group.config.get("shared_state_access") != "read_write":

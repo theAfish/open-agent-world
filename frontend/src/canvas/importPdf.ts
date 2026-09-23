@@ -11,11 +11,11 @@ export async function importPdf(file:File, position:{x:number;y:number}, parentI
   async function request(path:string,body?:unknown){const response=await fetch(`/api/${path}`,body===undefined?undefined:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});if(!response.ok)throw new Error(await response.text());return response.json();}
   const node=await request("nodes",{type:"library.paper",name:file.name.replace(/\.pdf$/i,"").slice(0,200),position,parent_id:parentId});
   try {
-    const doc = await request(`nodes/${node.id}/document`);
     onProgress({stage:"uploading",percent:0});
+    // The PDF is stored as a Paper object (raw bytes plus extractions), not in the node document.
     await new Promise<void>((resolve,reject)=>{
       const xhr = new XMLHttpRequest();
-      xhr.open("POST",`/api/nodes/${node.id}/actions/import`);
+      xhr.open("POST",`/api/nodes/${node.id}/resource/import`);
       xhr.setRequestHeader("Content-Type","application/json");
       xhr.upload.onprogress = event => {
         if(event.lengthComputable) onProgress({stage:"uploading",percent:Math.floor(100*event.loaded/event.total)});
@@ -24,7 +24,7 @@ export async function importPdf(file:File, position:{x:number;y:number}, parentI
       xhr.onerror = () => reject(new Error(t('PDF 上传连接中断')));
       xhr.onabort = () => reject(new Error(t('PDF 上传已取消')));
       xhr.onload = () => xhr.status>=200 && xhr.status<300 ? resolve() : reject(new Error(xhr.responseText || `HTTP ${xhr.status}`));
-      xhr.send(JSON.stringify({arguments:{filename:file.name,pdf},expected_revision:doc.revision}));
+      xhr.send(JSON.stringify({arguments:{filename:file.name,pdf}}));
     });
   }
   catch(error){const cleanup=await fetch(`/api/nodes/${node.id}`,{method:"DELETE"});if(!cleanup.ok)throw new Error(t('Could not clean up empty node {id}: {error}', { id: node.id, error: String(error) }));throw error;}

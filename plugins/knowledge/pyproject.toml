@@ -1,0 +1,21 @@
+[project]
+name = "oaw-knowledge"
+version = "0.1.0"
+description = "Agent-written knowledge stores with verified provenance for Open Agent World"
+requires-python = ">=3.12"
+dependencies = ["httpx>=0.28,<1", "pydantic>=2.11,<3"]
+
+[project.optional-dependencies]
+# Structure store: CIF parsing, symmetry and structure matching. Without it the
+# store keeps CIF text and reads cell, formula and space group from CIF tags.
+structures = ["pymatgen>=2024.1"]
+
+[project.entry-points."open_agent_world.plugins"]
+knowledge = "oaw_knowledge:create_plugin"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/oaw_knowledge"]

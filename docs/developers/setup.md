@@ -4,7 +4,7 @@
 
 ## Prerequisites
 
-Install Git, Python 3.11 or newer, [uv](https://docs.astral.sh/uv/getting-started/installation/), and Node.js 20 or newer. Python is enough for the plugin code; Node builds and serves OAW's frontend.
+Install Git, Python 3.12 or newer, [uv](https://docs.astral.sh/uv/getting-started/installation/), and Node.js 20 or newer. Python is enough for the plugin code; Node builds and serves OAW's frontend.
 
 Windows and Linux/WSL support local Sandbox execution with the required isolation runtime. macOS can run OAW and the first plugin tutorial, but currently has no local Sandbox runtime.
 

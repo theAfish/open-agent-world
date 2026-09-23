@@ -74,7 +74,15 @@ def resolve_target(value, targets, parameter):
     return next(iter(matches))
 
 
+# Past this many targets an enum costs more context than it helps; a container
+# grant can reach hundreds of members, which a listing tool names instead.
+MAX_ENUM_TARGETS = 40
+
+
 def selector_schema(targets):
+    if len(targets) > MAX_ENUM_TARGETS:
+        return {"type": "string", "description": f"One of {len(targets)} currently authorized targets, by node ID "
+                "(or exact unambiguous name) as returned by a listing or search tool. Selectors are rechecked on every invocation."}
     aliases = target_aliases(targets)
     return {"type": "string", "enum": list(aliases),
             "description": "Current authorized targets: " + "; ".join(

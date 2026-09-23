@@ -2,7 +2,7 @@
 name = "open-agent-world-backend"
 version = "0.1.0"
 description = "Authoritative world and capability backend for Open Agent World"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28,<1",
     # cryptography 49+ no longer publishes Intel macOS wheels.

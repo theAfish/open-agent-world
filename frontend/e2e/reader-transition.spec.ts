@@ -4,16 +4,18 @@ function pdfFixture(){
   const objects=["<< /Type /Catalog /Pages 2 0 R >>","<< /Type /Pages /Kids [3 0 R] /Count 1 >>","<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>","<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`];
   let pdf="%PDF-1.4\n";const offsets=[0];objects.forEach((o,i)=>{offsets.push(pdf.length);pdf+=`${i+1} 0 obj\n${o}\nendobj\n`;});const xref=pdf.length;
   pdf+=`xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(n=>String(n).padStart(10,"0")+" 00000 n \n").join("")}trailer\n<< /Root 1 0 R /Size 6 >>\nstartxref\n${xref}\n%%EOF`;
-  return Buffer.from(pdf).toString("base64");
+  return Buffer.from(pdf);
 }
 async function setup(page:Page,delay=0,broken=false){
-  const doc={revision:1,value:{pdf:broken?"broken":pdfFixture(),thumbnail:"",notes:"",page:1,pages:1,annotations:[]}};
+  const doc={revision:1,value:{notes:"",page:1,annotations:[]}};
+  const raw={bytes:broken?Buffer.from("broken"):pdfFixture()};
   await page.route("**/api/**",async route=>{
     const url=route.request().url();
     if(!new URL(url).pathname.startsWith("/api/"))return route.continue();
     if(url.endsWith("/api/world"))return route.fulfill({json:{nodes:[{id:"transition-fixture",name:"Transition fixture",type:"library.paper",config:{}}]}});
     if(url.endsWith("/document")){if(delay)await new Promise(r=>setTimeout(r,delay));return route.fulfill({json:doc});}
-    if(url.includes("/preview"))return route.fulfill({json:{revision:1,value:{thumbnail:"",pages:1,filename:"fixture.pdf"}}});
+    if(url.includes("/files/raw.pdf"))return route.fulfill({body:raw.bytes,contentType:"application/pdf"});
+    if(url.includes("/preview"))return route.fulfill({json:{revision:1,value:{thumbnail:"",pages:1,filename:"fixture.pdf",sha256:"fixture",extraction:null}}});
     return route.fulfill({json:{}});
   });
   await page.addInitScript(()=>{
@@ -22,7 +24,7 @@ async function setup(page:Page,delay=0,broken=false){
     new MutationObserver(()=>{const p=document.querySelector("dialog.library-reader")?.getAttribute("data-entrance-phase");const content=document.querySelector(".library-reader-content");if(p&&p!==state.phases.at(-1)?.phase)state.phases.push({phase:p,t:performance.now(),visibility:content?getComputedStyle(content).visibility:undefined});}).observe(document,{subtree:true,attributes:true,childList:true,attributeFilter:["data-entrance-phase"]});
   });
   await page.goto("/dev/reader-transition.html");
-  return {recover:()=>{doc.value.pdf=pdfFixture();}};
+  return {recover:()=>{raw.bytes=pdfFixture();}};
 }
 test("real rendering, final layout, zoom and repeated opening",async({page},info)=>{
   await setup(page);await page.getByRole("button",{name:"打开阅读器",exact:true}).click();
