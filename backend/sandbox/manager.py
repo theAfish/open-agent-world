@@ -34,6 +34,7 @@ class _Binding:
 
 class SandboxManager(SandboxBackend):
     supports_invocation_environment = True
+    supports_optional_python_runtime = True
 
     def __init__(self, root: Path, registry: SandboxRuntimeRegistry, *, preferred: str = "auto") -> None:
         self.root = root.resolve()
@@ -280,12 +281,21 @@ class SandboxManager(SandboxBackend):
     async def execute(self, sandbox_id: str, argv: Sequence[str], *, timeout_seconds: float | None = None,
                       env: Mapping[str, str] | None = None,
                       invocation_env: Mapping[str, str] | None = None,
-                      runtime_mount: RuntimeMount | None = None) -> CommandResult:
+                      runtime_mount: RuntimeMount | None = None,
+                      python_environment: str = "auto") -> CommandResult:
         binding = self._binding(sandbox_id)
         if not binding.provisioned:
             raise SandboxStateError("Start the Sandbox before executing commands")
         options = {"runtime_mount": runtime_mount} if runtime_mount is not None else {}
         backend = self._backend(binding.resolved_runtime or "")
+        from .commands import needs_managed_python
+        managed_python = needs_managed_python(argv, python_environment,
+            skill=runtime_mount is not None)
+        if backend.supports_optional_python_runtime:
+            options["managed_python"] = managed_python
+        elif python_environment == "none":
+            raise SandboxValidationError(
+                "This Sandbox runtime cannot omit its managed Python environment")
         if binding.policy and backend.supports_execution_policy:
             options["execution_policy"] = dict(binding.policy)
         elif any(binding.policy.get(k, v) != v for k, v in {"network_enabled": False, "memory_bytes": 536870912, "active_process_limit": 64}.items()):

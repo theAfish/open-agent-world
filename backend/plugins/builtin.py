@@ -725,7 +725,7 @@ async def _execute_sandbox(
 ) -> Any:
     argv = values.get("argv")
     if (
-        set(values) - {"argv", "environment_id", "target_id", "timeout_seconds", "wait_seconds"}
+        set(values) - {"argv", "environment_id", "target_id", "timeout_seconds", "wait_seconds", "python_environment"}
         or not isinstance(argv, list)
         or not argv
         or not all(isinstance(item, str) and item for item in argv)
@@ -736,7 +736,7 @@ async def _execute_sandbox(
     return await context.execute_sandbox(
         capability.agent_id, capability.target_id, argv,
         wait_seconds=values.get("wait_seconds", 1),
-        **{key: values[key] for key in ("environment_id", "target_id", "timeout_seconds") if key in values}
+        **{key: values[key] for key in ("environment_id", "target_id", "timeout_seconds", "python_environment") if key in values}
     )
 
 
@@ -920,8 +920,8 @@ def _register_builtin(registry: PluginRegistration) -> None:
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.execute', tool_name='execute_command', target_parameter='sandbox',
         selectors=EXECUTION_SELECTORS,
-        description='Execute an argv command in the selected sandbox. Long operations return status=running and an operation_id after wait_seconds (default 1). Use wait_sandbox_operation to collect the result or do independent work; never resubmit running work. Commands run concurrently in the shared workspace and HOME. Inspect active_commands to coordinate with other Agents; avoid overwriting their edits. Cancellation and timeout affect only the selected command. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES. Calls use fresh non-interactive processes: cd/export/venv activation do not carry over. For installations set timeout_seconds explicitly and keep progress visible; do not pipe installers to tail. Shell pipelines report the final command status: use bash -o pipefail or download with curl -f to a file and only execute it after success. Use install_python_packages for shared Python dependencies.',
-        input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}, "wait_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 1, "description": "Host observation budget; returns operation_id if still running. Use wait_sandbox_operation later, not a duplicate submission."}, "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 3600, "description": "Command wall-clock budget in seconds. Omit to use Sandbox settings; set explicitly for slow installs."}}, "required": ["argv"], "additionalProperties": False}), _execute_sandbox)
+        description='Execute an argv command in the selected sandbox. Long operations return status=running and an operation_id after wait_seconds (default 1). Use wait_sandbox_operation to collect the result or do independent work; never resubmit running work. Commands run concurrently in the shared workspace and HOME. Inspect active_commands to coordinate with other Agents; avoid overwriting their edits. Cancellation and timeout affect only the selected command. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES. Calls use fresh non-interactive processes: cd/export/venv activation do not carry over. On macOS Seatbelt, direct python/python3 commands automatically prepare managed Python; other commands do not. Set python_environment=managed for shell commands or entry points that invoke Python indirectly. Skill scripts retain managed Python by default. For installations set timeout_seconds explicitly and keep progress visible; do not pipe installers to tail. Shell pipelines report the final command status: use bash -o pipefail or download with curl -f to a file and only execute it after success. Use install_python_packages for shared Python dependencies.',
+        input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}, "python_environment": {"type": "string", "enum": ["auto", "managed", "none"], "description": "macOS Seatbelt Python preparation: auto for direct python commands, managed for commands that invoke Python indirectly, none for system-only commands. Other runtimes always use their managed Python."}, "wait_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 1, "description": "Host observation budget; returns operation_id if still running. Use wait_sandbox_operation later, not a duplicate submission."}, "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 3600, "description": "Command wall-clock budget in seconds. Omit to use Sandbox settings; set explicitly for slow installs."}}, "required": ["argv"], "additionalProperties": False}), _execute_sandbox)
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.cancel_command', tool_name='cancel_command', target_parameter='sandbox',
         description='Cancel one command and wait for its process cleanup. Inspect active_commands and supply its id as command_id. Agents may cancel their own commands; cancelling another Agent requires sandbox.stop authority. A stale ID cannot cancel a newer command.',

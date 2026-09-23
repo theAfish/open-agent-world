@@ -3,8 +3,14 @@
 [Documentation](README.md)
 
 Normal sandbox backends select a persistent Python venv under the OAW data root:
-`runtime/python/venv`. Python commands, Skill scripts and the sandbox shell PATH
-use this environment. It excludes system site-packages, user site-packages,
+`runtime/python/venv`. Python commands and Skill scripts use this environment.
+On macOS Seatbelt, ordinary commands no longer prepare or mount it; direct
+`python`/`python3` argv commands and Skill scripts select it automatically.
+Shell commands that invoke Python indirectly must request
+`python_environment: "managed"` through the execute API/tool, or enable
+**Managed Python** in the Sandbox terminal. Without that choice a shell runs
+without OAW's managed Python environment. Other runtimes retain eager Python
+preparation for now. The managed environment excludes system site-packages, user site-packages,
 backend `PYTHONPATH`, and the backend project venv. Windows has a managed copy of
 the base interpreter and standard library in `runtime/python/base`; sandbox ACLs
 never grant access to the backend or host Python installation.
@@ -14,9 +20,13 @@ runtime is read-only inside each sandbox. Packages persist across commands,
 sandboxes, backend restarts and plugin removal. Existing Python processes may
 retain modules they have already imported; a new command sees installed packages.
 
-Windows and Linux venvs are not binary-compatible. WSL distributions each share
-one Linux venv under `runtime/platforms/<distribution-key>/runtime/python/venv`.
-There are no per-sandbox or per-plugin environments.
+Windows, Darwin and Linux venvs are not binary-compatible. WSL distributions each
+share one Linux venv under `runtime/platforms/<distribution-key>/runtime/python/venv`.
+Seatbelt uses an OAW-managed CPython 3.12 installed below `runtime/python/base`;
+it does not assume `/usr/bin/python3`. Apple Container VM uses a separate Linux
+environment below `runtime/macos-container-python`, prepared inside its Python
+3.12 image and mounted at `/opt/oaw-python`. There are no per-sandbox or
+per-plugin environments.
 
 Installed `.oawpack` manifests declare `runtime.sandbox.python`; discovery feeds
 the same bootstrap used by bundled plugins. All enabled Pack requirements are
@@ -100,8 +110,8 @@ startup hooks do not run in the backend during installation.
 
 This minimal implementation accepts index package names, extras and version
 constraints, and installs wheels only. Source builds, local paths, URLs and raw
-installer options are unsupported. Python commands and installed CLI entry points
-automatically use the shared venv, including calls inside shells and subprocesses.
+installer options are unsupported. Selected managed-Python commands and installed
+CLI entry points use the shared venv, including calls inside their shells and subprocesses.
 After installation the manager retargets launcher interpreter references without
 executing installed package code on the host. Existing environments are repaired
 on their next preparation/execution; no package reinstall or venv activation is

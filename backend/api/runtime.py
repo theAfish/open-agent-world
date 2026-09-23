@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import PurePath
 from dataclasses import fields
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import Response
@@ -140,6 +140,7 @@ class SandboxExecuteRequest(BaseModel):
     timeout_seconds: Annotated[float, Field(gt=0, le=3600, strict=True, allow_inf_nan=False)] | None = None
     environment_id: str | None = None
     target_id: str | None = None
+    python_environment: Literal["auto", "managed", "none"] = "auto"
 
     @model_validator(mode="after")
     def validate_command_shape(self) -> "SandboxExecuteRequest":
@@ -329,6 +330,7 @@ async def execute_sandbox(
         request.argv,
         command=request.command,
         timeout_seconds=request.timeout_seconds, environment_id=request.environment_id, target_id=request.target_id,
+        python_environment=request.python_environment,
         _keep_on_disconnect=True,
     )
 

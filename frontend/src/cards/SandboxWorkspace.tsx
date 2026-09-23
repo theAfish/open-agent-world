@@ -84,6 +84,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const recalled = useRef(-1);
   const savedDraft = useRef("");
   const [commands, setCommands] = useState<string[]>([]);
+  const [managedPython, setManagedPython] = useState(false);
   const [terminalTab, setTerminalTab] = useState("terminal");
   const [selection, setSelection] = useState<{ root: string; path: string; label: string }>();
   const [preview, setPreview] = useState<Files>();
@@ -233,7 +234,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     recalled.current = -1;
     setCommands(current => [...current, command].slice(-100));
     setDraft(""); setError("");
-    try { await execute(card.id, command); await refreshHistory(); await refreshFiles(); }
+    try { await execute(card.id, command, managedPython ? "managed" : "auto"); await refreshHistory(); await refreshFiles(); }
     catch (e) { setError(apiErrorMessage(e)); }
     finally { submitting.current = false; }
   }
@@ -378,6 +379,10 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
                 onClick={() => setTerminalTab(view)}>{view === "terminal" ? <Terminal size={12} /> : <History size={12} />}{view === "terminal" ? t("Terminal") : t("History")}</button>)}
             </nav>
             <div className="sandbox-pane-actions">
+              {info?.runtime_id === "darwin" && <label className="sandbox-python-option" title={t("Prepare OAW's managed Python for commands that invoke Python inside a shell.")}>
+                <input type="checkbox" checked={managedPython} onChange={e => setManagedPython(e.target.checked)} />
+                {t("Managed Python")}
+              </label>}
               <span className="sandbox-shell-hint" title={t("Non-interactive commands. Each command starts in the working folder; cd and export do not persist. Interactive prompts are unsupported. Closing this window leaves execution running.")}>{t("Non-interactive")}</span>
               {activeCommands.length > 0 && <button type="button" onClick={() => setTerminalTab("history")}>{activeCommands.length} {t("running")}</button>}
               {running && <IconButton icon={Square} size="xs" quiet label={t("Cancel command")} onClick={() => void action(`cancel?command_id=${encodeURIComponent(running.id)}`)} />}

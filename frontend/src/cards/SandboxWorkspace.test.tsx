@@ -201,6 +201,20 @@ describe("Sandbox workspace interaction", () => {
     expect((command as HTMLTextAreaElement).value).toBe("unfinished");
   });
 
+  it("lets Seatbelt terminal commands opt into managed Python", async () => {
+    const darwinInfo = { ...info, runtime_id: "darwin", platform: "macos", shell: ["/bin/zsh", "-c"] };
+    useWorldStore.setState({ sandboxInfo: { [card.id]: darwinInfo } });
+    vi.spyOn(worldApi, "getSandbox").mockResolvedValue(darwinInfo);
+    const execute = vi.spyOn(worldApi, "executeSandbox").mockResolvedValue({ stdout: "ok", exit_code: 0 });
+    render(<Workspace />);
+    const checkbox = await screen.findByRole("checkbox", { name: "Managed Python" });
+    fireEvent.click(checkbox);
+    const command = screen.getByRole("textbox", { name: "Command" });
+    fireEvent.change(command, { target: { value: "python script.py" } });
+    fireEvent.keyDown(command, { key: "Enter" });
+    await waitFor(() => expect(execute).toHaveBeenCalledWith(card.id, "python script.py", "managed"));
+  });
+
   it("refreshes files after starting and rebinding the workspace without a socket event", async () => {
     const stopped = { ...info, state: "stopped", runtime_locked: false };
     useWorldStore.setState({ cards: [{ ...card, status: "stopped" }], sandboxInfo: { [card.id]: stopped } });

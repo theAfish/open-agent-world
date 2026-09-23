@@ -44,6 +44,8 @@ describe("API normalization boundary", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("/api/sandbox/runtimes");
     expect(fetchMock.mock.calls[1][0]).toBe("/api/sandboxes/folder%2Fname/execute");
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ command: "printf 'hello'" });
+    await worldApi.executeSandbox("folder/name", "python script.py", "managed");
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ command: "python script.py", python_environment: "managed" });
   });
 
   it("merges authoritative resource metadata and status into a card", () => {

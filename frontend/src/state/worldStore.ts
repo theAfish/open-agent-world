@@ -392,7 +392,7 @@ interface WorldState {
   saveSandboxConfig: (id: string, config: SandboxConfig) => Promise<boolean>;
   startSandbox: (id: string) => Promise<boolean>;
   stopSandbox: (id: string) => Promise<boolean>;
-  executeSandbox: (id: string, command: string) => Promise<boolean>;
+  executeSandbox: (id: string, command: string, pythonEnvironment?: "auto" | "managed") => Promise<boolean>;
   ingestEvent: (event: RuntimeEvent) => void;
   ingestEvents: (events: RuntimeEvent[]) => void;
   setSocketState: (state: SocketState) => void;
@@ -1659,7 +1659,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
   },
 
-  executeSandbox: async (id, command) => {
+  executeSandbox: async (id, command, pythonEnvironment = "auto") => {
     if (get().sandboxBusy[id]) return false;
     const previousEventIds = new Set(get().events.map((event) => event.id));
     const revision = (get().sandboxRevisions[id] ?? 0) + 1;
@@ -1672,7 +1672,9 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       activityOpen: true,
     }));
     try {
-      const result = await worldApi.executeSandbox(id, command);
+      const result = pythonEnvironment === "managed"
+        ? await worldApi.executeSandbox(id, command, "managed")
+        : await worldApi.executeSandbox(id, command);
       if (get().sandboxRevisions[id] !== revision) return true;
       const receivedOutput = (channel: "stdout" | "stderr") => get().events.some((event) => (
         !previousEventIds.has(event.id)

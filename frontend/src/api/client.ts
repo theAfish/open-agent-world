@@ -865,10 +865,10 @@ export const worldApi = {
     });
   },
 
-  executeSandbox(nodeId: string, command: string): Promise<Record<string, unknown>> {
+  executeSandbox(nodeId: string, command: string, pythonEnvironment: "auto" | "managed" = "auto"): Promise<Record<string, unknown>> {
     return request<Record<string, unknown>>(`/sandboxes/${encodeURIComponent(nodeId)}/execute`, {
       method: "POST",
-      body: JSON.stringify({ command }),
+      body: JSON.stringify({ command, ...(pythonEnvironment === "managed" ? { python_environment: "managed" } : {}) }),
     });
   },
 };

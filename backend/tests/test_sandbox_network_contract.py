@@ -1,8 +1,9 @@
 """Policy routing and opt-in real manual/Agent/Skill networking acceptance.
 
-OAW_TEST_NETWORK_RUNTIME=windows|linux|wsl:<installed distro> selects a real
-runtime. HTTPS uses example.com unless OAW_TEST_HTTPS_URL names a controlled
-public endpoint. OS-specific tests separately exercise raw non-HTTP TCP.
+OAW_TEST_NETWORK_RUNTIME=windows|linux|wsl:<installed distro>|macos-container
+selects a direct-egress runtime. HTTPS uses example.com unless
+OAW_TEST_HTTPS_URL names a controlled public endpoint. A separate test covers
+Seatbelt's proxy TCP transport. OS-specific tests exercise raw non-HTTP TCP.
 """
 import asyncio
 import json
@@ -187,7 +188,55 @@ async def test_discovery_distinguishes_unimplemented_from_failed_setup(tmp_path)
     assert "private namespace refused" in network.network_reason
 
 
-@pytest.mark.skipif(not os.environ.get("OAW_TEST_NETWORK_RUNTIME"), reason="Select a real isolated networking runtime explicitly")
+@pytest.mark.skipif(os.environ.get("OAW_TEST_NETWORK_RUNTIME") != "darwin",
+    reason="Select the macOS Seatbelt runtime explicitly")
+def test_real_seatbelt_proxy_saved_policy(tmp_path, monkeypatch):
+    from backend.tests.conftest import create_node
+    from backend.plugins.builtin import create_builtin_registry
+
+    # This exercises the built-in Sandbox only. Avoid unrelated AtomSculptor
+    # environment bootstrap (which can download large wheels) during the
+    # network acceptance run.
+    monkeypatch.setattr("backend.services.load_plugin_registry",
+        lambda **_kwargs: create_builtin_registry())
+
+    url = os.environ.get("OAW_TEST_HTTPS_URL", "https://example.com")
+    settings = replace(Settings.for_data_root(tmp_path / "app"), sandbox_runtime="darwin")
+    print("Seatbelt proxy check: starting OAW with built-in Sandbox only", flush=True)
+    with TestClient(create_app(settings), client=("127.0.0.1", 51000)) as client:
+        sandbox = create_node(client, "sandbox", config={"runtime": "darwin"})
+        base = f"/api/sandboxes/{sandbox['id']}"
+        proxied = ["/usr/bin/curl", "--disable", "--fail", "--silent",
+            "--show-error", "--max-time", "12", "--", url]
+        direct = ["/usr/bin/curl", "--disable", "--noproxy", "*", "--fail", "--silent",
+            "--show-error", "--max-time", "12", "--", url]
+        print("Seatbelt proxy check: offline command", flush=True)
+        assert client.post(base + "/start").status_code == 200
+        offline = client.post(base + "/execute", json={"argv": proxied})
+        assert offline.status_code == 200 and offline.json()["exit_code"] != 0, offline.text
+        assert not (tmp_path / "app" / "runtime" / "python" / "ready.json").exists()
+        assert client.post(base + "/stop").status_code == 200
+        saved = client.patch(f"/api/nodes/{sandbox['id']}", json={"config": {"network_enabled": True}})
+        assert saved.status_code == 200, saved.text
+        print("Seatbelt proxy check: enabling proxy network", flush=True)
+        started = client.post(base + "/start")
+        assert started.status_code == 200, started.text
+        assert started.json()["network_transport"] == "proxy_tcp"
+        print("Seatbelt proxy check: public HTTPS through proxy", flush=True)
+        online = client.post(base + "/execute", json={"argv": proxied})
+        assert online.status_code == 200 and online.json()["exit_code"] == 0, online.text
+        assert not (tmp_path / "app" / "runtime" / "python" / "ready.json").exists()
+        print("Seatbelt proxy check: direct socket must be denied", flush=True)
+        blocked = client.post(base + "/execute", json={"argv": direct})
+        assert blocked.status_code == 200 and blocked.json()["exit_code"] != 0, blocked.text
+        print("Seatbelt proxy check: connectivity diagnostic", flush=True)
+        diagnostic = client.post(base + "/diagnostics", json={"destination": url})
+        assert diagnostic.status_code == 200 and diagnostic.json()["status"] == "connected", diagnostic.text
+
+
+@pytest.mark.skipif(not os.environ.get("OAW_TEST_NETWORK_RUNTIME") or
+    os.environ.get("OAW_TEST_NETWORK_RUNTIME") == "darwin",
+    reason="Select a direct-egress runtime explicitly; Seatbelt has a separate proxy contract")
 def test_real_saved_policy_routes_manual_agent_skill_and_diagnostics(tmp_path):
     from backend.capabilities.provider import WorldAgentCapabilityProvider
     from backend.tests.conftest import create_node

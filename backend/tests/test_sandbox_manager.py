@@ -91,6 +91,40 @@ def make_manager(tmp_path, *, available=True):
 
 
 @pytest.mark.asyncio
+async def test_optional_python_environment_dispatch(tmp_path):
+    manager, backend = make_manager(tmp_path)
+    backend.supports_optional_python_runtime = True
+    selected = []
+    original_execute = backend.execute
+
+    async def capture(sandbox_id, argv, *, managed_python, **options):
+        selected.append(managed_python)
+        return await original_execute(sandbox_id, argv, **options)
+
+    backend.execute = capture
+    await manager.create("lab")
+    await manager.start("lab")
+    await manager.execute("lab", ["/usr/bin/curl", "https://example.com"])
+    await manager.execute("lab", ["python3", "script.py"])
+    await manager.execute("lab", ["/bin/sh", "-c", "python script.py"],
+        python_environment="managed")
+    await manager.execute("lab", ["python3", "script.py"],
+        python_environment="none")
+    assert selected == [False, True, True, False]
+    with pytest.raises(SandboxValidationError, match="python_environment"):
+        await manager.execute("lab", ["/usr/bin/curl"], python_environment="invalid")
+
+
+@pytest.mark.asyncio
+async def test_nonoptional_runtime_rejects_python_bypass(tmp_path):
+    manager, _ = make_manager(tmp_path)
+    await manager.create("lab")
+    await manager.start("lab")
+    with pytest.raises(SandboxValidationError, match="cannot omit"):
+        await manager.execute("lab", ["/usr/bin/curl"], python_environment="none")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("existing_binding", [False, True])
 async def test_legacy_windows_auto_config_keeps_pinned_runtime(tmp_path, existing_binding):
     manager, backend = make_manager(tmp_path)

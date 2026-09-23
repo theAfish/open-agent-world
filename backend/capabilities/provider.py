@@ -211,7 +211,7 @@ class _CapabilityContext:
         }, (ToolImage(path.read_bytes(), record.media_type),))
 
     async def execute_sandbox(
-        self, agent_id: str, sandbox_id: str, argv: list[str], *, environment_id: str | None = None, target_id: str | None = None, timeout_seconds: float | None = None, wait_seconds: float | None = None
+        self, agent_id: str, sandbox_id: str, argv: list[str], *, environment_id: str | None = None, target_id: str | None = None, timeout_seconds: float | None = None, wait_seconds: float | None = None, python_environment: str = "auto"
     ) -> dict[str, Any]:
         self.services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
         if self.services.sandbox_backend is None:
@@ -221,7 +221,8 @@ class _CapabilityContext:
         return await self.services.sandbox_operations.submit(agent_id, sandbox_id, "command",
             lambda operation_id: self.services.execute_sandbox(sandbox_id, argv,
                 agent_id=agent_id, environment_id=environment_id, target_id=target_id,
-                timeout_seconds=timeout_seconds, _operation_id=operation_id), wait_seconds=wait_seconds)
+                timeout_seconds=timeout_seconds, python_environment=python_environment,
+                _operation_id=operation_id), wait_seconds=wait_seconds)
 
     async def run_skill_script(self, agent_id: str, sandbox_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
         from backend.skill_runtime import RunSkillScript

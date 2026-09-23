@@ -2965,7 +2965,10 @@ class ApplicationServices:
         _operation_id: str | None = None,
         environment_id: str | None = None,
         target_id: str | None = None,
+        python_environment: str = "auto",
     ) -> CommandResult:
+        if not isinstance(python_environment, str) or python_environment not in {"auto", "managed", "none"}:
+            raise SandboxValidationError("python_environment must be auto, managed, or none")
         if timeout_seconds is not None:
             import math
             if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)) or not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= 3600:
@@ -3017,6 +3020,16 @@ class ApplicationServices:
                                 raise ResourceValidationError("Skill execution requires an Agent")
                             execution_argv, mount = resolve_skill_mount(self, agent_id, sandbox_id, _skill_request)
                             options["runtime_mount"] = mount
+                        if getattr(backend, "supports_optional_python_runtime", False):
+                            if isinstance(backend, SandboxManager):
+                                options["python_environment"] = python_environment
+                            else:
+                                from backend.sandbox.commands import needs_managed_python
+                                options["managed_python"] = needs_managed_python(execution_argv,
+                                    python_environment, skill=_skill_request is not None)
+                        elif python_environment == "none":
+                            raise SandboxValidationError(
+                                "This Sandbox runtime cannot omit its managed Python environment")
                         from backend.execution_config import resolve_sandbox_configuration
                         from backend.execution_config import effective_variables
                         _, pending_variables = effective_variables(self, sandbox_id, environment_id)
@@ -3038,6 +3051,7 @@ class ApplicationServices:
                         receipt = self._sandbox_commands.get(command_id, {}) if _operation_id else {}
                         receipt.update({"id": command_id, "caller": agent_id or "user", "state": "running",
                             "sandbox_id": sandbox_id,
+                            "python_environment": python_environment,
                             "history_key": command_history_key(self, sandbox_id),
                             "run_id": self.run_manager.current_context.run_id if self.run_manager.current_context else None,
                             "started_at": datetime.now(UTC).isoformat(), "argv": redact(list(execution_argv), secrets),
