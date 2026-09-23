@@ -8,7 +8,7 @@ import unittest
 from open_agent_world.plugin_api import AgentConfig
 from open_agent_world.plugin_api import RuntimeModelConnection
 
-from oaw_atomsculptor import AtomSculptorAgentConfig, AtomSculptorPlugin, OBSERVE, OBSERVE_INPUT_SCHEMA, ObserveStructure, RECORD_CANDIDATES, RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA, WRITE_INPUT_SCHEMA, _observe, _write, create_plugin
+from oaw_atomsculptor import AtomSculptorAgentConfig, AtomSculptorPlugin, OBSERVE, OBSERVE_INPUT_SCHEMA, ObserveStructure, RECORD_CANDIDATES, RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA, WRITE_INPUT_SCHEMA, _observe, _structure_overview, _write, create_plugin
 from oaw_atomsculptor.runtime import (
     AtomSculptorRuntime,
     BUILDER_INSTRUCTION,
@@ -20,6 +20,19 @@ from oaw_atomsculptor.structure import Atom, Layer, StructureDocument, select, s
 
 
 class StructureContractTests(unittest.TestCase):
+    def test_large_inspection_is_bounded_and_can_return_coordinate_windows(self) -> None:
+        document = StructureDocument(atoms=[
+            Atom(id=index, symbol="C", x=index, y=0, z=0)
+            for index in range(520)
+        ]).model_dump(mode="json")
+        overview = _structure_overview(document, revision=2, detail="summary", offset=0, limit=100)
+        self.assertEqual(overview["revision"], 2)
+        self.assertEqual(overview["value"]["atom_count"], 520)
+        self.assertNotIn("atoms", overview["value"])
+        window = _structure_overview(document, revision=2, detail="atoms", offset=200, limit=100)["atom_window"]
+        self.assertEqual((window["offset"], window["returned"], window["total"]), (200, 100, 520))
+        self.assertEqual(window["atoms"][0]["id"], 200)
+
     def test_trace_values_are_bounded_and_redact_sensitive_binary_payloads(self) -> None:
         traced = _trace_value({"data_base64": "image-bytes", "atoms": [{"id": 1}] * 17, "message": "x" * 1_100})
         self.assertEqual(traced["data_base64"], "<redacted>")

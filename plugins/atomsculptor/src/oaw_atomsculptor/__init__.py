@@ -7,9 +7,10 @@ document contract rather than on the retired AtomSculptor Sandbox APIs.
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from open_agent_world.plugin_api import (
     CapabilityDefinition,
@@ -87,8 +88,93 @@ class ObserveStructure(BaseModel):
 OBSERVE_INPUT_SCHEMA = ObserveStructure.model_json_schema()
 
 
+class InspectStructure(BaseModel):
+    """Bound the document data returned to a model after an inspection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    detail: Literal["summary", "atoms"] = "summary"
+    atom_offset: int = Field(default=0, ge=0)
+    atom_limit: int = Field(default=100, ge=1, le=200)
+
+
+INSPECT_INPUT_SCHEMA = InspectStructure.model_json_schema()
+
+
+def _structure_overview(document: dict, *, revision: int, detail: str, offset: int, limit: int) -> dict:
+    """Return a model-sized inspection result without mutating its document."""
+
+    atoms = document.get("atoms") if isinstance(document.get("atoms"), list) else []
+    selected_ids = document.get("selected_atom_ids") if isinstance(document.get("selected_atom_ids"), list) else []
+    selected = [
+        {key: atom.get(key) for key in ("id", "symbol", "x", "y", "z", "layer_id")}
+        for atom in atoms
+        if isinstance(atom, dict) and atom.get("id") in selected_ids
+    ]
+    formula = " ".join(
+        f"{symbol}{count if count != 1 else ''}"
+        for symbol, count in sorted(Counter(
+            atom.get("symbol") for atom in atoms if isinstance(atom, dict) and isinstance(atom.get("symbol"), str)
+        ).items())
+    )
+    coordinates = [
+        (atom.get("x"), atom.get("y"), atom.get("z"))
+        for atom in atoms if isinstance(atom, dict)
+        and all(isinstance(atom.get(axis), (int, float)) for axis in ("x", "y", "z"))
+    ]
+    bounds = None if not coordinates else {
+        "min": [min(point[index] for point in coordinates) for index in range(3)],
+        "max": [max(point[index] for point in coordinates) for index in range(3)],
+    }
+    value = {
+        "format_version": document.get("format_version"),
+        "atom_count": len(atoms),
+        "formula": formula,
+        "coordinate_bounds": bounds,
+        "cell": document.get("cell"),
+        "pbc": document.get("pbc"),
+        "layers": document.get("layers", []),
+        "active_layer_ids": document.get("active_layer_ids", []),
+        "selected_atom_ids": selected_ids,
+        "selected_atoms": selected,
+        "source_name": document.get("source_name", ""),
+        "source_metadata": document.get("source_metadata", {}),
+        "interface_candidates": document.get("interface_candidates", []),
+    }
+    response = {
+        "revision": revision,
+        "summary": {
+            "atom_count": len(atoms),
+            "formula": formula,
+            "layer_count": len(value["layers"]),
+            "selected_atom_count": len(selected),
+            "source_name": value["source_name"],
+        },
+        "value": value,
+    }
+    if detail == "atoms":
+        start = min(offset, len(atoms))
+        end = min(start + limit, len(atoms))
+        response["atom_window"] = {
+            "offset": start,
+            "limit": limit,
+            "returned": end - start,
+            "total": len(atoms),
+            "atoms": [
+                {key: atom.get(key) for key in ("id", "symbol", "x", "y", "z", "layer_id")}
+                for atom in atoms[start:end] if isinstance(atom, dict)
+            ],
+        }
+    return response
+
+
 async def _read(context, capability, arguments):
-    return await context.node_document_action(capability, "inspect", arguments)
+    request = InspectStructure.model_validate(arguments)
+    result = await context.node_document_action(capability, "inspect", {})
+    return _structure_overview(
+        result["value"], revision=result["revision"], detail=request.detail,
+        offset=request.atom_offset, limit=min(request.atom_limit, 200),
+    )
 
 
 async def _write(context, capability, arguments):
@@ -124,6 +210,13 @@ class AtomSculptorPlugin:
         plugin_api_version="1.20",
         name="AtomSculptor",
         description="Agent-assisted atomistic structure modelling.",
+        # OAW provisions these as binary wheels in its managed Sandbox Python;
+        # they are never imported into the backend process.  This covers every
+        # bundled modelling/inspection skill without relying on a host Conda
+        # environment or a platform-specific prebuilt image.
+        python_requirements=(
+            "ase>=3.22", "matplotlib>=3.7", "numpy>=1.23", "pymatgen>=2024.0",
+        ),
     )
 
     def register(self, registration) -> None:
@@ -141,8 +234,8 @@ class AtomSculptorPlugin:
             CapabilityDefinition(
                 kind=READ,
                 tool_name="inspect_atom_structure",
-                description="Inspect the current atoms, cell, layers and selected stable atom IDs.",
-                input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+                description="Inspect a structure with a bounded summary, revision and selected atom coordinates. The default never returns every atom. Request detail='atoms' with atom_offset and atom_limit (at most 200) only for a necessary coordinate window.",
+                input_schema=INSPECT_INPUT_SCHEMA,
             ),
             _read,
         )
