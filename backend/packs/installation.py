@@ -112,9 +112,15 @@ class PackInstallationManager:
             self._check_selection({**self.selected(db), pack.manifest.id: pack.manifest})
         return pack
 
-    def install(self, data: bytes) -> dict:
+    def install(self, data: bytes, *, expected_id: str | None = None,
+                expected_version: str | None = None, expected_sha256: str | None = None) -> dict:
         pack = inspect_archive(data)
         manifest = pack.manifest
+        if expected_sha256 is not None and pack.digest != expected_sha256:
+            raise ValueError("Pack SHA-256 differs from the requested artifact")
+        if ((expected_id is not None and manifest.id != expected_id)
+                or (expected_version is not None and manifest.version != expected_version)):
+            raise ValueError("Pack identity differs from the requested Pack/version")
         stage = self.root / "staging" / uuid4().hex
         stage.mkdir(parents=True)
         published = None

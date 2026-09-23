@@ -561,6 +561,7 @@ class ApplicationServices:
     sandbox_backend: SandboxBackend | None = None
     plugin_bootstrap: Any = None
     pack_installations: Any = None
+    marketplace: Any = None
     _node_mutation_lock: asyncio.Lock = field(
         default_factory=asyncio.Lock, init=False, repr=False
     )
@@ -2075,6 +2076,12 @@ class ApplicationServices:
             edge_count=len(record.blueprint.edges),
             bounds=record.blueprint.bounds,
             node_types=sorted({node.type for node in record.blueprint.nodes}),
+            members=[{"name": node.name, "type": node.type} for node in record.blueprint.nodes],
+            required_card_ids=sorted({
+                *(node.type for node in record.blueprint.nodes),
+                *(dependency.id for node in record.blueprint.nodes
+                  for dependency in node.dependencies if dependency.kind == "node_type"),
+            }),
             plugin_ids=sorted({
                 *(node.plugin_id for node in record.blueprint.nodes),
                 *(
@@ -3867,4 +3874,6 @@ def create_services(
         services.sandbox_backend.pack_requirements = services.plugin_bootstrap.requirements
     from backend.packs.installation import PackInstallationManager
     services.pack_installations = PackInstallationManager(settings.data_root, plugin_registry)
+    from backend.packs.marketplace import MarketplaceClient
+    services.marketplace = MarketplaceClient(settings.marketplace_url)
     return services

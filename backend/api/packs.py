@@ -1,4 +1,4 @@
-"""Host-local management of trusted Pack files; no remote artifact fetcher."""
+"""Host-local management of trusted Pack files."""
 from __future__ import annotations
 
 import mimetypes

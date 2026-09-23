@@ -5,6 +5,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from backend import official_marketplace
+
 
 def _default_data_root() -> Path:
     configured = os.environ.get("OPEN_AGENT_WORLD_DATA_ROOT")
@@ -35,6 +37,9 @@ class Settings:
     control_plane_token: str | None = field(default=None, repr=False)
     storage_config_path: Path | None = None
     application_mode: str = "production"
+    marketplace_url: str | None = field(
+        default_factory=lambda: official_marketplace.OFFICIAL_MARKETPLACE_URL
+    )
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -68,6 +73,9 @@ class Settings:
             inactivity_timeout = parsed if parsed > 0 else None
         return cls(
             application_mode=mode,
+            marketplace_url=(os.environ["OPEN_AGENT_WORLD_MARKETPLACE_URL"].strip() or None)
+            if "OPEN_AGENT_WORLD_MARKETPLACE_URL" in os.environ
+            else official_marketplace.OFFICIAL_MARKETPLACE_URL,
             data_root=root,
             storage_config_path=None if os.environ.get("OPEN_AGENT_WORLD_DATA_ROOT") else root.with_name(root.name + ".storage.json"),
             database_path=root / "database" / "world.sqlite3",

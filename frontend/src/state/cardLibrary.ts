@@ -35,9 +35,11 @@ interface LibraryStore {
   snapshot: LibrarySnapshot | null;
   open: boolean;
   tab: "packs" | "cards" | "store";
+  inspectedEntry: DeckEntry | null;
   busy: boolean;
   error: string;
   show: () => void;
+  inspect: (entry: DeckEntry) => void;
   close: () => void;
   refresh: () => Promise<void>;
   edit: (edit: LibraryEdit) => Promise<LibrarySnapshot | null>;
@@ -48,7 +50,8 @@ let refreshQueued = false;
 export const useCardLibrary = create<LibraryStore>((set, get) => {
   const accept = (snapshot: LibrarySnapshot) => set(state => !state.snapshot || snapshot.revision >= state.snapshot.revision ? { snapshot } : {});
   return {
-    snapshot: null, open: false, tab: "packs", busy: false, error: "",
+    snapshot: null, open: false, tab: "packs", inspectedEntry: null, busy: false, error: "",
+    inspect: entry => { set({ inspectedEntry: entry, open: true, tab: "cards" }); void get().refresh(); },
     show: () => { set({ open: true }); void get().refresh(); },
     close: () => set({ open: false }),
     refresh: async () => {

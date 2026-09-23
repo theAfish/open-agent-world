@@ -39,8 +39,20 @@ under **Manage installed Packs** after addressing the reported conflict or
 connectivity problem. Open the Pack once it is ready and add its cards to your Deck.
 
 Install a newer version from file to upgrade. Select a retained version with
-**Use this version on restart** to roll back. The Store tab remains a placeholder;
-remote discovery, download and publishing are not available yet.
+**Use this version on restart** to roll back.
+
+## Get a Pack from the Store
+
+Open **Pack & Card Library → Store**, search or browse, and open a Pack's details
+to see its compatibility and requirements. Choose **Get**, then restart OAW when
+prompted. The downloaded Pack appears in the same **Packs** tab as local Packs.
+Open it, add its cards to your Deck and place them in your World.
+
+**Update available** offers an explicit **Update** action; OAW does not update
+Packs automatically. If the Store is unavailable, use **Retry** later. Your
+existing Packs, Cards, Deck and World keep working. The official endpoint is
+not deployed yet; development builds can connect through the host override
+described in [Pack Store Client V0](../pack-store.md).
 
 ## Disable or remove a Pack
 

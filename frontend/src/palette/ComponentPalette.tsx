@@ -148,7 +148,7 @@ export function ComponentPalette() {
           const label = definition ? t(definition.label) : legion?.name ?? entry.id;
           const payload: PaletteDragPayload = entry.kind === "node" ? { version: 1, kind: "node", type: entry.id }
             : { version: 1, kind: "legion", id: entry.id, revision: legion?.revision ?? 0 };
-          return <button type="button" key={`${entry.kind}:${entry.id}`} className="deck-hover-button" data-palette-card={entry.id} aria-disabled={!available}
+          return <button type="button" key={`${entry.kind}:${entry.id}`} className="deck-hover-button" data-palette-card={entry.id} data-legion-preview={legion?.id} data-unavailable={!available}
             draggable={false} onPointerDown={event => {
               if (removing || library.busy || event.button !== 0 || !event.isPrimary) return;
               suppressClick.current = false;
@@ -170,9 +170,10 @@ export function ComponentPalette() {
             onClick={event => {
               if (dragged.current) { event.preventDefault(); return; }
               if (suppressClick.current && event.detail !== 0) { suppressClick.current = false; event.preventDefault(); return; }
-              if (available && !library.open) entry.kind === "node" ? void createCard(entry.id) : void instantiateLegion(entry.id);
+              if (!available) { library.inspect(entry); return; }
+              if (!library.open) entry.kind === "node" ? void createCard(entry.id) : void instantiateLegion(entry.id);
             }}
-            aria-label={available ? t("Place {v0}", { v0: String(label) }) : t("{v0} unavailable", { v0: String(label) })} title={available ? (definition ? t(definition.description) : undefined) ?? t("Deploy saved formation") : t("Content unavailable. Inspect it in the Library.")}>
+            aria-label={available ? t("Place {v0}", { v0: String(label) }) : t("{v0} unavailable", { v0: String(label) })} title={legion ? undefined : available ? (definition ? t(definition.description) : undefined) : t("Content unavailable. Inspect it in the Library.")}>
             <CardStock style={{ "--collection-color": definition?.color ?? "#78967b" } as CSSProperties} className={`palette-item palette-item--${entry.kind === "node" ? entry.id : "legion"}`} data-deck-visual>
               <CardFace icon={available ? definition ? <CatalogIcon definition={definition} /> : <Layers3 /> : <AlertTriangle />} label={label}
                 description={available ? (definition ? t(definition.description) : undefined) ?? t(legion?.preset ? "Preset formation" : "Saved formation") : t("Unavailable")} />

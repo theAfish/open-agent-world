@@ -17,6 +17,7 @@ from backend.api.world import router as world_router
 from backend.api.storage import router as storage_router
 from backend.api.plugin_assets import router as plugin_assets_router
 from backend.api.packs import router as packs_router
+from backend.api.store import router as store_router
 from backend.api.summoning import router as summoning_router
 from backend.api.execution_credentials import router as execution_credentials_router
 from backend.api.artifacts import router as artifacts_router
@@ -51,6 +52,7 @@ api_router.include_router(artifacts_router)
 api_router.include_router(execution_credentials_router)
 api_router.include_router(plugin_assets_router)
 api_router.include_router(packs_router)
+api_router.include_router(store_router)
 api_router.include_router(summoning_router)
 api_router.include_router(node_documents_router)
 api_router.include_router(card_state_router)

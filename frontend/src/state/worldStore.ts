@@ -1,4 +1,5 @@
 import { useConversationView } from "./conversationView";
+import { ensureCardsCollected } from "./cardDependencies";
 import type { MapPinLocation } from "../canvas/MapAtlas";
 import { create } from "zustand";
 import { EMPTY_MODEL_CATALOG, type ModelCatalog } from "./modelConnections";
@@ -694,6 +695,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       });
       return undefined;
     }
+    if (!await ensureCardsCollected([type])) return undefined;
     const finalPosition = position ?? viewportCenterToWorld(get().viewport);
     const draft = buildCardDraft(type, finalPosition, definition);
     const defaultModel = get().modelCatalog.default_model ?? (!get().modelCatalog.revision ? get().modelSettings.models[0] : undefined);
@@ -1058,6 +1060,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       get().pushToast({ tone: "error", title: "Deployment paused", detail: "Reconnect the world service first." });
       return undefined;
     }
+    if (!await ensureCardsCollected(legion.required_card_ids ?? legion.node_types)) return undefined;
     const finalAnchor = anchor ?? viewportCenterToWorld(get().viewport);
     const origin = {
       x: finalAnchor.x - legion.bounds.width / 2,

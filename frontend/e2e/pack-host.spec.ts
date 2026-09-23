@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
-test.skip(!process.env.OAW_PACK_ARTIFACT, 'Run scripts/run-pack-e2e.mjs with an externally built Greeter artifact');
+test.skip(!process.env.OAW_PACK_ARTIFACT && process.env.OAW_PACK_SOURCE !== 'store-official',
+  'Run scripts/run-pack-e2e.mjs with an externally built Greeter artifact or --store-official');
 
 async function dismissOnboarding(page: import('@playwright/test').Page) {
   const profile = await (await page.request.get('/api/application')).json();
@@ -30,7 +31,41 @@ test('install local Pack into the production host without a frontend rebuild', a
   const installed = await (await request.get('/api/packs')).json();
   expect(installed.versions[0]).toMatchObject({ id: 'example.greeter', selected: true, loaded: false });
   expect((await (await request.get('/api/catalog')).json()).frontend_modules['example.greeter']).toBeUndefined();
-  await page.screenshot({ path: '../.outputs/pack-acceptance/installed.png' });
+  await page.screenshot({ path: `${process.env.OAW_PACK_E2E_DATA_ROOT}/installed.png` });
+});
+
+test('install remote Pack through Store and the existing installer', async ({ page, request }) => {
+  const browserRequests: string[] = [];
+  page.on('request', request => browserRequests.push(request.url()));
+  expect((await (await request.get('/api/packs')).json()).versions).toEqual([]);
+  await dismissOnboarding(page);
+  await page.getByRole('button', { name: 'Open Pack and Card Library' }).click();
+  const library = page.getByRole('dialog', { name: 'Pack & Card Library' });
+  await library.getByRole('button', { name: 'Store', exact: true }).click();
+  const pack = library.locator('[data-store-pack-id="example.greeter"]');
+  await expect(pack).toBeVisible();
+  if (process.env.OAW_PACK_SOURCE === 'store-fake') {
+    await library.getByRole('button', { name: 'Load more', exact: true }).click();
+    await expect(library.locator('[data-store-pack-id]')).toHaveCount(23);
+  }
+  await library.getByLabel('Search packs', { exact: true }).fill('does-not-exist');
+  await expect(library.getByText('No matching packs', { exact: true })).toBeVisible();
+  await library.getByLabel('Search packs', { exact: true }).fill('Greeter');
+  await expect(pack).toBeVisible();
+  await page.screenshot({ path: `${process.env.OAW_PACK_E2E_DATA_ROOT}/store-catalog.png` });
+  await pack.getByRole('button', { name: 'View Greeter details', exact: true }).click();
+  const detail = library.getByRole('article', { name: 'Pack details', exact: true });
+  await expect(detail.getByText('colorama==0.4.6', { exact: true })).toBeVisible();
+  await expect(detail.getByText('OAW compatibility', { exact: true })).toBeVisible();
+  await page.screenshot({ path: `${process.env.OAW_PACK_E2E_DATA_ROOT}/store-detail.png` });
+  await detail.getByRole('button', { name: 'Get', exact: true }).click();
+  await expect(detail.getByText('Installed · Restart required', { exact: true })).toBeVisible({ timeout: 120000 });
+  await expect(detail.getByRole('button', { name: 'Installed', exact: true })).toBeDisabled();
+  const installed = await (await request.get('/api/packs')).json();
+  expect(installed.versions[0]).toMatchObject({ id: 'example.greeter', version: '0.1.0', selected: true, loaded: false, digest: process.env.OAW_PACK_EXPECTED_SHA });
+  expect((await (await request.get('/api/catalog')).json()).frontend_modules['example.greeter']).toBeUndefined();
+  expect(browserRequests.every(url => !url.includes('/v1/packs'))).toBe(true);
+  await page.screenshot({ path: `${process.env.OAW_PACK_E2E_DATA_ROOT}/installed.png` });
 });
 
 test('restart activates backend, runtime frontend, Python, Library, Deck and a usable Card', async ({ page, request }) => {
@@ -50,6 +85,13 @@ test('restart activates backend, runtime frontend, Python, Library, Deck and a u
   await page.getByRole('button', { name: 'Open Pack and Card Library' }).click();
   const library = page.getByRole('dialog', { name: 'Pack & Card Library' });
   const pack = library.locator('[data-pack-id="example.greeter"]');
+  if (process.env.OAW_PACK_SOURCE !== 'local') {
+    await library.getByRole('button', { name: 'Store', exact: true }).click();
+    const remote = library.locator('[data-store-pack-id="example.greeter"]');
+    await expect(remote.getByRole('button', { name: 'Installed', exact: true })).toBeDisabled();
+    await expect(remote.getByText('Installed · Restart required', { exact: true })).toHaveCount(0);
+  }
+  await library.getByRole('button', { name: /^Packs/ }).click();
   await pack.getByRole('button', { name: 'Tear open Greeter', exact: true }).click();
   await expect(pack).toHaveClass(/is-opened/);
   await pack.getByRole('button', { name: 'View cards in Greeter', exact: true }).click();
@@ -69,6 +111,26 @@ test('restart activates backend, runtime frontend, Python, Library, Deck and a u
   expect(nodes.find((n: { type: string }) => n.type === 'example.greeter.card').config.greeting).toBe('Hello, Pack Store!');
   await page.reload();
   await expect(page.locator('[data-greeter-output]')).toHaveText('Hello, Pack Store!');
-  await page.screenshot({ path: '../.outputs/pack-acceptance/greeter-in-world.png' });
+  await page.screenshot({ path: `${process.env.OAW_PACK_E2E_DATA_ROOT}/greeter-in-world.png` });
   expect(errors).toEqual([]);
+});
+
+test('Store offline leaves Packs Cards Deck and World usable', async ({ page, request }) => {
+  await dismissOnboarding(page);
+  await expect(page.locator('[data-greeter-output]')).toHaveText('Hello, Pack Store!');
+  await page.getByRole('button', { name: 'Open Pack and Card Library' }).click();
+  const library = page.getByRole('dialog', { name: 'Pack & Card Library' });
+  await library.getByRole('button', { name: 'Store', exact: true }).click();
+  await expect(library.getByText('Store unavailable', { exact: true })).toBeVisible();
+  await library.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect(library.getByText('Store unavailable', { exact: true })).toBeVisible();
+  await page.screenshot({ path: `${process.env.OAW_PACK_E2E_DATA_ROOT}/store-offline.png` });
+  await library.getByRole('button', { name: /^Packs/ }).click();
+  await expect(library.locator('[data-pack-id="example.greeter"]')).toBeVisible();
+  await expect(library.getByRole('button', { name: 'Install Pack from File...', exact: true })).toBeVisible();
+  await library.getByRole('button', { name: /^Cards/ }).click();
+  await expect(library.getByRole('heading', { name: 'Card Library', exact: true })).toBeVisible();
+  await library.getByRole('button', { name: 'Close Library', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: 'Active card deck' })).toBeVisible();
+  expect((await request.get('/api/health')).ok()).toBe(true);
 });

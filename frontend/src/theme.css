@@ -162,9 +162,19 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   height: 100%;
 }
 
-.world-shell { background: var(--canvas); isolation: isolate; }
+.world-shell { background: var(--canvas); isolation: isolate; overflow: clip; }
 
-.world-canvas .react-flow { background: transparent; }
+.world-canvas .react-flow {
+  background: transparent;
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
+.world-canvas .react-flow__node.draggable,
+.world-canvas .node-drag-region,
+.world-canvas .container-drag-region {
+  touch-action: none;
+}
 
 .world-canvas .react-flow__pane { cursor: grab; }
 .world-canvas .react-flow__pane:active { cursor: grabbing; }
@@ -1007,7 +1017,6 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 @keyframes toastIn { from { opacity: 0; transform: translateX(15px); } }
 
 @media (max-width: 820px) {
-  .top-bar { top: 10px; left: 10px; right: 10px; grid-template-columns: 1fr auto; }
   .topology-summary { display: none; }
   .connection-status span { display: none; }
   .connection-status { width: 34px; justify-content: center; padding: 0; }
@@ -1020,8 +1029,6 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   .palette-plus,
   .developer-tools { display: none; }
   .chunk-readout { left: 10px; bottom: 69px; }
-  .world-controls.react-flow__controls { right: 10px; bottom: 68px; }
-  .world-minimap.react-flow__minimap { display: none; }
   .edge-inspector { top: 78px; bottom: auto; max-width: calc(100vw - 20px); }
   .activity-panel { top: 78px; right: 10px; bottom: 65px; width: min(326px, calc(100vw - 20px)); }
   .toast-stack { top: 78px; right: 10px; width: min(350px, calc(100vw - 20px)); }
@@ -1029,7 +1036,6 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 }
 
 @media (max-width: 520px) {
-  .top-bar { height: 54px; }
   .world-identity span { display: none; }
   .world-identity strong { font-size: 11px; }
   .world-mark { width: 31px; height: 31px; }
@@ -1451,7 +1457,7 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   --deck-tab-step: 68px;
   --deck-tab-chrome: 54px;
   --deck-preferred-width: max(520px, calc(var(--deck-tab-count, 1) * var(--deck-tab-step) + var(--deck-tab-chrome)), calc(200px + min(var(--deck-hand-count, 0), 8) * 76px));
-  width: min(var(--deck-preferred-width), 760px, calc(100vw - 360px));
+  width: min(var(--deck-preferred-width), 760px, calc(100vw - 680px));
   min-width: 0;
   padding: 7px;
   border-radius: 20px;
@@ -1887,7 +1893,7 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
 .activity-panel { top: 20px; }
 .toast-stack { top: 20px; }
 
-@media (max-width: 1050px) {
+@media (max-width: 1250px) {
   .component-palette {
     right: auto;
     left: 50%;
@@ -1897,17 +1903,11 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
     padding: 7px;
     transform: translateX(-50%);
   }
-  .top-bar { top: auto; right: auto; bottom: 82px; left: 10px; transition: bottom 260ms cubic-bezier(0.22, 1, 0.36, 1); }
-  .world-controls.react-flow__controls { right: 10px; bottom: 82px; transition: bottom 260ms cubic-bezier(0.22, 1, 0.36, 1); }
   .edge-inspector { top: 62px; bottom: auto; }
-  .world-shell:has(.component-palette:hover, .component-palette :focus-visible, .component-palette .deck-editor:focus-within) .top-bar,
-  .world-shell:has(.component-palette:hover, .component-palette :focus-visible, .component-palette .deck-editor:focus-within) .world-controls.react-flow__controls,
   .world-shell:has(.component-palette:hover, .component-palette :focus-visible, .component-palette .deck-editor:focus-within) .edge-inspector { bottom: 222px; }
 }
 
 @media (max-width: 620px) {
-  .top-bar { width: 222px; }
-  .top-bar .top-icon-button { width: 36px; height: 31px; }
   .deck-tabs { grid-template-columns: minmax(0, 1fr) auto; }
   .component-palette { --deck-tab-width: 60px; --deck-tab-step: 64px; --deck-tab-chrome: 50px; }
   .deck-tool-button { width: 30px; min-width: 30px; flex-basis: 30px; }
@@ -1933,8 +1933,6 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
   .legion-palette-entry .palette-item,
   .legion-palette-entry .palette-item:hover { min-height: var(--compact-card-height); height: var(--compact-card-height); }
   .component-palette .palette-item-icon { width: 38px; height: 38px; }
-  .world-shell:has(.component-palette:hover, .component-palette :focus-visible, .component-palette .deck-editor:focus-within) .top-bar,
-  .world-shell:has(.component-palette:hover, .component-palette :focus-visible, .component-palette .deck-editor:focus-within) .world-controls.react-flow__controls,
   .world-shell:has(.component-palette:hover, .component-palette :focus-visible, .component-palette .deck-editor:focus-within) .edge-inspector { bottom: 200px; }
 }
 .legion-container { width: 100%; height: 100%; border: 1px solid #82958c; border-radius: 24px; background: color-mix(in srgb, var(--surface, #f6f4ec) 82%, transparent); box-shadow: inset 0 0 0 7px #82958c0c; position: relative; }
@@ -2341,7 +2339,47 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
 .map-pin-marker { position: absolute; display: flex; align-items: center; gap: 4px; transform: translate(-12.5px, -25px); color: var(--accent); white-space: nowrap; }
 .map-pin-marker span { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--chrome); color: var(--ink); font-size: 12px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .world-canvas.pin-tool-active > .react-flow .react-flow__pane { cursor: crosshair; }
-@media (max-width: 760px) { .map-tools.react-flow__panel { right: 60px; bottom: 82px; } }
+/* One breakpoint owns the corner HUD; the bottom remains available to the Deck. */
+@media (max-width: 1250px) {
+  .top-bar {
+    top: max(10px, env(safe-area-inset-top));
+    bottom: auto;
+    left: max(10px, env(safe-area-inset-left));
+    right: auto;
+    width: 48px;
+    gap: 5px;
+    padding: 6px;
+    max-height: calc(100dvh - 220px);
+    overflow-y: auto;
+  }
+  .top-bar .world-status { justify-content: center; padding: 0; }
+  .top-bar .topology-summary, .top-bar .connection-status span { display: none; }
+  .top-bar .connection-status { width: 34px; padding: 0; justify-content: center; }
+  .top-bar .top-actions { grid-template-columns: 1fr; }
+  .top-bar .top-icon-button { width: 34px; height: 32px; }
+  .world-controls.react-flow__controls,
+  .world-minimap.react-flow__minimap,
+  .map-tools.react-flow__panel { margin: 0; bottom: auto; }
+  .world-controls.react-flow__controls {
+    top: max(10px, env(safe-area-inset-top));
+    right: max(10px, env(safe-area-inset-right));
+  }
+  .world-minimap.react-flow__minimap {
+    top: max(10px, env(safe-area-inset-top));
+    right: calc(max(10px, env(safe-area-inset-right)) + 44px);
+  }
+  .map-tools.react-flow__panel {
+    top: calc(max(10px, env(safe-area-inset-top)) + 108px);
+    right: max(10px, env(safe-area-inset-right));
+    max-width: calc(100vw - 78px);
+  }
+  .map-toolbar { order: -1; }
+  .map-atlas, .map-tools .glue-tool-hint {
+    width: min(310px, calc(100vw - 78px));
+    max-height: max(100px, calc(100dvh - 380px));
+    overflow-y: auto;
+  }
+}
 
 /* Preview is a portrait card; React Flow uses NODE_SURFACE_SIZE.preview. */
 .world-card.node-surface.is-preview { border-radius: 14px; }

@@ -107,6 +107,10 @@ The payload starts with the interpreter and standard library from the build mach
 
 The build retains previous payloads under `.open-agent-world/desktop-previous-*` until manually removed. `-SkipFrontend` and `-SkipPayload` are available when rebuilding only the desktop shell; use them only when those inputs have not changed. The initial package is unsigned; no certificate, publishing destination, or automatic update service is configured.
 
+`scripts/package-backend.py --cache-dir <uv-cache>` can reuse an existing download
+cache while still enforcing the locked wheel hashes. See [Store acceptance](pack-store.md#acceptance)
+for testing remote Pack installation with the packaged interpreter and frontend.
+
 ## Verification
 
 ```powershell

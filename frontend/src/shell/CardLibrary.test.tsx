@@ -23,7 +23,7 @@ function snapshot(revision = 1): LibrarySnapshot {
 
 afterEach(() => {
   cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals();
-  useCardLibrary.setState({ snapshot: null, busy: false, open: false, tab: "packs", error: "", refresh: originalRefresh });
+  useCardLibrary.setState({ snapshot: null, busy: false, open: false, tab: "packs", inspectedEntry: null, error: "", refresh: originalRefresh });
 });
 
 it("browses a large collection in bounded pages and resets pagination for search and filters", () => {
@@ -78,6 +78,22 @@ function openCards(state: LibrarySnapshot) {
   render(<CardLibrary />);
   fireEvent.click(screen.getByRole("button", { name: /^Cards/ }));
 }
+
+it("opens unavailable Legion diagnostics directly from its deck card", () => {
+  vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+  const state = packSnapshot();
+  state.decks[0].entries = [{ kind: "legion", id: "broken" }];
+  useCardLibrary.setState({ snapshot: state, open: false, refresh: async () => {} });
+  useWorldStore.setState({ catalog: TEST_CATALOG, legions: [{ id: "broken", name: "Broken formation",
+    node_count: 1, edge_count: 0, bounds: { width: 100, height: 100 }, node_types: ["missing.card"],
+    plugin_ids: ["missing.plugin"], compatible: false, issues: ["missing.plugin is disabled", "Template version is unsupported"], revision: 1 }] });
+  render(<><ComponentPalette /><CardLibrary /></>);
+  fireEvent.click(screen.getByLabelText("Broken formation unavailable"));
+  const details = screen.getByRole("region", { name: "Dependency details" });
+  expect(within(details).getByText("missing.plugin is disabled")).toBeTruthy();
+  expect(within(details).getByText("Template version is unsupported")).toBeTruthy();
+  expect(within(details).getByText("missing.card", { selector: "code" })).toBeTruthy();
+});
 
 it("groups by collected pack provenance, deduplicates shared cards and filters by every source", () => {
   const state = packSnapshot();

@@ -245,10 +245,15 @@ environment and frontend failure-isolation tests remain beside their existing
 host suites. The browser acceptance belongs in `frontend/e2e` because it verifies
 cross-cutting host installation, restart, library and deck behavior.
 
-## Deferred Store work
+## Store acquisition
 
-Remote catalog/search, downloads, publishing, accounts, GitHub integration,
-ratings/moderation, paid Packs, automatic update checks, signatures, publisher
-identity and additional runtime kinds remain future work. A Store can later
-deliver the same `.oawpack` bytes to this installer without replacing the
-Registry, Card Library, frontend SDK or Shared Python runtime.
+The **Store** tab now supports remote catalog search, pagination, Pack details,
+explicit Get/Update and installed/restart state. The local backend downloads the
+selected Marketplace version and passes its verified `.oawpack` bytes to this
+same installer. Local **Install Pack from File...** remains available.
+
+See [Pack Store Client V0](pack-store.md) for the HTTP boundary, integrity checks,
+development configuration and offline/private Release acceptance commands.
+
+Accounts, publishing, ratings/moderation, paid Packs, automatic updates,
+signatures, publisher identity and additional runtime kinds remain deferred.

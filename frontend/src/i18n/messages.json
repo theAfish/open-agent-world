@@ -1,4 +1,13 @@
 {
+  "Legion contents": ["Legion contents", "Legion 内部卡牌"],
+  "No member cards": ["No member cards", "暂无成员卡牌"],
+  "{count} more cards": ["{count} more cards", "另有 {count} 张卡牌"],
+  "Dependency details": ["Dependency details", "依赖详情"],
+  "Not collected": ["Not collected", "尚未收集"],
+  "Required packs": ["Required packs", "所需卡包"],
+  "Open required packs…": ["Open required packs…", "打开所需卡包…"],
+  "Required cards have no available owned pack: {cards}": ["Required cards have no available owned pack: {cards}", "以下依赖卡牌没有可用的已拥有卡包：{cards}"],
+  "This action requires uncollected cards:\n{cards}\n\nOpen these owned packs and continue?\n{packs}": ["This action requires uncollected cards:\n{cards}\n\nOpen these owned packs and continue?\n{packs}", "此操作需要尚未收集的卡牌：\n{cards}\n\n是否打开以下已拥有的卡包并继续？\n{packs}"],
   "Local Pack management": ["Local Pack management", "本地 Pack 管理"],
   "Pack file": ["Pack file", "Pack 文件"],
   "Install Pack from File...": ["Install Pack from File...", "从文件安装 Pack..."],
@@ -6919,5 +6928,85 @@
   "done": ["Done", "已完成"],
   "blocked": ["Blocked", "已阻塞"],
   "Run tasks": ["Run tasks", "执行任务"],
-  "Existing conversations and files are included. Users with the password share this application’s data.": ["Existing conversations and files are included. Users with the password share this application’s data.", "部署会保留已有会话和文件。持有访问密码的用户共享此应用的数据。"]
+  "Existing conversations and files are included. Users with the password share this application’s data.": ["Existing conversations and files are included. Users with the password share this application’s data.", "部署会保留已有会话和文件。持有访问密码的用户共享此应用的数据。"],
+  "Pack Store": [
+    "Pack Store",
+    "Pack 商店"
+  ],
+  "Back to Store": [
+    "Back to Store",
+    "返回商店"
+  ],
+  "Pack details": [
+    "Pack details",
+    "Pack 详情"
+  ],
+  "OAW compatibility": [
+    "OAW compatibility",
+    "OAW 兼容版本"
+  ],
+  "Pack dependencies": [
+    "Pack dependencies",
+    "Pack 依赖"
+  ],
+  "Sandbox Python requirements": [
+    "Sandbox Python requirements",
+    "Sandbox Python 依赖"
+  ],
+  "No version available": [
+    "No version available",
+    "暂无可用版本"
+  ],
+  "Discover new Packs for your world.": [
+    "Discover new Packs for your world.",
+    "为你的世界发现新的 Pack。"
+  ],
+  "View {v0} details": [
+    "View {v0} details",
+    "查看 {v0} 详情"
+  ],
+  "Store unavailable": [
+    "Store unavailable",
+    "商店暂不可用"
+  ],
+  "No matching packs": [
+    "No matching packs",
+    "没有匹配的 Pack"
+  ],
+  "Get": [
+    "Get",
+    "获取"
+  ],
+  "Update available": [
+    "Update available",
+    "有可用更新"
+  ],
+  "Store is not configured yet.": [
+    "Store is not configured yet.",
+    "商店尚未配置。"
+  ],
+  "Store is unavailable. Check the host configuration.": [
+    "Store is unavailable. Check the host configuration.",
+    "商店暂不可用，请检查主机配置。"
+  ],
+  "Store request timed out. Please retry.": [
+    "Store request timed out. Please retry.",
+    "商店请求超时，请重试。"
+  ],
+  "Store connection failed or download was interrupted. Please retry.": [
+    "Store connection failed or download was interrupted. Please retry.",
+    "商店连接失败或下载中断，请重试。"
+  ],
+  "This Pack or version is no longer available.": [
+    "This Pack or version is no longer available.",
+    "此 Pack 或版本已不可用。"
+  ],
+  "Store is busy. Please retry shortly.": [
+    "Store is busy. Please retry shortly.",
+    "商店繁忙，请稍后重试。"
+  ],
+  "Store is temporarily unavailable. Please retry.": [
+    "Store is temporarily unavailable. Please retry.",
+    "商店暂不可用，请重试。"
+  ]
 }

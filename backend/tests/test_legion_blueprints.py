@@ -92,6 +92,7 @@ def test_starter_presets_share_legion_deployment_without_a_wrapper(client, prese
     catalog = client.get("/api/legions/presets")
     assert catalog.status_code == 200
     assert all(item["compatible"] for item in catalog.json()), catalog.text
+    assert all(set(item["node_types"]) <= set(item["required_card_ids"]) for item in catalog.json())
     response = client.post(f"/api/legions/presets/{preset}/instances", json={"unwrap": True})
     assert response.status_code == 201, response.text
     instance = response.json()

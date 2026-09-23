@@ -189,6 +189,10 @@ export function normalizeLegionSummary(input: unknown): LegionSummary {
       height: asNumber(bounds.height, 0),
     },
     node_types: asStringArray(source.node_types),
+    members: Array.isArray(source.members) ? source.members.map(item => {
+      const member = asRecord(item);
+      return { name: String(member.name ?? ""), type: String(member.type ?? "") };
+    }) : undefined,
     plugin_ids: asStringArray(source.plugin_ids),
     compatible: source.compatible === true,
     issues: asStringArray(source.issues),
@@ -266,6 +270,21 @@ function unwrap<T>(input: unknown, key: string): T {
 }
 
 export const worldApi = {
+  getStorePacks(query: string, cursor?: string, signal?: AbortSignal): Promise<import('../types/packs').StorePage> {
+    const params = new URLSearchParams({ query, limit: '20' });
+    if (cursor) params.set('cursor', cursor);
+    return request(`/store/packs?${params}`, { signal });
+  },
+  getStorePack(id: string, signal?: AbortSignal): Promise<import('../types/packs').StoreDetail> {
+    return request(`/store/packs/${encodeURIComponent(id)}`, { signal });
+  },
+  getStoreVersion(id: string, version: string, signal?: AbortSignal): Promise<import('../types/packs').StoreVersion> {
+    return request(`/store/packs/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`, { signal });
+  },
+  installStorePack(id: string, version: string, signal?: AbortSignal): Promise<import('../types/packs').StoreState> {
+    return request(`/store/packs/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/install`,
+      { method: 'POST', headers: { 'X-OAW-Pack-Install': '1' }, signal });
+  },
   getInstalledPacks(): Promise<import('../types/packs').PackInstallations> { return request('/packs'); },
   inspectPack(file: File): Promise<import('../types/packs').PackInspection> {
     return request('/packs/inspect', { method: 'POST', headers: { 'Content-Type': 'application/vnd.oaw.pack', 'X-OAW-Pack-Install': '1' }, body: file });

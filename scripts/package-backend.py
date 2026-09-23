@@ -22,6 +22,7 @@ def run(arguments, *, root, env, quiet=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--python", default=sys.executable, help="A full Windows CPython installation (not a frozen executable)")
+    parser.add_argument("--cache-dir", type=Path, help="Reuse an existing uv download cache; locked wheel hashes remain enforced")
     args = parser.parse_args()
     if os.name != "nt" and sys.platform != "darwin":
         parser.error("Build desktop installers on Windows or macOS.")
@@ -53,7 +54,7 @@ def main():
             shutil.copytree(source / name, python_root / name,
                 ignore=shutil.ignore_patterns("site-packages", "__pycache__", "*.pth", "sitecustomize.py", "usercustomize.py", "test", "tests"))
     env = dict(os.environ)
-    env["UV_CACHE_DIR"] = str(root / ".uv-cache")
+    env["UV_CACHE_DIR"] = str(args.cache_dir.resolve() if args.cache_dir else root / ".uv-cache")
     env["UV_PYTHON_INSTALL_DIR"] = str(build_root / "build-python")
     if sys.platform == "darwin":
         # A managed standalone interpreter is relocatable; Homebrew/framework

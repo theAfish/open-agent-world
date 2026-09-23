@@ -26,7 +26,7 @@
 .library-tools select { max-width: 230px; }
 .library-internal-toggle { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-soft); cursor: pointer; }
 .library-internal-toggle input { accent-color: var(--accent); }
-.library-card-layout { display: grid; grid-template-columns: minmax(0, 1fr) 235px; gap: 20px; align-items: start; }
+.library-card-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
 .library-source-group { margin-bottom: 22px; min-width: 0; }
 .library-source-group:not([open]) { margin-bottom: 0; }
 .library-source-group > summary { display: flex; gap: 10px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); cursor: pointer; list-style: none; color: var(--ink-soft); }
@@ -56,6 +56,11 @@
 .library-card-detail p { color: var(--ink-soft); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
 .library-card-detail small { font-size: 10px; color: var(--ink-faint); }
 .library-card-detail .library-unavailable { color: var(--warning); }
+.library-dependencies { min-width: 0; width: 100%; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.library-dependencies h4 { margin: 0; }
+.library-dependencies ul { padding-left: 18px; }
+.library-dependencies li + li { margin-top: 7px; }
+.library-dependencies button { margin-top: 10px; }
 .library-empty, .library-store { padding: 45px 20px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px; color: var(--ink-faint); }
 .library-empty p, .library-store p { margin: 0; max-width: 420px; font-size: 13px; line-height: 1.7; }
 .library-empty strong, .library-store h3 { color: var(--ink); }

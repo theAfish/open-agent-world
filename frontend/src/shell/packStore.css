@@ -1,0 +1,19 @@
+.pack-store { display: flex; flex-direction: column; gap: 20px; padding: 4px 0 24px; }
+.pack-store > .library-text-button { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; }
+.store-pack-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 20px; }
+.store-pack { min-width: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-raised); overflow: hidden; box-shadow: 0 5px 16px #00000008; }
+.store-pack-open { width: 100%; min-height: 205px; padding: 24px; display: flex; flex-direction: column; align-items: flex-start; text-align: left; color: var(--ink); border: 0; background: linear-gradient(130deg, #9ea68b16, transparent 70%); cursor: pointer; }
+.store-pack-open:hover { background-color: #9ea68b12; }
+.store-pack-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.store-pack-emblem { display: grid; place-items: center; width: 56px; height: 64px; border-radius: 8px; color: var(--ink-soft); background: linear-gradient(145deg, #a6af952b, #c5bda521); border: 1px solid var(--line); }
+.store-pack h4 { font-size: 18px; margin: 17px 0 8px; font-weight: 550; }
+.store-pack p, .store-detail p { font-size: 13px; line-height: 1.7; color: var(--ink-soft); margin: 0; overflow-wrap: anywhere; }
+.store-pack-footer { padding: 14px 20px; min-height: 64px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.store-installation { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--ink-soft); }
+.store-detail { max-width: 720px; display: flex; flex-direction: column; align-items: flex-start; gap: 16px; padding: 24px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 14px; }
+.store-detail h3 { margin: 0; font-size: 26px; font-weight: 550; }
+.store-description { white-space: pre-wrap; }
+.store-requirements { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(0, 2fr); gap: 14px 24px; width: 100%; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.6; }
+.store-requirements dt { color: var(--ink-faint); }
+.store-requirements dd { margin: 0; overflow-wrap: anywhere; color: var(--ink); }
+@media (max-width: 600px) { .store-requirements { grid-template-columns: 1fr; gap: 6px; } .store-requirements dd { margin-bottom: 12px; } }
