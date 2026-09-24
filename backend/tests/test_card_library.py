@@ -255,6 +255,7 @@ def test_revision_conflicts_and_deck_validation(tmp_path):
         store.edit(LibraryEdit(expected_revision=stale, action="delete_deck", id="starter"))
     with pytest.raises(GraphValidationError, match="duplicate"):
         edit(store, "update_deck", id="starter", entries=[{"id": "text"}, {"id": "text"}])
+    edit(store, "delete_deck", id="saved-legions")
     with pytest.raises(GraphValidationError, match="at least one"):
         edit(store, "delete_deck", id="starter")
     with pytest.raises(GraphValidationError, match="Only collected"):
@@ -395,7 +396,7 @@ def test_move_unavailable_reference_preserves_collection_rules(tmp_path):
     edit(store, "set_plugin_enabled", id="example", enabled=False)
     state = edit(store, "move_entry", source_deck_id="starter", id=target, entry={"id": "example.card"})
     assert not state.decks[0].entries
-    assert state.decks[1].entries[0].id == "example.card"
+    assert next(deck for deck in state.decks if deck.id == target).entries[0].id == "example.card"
     with pytest.raises(GraphValidationError, match="Only collected"):
         edit(store, "move_entry", id="starter", entry={"id": "example.card"})
     assert store.read().model_dump(mode="json") == state.model_dump(mode="json")

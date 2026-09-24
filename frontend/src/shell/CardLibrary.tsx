@@ -6,7 +6,7 @@ import { CatalogIcon } from "../components/CatalogIcon";
 import { useCardLibrary, type DeckEntry } from "../state/cardLibrary";
 import { useWorldStore } from "../state/worldStore";
 import { collectionDependencies, ensureCardsCollected } from "../state/cardDependencies";
-import { collectedLibraryCards, displayDeckName, formationSource, libraryCardMatches, libraryCardMetadata, type LibraryCard } from "./libraryCatalog";
+import { collectedLibraryCards, collectedLibraryLegions, compareLibraryCards, displayDeckName, libraryCardMatches, libraryCardMetadata, type LibraryCard } from "./libraryCatalog";
 import { LibraryPack } from "./LibraryPack";
 import { PackInstaller } from "./PackInstaller";
 import { PackStore } from "./PackStore";
@@ -75,11 +75,7 @@ export function CardLibrary() {
   const newSourceCards = sourcePack?.definition.cards.filter(id => !snapshot?.collection[id]?.source_pack_ids.includes(sourcePack.definition.id)).length ?? 0;
   const deck = snapshot?.decks.find(item => item.id === snapshot.active_deck_id);
   const cards = snapshot ? collectedLibraryCards(snapshot) : [];
-  const formations: LibraryCard[] = legions.map(item => ({ kind: "legion", id: item.id, label: item.name,
-    description: t("{v0} cards · {v1} links", { v0: String(item.node_count), v1: String(item.edge_count) }), category: "Saved Legions", available: item.compatible,
-    internal: false, sources: [item.preset
-      ? { id: 'plugin-legions', name: t('Pack presets'), pluginName: t('Installed Packs') }
-      : { ...formationSource, name: t(formationSource.name), pluginName: t(formationSource.pluginName) }], owners: [] }));
+  const formations = snapshot ? collectedLibraryLegions(snapshot, legions) : [];
   const allCards = [...cards, ...formations];
   const sources = [...new Map(allCards.flatMap(item => item.sources).map(source => [source.id, source])).values()]
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -90,7 +86,7 @@ export function CardLibrary() {
   const sourceFor = (item: LibraryCard) => item.sources.find(source => source.id === sourceFilter) ?? item.sources[0];
   const filtered = matching.filter(item => showInternal || !item.internal).sort((a, b) =>
     sourceFor(a).name.localeCompare(sourceFor(b).name) || sourceFor(a).id.localeCompare(sourceFor(b).id)
-    || Number(a.internal) - Number(b.internal) || a.label.localeCompare(b.label));
+    || compareLibraryCards(a, b));
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, pages - 1);
   const pageCards = filtered.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
@@ -124,7 +120,7 @@ export function CardLibrary() {
         }} data-library-card={item.id} onClick={event => {
           if (suppressClick.current && event.detail !== 0) { suppressClick.current = false; return; }
           setSelected(item);
-        }} aria-label={t("Inspect {v0}", { v0: String(item.label) })}><CardStock data-deck-visual className="library-card-stock"><CardFace icon={<CatalogIcon definition={item.definition} />} label={item.label} description={item.description} />
+        }} aria-label={t("Inspect {v0}", { v0: String(item.label) })}><CardStock data-deck-visual className="library-card-stock"><CardFace icon={item.kind === "legion" ? <Layers3 /> : <CatalogIcon definition={item.definition} />} label={item.label} description={item.description} />
         {!item.available && !item.internal ? <span className="library-unavailable">{t("Unavailable")}</span> : null}</CardStock></button>
       {item.internal && !included ? <div className="library-card-usage">{item.owners.length ? t("Use through its container") : t("Created by a world action")}</div> :
         <button className={`library-card-add ${included ? "is-in-deck" : ""}`} disabled={library.busy || !deck || (!included && !item.available)} onClick={() => toggleCard(item)} aria-label={t(included ? 'Remove {v0} from deck' : 'Add {v0} to deck', { v0: item.label })}>
@@ -176,7 +172,7 @@ export function CardLibrary() {
             </details>)}
             {!filtered.length ? <div className="library-empty"><LibraryBig size={30} /><strong>{allCards.length ? t("No matching cards") : t("Your collection starts with a pack")}</strong><p>{!showInternal && internalCount ? t("{v0} matching internal cards are hidden. Show internal cards to inspect their purpose and container.", { v0: String(internalCount) }) : allCards.length ? t("Try another search, source pack or category.") : t("Visit Packs and open one to discover its cards.")}</p><button className="secondary-button" onClick={() => { if (!showInternal && internalCount) setShowInternal(true); else { setTab("packs"); setQuery(""); } }}>{!showInternal && internalCount ? t("Show internal cards") : t("Browse packs")}</button></div> : null}
             {pages > 1 ? <div className="library-pagination"><button aria-label={t("Previous cards")} disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={16} /></button><span>{t("Page")} {currentPage + 1} {t("of")} {pages}</span><button aria-label={t("Next cards")} disabled={currentPage >= pages - 1} onClick={() => setPage(currentPage + 1)}><ChevronRight size={16} /></button></div> : null}
-          </div><div className="library-card-sidebar"><aside className="library-card-detail" aria-label={t("Card details")}>{detail ? <><CatalogIcon definition={detail.definition} size={36} /><span className="library-badge">{t(detail.category)}</span><h3>{detail.label}</h3><p>{detail.description}</p>
+          </div><div className="library-card-sidebar"><aside className="library-card-detail" aria-label={t("Card details")}>{detail ? <>{detail.kind === "legion" ? <Layers3 size={36} /> : <CatalogIcon definition={detail.definition} size={36} />}<span className="library-badge">{t(detail.category)}</span><h3>{detail.label}</h3><p>{detail.description}</p>
             {detailLegion ? <section className="library-dependencies" aria-label={t("Dependency details")}>
               <h4>{t("Dependency details")}</h4>
               {detailLegion.issues.length ? <ul className="library-unavailable">{detailLegion.issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul> : null}
@@ -190,6 +186,7 @@ export function CardLibrary() {
             {detail.definition ? <><small>{t("Source Pack")}</small><p>{snapshot.plugins[detail.definition.plugin_id]?.descriptor.name ?? detail.definition.plugin_id}</p><small>{t("Collected from")}</small><p>{detail.sources.map(source => source.name).join(", ")}</p><small>{t("Collected")} {new Date(snapshot.collection[detail.id].unlocked_at).toLocaleDateString(useLocale.getState().locale)}</small></> : <p>{t(legions.find(item => item.id === detail.id)?.preset
               ? "A Pack preset. Deploy it, customize its members and workspace, then save your own copy."
               : "A formation you saved from your world. Its members keep their original Pack dependencies.")}</p>}
+            {detailLegion?.preset ? <><small>{t("Collected from")}</small><p>{detail.sources.map(source => source.name).join(", ")}</p></> : null}
             {(detail.definition && (!snapshot.plugins[detail.definition.plugin_id]?.installed || !snapshot.plugins[detail.definition.plugin_id]?.enabled)) || (!detail.available && !detail.internal) ? <p className="library-unavailable">{detail.kind === "legion" ? t("This formation has unavailable dependencies.") : t("This content is unavailable. Install or enable its Pack to use it again.")}</p> : null}
             {!detail.internal || deck?.entries.some(entry => same(entry, detail)) ? <button className="secondary-button" disabled={library.busy || !deck || (!detail.available && !deck.entries.some(entry => same(entry, detail)))}
               aria-label={deck?.entries.some(entry => same(entry, detail)) ? t("Remove inspected card from deck") : t("Add inspected card to deck")} onClick={() => toggleCard(detail)}>

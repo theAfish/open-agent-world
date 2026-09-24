@@ -21,6 +21,7 @@ export function LibraryPack({ pack, snapshot, onOpened, onBrowse }: {
   const available = snapshot.available_pack_ids.includes(definition.id);
   const canOpen = !library.busy && phase === "idle" && available && pack.owned && !pack.opened;
   const artwork = definition.artwork_url && definition.artwork_url !== failedArtwork ? definition.artwork_url : null;
+  const presetCount = Object.values(snapshot.preset_pack_ids ?? {}).filter(ids => ids.includes(definition.id)).length;
   const cards = definition.cards.slice(0, 3).map(id => snapshot.card_definitions[id]);
   const color = definition.accent_color ?? cards.find(card => card?.color)?.color ?? "#617b72";
   useEffect(() => {
@@ -63,7 +64,7 @@ export function LibraryPack({ pack, snapshot, onOpened, onBrowse }: {
             <span className="pack-emblem"><CatalogIcon definition={cards[0]} size={38} /></span>
             <span className="pack-title">{definition.name}</span>
             <span className="pack-subtitle">{definition.description || t("A collection of possibilities.")}</span>
-            <span className="pack-print-footer"><b>{String(definition.cards.length).padStart(2, "0")} <small>{t("CARDS")}</small></b><span>{t("OPEN AGENT")}<br />{t("WORLD")}</span></span>
+            <span className="pack-print-footer"><b>{String(definition.cards.length + presetCount).padStart(2, "0")} <small>{t("CARDS")}</small></b><span>{t("OPEN AGENT")}<br />{t("WORLD")}</span></span>
           </span>
           <span className="pack-foil" />
         </span>
