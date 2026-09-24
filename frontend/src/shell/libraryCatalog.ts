@@ -1,6 +1,6 @@
 import { t } from "../i18n";
 import type { DeckEntry, LibrarySnapshot } from "../state/cardLibrary";
-import type { NodeTypeCatalogItem } from "../types/world";
+import type { LegionSummary, NodeTypeCatalogItem } from "../types/world";
 
 export interface LibrarySource { id: string; name: string; pluginName: string }
 export interface LibraryCard extends DeckEntry {
@@ -17,7 +17,9 @@ export interface LibraryCard extends DeckEntry {
 export const formationSource: LibrarySource = { id: "saved-legions", name: "Saved Legions", pluginName: "Your formations" };
 
 export function displayDeckName(deck: { id: string; name: string }): string {
-  return deck.id === 'starter' && deck.name === 'My deck' ? t('My deck') : deck.name;
+  if (deck.id === 'starter' && deck.name === 'My deck') return t('My deck');
+  if (deck.id === 'saved-legions' && deck.name === 'Legions') return t('Legions');
+  return deck.name;
 }
 
 export function libraryCardMetadata(snapshot: LibrarySnapshot, definition: NodeTypeCatalogItem) {
@@ -44,6 +46,33 @@ export function collectedLibraryCards(snapshot: LibrarySnapshot): LibraryCard[] 
       available: snapshot.available_card_ids.includes(entry.card_id), internal: definition.user_creatable === false,
       definition, sources }];
   });
+}
+
+export function collectedLibraryLegions(snapshot: LibrarySnapshot, legions: LegionSummary[]): LibraryCard[] {
+  return legions.flatMap(item => {
+    const packIds = [...new Set(snapshot.preset_pack_ids?.[item.id] ?? [])]
+      .filter(id => snapshot.packs[id]?.owned && snapshot.packs[id].opened);
+    const sources: LibrarySource[] = item.preset ? packIds.map(id => {
+      const pack = snapshot.packs[id].definition;
+      return { id: `pack:${id}`, name: t(pack.name),
+        pluginName: snapshot.plugins[pack.plugin_id]?.descriptor.name || pack.plugin_id };
+    }) : [{ ...formationSource, name: t(formationSource.name), pluginName: t(formationSource.pluginName) }];
+    // Installing a preset is not collecting it. Never fall back to a global
+    // preset category, nor infer ownership from the types of its member cards.
+    if (!sources.length) return [];
+    return [{ kind: "legion", id: item.id, label: item.name,
+      description: t("{v0} cards · {v1} links", { v0: String(item.node_count), v1: String(item.edge_count) }),
+      category: item.preset ? "Legions" : "Saved Legions",
+      available: item.compatible && (!item.preset || packIds.some(id => snapshot.available_pack_ids.includes(id))),
+      internal: false, sources, owners: [] }];
+  });
+}
+
+/** Order within a source pack, before pagination: formations, ordinary cards, internal cards. */
+export function compareLibraryCards(a: LibraryCard, b: LibraryCard): number {
+  return Number(a.internal) - Number(b.internal)
+    || Number(b.kind === "legion") - Number(a.kind === "legion")
+    || a.label.localeCompare(b.label) || a.id.localeCompare(b.id);
 }
 
 export function libraryCardMatches(card: LibraryCard, query: string) {

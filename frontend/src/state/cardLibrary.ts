@@ -19,6 +19,8 @@ export interface LibrarySnapshot {
   active_deck_id: string;
   available_card_ids: string[];
   available_pack_ids: string[];
+  /** Registry-owned preset provenance; older backend snapshots may omit it. */
+  preset_pack_ids?: Record<string, string[]>;
 }
 export interface LibraryEdit {
   action: "open_pack" | "create_deck" | "update_deck" | "delete_deck" | "activate_deck" | "move_entry" | "import_legacy" | "set_plugin_enabled";

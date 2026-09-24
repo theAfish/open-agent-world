@@ -32,6 +32,16 @@ test('library adds directly to the visible bottom deck at desktop and narrow wid
     await expect(page.locator('.palette-drag-preview')).toBeVisible();
     await page.mouse.up();
   };
+  // Legions is an ordinary persistent destination, including while Library is open.
+  const legionsTab = deck.locator('[role="tab"][data-deck-destination="saved-legions"]');
+  await expect(legionsTab).toBeEnabled();
+  await drag(legionsTab);
+  await expect(legionsTab).toHaveAttribute('aria-selected', 'true');
+  await expect(deck.locator('[data-palette-card="text"]')).toBeVisible();
+  await library.getByRole('button', { name: 'Remove Text file from deck', exact: true }).click();
+  await expect(deck.locator('[data-palette-card="text"]')).toHaveCount(0);
+  expect((await read()).decks.find(item => item.id === 'saved-legions')!.entries).toEqual([]);
+  await deck.getByRole('tab', { name: /Library destination/ }).click();
   for (const width of [1280, 720, 390]) {
     await page.setViewportSize({ width, height: 800 });
     await expect(deck.locator('.deck-stage')).toBeVisible();
@@ -63,6 +73,12 @@ test('library adds directly to the visible bottom deck at desktop and narrow wid
   await deck.getByRole('button', { name: 'Delete deck', exact: true }).click();
   await expect(deck.getByRole('tab', { name: /Renamed destination/ })).toHaveCount(0);
   expect((await read()).collection.text.unlocked).toBe(true);
+  // The default Legions deck can be deleted, and must not be recreated by refresh.
+  await legionsTab.click();
+  await deck.getByRole('button', { name: 'Edit deck', exact: true }).click();
+  await deck.getByRole('button', { name: 'Delete deck', exact: true }).click();
+  await expect(legionsTab).toHaveCount(0);
+  expect((await read()).decks.map(item => item.id)).toEqual(['starter']);
   await deck.getByRole('button', { name: 'Edit deck', exact: true }).click();
   await expect(deck.getByRole('button', { name: 'Delete deck', exact: true })).toBeDisabled();
   await deck.getByRole('button', { name: 'Cancel', exact: true }).click();
