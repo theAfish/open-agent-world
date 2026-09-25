@@ -1,4 +1,5 @@
 import { useConversationView } from "./conversationView";
+import { useLegionDeployments } from "./legionDeployments";
 import { ensureCardsCollected } from "./cardDependencies";
 import type { MapPinLocation } from "../canvas/MapAtlas";
 import { create } from "zustand";
@@ -1043,69 +1044,78 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
   })),
 
-  instantiateLegion: (id, anchor, options = {}) => withHistoryTransaction(() => withLegionOperation(id, async () => {
-    const legion = options.blueprint ?? get().legions.find((item) => item.id === id);
-    if (!legion) {
-      get().pushToast({ tone: "error", title: "Legion is unavailable", detail: "Refresh the Legion library and try again." });
-      return undefined;
-    }
-    if (!legion.compatible) {
-      get().pushToast({
-        tone: "error",
-        title: `${legion.name} cannot be deployed`,
-        detail: legion.issues.join(" ") || "One or more required plugins are unavailable.",
-      });
-      return undefined;
-    }
-    if (get().syncState === "offline") {
-      get().pushToast({ tone: "error", title: "Deployment paused", detail: "Reconnect the world service first." });
-      return undefined;
-    }
-    if (!await ensureCardsCollected(legion.required_card_ids ?? legion.node_types)) return undefined;
-    const finalAnchor = anchor ?? viewportCenterToWorld(get().viewport);
-    const origin = {
-      x: finalAnchor.x - legion.bounds.width / 2,
-      y: finalAnchor.y - legion.bounds.height / 2,
-    };
-    set({ syncState: "syncing" });
-    try {
-      const deployment = { unwrap: options.unwrap, preset: options.preset ?? legion.preset };
-      const instance = await worldApi.instantiateLegion(id, origin, deployment);
-      useNodeSurfaceStore.getState().restorePresentation(instance.nodes, get().catalog, instance.presentation);
-      const cards = instance.nodes.map(copyCard);
-      const edges = instance.edges.map(copyEdge);
-      markWorldMutation();
-      set((state) => ({
-        cards: mergeCards(state.cards, instance.nodes, state.cardTombstones),
-        edges: mergeEdges(state.edges, instance.edges, state.edgeTombstones),
-        selectedCardIds: deployedLegionSelection(cards, deployment.preset && !deployment.unwrap),
-        selectionRevision: state.selectionRevision + 1,
-        selectedEdgeId: undefined,
-        syncState: "online",
-        undoStack: appendHistory(state.undoStack, {
-          id: ++historySequence,
-          label: `Deploy ${legion.name}`,
-          kind: "legion-instantiated",
-          options: deployment,
-          legionId: legion.id,
-          position: { ...origin },
-          cards,
-          edges,
-        }),
-        redoStack: [],
-      }));
-      get().pushToast({
-        tone: "success",
-        title: `${legion.name} deployed`,
-        detail: `${instance.nodes.length} cards and ${instance.edges.length} links instantiated.`,
-      });
-      return instance;
-    } catch (error) {
-      set({ syncState: "online" });
-      get().pushToast({ tone: "error", title: "Legion was not deployed", detail: apiErrorMessage(error) });
-      return undefined;
-    }
-  })),
+  instantiateLegion: (id, anchor, options = {}) => {
+    // Feedback and the drop anchor belong to the gesture, even when another
+    // history operation is still running. Pending markers are never graph nodes.
+    const initial = options.blueprint ?? get().legions.find((item) => item.id === id);
+    const finalAnchor = { ...(anchor ?? viewportCenterToWorld(get().viewport)) };
+    const pendingId = initial ? useLegionDeployments.getState().begin(initial.name, finalAnchor) : undefined;
+    return withHistoryTransaction(() => withLegionOperation(id, async () => {
+      const legion = options.blueprint ?? get().legions.find((item) => item.id === id);
+      if (!legion) {
+        get().pushToast({ tone: "error", title: "Legion is unavailable", detail: "Refresh the Legion library and try again." });
+        return undefined;
+      }
+      if (!legion.compatible) {
+        get().pushToast({
+          tone: "error",
+          title: `${legion.name} cannot be deployed`,
+          detail: legion.issues.join(" ") || "One or more required plugins are unavailable.",
+        });
+        return undefined;
+      }
+      if (get().syncState === "offline") {
+        get().pushToast({ tone: "error", title: "Deployment paused", detail: "Reconnect the world service first." });
+        return undefined;
+      }
+      if (!await ensureCardsCollected(legion.required_card_ids ?? legion.node_types)) return undefined;
+      const origin = {
+        x: finalAnchor.x - legion.bounds.width / 2,
+        y: finalAnchor.y - legion.bounds.height / 2,
+      };
+      set({ syncState: "syncing" });
+      try {
+        const deployment = { unwrap: options.unwrap, preset: options.preset ?? legion.preset };
+        if (pendingId !== undefined) useLegionDeployments.getState().start(pendingId);
+        const instance = await worldApi.instantiateLegion(id, origin, deployment);
+        useNodeSurfaceStore.getState().restorePresentation(instance.nodes, get().catalog, instance.presentation);
+        const cards = instance.nodes.map(copyCard);
+        const edges = instance.edges.map(copyEdge);
+        markWorldMutation();
+        set((state) => ({
+          cards: mergeCards(state.cards, instance.nodes, state.cardTombstones),
+          edges: mergeEdges(state.edges, instance.edges, state.edgeTombstones),
+          selectedCardIds: deployedLegionSelection(cards, deployment.preset && !deployment.unwrap),
+          selectionRevision: state.selectionRevision + 1,
+          selectedEdgeId: undefined,
+          syncState: "online",
+          undoStack: appendHistory(state.undoStack, {
+            id: ++historySequence,
+            label: `Deploy ${legion.name}`,
+            kind: "legion-instantiated",
+            options: deployment,
+            legionId: legion.id,
+            position: { ...origin },
+            cards,
+            edges,
+          }),
+          redoStack: [],
+        }));
+        get().pushToast({
+          tone: "success",
+          title: `${legion.name} deployed`,
+          detail: `${instance.nodes.length} cards and ${instance.edges.length} links instantiated.`,
+        });
+        return instance;
+      } catch (error) {
+        set({ syncState: "online" });
+        get().pushToast({ tone: "error", title: "Legion was not deployed", detail: apiErrorMessage(error) });
+        return undefined;
+      }
+    })).finally(() => {
+      if (pendingId !== undefined) useLegionDeployments.getState().finish(pendingId);
+    });
+  },
 
   dissolveContainer: (id) => withHistoryTransaction(async () => {
     const group = get().cards.find((c) => c.id === id && isContainer(c, get().catalog));

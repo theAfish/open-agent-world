@@ -15,10 +15,10 @@ import { ActivityGlow } from "../effects/ActivityGlow";
 import { useNodeActivity } from "../effects/useNodeActivity";
 
 function useToggleEquipment(ownerId: string) {
-  const cards = useWorldStore((state) => state.cards);
   return () => {
     const panel = useEquipmentPanel.getState();
     if (panel.openIds.includes(ownerId)) {
+      const cards = useWorldStore.getState().cards;
       cards.filter((item) => equipmentOwner(item, cards)?.id === ownerId)
         .forEach((item) => useNodeSurfaceStore.getState().dismiss(item.id));
     }
@@ -29,11 +29,16 @@ function useToggleEquipment(ownerId: string) {
 export function EquipmentToggle({ card }: { card: WorldCard }) {
   useLocale();
   const catalog = useWorldStore((s) => s.catalog);
-  const count = useWorldStore((s) => s.cards.filter((item) => item.equipment?.owner_id === card.id).length);
-  const openIds = useEquipmentPanel((state) => state.openIds);
-  const toggle = useToggleEquipment(card.id);
   if (card.ephemeral || !catalog.node_types.find((type) => type.id === card.type)?.traits.includes("core.agent")) return null;
-  return <button className="equipment-toggle nodrag nopan" aria-label={t("Equipment for {v0}", { v0: String(card.name) })} aria-expanded={openIds.includes(card.id)}
+  return <AgentEquipmentToggle card={card} />;
+}
+
+function AgentEquipmentToggle({ card }: { card: WorldCard }) {
+  useLocale();
+  const count = useWorldStore((s) => s.cards.filter((item) => item.equipment?.owner_id === card.id).length);
+  const open = useEquipmentPanel((state) => state.openIds.includes(card.id));
+  const toggle = useToggleEquipment(card.id);
+  return <button className="equipment-toggle nodrag nopan" aria-label={t("Equipment for {v0}", { v0: String(card.name) })} aria-expanded={open}
     title={t("Equipment")} onClick={toggle}><Backpack size={14} /><span>{count}</span></button>;
 }
 

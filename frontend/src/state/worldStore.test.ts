@@ -6,6 +6,7 @@ import { TEST_CATALOG } from "./catalog.fixture";
 import { mergeEdges, useWorldStore } from "./worldStore";
 import { useNodeSurfaceStore } from "./nodeSurfaces";
 import { useCardLibrary } from "./cardLibrary";
+import { useLegionDeployments } from "./legionDeployments";
 
 function card(id: string, type: WorldCard["type"]): WorldCard {
   return { id, ...buildCardDraft(type, { x: 0, y: 0 }) };
@@ -40,6 +41,7 @@ function deferred<T>() {
 describe("authoritative world synchronization", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    useLegionDeployments.setState({ pending: [] });
     useCardLibrary.setState({ busy: false, snapshot: {
       schema_version: 1, revision: 1, migration_pending: false, plugins: {}, packs: {},
       card_definitions: {}, decks: [], active_deck_id: "", available_card_ids: [], available_pack_ids: [],
@@ -947,6 +949,47 @@ describe("authoritative world synchronization", () => {
     expect(useWorldStore.getState().toasts.at(-1)).toMatchObject({
       title: "Use the dedicated creation action",
     });
+  });
+
+  it("shows queued deployments immediately and keeps their drop anchors while panning", async () => {
+    const summary = legion();
+    const first = deferred<{ legion_id: string; nodes: WorldCard[]; edges: WorldEdge[] }>();
+    const second = deferred<{ legion_id: string; nodes: WorldCard[]; edges: WorldEdge[] }>();
+    useWorldStore.setState({ legions: [summary] });
+    const deploy = vi.spyOn(worldApi, "instantiateLegion")
+      .mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise);
+    const pending = () => useLegionDeployments.getState().pending;
+    const one = useWorldStore.getState().instantiateLegion(summary.id, { x: 160, y: 120 });
+    await vi.waitFor(() => expect(deploy).toHaveBeenCalledTimes(1));
+    const anchor = { x: 400, y: 300 };
+    const two = useWorldStore.getState().instantiateLegion(summary.id, anchor);
+    expect(pending().map(p => p.stage)).toEqual(['deploying', 'queued']);
+    expect(pending()[1].position).toEqual(anchor);
+    expect(useWorldStore.getState().cards).toEqual([]);
+    expect(useWorldStore.getState().undoStack).toEqual([]);
+    anchor.x = 999;
+    useWorldStore.setState(s => ({ viewport: { ...s.viewport, x: 800, y: 800, zoom: 0.5 } }));
+    first.resolve({ legion_id: summary.id, nodes: [card('first', 'text')], edges: [] });
+    await one;
+    await vi.waitFor(() => expect(deploy).toHaveBeenCalledTimes(2));
+    expect(pending()).toMatchObject([{ stage: 'deploying', position: { x: 400, y: 300 } }]);
+    expect(deploy.mock.calls[1][1]).toEqual({ x: 280, y: 252 });
+    second.reject(new Error('Deployment failed'));
+    await two;
+    expect(pending()).toEqual([]);
+    expect(useWorldStore.getState().cards.map(c => c.id)).toEqual(['first']);
+    expect(useWorldStore.getState().undoStack).toHaveLength(1);
+    expect(useWorldStore.getState().toasts.at(-1)?.title).toBe('Legion was not deployed');
+  });
+
+  it("clears placement feedback when deployment validation declines the request", async () => {
+    useWorldStore.setState({ legions: [legion()], syncState: 'offline' });
+    const deploy = vi.spyOn(worldApi, 'instantiateLegion');
+    const result = useWorldStore.getState().instantiateLegion('legion-1');
+    expect(useLegionDeployments.getState().pending).toHaveLength(1);
+    expect(await result).toBeUndefined();
+    expect(useLegionDeployments.getState().pending).toEqual([]);
+    expect(deploy).not.toHaveBeenCalled();
   });
 
   it("merges a Legion instance as one undoable topology operation", async () => {

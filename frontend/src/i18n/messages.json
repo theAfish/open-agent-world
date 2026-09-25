@@ -1,4 +1,6 @@
 {
+  "Waiting to deploy {name}…": ["Waiting to deploy {name}…", "等待部署 {name}…"],
+  "Deploying {name}…": ["Deploying {name}…", "正在部署 {name}…"],
   "Legion contents": ["Legion contents", "Legion 内部卡牌"],
   "No member cards": ["No member cards", "暂无成员卡牌"],
   "{count} more cards": ["{count} more cards", "另有 {count} 张卡牌"],
