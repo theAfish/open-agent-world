@@ -212,7 +212,7 @@ try {
     $env:OAW_DEV_BACKEND_HTTP_URL = $backendHttpUrl
     $env:OAW_DEV_BACKEND_WS_URL = "ws://127.0.0.1:$backendPort"
     $backendArguments = @(
-        "run", "--project", "backend", "--extra", "adk", "--extra", "litellm"
+        "run", "--project", "backend", "--extra", "adk", "--extra", "litellm", "--extra", "knowledge"
     )
     $resolvedPluginPaths = foreach ($candidate in $PluginPath) {
         $candidatePath = if ([System.IO.Path]::IsPathRooted($candidate)) {

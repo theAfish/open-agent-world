@@ -77,7 +77,8 @@ let exitCode = 1;
 try {
   await resetDataRoot();
   start(
-    path.join(projectRoot, "backend", ".venv", "Scripts", "python.exe"),
+    path.join(projectRoot, "backend", ".venv", ...(process.platform === "win32"
+      ? ["Scripts", "python.exe"] : ["bin", "python"])),
     ["-m", "uvicorn", ministerSuite ? "backend.tests.minister_app:app" : "backend.main:app", "--host", "127.0.0.1", "--port", "8017", "--no-proxy-headers"],
     {
       cwd: projectRoot,

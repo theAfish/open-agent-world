@@ -1,0 +1,40 @@
+[project]
+name = "oaw-knowledge-base"
+version = "0.1.0"
+description = "Research knowledge base: raw data to markdown, projection, reviewed knowledge graph"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.11,<3"]
+
+# mat-know-base and pymupdf4llm are deliberately absent: the plugin loader never
+# installs plugin dependencies, so they are documented as a backend venv step in
+# README.md and reported as a missing engine at runtime instead of breaking load.
+
+[project.optional-dependencies]
+# Everything the standalone service, its MCP server and the `kb` CLI need. Not
+# required by the OAW card, which reaches the same operations in process.
+service = [
+    "fastapi>=0.116,<1",
+    "uvicorn[standard]>=0.35,<1",
+    "httpx>=0.28,<1",
+    "mcp>=1.2,<2",
+]
+
+[project.entry-points."open_agent_world.plugins"]
+oaw-knowledge-base = "oaw_knowledge_base.plugin:create_plugin"
+
+[project.scripts]
+kb = "oaw_knowledge_base.service.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/oaw_knowledge_base"]
+
+[tool.pytest.ini_options]
+# `cd plugins/knowledge_base && pytest` runs the pipeline suite in any venv that has
+# mat-know-base, with no OAW on the path.
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"

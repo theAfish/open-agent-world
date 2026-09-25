@@ -21,6 +21,7 @@
       "svelte": ["./node_modules/svelte/types/index.d.ts"],
       "pdfjs-dist": ["./node_modules/pdfjs-dist"],
       "@xyflow/react": ["./node_modules/@xyflow/react"],
+      "lucide-react": ["./node_modules/lucide-react"],
       "react": ["./node_modules/@types/react"],
       "react-dom": ["./node_modules/@types/react-dom"],
       "react/*": ["./node_modules/@types/react/*"]

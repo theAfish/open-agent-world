@@ -22,6 +22,7 @@ from backend.api.summoning import router as summoning_router
 from backend.api.execution_credentials import router as execution_credentials_router
 from backend.api.artifacts import router as artifacts_router
 from backend.api.library_translation import router as library_translation_router
+from backend.api.knowledge_bridge import router as knowledge_bridge_router
 from backend.api.card_library import router as card_library_router
 from backend.api.card_state import router as card_state_router
 from backend.api.file_preview import router as file_preview_router
@@ -67,3 +68,4 @@ api_router.include_router(desktop_router)
 
 api_router.include_router(storage_router)
 api_router.include_router(library_translation_router)
+api_router.include_router(knowledge_bridge_router)

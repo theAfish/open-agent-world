@@ -17,6 +17,18 @@ dependencies = [
 [project.optional-dependencies]
 adk = ["google-adk>=2.8,<3"]
 litellm = ["litellm>=1.74,<2"]
+# The knowledge base plugin's engines. Declared here so `uv sync` keeps them: a
+# sync prunes anything outside the lock, which silently breaks the card.
+knowledge = [
+    "mat-know-base",
+    "pymupdf4llm>=0.0.17",
+]
+
+[tool.uv.sources]
+# Interim: the plugin needs mat_know_base changes that are not yet pushed (the
+# knowledge repository and the file object store). Switch to the published repo
+# once they land: { git = "https://github.com/theAfish/mat_know_base.git" }
+mat-know-base = { path = "/home/ruoyu/projects/mat_know_base", editable = true }
 
 [dependency-groups]
 dev = [
