@@ -37,7 +37,7 @@ class ModelConnection(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     name: str = Field(min_length=1, max_length=120)
-    adapter: Literal["openai", "anthropic", "gemini", "legacy"] = "openai"
+    adapter: Literal["openai", "anthropic", "gemini", "typesafe", "legacy"] = "openai"
     base_url: str = Field(default="", max_length=2000)
     enabled: bool = True
     api_key_configured: bool = False
@@ -231,4 +231,5 @@ def _provider_environment_variable(adapter: str) -> str:
         "openai": "OPENAI_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
         "gemini": "GEMINI_API_KEY",
+        "typesafe": "TYPESAFE_API_KEY",
     }.get(adapter, "OPENAI_API_KEY")

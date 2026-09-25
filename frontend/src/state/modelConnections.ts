@@ -8,7 +8,7 @@ export interface ConfiguredModel {
   context_window?: number; max_output_tokens?: number;
 }
 export interface ModelConnection {
-  id: string; name: string; adapter: "openai" | "anthropic" | "gemini" | "legacy";
+  id: string; name: string; adapter: "openai" | "anthropic" | "gemini" | "typesafe" | "legacy";
   base_url: string; enabled: boolean; auth_mode: "api_key" | "none" | "environment";
   environment_variable?: string | null;
   api_key_configured: boolean; models: ConfiguredModel[];

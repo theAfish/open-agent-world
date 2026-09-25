@@ -38,18 +38,6 @@ import { useCollectionHover } from "../state/shadowCollection";
 const DRAG_THRESHOLD_PX = 5;
 const NON_DRAG_SELECTOR = "button, input, textarea, select, label, a, summary, [role='button'], [role='separator'], [contenteditable]:not([contenteditable='false']), .nodrag, .react-flow__handle";
 
-// Element boxes include padding and empty line space. Only rendered text should
-// take a mouse gesture away from dragging the surrounding inspector.
-function hitsText(target: Element, x: number, y: number): boolean {
-  const range = document.createRange();
-  return Array.from(target.childNodes).some(node => {
-    if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) return false;
-    range.selectNodeContents(node);
-    return Array.from(range.getClientRects()).some(rect =>
-      x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom);
-  });
-}
-
 interface BodyProps { card: WorldCard; level: NodeSurfaceLevel }
 
 const BODIES: Partial<Record<CardType, ComponentType<BodyProps>>> = {
@@ -187,21 +175,10 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
         if ((event.target as Element).closest(NON_DRAG_SELECTOR)) event.stopPropagation();
       }}
       onMouseDownCapture={event => {
-        const target = event.target as Element;
-        // React Flow's native drag listener runs before React's bubble handlers.
-        // Classify the gesture during capture so its nodrag filter can reject it,
-        // while still delivering the event to child controls and React handlers.
+        // Isolate controls before React Flow's native drag listener runs.
         const boundary = event.currentTarget;
         boundary.classList.remove("nodrag");
-        const control = Boolean(target.closest(NON_DRAG_SELECTOR));
-        const inspectorContent = visualLevel === "inspector"
-          && Boolean(target.closest(".node-inspector-content, .node-inspector-footer"));
-        const selectingText = !control && inspectorContent && hitsText(target, event.clientX, event.clientY);
-        boundary.classList.toggle("nodrag", control || selectingText);
-        if (!control && inspectorContent && !selectingText) {
-          event.preventDefault();
-          window.getSelection()?.removeAllRanges();
-        }
+        boundary.classList.toggle("nodrag", Boolean((event.target as Element).closest(NON_DRAG_SELECTOR)));
       }}
       onClick={(event) => {
         const start = pointerStart.current;
@@ -228,7 +205,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
 
       {visualLevel !== "inspector" && <EquipmentToggle card={card} />}
       {visualLevel === "workspace" ? <WorkspaceSurface card={card} /> : <>
-        <header className="card-header node-surface-header">
+        <header className="card-header node-surface-header node-drag-region">
           <div className="card-kind-icon" aria-hidden="true"><CatalogIcon definition={definition} size={18} /></div>
           <div className="card-title-group">
             <span className="card-eyebrow">{label}</span>
@@ -255,15 +232,15 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
         </header>
 
         <div className="node-preview-content" aria-hidden={visualLevel !== "preview"}>
-          <div className="node-preview-body"><NodePreview card={card} /></div>
+          {(visualLevel==='preview'||!card.type.startsWith('xrd.')) && <div className="node-preview-body"><NodePreview card={card} /></div>}
           {presentation.open !== "preview" && <span className="node-preview-hint">{t(presentation.open === "workspace" ? "Open workspace" : "Click for details")}</span>}
         </div>
 
-        <div className="card-body node-inspector-content" aria-hidden={visualLevel !== "inspector"}>
-          {(visualLevel === 'inspector' || inspectorVisited) && <CardContent card={card} level={level} />}
+        <div className="card-body node-inspector-content nodrag nopan" aria-hidden={visualLevel !== "inspector"}>
+          {(visualLevel === 'inspector' || (inspectorVisited && !card.type.startsWith('xrd.'))) && <CardContent card={card} level={level} />}
         </div>
 
-        <footer className="card-footer node-inspector-footer">
+        <footer className="card-footer node-inspector-footer nodrag nopan">
           {definition?.traits.includes("core.agent") && !card.ephemeral ? <EquipmentToggle card={card} />
             : <span className="card-id">{card.ephemeral ? "synthetic" : card.id.slice(0, 8)}</span>}
           <div className="card-footer-actions">

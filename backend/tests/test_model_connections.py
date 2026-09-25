@@ -213,6 +213,31 @@ def test_environment_authentication_uses_the_connection_variable_not_a_saved_key
         db.close()
 
 
+def test_typesafe_connection_uses_encrypted_key_and_provider_environment(tmp_path, monkeypatch):
+    from backend.agents.typesafe import TypeSafeModel
+    db = Database(tmp_path / "state.db")
+    try:
+        store = ModelConnectionStore(LlmSettingsStore(db, tmp_path))
+        item = connection("jev")
+        item.update(adapter="typesafe", base_url="https://api.typesafe.ai", models=[dict(id="jev", name="Jev", model_id="jev-1.13.0")])
+        public = store.save(CatalogEdit(connections=[item]))
+        assert "secret-jev" not in public.model_dump_json()
+        assert store.resolve("oaw:model:jev") == ("typesafe", "jev-1.13.0", "https://api.typesafe.ai", "secret-jev")
+        runtime = GoogleAdkAgentRuntime(None, model_connections=store)
+        assert isinstance(runtime._adk_model("oaw:model:jev"), TypeSafeModel)
+        edit = public.model_dump()
+        edit["connections"][0]["auth_mode"] = "environment"
+        store.save(CatalogEdit.model_validate(edit))
+        monkeypatch.setenv("TYPESAFE_API_KEY", "typesafe-environment-secret")
+        monkeypatch.setenv("OPENAI_API_KEY", "wrong-provider-key")
+        assert store.resolve("oaw:model:jev")[3] == "typesafe-environment-secret"
+        monkeypatch.delenv("TYPESAFE_API_KEY")
+        with pytest.raises(ResourceValidationError, match="TYPESAFE_API_KEY"):
+            store.resolve("oaw:model:jev")
+    finally:
+        db.close()
+
+
 @pytest.mark.parametrize("auth_mode", ["none", "environment"])
 @pytest.mark.parametrize("legacy", [False, True])
 def test_entered_key_activates_without_a_separate_mode_change(tmp_path, auth_mode, legacy):

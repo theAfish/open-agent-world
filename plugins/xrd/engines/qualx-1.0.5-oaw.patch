@@ -1,0 +1,283 @@
+diff --git a/src/commandline.cpp b/src/commandline.cpp
+index fba7987..74cd7f6 100644
+--- a/src/commandline.cpp
++++ b/src/commandline.cpp
+@@ -1,6 +1,7 @@
+ #include "commandline.h"
+ 
+ #include <QFileInfo>
++#include <cmath>
+ 
+ CommandLineParseResult parseCommandLine(QCommandLineParser &parser, QString &filein, QString &fileout,
+                                         ProgOptions &popt, DbBuildOptions &dbopt, SearchOptions &searchopt,
+@@ -43,6 +44,15 @@ CommandLineParseResult parseCommandLine(QCommandLineParser &parser, QString &fil
+     const QCommandLineOption containsAnyOption("contains-any",
+         "Contains-any composition: match structures whose elements are a subset of the listed ones");
+     parser.addOption(containsAnyOption);
++    const QCommandLineOption settingsDirOption("settings-dir",
++        "Use only INI settings below this directory (requires --nogui)", "folder");
++    parser.addOption(settingsDirOption);
++    const QCommandLineOption databaseOption("database",
++        "Search this .sq database only (requires --settings-dir and --nogui)", "sqfile");
++    parser.addOption(databaseOption);
++    const QCommandLineOption wavelengthOption("wavelength",
++        "Experimental wavelength in Angstrom", "angstrom");
++    parser.addOption(wavelengthOption);
+ 
+     if (!parser.parse(QCoreApplication::arguments())) {
+         errorMessage = parser.errorText();
+@@ -69,6 +79,46 @@ CommandLineParseResult parseCommandLine(QCommandLineParser &parser, QString &fil
+ 
+     test = parser.isSet(testOption);
+ 
++    if (parser.isSet(wavelengthOption)) {
++        bool ok = false;
++        const double wavelength = parser.value(wavelengthOption).toDouble(&ok);
++        if (!ok || !std::isfinite(wavelength) || wavelength <= 0.0 || wavelength > 100.0) {
++            errorMessage = "Option --wavelength must be a finite value in (0, 100] Angstrom.";
++            return CommandLineError;
++        }
++        popt.wavel = static_cast<float>(wavelength);
++    }
++
++    searchopt.settingsDir = parser.value(settingsDirOption).trimmed();
++    searchopt.databasePath = parser.value(databaseOption).trimmed();
++    if (parser.isSet(settingsDirOption) && (searchopt.settingsDir.isEmpty() || !popt.nogui)) {
++        errorMessage = "Option --settings-dir requires a non-empty path and --nogui.";
++        return CommandLineError;
++    }
++    if (parser.isSet(settingsDirOption) != parser.isSet(databaseOption) ||
++            ((parser.isSet(settingsDirOption) || parser.isSet(databaseOption)) && parser.isSet(createDbOption))) {
++        errorMessage = "Options --settings-dir and --database must be used together and cannot be combined with --createdb.";
++        return CommandLineError;
++    }
++    if (parser.isSet(databaseOption)) {
++        if (!popt.nogui || searchopt.settingsDir.isEmpty() || !parser.isSet(searchOption)) {
++            errorMessage = "Option --database requires --nogui, --settings-dir and --search.";
++            return CommandLineError;
++        }
++        const QFileInfo databaseFile(searchopt.databasePath);
++        if (!databaseFile.isFile() || databaseFile.suffix().compare("sq", Qt::CaseInsensitive) != 0) {
++            errorMessage = "Option --database must name an existing .sq file.";
++            return CommandLineError;
++        }
++        searchopt.databasePath = databaseFile.absoluteFilePath();
++        for (const QString &suffix : {QString(".info"), QString(".infostat"), QString(".search")}) {
++            if (!QFileInfo(searchopt.databasePath + suffix).isFile()) {
++                errorMessage = QString("Database companion file missing: %1").arg(searchopt.databasePath + suffix);
++                return CommandLineError;
++            }
++        }
++    }
++
+     // Parse database creation options
+     if (parser.isSet(createDbOption)) {
+         dbopt.enabled = true;
+diff --git a/src/commandline.h b/src/commandline.h
+index c04a9f7..15e5412 100644
+--- a/src/commandline.h
++++ b/src/commandline.h
+@@ -19,6 +19,8 @@ struct SearchOptions
+     QString composition;               // --composition "Al AND Si OR O"
+     bool    exactComposition = false;  // --exact  (ONLY_OP: all elements, no others)
+     bool    containsAny      = false;  // --contains-any (JUST_OP: only these elements allowed)
++    QString settingsDir;               // isolated INI settings for command-line integrations
++    QString databasePath;              // explicit .sq path (requires settingsDir)
+ };
+ 
+ // Options for database creation from command line
+diff --git a/src/dbmanager.cpp b/src/dbmanager.cpp
+index 5eda32d..73842c9 100644
+--- a/src/dbmanager.cpp
++++ b/src/dbmanager.cpp
+@@ -5,6 +5,8 @@
+ #include <QSqlDatabase>
+ #include <QSqlError>
+ #include <QSqlQuery>
++#include <QCoreApplication>
++#include <QApplication>
+ 
+ DbManager::DbManager()
+ {
+@@ -33,16 +35,21 @@ DbManager::~DbManager()
+     closeDb();
+ }
+ 
+-bool DbManager::openDb(const QString &path)
++bool DbManager::openDb(const QString &path, bool readOnly)
+ {
+     closeDb();  // close any previously open connection
+     m_connName = QFileInfo(path).fileName();
+     {
+         QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", m_connName);
+         db.setDatabaseName(path);
++        if (readOnly)
++            db.setConnectOptions("QSQLITE_OPEN_READONLY");
+         if (!db.open()) {
+-            QMessageBox::critical(nullptr, "Database Error",
+-                                   QString("%1\nFile: %2").arg(db.lastError().text(), path));
++            const QString message = QString("%1\nFile: %2").arg(db.lastError().text(), path);
++            if (qobject_cast<QApplication *>(QCoreApplication::instance()))
++                QMessageBox::critical(nullptr, "Database Error", message);
++            else
++                qCritical() << message;
+             QSqlDatabase::removeDatabase(m_connName);
+             m_connName.clear();
+             return false;
+diff --git a/src/dbmanager.h b/src/dbmanager.h
+index 147dbf3..67b1e9f 100644
+--- a/src/dbmanager.h
++++ b/src/dbmanager.h
+@@ -12,7 +12,7 @@ public:
+     DbManager(const QString &path);
+     ~DbManager();
+ 
+-    bool openDb(const QString &path);
++    bool openDb(const QString &path, bool readOnly = false);
+     void closeDb();
+     bool isOpen() const;
+     int queryForCount(const QString &queryString);
+diff --git a/src/main.cpp b/src/main.cpp
+index 5c65c4c..a85f793 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -13,6 +13,9 @@
+ 
+ #include <QApplication>
+ #include <QCoreApplication>
++#include <QDir>
++#include <QFileInfo>
++#include <QSettings>
+ #include <QScopeGuard>
+ #include <algorithm>
+ #include <csetjmp>
+@@ -61,12 +64,12 @@ QCoreApplication *loadQt(int &argc, char **argv)
+ // Headless equivalent of Search > Match (MainWindow::onActionSearchMatchTriggered),
+ // used when --search is given together with a data file in --nogui mode, where no
+ // MainWindow (and thus no result widgets) exists. Prints the matching cards to stdout.
+-void runSearchMatchCli(const SearchOptions &searchopt)
++bool runSearchMatchCli(const SearchOptions &searchopt)
+ {
+     int npeaks = ensurePeaksFound();
+     if (npeaks == 0) {
+         fputs("Error: no peaks found. Check the data/peak-search parameters and try again.\n", stderr);
+-        return;
++        return false;
+     }
+ 
+     loadExperimentalPeaks();
+@@ -117,6 +120,7 @@ void runSearchMatchCli(const SearchOptions &searchopt)
+                qPrintable(card.getChemicalFormula()),
+                qPrintable(card.getSpaceGroup()));
+     }
++    return true;
+ }
+ 
+ }
+@@ -184,7 +188,25 @@ int main(int argc, char *argv[])
+     // Load databases only after early-exit cases (--version, --help, bad args).
+     // Declared after 'a' so the scope guard is destroyed before QApplication,
+     // ensuring closeDatabeses() is called while QCoreApplication still exists.
+-    AppState::load();
++    if (!searchopt.settingsDir.isEmpty()) {
++        const QString settingsPath = QFileInfo(searchopt.settingsDir).absoluteFilePath();
++        if (!QDir().mkpath(settingsPath)) {
++            fputs("Error: could not create isolated settings directory.\n", stderr);
++            return 1;
++        }
++        QSettings::setDefaultFormat(QSettings::IniFormat);
++        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsPath);
++        QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, settingsPath);
++    }
++    if (!searchopt.databasePath.isEmpty()) {
++        // Deliberately avoid load(): it auto-discovers unrelated databases.
++        if (!AppState::db().openDatabases(searchopt.databasePath.chopped(3), true)) {
++            fputs("Error: could not open explicitly selected database.\n", stderr);
++            return 1;
++        }
++    } else {
++        AppState::load();
++    }
+     auto dbCleanup = qScopeGuard([] { AppState::db().closeDatabeses(); });
+ 
+     //Find folder with program files
+@@ -258,10 +280,13 @@ int main(int argc, char *argv[])
+         }
+ 
+         if (searchopt.enabled) {
++            if (!filein.isEmpty() && ier)
++                return EXIT_FAILURE;
+             if (!filein.isEmpty() && !ier) {
+                 // A data file was loaded: search & match against its experimental
+                 // peaks, as if the user had triggered Search > Match from the menu.
+-                runSearchMatchCli(searchopt);
++                if (!runSearchMatchCli(searchopt))
++                    return EXIT_FAILURE;
+             } else {
+                 DbQueryBuilder builder;
+                 if (!searchopt.composition.isEmpty()) {
+@@ -321,4 +346,5 @@ int main(int argc, char *argv[])
+             return ier ? EXIT_FAILURE : 0;
+         return a->exec();
+     }
++    return ier ? EXIT_FAILURE : EXIT_SUCCESS;
+ }
+diff --git a/src/qualx.f90 b/src/qualx.f90
+index 389b372..88803c1 100644
+--- a/src/qualx.f90
++++ b/src/qualx.f90
+@@ -19,6 +19,7 @@ contains
+    use gen_frm
+    use errormod
+    use import_data_struct
++   use variables, only: dataset
+    type(param_options_type)      :: param_opt
+    character(c_char), intent(in) :: fileinc(*),exepathcc(*)
+    integer(c_int), value         :: len_in, len_path
+@@ -41,6 +42,11 @@ contains
+ !
+    if (len_trim(filein) /= 0) then
+        call mainloop(filein,ier)
++       if (ier == 0 .and. param_opt%wavel > 0.0) then
++           if (allocated(dataset)) then
++               if (size(dataset) > 0) call dataset(1)%set_wave(1, [param_opt%wavel])
++           endif
++       endif
+    endif
+ 
+ 10 continue
+diff --git a/src/qualxdbmanager.cpp b/src/qualxdbmanager.cpp
+index 24c82a0..2ca6f2e 100644
+--- a/src/qualxdbmanager.cpp
++++ b/src/qualxdbmanager.cpp
+@@ -24,12 +24,12 @@ QualxDbManager::~QualxDbManager()
+     closeDatabeses();
+ }
+ 
+-bool QualxDbManager::openDatabases(const QString &path)
++bool QualxDbManager::openDatabases(const QString &path, bool readOnly)
+ {
+-    if (!dbMain.openDb(path+".sq")) return false;
+-    if (!dbInfo.openDb(path+".sq.info")) return false;
+-    if (!dbInfoStat.openDb(path+".sq.infostat")) return false;
+-    if (!dbSearch.openDb(path+".sq.search")) return false;
++    if (!dbMain.openDb(path+".sq", readOnly)) return false;
++    if (!dbInfo.openDb(path+".sq.info", readOnly)) return false;
++    if (!dbInfoStat.openDb(path+".sq.infostat", readOnly)) return false;
++    if (!dbSearch.openDb(path+".sq.search", readOnly)) return false;
+     return true;
+ }
+ 
+diff --git a/src/qualxdbmanager.h b/src/qualxdbmanager.h
+index 798584d..5db98b5 100644
+--- a/src/qualxdbmanager.h
++++ b/src/qualxdbmanager.h
+@@ -37,7 +37,7 @@ public:
+ 
+     QualxDbManager();
+     ~QualxDbManager();
+-    bool openDatabases(const QString &path);
++    bool openDatabases(const QString &path, bool readOnly = false);
+     void closeDatabeses();
+     QVector<CardType> makeQuery(const DbQueryBuilder &builder, ProgressCallback progress = nullptr);
+     void makeQueryStrongest(const DbQueryBuilder &builder, QVector<CardType> &acceptedCards,

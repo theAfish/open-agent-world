@@ -295,6 +295,14 @@ class WorldAgentCapabilityProvider:
     def __init__(self, services: ApplicationServices) -> None:
         self.services = services
 
+    async def read_own_document(self, agent_id: str) -> dict[str, Any]:
+        context = self.services._require_run_manager().current_context
+        if context is None or context.agent_id != agent_id:
+            raise ResourceValidationError('Own-document access requires the current agent run')
+        from backend.node_documents import read_document
+        async with self.services._node_mutation(read_only=True):
+            return read_document(self.services, agent_id)
+
     async def list_tools(self, agent_id: str) -> Sequence[ScopedToolDefinition]:
         definitions: list[ScopedToolDefinition] = []
         from backend.capabilities.projection import project_operations

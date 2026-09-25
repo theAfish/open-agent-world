@@ -1,0 +1,67 @@
+// @vitest-environment jsdom
+import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {afterEach,expect,it,vi} from 'vitest';
+import {FrameCanvas,setParameterMode} from '../../../plugins/xrd/frontend/FrameCanvas';
+import {InputDock} from '../../../plugins/xrd/frontend/InputDock';
+import {integratedXrdInputs} from './integratedInputs';
+import type {PluginViewProps} from './sdk';
+vi.mock('../../../plugins/xrd/frontend/CandidateStructure',()=>({StructureCanvas:()=>null}));
+Object.defineProperty(HTMLDialogElement.prototype,'showModal',{value:function(this:HTMLDialogElement){this.setAttribute('open','');}});
+Object.defineProperty(HTMLDialogElement.prototype,'close',{value:vi.fn()});
+afterEach(cleanup);
+it('only folds connected workflow source cards, keeping unrelated input cards visible',()=>{
+ const cards=[{id:'m',type:'xrd.match'},{id:'p',type:'xrd.pattern'},{id:'l',type:'xrd.library'},{id:'other',type:'xrd.pattern'}] as PluginViewProps['card'][];
+ expect([...integratedXrdInputs(cards,[{source:'m',target:'p',relationship:'xrd.input'},{source:'m',target:'l',relationship:'xrd.input'}])]).toEqual(['p','l']);
+ expect(cards).toHaveLength(4);
+});
+it('parameter mode shows current raw input, then restores the result snapshot; upload targets the source document',async()=>{
+ const source='integrated-test';setParameterMode(source,true);
+ const host={getInputs:vi.fn().mockResolvedValue([{id:'p',kind:'pattern'}]),readDocument:vi.fn().mockResolvedValue({revision:4,value:{filename:'raw.txt',points:[[10,4],[20,8]]}}),getAgentInfo:vi.fn().mockResolvedValue({details:{frames:{run_id:'fit-test',stage:'fit',observed:[[10,2],[20,3]],frames:[{candidate_id:'a',label:'Candidate A',state:'final',calculated:[[10,2],[20,3]]}]}}}),documentDownloadUrl:()=>'/source',documentAction:vi.fn().mockResolvedValue({revision:5,value:{filename:'new.txt',points:[[10,5],[20,9]]}})} as unknown as PluginViewProps['host'];
+ render(<FrameCanvas card={{id:'canvas',type:'xrd.spectrum-canvas',config:{source_node_id:source}} as unknown as PluginViewProps['card']} host={host} definition={{} as PluginViewProps['definition']} level="workspace"/>);
+ await screen.findByText('raw.txt');
+ expect(screen.queryByText(/计算谱（共同强度尺度）/)).toBeNull();
+ const file=new File(['10 5\n20 9'],'new.txt');Object.defineProperty(file,'arrayBuffer',{value:async()=>new TextEncoder().encode('10 5\n20 9').buffer});
+ render(<InputDock props={{host} as PluginViewProps} inputs={[{id:'p',name:'实验谱',kind:'pattern',ready:true,detail:'2 个点'}]} disabled={false}/>);
+ fireEvent.click(screen.getByRole('button',{name:'实验谱 · 2 个点 已载入'}));
+ fireEvent.change(screen.getByLabelText('导入原始谱数据'),{target:{files:[file]}});
+ await waitFor(()=>expect(host.documentAction).toHaveBeenCalledWith('import',expect.objectContaining({filename:'new.txt'}),4,'p'));
+ setParameterMode(source,false);
+ await screen.findByText('Candidate A');
+ expect(screen.queryByText(/计算谱（共同强度尺度）/)).toBeNull();
+ expect(screen.queryByLabelText('导入实验谱')).toBeNull();
+});
+it('keeps cancellation local and shows loading only during import',async()=>{
+ const ensureXrdInput=vi.fn().mockResolvedValue('p');
+ let complete!:(value:unknown)=>void;
+ const host={ensureXrdInput,readDocument:vi.fn().mockResolvedValue({revision:1}),documentAction:vi.fn(()=>new Promise(resolve=>{complete=resolve;})),openLinkedCanvas:vi.fn()} as unknown as PluginViewProps['host'];
+ render(<InputDock props={{host} as PluginViewProps} inputs={[]} disabled={false}/>);
+ const escape=vi.fn();window.addEventListener('keydown',escape);
+ const button=screen.getByRole('button',{name:/实验谱/});
+ expect(button.getAttribute('data-import-hint')).toContain('请拖拽谱到谱画布');
+ fireEvent.click(button);fireEvent.keyDown(window,{key:'Escape'});
+ expect(escape).not.toHaveBeenCalled();
+ fireEvent(screen.getByLabelText('导入原始谱数据'),new Event('cancel',{bubbles:true}));
+ expect(ensureXrdInput).not.toHaveBeenCalled();
+ await new Promise(resolve=>setTimeout(resolve,5));
+ fireEvent.keyDown(window,{key:'Escape'});expect(escape).toHaveBeenCalledTimes(1);
+ window.removeEventListener('keydown',escape);
+ const file=new File(['10 5'],'test.txt');Object.defineProperty(file,'arrayBuffer',{value:async()=>new TextEncoder().encode('10 5').buffer});
+ fireEvent.change(screen.getByLabelText('导入原始谱数据'),{target:{files:[file]}});
+ expect(screen.getByLabelText('正在加载')).toBeTruthy();
+ await waitFor(()=>expect(host.documentAction).toHaveBeenCalled());complete({revision:2});
+ await screen.findByLabelText('已载入');expect(screen.queryByLabelText('正在加载')).toBeNull();
+ expect(host.openLinkedCanvas).not.toHaveBeenCalled();
+});
+it('accepts a spectrum dropped on an empty workspace canvas and imports into its linked input',async()=>{
+ const host={ensureXrdInput:vi.fn().mockResolvedValue('pattern'),readDocument:vi.fn().mockResolvedValue({revision:7}),documentAction:vi.fn().mockResolvedValue({revision:8})} as unknown as PluginViewProps['host'];
+ const {container}=render(<FrameCanvas card={{id:'empty',type:'xrd.spectrum-canvas',config:{}} as PluginViewProps['card']} host={host} definition={{} as PluginViewProps['definition']} level="workspace"/>);
+ const file=new File(['10 5\n20 9'],'drop.txt');Object.defineProperty(file,'arrayBuffer',{value:async()=>new TextEncoder().encode('10 5\n20 9').buffer});
+ fireEvent.drop(container.querySelector('section')!,{dataTransfer:{files:[file],types:['Files']}});
+ expect(host.documentAction).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole('button',{name:'否'}));
+ expect(host.documentAction).not.toHaveBeenCalled();
+ fireEvent.drop(container.querySelector('section')!,{dataTransfer:{files:[file],types:['Files']}});
+ fireEvent.click(screen.getByRole('button',{name:'是，开启新流程'}));
+ await waitFor(()=>expect(host.documentAction).toHaveBeenCalledWith('import',expect.objectContaining({filename:'drop.txt'}),7,'pattern'));
+ expect(host.ensureXrdInput).toHaveBeenCalledWith('pattern');
+});

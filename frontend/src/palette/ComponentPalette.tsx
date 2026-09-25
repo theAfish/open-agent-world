@@ -130,7 +130,7 @@ export function ComponentPalette() {
           const definition = entry.kind === "node" ? snapshot?.card_definitions[entry.id] : undefined;
           const legion = entry.kind === "legion" ? legions.find(item => item.id === entry.id) : undefined;
           const available = entry.kind === "node" ? snapshot?.available_card_ids.includes(entry.id) : legion?.compatible;
-          const label = definition ? t(definition.label) : legion?.name ?? entry.id;
+          const label = definition ? t(entry.id === "xrd.match" ? "XRD 谱解析" : definition.label) : legion?.name ?? entry.id;
           const payload: PaletteDragPayload = entry.kind === "node" ? { version: 1, kind: "node", type: entry.id }
             : { version: 1, kind: "legion", id: entry.id, revision: legion?.revision ?? 0 };
           return <button type="button" key={`${entry.kind}:${entry.id}`} className="deck-hover-button" data-palette-card={entry.id} data-legion-preview={legion?.id} data-unavailable={!available}

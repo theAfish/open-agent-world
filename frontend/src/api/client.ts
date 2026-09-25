@@ -434,7 +434,7 @@ export const worldApi = {
     return normalizeLegionInstantiation(body);
   },
 
-  getAgentCapabilities(id: string): Promise<{ capabilities: { id: string; target_name: string; description: string; kind: string }[] }> {
+  getAgentCapabilities(id: string): Promise<{ capabilities: { id: string; target_id?: string; target_name: string; description: string; kind: string }[] }> {
     return request(`/agents/${encodeURIComponent(id)}/capabilities`);
   },
 
@@ -448,7 +448,7 @@ export const worldApi = {
     });
   },
 
-  getAgentInfo(id: string): Promise<{ session_id: string; details?: Record<string, unknown> }> {
+  getAgentInfo(id: string): Promise<{ session_id: string; status?: string; active_run_id?: string | null; last_error?: string | null; details?: Record<string, unknown> }> {
     return request(`/agents/${encodeURIComponent(id)}`);
   },
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Structure, type AnyStructure } from 'matterviz/structure';
   let { structure, onError }: { structure: AnyStructure; onError: (message: string) => void } = $props();
+  export function setStructure(next: AnyStructure) { structure = next; }
 </script>
 
 <svelte:boundary onerror={(error) => onError(error instanceof Error ? error.message : String(error))}>

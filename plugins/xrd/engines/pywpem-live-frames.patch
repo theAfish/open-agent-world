@@ -1,0 +1,37 @@
+--- a/src/StructureSolver/solver.py
++++ b/src/StructureSolver/solver.py
+@@ -137,11 +137,21 @@
+             initial_parameters, source_cif, block_name, cell_decode, observed_angles, observed_intensities,
+             initial_coordinates, cell_parameter_count,
+         )
++        best_frame_score = [float('inf')]
++        frame_count = [0]
+         def residual(parameters):
+             score, _ = self._score(
+                 parameters, source_cif, block_name, cell_decode, observed_angles, observed_intensities,
+                 initial_coordinates, cell_parameter_count,
+             )
++            objective = float(np.mean(score ** 2))
++            callback = getattr(self, 'frame_callback', None)
++            if callback and objective < best_frame_score[0] * (1 - 1e-5):
++                best_frame_score[0] = objective
++                frame_count[0] += 1
++                text = self._render(source_cif, block_name, cell_decode(parameters), parameters[cell_parameter_count:])
++                angles, intensities = self._pattern(text)
++                callback(text, angles, intensities, objective, frame_count[0])
+             return score
+ 
+         result = least_squares(residual, initial_parameters, bounds=(lower, upper),
+--- a/src/EMBraggOpt/EMBraggSolver.py
++++ b/src/EMBraggOpt/EMBraggSolver.py
+@@ -675,6 +675,10 @@
+             Rwp.append(np.sqrt(wp_error_sum / obs) * 100)
+             _Rsquare.append(Rsquare(y, i_obser))
+ 
++            # OAW observer: a complete EM/Bragg state, before the convergence check.
++            callback = getattr(self, 'frame_callback', None)
++            if callback is not None:
++                callback(i_ter, two_theta, y, ini_LC)
+ 
+             print('Rp:%.3f' % (p_error_sum / obs * 100) + ' | Rwp:%.3f' % (np.sqrt(wp_error_sum / obs) * 100) + ' | Rsquare:%.3f' % (Rsquare(y, i_obser)))
+ 

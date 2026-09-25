@@ -5,23 +5,37 @@ import os
 from pathlib import Path
 import shutil
 import sys
+try:
+    from .engine import engine_root
+except ImportError:
+    from engine import engine_root
 
 def main():
     root, run = map(Path, sys.argv[1:])
     options = json.loads((run / "input.json").read_text(encoding="utf-8"))
     os.environ["MPLBACKEND"]="Agg"
     os.environ["OMP_NUM_THREADS"]="1"
-    sys.path.insert(0,str(root / "PyWPEM"))
+    if options.get("mode") == "match" and options.get("workflow_stage", "search") in {"preopt", "fit"}:
+        from refinement import run_pipeline
+        run_pipeline(root, run, options)
+        return
+    if options.get("mode") == "match":
+        from matching import match_patterns
+        inputs = json.loads((run / "input-snapshot.json").read_text(encoding="utf-8"))
+        result = match_patterns(inputs, options, run_dir=run)
+        (run / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        return
+    sys.path.insert(0,str(engine_root().parent))
     os.chdir(run)
     import numpy as np
     import pandas as pd
-    from src import WPEM
-    from src.EMBraggOpt.EMBraggSolver import WPEMsolver
+    from OAW_XRDfit.src import WPEM
+    from OAW_XRDfit.src.EMBraggOpt.EMBraggSolver import WPEMsolver
     np.random.seed(0)
     import random
     random.seed(0)
     if options["demo"]:
-        source=root / "PyWPEM/Tutorial/class_2_basic_structure/data"
+        source=engine_root() / "demo"
         shutil.copy2(source / "intensity.csv",run / "intensity.csv")
         shutil.copy2(source / "Mn2O3.cif",run / "sample.cif")
     else:
@@ -30,7 +44,7 @@ def main():
     data=pd.read_csv("intensity.csv",header=None)
     if data.shape[1]!=2 or len(data)<20 or not np.isfinite(data.values).all() or not np.all(np.diff(data[0])>0) or not np.all(data[1]>=0):
         raise ValueError("Expected ascending 2theta,intensity CSV, finite nonnegative intensities and >=20 points")
-    result={"inputs":{name:hashlib.sha256((run/name).read_bytes()).hexdigest() for name in ("intensity.csv","sample.cif")},"converged":False}
+    result={"mode":"fit", "inputs":{name:hashlib.sha256((run/name).read_bytes()).hexdigest() for name in ("intensity.csv","sample.cif")},"converged":False}
     original=WPEMsolver.cal_output_result
     def capture(self):
         values=original(self)

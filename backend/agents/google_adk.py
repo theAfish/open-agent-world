@@ -193,8 +193,22 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
         managed = None
         try:
             definitions = tuple(await self._provider.list_tools(agent_id))
-            tools = build_scoped_tool_callables(self._provider, agent_id, definitions)
             selected_model = self._adk_model(record.config.model)
+            from .typesafe import TypeSafeModel, execute_typesafe
+            if isinstance(selected_model, TypeSafeModel):
+                run_secret = selected_model.api_key
+                from backend.security.redaction import redact
+                async with aclosing(execute_typesafe(
+                    self._provider, config, context, selected_model, definitions
+                )) as stream:
+                    async for event in stream:
+                        yield AgentEvent(
+                            event.agent_id, event.run_id, event.type,
+                            redact(dict(event.payload), [run_secret]),
+                            timestamp=event.timestamp, run_status=event.run_status,
+                        )
+                return
+            tools = build_scoped_tool_callables(self._provider, agent_id, definitions)
             run_secret = getattr(selected_model, "_additional_args", {}).get("api_key")
             context_options = {}
             if self.context_store is not None:
@@ -348,6 +362,9 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
             if self.model_connections is None:
                 raise AgentStateError("Model connections are not configured on this runtime")
             adapter, model_id, base_url, api_key = self.model_connections.resolve(configured_model)
+            if adapter == "typesafe":
+                from .typesafe import TypeSafeModel
+                return TypeSafeModel(model=model_id, base_url=base_url, api_key=api_key or "")
             from google.adk.models.lite_llm import LiteLlm
             if adapter == "legacy":
                 from google.adk.models import LLMRegistry

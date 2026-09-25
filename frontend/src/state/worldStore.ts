@@ -354,7 +354,7 @@ interface WorldState {
   updateCard: (
     id: string,
     patch: Partial<Omit<WorldCard, "id" | "type">>,
-    options?: { expectedRevision: number },
+    options?: { expectedRevision?: number; throwOnError?: boolean },
   ) => Promise<void>;
   updateCardPositions: (updates: Array<{ id: string; position: WorldPosition; parent_id?: string | null }>, stationaryIds?: string[]) => Promise<void>;
   resizeContainer: (id: string, size: WorldCard['size'], position?: WorldPosition) => Promise<void>;
@@ -787,6 +787,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         syncState: "online",
       }));
       get().pushToast({ tone: "error", title: "Change was not saved", detail: apiErrorMessage(error) });
+      if (options?.throwOnError) throw error;
     }
   }),
 

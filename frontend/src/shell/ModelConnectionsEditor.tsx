@@ -8,12 +8,13 @@ const presets = {
   openai: { name: "OpenAI", base_url: "https://api.openai.com/v1", auth_mode: "api_key" as const },
   anthropic: { name: "Anthropic", base_url: "https://api.anthropic.com", auth_mode: "api_key" as const },
   gemini: { name: "Google Gemini", base_url: "", auth_mode: "api_key" as const },
+  typesafe: { name: "TypeSafe / Jev", base_url: "https://api.typesafe.ai", auth_mode: "api_key" as const },
   compatible: { name: "Custom connection", base_url: "", auth_mode: "api_key" as const },
   local: { name: "Local models", base_url: "http://localhost:11434/v1", auth_mode: "none" as const },
 };
 
 function defaultEnvironmentVariable(adapter: ModelConnection["adapter"]): string {
-  return adapter === "anthropic" ? "ANTHROPIC_API_KEY" : adapter === "gemini" ? "GEMINI_API_KEY" : "OPENAI_API_KEY";
+  return adapter === "typesafe" ? "TYPESAFE_API_KEY" : adapter === "anthropic" ? "ANTHROPIC_API_KEY" : adapter === "gemini" ? "GEMINI_API_KEY" : "OPENAI_API_KEY";
 }
 
 export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
@@ -36,7 +37,8 @@ export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
     const p = presets[preset];
     const added: ModelConnection = { id, name: p.name, base_url: p.base_url,
       adapter: preset === "compatible" || preset === "local" ? "openai" : preset,
-      auth_mode: p.auth_mode, enabled: true, api_key_configured: false, models: [] };
+      auth_mode: p.auth_mode, enabled: true, api_key_configured: false,
+      models: preset === "typesafe" ? [{ id: crypto.randomUUID(), name: "Jev 1.13.0", model_id: "jev-1.13.0", enabled: true }] : [] };
     onChange({ ...value, connections: [...value.connections, added] }); setSelected(id); setQuery("");
     reportInteraction({ type: "model-connection-selected" });
   };
@@ -52,6 +54,7 @@ export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
       <select aria-label={t("New connection type")} value={preset} onChange={e => setPreset(e.target.value as keyof typeof presets)}>
         <option value="compatible">{t("OpenAI-compatible service")}</option><option value="openai">{t("OpenAI")}</option>
         <option value="anthropic">{t("Anthropic")}</option><option value="gemini">{t("Google Gemini")}</option><option value="local">{t("Local service")}</option>
+        <option value="typesafe">TypeSafe / Jev</option>
       </select>
       <button type="button" className="secondary-button" onClick={add} disabled={value.connections.length >= 100}><Plus size={14} /> {t("Add connection")}</button>
     </div>
@@ -77,6 +80,7 @@ export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
         <label className="field-label"><span>{t("Connection name")}</span><input value={connection.name} maxLength={120} required onChange={e => update({ name: e.target.value })} placeholder={t("Company account")} /></label>
         <label className="field-label"><span>{t("API format")}</span><select disabled={connection.id === "legacy"} value={connection.adapter} onChange={e => update({ adapter: e.target.value as ModelConnection["adapter"] })}>
           <option value="openai">{t("OpenAI-compatible Chat Completions")}</option><option value="anthropic">{t("Anthropic Messages")}</option><option value="gemini">{t("Google Gemini")}</option>
+          <option value="typesafe">TypeSafe System One / Jev</option>
           {connection.adapter === "legacy" && <option value="legacy">{t("Previous automatic routing")}</option>}
         </select></label>
         <label className="field-label"><span>{t("Base URL")}</span><input type="url" value={connection.base_url} onChange={e => update({ base_url: e.target.value })} placeholder={t("Use provider default")} spellCheck={false} />

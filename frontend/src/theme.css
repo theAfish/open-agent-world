@@ -449,6 +449,9 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .card-status[data-status="error"] > span:first-child { background: var(--danger); }
 
 .card-body { flex: 1; min-height: 0; padding-top: 11px; }
+.world-card.is-inspector { cursor: default; }
+.world-card.is-inspector > .node-drag-region { cursor: grab; }
+.world-card.is-inspector > .node-drag-region:active { cursor: grabbing; }
 .world-canvas, .world-card.is-node, .world-card.is-preview {
   -webkit-user-select: none;
   user-select: none;
@@ -855,6 +858,7 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .legion-selection-summary span { display: flex; align-items: center; gap: 4px; color: var(--ink-faint); font-size: 8px; white-space: nowrap; }
 .legion-selection-warning { display: flex; align-items: center; gap: 4px; color: var(--warning); font-size: 8px; white-space: nowrap; }
 .legion-selection-bar .primary-button { min-height: 34px; white-space: nowrap; font-size: 10px; }
+.legion-selection-delete { flex: 0 0 auto; width: 34px; height: 34px; }
 
 .legion-dialog {
   width: min(510px, 100%);

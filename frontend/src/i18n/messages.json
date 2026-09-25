@@ -1323,6 +1323,18 @@
     "Delete session",
     "删除会话"
   ],
+  " / {v0} external links": [
+    " / {v0} external links",
+    " / {v0} 条外部连线"
+  ],
+  "Delete selected cards": [
+    "Delete selected cards",
+    "删除所选卡片"
+  ],
+  "Delete selected cards, container members, and connected links. Ctrl+Z to undo.": [
+    "Delete selected cards, container members, and connected links. Ctrl+Z to undo.",
+    "删除所选卡片、容器成员及关联连线，按 Ctrl+Z 撤销。"
+  ],
   "Delete task": [
     "Delete task",
     "删除任务"

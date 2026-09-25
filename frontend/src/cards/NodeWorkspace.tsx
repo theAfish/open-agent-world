@@ -47,7 +47,7 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
     <header className="workspace-titlebar node-drag-region">
       <div className="workspace-app-mark"><CatalogIcon definition={catalog.node_types.find((d) => d.id === card.type)} size={16} /></div>
       <div>
-        <span>{catalog.node_types.find((item) => item.id === card.type)?.label ?? card.type} {t("workspace")}</span>
+        <span>{card.type === "xrd.match" ? "XRD 谱解析" : (catalog.node_types.find((item) => item.id === card.type)?.label ?? card.type)} {t("workspace")}</span>
         <CardName card={card} workspace label={catalog.node_types.find(item => item.id === card.type)?.label ?? card.type} />
       </div>
       <div className="workspace-window-actions">
@@ -194,7 +194,7 @@ export function WorkspaceContent({ card }: WorkspaceSurfaceProps) {
   return (
       <div className="workspace-content">
       <PluginSurface card={card} slot="workspace" level="workspace">
-      {catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("core.agent") ? deployed ? <div className="workspace-welcome"><Bot size={22} /><strong>{card.name}</strong><p>{t(card.status)}</p></div> : <>
+      {card.type === "xrd.match" ? <div className="agent-window-body"><div className="agent-settings-window nodrag nopan nowheel"><AgentCardBody card={card} level="workspace" /></div></div> : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("core.agent") ? deployed ? <div className="workspace-welcome"><Bot size={22} /><strong>{card.name}</strong><p>{t(card.status)}</p></div> : <>
         <nav className="agent-window-tabs nodrag nopan" role="tablist" aria-label={t("Agent window")}>
           <button role="tab" aria-selected={!ministerTab && agentTab === "activity"} onClick={() => { useMinisterRole.setState({ settingsCardId: undefined }); setAgentTab("activity"); }}>{t("Activity")}</button>
           <button role="tab" aria-selected={!ministerTab && agentTab === "settings"} onClick={() => { useMinisterRole.setState({ settingsCardId: undefined }); setAgentTab("settings"); }}>{t("Settings")}</button>

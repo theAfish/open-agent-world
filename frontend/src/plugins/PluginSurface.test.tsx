@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useLegionWorkspace } from '../state/legionWorkspace';
+import { WorkspaceSurfaceContext } from './WorkspaceSurfaceContext';
 import { afterEach, expect, it, vi } from "vitest";
 import { worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
@@ -11,9 +13,19 @@ import * as registry from './registry';
 import { useConversationView } from '../state/conversationView';
 import type { PluginViewProps } from './sdk';
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); useLegionWorkspace.getState().close(); vi.restoreAllMocks(); });
 const card: WorldCard = { id: "extension-card", type: "example.agent", name: "Extension", status: "idle",
   position: { x: 0, y: 0 }, size: { width: 300, height: 190 }, expanded: false, config: { effort: "default" } };
+
+it('suspends covered XRD graph canvases but keeps Legion panes and restores them on exit', () => {
+  const canvas = { ...card, type: 'xrd.structure-canvas' };
+  render(<><PluginSurface card={canvas} slot="settings" level="workspace"><p>Graph canvas</p></PluginSurface><WorkspaceSurfaceContext.Provider value={true}><PluginSurface card={canvas} slot="settings" level="workspace"><p>Legion canvas</p></PluginSurface></WorkspaceSurfaceContext.Provider></>);
+  act(() => useLegionWorkspace.getState().open('legion'));
+  expect(screen.queryByText('Graph canvas')).toBeNull();
+  expect(screen.getByText('Legion canvas')).toBeTruthy();
+  act(() => useLegionWorkspace.getState().close());
+  expect(screen.getByText('Graph canvas')).toBeTruthy();
+});
 
 function install(pluginId: string, frontend: { settings?: string } = {}) {
   const updateCard = vi.fn().mockResolvedValue(undefined);
@@ -33,7 +45,7 @@ it("loads the actual local plugin entry and saves through the scoped host SDK", 
   expect(screen.queryByText("Local runtime")).toBeNull();
   expect(screen.queryByText("Fallback")).toBeNull();
   fireEvent.change(screen.getByLabelText("Effort"), { target: { value: "high" } });
-  await waitFor(() => expect(update).toHaveBeenCalledWith(card.id, { config: { effort: "high" } }));
+  await waitFor(() => expect(update).toHaveBeenCalledWith(card.id, { config: { effort: "high" } }, { throwOnError: true }));
 });
 
 it("uses the host view when no override is declared", () => {

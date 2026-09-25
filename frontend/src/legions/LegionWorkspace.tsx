@@ -16,6 +16,7 @@ import { activateTab, activePaneView, dockPane, dropSide, layoutMinimum, paneVie
   type DockSide, type WorkspaceLayout, type WorkspaceLeaf, type WorkspaceNode, type WorkspaceView } from './workspaceLayout';
 import './legionWorkspace.css';
 import { PublishApplication } from '../deployment/PublishApplication';
+import { WorkspaceSurfaceContext } from '../plugins/WorkspaceSurfaceContext';
 
 const CARD_MIME = 'application/x-oaw-workspace-view';
 type RegisteredSection = WorkspaceSectionRegistration & { card_id: string };
@@ -182,7 +183,7 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
   };
 
   return <dialog ref={dialog} className="legion-workspace" data-legion-workspace={card.id} aria-label={t('{v0} workspace mode', { v0: card.name })}
-    onCancel={event => { event.preventDefault(); if (drawerCard) setDrawerId(null); else requestClose(); }} onKeyDown={event => event.stopPropagation()}
+    onCancel={event => { event.preventDefault(); if (event.target !== event.currentTarget) return; if (drawerCard) setDrawerId(null); else requestClose(); }} onKeyDown={event => event.stopPropagation()}
     onDragEnd={() => { setDragging(false); setSelected(null); }}>
     <header className="legion-window-titlebar">
       <span className="legion-window-mark"><LayoutTemplate size={16} /></span>
@@ -484,11 +485,11 @@ function CardWorkspaceOwner({ member, host, workspace, editing, placedViews, hid
 }) {
   const registerOwned = useCallback((section: WorkspaceSectionRegistration) => register(member.id, section), [member.id, register]);
   const sectionView = (id: string) => ({ card_id: member.id, section_id: id });
-  return createPortal(<WorkspaceSectionProvider cardId={member.id} editing={editing}
+  return createPortal(<WorkspaceSurfaceContext.Provider value={true}><WorkspaceSectionProvider cardId={member.id} editing={editing}
     detachedSectionIds={new Set(placedViews.filter(view => view.card_id === member.id && view.section_id).map(view => view.section_id!))}
     hiddenSectionIds={new Set(hiddenViews.filter(view => view.card_id === member.id).map(view => view.section_id!))}
     register={registerOwned} onSelect={id => select(sectionView(id))} onDragStart={(event, id) => startDrag(event, sectionView(id))}
     onHide={id => hide(sectionView(id))}>
     {workspace ? <WorkspaceContent card={member} /> : <CardContent card={member} level="inspector" />}
-  </WorkspaceSectionProvider>, host);
+  </WorkspaceSectionProvider></WorkspaceSurfaceContext.Provider>, host);
 }

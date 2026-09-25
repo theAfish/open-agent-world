@@ -1,6 +1,6 @@
 """Validated, durable node documents and pure plugin-owned actions."""
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping
 from pydantic import BaseModel
 
 
@@ -13,11 +13,21 @@ class NodeDocumentDownload:
 
 @dataclass(frozen=True, slots=True)
 class NodeDocumentAction:
-    """Writes own their capability; reads may reuse an installed document read capability."""
+    """Writes own their capability; reads may reuse an installed document read capability.
+
+    An optional asynchronous preparation step receives isolated JSON copies and
+    returns arguments for the pure handler. Preparation runs outside the graph
+    mutation lock, and the host rechecks access and revision before committing.
+    """
     handler: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
     capability_kind: str | None = None
     read_only: bool = False
     project: bool = False
+    prepare: Callable[[dict[str, Any], dict[str, Any]], Awaitable[dict[str, Any]]] | None = None
+
+    def __post_init__(self):
+        if self.read_only and self.prepare is not None:
+            raise ValueError("Read-only document actions cannot define prepare")
 
 
 @dataclass(frozen=True, slots=True)

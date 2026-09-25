@@ -854,6 +854,17 @@ are serialized with node mutations and require `expected_revision` for writes.
 Read-only actions validate arguments without committing. `replace` is reserved for
 human/host full-document restoration and cannot be called using Agent permissions.
 
+Write actions may define an optional asynchronous `prepare(value, arguments)`
+callback for external I/O. The host checks access, editability and the expected
+revision, copies both inputs, releases the node mutation gate, and awaits the
+callback. Its returned dictionary becomes the pure handler's arguments. Before
+applying that handler, the host reacquires the gate and checks the live node,
+action identity, capability, editability and original revision again. Failed or
+cancelled preparation does not write the document; concurrent edits require a
+fresh retry. Preparation must not mutate graph state or perform irreversible
+external actions. `read_only` actions cannot define `prepare`, and prepared
+actions must be invoked outside any caller-owned node mutation gate.
+
 Human-facing APIs:
 
 ```text

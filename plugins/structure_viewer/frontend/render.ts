@@ -1,13 +1,21 @@
-import { mount, unmount } from "svelte";
+import { mount, unmount, tick } from "svelte";
+import type { AnyStructure } from 'matterviz/structure';
 import StructureHost from "./StructureHost.svelte";
 import { parse_structure_file } from "matterviz/structure/parse";
 
-export function renderStructure(target: HTMLElement, file: { name: string; data: string }, onError: (message: string) => void) {
+export function renderStructure(target: HTMLElement, file: { name: string; data: string }, onError: (message: string) => void, prepared?: AnyStructure) {
+  const parse = (file: { name: string; data: string }) => {
   const bytes = Uint8Array.from(atob(file.data), character => character.charCodeAt(0));
   const structure = parse_structure_file(new TextDecoder("utf-8", { fatal: true }).decode(bytes), file.name);
   if (!structure?.sites?.length) throw new Error("No atoms found in this structure file.");
   if (structure.sites.length > 20000) throw new Error("This viewer supports up to 20,000 atoms per structure.");
+  return structure;
+  };
+  const structure = prepared ?? parse(file);
   const component = mount(StructureHost, { target, props: { structure, onError } });
   target.dataset.atomCount = String(structure.sites.length);
-  return () => { delete target.dataset.atomCount; void unmount(component); };
+  return Object.assign(() => { delete target.dataset.atomCount; void unmount(component); }, {
+    update(next: {name:string;data:string}, prepared?: AnyStructure) {const structure=prepared??parse(next);(component as {setStructure(value:typeof structure):void}).setStructure(structure);target.dataset.atomCount=String(structure.sites.length);},
+    async painted() { await tick(); await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))); }
+  });
 }
