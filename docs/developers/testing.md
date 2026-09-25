@@ -1,5 +1,10 @@
 # Test and distribute
 
+For an independently installable frontend + backend artifact, follow
+[Local Pack distribution](../pack-distribution.md) and the
+[external Greeter fixture](../../examples/packs/greeter/README.md). The wheel-only
+instructions below remain useful for source-checkout development.
+
 ## Test the first-card package
 
 From the repository root:
@@ -39,7 +44,9 @@ There are two backend installation paths:
 - Put the source package directly in the checkout's `plugins/` directory. Its additional dependencies must already be installed in the backend environment.
 - Install a wheel into the environment that runs the backend. On a Windows source checkout, for example: `uv pip install --python backend/.venv/Scripts/python.exe path/to/plugin.whl`. Linux/macOS use `backend/.venv/bin/python`.
 
-Restart OAW after installation. These are source-checkout instructions; an existing desktop installation does not expose a general wheel-import UI. Frontend code must also be present during the app's frontend build.
+Restart OAW after installation. These are source-checkout instructions. The
+production host accepts `.oawpack` files through the Pack Library, with runtime
+frontend loading; a bare wheel is not a complete Pack distribution.
 
 ## Write the plugin README
 

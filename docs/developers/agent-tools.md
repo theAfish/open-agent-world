@@ -17,7 +17,7 @@ Linux/macOS:
 
 ```sh
 cp -R examples/plugins/greeter plugins/greeter
-python3 scripts/dev.py --agent-runtime core.mock --profile plugin-tutorial
+bash scripts/dev.sh --agent-runtime core.mock --profile plugin-tutorial
 ```
 
 Do not copy over an existing plugin directory. Alternatively, Windows supports attaching the original package with `-PluginPath ./examples/plugins/greeter`; that attaches its backend package only.

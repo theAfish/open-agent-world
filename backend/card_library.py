@@ -1,6 +1,7 @@
 """Application-owned collection and deck state; plugin definitions stay registry-owned."""
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import UTC, datetime
 import json
 from typing import Literal
@@ -58,7 +59,7 @@ class Deck(Model):
 
 
 class LibraryState(Model):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     revision: int = 0
     migration_pending: bool = False
     plugins: dict[str, PluginInstallState] = Field(default_factory=dict)
@@ -66,7 +67,9 @@ class LibraryState(Model):
     # Last observed public metadata is retained only to describe unavailable content.
     card_definitions: dict[str, NodeTypeCatalogItem] = Field(default_factory=dict)
     collection: dict[str, CollectionEntry] = Field(default_factory=dict)
-    decks: list[Deck] = Field(default_factory=lambda: [Deck(id="starter", name="My deck")])
+    decks: list[Deck] = Field(default_factory=lambda: [
+        Deck(id="starter", name="My deck"), Deck(id="saved-legions", name="Legions"),
+    ])
     active_deck_id: str = "starter"
 
 
@@ -98,7 +101,8 @@ class CardLibraryStore:
         # Older catalogs persisted this retired metadata field. Migrate only
         # stored snapshots; current plugin definitions remain strictly validated.
         migrated = False
-        if isinstance(payload, dict) and payload.get("schema_version", 1) == 1:
+        upgrade_decks = isinstance(payload, dict) and payload.get("schema_version", 1) == 1
+        if isinstance(payload, dict) and payload.get("schema_version", 1) in (1, 2):
             packs = payload.get("packs", {})
             if isinstance(packs, dict):
                 for pack in packs.values():
@@ -116,7 +120,19 @@ class CardLibraryStore:
                             # Reconcile refreshes installed definitions from the registry.
                             definition["presentation"] = NodePresentation.from_legacy_surfaces(surfaces).model_dump(mode="json")
                             migrated = True
+        if upgrade_decks:
+            payload["schema_version"] = 2
         state = LibraryState.model_validate(payload)
+        if upgrade_decks:
+            # Replace the old virtual tray once. Only saved user templates were
+            # stored in this table; pack presets must never be auto-equipped.
+            # Existing real decks (including manually added presets) stay intact.
+            if not any(deck.id == "saved-legions" for deck in state.decks):
+                legions = db.execute("SELECT id FROM legions ORDER BY created_at, id").fetchall()
+                state.decks.append(Deck(id="saved-legions", name="Legions",
+                    entries=[DeckEntry(kind="legion", id=row[0]) for row in legions]))
+            state.revision += 1
+            migrated = True
         if migrated:
             CardLibraryStore._write(db, state)
         return state
@@ -176,8 +192,7 @@ class CardLibraryStore:
                         deck = groups.setdefault(card.deck_id, Deck(id=card.deck_id, name=card.deck_label, icon=card.deck_icon))
                         deck.entries.append(DeckEntry(id=card.id))
                 legions = db.execute("SELECT id FROM legions ORDER BY created_at, id").fetchall()
-                if legions:
-                    groups["saved-legions"] = Deck(id="saved-legions", name="Legions", entries=[DeckEntry(kind="legion", id=row[0]) for row in legions])
+                groups["saved-legions"] = Deck(id="saved-legions", name="Legions", entries=[DeckEntry(kind="legion", id=row[0]) for row in legions])
                 state.decks = list(groups.values()) or state.decks
                 state.active_deck_id = state.decks[0].id
             # Catalog dictionaries may contain tuples; SQLite JSON restores lists.
@@ -223,18 +238,33 @@ class CardLibraryStore:
                 state.collection[cid] = CollectionEntry(card_id=cid, plugin_id=pack.definition.plugin_id,
                     source_pack_ids=[pack.definition.id], unlocked_at=timestamp)
 
+    def _preset_pack_ids(self, packs: Iterable[PackCatalogItem]) -> dict[str, list[str]]:
+        # Presets are registered by plugins, not by the plugins of their member
+        # cards. A plugin's presets belong to its Packs, including fallback Packs.
+        by_plugin: dict[str, list[str]] = {}
+        for pack in packs:
+            by_plugin.setdefault(pack.plugin_id, []).append(pack.id)
+        return {preset.id: by_plugin.get(self.registry.owner_id("legion_preset", preset.id), [])
+                for preset in self.registry.legion_presets()}
+
     def _validate_additions(self, db, state: LibraryState, entries: list[DeckEntry], previous: list[DeckEntry]) -> None:
         keys = [(entry.kind, entry.id) for entry in entries]
         if len(set(keys)) != len(keys):
             raise GraphValidationError("A deck cannot contain duplicate card references")
+        preset_pack_ids = None
         for entry in entries:
             if entry in previous:
                 continue  # Unavailable references can be kept or removed without losing the deck.
             if entry.kind == "legion":
-                if not db.execute("SELECT 1 FROM legions WHERE id=?", (entry.id,)).fetchone() and not any(
-                    preset.id == entry.id for preset in self.registry.legion_presets()
-                ):
+                if db.execute("SELECT 1 FROM legions WHERE id=?", (entry.id,)).fetchone():
+                    continue
+                if preset_pack_ids is None:
+                    preset_pack_ids = self._preset_pack_ids(self.registry.catalog().packs)
+                if entry.id not in preset_pack_ids:
                     raise NotFoundError("Saved Legion no longer exists")
+                if not any(state.packs[pid].owned and state.packs[pid].opened
+                           for pid in preset_pack_ids[entry.id] if pid in state.packs):
+                    raise GraphValidationError("Open this Legion's source pack in the Library before adding it to a deck")
             elif entry.id not in state.collection or not state.collection[entry.id].unlocked or not self.card_available(state, entry.id):
                 raise GraphValidationError("Only collected, available cards can be added to a deck")
 
@@ -311,7 +341,8 @@ class CardLibraryStore:
                     for deck in request.decks:
                         self._validate_additions(db, state, deck.entries, [])
                     # Saved formations had a separate tray; retain them during folder import.
-                    formation_decks = [d for d in state.decks if any(e.kind == "legion" for e in d.entries) and d.id not in ids]
+                    formation_decks = [d for d in state.decks
+                        if (d.id == "saved-legions" or any(e.kind == "legion" for e in d.entries)) and d.id not in ids]
                     state.decks = request.decks + formation_decks
                     state.active_deck_id = next((d.id for d in state.decks if d.entries), state.decks[0].id)
             elif request.action == "set_plugin_enabled":
@@ -322,6 +353,22 @@ class CardLibraryStore:
                     raise GraphValidationError("Provide the plugin enabled state")
                 if request.id == CORE and not request.enabled:
                     raise GraphValidationError("The core plugin is required by the application")
+                enabled = {key for key, value in state.plugins.items() if value.installed and value.enabled}
+                if request.enabled:
+                    enabled.add(request.id)
+                else:
+                    enabled.discard(request.id)
+                from backend.packs.requirements import aggregate_requirements
+                declarations = {}
+                for descriptor in self.registry.plugins():
+                    if descriptor.id in enabled:
+                        if not set(descriptor.requires_plugins) <= enabled:
+                            raise ConflictError(f"Pack {descriptor.name or descriptor.id} requires its dependency Packs to be enabled")
+                        declarations[descriptor.id] = self.registry.runtime_requirements.get(descriptor.id, descriptor.python_requirements)
+                try:
+                    aggregate_requirements(declarations)
+                except ValueError as exc:
+                    raise ConflictError(str(exc)) from exc
                 plugin.enabled = request.enabled
             state.migration_pending = False
             state.revision += 1
@@ -336,4 +383,5 @@ class CardLibraryStore:
         result = state.model_dump(mode="json")
         result["available_card_ids"] = [cid for cid in state.collection if self.card_available(state, cid)]
         result["available_pack_ids"] = [pack.id for pack in current.packs if self.registry.is_enabled(pack.plugin_id)]
+        result["preset_pack_ids"] = self._preset_pack_ids(current.packs)
         return result

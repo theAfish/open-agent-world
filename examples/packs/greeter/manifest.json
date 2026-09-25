@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "id": "example.greeter",
+  "name": "Greeter",
+  "version": "0.1.0",
+  "compatibility": { "oaw": ">=0.1.0,<0.2", "plugin_api": "1.23", "frontend_api": 1 },
+  "dependencies": { "packs": [] },
+  "runtime": { "sandbox": { "python": ["colorama==0.4.6"] } },
+  "entrypoints": { "backend": "backend/oaw_pack_example_greeter-0.1.0-py3-none-any.whl", "frontend": "frontend/index.js" }
+}

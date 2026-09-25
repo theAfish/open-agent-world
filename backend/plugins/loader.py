@@ -12,7 +12,7 @@ from backend.plugins.registry import PluginDescriptor, PluginRegistry
 ENTRY_POINT_GROUP = "open_agent_world.plugins"
 
 
-def load_plugin_registry(plugin_directory: Path | None = None, *, plugin_directories: tuple[Path, ...] = ()) -> PluginRegistry:
+def load_plugin_registry(plugin_directory: Path | None = None, *, plugin_directories: tuple[Path, ...] = (), data_root: Path | None = None) -> PluginRegistry:
     """Load trusted packages in the project's plugins folder, then installed plugins.
 
     Each entry point exposes a zero-argument plugin factory. Loading is
@@ -101,4 +101,54 @@ def load_plugin_registry(plugin_directory: Path | None = None, *, plugin_directo
                     registry.runtime_requirements[plugin.descriptor.id] = tuple(validate_requirements(requirements))
         except Exception as exc:
             raise RuntimeError(f"Cannot load plugin {entry_point.name!r} from {origin}: {exc}") from exc
+    if data_root is not None:
+        load_installed_packs(registry, data_root)
     return registry
+
+
+def load_installed_packs(registry: PluginRegistry, data_root: Path) -> None:
+    """Discover immutable wheels from user data; never install into host Python."""
+    import importlib.util
+    from urllib.parse import quote
+    from backend.packs.installation import PackInstallationManager
+
+    manager = PackInstallationManager(data_root, registry)
+    pending = manager.selected()
+    # Persisted enable/disable state is reconciled by CardLibraryStore next.
+    # Environment bootstrap validates that enabled set, before any mutation.
+    manager._check_selection(pending, check_requirements=False)
+    # Resolve metadata first. No user code runs during inspection or validation.
+    entries = {key: manager.verify_installed(manifest, backend_only=True) for key, manifest in pending.items()}
+    while pending:
+        ready = [m for m in pending.values() if not any(d.id in pending for d in m.dependencies.packs)]
+        if not ready:
+            raise RuntimeError("Cyclic installed Pack dependencies")
+        for manifest in ready:
+            try:
+                origin = manager.version_path(manifest.id, manifest.version) / manifest.entrypoints.backend
+                existing = importlib.util.find_spec(manifest.module_name)
+                if existing is not None:
+                    # Same-version app instances in tests can share immutable code;
+                    # changing a module version always requires a process restart.
+                    if existing.origin is None or not existing.origin.replace("\\", "/").startswith(str(origin).replace("\\", "/") + "/"):
+                        raise ValueError("Backend module ownership conflict; restart OAW to change versions")
+                if str(origin) not in sys.path:
+                    sys.path.append(str(origin))
+                plugin = EntryPoint(name=manifest.id, value=entries[manifest.id], group=ENTRY_POINT_GROUP).load()()
+                descriptor = plugin.descriptor
+                dependencies = tuple(registry.owner_id("pack", d.id) for d in manifest.dependencies.packs)
+                if (descriptor.id != manifest.id or descriptor.version != manifest.version
+                        or descriptor.plugin_api_version != manifest.compatibility.plugin_api
+                        or set(descriptor.requires_plugins) != set(dependencies)
+                        or (descriptor.python_requirements and descriptor.python_requirements != manifest.runtime.sandbox.python)):
+                    raise ValueError("Backend descriptor disagrees with distribution identity, compatibility or dependencies")
+                registry.install(plugin, distribution=manifest)
+                registry.installed_packs[manifest.id] = manifest
+                registry.runtime_requirements[manifest.id] = manifest.runtime.sandbox.python
+                registry.frontend_modules[manifest.id] = {
+                    "version": manifest.version, "api_version": manifest.compatibility.frontend_api,
+                    "url": f"/api/packs/{manifest.id}/versions/{quote(manifest.version, safe='!')}/{quote(manifest.entrypoints.frontend)}",
+                }
+                del pending[manifest.id]
+            except Exception as exc:
+                raise RuntimeError(f"Cannot load installed Pack {manifest.id}@{manifest.version}: {exc}. Select a retained version with the Pack recovery CLI.") from exc

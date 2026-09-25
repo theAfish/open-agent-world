@@ -222,25 +222,39 @@ describe("ConversationWorkspace snapshots", () => {
     expect(detached.childElementCount).toBe(0);
   });
 
-  it("shows start and stop events immediately while the history refresh is stalled", async () => {
+  it("shows a live Run, stops that run by id, and avoids REST refresh for streaming activity", async () => {
     vi.mocked(worldApi.getConversation).mockResolvedValue({
       conversation_id: card.id, sessions: [{ ...session, participant_ids: ["atlas"] }],
       agents: [{ id: "atlas", name: "Atlas", status: "idle", model: "mock", connected: true }],
     });
     vi.mocked(worldApi.getConversationTimeline).mockResolvedValue({
-      items: [historicalMessage], has_before: false, has_after: false, active_agent_ids: [],
+      items: [historicalMessage], has_before: false, has_after: false, active_agent_ids: [], active_runs: [],
     });
+    const cancel = vi.spyOn(worldApi, "cancelRun").mockResolvedValue({});
     render(<ConversationWorkspace card={card} />);
     await screen.findByText(historicalMessage.content);
     const initialCalls = vi.mocked(worldApi.getConversationTimeline).mock.calls.length;
     vi.mocked(worldApi.getConversationTimeline).mockReturnValue(new Promise(() => {}));
-    const started = { id: "start", type: "run_started", agent_id: "atlas", conversation_id: card.id,
-      session_id: session.id, timestamp: historicalMessage.created_at, payload: {} };
+    const started = { id: "start", type: "run_started", run_id: "run-1", agent_id: "atlas", conversation_id: card.id,
+      session_id: session.id, timestamp: historicalMessage.created_at, payload: { run_id: "run-1" } };
     act(() => useWorldStore.setState({ events: [started] }));
     expect(screen.getByLabelText("Atlas is responding")).toBeTruthy();
-    await waitFor(() => expect(worldApi.getConversationTimeline).toHaveBeenCalledTimes(initialCalls + 1));
+    expect(worldApi.getConversationTimeline).toHaveBeenCalledTimes(initialCalls);
+
+    act(() => useWorldStore.setState({ events: [
+      { ...started, id: "stream", type: "agent_message", payload: { run_id: "run-1", text: "Inspecting services.py" } },
+      started,
+    ] }));
+    expect(screen.getByText("Inspecting services.py")).toBeTruthy();
+    expect(worldApi.getConversationTimeline).toHaveBeenCalledTimes(initialCalls);
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(cancel).toHaveBeenCalledWith("run-1"));
+    expect(screen.getByRole("button", { name: /Stopping/ })).toBeTruthy();
+
     act(() => useWorldStore.setState({ events: [{ ...started, id: "stop", type: "run_succeeded" }, started] }));
     expect(screen.queryByLabelText("Atlas is responding")).toBeNull();
+    await waitFor(() => expect(worldApi.getConversationTimeline).toHaveBeenCalledTimes(initialCalls + 1));
   });
 
   it("sends unmatched @ text to the default participant after a cancelled run", async () => {
@@ -254,8 +268,8 @@ describe("ConversationWorkspace snapshots", () => {
     }));
     render(<ConversationWorkspace card={card} />);
     await screen.findByText(historicalMessage.content);
-    const started = { id: "start", type: "run_started", agent_id: "atlas", conversation_id: card.id,
-      session_id: session.id, timestamp: historicalMessage.created_at, payload: {} };
+    const started = { id: "start", type: "run_started", run_id: "run-1", agent_id: "atlas", conversation_id: card.id,
+      session_id: session.id, timestamp: historicalMessage.created_at, payload: { run_id: "run-1" } };
     act(() => useWorldStore.setState({ events: [started] }));
     expect(screen.getByLabelText("Atlas is responding")).toBeTruthy();
     act(() => useWorldStore.setState({ events: [{ ...started, id: "cancel", type: "run_cancelled" }, started] }));
@@ -327,21 +341,29 @@ describe("ConversationWorkspace snapshots", () => {
     });
   });
 
-  it("restores intermediate messages and tools from durable history after remount", async () => {
-    const items: ConversationMessage[] = [historicalMessage,
-      { ...historicalMessage, id: "middle", sequence: 2, sender_kind: "agent", content: "Checking the file" },
-      { ...historicalMessage, id: "tool", sequence: 3, sender_kind: "agent", kind: "tool_completed", content: "Finished read_file" },
-      { ...historicalMessage, id: "final", sequence: 4, sender_kind: "agent", content: "Final answer" },
-    ];
-    vi.mocked(worldApi.getConversationTimeline).mockResolvedValue({ items, has_before: false, has_after: false });
+  it("restores only final chat history while keeping the durable tool trace collapsed", async () => {
+    const final: ConversationMessage = {
+      ...historicalMessage, id: "final", sequence: 2, sender_kind: "agent",
+      sender_name: "Atlas", run_id: "run-1", content: "Final answer",
+    };
+    vi.mocked(worldApi.getConversationTimeline).mockResolvedValue({
+      items: [historicalMessage, final], has_before: false, has_after: false,
+      run_summaries: {
+        "run-1": {
+          run_id: "run-1", agent_id: "atlas", status: "succeeded",
+          tool_count: 1, tool_trace: [{ type: "tool_started", name: "read_file" }],
+        },
+      },
+    });
     render(<ConversationWorkspace card={card} />);
     await screen.findByText("Final answer");
-    cleanup();
-    useWorldStore.setState({ events: [] });
-    render(<ConversationWorkspace card={card} />);
-    expect(await screen.findByText("Checking the file")).toBeTruthy();
-    expect(screen.getByText("Finished read_file")).toBeTruthy();
-    expect(screen.getAllByText("Final answer")).toHaveLength(1);
+    expect(screen.queryByText("Checking the file")).toBeNull();
+    const summary = screen.getByText(/1 tool calls/);
+    const details = summary.closest("details") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    fireEvent.click(summary);
+    expect(details.open).toBe(true);
+    expect(screen.getByText("read_file")).toBeTruthy();
   });
 
   it("creates independent sessions within the selected group and renames them", async () => {

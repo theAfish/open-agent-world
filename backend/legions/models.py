@@ -176,6 +176,12 @@ class LegionRecord(BaseModel):
     revision: int
 
 
+class LegionMemberSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    type: str
+
+
 class LegionSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -188,6 +194,8 @@ class LegionSummary(BaseModel):
     edge_count: int
     bounds: LegionBounds
     node_types: list[str]
+    members: list[LegionMemberSummary] = Field(default_factory=list)
+    required_card_ids: list[str] = Field(default_factory=list)
     plugin_ids: list[str]
     compatible: bool
     issues: list[str]

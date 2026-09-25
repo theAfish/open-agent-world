@@ -32,6 +32,26 @@ export function tutorialAllows(target: Element, scope: InteractionScope, kind = 
   const { step, refs } = scope;
   const within = (selector: string) => Boolean(target.closest(selector));
   const isCanvas = within('.react-flow__pane');
+  if (step.id.startsWith('legion-')) {
+    const workspace = target.closest('[data-legion-workspace]');
+    if (workspace) {
+      if (workspace.getAttribute('data-legion-workspace') !== refs.legion) return false;
+      if (step.id === 'legion-layout' || step.id === 'legion-return') return within('.legion-layout-palette, .legion-layout-stage, .legion-window-close-prompt, .legion-window-error, [data-tutorial="legion-edit"], [data-tutorial="legion-save"], [data-tutorial="legion-reset"], [data-tutorial="legion-back"]')
+        && (kind === 'wheel' || within('.workspace-section-controls') || !within('.legion-pane-content'));
+      return false;
+    }
+    if (within('[data-tutorial="legion-open"]')) return target.closest('.react-flow__node')?.getAttribute('data-id') === refs.legion;
+    if (step.id === 'legion-form') {
+      if (within('[data-tutorial="legion-selection"]')) {
+        const expected = (step.participants ?? []).map(role => refs[role]);
+        return scope.selectedIds?.length === expected.length && expected.every(id => !!id && scope.selectedIds?.includes(id));
+      }
+      if (isCanvas) return true;
+      return (step.participants ?? []).some(role => refs[role] === target.closest('.react-flow__node')?.getAttribute('data-id'))
+        && !within('button, input, textarea, select, .semantic-handle, .surface-resize-arc');
+    }
+    return false;
+  }
   if (step.target === 'minister' && target.closest('[data-minister-for]')?.getAttribute('data-minister-for') === refs.minister) return true;
   if (kind === 'wheel') return isCanvas || within('.settings-dialog, .card-library-modal, [data-tutorial-highlight]');
   if (step.id === 'pan') return isCanvas;
@@ -104,6 +124,7 @@ export function installTutorialInteractionGuard(getScope: () => InteractionScope
       }
       if (tutorialAllows(target, scope) && (target.closest(editable) || target.closest('.tutorial-guide'))) return;
       const plain = !key.ctrlKey && !key.metaKey && !key.altKey;
+      if (scope.step.id === 'legion-form' && ['Control', 'Meta'].includes(key.key)) return;
       const subjectId = scope.step.role && scope.refs[scope.step.role];
       const subjectSelected = subjectId && scope.selectedIds?.length && scope.selectedIds.every(id => id === subjectId);
       if (plain && (key.key === 'Shift' || (subjectSelected && scope.step.expects === 'focus' && key.key.toLowerCase() === 'f')

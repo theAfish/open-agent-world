@@ -1,22 +1,23 @@
-# Plugins and packs
+# Packs and cards
 
-Plugins add new cards and tools. Packs group those cards so you can collect them and add them to your decks.
+Packs add cards and tools to your world. Open a Pack to collect its cards, choose
+which belong in your Deck, then place them in your World.
 
-## Use an installed plugin
+## Use an installed Pack
 
 1. Open **Pack & Card Library**.
-2. Find and open the plugin's pack.
+2. Find and open a Pack.
 3. Add the collected cards you want to your active deck.
 4. Place a card from the bottom tray.
 5. Connect it to the Agent or resource that should use it, then choose a supported relationship.
 
-Installing, collecting, and placing are separate steps. An installed plugin does not automatically fill your tray.
+Installing, collecting, and placing are separate steps. Installing a Pack does not automatically fill your tray.
 
 ## Choose a tool
 
-Availability depends on your installed build and the plugin's requirements.
+Availability depends on your installed build and the Pack's requirements.
 
-| Plugin | What you can do |
+| Pack | What you can do |
 | --- | --- |
 | Task Board | Track tasks and dependencies with connected Agents |
 | Skill Toolboxes | Give Agents reusable skills and instructions |
@@ -26,12 +27,39 @@ Availability depends on your installed build and the plugin's requirements.
 | SQLite | Keep a database card and grant scoped database operations |
 | Codex | Use an alternative Agent runtime, when its requirements are installed |
 
-## Add or remove plugins
+## Install a local Pack
 
-The Store tab is currently a placeholder. OAW does not yet have an online plugin marketplace or a general one-click package installer. Follow the instructions from the plugin's author for your OAW build; plugins run trusted code, so choose packages you trust.
+In **Pack & Card Library → Packs**, choose **Install Pack from File...** and select
+a `.oawpack`. Review its name and version, then choose **Install Pack**. Packs run
+trusted application code: use files from a source you trust.
 
-If a plugin includes a custom interface, installing its Python package alone may not be enough. Its author needs to provide instructions for a compatible application build.
+Restart OAW when prompted. The Pack remains **Installed** while its Sandbox
+runtime is preparing or if preparation fails. Use **Retry environment preparation**
+under **Manage installed Packs** after addressing the reported conflict or
+connectivity problem. Open the Pack once it is ready and add its cards to your Deck.
 
-Before disabling a plugin, remove its cards and other dependent objects from the world. The Library explains remaining dependencies. Disabling a plugin can make its collected cards unavailable; it does not erase your collection or deck references.
+Install a newer version from file to upgrade. Select a retained version with
+**Use this version on restart** to roll back.
 
-Want to create your own? Start with the separate [plugin developer guide](../developers/index.md).
+## Get a Pack from the Store
+
+Open **Pack & Card Library → Store**, search or browse, and open a Pack's details
+to see its compatibility and requirements. Choose **Get**, then restart OAW when
+prompted. The downloaded Pack appears in the same **Packs** tab as local Packs.
+Open it, add its cards to your Deck and place them in your World.
+
+**Update available** offers an explicit **Update** action; OAW does not update
+Packs automatically. If the Store is unavailable, use **Retry** later. Your
+existing Packs, Cards, Deck and World keep working. The official endpoint is
+not deployed yet; development builds can connect through the host override
+described in [Pack Store Client V0](../pack-store.md).
+
+## Disable or remove a Pack
+
+Remove its cards and dependent objects from the World first; the Library explains
+remaining usages. Collection and Deck references survive disable and uninstall.
+Third-party Packs expose **Uninstall on restart** in local Pack management.
+An inactive version can be removed after it is neither selected nor loaded.
+Core functionality stays enabled; bundled Packs do not use the external installer.
+
+To create your own, see [Local Pack distribution](../pack-distribution.md).

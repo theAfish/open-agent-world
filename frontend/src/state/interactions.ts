@@ -9,6 +9,7 @@ export type WorldInteraction =
   | { type: 'minister-opened'; cardId: string }
   | { type: 'minister-appointed'; cardId: string }
   | { type: 'minister-settings-opened'; cardId: string }
+  | { type: 'legion-workspace-closed'; cardId: string }
   | { type: 'glue-saved'; bonds: { a: string; b: string }[] };
 
 const listeners = new Set<(event: WorldInteraction) => void>();

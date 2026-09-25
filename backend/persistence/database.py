@@ -125,6 +125,25 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
 CREATE INDEX IF NOT EXISTS conversation_messages_session_idx
     ON conversation_messages (session_id, created_at, id);
 
+CREATE TABLE IF NOT EXISTS conversation_deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES conversation_sessions(id) ON DELETE CASCADE,
+    message_id TEXT NOT NULL REFERENCES conversation_messages(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK (status IN ('queued','claimed','done','cancelled')),
+    claimed_run_id TEXT,
+    created_at TEXT NOT NULL,
+    claimed_at TEXT,
+    completed_at TEXT,
+    UNIQUE(message_id, agent_id)
+);
+
+CREATE INDEX IF NOT EXISTS conversation_deliveries_queue_idx
+    ON conversation_deliveries (agent_id, status, session_id, id);
+CREATE INDEX IF NOT EXISTS conversation_deliveries_run_idx
+    ON conversation_deliveries (claimed_run_id);
+
 -- OAW execution continuation, separate from canonical conversation history.
 CREATE TABLE IF NOT EXISTS agent_contexts (
     agent_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
@@ -396,6 +415,23 @@ class Database:
         self._connection.execute('CREATE INDEX IF NOT EXISTS conversation_session_group_idx ON conversation_sessions(group_id, updated_at)')
         self._connection.execute("""CREATE INDEX IF NOT EXISTS conversation_active_runs_idx ON runs(caller_id, context_id, status, agent_id)
             WHERE caller_kind = 'conversation' AND status IN ('created', 'running', 'waiting')""")
+        self._connection.executescript("""CREATE TABLE IF NOT EXISTS conversation_deliveries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+            session_id TEXT NOT NULL REFERENCES conversation_sessions(id) ON DELETE CASCADE,
+            message_id TEXT NOT NULL REFERENCES conversation_messages(id) ON DELETE CASCADE,
+            agent_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+            status TEXT NOT NULL CHECK (status IN ('queued','claimed','done','cancelled')),
+            claimed_run_id TEXT,
+            created_at TEXT NOT NULL,
+            claimed_at TEXT,
+            completed_at TEXT,
+            UNIQUE(message_id, agent_id)
+        );
+        CREATE INDEX IF NOT EXISTS conversation_deliveries_queue_idx
+            ON conversation_deliveries (agent_id, status, session_id, id);
+        CREATE INDEX IF NOT EXISTS conversation_deliveries_run_idx
+            ON conversation_deliveries (claimed_run_id);""")
 
     def _migrate_open_card_types(self) -> None:
         row = self._connection.execute(

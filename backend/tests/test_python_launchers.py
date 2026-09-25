@@ -38,7 +38,7 @@ def installed_probe(tmp_path, monkeypatch):
         if 'install' in argv:
             argv = [*argv, '--no-index', '--find-links', str(wheels)]
         result = original(self, argv)
-        if 'install' in argv:
+        if 'install' in argv and '--dry-run' not in argv:
             launcher = self.bin / ('oaw-shared-probe.exe' if os.name == 'nt' else 'oaw-shared-probe')
             installed_launchers.append((launcher, launcher.read_bytes()))
         return result
@@ -136,6 +136,8 @@ def test_failed_install_repairs_partial_launchers_and_marks_crash_recovery(insta
     launcher, original_bytes = installed_launchers[0]
 
     def interrupted(argv):
+        if '--dry-run' in argv:
+            return
         # Model an installer that replaced a launcher before failing. A process
         # crash at this point must also leave the ready receipt invalidated.
         assert json.loads((runtime.root / 'ready.json').read_text())['launcher_version'] == 0

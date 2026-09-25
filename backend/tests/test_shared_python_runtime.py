@@ -45,7 +45,7 @@ async def test_wsl_deadline_covers_setup_bootstrap_and_package_install(tmp_path,
     from backend.sandbox.python_runtime import PACKAGE_INSTALL_TIMEOUT, RUNTIME_SETUP_TIMEOUT
     backend = WslSandboxBackend(tmp_path, distribution='Ubuntu')
     async def request(payload, *, timeout):
-        assert timeout > 60 + RUNTIME_SETUP_TIMEOUT + 2 * PACKAGE_INSTALL_TIMEOUT
+        assert timeout > 60 + RUNTIME_SETUP_TIMEOUT + 3 * PACKAGE_INSTALL_TIMEOUT
         assert payload['requirements'] == ['ase']
         return {'requirements': ['ase']}
     monkeypatch.setattr(backend, '_request', request)
@@ -89,9 +89,10 @@ def test_shared_mutations_and_bootstrap_receipts_are_serialized(tmp_path, monkey
         for future in futures:
             future.result()
     assert peak == 1
-    assert len(calls) == 1
-    SharedPythonRuntime(tmp_path).prepare_sync(['sample==2'], 'plugin')
     assert len(calls) == 2
+    assert '--dry-run' in calls[0] and '--dry-run' not in calls[1]
+    SharedPythonRuntime(tmp_path).prepare_sync(['sample==2'], 'plugin')
+    assert len(calls) == 4
 
 
 def test_linux_runtime_mount_is_readonly_and_workspace_is_separate(tmp_path):
@@ -195,3 +196,50 @@ async def test_bootstrap_discovery_restart_change_failure_retry_and_removal(tmp_
     removed = PluginEnvironmentBootstrap(tmp_path, PluginRegistry(), manager)
     assert removed.records() == []
     assert retained.exists()
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_aggregates_all_owners_and_marks_them_failed_then_retries(tmp_path):
+    registry = plugin_registry(('numpy>=1.26',))
+    registry.install(PluginDefinition(PluginDescriptor(id='test.second', version='1', plugin_api_version='1.0',
+        python_requirements=('numpy<3', 'ase>=3')), lambda r: None))
+    calls = []
+    fail = True
+    async def catalog():
+        return [SimpleNamespace(id='test', available=True)]
+    async def prepare(target, requirements, bootstrap_key=None):
+        calls.append((requirements, bootstrap_key))
+        if fail:
+            raise RuntimeError('temporary index failure')
+    manager = SimpleNamespace(registry=SimpleNamespace(catalog=catalog), prepare_python=prepare)
+    bootstrap = PluginEnvironmentBootstrap(tmp_path, registry, manager)
+    await bootstrap.run()
+    assert calls == [(['ase>=3', 'numpy<3', 'numpy>=1.26'], 'enabled-packs')]
+    assert {r['state'] for r in bootstrap.records()} == {'environment_failed'}
+    fail = False
+    bootstrap.enqueue()
+    await bootstrap.shutdown()
+    assert {r['state'] for r in bootstrap.records()} == {'environment_ready'}
+
+
+def test_failed_preflight_never_mutates_working_packages(tmp_path, monkeypatch):
+    runtime = SharedPythonRuntime(tmp_path)
+    def ensure():
+        runtime.bin.mkdir(parents=True, exist_ok=True)
+        runtime.python.touch()
+    monkeypatch.setattr(runtime, '_ensure', ensure)
+    monkeypatch.setattr(runtime, '_uv', lambda: 'uv')
+    ensure()
+    marker = runtime.venv / 'existing-package'
+    marker.write_bytes(b'working version')
+    calls = []
+    def resolve(argv):
+        calls.append(argv)
+        assert '--dry-run' in argv
+        raise RuntimeError('No solution found: Pack A requires numpy<2, Pack B requires numpy>=2')
+    monkeypatch.setattr(runtime, '_run', resolve)
+    with pytest.raises(RuntimeError, match='No solution'):
+        runtime.prepare_sync(['numpy<2', 'numpy>=2'])
+    assert len(calls) == 1
+    assert marker.read_bytes() == b'working version'
+    assert not (runtime.root / 'bootstrap.json').exists()

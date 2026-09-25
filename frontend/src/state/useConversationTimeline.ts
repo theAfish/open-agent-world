@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import type { ConversationMessagePage, RuntimeEvent } from "../types/world";
-import { activeConversationAgentIds } from "./conversationActivity";
+import { activeConversationAgentIds, activeConversationRuns } from "./conversationActivity";
 
 export const CONVERSATION_WINDOW_SIZE = 150;
 const emptyPage: ConversationMessagePage = { items: [], has_before: false, has_after: false };
@@ -50,7 +50,11 @@ export function useConversationTimeline(conversationId: string, sessionId: strin
       const incoming = await worldApi.getConversationTimeline(conversationId, sessionId, cursor);
       if (version !== generation.current || currentScope.current !== scope) return;
       if (direction === "refresh" && !follow.current) {
-        const next = { ...current, active_agent_ids: incoming.active_agent_ids,
+        const next = { ...current,
+          active_agent_ids: incoming.active_agent_ids,
+          active_runs: incoming.active_runs,
+          deliveries: incoming.deliveries,
+          run_summaries: incoming.run_summaries,
           has_after: current.has_after || (incoming.items.at(-1)?.sequence ?? 0) > (current.items.at(-1)?.sequence ?? 0) };
         pageRef.current = next;
         setState({ scope, page: next, activityBoundary });
@@ -71,6 +75,9 @@ export function useConversationTimeline(conversationId: string, sessionId: strin
       const items = direction === "before" ? merged.slice(0, CONVERSATION_WINDOW_SIZE) : merged.slice(-CONVERSATION_WINDOW_SIZE);
       const next = {
         active_agent_ids: incoming.active_agent_ids,
+        active_runs: incoming.active_runs,
+        deliveries: incoming.deliveries,
+        run_summaries: incoming.run_summaries,
         items,
         has_before: direction === "before" || direction === "latest" || tailGap ? incoming.has_before : current.has_before || trimmed,
         has_after: direction === "before" ? current.has_after || trimmed : incoming.has_after,
@@ -158,9 +165,26 @@ export function useConversationTimeline(conversationId: string, sessionId: strin
   const boundaryIndex = state.scope === scope && state.activityBoundary
     ? events.findIndex((event) => event.id === state.activityBoundary) : -1;
   const activityEvents = boundaryIndex < 0 ? events : events.slice(0, boundaryIndex);
-  const activeAgentIds = activeConversationAgentIds(activityEvents, conversationId, sessionId, page.active_agent_ids);
-  return { messages: page.items, activeAgentIds, hasBefore: page.has_before, hasAfter: page.has_after,
+  const activeRuns = activeConversationRuns(
+    activityEvents, conversationId, sessionId, page.active_runs ?? [],
+  );
+  const activeAgentIds = activeRuns.length
+    ? [...new Set(activeRuns.map((run) => run.agent_id))]
+    : activeConversationAgentIds(activityEvents, conversationId, sessionId, page.active_agent_ids);
+  return {
+    messages: page.items,
+    activeAgentIds,
+    activeRuns,
+    deliveries: page.deliveries ?? [],
+    runSummaries: page.run_summaries ?? {},
+    hasBefore: page.has_before,
+    hasAfter: page.has_after,
     showLatest: state.scope === scope && (awayFromBottom || page.has_after),
-    loading, error, onScroll, loadOlder: () => load("before"), loadNewer: () => load("after"),
-    loadLatest: () => load("latest") };
+    loading,
+    error,
+    onScroll,
+    loadOlder: () => load("before"),
+    loadNewer: () => load("after"),
+    loadLatest: () => load("latest"),
+  };
 }

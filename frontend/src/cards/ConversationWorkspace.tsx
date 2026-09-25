@@ -1,6 +1,8 @@
 import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
 import { t, useLocale } from "../i18n";
 import { useConversationTimeline } from "../state/useConversationTimeline";
+import { useRunActivity } from "../state/useRunActivity";
+import { RunActivityDetails, RunActivityStream } from "./RunActivityStream";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { ConversationAttachments } from "./ConversationAttachments";
 import { ConversationActions } from "./ConversationActions";
@@ -50,10 +52,6 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
         || event.type === "conversation_session_created"
         || event.type === "conversation_session_updated"
         || event.type === "conversation_session_deleted"
-        || event.type === "agent_status_changed"
-        || event.type === "agent_started"
-        || event.type === "run_started"
-        || event.type === "run_resumed"
         || event.type === "run_succeeded"
         || event.type === "run_failed"
         || event.type === "run_cancelled"
@@ -84,6 +82,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const [uploading, setUploading] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const [outgoing, setOutgoing] = useState<OutgoingMessage[]>([]);
+  const [stoppingRuns, setStoppingRuns] = useState<Set<string>>(() => new Set());
   const revealOutgoing = useRef(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string>();
   const [creatingGroup, setCreatingGroup] = useState(false);
@@ -160,7 +159,9 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       revealOutgoing.current = false;
     }
   }, [outgoing]);
-  const respondingAgents = participants.filter((agent) => history.activeAgentIds.includes(agent.id));
+  const activeRuns = history.activeRuns;
+  const runActivities = useRunActivity(card.id, activeSessionId, runtimeEvents, activeRuns, history.runSummaries);
+  const deliveryAgents = new Map(agents.map((agent) => [agent.id, agent.name]));
   const activeGroupId = activeSession?.group_id ?? activeSession?.id;
   const groups = [...new Map(sessions.map((session) => [session.group_id ?? session.id, session])).values()];
   const groupSessions = sessions.filter((session) => (session.group_id ?? session.id) === activeGroupId);
@@ -323,7 +324,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
 
   const submit = async () => {
     const content = draft.trim();
-    if ((!content && attachments.length === 0) || !activeSession || busy || uploading) return;
+    if ((!content && attachments.length === 0) || !activeSession || uploading) return;
     const targets = resolveConversationTargets(content, participants, selectedAgentId);
     const messageId = crypto.randomUUID();
     const message: ConversationMessage = {
@@ -337,7 +338,6 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     setDraft("");
     setAttachments([]);
     setMentionCaret(undefined);
-    setBusy(true);
     try {
       const result = await worldApi.postConversationMessage(card.id, activeSession.id, {
         content,
@@ -363,8 +363,20 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
         ? { ...item, status: "unconfirmed", error: apiErrorMessage(reason) } : item));
       if (selectedScope.current === `${card.id}/${message.session_id}`) void history.loadLatest();
       pushToast({ tone: "error", title: t("Send could not be confirmed"), detail: apiErrorMessage(reason) });
-    } finally {
-      setBusy(false);
+    }
+  };
+
+  const stopRun = async (runId: string) => {
+    setStoppingRuns((current) => new Set(current).add(runId));
+    try {
+      await worldApi.cancelRun(runId);
+    } catch (reason) {
+      setStoppingRuns((current) => {
+        const next = new Set(current);
+        next.delete(runId);
+        return next;
+      });
+      pushToast({ tone: "error", title: t("Run could not be stopped"), detail: apiErrorMessage(reason) });
     }
   };
 
@@ -511,16 +523,26 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
           {error || history.error ? <div role="alert"><p>{error ?? history.error}</p><button type="button" onClick={() => void history.loadLatest()}>{t("Retry history")}</button></div> : null}
           {history.hasBefore ? <button type="button" disabled={history.loading} onClick={() => void history.loadOlder()}>{t("Load older messages")}</button> : null}
           {history.loading ? <div className="sr-only" role="status">{t("Loading messages...")}</div> : null}
-          {!error && messages.length === 0 && respondingAgents.length === 0 && !history.loading ? (
+          {!error && messages.length === 0 && activeRuns.length === 0 && !history.loading ? (
             <div className="workspace-welcome"><span><MessageSquare size={22} /></span><strong>{t("This session is ready")}</strong><p>{t("Select a participant, type an explicit @name, or keep an unaddressed note.")}</p></div>
           ) : null}
           {messages.map((message) => (
             <article className={`workspace-message is-${message.sender_kind}`} key={message.id} data-message-id={message.id}>
               <span>{message.sender_kind === "agent" ? <Bot size={13} /> : message.sender_kind === "system" ? <Info size={13} /> : <UserRound size={13} />}</span>
-              <div><strong>{message.sender_name}</strong>{message.kind?.startsWith("tool_")
-                ? <details className="conversation-tool-message"><summary>{message.content.split("\n")[0]}</summary><pre>{message.content.split("\n").slice(1).join("\n").trim() || t("No additional details")}</pre></details>
-                : message.content ? (message.sender_kind === "agent" ? <MarkdownMessage content={message.content} /> : <p>{message.content}</p>) : null}
+              <div><strong>{message.sender_name}</strong>
+                {message.run_id && (history.runSummaries[message.run_id] || runActivities.get(message.run_id)?.items.length) ?
+                  <RunActivityDetails run={history.runSummaries[message.run_id]} activity={runActivities.get(message.run_id)}
+                    finalReply={message.sender_kind === "agent" && message.is_final !== false ? message.content : undefined} /> : null}
+                {message.kind?.startsWith("tool_")
+                  ? <details className="conversation-tool-message"><summary>{message.content.split("\n")[0]}</summary><pre>{message.content.split("\n").slice(1).join("\n").trim() || t("No additional details")}</pre></details>
+                  : message.content ? (message.sender_kind === "agent" ? <MarkdownMessage content={message.content} /> : <p>{message.content}</p>) : null}
                 {message.attachments?.length ? <ConversationAttachments conversationId={card.id} sessionId={message.session_id} files={message.attachments} /> : null}
+                {message.sender_kind === "user" ? (() => {
+                  const queued = history.deliveries.filter((delivery) => delivery.message_id === message.id && delivery.status === "queued");
+                  if (!queued.length) return null;
+                  const names = queued.map((delivery) => deliveryAgents.get(delivery.agent_id) ?? delivery.agent_id);
+                  return <small className="conversation-delivery-state" role="status">{t("Queued for {v0}", { v0: names.join(", ") })}</small>;
+                })() : null}
                 {visibleOutgoing.find((item) => item.message.id === message.id)?.status === "sending" ? <small className="conversation-delivery-state" role="status">{t("Sending...")}</small> : null}
                 {visibleOutgoing.find((item) => item.message.id === message.id)?.status === "unconfirmed" ? <div className="conversation-delivery-state is-error" role="alert">
                   <span>{t("Send not confirmed. Your text is kept here.")}</span>
@@ -535,16 +557,20 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
             </article>
           ))}
           {history.hasAfter ? <button type="button" disabled={history.loading} onClick={() => void history.loadNewer()}>{t("Load newer messages")}</button> : null}
-          {!error ? respondingAgents.map((agent) => (
-            <article className="workspace-message is-agent is-responding" key={`responding-${agent.id}`} data-responding-agent-id={agent.id} aria-label={t("{v0} is responding", { v0: String(agent.name) })}>
-              <span><Bot size={13} /></span>
-              <div>
-                <strong>{agent.name}</strong>
-                <div className="conversation-typing-bubble" aria-hidden="true"><i /><i /><i /></div>
-                <span className="sr-only">{agent.name} {t("is responding")}</span>
-              </div>
-            </article>
-          )) : null}
+          {!error ? activeRuns.map((run) => {
+            const agent = agents.find((item) => item.id === run.agent_id);
+            const stopping = stoppingRuns.has(run.run_id);
+            return (
+              <article className="workspace-message is-agent is-responding" key={run.run_id}
+                data-responding-agent-id={run.agent_id}
+                aria-label={t("{v0} is responding", { v0: String(agent?.name ?? run.agent_id) })}>
+                <span title={agent?.name}><Bot size={13} /></span>
+                <RunActivityStream activity={runActivities.get(run.run_id)} active
+                  waiting={run.status === "waiting"} stopping={stopping}
+                  onStop={() => void stopRun(run.run_id)} />
+              </article>
+            );
+          }) : null}
           </div>
         </div>
         {history.showLatest ? <button type="button" className="conversation-latest" aria-label={t("Jump to latest")} title={t("Jump to latest")} disabled={history.loading} onClick={() => void history.loadLatest()}><ArrowDown size={18} aria-hidden="true" /></button> : null}
@@ -611,9 +637,9 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
             </div>
           ) : null}
           <footer>
-            <button type="button" aria-label={uploading ? t("Uploading files") : t("Attach files")} title={t("Attach files")} disabled={!activeSession || busy || uploading} onClick={() => fileInput.current?.click()}>{uploading ? <LoaderCircle size={14} /> : <Paperclip size={14} />}</button>
+            <button type="button" aria-label={uploading ? t("Uploading files") : t("Attach files")} title={t("Attach files")} disabled={!activeSession || uploading} onClick={() => fileInput.current?.click()}>{uploading ? <LoaderCircle size={14} /> : <Paperclip size={14} />}</button>
             <span>{selectedAgentId ? `Default: @${agents.find((item) => item.id === selectedAgentId)?.name}` : t("No default recipient")} {t("· Enter to send · Shift+Enter for new line")}</span>
-            <button type="button" onClick={() => void submit()} disabled={(!draft.trim() && attachments.length === 0) || !activeSession || busy || uploading} aria-label={t("Send message")}><Send size={14} /></button>
+            <button type="button" onClick={() => void submit()} disabled={(!draft.trim() && attachments.length === 0) || !activeSession || uploading} aria-label={t("Send message")}><Send size={14} /></button>
           </footer>
         </div>
       </main>

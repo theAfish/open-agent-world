@@ -40,6 +40,9 @@ jobs:
         with:
           python-version: '3.12'
       - uses: astral-sh/setup-uv@v6
+      - name: Require official Marketplace binding for tagged releases
+        if: github.ref_type == 'tag'
+        run: python scripts/check-marketplace-release.py
       - name: Sync desktop version from tag
         if: github.ref_type == 'tag'
         shell: python

@@ -1,0 +1,14 @@
+{
+  "name": "@oaw/plugin-api",
+  "version": "1.0.0",
+  "description": "Public Open Agent World frontend Pack types and build contract",
+  "type": "module",
+  "types": "./types/plugins/sdk.d.ts",
+  "exports": {
+    ".": { "types": "./types/plugins/sdk.d.ts", "default": "./host-only.mjs" },
+    "./build": "./build.mjs"
+  },
+  "files": ["types", "build.mjs", "host-only.mjs", "README.md"],
+  "dependencies": { "esbuild": "^0.24.2" },
+  "peerDependencies": { "react": "^18.3.1", "react-dom": "^18.3.1", "@types/react": "^18.3.0", "@types/react-dom": "^18.3.0", "@xyflow/react": "^12.8.5", "zustand": "^5.0.2" }
+}

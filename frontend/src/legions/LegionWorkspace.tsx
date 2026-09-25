@@ -182,7 +182,7 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
     setSelected(view); setDragging(true);
   };
 
-  return <dialog ref={dialog} className="legion-workspace" aria-label={t('{v0} workspace mode', { v0: card.name })}
+  return <dialog ref={dialog} className="legion-workspace" data-legion-workspace={card.id} aria-label={t('{v0} workspace mode', { v0: card.name })}
     onCancel={event => { event.preventDefault(); if (event.target !== event.currentTarget) return; if (drawerCard) setDrawerId(null); else requestClose(); }} onKeyDown={event => event.stopPropagation()}
     onDragEnd={() => { setDragging(false); setSelected(null); }}>
     <header className="legion-window-titlebar">
@@ -191,12 +191,12 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
       <span className="legion-window-status" role="status">{busy ? t('Saving...') : dirty ? t('Unsaved layout') : saved ? t('Layout saved') : ''}</span>
       {actions}
       {!locked && <><PublishApplication card={card} disabled={busy || dirty || editing} />
-      <button className="secondary-button" disabled={busy || (editing && conflict)} onClick={() => { if (editing) finishEditing(); else { setEditing(true); setSelected(null); } }}>
+      <button data-tutorial="legion-edit" className="secondary-button" disabled={busy || (editing && conflict)} onClick={() => { if (editing) finishEditing(); else { setEditing(true); setSelected(null); } }}>
         {editing ? <Check size={13} /> : <Pencil size={13} />}{editing ? t('Done editing') : t('Edit layout')}
       </button>
-      {editing && dirty && <button className="secondary-button" disabled={busy} onClick={reset}>{t('Cancel layout changes')}</button>}
-      {editing && <button className="primary-button" disabled={busy || !dirty || conflict} onClick={() => void save()}><Save size={13} />{busy ? t('Saving...') : t('Save layout')}</button>}
-      <button className="secondary-button" disabled={busy} onClick={requestClose}><ArrowLeft size={14} />{t('Back to canvas')}</button></>}
+      {editing && dirty && <button data-tutorial="legion-reset" className="secondary-button" disabled={busy} onClick={reset}>{t('Cancel layout changes')}</button>}
+      {editing && <button data-tutorial="legion-save" className="primary-button" disabled={busy || !dirty || conflict} onClick={() => void save()}><Save size={13} />{busy ? t('Saving...') : t('Save layout')}</button>}
+      <button data-tutorial="legion-back" className="secondary-button" disabled={busy} onClick={requestClose}><ArrowLeft size={14} />{t('Back to canvas')}</button></>}
     </header>
     {(error || conflict) && <div className="legion-window-error" role="alert">{error || t('This layout changed elsewhere. Reload it before saving.')}
       {conflict ? <button onClick={reset}>{t('Reload layout')}</button> : !editing && <>
@@ -209,7 +209,7 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
       <button className="secondary-button" onClick={() => setClosing(false)}>{t('Keep editing')}</button>
       <button className="secondary-button" onClick={close}>{t('Discard layout and close')}</button>
     </div>}
-    <div className={`legion-window-main ${editing ? 'is-editing' : ''}`}>
+    <div data-tutorial="legion-layout" className={`legion-window-main ${editing ? 'is-editing' : ''}`}>
       {editing && <aside className="legion-layout-palette" aria-label={t('Workspace cards')}>
         <header><strong>{t('Workspace cards')}</strong><span>{members.length - unplaced.length} / {members.length}</span></header>
         <p>{t('Drop on a title bar to add a tab, or on a region edge to split. You can also select a card and use the docking buttons.')}</p>

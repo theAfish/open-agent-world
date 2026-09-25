@@ -6,6 +6,22 @@ const scope = (id: string): InteractionScope => ({ active: true, busy: false, st
 function el(html: string) { document.body.innerHTML = html; return document.body.firstElementChild!; }
 afterEach(() => { document.body.innerHTML = ''; });
 describe('tutorial interaction ownership', () => {
+  it('forms only the three tutorial cards and keeps workspace guidance inside its owner', () => {
+    const current = { ...scope('legion-form'), refs: { agent: 'a', conversation: 'c', sandbox: 's', legion: 'g' }, selectedIds: ['a', 'c'] };
+    const form = el('<button data-tutorial="legion-selection" />');
+    expect(tutorialAllows(form, current)).toBe(false);
+    current.selectedIds = ['a', 'c', 'other'];
+    expect(tutorialAllows(form, current)).toBe(false);
+    current.selectedIds = ['a', 'c', 's'];
+    expect(tutorialAllows(form, current)).toBe(true);
+    const workspace = { ...current, step: STEPS.find(step => step.id === 'legion-layout')! };
+    const dock = el('<dialog data-legion-workspace="g"><div class="legion-layout-stage"><button /></div></dialog>').querySelector('button')!;
+    expect(tutorialAllows(dock, workspace)).toBe(true);
+    dock.closest('dialog')!.setAttribute('data-legion-workspace', 'other');
+    expect(tutorialAllows(dock, workspace)).toBe(false);
+    const hint = el('<dialog data-legion-workspace="g"><div class="tutorial-guide"><button /></div></dialog>').querySelector('button')!;
+    expect(tutorialAllows(hint, workspace)).toBe(true);
+  });
   it('excludes unrelated automatic glue and connection targets', () => {
     let current = { ...scope('glue'), refs: { glueA: 'a', glueB: 'b' } } as InteractionScope;
     const remove = installTutorialInteractionGuard(() => current, () => {});

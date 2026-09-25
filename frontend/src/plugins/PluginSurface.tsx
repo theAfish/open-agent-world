@@ -21,7 +21,7 @@ class PluginBoundary extends Component<{ children: ReactNode }, { error: string 
   state: { error: string | null } = { error: null };
   static getDerivedStateFromError(error: unknown) { return { error: error instanceof Error ? error.message : String(error) }; }
   render() {
-    return this.state.error ? <div role="alert" className="mini-empty">{t("Plugin view unavailable:")} {this.state.error}</div> : this.props.children;
+    return this.state.error ? <div role="alert" className="mini-empty">{t("Pack view unavailable:")} {this.state.error}</div> : this.props.children;
   }
 }
 
@@ -34,6 +34,7 @@ export function PluginSurface({ card, slot, level, children }: {
   const inWorkspace = useContext(WorkspaceSurfaceContext);
   const covered = useLegionWorkspace(s => Boolean(s.activeId));
   const definition = useWorldStore((s) => s.catalog.node_types.find((d) => d.id === card.type));
+  const runtime = useWorldStore((s) => definition ? s.catalog.frontend_modules?.[definition.plugin_id] : undefined);
   const updateCard = useWorldStore((s) => s.updateCard);
   const source = useWorldStore(s=>xrdCanvasSource(card,s.cards,s.edges));
   const viewCard = useMemo(()=>source?{...card,config:{...card.config,source_node_id:source}}:card,[card,source]);
@@ -168,9 +169,9 @@ export function PluginSurface({ card, slot, level, children }: {
   const reference = definition?.frontend?.[slot];
   if (covered && !inWorkspace && card.type.startsWith('xrd.')) return null;
   if (!reference || !definition) return <>{children}</>;
-  const View = pluginView(definition.plugin_id, reference);
-  return <PluginBoundary key={`${card.id}:${definition.plugin_id}:${reference}:${card.state_scope}:${sessionId ?? ""}`}>
-    <Suspense fallback={<p role="status">{t("Loading plugin view...")}</p>}>
+  const View = pluginView(definition.plugin_id, reference, runtime);
+  return <PluginBoundary key={`${card.id}:${definition.plugin_id}:${runtime?.version}:${reference}:${card.state_scope}:${sessionId ?? ""}`}>
+    <Suspense fallback={<p role="status">{t("Loading Pack view...")}</p>}>
       <View card={viewCard} definition={definition} level={level} host={host} />
     </Suspense>
   </PluginBoundary>;

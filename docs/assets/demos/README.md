@@ -10,6 +10,12 @@ Captured on 2026-09-14 from the running OAW web app in Microsoft Edge, at 1600 �
 | Connect agents / 连接智能体 | [7.4 s](connect-cards.gif) | [PNG](connect-cards.png) |
 | Tasks and dependencies / 任务与依赖 | [7.9 s](task-dependencies.gif) | [PNG](task-dependencies.png) |
 | Connected structure viewer / 文件与三维结构联动 | [7.3 s](structure-viewer.gif) | [PNG](structure-viewer.png) |
+| Legion on the canvas / Legion 画布分组 | — | [Light / 浅色](legion-canvas.png) · [Dark / 深色](legion-canvas-dark.png) |
+| Legion Workspace / Legion 工作区 | — | [Light / 浅色](legion-workspace.png) · [Dark / 深色](legion-workspace-dark.png) |
+
+The four Legion screenshots were captured on 2026-09-21 at 1600 × 1000. They show the same five-card Research studio on the canvas and in Workspace mode: the brief, conversation and Task Board occupy live panels while the two Agents remain available in the Legion. Messages and task progress are prepared example data.
+
+四张 Legion 截图于 2026-09-21 从真实界面截取，尺寸为 1600 × 1000。同一个 Research studio 在画布上包含五张卡片，工作区中展示项目说明、对话和任务板，两个 Agent 仍保留在 Legion 内。消息和任务进度均为预先准备的示例数据。
 
 ## Recording notes / 录制说明
 
@@ -21,6 +27,16 @@ Captured on 2026-09-14 from the running OAW web app in Microsoft Edge, at 1600 �
 素材来自独立演示工作区中的真实界面，使用预先准备的示例内容。录制展示连线、任务操作和文件预览，不代表真实模型回答或沙箱执行。动图在关键步骤适当停留，方便阅读。
 
 ## Recreating the scenes
+
+To regenerate the Legion screenshots, run from `frontend` in PowerShell:
+
+```powershell
+$env:OAW_CAPTURE_README = '1'
+node scripts/run-e2e.mjs e2e/readme-legion.spec.ts
+Remove-Item Env:OAW_CAPTURE_README
+```
+
+The runner uses its isolated test profile. Without the environment variable, images go to test results. The host integration check verifies retained connections, live panel contents and the saved layout.
 
 Use a fresh profile with the local mock runtime; see [Getting started](../../getting-started.md#try-without-model-credentials).
 

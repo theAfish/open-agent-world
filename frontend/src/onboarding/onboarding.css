@@ -1,5 +1,10 @@
 .onboarding-layer { position: absolute; inset: 0; z-index: 34; pointer-events: none; }
 .onboarding-layer.is-settings-guide { position: fixed; z-index: 85; }
+.legion-workspace.has-tutorial-guide .legion-window-main { margin-right: 284px; }
+.legion-workspace > .onboarding-layer { position: fixed; }
+@media (max-width: 1099px) {
+  .legion-workspace.has-tutorial-guide .legion-window-main { margin-right: 0; margin-bottom: var(--tutorial-guide-height, 356px); }
+}
 .onboarding-logo-ring { position: absolute; width: 160px; height: 160px; left: calc(50% - 80px); top: min(72px, 9%); transition: opacity .7s ease, transform 1.1s ease; }
 .onboarding-logo-ring.has-entered { opacity: 0; transform: scale(.92); }
 .onboarding-welcome { position: absolute; left: 50%; top: calc(38% + 65px); width: min(430px, calc(100% - 40px)); transform: translateX(-50%); text-align: center; pointer-events: auto; }

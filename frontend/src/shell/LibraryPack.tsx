@@ -21,6 +21,7 @@ export function LibraryPack({ pack, snapshot, onOpened, onBrowse }: {
   const available = snapshot.available_pack_ids.includes(definition.id);
   const canOpen = !library.busy && phase === "idle" && available && pack.owned && !pack.opened;
   const artwork = definition.artwork_url && definition.artwork_url !== failedArtwork ? definition.artwork_url : null;
+  const presetCount = Object.values(snapshot.preset_pack_ids ?? {}).filter(ids => ids.includes(definition.id)).length;
   const cards = definition.cards.slice(0, 3).map(id => snapshot.card_definitions[id]);
   const color = definition.accent_color ?? cards.find(card => card?.color)?.color ?? "#617b72";
   useEffect(() => {
@@ -38,7 +39,7 @@ export function LibraryPack({ pack, snapshot, onOpened, onBrowse }: {
       onOpened(definition.id);
     } else setPhase("idle");
   };
-  const unavailable = !plugin?.installed ? t("Plugin uninstalled") : !plugin.enabled ? t("Plugin disabled") : !available ? t("Pack unavailable") : !pack.owned ? t("Not owned") : "";
+  const unavailable = !plugin?.installed ? t("Pack uninstalled") : !plugin.enabled ? t("Pack disabled") : !available ? t("Pack unavailable") : !pack.owned ? t("Not owned") : "";
   return <article aria-label={definition.name} data-pack-id={definition.id} className={`library-pack ${pack.opened ? "is-opened" : ""} is-${phase}`} style={{ "--pack-color": color } as CSSProperties}>
     <button className="pack-touch-area" {...tilt} aria-label={`${pack.opened || !available ? t("View cards in") : t("Tear open")} ${definition.name}`}
       title={phase === "pending" ? t("Opening…") : pack.opened ? t("View {v0} cards", { v0: String(definition.name) }) : unavailable || t("Open {v0}", { v0: String(definition.name) })}
@@ -63,7 +64,7 @@ export function LibraryPack({ pack, snapshot, onOpened, onBrowse }: {
             <span className="pack-emblem"><CatalogIcon definition={cards[0]} size={38} /></span>
             <span className="pack-title">{definition.name}</span>
             <span className="pack-subtitle">{definition.description || t("A collection of possibilities.")}</span>
-            <span className="pack-print-footer"><b>{String(definition.cards.length).padStart(2, "0")} <small>{t("CARDS")}</small></b><span>{t("OPEN AGENT")}<br />{t("WORLD")}</span></span>
+            <span className="pack-print-footer"><b>{String(definition.cards.length + presetCount).padStart(2, "0")} <small>{t("CARDS")}</small></b><span>{t("OPEN AGENT")}<br />{t("WORLD")}</span></span>
           </span>
           <span className="pack-foil" />
         </span>

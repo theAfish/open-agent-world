@@ -6,6 +6,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import { useCardLibrary } from '../state/cardLibrary';
 import { useWorldStore } from '../state/worldStore';
 import { useNodeSurfaceStore } from '../state/nodeSurfaces';
+import { useLegionWorkspace } from '../state/legionWorkspace';
 import { beginGlueEdit, glueGroup, persistGlue, useGlueStore } from '../state/glue';
 import { nodePositionFromSurfacePosition } from '../canvas/nodeDisplacement';
 import { OawGuide, type GuideMotion } from './OawGuide';
@@ -65,6 +66,17 @@ export function Onboarding() {
   const sync = useWorldStore(w => w.syncState);
   const cards = useWorldStore(w => w.cards);
   const surfaces = useNodeSurfaceStore(w => w.surfaceLevels);
+  const activeWorkspaceId = useLegionWorkspace(w => w.activeId);
+  const workspaceId = cards.some(card => card.id === activeWorkspaceId && card.type === 'legion') ? activeWorkspaceId : undefined;
+  const [workspaceHost, setWorkspaceHost] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    setWorkspaceHost(workspaceId ? document.querySelector<HTMLElement>(`dialog[data-legion-workspace="${CSS.escape(workspaceId)}"]`) : null);
+  }, [workspaceId]);
+  useLayoutEffect(() => {
+    if (!workspaceHost || s.view === 'hidden') return;
+    workspaceHost.classList.add('has-tutorial-guide');
+    return () => { workspaceHost.classList.remove('has-tutorial-guide'); workspaceHost.style.removeProperty('--tutorial-guide-height'); };
+  }, [workspaceHost, s.view]);
   const flow = useReactFlow<CanvasNode>();
   const [compact, setCompact] = useState(false);
   const [rightGuide, setRightGuide] = useState(false);
@@ -291,6 +303,12 @@ export function Onboarding() {
   }, [step.id, flow]);
 
   const targetElement = useCallback((target: Target) => {
+    if (target.startsWith('legion-')) {
+      const control = document.querySelector<HTMLElement>(`[data-tutorial="${target}"]`);
+      if (control) return control;
+      const id = useTutorialStore.getState().session?.refs.legion;
+      return id ? nodeElement(id)?.querySelector<HTMLElement>('[data-tutorial="legion-open"]') ?? nodeElement(id) : null;
+    }
     if (target === 'library' || target.startsWith('library-')) {
       const library = useCardLibrary.getState();
       if (!library.open || target === 'library') return document.querySelector<HTMLElement>('[data-tutorial="library"]');
@@ -345,7 +363,13 @@ export function Onboarding() {
       const participants = (step.participants ?? []).flatMap(role => {
         const element = targetElement(role); return element ? [{ id: role, element }] : [];
       });
-      const subjects = [...participants, ...(element && !participants.some(item => item.element === element) ? [{ id: target, element }] : [])];
+      const subjects: { id: string; element: HTMLElement }[] = [...participants, ...(element && !participants.some(item => item.element === element) ? [{ id: target, element }] : [])];
+      const liveLayout = step.id === 'legion-return' ? document.querySelector<HTMLElement>('[data-tutorial="legion-layout"]') : null;
+      if (liveLayout) subjects.push({ id: 'legion-layout', element: liveLayout });
+      if (step.id === 'legion-layout') {
+        for (const element of document.querySelectorAll<HTMLElement>('[data-tutorial="legion-edit"], [data-tutorial="legion-save"]'))
+          subjects.push({ id: element.dataset.tutorial!, element });
+      }
       const ministerControls = target === 'minister' && s.session?.refs.minister
         ? [...document.querySelectorAll<HTMLElement>(`[data-minister-for="${CSS.escape(s.session.refs.minister)}"], [data-tutorial-card-id="${CSS.escape(s.session.refs.minister)}"]`)]
           .filter(control => !control.hidden).map((element, i) => ({ id: `minister-control-${i}`, element })) : [];
@@ -398,7 +422,7 @@ export function Onboarding() {
         }
       }
       const pair = step.participants?.map(role => useTutorialStore.getState().session?.refs[role]);
-      let route = pair?.[0] && pair[1] ? connectionGeometry(pair[0], pair[1]) : undefined;
+      let route = pair?.length === 2 && pair[0] && pair[1] ? connectionGeometry(pair[0], pair[1]) : undefined;
       if (route && step.participants?.[0] === 'glueA' && participants.length === 2) {
         const [a, b] = participants.map(item => item.element.getBoundingClientRect());
         // Physical sticking has no capability curve. A simple corridor stays
@@ -450,6 +474,13 @@ export function Onboarding() {
         anchor.current = { ...placed, key };
         x = placed.x; y = placed.y;
       }
+      if (workspaceHost) {
+        // Reserve space inside the native modal so guidance never covers docking controls.
+        const bubbleHeight = guide.current?.querySelector<HTMLElement>('.tutorial-bubble')?.offsetHeight ?? 220;
+        workspaceHost.style.setProperty('--tutorial-guide-height', `${bubbleHeight + 136}px`);
+        x = width - 278;
+        y = width >= 1100 ? 80 + bubbleHeight : height - 142;
+      }
       setPosition(previous => Math.abs(previous.x - x) + Math.abs(previous.y - y) > 1 ? { x, y } : previous);
       const now = performance.now();
       const trip = travel.current!.update({ x, y }, now - lastTime, welcome || s.view === 'paused' || reducedMotion());
@@ -474,7 +505,7 @@ export function Onboarding() {
     }
     place();
     return () => { cancelAnimationFrame(frame); highlighted.forEach(element => element.removeAttribute('data-tutorial-highlight')); };
-  }, [welcome, libraryOpen, s.view, target, step.id, step.participants, targetElement, flow, connectionGeometry, cards.length]);
+  }, [welcome, libraryOpen, workspaceHost, s.view, target, step.id, step.participants, targetElement, flow, connectionGeometry, cards.length]);
 
   if (s.view === 'hidden') return <QuickStartGuide />;
   const motion: GuideMotion = welcome || s.view === 'paused' ? 'idle' : s.busy ? 'think' : step.id === 'enter' ? 'enter' : step.expects ? 'indicate' : 'speak';
@@ -485,7 +516,8 @@ export function Onboarding() {
   const needsConnection = settingsStep && step.target !== 'model-connection' && resolvedTarget === 'model-connection';
   const waitingForTarget = settingsStep && (needsSettings || needsModelsTab || needsConnection);
   const libraryStep = step.target === 'library' || step.target.startsWith('library-');
-  const dialogue = libraryStep && !libraryOpen && step.id !== 'deck' ? 'Open the Library again to continue preparing your deck.' : needsSettings ? 'Click settings to continue setting up your model.'
+  const dialogue = ['legion-layout', 'legion-return'].includes(step.id) && !workspaceId ? 'Open Workspace mode again to continue arranging your Legion.'
+    : libraryStep && !libraryOpen && step.id !== 'deck' ? 'Open the Library again to continue preparing your deck.' : needsSettings ? 'Click settings to continue setting up your model.'
     : needsModelsTab ? 'Click Models here.'
     : needsConnection ? 'Add or select a connection first.' : reviewing ? step.result!.dialogue : step.dialogue;
   const missing = role && step.expects !== 'place' && step.expects !== 'delete' && !cards.some(card => card.id === s.session?.refs[role]);
@@ -542,5 +574,5 @@ export function Onboarding() {
       </div>}
       <div className="tutorial-mascot"><div className="tutorial-portal" aria-hidden="true" /><div className="tutorial-traveler"><OawGuide motion={motion} inLogo={welcome} movementTarget={guide} celebration={s.celebration} /></div></div>
     </div>
-  </div>, document.body);
+  </div>, workspaceHost ?? document.body);
 }

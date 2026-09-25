@@ -43,6 +43,10 @@ async def edit_library(request: LibraryEdit, services: ApplicationServices = Dep
     # unrelated world cleanup. Only disabling changes runtime availability.
     disabling = request.action == "set_plugin_enabled" and request.enabled is False
     async with services._node_mutation(read_only=not disabling):
+        if (request.action == "set_plugin_enabled" and request.enabled
+                and request.id in services.plugins.installed_packs
+                and request.id not in services.pack_installations.selected()):
+            raise ConflictError("This Pack is scheduled for uninstall. Select an installed version and restart OAW before enabling it.")
         if request.action == "set_plugin_enabled" and request.enabled is False:
             usages = plugin_usage(services, request.id or "")
             if usages:

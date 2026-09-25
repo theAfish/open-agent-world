@@ -5,6 +5,7 @@ import { buildCardDraft } from "./helpers";
 import { TEST_CATALOG } from "./catalog.fixture";
 import { mergeEdges, useWorldStore } from "./worldStore";
 import { useNodeSurfaceStore } from "./nodeSurfaces";
+import { useCardLibrary } from "./cardLibrary";
 
 function card(id: string, type: WorldCard["type"]): WorldCard {
   return { id, ...buildCardDraft(type, { x: 0, y: 0 }) };
@@ -39,6 +40,13 @@ function deferred<T>() {
 describe("authoritative world synchronization", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    useCardLibrary.setState({ busy: false, snapshot: {
+      schema_version: 1, revision: 1, migration_pending: false, plugins: {}, packs: {},
+      card_definitions: {}, decks: [], active_deck_id: "", available_card_ids: [], available_pack_ids: [],
+      collection: Object.fromEntries(TEST_CATALOG.node_types.map(card => [card.id, {
+        card_id: card.id, plugin_id: card.plugin_id, source_pack_ids: [], unlocked: true, unlocked_at: "",
+      }])),
+    } });
     useNodeSurfaceStore.setState({ surfaceLevels: {}, baseLevels: {}, presentations: {}, dragging: false, connectingNodeId: undefined });
     vi.spyOn(worldApi, "getModelConnections").mockResolvedValue({ revision: 0, connections: [], default_model: null });
     vi.spyOn(worldApi, "getCatalog").mockResolvedValue(TEST_CATALOG);
@@ -438,6 +446,10 @@ describe("authoritative world synchronization", () => {
   it("loads server-created toolbox members and includes missing members when deleting", async () => {
     const definition = { ...TEST_CATALOG.node_types.find((node) => node.id === 'legion')!, id: 'test.toolbox', user_creatable: true, traits: [] };
     const toolbox = { ...card('toolbox', 'test.toolbox') };
+    const library = useCardLibrary.getState().snapshot!;
+    useCardLibrary.setState({ snapshot: { ...library, collection: { ...library.collection,
+      'test.toolbox': { card_id: 'test.toolbox', plugin_id: definition.plugin_id, source_pack_ids: [], unlocked: true, unlocked_at: '' },
+    } } });
     const member = { ...card('skill', 'test.skill'), parent_id: toolbox.id };
     useWorldStore.setState({ catalog: { ...TEST_CATALOG, node_types: [...TEST_CATALOG.node_types, definition] } });
     vi.spyOn(worldApi, 'createNode').mockResolvedValue(toolbox);

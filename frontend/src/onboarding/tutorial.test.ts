@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { worldApi } from '../api/client';
 import { useWorldStore } from '../state/worldStore';
 import { useNodeSurfaceStore } from '../state/nodeSurfaces';
+import { useLegionWorkspace } from '../state/legionWorkspace';
 import { useCardLibrary, type LibrarySnapshot } from '../state/cardLibrary';
 import { useGlueStore } from '../state/glue';
 import { reportInteraction } from '../state/interactions';
@@ -28,6 +29,7 @@ beforeEach(() => {
     modelCatalog: { revision: 0, connections: [], default_model: null }, settingsOpen: false,
     historyBusy: false, positionCommitBusy: false, undoStack: [], redoStack: [], cardTombstones: {}, toasts: [], selectedCardIds: [] });
   useNodeSurfaceStore.setState({ surfaceLevels: {}, dragging: false });
+  useLegionWorkspace.setState({ activeId: undefined });
   useGlueStore.setState({ boxes: {}, bonds: [], activeEdits: 0 });
   vi.spyOn(worldApi, 'getWorld').mockResolvedValue(snapshot());
   vi.spyOn(worldApi, 'getGlue').mockResolvedValue({ revision: 1, boxes: {}, bonds: [] });
@@ -35,6 +37,49 @@ beforeEach(() => {
 afterEach(() => { detach?.(); detach = undefined; });
 
 describe('tutorial progression', () => {
+  it('recovers a dissolved Legion by returning to the surviving workflow cards', async () => {
+    const members = [card('a', 'agent'), card('c', 'conversation'), card('s', 'sandbox')];
+    useWorldStore.setState({ cards: members });
+    vi.mocked(worldApi.getWorld).mockResolvedValue(snapshot(members));
+    useTutorialStore.setState({ status: 'started', view: 'active', session: {
+      id: 'recover-legion', step: 'legion-layout', initialIds: [], demos: [], refs: { agent: 'a', conversation: 'c', sandbox: 's', legion: 'gone' },
+    } });
+    const focus = vi.fn(async () => {});
+    tutorial.resume(); detach = tutorial.attach({ ...bridge, focus });
+    await tutorial.recover();
+    expect(useTutorialStore.getState().session?.step).toBe('legion-form');
+    expect(focus).toHaveBeenCalledWith(['a', 'c', 's']);
+    expect(useWorldStore.getState().cards).toEqual(members);
+    expect(useTutorialStore.getState().session?.demos).toEqual([]);
+  });
+
+  it('requires the workflow members, a persisted layout and an explicit workspace close', async () => {
+    const members = [card('a', 'agent'), card('c', 'conversation'), card('s', 'sandbox')];
+    const group = card('g', 'legion');
+    useWorldStore.setState({ cards: [...members, group] });
+    useTutorialStore.setState({ status: 'started', view: 'active', session: {
+      id: 'legion', step: 'legion-form', initialIds: [], demos: [], refs: { agent: 'a', conversation: 'c', sandbox: 's' },
+    } });
+    tutorial.resume(); detach = tutorial.attach(bridge);
+    useWorldStore.setState({ cards: [...members.map((member, index) => index < 2 ? { ...member, parent_id: 'g' } : member), group] });
+    expect(useTutorialStore.getState().session?.step).toBe('legion-form');
+    useWorldStore.setState({ cards: [...members.map(member => ({ ...member, parent_id: 'g' })), group] });
+    expect(useTutorialStore.getState().session?.step).toBe('legion-open');
+    useLegionWorkspace.getState().open('unrelated');
+    expect(useTutorialStore.getState().session?.step).toBe('legion-open');
+    useLegionWorkspace.getState().open('g');
+    expect(useTutorialStore.getState().session?.step).toBe('legion-layout');
+    await tutorial.continue();
+    expect(useTutorialStore.getState().session?.step).toBe('legion-layout');
+    const layout = { version: 2, hidden_sections: [], root: { kind: 'split', axis: 'horizontal', ratio: .5,
+      first: { kind: 'pane', view: { card_id: 'c' } }, second: { kind: 'pane', view: { card_id: 's' } } } };
+    useWorldStore.setState(state => ({ cards: state.cards.map(item => item.id === 'g' ? { ...item, config: { workspace_layout: layout } } : item) }));
+    expect(useTutorialStore.getState().session?.step).toBe('legion-return');
+    expect(stepComplete(STEPS.find(step => step.id === 'legion-return')!, { legion: 'g' }, base, observation({ cards: [group] }))).toBe(false);
+    useLegionWorkspace.getState().close();
+    expect(useTutorialStore.getState().session?.step).toBe('finish');
+  });
+
   it('requires a visible workspace and explicit Continue for window introductions', async () => {
     useWorldStore.setState({ cards: [card('room', 'conversation')] });
     useTutorialStore.setState({ status: 'started', view: 'active', session: {

@@ -6,6 +6,11 @@ This is the detailed plugin contract reference. New authors should follow
 [Build a plugin](developers/index.md), starting with a small working card.
 For everyday use, see [Plugins and packs](user-guide/plugins.md).
 
+For third-party installation in a production/desktop host, use the
+[`.oawpack` distribution contract](pack-distribution.md). It combines one Pack,
+one version and one runtime owner with a dynamically loaded frontend. The source
+plugin contracts below remain the internal runtime and development interface.
+
 ## Using plugins
 
 Plugins add cards, relationships, tools, and runtime integrations. The backend discovers packages under the repository's `plugins/` directory and installed Python entry points at startup. Install only reviewed code: plugins execute inside the trusted backend process.

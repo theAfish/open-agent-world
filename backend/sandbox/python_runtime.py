@@ -24,7 +24,8 @@ from .models import SandboxBusyError, SandboxOperationError, SandboxPreparationE
 # connection. uv still enforces its own connect/read timeouts for stalled I/O.
 PACKAGE_INSTALL_TIMEOUT = 1800
 RUNTIME_SETUP_TIMEOUT = 600
-PREPARATION_TIMEOUT = 60 + RUNTIME_SETUP_TIMEOUT + 2 * PACKAGE_INSTALL_TIMEOUT + 120
+# Setup, uv bootstrap, dependency preflight, and dependency installation.
+PREPARATION_TIMEOUT = 60 + RUNTIME_SETUP_TIMEOUT + 3 * PACKAGE_INSTALL_TIMEOUT + 120
 LAUNCHER_VERSION = 1
 
 
@@ -207,24 +208,31 @@ class SharedPythonRuntime:
             if requirements and (bootstrap_key is None or receipts.get(bootstrap_key) != requirements):
                 uv = self._uv()
                 if uv:
+                    arguments = [uv, "--no-config", "--cache-dir", self.root / "cache", "pip", "install",
+                        "--python", self.installer_python, "--prefix", self.venv,
+                        "--only-binary", ":all:", *requirements]
+                    # Resolve the complete request before modifying working
+                    # packages. Use the same mutation lock across both phases.
+                    self._run([*arguments, "--dry-run"])
                     # Probe only the clean base interpreter. Querying the shared
                     # venv could execute a package's .pth/sitecustomize on the host.
                     # A crash mid-install must trigger repair on the next call.
                     self._write_ready(launchers_ready=False)
                     try:
-                        self._run([uv, "--no-config", "--cache-dir", self.root / "cache", "pip", "install", "--python", self.installer_python,
-                            "--prefix", self.venv,
-                            "--only-binary", ":all:", *requirements])
+                        self._run(arguments)
                     finally:
                         # A failed install may still have written some launchers.
                         self._repair_launchers()
                 else:
                     raise SandboxPreparationError("Install uv on the execution platform to manage shared Python packages safely")
+                # Any mutation invalidates older aggregate receipts, including
+                # interactive package installs between two bootstrap passes.
+                receipts = {}
                 if bootstrap_key is not None:
                     receipts[bootstrap_key] = requirements
-                    temporary = receipts_path.with_suffix(".tmp")
-                    temporary.write_text(json.dumps(receipts), encoding="utf-8")
-                    temporary.replace(receipts_path)
+                temporary = receipts_path.with_suffix(".tmp")
+                temporary.write_text(json.dumps(receipts), encoding="utf-8")
+                temporary.replace(receipts_path)
         return {"kind": self.kind, "python": str(self.python), "requirements": requirements}
 
     def _repair_launchers(self):

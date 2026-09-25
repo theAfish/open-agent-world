@@ -1,5 +1,6 @@
 import { resetTutorialProfile } from './tutorial-profile';
 import { prepareTutorialDeck } from './tutorial-deck';
+import { buildTutorialLegion } from './tutorial-legion';
 import { expect, test, type Page } from '@playwright/test';
 
 test.describe('canvas onboarding', () => {
@@ -282,6 +283,7 @@ test.describe('canvas onboarding', () => {
     await expect(page.locator('.tutorial-guide')).toHaveAttribute('data-moving', 'false');
     await page.screenshot({ path: 'test-results/onboarding-minister.png' });
     await page.getByRole('button', { name: 'Got it', exact: true }).click();
+    await buildTutorialLegion(page, { agent: agentId, conversation: conversationId, sandbox: sandboxId });
     await page.getByRole('button', { name: 'Finish & keep my world', exact: true }).click();
     await expect(page.locator('.onboarding-layer')).toHaveCount(0);
     const remaining = await (await request.get('/api/nodes')).json();

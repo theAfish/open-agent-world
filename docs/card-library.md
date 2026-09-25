@@ -190,7 +190,10 @@ them. Environment bootstrap skips disabled plugins and is queued on re-enable.
 This does not unload trusted Python modules or cancel a dependency installer that
 was already running; full hot-unload requires a separate runtime lifecycle design.
 
-Uninstall means removing the package and restarting. The existing fail-closed
+For installed `.oawpack` files, local Pack management selects uninstall for the
+next restart and blocks new world admissions through the existing enable gate.
+Source-development packages can still be removed from their development path.
+The existing fail-closed
 startup rule still applies if plugin-owned world objects remain. With those objects
 removed, the app retains absent pack/card/deck metadata and restores availability
 on reinstall. A different plugin cannot claim a previously collected card or pack
@@ -198,6 +201,10 @@ ID. Saved Legion compatibility continues through its existing dependency checks.
 
 Future store work can replace the current installation-to-ownership acquisition
 rule without changing deck references. Account ownership, download/install
-orchestration, active-instance suspension, dependency resolution and server-side
+transport, active-instance suspension and server-side
 catalog paging remain separate future work. Current card browsing pages rendered
 results (30 per page) while loading catalog/collection metadata as one snapshot.
+
+Local archive validation, immutable version installation, upgrade/rollback,
+runtime frontend loading and shared Python requirement resolution are implemented
+by the [Pack distribution host](pack-distribution.md).

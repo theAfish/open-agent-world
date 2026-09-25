@@ -2,7 +2,7 @@
 
 **English** | [简体中文](tutorial.zh-CN.md)
 
-An empty world opens with the OAW logo and a choice of starting blueprints: **General assistant**, **Coding workspace**, and **Multi-Agent collaboration**. Each places its connected cards directly on the canvas without a Legion wrapper, using the [Legion template system](legions.md). Saved Legions are also available as starting blueprints. **Start Tutorial** begins the guided walkthrough, while **Start Empty** adds nothing. Missing model setup opens the existing Settings flow with a small resumable guide; no Minister is appointed automatically. The tutorial takes place on the real canvas. It covers navigation, cards, an Agent–Conversation–Sandbox workflow, sticking cards together, and finally promotion of the tutorial's existing Agent into a Minister. The compass button in the world controls replays it.
+An empty world opens with the OAW logo and a choice of starting blueprints: **General assistant**, **Coding workspace**, and **Multi-Agent collaboration**. Each places its connected cards directly on the canvas without a Legion wrapper, using the [Legion template system](legions.md). Saved Legions are also available as starting blueprints. **Start Tutorial** begins the guided walkthrough, while **Start Empty** adds nothing. Missing model setup opens the existing Settings flow with a small resumable guide; no Minister is appointed automatically. The tutorial takes place on the real canvas. It covers navigation, cards, an Agent–Conversation–Sandbox workflow, sticking cards together, promotion of the existing Agent into a Minister, and finally forming a Legion and arranging its Workspace. The compass button in the world controls replays it.
 
 The Minister chapter displays `Agent + Minister role = Minister Agent`. It adds the real Minister role card to the active deck, then guides the user to place it beside their Agent and drag it onto that Agent. The role card is absorbed as the Agent is promoted and contracts to a circular node with a small crown. The user then explores canvas chat and the Minister tab inside the Agent card, where permissions and confirmations live. History remains in the existing Agent workspace. Progress observes the persisted role and actual interactions. Users who skip the tutorial can find the same role card in the Core essentials pack and add it to any deck.
 
@@ -11,6 +11,14 @@ The guide waits for your actions. Its small compass button finds the current sub
 Deck preparation is hands-on: the guide points to the Library, the starter pack, and the opened wrapper. Drag Text, Agent, Conversation, and Sandbox into one chosen deck in the collection sidebar, then activate it to return to the canvas. Clicking Add to opens the same destination choice. The selected deck must contain all four available cards before continuing.
 
 Your placed cards and collected deck entries stay in your world. The guide registers its temporary Text cards and removes unchanged props on finish, skip, or restart. If you edit a prop, connect it, or stick it to your own card, it is kept. Failed cleanup retains its ledger and offers a retry.
+
+## Legion and Workspace
+
+The final chapter brings your existing Agent, Conversation and Sandbox together. Hold **Ctrl** (**⌘** on Mac) and click the three cards, then choose **Form Legion**. The guide recognizes the saved membership and retains existing connections. A Legion starts as a group; team mode is an optional setting for shared instructions and state.
+
+Open **Workspace mode** in the Legion header. Place Conversation first, dock Sandbox beside it, and choose **Done editing**. Dragging and the ordinary selection/docking buttons both work. Agent can remain unplaced. The guide waits for the saved layout, then introduces split panels, tabs and individual card sections before **Back to canvas**. Your Legion and layout survive tutorial cleanup and can later be saved to the library as a reusable setup.
+
+Guidance renders inside the native Workspace dialog, with space reserved beside or below the panels. Pause, resume, skip and recovery remain accessible. After a reload, resume and reopen Workspace mode; a missing Legion returns recovery to grouping the surviving cards.
 
 ## Implementation
 
@@ -30,7 +38,9 @@ From `frontend`, run:
 
 ```sh
 npx vitest run src/onboarding src/state/interactions.test.ts
-node scripts/run-e2e.mjs e2e/onboarding.spec.ts e2e/guide-rig.spec.ts
+node scripts/run-e2e.mjs e2e/onboarding.spec.ts --grep-invert no-preference
+node scripts/run-e2e.mjs e2e/onboarding.spec.ts --grep no-preference
+node scripts/run-e2e.mjs e2e/onboarding-legion.spec.ts e2e/guide-rig.spec.ts
 ```
 
 The browser suite checks welcome choices, a smaller viewport, reload/resume, and the full tutorial with normal and reduced motion. It runs against the existing isolated backend, performs actual gestures, grants real relationships, and checks that the workflow survives prop cleanup. The isolated backend uses its test runtime; these tests do not establish live model quality or native Sandbox execution.

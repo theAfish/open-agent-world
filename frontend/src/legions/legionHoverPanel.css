@@ -1,0 +1,10 @@
+.legion-hover-panel { position: fixed; z-index: 10000; pointer-events: none; width: 280px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: hidden; padding: 12px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-solid); color: var(--ink); box-shadow: var(--panel-shadow); font-size: 12px; }
+.legion-hover-panel header { display: flex; align-items: center; gap: 8px; }
+.legion-hover-panel header strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.legion-hover-panel small, .legion-hover-panel p { color: var(--ink-soft); font-size: 11px; }
+.legion-hover-panel p { margin: 8px 0 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.legion-hover-panel ul { list-style: none; padding: 0; margin: 8px 0 0; }
+.legion-hover-panel li { display: flex; align-items: center; gap: 9px; padding: 6px 0; border-top: 1px solid var(--line); }
+.legion-hover-panel li > svg, .legion-hover-panel li > img { flex-shrink: 0; }
+.legion-hover-panel li div { min-width: 0; }
+.legion-hover-panel li strong, .legion-hover-panel li small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

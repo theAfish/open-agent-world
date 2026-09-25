@@ -32,7 +32,7 @@ Linux, WSL, or macOS:
 
 ```sh
 bash scripts/setup.sh
-python3 scripts/dev.py --agent-runtime core.mock --profile plugin-tutorial
+bash scripts/dev.sh --agent-runtime core.mock --profile plugin-tutorial
 ```
 
 Open the URL printed by the launcher. Ports can change when the usual ones are occupied. Keep the launcher running and stop it with Ctrl+C.

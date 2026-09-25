@@ -108,7 +108,7 @@ Windows:
 Linux/macOS:
 
 ```sh
-python3 scripts/dev.py --agent-runtime core.mock --profile plugin-tutorial
+bash scripts/dev.sh --agent-runtime core.mock --profile plugin-tutorial
 ```
 
 In OAW:

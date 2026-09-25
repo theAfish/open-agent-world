@@ -11,6 +11,7 @@ import sqlite3
 import time
 
 from backend.sandbox.python_runtime import validate_requirements
+from backend.packs.requirements import aggregate_requirements
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class PluginEnvironmentBootstrap:
         self.registry = registry
         self.manager = sandbox_manager
         self.task = None
+        self.rerun = False
         with self.connect() as db:
             db.execute("""CREATE TABLE IF NOT EXISTS plugins (
                 id TEXT PRIMARY KEY, declaration TEXT NOT NULL, digest TEXT NOT NULL,
@@ -64,8 +66,18 @@ class PluginEnvironmentBootstrap:
 
     def enqueue(self):
         self.discover()
+        self.rerun = True
         if self.task is None or self.task.done():
-            self.task = asyncio.create_task(self.run(), name="plugin-environment-bootstrap")
+            self.task = asyncio.create_task(self._drain(), name="plugin-environment-bootstrap")
+
+    async def _drain(self):
+        while self.rerun:
+            self.rerun = False
+            await self.run()
+
+    def requirements(self):
+        return {p.id: self.registry.runtime_requirements.get(p.id, p.python_requirements)
+                for p in self.registry.plugins() if self.registry.is_enabled(p.id)}
 
     def update(self, plugin_id, state, *, error=None, completed=None):
         with self.connect() as db:
@@ -75,29 +87,35 @@ class PluginEnvironmentBootstrap:
                 db.execute("UPDATE plugins SET completed=? WHERE id=?", (json.dumps(completed), plugin_id))
 
     async def run(self):
-        for row in self.records():
-            if not self.registry.is_enabled(row['id']):
-                continue
-            requirements = json.loads(row['declaration'])
-            completed = json.loads(row['completed'])
-            if not requirements:
-                self.update(row['id'], 'environment_ready')
-                continue
-            try:
-                if self.manager is None:
-                    raise RuntimeError("Managed sandbox execution is not configured")
-                targets = [r.id for r in await self.manager.registry.catalog() if r.available]
-                if not targets:
-                    raise RuntimeError("No sandbox execution platform is available for Python bootstrap")
-                for target in targets:
-                    self.update(row['id'], 'environment_pending')
-                    await self.manager.prepare_python(target, requirements, bootstrap_key=row['id'])
+        rows = [row for row in self.records() if self.registry.is_enabled(row['id'])]
+        required = [row for row in rows if json.loads(row['declaration'])]
+        for row in rows:
+            self.update(row['id'], 'environment_pending' if row in required else 'environment_ready')
+        if not required:
+            return
+        try:
+            requirements = aggregate_requirements(self.requirements())
+            if self.manager is None:
+                raise RuntimeError("Managed sandbox execution is not configured")
+            targets = [r.id for r in await self.manager.registry.catalog() if r.available]
+            if not targets:
+                raise RuntimeError("No sandbox execution platform is available for Python bootstrap")
+            for target in targets:
+                # One resolution and mutation for the entire enabled set. Never
+                # mark an individual owner ready after an isolated installation.
+                await self.manager.prepare_python(target, requirements, bootstrap_key="enabled-packs")
+                for row in required:
+                    completed = json.loads(row['completed'])
                     completed[target] = row['digest']
+                    row['completed'] = json.dumps(completed)
                     self.update(row['id'], 'environment_pending', completed=completed)
+            for row in required:
                 self.update(row['id'], 'environment_ready')
-            except Exception as exc:
-                self.update(row['id'], 'environment_failed', error=str(exc))
-                logger.exception("Plugin %s environment bootstrap failed", row['id'])
+        except Exception as exc:
+            owners = ", ".join(row['id'] for row in required)
+            for row in required:
+                self.update(row['id'], 'environment_failed', error=f"Shared Python for {owners}: {exc}")
+            logger.exception("Pack environment bootstrap failed for %s", owners)
 
     async def shutdown(self):
         if self.task is not None:

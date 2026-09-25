@@ -56,7 +56,12 @@ it("exposes saved Legions without deck membership and tracks library changes", (
   fireEvent.click(place);
   expect(instantiate).toHaveBeenCalledWith("saved-team");
   act(() => useWorldStore.setState({ legions: [{ ...legion, compatible: false }] }));
-  expect(screen.getByRole("button", { name: "Research team unavailable" }).getAttribute("aria-disabled")).toBe("true");
+  const unavailable = screen.getByRole("button", { name: "Research team unavailable" });
+  expect(unavailable.getAttribute("aria-disabled")).toBeNull();
+  fireEvent.click(unavailable);
+  expect(useCardLibrary.getState().inspectedEntry).toEqual({ kind: "legion", id: "saved-team" });
+  act(() => useCardLibrary.setState({ open: false, inspectedEntry: null }));
+  fireEvent.click(screen.getByRole("tab", { name: /Legions/ }));
   act(() => useWorldStore.setState({ legions: [] }));
   expect(screen.getByText("No saved Legions")).toBeTruthy();
   expect(screen.getByRole("tab", { name: /Legions/ }).getAttribute("aria-selected")).toBe("true");

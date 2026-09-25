@@ -504,6 +504,293 @@ async def test_agent_message_to_an_active_ancestor_does_not_start_a_second_run(
         services.close()
 
 
+class _QueuedConversationRuntime(MockAgentRuntime):
+    def __init__(self, capability_provider):
+        super().__init__(capability_provider)
+        self.release_first = asyncio.Event()
+        self.started = asyncio.Event()
+        self.prompts: list[str] = []
+
+    async def execute(self, config, context, runtime_input):
+        from backend.agents import AgentEvent, AgentEventType
+        from backend.runs import RunStatus
+
+        self.prompts.append(runtime_input.prompt)
+        self.started.set()
+        if len(self.prompts) == 1:
+            await self.release_first.wait()
+        text = f"Reply {len(self.prompts)}"
+        yield AgentEvent(
+            context.agent_id, context.run_id, AgentEventType.MESSAGE,
+            {"text": text, "final": True},
+        )
+        yield AgentEvent(
+            context.agent_id, context.run_id, AgentEventType.COMPLETED,
+            {"text": text}, run_status=RunStatus.SUCCEEDED,
+        )
+
+
+@pytest.mark.asyncio
+async def test_busy_conversation_agent_queues_and_batches_later_messages(
+    data_root: Path,
+) -> None:
+    from backend.conversations import ConversationPost
+    from backend.runs import TERMINAL_RUN_STATUSES
+
+    settings = Settings.for_data_root(data_root)
+    services = create_services(settings)
+    runtime = _QueuedConversationRuntime(WorldAgentCapabilityProvider(services))
+    services.install_runtime_provider("core.mock", runtime, default=True)
+    try:
+        atlas = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        conversation = await services.create_card(
+            CardCreate(type="conversation", name="Queue room")
+        )
+        await services.create_edge(EdgeCreate(
+            source=atlas.id, target=conversation.id, relationship="participate"
+        ))
+        session = await services.create_conversation_session(
+            conversation.id,
+            ConversationSessionCreate(title="Queue", participant_ids=[atlas.id]),
+        )
+
+        await services.post_conversation_message(
+            conversation.id, session.id,
+            ConversationPost(content="Do A", mention_agent_ids=[atlas.id]),
+        )
+        await asyncio.wait_for(runtime.started.wait(), timeout=2)
+
+        await services.post_conversation_message(
+            conversation.id, session.id,
+            ConversationPost(content="Do not change the schema", mention_agent_ids=[atlas.id]),
+        )
+        await services.post_conversation_message(
+            conversation.id, session.id,
+            ConversationPost(content="Also add tests", mention_agent_ids=[atlas.id]),
+        )
+
+        # User messages are durable immediately even though Run A still owns the
+        # Agent's only slot; no second Run is admitted yet.
+        messages = services.list_conversation_messages(conversation.id, session.id)
+        assert [message.content for message in messages] == [
+            "Do A", "Do not change the schema", "Also add tests",
+        ]
+        manager = services._require_run_manager()
+        assert len(manager.list_runs(agent_id=atlas.id)) == 1
+        pending = services.conversations.page_messages(conversation.id, session.id).deliveries
+        assert [item.status for item in pending].count("queued") == 2
+
+        runtime.release_first.set()
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            runs = manager.list_runs(agent_id=atlas.id)
+            if len(runs) == 2 and all(run.status in TERMINAL_RUN_STATUSES for run in runs):
+                break
+
+        runs = manager.list_runs(agent_id=atlas.id)
+        assert len(runs) == 2
+        assert all(run.status in TERMINAL_RUN_STATUSES for run in runs)
+        assert len(runtime.prompts) == 2
+        assert "Additional messages received while you were working" in runtime.prompts[1]
+        assert "Do not change the schema" in runtime.prompts[1]
+        assert "Also add tests" in runtime.prompts[1]
+        assert services.conversations.page_messages(
+            conversation.id, session.id
+        ).deliveries == []
+
+        # Canonical UI order stays chronological; delivery order is represented
+        # by the Run claim instead of rewriting user messages.
+        history = services.list_conversation_messages(conversation.id, session.id)
+        assert [item.sender_kind for item in history] == [
+            "user", "user", "user", "agent", "agent",
+        ]
+        assert runs[1].lifecycle["delivery_message_ids"]
+        assert len(runs[1].lifecycle["delivery_message_ids"]) == 2
+    finally:
+        await services.shutdown()
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_one_message_creates_independent_deliveries_for_multiple_agents(
+    data_root: Path,
+) -> None:
+    from backend.conversations import ConversationPost
+    from backend.runs import TERMINAL_RUN_STATUSES
+
+    settings = Settings.for_data_root(data_root)
+    services = create_services(settings)
+    runtime = MockAgentRuntime(WorldAgentCapabilityProvider(services))
+    services.install_runtime_provider("core.mock", runtime, default=True)
+    try:
+        atlas = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        river = await services.create_card(CardCreate(type="agent", name="River"))
+        conversation = await services.create_card(
+            CardCreate(type="conversation", name="Multi-agent queue")
+        )
+        for agent in (atlas, river):
+            await services.create_edge(EdgeCreate(
+                source=agent.id, target=conversation.id, relationship="participate"
+            ))
+        session = await services.create_conversation_session(
+            conversation.id,
+            ConversationSessionCreate(
+                title="Multi", participant_ids=[atlas.id, river.id]
+            ),
+        )
+        result = await services.post_conversation_message(
+            conversation.id,
+            session.id,
+            ConversationPost(
+                content="Both of you inspect this",
+                mention_agent_ids=[atlas.id, river.id],
+            ),
+        )
+
+        manager = services._require_run_manager()
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            runs = manager.list_runs()
+            targeted = [run for run in runs if run.agent_id in {atlas.id, river.id}]
+            if len(targeted) == 2 and all(run.status in TERMINAL_RUN_STATUSES for run in targeted):
+                break
+        targeted = [
+            run for run in manager.list_runs()
+            if run.agent_id in {atlas.id, river.id}
+        ]
+        assert {run.agent_id for run in targeted} == {atlas.id, river.id}
+        assert all(run.lifecycle["delivery_message_ids"] == [result.message.id] for run in targeted)
+        assert services.conversations.page_messages(
+            conversation.id, session.id
+        ).deliveries == []
+    finally:
+        await services.shutdown()
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_conversation_run_drains_the_next_queued_turn(
+    data_root: Path,
+) -> None:
+    from backend.conversations import ConversationPost
+    from backend.runs import RunStatus
+
+    settings = Settings.for_data_root(data_root)
+    services = create_services(settings)
+    runtime = _QueuedConversationRuntime(WorldAgentCapabilityProvider(services))
+    services.install_runtime_provider("core.mock", runtime, default=True)
+    try:
+        atlas = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        conversation = await services.create_card(
+            CardCreate(type="conversation", name="Cancel queue")
+        )
+        await services.create_edge(EdgeCreate(
+            source=atlas.id, target=conversation.id, relationship="participate"
+        ))
+        session = await services.create_conversation_session(
+            conversation.id,
+            ConversationSessionCreate(title="Cancel", participant_ids=[atlas.id]),
+        )
+        await services.post_conversation_message(
+            conversation.id, session.id,
+            ConversationPost(content="Long task", mention_agent_ids=[atlas.id]),
+        )
+        await asyncio.wait_for(runtime.started.wait(), timeout=2)
+        await services.post_conversation_message(
+            conversation.id, session.id,
+            ConversationPost(content="Next task", mention_agent_ids=[atlas.id]),
+        )
+        manager = services._require_run_manager()
+        first = manager.list_runs(agent_id=atlas.id)[0]
+        await manager.cancel_run(first.run_id)
+
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            runs = manager.list_runs(agent_id=atlas.id)
+            if len(runs) == 2 and runs[-1].status is RunStatus.SUCCEEDED:
+                break
+        runs = manager.list_runs(agent_id=atlas.id)
+        assert runs[0].status is RunStatus.CANCELLED
+        assert runs[1].status is RunStatus.SUCCEEDED
+        assert "Next task" in runtime.prompts[1]
+        assert services.conversations.page_messages(
+            conversation.id, session.id
+        ).deliveries == []
+    finally:
+        await services.shutdown()
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_restart_requeues_an_interrupted_claimed_delivery(
+    data_root: Path,
+) -> None:
+    from uuid import uuid4
+    from backend.runs import RunStatus
+
+    settings = Settings.for_data_root(data_root)
+    services = create_services(settings)
+    runtime = MockAgentRuntime(WorldAgentCapabilityProvider(services))
+    services.install_runtime_provider("core.mock", runtime, default=True)
+    atlas = await services.create_card(CardCreate(type="agent", name="Atlas"))
+    conversation = await services.create_card(
+        CardCreate(type="conversation", name="Restart queue")
+    )
+    await services.create_edge(EdgeCreate(
+        source=atlas.id, target=conversation.id, relationship="participate"
+    ))
+    session = await services.create_conversation_session(
+        conversation.id,
+        ConversationSessionCreate(title="Restart", participant_ids=[atlas.id]),
+    )
+    message = services.conversations.add_message(
+        conversation.id,
+        session.id,
+        sender_kind="user",
+        sender_id=None,
+        sender_name="You",
+        content="Resume this after restart",
+        mention_agent_ids=[atlas.id],
+        delivery_agent_ids=[atlas.id],
+    )
+    fake_run_id = str(uuid4())
+    manager = services._require_run_manager()
+    manager.store.create(
+        agent_id=atlas.id,
+        run_id=fake_run_id,
+        runtime_provider_id="core.mock",
+        caller_kind="conversation",
+        caller_id=conversation.id,
+        context_id=session.id,
+    )
+    manager.store.update_status(fake_run_id, RunStatus.RUNNING)
+    assert services.deliveries.claim_batch(
+        conversation.id, session.id, atlas.id, fake_run_id, [message.id]
+    ) == [message.id]
+    services.close()
+
+    restored = create_services(settings)
+    restored_runtime = MockAgentRuntime(WorldAgentCapabilityProvider(restored))
+    restored.install_runtime_provider("core.mock", restored_runtime, default=True)
+    try:
+        await restored.startup()
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            history = restored.list_conversation_messages(conversation.id, session.id)
+            if history and history[-1].sender_kind == "agent":
+                break
+        history = restored.list_conversation_messages(conversation.id, session.id)
+        assert [item.sender_kind for item in history] == ["user", "system", "agent"]
+        assert "interrupted by a backend restart" in history[1].content
+        assert "Resume this after restart" in history[-1].content
+        assert restored.conversations.page_messages(
+            conversation.id, session.id
+        ).deliveries == []
+    finally:
+        await restored.shutdown()
+        restored.close()
+
+
 class _ScriptedProvider:
     """Minimal RuntimeProvider double with a scripted execution outcome."""
 
@@ -627,15 +914,20 @@ async def test_empty_successful_conversation_run_persists_a_system_notice(
 
 
 @pytest.mark.asyncio
-async def test_suspended_conversation_run_surfaces_a_wait_notice(
+async def test_suspended_conversation_run_stays_live_without_polluting_history(
     data_root: Path,
 ) -> None:
     services = _scripted_conversation_services(data_root, "waiting")
     try:
         messages = await _post_and_collect_outcome(services)
-        assert [item.sender_kind for item in messages] == ["user", "system"]
-        assert "paused this response to wait on external work" in messages[-1].content
+        assert [item.sender_kind for item in messages] == ["user"]
+        conversation = next(card for card in services.world.list_cards() if card.type == "conversation")
+        session = services.conversations.list_sessions(conversation.id)[0]
+        page = services.conversations.page_messages(conversation.id, session.id)
+        assert len(page.active_runs) == 1
+        assert page.active_runs[0].status == "waiting"
     finally:
+        await services.shutdown()
         services.close()
 
 

@@ -3,9 +3,10 @@ import type { NodeSurfaceLevel } from '../state/nodeSurfaces';
 import type { GlueBond } from '../state/glue';
 import type { LibrarySnapshot } from '../state/cardLibrary';
 import type { WorldInteraction } from '../state/interactions';
+import { paneViews, readWorkspaceLayout } from '../legions/workspaceLayout';
 
-export type Role = 'demo' | 'practice' | 'agent' | 'conversation' | 'sandbox' | 'glueA' | 'glueB' | 'ministerRole' | 'minister';
-export type Target = Role | 'center' | 'terrain' | 'deck' | 'tools' | 'zoom-controls' | 'library' | 'library-pack' | 'library-decks' | 'settings' | 'model-connection' | 'model-credentials' | 'model-list' | 'model-save';
+export type Role = 'demo' | 'practice' | 'agent' | 'conversation' | 'sandbox' | 'glueA' | 'glueB' | 'ministerRole' | 'minister' | 'legion';
+export type Target = Role | 'center' | 'terrain' | 'deck' | 'tools' | 'zoom-controls' | 'library' | 'library-pack' | 'library-decks' | 'settings' | 'model-connection' | 'model-credentials' | 'model-list' | 'model-save' | 'legion-selection' | 'legion-layout' | 'legion-back';
 export type Demonstration = 'library' | 'deck' | 'place' | 'connect' | 'glue' | 'unglue';
 export interface TutorialStep {
   id: string;
@@ -14,16 +15,16 @@ export interface TutorialStep {
   hint?: string;
   target: Target;
   action?: Demonstration;
-  participants?: [Role, Role];
+  participants?: Role[];
   result?: { dialogue: string; target: Target };
   button?: string;
-  expects?: 'library-open' | 'pack-open' | 'library-cards' | 'deck-ready' | 'settings-open' | 'model-connection' | 'models-saved' | 'pan' | 'zoom' | 'place' | 'move' | 'select' | 'open' | 'close' | 'focus' | 'delete' | 'configure' | 'workspace' | 'message' | 'connect' | 'glue' | 'presence' | 'promotion' | 'minister-panel';
+  expects?: 'library-open' | 'pack-open' | 'library-cards' | 'deck-ready' | 'settings-open' | 'model-connection' | 'models-saved' | 'pan' | 'zoom' | 'place' | 'move' | 'select' | 'open' | 'close' | 'focus' | 'delete' | 'configure' | 'workspace' | 'message' | 'connect' | 'glue' | 'presence' | 'promotion' | 'minister-panel' | 'legion' | 'legion-workspace' | 'legion-layout' | 'legion-canvas';
   role?: Role;
   optional?: string;
   review?: boolean;
 }
 
-export const CHAPTERS = ['Find your bearings', 'Make it tangible', 'Build a working world', 'Stick together', 'Meet the Minister'];
+export const CHAPTERS = ['Find your bearings', 'Make it tangible', 'Build a working world', 'Stick together', 'Meet the Minister', 'Build a Legion workspace'];
 export const STEPS: readonly TutorialStep[] = [
   { id: 'enter', chapter: 0, dialogue: 'Oh, hello! There’s a whole world beyond this little ring. Come explore with me.', target: 'center', button: 'Let’s go' },
   { id: 'pan', chapter: 0, dialogue: 'Follow me over here. Drag an empty patch of canvas to move around.', hint: 'Drag the background, away from cards.', target: 'terrain', expects: 'pan' },
@@ -35,7 +36,7 @@ export const STEPS: readonly TutorialStep[] = [
   { id: 'place-demo', result: { target: 'demo', dialogue: 'The Text card is here. Take a moment to look; when you are ready, we will place yours.' }, chapter: 1, dialogue: 'Watch this Text card travel from the deck into the world. This one is my temporary prop.', target: 'deck', action: 'place', button: 'Show me' },
   { id: 'place', chapter: 1, dialogue: 'Your turn! Drag a Text card from the deck onto a clear patch. Clicking the deck card also places it.', target: 'deck', expects: 'place', role: 'practice' },
   { id: 'move', chapter: 1, dialogue: 'Give your card a new home. Drag its title or an empty part of its frame.', target: 'practice', expects: 'move', role: 'practice' },
-  { id: 'select', chapter: 1, dialogue: 'Shift-click selects a card. You can select several this way, too.', target: 'practice', expects: 'select', role: 'practice' },
+  { id: 'select', chapter: 1, dialogue: 'Shift-click selects a card. Later, use Ctrl / ⌘-click to select several cards together.', target: 'practice', expects: 'select', role: 'practice' },
   { id: 'open', chapter: 1, dialogue: 'Now click your card normally to look inside.', target: 'practice', expects: 'open', role: 'practice' },
   { id: 'close', chapter: 1, dialogue: 'The × closes this inspector. The corner arrow folds a preview down to a small node.', hint: 'Close the inspector with × or Escape.', target: 'practice', expects: 'close', role: 'practice' },
   { id: 'focus', chapter: 1, dialogue: 'Lost your place? Select your card, then press F to focus it. The fit-view button can show the whole world.', hint: 'Shift-click your card, then press F outside a text field.', target: 'practice', expects: 'focus', role: 'practice' },
@@ -67,7 +68,12 @@ export const STEPS: readonly TutorialStep[] = [
   { id: 'minister-message', chapter: 4, dialogue: 'Try asking “What cards are inside your circle?” Later, ask it to find a card, arrange your world, or help configure an Agent.', target: 'minister', expects: 'message', role: 'minister', optional: 'Try the model later' },
   { id: 'minister-history', chapter: 4, dialogue: 'Open your Agent card and choose the Minister tab. Its permissions and confirmations live there; history stays in the Agent workspace.', target: 'minister', expects: 'minister-panel', role: 'minister' },
   { id: 'minister-safety', chapter: 4, dialogue: 'You stay in charge. Review sensitive or destructive proposals in the Minister’s confirmations. Its control radius and canvas-edit setting define where it can help.', target: 'minister', button: 'Got it' },
-  { id: 'finish', chapter: 4, dialogue: 'You’ve made a world! Your workflow stays. I’ll tidy my temporary props. Find Replay Tutorial at the compass in the world controls whenever you want another walk.', target: 'center', button: 'Finish & keep my world' },
+  { id: 'legion-intro', chapter: 5, dialogue: 'Let’s give your workflow a home. A Legion groups cards while keeping their connections. Team mode is optional: enable it later for shared instructions and team state.', target: 'center', button: 'Build my Legion' },
+  { id: 'legion-form', chapter: 5, dialogue: 'Hold Ctrl (⌘ on Mac) and click your Agent, Conversation and Sandbox, then click Form Legion in the selection bar.', hint: 'Select all three cards. Your existing cards and connections stay with you.', target: 'legion-selection', participants: ['agent', 'conversation', 'sandbox'], expects: 'legion' },
+  { id: 'legion-open', chapter: 5, dialogue: 'Here is your Legion! Click Workspace mode in its header to bring its cards into one window.', target: 'legion', role: 'legion', expects: 'legion-workspace' },
+  { id: 'legion-layout', chapter: 5, dialogue: 'Place Conversation first, then dock Sandbox beside it. Choose Done editing to save your layout.', hint: 'Drag from Workspace cards, or select a card and use Place selected card and Dock right. You can leave Agent unplaced.', target: 'legion-layout', role: 'legion', expects: 'legion-layout' },
+  { id: 'legion-return', chapter: 5, dialogue: 'These are your live cards. Edit layout can split panels, add tabs or arrange individual sections. Your saved layout reopens with this Legion. Click Back to canvas when ready.', target: 'legion-back', role: 'legion', expects: 'legion-canvas' },
+  { id: 'finish', chapter: 5, dialogue: 'Your Legion and workspace stay here. Later, save the Legion to your library to reuse its setup. I’ll tidy my temporary props. Replay Tutorial is at the compass whenever you want another walk.', target: 'center', button: 'Finish & keep my world' },
 ];
 
 export interface Observation {
@@ -79,6 +85,7 @@ export interface Observation {
   viewport: FlowViewportState;
   settled: boolean;
   settingsOpen?: boolean;
+  legionWorkspaceId?: string;
   library?: { open: boolean; tab: string; snapshot: LibrarySnapshot | null };
   deleted: string[];
 }
@@ -111,6 +118,15 @@ export function stepComplete(step: TutorialStep, refs: Partial<Record<Role, stri
     case 'delete': return Boolean(id && state.deleted.includes(id));
     case 'configure': return Boolean(card && state.settled && (level === 'inspector' || level === 'workspace') && JSON.stringify(card.config) !== baseline.config);
     case 'workspace': return Boolean(card && level === 'workspace');
+    case 'legion': return Boolean(state.settled && refs.legion && state.cards.some(item => item.id === refs.legion && item.type === 'legion')
+      && ['agent', 'conversation', 'sandbox'].every(role => state.cards.some(item => item.id === refs[role as Role] && item.parent_id === refs.legion)));
+    case 'legion-workspace': return Boolean(card && state.legionWorkspaceId === id);
+    case 'legion-layout': {
+      const views = paneViews(readWorkspaceLayout(card?.config.workspace_layout).root);
+      return Boolean(card && state.settled && state.legionWorkspaceId === id
+        && ['conversation', 'sandbox'].every(role => views.some(view => view.card_id === refs[role as Role] && !view.section_id)));
+    }
+    case 'legion-canvas': return Boolean(card && !state.legionWorkspaceId && event?.type === 'legion-workspace-closed' && event.cardId === id);
     case 'message': return Boolean(id && event?.type === 'message-sent' && event.cardId === id);
     case 'promotion': return Boolean(card?.minister && refs.minister === card.id && state.settled);
     case 'minister-panel': return Boolean(id && event?.type === 'minister-settings-opened' && event.cardId === id);

@@ -29,7 +29,7 @@ export function LegionSelection() {
     <div className="legion-selection-summary"><strong>{selection.cards.length} {t("selected")}</strong>
       <span><Link2 size={11} /> {selection.internalEdges.length} {t("internal links")} {selection.externalEdges.length > 0 && t(" / {v0} external links", { v0: String(selection.externalEdges.length) })}</span></div>
     <span className="legion-help">{t("Form a team, configure it, then save it to your library.")}</span>
-    <button className="primary-button" disabled={!canForm} onClick={async () => {
+    <button data-tutorial="legion-selection" className="primary-button" disabled={!canForm} onClick={async () => {
       setBusy("forming"); try { await formGroup(selectedIds); } finally { setBusy(null); }
     }}><Layers3 size={14} /> {busy === "forming" ? t("Forming...") : t("Form Legion")}</button>
     <IconButton icon={Trash2} danger className="legion-selection-delete"

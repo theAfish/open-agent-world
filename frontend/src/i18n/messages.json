@@ -1,4 +1,56 @@
 {
+  "Legion contents": ["Legion contents", "Legion 内部卡牌"],
+  "No member cards": ["No member cards", "暂无成员卡牌"],
+  "{count} more cards": ["{count} more cards", "另有 {count} 张卡牌"],
+  "Dependency details": ["Dependency details", "依赖详情"],
+  "Not collected": ["Not collected", "尚未收集"],
+  "Required packs": ["Required packs", "所需卡包"],
+  "Open required packs…": ["Open required packs…", "打开所需卡包…"],
+  "Required cards have no available owned pack: {cards}": ["Required cards have no available owned pack: {cards}", "以下依赖卡牌没有可用的已拥有卡包：{cards}"],
+  "This action requires uncollected cards:\n{cards}\n\nOpen these owned packs and continue?\n{packs}": ["This action requires uncollected cards:\n{cards}\n\nOpen these owned packs and continue?\n{packs}", "此操作需要尚未收集的卡牌：\n{cards}\n\n是否打开以下已拥有的卡包并继续？\n{packs}"],
+  "Local Pack management": ["Local Pack management", "本地 Pack 管理"],
+  "Pack file": ["Pack file", "Pack 文件"],
+  "Install Pack from File...": ["Install Pack from File...", "从文件安装 Pack..."],
+  "Install Pack": ["Install Pack", "安装 Pack"],
+  "Inspecting": ["Inspecting", "正在检查文件"],
+  "Validating": ["Validating", "正在验证"],
+  "Installing": ["Installing", "正在安装"],
+  "Ready to install": ["Ready to install", "可以安装"],
+  "Environment preparing": ["Environment preparing", "正在准备环境"],
+  "Packs run trusted application code. Install only files from a source you trust.": ["Packs run trusted application code. Install only files from a source you trust.", "Pack 会运行应用程序代码，请仅安装来自可信来源的文件。"],
+  "Restart OAW to activate Pack changes.": ["Restart OAW to activate Pack changes.", "重启 OAW 后应用 Pack 更改。"],
+  "Manage installed Packs": ["Manage installed Packs", "管理已安装的 Pack"],
+  "Retained version": ["Retained version", "保留的版本"],
+  "Sandbox runtime": ["Sandbox runtime", "Sandbox 运行环境"],
+  "Retry environment preparation": ["Retry environment preparation", "重试环境准备"],
+  "Use this version on restart": ["Use this version on restart", "重启后使用此版本"],
+  "Uninstall on restart": ["Uninstall on restart", "重启后卸载"],
+  "Remove retained version": ["Remove retained version", "删除保留的版本"],
+  "Restart required": ["Restart required", "需要重启"],
+  "Pack uninstalled": ["Pack uninstalled", "Pack 已卸载"],
+  "Pack disabled": ["Pack disabled", "Pack 已禁用"],
+  "Disable Pack": ["Disable Pack", "禁用 Pack"],
+  "Enable Pack": ["Enable Pack", "启用 Pack"],
+  "Source Pack": ["Source Pack", "来源 Pack"],
+  "Pack presets": ["Pack presets", "Pack 预设"],
+  "Installed Packs": ["Installed Packs", "已安装的 Pack"],
+  "A Pack preset. Deploy it, customize its members and workspace, then save your own copy.": ["A Pack preset. Deploy it, customize its members and workspace, then save your own copy.", "来自 Pack 的预设。部署后调整成员和工作区，再保存自己的副本。"],
+  "A formation you saved from your world. Its members keep their original Pack dependencies.": ["A formation you saved from your world. Its members keep their original Pack dependencies.", "从世界中保存的编队，成员保留原有的 Pack 依赖。"],
+  "This content is unavailable. Install or enable its Pack to use it again.": ["This content is unavailable. Install or enable its Pack to use it again.", "此内容暂不可用，安装或启用所属 Pack 后即可继续使用。"],
+  "Use Packs included with OAW or install a local .oawpack file.": ["Use Packs included with OAW or install a local .oawpack file.", "可以使用 OAW 自带的 Pack，或安装本地 .oawpack 文件。"],
+  "Pack view unavailable:": ["Pack view unavailable:", "Pack 视图不可用："],
+  "Loading Pack view...": ["Loading Pack view...", "正在加载 Pack 视图..."],
+  "Build a Legion workspace": ["Build a Legion workspace", "搭建 Legion 工作区"],
+  "Build my Legion": ["Build my Legion", "组建我的 Legion"],
+  "Let’s give your workflow a home. A Legion groups cards while keeping their connections. Team mode is optional: enable it later for shared instructions and team state.": ["Let’s give your workflow a home. A Legion groups cards while keeping their connections. Team mode is optional: enable it later for shared instructions and team state.", "给工作流安个家吧。Legion 把卡片组成一组，并保留原有连接。你也可以稍后开启团队模式，共享指令和团队状态。"],
+  "Hold Ctrl (⌘ on Mac) and click your Agent, Conversation and Sandbox, then click Form Legion in the selection bar.": ["Hold Ctrl (⌘ on Mac) and click your Agent, Conversation and Sandbox, then click Form Legion in the selection bar.", "按住 Ctrl（Mac 上为 ⌘）依次点击你的 Agent、Conversation 和 Sandbox，然后点击选择栏中的「组建军团」。"],
+  "Select all three cards. Your existing cards and connections stay with you.": ["Select all three cards. Your existing cards and connections stay with you.", "选中这三张卡片。已有卡片和连接都会保留。"],
+  "Here is your Legion! Click Workspace mode in its header to bring its cards into one window.": ["Here is your Legion! Click Workspace mode in its header to bring its cards into one window.", "这就是你的 Legion！点击它标题栏里的「工作区模式」，把卡片放进同一个窗口。"],
+  "Place Conversation first, then dock Sandbox beside it. Choose Done editing to save your layout.": ["Place Conversation first, then dock Sandbox beside it. Choose Done editing to save your layout.", "先放入 Conversation，再把 Sandbox 停靠在它旁边。点击「完成编辑」保存布局。"],
+  "Drag from Workspace cards, or select a card and use Place selected card and Dock right. You can leave Agent unplaced.": ["Drag from Workspace cards, or select a card and use Place selected card and Dock right. You can leave Agent unplaced.", "从「工作区卡片」拖入，也可以选中卡片后使用「放入所选卡片」和「停靠右侧」。Agent 可以暂时不放入。"],
+  "These are your live cards. Edit layout can split panels, add tabs or arrange individual sections. Your saved layout reopens with this Legion. Click Back to canvas when ready.": ["These are your live cards. Edit layout can split panels, add tabs or arrange individual sections. Your saved layout reopens with this Legion. Click Back to canvas when ready.", "这里显示的是原来的卡片。「编辑布局」可以分屏、添加标签页或单独排列卡片分区。下次打开 Legion 时会恢复保存的布局。看好后点击「返回画布」。"],
+  "Your Legion and workspace stay here. Later, save the Legion to your library to reuse its setup. I’ll tidy my temporary props. Replay Tutorial is at the compass whenever you want another walk.": ["Your Legion and workspace stay here. Later, save the Legion to your library to reuse its setup. I’ll tidy my temporary props. Replay Tutorial is at the compass whenever you want another walk.", "你的 Legion 和工作区会保留下来。以后可将 Legion 保存到卡牌库，重复使用这套配置。我来收好临时道具；想再逛一遍，点击罗盘里的「重播教程」。"],
+  "Open Workspace mode again to continue arranging your Legion.": ["Open Workspace mode again to continue arranging your Legion.", "重新打开「工作区模式」，继续布置你的 Legion。"],
   "Moves on next restart. The original folder is kept as a backup.": ["Moves on next restart. The original folder is kept as a backup.", "下次重启时迁移，原文件夹保留为备份。"],
   "After verifying the new files, please delete unused backup folders manually.": ["After verifying the new files, please delete unused backup folders manually.", "确认新文件无误后，请手动删除不再使用的备份文件夹。"],
   "Changing this folder moves all Sandbox workspaces and keeps backups. Stop Sandboxes and Agents first.": ["Changing this folder moves all Sandbox workspaces and keeps backups. Stop Sandboxes and Agents first.", "修改位置会迁移所有 Sandbox 工作目录并保留备份，请先停止 Sandbox 和 Agent。"],
@@ -204,8 +256,8 @@
   "Agent name": ["Agent name", "Agent 名称"],
   "Your Agent is now a Minister and still uses its original model and tools. Click its new Minister badge to talk right here on the canvas.": ["Your Agent is now a Minister and still uses its original model and tools. Click its new Minister badge to talk right here on the canvas.", "你的 Agent 现在担任 Minister，仍使用原来的模型和工具。点击新出现的 Minister 徽章，就能直接在画布上交谈。"],
   "The settings button beside the Minister badge opens history, nearby cards, and confirmations. Open it now.": ["The settings button beside the Minister badge opens history, nearby cards, and confirmations. Open it now.", "Minister 徽章旁的设置按钮可以打开历史、附近卡片和待确认操作。现在试着打开它。"],
-  "Other controls are locked. Pause to explore freely.": ["Other controls are locked. Pause to explore freely.", "??????????????????"],
-  "Pause tutorial": ["Pause tutorial", "????"],
+  "Other controls are locked. Pause to explore freely.": ["Other controls are locked. Pause to explore freely.", "其他控件暂时锁定，暂停教程后可自由探索。"],
+  "Pause tutorial": ["Pause tutorial", "暂停教程"],
   "Use default model": ["Use default model", "??????"],
   "Choose a default model": ["Choose a default model", "??????"],
   "Set up your default model": ["Set up your default model", "???????"],
@@ -4535,9 +4587,9 @@
     "Give your card a new home. Drag its title or an empty part of its frame.",
     "给卡片换个位置，拖动它的标题或边框空白处即可。"
   ],
-  "Shift-click selects a card. You can select several this way, too.": [
-    "Shift-click selects a card. You can select several this way, too.",
-    "按住 Shift 点击可选中卡片，也可以这样选中多张。"
+  "Shift-click selects a card. Later, use Ctrl / ⌘-click to select several cards together.": [
+    "Shift-click selects a card. Later, use Ctrl / ⌘-click to select several cards together.",
+    "按住 Shift 点击可选中卡片。以后可以按住 Ctrl / ⌘ 点击，一起选中多张卡片。"
   ],
   "Now click your card normally to look inside.": [
     "Now click your card normally to look inside.",
@@ -6888,5 +6940,85 @@
   "done": ["Done", "已完成"],
   "blocked": ["Blocked", "已阻塞"],
   "Run tasks": ["Run tasks", "执行任务"],
-  "Existing conversations and files are included. Users with the password share this application’s data.": ["Existing conversations and files are included. Users with the password share this application’s data.", "部署会保留已有会话和文件。持有访问密码的用户共享此应用的数据。"]
+  "Existing conversations and files are included. Users with the password share this application’s data.": ["Existing conversations and files are included. Users with the password share this application’s data.", "部署会保留已有会话和文件。持有访问密码的用户共享此应用的数据。"],
+  "Pack Store": [
+    "Pack Store",
+    "Pack 商店"
+  ],
+  "Back to Store": [
+    "Back to Store",
+    "返回商店"
+  ],
+  "Pack details": [
+    "Pack details",
+    "Pack 详情"
+  ],
+  "OAW compatibility": [
+    "OAW compatibility",
+    "OAW 兼容版本"
+  ],
+  "Pack dependencies": [
+    "Pack dependencies",
+    "Pack 依赖"
+  ],
+  "Sandbox Python requirements": [
+    "Sandbox Python requirements",
+    "Sandbox Python 依赖"
+  ],
+  "No version available": [
+    "No version available",
+    "暂无可用版本"
+  ],
+  "Discover new Packs for your world.": [
+    "Discover new Packs for your world.",
+    "为你的世界发现新的 Pack。"
+  ],
+  "View {v0} details": [
+    "View {v0} details",
+    "查看 {v0} 详情"
+  ],
+  "Store unavailable": [
+    "Store unavailable",
+    "商店暂不可用"
+  ],
+  "No matching packs": [
+    "No matching packs",
+    "没有匹配的 Pack"
+  ],
+  "Get": [
+    "Get",
+    "获取"
+  ],
+  "Update available": [
+    "Update available",
+    "有可用更新"
+  ],
+  "Store is not configured yet.": [
+    "Store is not configured yet.",
+    "商店尚未配置。"
+  ],
+  "Store is unavailable. Check the host configuration.": [
+    "Store is unavailable. Check the host configuration.",
+    "商店暂不可用，请检查主机配置。"
+  ],
+  "Store request timed out. Please retry.": [
+    "Store request timed out. Please retry.",
+    "商店请求超时，请重试。"
+  ],
+  "Store connection failed or download was interrupted. Please retry.": [
+    "Store connection failed or download was interrupted. Please retry.",
+    "商店连接失败或下载中断，请重试。"
+  ],
+  "This Pack or version is no longer available.": [
+    "This Pack or version is no longer available.",
+    "此 Pack 或版本已不可用。"
+  ],
+  "Store is busy. Please retry shortly.": [
+    "Store is busy. Please retry shortly.",
+    "商店繁忙，请稍后重试。"
+  ],
+  "Store is temporarily unavailable. Please retry.": [
+    "Store is temporarily unavailable. Please retry.",
+    "商店暂不可用，请重试。"
+  ]
 }

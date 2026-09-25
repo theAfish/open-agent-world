@@ -342,7 +342,7 @@ def _rebase_managed_metadata(stage: Path, source: Path, target: Path):
 
 
 def _checkpoint(source: Path):
-    for path in (source / 'database/world.sqlite3', source / 'runtime/plugins.sqlite3'):
+    for path in (source / 'database/world.sqlite3', source / 'runtime/plugins.sqlite3', source / 'packs/installations.sqlite3'):
         if path.is_file():
             with closing(sqlite3.connect(path, timeout=1)) as database:
                 if database.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()[0]:

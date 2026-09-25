@@ -20,6 +20,7 @@ class AgentEventType(StrEnum):
     STARTED = "agent_started"
     STATUS_CHANGED = "agent_status_changed"
     MESSAGE = "agent_message"
+    PROGRESS = "agent_progress"
     TOOL_STARTED = "tool_started"
     TOOL_COMPLETED = "tool_completed"
     COMPLETED = "agent_completed"

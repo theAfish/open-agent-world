@@ -212,11 +212,14 @@ export interface RelationshipCatalogItem {
 }
 
 export interface PackDefinition {
+  source?: 'bundled' | 'installed';
   id: string; plugin_id: string; name: string; description: string; cards: string[];
   artwork_asset?: string | null; artwork_url?: string | null; accent_color?: string | null;
 }
 
+export interface RuntimeFrontendModule { version: string; api_version: number; url: string }
 export interface PluginCatalog {
+  frontend_modules?: Record<string, RuntimeFrontendModule>;
   packs: PackDefinition[];
   plugins: Array<{
     id: string;
@@ -248,6 +251,8 @@ export interface LegionSummary {
   edge_count: number;
   bounds: LegionBounds;
   node_types: CardType[];
+  members?: Array<{ name: string; type: CardType }>;
+  required_card_ids?: string[];
   plugin_ids: string[];
   compatible: boolean;
   issues: string[];
@@ -383,8 +388,37 @@ export interface ContainerDefinition {
   document_field: string | null;
 }
 
+export interface ConversationToolTrace {
+  type: string;
+  name: string;
+  call_id?: string;
+}
+
+export interface ConversationRunSummary {
+  run_id: string;
+  agent_id: string;
+  status: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  awaiting?: string | null;
+  progress?: string | null;
+  tool_count: number;
+  tool_trace: ConversationToolTrace[];
+  live_text?: string;
+}
+
+export interface ConversationDeliveryState {
+  message_id: string;
+  agent_id: string;
+  status: "queued" | "claimed";
+  claimed_run_id?: string | null;
+}
+
 export interface ConversationMessagePage {
   active_agent_ids?: string[];
+  active_runs?: ConversationRunSummary[];
+  deliveries?: ConversationDeliveryState[];
+  run_summaries?: Record<string, ConversationRunSummary>;
   items: ConversationMessage[];
   has_before: boolean;
   has_after: boolean;

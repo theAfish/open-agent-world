@@ -73,6 +73,7 @@ class PackDefinition(BaseModel):
 class PackCatalogItem(PackDefinition):
     plugin_id: str
     artwork_url: str | None = None
+    source: Literal["bundled", "installed"] = "bundled"
 
 
 class Plugin(Protocol):
@@ -182,6 +183,7 @@ class PluginCatalog(BaseModel):
     node_types: list[NodeTypeCatalogItem]
     relationships: list[RelationshipCatalogItem]
     packs: list[PackCatalogItem] = Field(default_factory=list)
+    frontend_modules: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -441,6 +443,8 @@ class PluginRegistry:
 
     def __init__(self) -> None:
         self.runtime_requirements: dict[str, tuple[str, ...]] = {}
+        self.installed_packs: dict[str, Any] = {}
+        self.frontend_modules: dict[str, dict[str, Any]] = {}
         self._plugins: dict[str, PluginDescriptor] = {}
         self._nodes: dict[str, NodeTypeDefinition] = {}
         self._relationships: dict[str, RelationshipDefinition] = {}
@@ -454,7 +458,7 @@ class PluginRegistry:
         self._legion_presets: dict[str, LegionPresetDefinition] = {}
         self._disabled: set[str] = set()
 
-    def install(self, plugin: Plugin) -> None:
+    def install(self, plugin: Plugin, *, distribution=None) -> None:
         descriptor = getattr(plugin, "descriptor", None)
         if not isinstance(descriptor, PluginDescriptor):
             raise TypeError("plugin descriptor must be a PluginDescriptor")
@@ -478,6 +482,13 @@ class PluginRegistry:
 
         staged = PluginRegistration(descriptor)
         register(staged)
+        if distribution is not None:
+            if set(staged.packs) != {distribution.id}:
+                raise ValueError("An external Pack must register exactly one Pack with its distribution ID")
+            if any(not key.startswith(distribution.id + ".") for key in staged.nodes):
+                raise ValueError("External card IDs must belong to the Pack namespace")
+            if any(card not in staged.nodes for card in staged.packs[distribution.id].cards):
+                raise ValueError("An external Pack may include only its own cards")
         for key, node in tuple(staged.nodes.items()):
             policy = node.state if node.state is not None else descriptor.state
             if policy is not None:
@@ -496,7 +507,7 @@ class PluginRegistry:
         self._plugins[descriptor.id] = descriptor
         self._commit_owned("legion_preset", descriptor.id, self._legion_presets, staged.legion_presets)
         self._commit_owned("pack", descriptor.id, self._packs, {
-            key: PackCatalogItem(**pack.model_dump(), plugin_id=descriptor.id,
+            key: PackCatalogItem(**pack.model_dump(), plugin_id=descriptor.id, source="installed" if distribution else "bundled",
                 artwork_url=f"/api/plugins/{descriptor.id}/assets/{pack.artwork_asset}" if pack.artwork_asset else None)
             for key, pack in staged.packs.items()
         })
@@ -993,6 +1004,7 @@ class PluginRegistry:
         return PluginCatalog(
             plugins=list(self._plugins.values()),
             packs=list(self._packs.values()),
+            frontend_modules={key: value for key, value in self.frontend_modules.items() if self.is_enabled(key)},
             node_types=[
                 item.catalog_item(self.node_type_owner_id(item.id))
                 for item in self._nodes.values()

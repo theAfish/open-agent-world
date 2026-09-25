@@ -1,3 +1,5 @@
+# Shell scripts must remain runnable in Linux/WSL checkouts on Windows hosts.
+*.sh text eol=lf
 # Preserve vendored engine bytes and their SHA256 manifest across platforms.
 plugins/xrd/src/oaw_xrd/OAW_XRDfit/** -text -whitespace
 plugins/xrd/engines/*.patch -whitespace

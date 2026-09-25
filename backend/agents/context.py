@@ -141,15 +141,26 @@ class ContextStore:
         with self.database.locked() as db:
             return db.execute("SELECT id, conversation_id FROM conversation_sessions WHERE id=?", (context_id,)).fetchone()
 
-    def conversation_delta(self, checkpoint: Checkpoint, agent_id: str, session_id: str) -> list[dict]:
+    def conversation_delta(
+        self,
+        checkpoint: Checkpoint,
+        agent_id: str,
+        session_id: str,
+        *,
+        max_sequence: int | None = None,
+    ) -> list[dict]:
         from backend.conversations.store import ConversationStore
         with self.database.locked() as db:
             pending = list(checkpoint.pending_messages)
             pending_clause = f" OR m.id IN ({','.join('?' for _ in pending)})" if pending else ""
+            upper_clause = " AND m.sequence<=?" if max_sequence is not None else ""
+            values = [session_id, checkpoint.cursor, *pending]
+            if max_sequence is not None:
+                values.append(max_sequence)
             rows = db.execute(f"""SELECT m.*, r.status AS run_status, r.runtime_provider_id AS provider_id
                 FROM conversation_messages m LEFT JOIN runs r ON r.run_id=m.run_id WHERE m.session_id=?
-                AND (m.sequence>?{pending_clause}) ORDER BY m.sequence""",
-                (session_id, checkpoint.cursor, *pending)).fetchall()
+                AND (m.sequence>?{pending_clause}){upper_clause} ORDER BY m.sequence""",
+                values).fetchall()
         contents = []
         for row in rows:
             checkpoint.cursor = max(checkpoint.cursor, int(row["sequence"]))
@@ -252,7 +263,18 @@ class ManagedContext:
         self._repair_interrupted_tools()
         session = store.session(context_id)
         if session:
-            self.checkpoint.contents.extend(store.conversation_delta(self.checkpoint, agent_id, context_id))
+            with store.database.locked() as db:
+                run = db.execute(
+                    "SELECT lifecycle_json FROM runs WHERE run_id=?", (run_id,)
+                ).fetchone()
+            lifecycle = json.loads(run["lifecycle_json"] or "{}") if run else {}
+            limit = lifecycle.get("conversation_max_sequence")
+            self.checkpoint.contents.extend(store.conversation_delta(
+                self.checkpoint,
+                agent_id,
+                context_id,
+                max_sequence=int(limit) if isinstance(limit, int) else None,
+            ))
         else:
             self.checkpoint.contents.append(text_content(prompt))
         self.checkpoint.initialized = True

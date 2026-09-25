@@ -1,5 +1,10 @@
 # Add a custom interface
 
+This guide uses the existing bundled/source development workflow. Independent
+Packs use the same `FrontendPlugin` / `PluginViewProps` interface with the
+[external Pack build contract](../pack-distribution.md#frontend-contract-and-shared-react)
+and do not require rebuilding the host frontend after installation.
+
 **Goal:** replace the first plugin's settings with a small React form. Complete [Your first plugin](first-plugin.md) first. Standard schema controls remain a good choice when you do not need a custom view.
 
 ## 1. Add frontend files

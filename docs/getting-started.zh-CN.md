@@ -23,10 +23,12 @@ Linux、WSL2 或 macOS：
 
 ```bash
 bash scripts/setup.sh
-python3 scripts/start.py
+bash scripts/start.sh
 ```
 
 安装脚本会安装后端开发依赖、Google ADK 和 LiteLLM 适配器、前端依赖，并构建生产版前端。`start` 通过 Python 后端提供构建好的页面，并打开本地应用地址。按 Ctrl+C 停止启动器。修改前端后，使用 `npm --prefix frontend run build` 重新构建。
+
+Shell 启动器直接使用已安装的后端环境，只有安装和重新构建时才需要 Node.js 和 uv。支持传递启动参数，例如 `bash scripts/start.sh --mode preview --profile demo` 或 `bash scripts/start.sh --port 38474`。无法自动打开浏览器时，可在同一台机器上手动打开输出的本地地址。使用 WSL2 时，请在 Linux 发行版内安装前置工具并运行这两个脚本。
 
 Windows 桌面安装包自带 Python 运行时，并在独立的 Tauri 窗口中打开应用。安装包构建和开发配置目录详见[桌面安装与开发（英文）](desktop.md)。
 
@@ -49,7 +51,7 @@ Windows 桌面安装包自带 Python 运行时，并在独立的 Tauri 窗口中
 也可以使用跨平台启动器：
 
 ```bash
-python3 scripts/dev.py --agent-runtime core.mock
+bash scripts/dev.sh --agent-runtime core.mock
 ```
 
 mock 运行时是调试替代品，不是语言模型。真实的智能体回复需要配置模型服务。已有 Agent 如果明确选择了运行时，会保留原来的选择。

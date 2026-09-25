@@ -24,6 +24,21 @@ Open the DMG and drag **Open Agent World** into **Applications**, then launch it
 
 macOS currently has **no local Sandbox runtime**. The desktop preview does not imply support for plugins or actions requiring that runtime.
 
+## Linux / WSL2
+
+Linux currently uses the source installation and opens the application in your browser. Install Git, Python 3.11 or newer, uv, and Node.js 20 or newer (including npm), then run:
+
+```bash
+git clone https://github.com/theAfish/open-agent-world.git
+cd open-agent-world
+bash scripts/setup.sh
+bash scripts/start.sh
+```
+
+Setup installs application dependencies and builds the frontend. Later launches only need `bash scripts/start.sh`; stop with Ctrl+C. For WSL2, run these commands inside your Linux distribution. Local Sandbox execution also requires the isolation prerequisites described in [Sandbox workspace](sandbox-workspace.md).
+
+中文：Linux / WSL2 可使用以上脚本安装并在浏览器中运行；后续只需执行 `bash scripts/start.sh`，按 Ctrl+C 退出。前置工具须安装在运行脚本的 Linux 环境中，详见[入门指南](getting-started.zh-CN.md)。
+
 ## First use
 
 1. In **Settings → Models**, add your connection, credentials, and model; choose a default.

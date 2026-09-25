@@ -20,7 +20,7 @@ from backend.agents import (
 from backend.errors import RuntimeUnavailableError
 from backend.legions.runtime import group_context, member_team
 from backend.events.hub import EventHub
-from backend.events.models import EventType
+from backend.events.models import EventType, RuntimeEvent
 from backend.plugins import PluginRegistry
 from backend.state import StateContext, StateScope, StateStore
 from backend.world.models import Card, CardPatch
@@ -36,6 +36,7 @@ from .models import (
     TERMINAL_RUN_STATUSES,
 )
 from .store import RunStore
+from .trace import public_tool_payload
 
 logger = logging.getLogger(__name__)
 
@@ -98,9 +99,9 @@ class RunManager:
     cleanup_timeout_seconds: float = 10.0
     execution_deadline_seconds: float = 3600.0
     _cleanup_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
+    _live_output: dict[str, str] = field(default_factory=dict)
     admission_check: Any = None
     cleanup_execution: Callable[[str], Awaitable[None]] | None = None
-    persist_provider_event: Callable[[AgentEvent, RunRecord, str, str], Awaitable[str | None]] | None = None
 
     def __post_init__(self):
         import math
@@ -229,6 +230,8 @@ class RunManager:
         detached: bool = False,
         task_id: str | None = None,
         context_id: str | None = None,
+        run_id: str | None = None,
+        initial_lifecycle: Mapping[str, Any] | None = None,
     ) -> RunRecord:
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("Run prompt must be a non-empty string")
@@ -254,6 +257,7 @@ class RunManager:
                 context_id = context_id or parent.context_id
             record = self.store.create(
                 agent_id=agent_id,
+                run_id=run_id,
                 runtime_provider_id=provider_id,
                 caller_kind=caller_kind,
                 caller_id=caller_id,
@@ -261,10 +265,18 @@ class RunManager:
                 task_id=task_id,
                 context_id=context_id,
             )
-            record = self.store.update_lifecycle(record.run_id,
-                owner_kind='agent', owner_id=agent_id,
-                cancellation_policy='independent' if detached or parent_run_id is None else 'dependent',
-                execution='running', holds_capacity=True, cleanup='none')
+            record = self.store.update_lifecycle(
+                record.run_id,
+                **{
+                    "owner_kind": "agent",
+                    "owner_id": agent_id,
+                    "cancellation_policy": "independent" if detached or parent_run_id is None else "dependent",
+                    "execution": "running",
+                    "holds_capacity": True,
+                    "cleanup": "none",
+                    **dict(initial_lifecycle or {}),
+                },
+            )
             team = group_context(self.world, self.state, card)
             state_context = self._state_context(record)
             self.state.set(state_context.local_scope, "legion_context", team or {})
@@ -322,6 +334,9 @@ class RunManager:
         return self.get_run(run_id)
 
     def final_text(self, run_id: str) -> str:
+        live = self._live_output.get(run_id)
+        if live is not None:
+            return live
         scope = self.state.ensure_scope("run", run_id, schema_id="core.run")
         return self.state.resolve(StateContext((scope,)), "output_text").value
 
@@ -712,19 +727,61 @@ class RunManager:
                         raise RuntimeError(
                             "runtime provider emitted an event for a different Agent or Run"
                         )
-                    await self._publish_provider_event(event, record)
-                    if event.type.value == 'tool_started':
-                        active_tools += 1
-                    elif event.type.value == 'tool_completed':
-                        active_tools = max(0, active_tools - 1)
-                    self.store.update_lifecycle(record.run_id, active_tools=active_tools,
-                        awaiting=str(event.payload.get('name', 'tool execution')) if active_tools else None,
-                        last_signal=event.type.value)
+                    published = await self._publish_provider_event(event, record)
+                    event_kind = event.type.value
                     text = event.payload.get("text")
-                    if isinstance(text, str) and (event.type.value == "agent_message"
-                            or (event.type.value == "agent_completed" and text.strip())):
-                        self.state.set(context.state_context.local_scope, "output_text", text, run_id=record.run_id)
+                    if event_kind == "agent_message" and isinstance(text, str):
+                        # Streaming snapshots are live Run state. Keep them out of
+                        # SQLite until the provider turn reaches a terminal result.
+                        self._live_output[record.run_id] = text
+                    elif event_kind == "agent_progress":
+                        progress = text if isinstance(text, str) else event.payload.get("status")
+                        if isinstance(progress, str) and progress.strip():
+                            self.store.update_lifecycle(
+                                record.run_id, progress=progress.strip(), last_signal=event_kind
+                            )
+                    elif event_kind in {"tool_started", "tool_completed"}:
+                        if event_kind == "tool_started":
+                            active_tools += 1
+                        else:
+                            active_tools = max(0, active_tools - 1)
+                        current_lifecycle = self.get_run(record.run_id).lifecycle
+                        trace = list(current_lifecycle.get("tool_trace") or [])
+                        # Use the same identity and sanitized details in REST
+                        # and WebSocket so reconnects do not duplicate tool rows.
+                        trace.append({
+                            **published.payload,
+                            "id": published.id,
+                            "timestamp": published.timestamp.isoformat(),
+                            "type": event_kind,
+                        })
+                        self.store.update_lifecycle(
+                            record.run_id,
+                            active_tools=active_tools,
+                            awaiting=str(event.payload.get("name") or "tool execution") if active_tools else None,
+                            progress=(
+                                current_lifecycle.get("progress")
+                                if event_kind == "tool_started"
+                                else None
+                            ),
+                            last_signal=event_kind,
+                            tool_count=int(current_lifecycle.get("tool_count") or 0)
+                                + (1 if event_kind == "tool_started" else 0),
+                            tool_trace=trace[-50:],
+                        )
+                    elif event_kind not in {"agent_message"}:
+                        self.store.update_lifecycle(record.run_id, last_signal=event_kind)
+                    if event_kind == "agent_completed" and isinstance(text, str) and text.strip():
+                        self._live_output[record.run_id] = text
                     if event.run_status is not None:
+                        final_text = self._live_output.get(record.run_id)
+                        if isinstance(final_text, str) and final_text.strip():
+                            self.state.set(
+                                context.state_context.local_scope,
+                                "output_text",
+                                final_text,
+                                run_id=record.run_id,
+                            )
                         current = self.get_run(record.run_id)
                         if current.status not in TERMINAL_RUN_STATUSES:
                             await self.transition_run(record.run_id, event.run_status)
@@ -842,6 +899,9 @@ class RunManager:
             return
         if status in TERMINAL_RUN_STATUSES:
             self._release_agent_slot(run_id)
+            # Successful terminal output has already been checkpointed once
+            # before the terminal transition; release the ephemeral overlay.
+            self._live_output.pop(run_id, None)
 
     def _provider_id(self, card: Card) -> str:
         provider_id = self._optional_provider_id(card)
@@ -979,23 +1039,21 @@ class RunManager:
 
     async def _publish_provider_event(
         self, event: AgentEvent, record: RunRecord
-    ) -> None:
+    ) -> RuntimeEvent:
         # AgentEvent.COMPLETED means one provider turn finished. Run success is
         # controlled only by the separate explicit ``run_status`` transition.
         conversation_id, session_id = self._conversation_scope(record)
-        message_id = None
-        if conversation_id and session_id and self.persist_provider_event:
-            message_id = await self.persist_provider_event(event, record, conversation_id, session_id)
-            if event.type.value == "agent_message":
-                self.state.set(self.state.get_scope("run", record.run_id), "output_message_id", message_id or "", run_id=record.run_id)
-        await self.events.publish(
+        payload = (public_tool_payload(event.payload)
+                   if event.type.value in {"tool_started", "tool_completed"}
+                   else dict(event.payload))
+        return await self.events.publish(
             EventType(event.type.value),
             node_id=record.agent_id,
             agent_id=record.agent_id,
             run_id=record.run_id,
             conversation_id=conversation_id,
             session_id=session_id,
-            payload={**dict(event.payload), "run_id": record.run_id, "message_id": message_id},
+            payload={**payload, "run_id": record.run_id},
         )
 
     async def _publish_agent_operational(
