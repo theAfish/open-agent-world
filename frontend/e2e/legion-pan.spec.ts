@@ -14,17 +14,32 @@ test('Legion blank space pans the canvas and labels paint above its background',
       ids.push((await response.json()).id);
     }
     expect((await request.post('/api/edges', { data: { source: ids[0], target: ids[1], relationship: 'communicate' } })).ok()).toBeTruthy();
-    expect((await request.post('/api/legion-groups', { data: { name: 'Pan team', node_ids: ids } })).ok()).toBeTruthy();
+    const groupResponse = await request.post('/api/legion-groups', { data: { name: 'Pan team', node_ids: ids } });
+    expect(groupResponse.ok()).toBeTruthy();
+    const [createdGroup] = await groupResponse.json();
+    const groupId: string = createdGroup.id;
+    ids.push(groupId);
+    const profile = await (await request.get('/api/application')).json();
+    expect((await request.patch('/api/application/preferences', { data: {
+      profile_id: profile.profile_id, generation: profile.generation, changes: {
+        'oaw.locale': 'en',
+        'oaw-onboarding-v1': JSON.stringify({ state: { status: 'skipped' }, version: 1 }),
+        'oaw-canvas-viewport-v1': JSON.stringify({ version: 0, state: {
+          viewport: { x: 0, y: 0, zoom: 1, width: 1800, height: 1100 }, mapPins: [],
+        } }),
+      },
+    } })).ok()).toBeTruthy();
     await page.goto('/');
-    const group = page.locator('[data-card-type="legion"]');
+    const group = page.locator(`[data-card-type="legion"][data-card-id="${groupId}"]`);
     await expect(group).toBeVisible();
     await page.getByRole('button', { name: 'Fit view', exact: true }).click();
     await expect.poll(async () => {
-      const bounds = (await group.boundingBox())!;
-      return bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width < 1800 && bounds.y + bounds.height < 1000;
+      const bounds = await group.boundingBox();
+      const canvas = await page.locator('#oaw-world-map').boundingBox();
+      return !!bounds && !!canvas && bounds.x >= canvas.x && bounds.y >= canvas.y
+        && bounds.x + bounds.width <= canvas.x + canvas.width
+        && bounds.y + bounds.height <= canvas.y + canvas.height;
     }).toBe(true);
-    const groupId = (await group.getAttribute('data-card-id'))!;
-    ids.push(groupId);
     const position = async (id: string) => (await (await request.get(`/api/nodes/${id}`)).json()).position;
     const before = await Promise.all(ids.map(position));
     const viewport = page.locator('#oaw-world-map > .react-flow__renderer > .react-flow__pane > .react-flow__viewport');
@@ -61,7 +76,10 @@ test('Legion blank space pans the canvas and labels paint above its background',
     await page.mouse.move(header.x + 80, header.y + 60, { steps: 8 });
     await page.mouse.up();
     await expect.poll(() => position(groupId)).not.toEqual(before[2]);
-    await group.getByLabel('Team instruction', { exact: true }).fill('Still editable');
+    await group.getByRole('button', { name: 'Legion settings', exact: true }).click();
+    const settings = page.getByRole('complementary', { name: 'Legion settings', exact: true });
+    await settings.getByLabel('Enable shared team settings').check();
+    await settings.getByLabel('Team instruction', { exact: true }).fill('Still editable');
     await page.getByRole('button', { name: 'Use dark theme' }).click();
     await page.screenshot({ path: '../.open-agent-world/legion-pan-dark.png' });
   } finally {

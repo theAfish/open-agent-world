@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import { useConversationView } from "../state/conversationView";
+import { useNodeSurfaceStore } from '../state/nodeSurfaces';
 import type {
   ConversationMessage,
   ConversationSession,
@@ -55,6 +56,7 @@ describe("ConversationWorkspace snapshots", () => {
     });
     useWorldStore.setState({ events: [], socketState: "closed", toasts: [] });
     useConversationView.setState({ sessions: {}, activeConversationId: undefined });
+    useNodeSurfaceStore.setState({ drafts: {} });
     vi.spyOn(worldApi, "getConversation").mockResolvedValue({
       conversation_id: card.id,
       sessions: [session],
@@ -64,6 +66,39 @@ describe("ConversationWorkspace snapshots", () => {
   });
 
   afterEach(() => cleanup());
+
+  it('restores each session composer after switching sessions and viewport unmount', async () => {
+    const other = { ...session, id: 'session-b', title: 'Other' };
+    vi.mocked(worldApi.getConversation).mockResolvedValue({ conversation_id: card.id, sessions: [session, other], agents: [] });
+    const first = render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    fireEvent.change(screen.getByLabelText('Conversation message'), { target: { value: 'Draft A' } });
+    act(() => useConversationView.getState().selectSession(card.id, other.id));
+    expect((screen.getByLabelText('Conversation message') as HTMLTextAreaElement).value).toBe('');
+    fireEvent.change(screen.getByLabelText('Conversation message'), { target: { value: 'Draft B' } });
+    first.unmount();
+    render(<ConversationWorkspace card={card} />);
+    expect((screen.getByLabelText('Conversation message') as HTMLTextAreaElement).value).toBe('Draft B');
+    act(() => useConversationView.getState().selectSession(card.id, session.id));
+    expect((screen.getByLabelText('Conversation message') as HTMLTextAreaElement).value).toBe('Draft A');
+  });
+
+  it('keeps an in-flight outgoing message and the next draft when remounted', async () => {
+    let fail!: (error: Error) => void;
+    vi.spyOn(worldApi, 'postConversationMessage').mockImplementation(() => new Promise((_resolve, reject) => { fail = reject; }));
+    const first = render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    fireEvent.change(screen.getByLabelText('Conversation message'), { target: { value: 'Sending across remount' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    fireEvent.change(screen.getByLabelText('Conversation message'), { target: { value: 'Next unsent draft' } });
+    first.unmount();
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText('Sending across remount');
+    await act(async () => fail(new Error('Connection lost')));
+    expect((screen.getByLabelText('Conversation message') as HTMLTextAreaElement).value).toBe('Next unsent draft');
+    expect(screen.getByText('Sending across remount')).toBeTruthy();
+    expect(screen.getByText('Connection lost')).toBeTruthy();
+  });
 
   it('restores session selection after remount and switches the canvas scope between open conversations', async () => {
     const otherSession = { ...session, id: 'session-2', title: 'Second', group_id: 'group', group_title: 'Research' };
@@ -363,7 +398,7 @@ describe("ConversationWorkspace snapshots", () => {
     expect(details.open).toBe(false);
     fireEvent.click(summary);
     expect(details.open).toBe(true);
-    expect(screen.getByText("read_file")).toBeTruthy();
+    expect(await screen.findByText("read_file")).toBeTruthy();
   });
 
   it("creates independent sessions within the selected group and renames them", async () => {

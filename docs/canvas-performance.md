@@ -1,5 +1,9 @@
 # Canvas interaction performance
 
+The [2026-09-25 populated-world investigation](panzoom-performance.md) covers
+card lifecycles, scoped drafts, chunk filtering, and the bounded Canvas terrain
+experiment. Its measurements are separate from the historical baselines below.
+
 ## Wide viewport terrain (2026-09-21)
 
 At zoom 0.12, a 1920 x 1080 viewport retains 77 terrain SVG tiles, with

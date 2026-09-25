@@ -75,6 +75,27 @@ export default {
 
 The form edits the configuration through the card-scoped `host` adapter. The backend still validates the message. React is shared with OAW; use `@oaw/plugin-api` for host contracts.
 
+### Transient drafts and surface visibility
+
+Canvas culling may unmount any view. An optional `host.draft` stores small JSON UI
+drafts outside the React mount: `get()` returns the draft or `undefined`, and
+`set(value)` replaces it. Optional `subscribe(listener)` returns an unsubscribe
+function and notifies views of changes, including completion of a save from a
+previous mount. Call `set(undefined)` after save or cancel, comparing the latest
+draft with the submitted draft so newer edits survive an in-flight save. The host
+owns the card, state-scope and session namespace, so views must not invent or
+pass session IDs. Drafts are shared across that card's surfaces, survive leaving
+and returning to an area, and are cleared on confirmed card deletion or page
+reload (including profile changes). They are not durable document state and are
+not written to preferences. Old hosts may omit this additive capability; use
+optional chaining. Never put full query results or rendered assets in a draft.
+
+Use the existing `level` prop to pause polling, layout and heavy child rendering
+outside `inspector`/`workspace`. Preview views should request a summary rather
+than an editor document. Retaining draft data does not require retaining the
+editor DOM. Existing third-party views with only local React state remain
+responsible for adopting this capability before their drafts can survive culling.
+
 ## 3. Select the view in Python
 
 Add this argument to your `NodeTypeDefinition(...)`:

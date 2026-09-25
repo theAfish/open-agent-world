@@ -1,8 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { CHUNK_SIZE, filterCardsToChunks, getViewportChunkBounds, getViewportChunkKeys, positionToChunk } from "./chunks";
 import { buildCardDraft } from "./helpers";
+import type { PluginCatalog } from '../types/world';
 
 describe("world chunks", () => {
+  const catalog = { node_types: [{ id: 'legion', container: {} }, { id: 'text' }] } as unknown as PluginCatalog;
+  const node = (id: string, x: number, y: number, parent_id?: string) => ({ id, ...buildCardDraft('text', { x, y }), parent_id });
+  const group = (id: string, x: number, y: number, parent_id?: string) => ({ ...node(id, x, y, parent_id), type: 'legion', size: { width: 800, height: 800 } });
+
+  it.each([catalog, undefined])('retains nested descendants in input order across negative and disjoint coverage', catalog => {
+    const cards = [node('leaf', 21000, 100, 'inner'),
+      { ...node('equipment', 50000, 50000), equipment: { owner_id: 'inner', relationship: null } },
+      node('sibling', 30000, 30000, 'outer'), group('inner', -2400, -2400, 'outer'),
+      group('outer', -2500, -2500), node('free', 9000, 100)];
+    expect(filterCardsToChunks(cards, ['-2:-2'], catalog).map(card => card.id)).toEqual(['leaf', 'sibling', 'inner', 'outer']);
+    expect(filterCardsToChunks(cards, new Set(['10:0', '4:0']), catalog).map(card => card.id)).toEqual(['leaf', 'sibling', 'inner', 'outer', 'free']);
+    expect(filterCardsToChunks(cards, ['20:20'], catalog)).toEqual([]);
+  });
+
+  it('does not fill the gap between disjoint active chunks and tolerates an unloaded ancestor', () => {
+    const cards = [node('first', 100, 100), group('gap', 2300, 2300), node('second', 4500, 4500),
+      node('far-child', 30000, 30000, 'loaded'), group('loaded', 100, 100, 'unloaded')];
+    expect(filterCardsToChunks(cards, ['0:0', '2:2'], catalog).map(card => card.id)).toEqual(['first', 'second', 'far-child', 'loaded']);
+  });
   it("keeps coverage stable within a tile and detects negative boundary and resize crossings", () => {
     const viewport = { x: 100, y: 100, zoom: 0.12, width: 1920, height: 1080 };
     const bounds = getViewportChunkBounds(viewport, 0);

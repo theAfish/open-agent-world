@@ -103,6 +103,12 @@ def summary(value):
             "done": sum(t["status"] == "done" for p in plans for t in p["tasks"])}
 
 
+def preview_summary(value, arguments):
+    counts = summary(value)
+    return {"total": counts["tasks"], "done": counts["done"],
+            "latest_title": value["plans"][-1]["title"] if value["plans"] else None}
+
+
 def find_plan(value, plan_id):
     plan = next((p for p in value["plans"] if p["id"] == plan_id), None)
     if plan is None:
@@ -219,6 +225,10 @@ def register(registration):
         registration.register_capability(CapabilityDefinition(kind=kind, tool_name="task_board_" + operation,
             target_parameter="board", description=description, input_schema=schema), invoke)
         actions[operation] = NodeDocumentAction(handler, capability_kind=kind, read_only=is_read, project=is_read)
+    # Canvas previews need no task descriptions, dependency lists or execution collection.
+    actions["summary"] = NodeDocumentAction(
+        preview_summary,
+        capability_kind="matcreator.tasks.read", read_only=True, project=True)
     delegation_kind = "matcreator.tasks.delegate"
     # One control grant with bounded operations; host validates each operation's inputs.
     delegate_schema = {

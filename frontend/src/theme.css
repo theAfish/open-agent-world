@@ -180,6 +180,7 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .world-canvas .react-flow__pane:active { cursor: grabbing; }
 
 /* Terrain */
+.contour-layer, .contour-canvas-experiment { display: contents; }
 .contour-chunk {
   position: absolute;
   width: 2048px;
@@ -189,7 +190,11 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
   overflow: visible;
   pointer-events: none;
   shape-rendering: geometricPrecision;
+  /* Overview tiles are small enough to cache without large high-zoom textures. */
+  will-change: var(--contour-promotion, auto);
 }
+
+svg.contour-chunk[data-canvas-ready="true"] { visibility: hidden; }
 
 .world-canvas .react-flow__viewport-portal {
   /* Terrain stays behind cards; interactive portal children choose their own layer. */

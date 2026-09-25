@@ -4,7 +4,7 @@ import type { LegionSummary, WorldCard, WorldEdge, WorldSnapshot } from "../type
 import { buildCardDraft } from "./helpers";
 import { TEST_CATALOG } from "./catalog.fixture";
 import { mergeEdges, useWorldStore } from "./worldStore";
-import { useNodeSurfaceStore } from "./nodeSurfaces";
+import { surfaceDraftKey, useNodeSurfaceStore } from "./nodeSurfaces";
 import { useCardLibrary } from "./cardLibrary";
 import { useLegionDeployments } from "./legionDeployments";
 
@@ -980,6 +980,26 @@ describe("authoritative world synchronization", () => {
     expect(useWorldStore.getState().cards.map(c => c.id)).toEqual(['first']);
     expect(useWorldStore.getState().undoStack).toHaveLength(1);
     expect(useWorldStore.getState().toasts.at(-1)?.title).toBe('Legion was not deployed');
+  });
+
+  it('retires drafts only after confirmed deletion and ignores stale deletion events', async () => {
+    const node = { ...card('draft-owner', 'agent'), revision: 3 };
+    const key = surfaceDraftKey(node.id, 'editor', 'session-a');
+    const otherKey = surfaceDraftKey('other', 'editor');
+    useWorldStore.setState({ cards: [node] });
+    useNodeSurfaceStore.setState({ drafts: { [key]: 'unsaved', [otherKey]: 'other draft' } });
+    const remove = vi.spyOn(worldApi, 'deleteNode').mockRejectedValueOnce(new Error('offline'));
+    await useWorldStore.getState().deleteCard(node.id);
+    expect(useNodeSurfaceStore.getState().drafts[key]).toBe('unsaved');
+    useWorldStore.getState().ingestEvent({ id: 'old-delete', type: 'card_deleted', timestamp: 'now',
+      payload: { node: { ...node, revision: 2 } } });
+    expect(useNodeSurfaceStore.getState().drafts[key]).toBe('unsaved');
+    remove.mockResolvedValue(undefined);
+    await useWorldStore.getState().deleteCard(node.id);
+    expect(useNodeSurfaceStore.getState().drafts).toEqual({ [otherKey]: 'other draft' });
+    useNodeSurfaceStore.getState().setDraft(key, 'offscreen draft');
+    useWorldStore.getState().ingestEvent({ id: 'confirmed-delete', type: 'card_deleted', timestamp: 'now', payload: { node } });
+    expect(useNodeSurfaceStore.getState().drafts).toEqual({ [otherKey]: 'other draft' });
   });
 
   it("clears placement feedback when deployment validation declines the request", async () => {

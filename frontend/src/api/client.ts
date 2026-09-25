@@ -218,7 +218,10 @@ export function normalizeWorldSnapshot(input: unknown): WorldSnapshot {
   const source = asRecord(input);
   const nodes = (source.nodes ?? []) as unknown[];
   const edges = (source.edges ?? []) as unknown[];
+  const seed = source.terrain_seed;
   return {
+    ...(typeof seed === 'number' && Number.isInteger(seed) && seed >= 0 && seed <= 0xFFFFFFFF
+      ? { terrain_seed: seed } : {}),
     nodes: nodes.map(normalizeCard),
     edges: edges.map(normalizeEdge),
     chunks: Array.isArray(source.chunks) ? (source.chunks as WorldSnapshot["chunks"]) : [],
@@ -347,6 +350,10 @@ export const worldApi = {
 
   async getNodeDocument(id: string, sessionId: string | null = cardStateSession(id) ?? null): Promise<{ value: Record<string, unknown>; revision: number; summary: Record<string, unknown> }> {
     return request(`/nodes/${encodeURIComponent(id)}/document`, { headers: stateSessionHeaders(sessionId) });
+  },
+
+  async getNodeDocumentSummary(id: string, sessionId: string | null = cardStateSession(id) ?? null): Promise<{ revision: number; summary: Record<string, unknown> }> {
+    return request(`/nodes/${encodeURIComponent(id)}/document?summary_only=true`, { headers: stateSessionHeaders(sessionId) });
   },
 
   async nodeResourceAction(id: string, action: string, args: Record<string, unknown>, confirm = false, sessionId: string | null = cardStateSession(id) ?? null): Promise<Record<string, unknown>> {

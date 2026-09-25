@@ -7,7 +7,7 @@ import type { WorldCard } from "../types/world";
 
 
 /** Plugin-owned scalar configuration, rendered without provider-specific code. */
-export function AgentSchemaSettings({ card }: { card: WorldCard }) {
+export function AgentSchemaSettings({ card, active = true }: { card: WorldCard; active?: boolean }) {
   useLocale();
   const catalog = useWorldStore((state) => state.catalog);
   const updateCard = useWorldStore((state) => state.updateCard);
@@ -15,11 +15,12 @@ export function AgentSchemaSettings({ card }: { card: WorldCard }) {
   const [error, setError] = useState("");
   const schema = catalog.node_types.find((item) => item.id === card.type)?.config_schema;
   useEffect(() => {
-    let active = true;
-    if (!card.ephemeral) void worldApi.getAgentInfo(card.id).then((info) => { if (active) setRuntime(info); })
-      .catch((reason) => { if (active) setError(apiErrorMessage(reason)); });
-    return () => { active = false; };
-  }, [card.id, card.ephemeral, card.config, card.status]);
+    if (!active) return;
+    let current = true;
+    if (!card.ephemeral) void worldApi.getAgentInfo(card.id).then((info) => { if (current) setRuntime(info); })
+      .catch((reason) => { if (current) setError(apiErrorMessage(reason)); });
+    return () => { current = false; };
+  }, [card.id, card.ephemeral, card.config, card.status, active]);
   const save = async (key: string, value: unknown) => {
     if (card.config[key] === value) return;
     setError("");

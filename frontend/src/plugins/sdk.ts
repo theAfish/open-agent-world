@@ -128,6 +128,15 @@ export interface PluginViewProps {
   definition: NodeTypeCatalogItem;
   level: NodeSurfaceLevel;
   host: {
+    /** Optional transient UI draft, isolated by the host's card/state scope/session.
+     * Survives surface unmount; never written to durable state or preferences.
+     * Clear with undefined after save/cancel. Older hosts may omit this capability. */
+    draft?: {
+      get(): Record<string, unknown> | undefined;
+      set(value: Record<string, unknown> | undefined): void;
+      /** Notify surfaces when another mount or an in-flight save changes the draft. */
+      subscribe?(listener: () => void): () => void;
+    };
     /** Absent for state.mode=none. The host owns namespace and lifecycle. */
     state?: CardStateStore;
     /** Present only when the developer permits a choice; null restores its default. */

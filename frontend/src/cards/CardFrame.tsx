@@ -112,10 +112,14 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
   const pointerStart = useRef<{ x: number; y: number; moved: boolean }>();
   const visualLevel = level;
   // Preview cards do not need editors, plugin bodies or their subscriptions.
-  // Once visited, retain the body on collapse so local unsaved drafts survive.
+  // Unknown plugin bodies may still own local drafts. Host editors retain drafts
+  // outside their mounts, so their hidden DOM and subscriptions can be released.
   const [inspectorVisited, setInspectorVisited] = useState(level === 'inspector');
   useEffect(() => { if (level === 'inspector') setInspectorVisited(true); }, [level]);
   const definition = catalog.node_types.find((item) => item.id === card.type);
+  const hostInspector = !definition?.frontend?.body && (['text', 'conversation', 'sandbox', 'image'].includes(card.type)
+    || definition?.traits.includes('ui.task-board.v1'));
+  const retainedInspector = !hostInspector && !card.type.startsWith('xrd.');
   const label = t(definition?.label ?? card.type);
   const eligible = canAppointMinister(card, catalog);
   const roleDrag = useEquipmentDrag(s => s.resource?.type === MINISTER_ROLE_CARD);
@@ -227,20 +231,20 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
                 else hidePreview(card.id);
               }} />
           ) : null}
-          {canCollapseInspector && <IconButton icon={X} size="sm" quiet className="node-surface-close"
+          {visualLevel === 'inspector' && canCollapseInspector && <IconButton icon={X} size="sm" quiet className="node-surface-close"
             onClick={() => closeInspector(card.id)} label={t("Close {v0} inspector", { v0: String(card.name) })} />}
         </header>
 
         <div className="node-preview-content" aria-hidden={visualLevel !== "preview"}>
-          {(visualLevel==='preview'||!card.type.startsWith('xrd.')) && <div className="node-preview-body"><NodePreview card={card} /></div>}
+          {visualLevel === 'preview' && <div className="node-preview-body"><NodePreview card={card} /></div>}
           {presentation.open !== "preview" && <span className="node-preview-hint">{t(presentation.open === "workspace" ? "Open workspace" : "Click for details")}</span>}
         </div>
 
         <div className="card-body node-inspector-content nodrag nopan" aria-hidden={visualLevel !== "inspector"}>
-          {(visualLevel === 'inspector' || (inspectorVisited && !card.type.startsWith('xrd.'))) && <CardContent card={card} level={level} />}
+          {(visualLevel === 'inspector' || (inspectorVisited && retainedInspector)) && <CardContent card={card} level={level} />}
         </div>
 
-        <footer className="card-footer node-inspector-footer nodrag nopan">
+        {visualLevel === 'inspector' && <footer className="card-footer node-inspector-footer nodrag nopan">
           {definition?.traits.includes("core.agent") && !card.ephemeral ? <EquipmentToggle card={card} />
             : <span className="card-id">{card.ephemeral ? "synthetic" : card.id.slice(0, 8)}</span>}
           <div className="card-footer-actions">
@@ -256,7 +260,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
               </button>
             ) : null}
           </div>
-        </footer>
+        </footer>}
       </>}
     </article>
     {card.minister && <MinisterAgent card={card} nodeHovered={ministerNodeHovered && level === 'node'} />}

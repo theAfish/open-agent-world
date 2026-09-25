@@ -4,7 +4,7 @@ import { t, useLocale } from "../i18n";
 import { Component, Suspense, useMemo, type ReactNode } from "react";
 import { worldApi, nodeDocumentDownloadUrl } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
-import { useNodeSurfaceStore } from "../state/nodeSurfaces";
+import { surfaceDraftKey, useNodeSurfaceStore } from "../state/nodeSurfaces";
 import { useOpenFiles } from "../state/openFiles";
 import type { WorldCard } from "../types/world";
 import { pluginView } from "./registry";
@@ -39,6 +39,17 @@ export function PluginSurface({ card, slot, level, children }: {
   const source = useWorldStore(s=>xrdCanvasSource(card,s.cards,s.edges));
   const viewCard = useMemo(()=>source?{...card,config:{...card.config,source_node_id:source}}:card,[card,source]);
   const host = useMemo<PluginViewProps["host"]>(() => ({
+    draft: {
+      get: () => {
+        const value = useNodeSurfaceStore.getState().drafts[surfaceDraftKey(card.id, 'plugin', card.state_scope, sessionId)];
+        return value ? JSON.parse(value) as Record<string, unknown> : undefined;
+      },
+      set: value => useNodeSurfaceStore.getState().setDraft(surfaceDraftKey(card.id, 'plugin', card.state_scope, sessionId), value ? JSON.stringify(value) : ''),
+      subscribe: listener => {
+        const key = surfaceDraftKey(card.id, 'plugin', card.state_scope, sessionId);
+        return useNodeSurfaceStore.subscribe((state, previous) => { if (state.drafts[key] !== previous.drafts[key]) listener(); });
+      },
+    },
     state: access.deployed || definition?.state?.mode === 'none' ? undefined : {
       get: () => worldApi.cardState(card.id, 'GET', undefined, undefined, sessionId ?? null),
       set: (value, revision) => worldApi.cardState(card.id, 'PUT', value, revision, sessionId ?? null),
@@ -165,7 +176,7 @@ export function PluginSurface({ card, slot, level, children }: {
       state.selectCards([target.id], { syncCanvas: true });
     },
     clearOpenedFile: () => useOpenFiles.getState().clear(card.id),
-  }), [card.id, source, updateCard, access, definition, sessionId]);
+  }), [card.id, card.state_scope, source, updateCard, access, definition, sessionId]);
   const reference = definition?.frontend?.[slot];
   if (covered && !inWorkspace && card.type.startsWith('xrd.')) return null;
   if (!reference || !definition) return <>{children}</>;

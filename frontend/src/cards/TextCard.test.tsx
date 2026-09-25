@@ -1,17 +1,18 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
 import { worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import { buildCardDraft } from "../state/helpers";
 import { TextCardBody } from "./TextCard";
+import { useNodeSurfaceStore } from '../state/nodeSurfaces';
 
 vi.mock("./CardUtilities", () => ({ RelationshipList: () => null }));
 const card = { id: "minutes", ...buildCardDraft("text", { x: 0, y: 0 }), config: { content: "", revision: 2, history: [] } };
 const originalSaveText = useWorldStore.getState().saveText;
-beforeEach(() => vi.restoreAllMocks());
+beforeEach(() => { vi.restoreAllMocks(); useNodeSurfaceStore.setState({ drafts: {} }); });
 afterEach(() => { cleanup(); useWorldStore.setState({ saveText: originalSaveText }); });
 
 it("loads real minutes and preserves them when a summary snapshot contains empty content", async () => {
@@ -46,4 +47,43 @@ it("does not permit saving a placeholder before the resource has loaded", () => 
   render(<TextCardBody card={card} level="inspector" />);
   expect(screen.getByRole("textbox")).toBeDisabled();
   expect(screen.getByRole("button", { name: "Save text" })).toBeDisabled();
+});
+
+it('retains dirty text and its original revision across viewport unmount', async () => {
+  const get = vi.spyOn(worldApi, 'getText').mockResolvedValue({ content: 'Saved', revision: 2, history: [] });
+  const save = vi.fn().mockResolvedValue(false);
+  useWorldStore.setState({ saveText: save });
+  const view = render(<TextCardBody card={card} level="inspector" />);
+  await screen.findByDisplayValue('Saved');
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Unfinished' } });
+  view.unmount();
+  get.mockResolvedValue({ content: 'New remote text', revision: 3, history: [] });
+  render(<TextCardBody card={card} level="inspector" />);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save text' })).toBeEnabled());
+  expect(screen.getByRole('textbox')).toHaveValue('Unfinished');
+  fireEvent.click(screen.getByRole('button', { name: 'Save text' }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith(card.id, 'Unfinished', 2));
+});
+
+it('finishes an in-flight save across remount and edits against the saved revision', async () => {
+  const get = vi.spyOn(worldApi, 'getText').mockResolvedValue({ content: 'Saved', revision: 2, history: [] });
+  let finish!: (saved: boolean) => void;
+  const save = vi.fn().mockImplementationOnce(() => new Promise<boolean>(resolve => { finish = resolve; })).mockResolvedValue(false);
+  useWorldStore.setState({ saveText: save, cards: [card] });
+  const first = render(<TextCardBody card={card} level="inspector" />);
+  await screen.findByDisplayValue('Saved');
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Submitted' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save text' }));
+  first.unmount();
+  render(<TextCardBody card={card} level="inspector" />);
+  get.mockResolvedValue({ content: 'Submitted', revision: 3, history: [] });
+  await act(async () => {
+    useWorldStore.setState({ cards: [{ ...card, config: { ...card.config, revision: 3 } }] });
+    finish(true);
+  });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save text' })).toBeDisabled());
+  await waitFor(() => expect(screen.getByText(/characters · r/)).toHaveTextContent('r3'));
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Next edit' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save text' }));
+  await waitFor(() => expect(save).toHaveBeenLastCalledWith(card.id, 'Next edit', 3));
 });

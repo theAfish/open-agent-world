@@ -28,7 +28,7 @@ import type {
   WorldPosition,
   WorldSnapshot,
 } from "../types/world";
-import { filterCardsToChunks, getViewportChunkKeys, viewportCenterToWorld } from "./chunks";
+import { filterCardsToChunks, getViewportChunkKeys, sameViewportChunks, viewportCenterToWorld } from "./chunks";
 import { EMPTY_CATALOG, getNodeType } from "./catalog";
 import { buildCardDraft, makeStressCards, mergeCardPatch } from "./helpers";
 import { summarizeLegionSelection } from "./legions";
@@ -43,6 +43,7 @@ import {
 } from "./modelSettings";
 
 import { applyGraphEvents, eventType, isGraphEvent, isOlder, mergeCards, mergeEdges, sequenceEvents, type Tombstones } from "./graphEvents";
+import { forgetTaskBoardCache } from '../cards/taskBoardCache';
 export { isOlder, mergeCards, mergeEdges } from "./graphEvents";
 
 export type SyncState = "loading" | "online" | "syncing" | "offline";
@@ -222,6 +223,9 @@ async function deletePersistentCards(cards: WorldCard[]): Promise<void> {
   } else {
     await worldApi.deleteNodes(persistent.map(card => card.id));
   }
+  const ids = persistent.map(card => card.id);
+  useNodeSurfaceStore.getState().forgetDrafts(ids);
+  forgetTaskBoardCache(ids);
 }
 
 function appendHistory(
@@ -631,6 +635,14 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   },
 
   setViewport: (viewport) => {
+    const previous = get().viewport;
+    if (previous.x === viewport.x && previous.y === viewport.y && previous.zoom === viewport.zoom
+      && previous.width === viewport.width && previous.height === viewport.height) return;
+    if (sameViewportChunks(previous, viewport)) {
+      // Persist the camera, but leave card filtering and chunk requests asleep.
+      set({ viewport });
+      return;
+    }
     const keys = getViewportChunkKeys(viewport);
     set({ viewport, activeChunkKeys: keys });
     void get().ensureChunks(keys);
@@ -1743,6 +1755,19 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         eventStream: sequenced.eventStream,
         eventSequence: sequenced.eventSequence,
       }));
+      // Only confirmed deletions retire drafts. Chunk eviction and stale delete
+      // events must not erase the editor state of an offscreen or restored card.
+      const deleted = graph.filter(event => eventType(event) === 'card_deleted');
+      if (deleted.length) {
+        const live = new Set(get().cards.map(card => card.id));
+        const ids = deleted.flatMap(event => {
+          const node = event.payload.node as { id?: unknown } | undefined;
+          const id = node?.id ?? event.node_id ?? event.agent_id ?? event.sandbox_id ?? event.resource_id;
+          return typeof id === 'string' && !live.has(id) ? [id] : [];
+        });
+        useNodeSurfaceStore.getState().forgetDrafts(ids);
+        forgetTaskBoardCache(ids);
+      }
       if (sequenced.gap) void get().refreshWorld();
     };
     for (const event of events) {

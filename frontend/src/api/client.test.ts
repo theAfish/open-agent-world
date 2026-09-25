@@ -5,6 +5,7 @@ import {
   normalizeLegionInstantiation,
   normalizeLegionSummary,
   normalizeRuntimeEvent,
+  normalizeWorldSnapshot,
   worldApi,
 } from "./client";
 
@@ -13,6 +14,14 @@ afterEach(() => {
 });
 
 describe("API normalization boundary", () => {
+  it('preserves the persisted unsigned 32-bit terrain seed without accepting malformed values', () => {
+    for (const seed of [0, 123, 456, 0xFFFFFFFF]) {
+      expect(normalizeWorldSnapshot({ terrain_seed: seed }).terrain_seed).toBe(seed);
+    }
+    for (const seed of [undefined, null, '123', -1, 1.5, NaN, Infinity, 0x100000000]) {
+      expect(normalizeWorldSnapshot({ terrain_seed: seed })).not.toHaveProperty('terrain_seed');
+    }
+  });
   it("saves cached glue candidates without gesture offsets", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ revision: 1, boxes: {}, bonds: [] })));
     vi.stubGlobal("fetch", fetchMock);

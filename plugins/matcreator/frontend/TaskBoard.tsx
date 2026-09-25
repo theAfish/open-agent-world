@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type SetStateAction } from 'react';
 import { t, useLocale, type PluginViewProps } from '@oaw/plugin-api';
 import './tasks.css';
 
@@ -9,12 +9,32 @@ type Snapshot = { value: { plans: Plan[] }; revision: number };
 type Attempt = { item_id: string; instance_id: string | null; agent_id: string | null; run_id: string | null; status: string; error?: string; text?: string; output_directory: string; reconciliation_error?: string };
 type Execution = { items: { id: string; metadata: { plan_id: string; task_id: string } }[]; attempts: Attempt[] };
 type Collected = { document: Snapshot; execution: Execution };
+type Editor = { task: Task; planId: string; revision: number; fresh: boolean };
+type Draft = { selected?: string; creating?: boolean; title?: string; goal?: string; editor?: Editor; taskId?: string;
+  saving?: { id: string; action: string }; error?: string };
 const columns: { id: Status; label: string }[] = [
   { id: 'pending', label: 'To do' }, { id: 'running', label: 'In progress' },
   { id: 'review', label: 'Awaiting review' },
   { id: 'blocked', label: 'Blocked' }, { id: 'done', label: 'Done' },
 ];
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
+function useTaskDraft(host: PluginViewProps['host']) {
+  const local = useRef<Draft>({});
+  const [, changed] = useState(0);
+  const read = useCallback(() => host.draft ? host.draft.get() as Draft | undefined ?? {} : local.current, [host]);
+  const subscribe = useCallback((listener: () => void) => host.draft?.subscribe?.(listener) ?? (() => {}), [host]);
+  const snapshot = useCallback(() => JSON.stringify(read()), [read]);
+  const raw = useSyncExternalStore(subscribe, snapshot);
+  const draft = useMemo(() => JSON.parse(raw) as Draft, [raw]);
+  const update = useCallback((edit: (current: Draft) => Draft) => {
+    const next = edit(read());
+    const kept = next.creating || next.editor || next.saving ? next : undefined;
+    if (host.draft) host.draft.set(kept); else local.current = kept ?? {};
+    // Older hosts can omit the subscription capability.
+    changed(value => value + 1);
+  }, [host, read]);
+  return { draft, update, read };
+}
 function StatusIcon({ status, size = 15 }: { status: Status; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {status === 'done' ? <path d="m5 12 4 4L19 6" /> : status === 'running' ? <path d="m8 5 11 7-11 7Z" /> : <><circle cx="12" cy="12" r="8" />{status === 'blocked' && <path d="M12 8v5m0 3h.01" />}</>}
@@ -23,7 +43,7 @@ function StatusIcon({ status, size = 15 }: { status: Status; size?: number }) {
 // Wide glyphs need more room before sharing a row with another task.
 const titleWidth = (title: string) => [...title].reduce((width, character) => width + (character.charCodeAt(0) > 255 ? 2 : 1), 0);
 
-function useBoard(host: PluginViewProps['host']) {
+function useBoard(host: PluginViewProps['host'], active = true) {
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [execution, setExecution] = useState<Execution>();
   const [error, setError] = useState('');
@@ -39,6 +59,7 @@ function useBoard(host: PluginViewProps['host']) {
     return next;
   }, [host, accept]);
   useEffect(() => {
+    if (!active) return;
     alive.current = true;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
@@ -49,40 +70,75 @@ function useBoard(host: PluginViewProps['host']) {
     };
     void poll();
     return () => { stopped = true; alive.current = false; clearTimeout(timer); };
-  }, [refresh]);
+  }, [refresh, active]);
   return { snapshot, execution, error, refresh, accept };
 }
 
 export function TaskPreview({ host }: PluginViewProps) {
   useLocale();
-  const { snapshot, error } = useBoard(host);
-  const tasks = snapshot?.value.plans.flatMap(plan => plan.tasks) ?? [];
+  const [summary, setSummary] = useState<{ done: number; total: number; latest_title?: string }>();
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let current = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      try {
+        const next = await host.documentAction('summary', {});
+        if (current) { setSummary(next.value as typeof summary); setError(''); }
+      } catch (reason) { if (current) setError(message(reason)); }
+      if (current) timer = setTimeout(() => void refresh(), 3000);
+    };
+    void refresh();
+    return () => { current = false; clearTimeout(timer); };
+  }, [host]);
   return <div className="mc-task-preview"><small>{t('Research task board')}</small>
-    <strong>{tasks.filter(task => task.status === 'done').length} / {tasks.length} {t('Done')}</strong>
-    <p>{snapshot?.value.plans.at(-1)?.title ?? t('Plan, execute, verify and learn.')}</p>
+    <strong>{summary?.done ?? 0} / {summary?.total ?? 0} {t('Done')}</strong>
+    <p>{summary?.latest_title ?? t('Plan, execute, verify and learn.')}</p>
     {error && <p role="alert">{error}</p>}
   </div>;
 }
 
-export function TaskBoard({ host }: PluginViewProps) {
+export function TaskBoard({ host, level = 'workspace' }: PluginViewProps) {
   useLocale();
-  const { snapshot, execution, error: readError, refresh, accept } = useBoard(host);
-  const [selected, setSelected] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [title, setTitle] = useState('');
-  const [goal, setGoal] = useState('');
-  const [editor, setEditor] = useState<{ task: Task; planId: string; revision: number; fresh: boolean }>();
-  const [taskId, setTaskId] = useState<string>();
+  const active = level === 'inspector' || level === 'workspace';
+  const { snapshot, execution, error: readError, refresh, accept } = useBoard(host, active);
+  const { draft, update: updateDraft, read: readDraft } = useTaskDraft(host);
+  const saved = useRef(draft).current;
+  const [selected, setSelected] = useState(saved?.selected ?? '');
+  const { creating = false, title = '', goal = '', editor } = draft;
+  const [taskId, setTaskId] = useState<string | undefined>(saved?.taskId);
+  const setCreating = (value: boolean) => updateDraft(current => ({ ...current, selected, taskId, creating: value, error: undefined }));
+  const setTitle = (value: string) => updateDraft(current => ({ ...current, title: value }));
+  const setGoal = (value: string) => updateDraft(current => ({ ...current, goal: value }));
+  const setEditor = (value: SetStateAction<Editor | undefined>) => updateDraft(current => {
+    const next = typeof value === 'function' ? value(current.editor) : value;
+    return { ...current, selected: next?.planId ?? selected, taskId, editor: next, error: undefined };
+  });
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const surface = useRef<HTMLElement>(null);
   const back = useRef<HTMLButtonElement>(null);
   const listScroll = useRef(0);
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [localBusy, setBusy] = useState(false);
+  const busy = localBusy || !!draft.saving;
   const [view, setView] = useState<'activity' | 'board'>('activity');
   const details = useRef<HTMLDetailsElement>(null);
   const running = useRef(false);
-  const plans = snapshot?.value.plans ?? [];
+  const previousDraft = useRef(draft);
+  useEffect(() => {
+    const previous = previousDraft.current;
+    previousDraft.current = draft;
+    if (!previous.saving || draft.saving) return;
+    // A save may have finished in an old, culled mount. Refresh this surviving
+    // view and reconcile its local selection with the shared draft completion.
+    if (active) void refresh().catch(reason => setError(message(reason)));
+    if (previous.creating && !draft.creating) { setSelected(''); setTaskId(undefined); }
+    if (previous.editor && !draft.editor) {
+      setSelected(previous.editor.planId);
+      setTaskId(previous.saving.action === 'remove_task' ? undefined : previous.editor.task.id);
+    }
+  }, [draft, active, refresh]);
+  const plans = active ? snapshot?.value.plans ?? [] : [];
   const plan = plans.find(item => item.id === selected) ?? plans.at(-1);
   const done = plan?.tasks.filter(task => task.status === 'done').length ?? 0;
   const taskDetail = plan?.tasks.find(task => task.id === taskId);
@@ -90,9 +146,11 @@ export function TaskBoard({ host }: PluginViewProps) {
   const attempts = execution?.attempts.filter(attempt => attempt.item_id === itemId) ?? [];
   const inTask = !!editor || taskId !== undefined;
   useEffect(() => {
+    if (!active) return;
     if (surface.current) surface.current.scrollTop = inTask ? 0 : listScroll.current;
     if (inTask && !editor) back.current?.focus();
-  }, [taskId, !!editor]);
+  }, [taskId, !!editor, active]);
+  if (!active) return null;
 
   function openTask(id: string) {
     setDescriptionExpanded(false);
@@ -103,14 +161,34 @@ export function TaskBoard({ host }: PluginViewProps) {
   function returnToTasks() { setTaskId(undefined); setEditor(undefined); setError(''); }
 
   async function mutate(action: string, arguments_: Record<string, unknown>, revision = snapshot?.revision) {
-    if (running.current || revision === undefined) return false;
+    if (running.current || readDraft().saving || revision === undefined) return false;
+    const submitted = readDraft();
+    const saving = { id: crypto.randomUUID(), action };
     running.current = true; setBusy(true); setError('');
+    updateDraft(current => ({ ...current, saving, error: undefined }));
     try {
       const next = await host.documentAction(action, arguments_, revision) as Snapshot;
       accept(next);
       if (action === 'create_plan') setSelected(next.value.plans.at(-1)!.id);
+      else if (submitted.editor && JSON.stringify(readDraft().editor) === JSON.stringify(submitted.editor)) {
+        setSelected(submitted.editor.planId);
+        setTaskId(action === 'remove_task' ? undefined : submitted.editor.task.id);
+      }
+      updateDraft(current => {
+        if (current.saving?.id !== saving.id) return current;
+        const clean = { ...current, saving: undefined };
+        if (action === 'create_plan') return current.title === submitted.title && current.goal === submitted.goal
+          ? { ...clean, creating: false, title: '', goal: '' } : clean;
+        if (JSON.stringify(current.editor) === JSON.stringify(submitted.editor)) return { ...clean, editor: undefined };
+        // Keep edits typed after submission, using the revision we just saved.
+        return current.editor && current.editor.task.id === submitted.editor?.task.id && action !== 'remove_task'
+          ? { ...clean, editor: { ...current.editor, revision: next.revision, fresh: false } } : clean;
+      });
       return true;
-    } catch (reason) { setError(message(reason)); return false; }
+    } catch (reason) {
+      updateDraft(current => current.saving?.id === saving.id ? { ...current, saving: undefined, error: message(reason) } : current);
+      setError(message(reason)); return false;
+    }
     finally { running.current = false; setBusy(false); }
   }
 
@@ -148,13 +226,11 @@ export function TaskBoard({ host }: PluginViewProps) {
       {!inTask && plan?.goal && <p className="mc-task-subtitle" title={plan.goal}>{plan.goal}</p>}
       {!inTask && plan && <progress aria-label={t('Research progress')} value={done} max={plan.tasks.length || 1} />}
     </header>
-    {(error || readError) && <p className="mc-task-error" role="alert">{error || readError}</p>}
+    {(error || draft.error || readError) && <p className="mc-task-error" role="alert">{error || draft.error || readError}</p>}
     {!snapshot && !readError && <p role="status">{t('Loading research tasks…')}</p>}
     {creating && <form className="mc-task-editor" onSubmit={async event => {
       event.preventDefault();
-      if (await mutate('create_plan', { title: title.trim(), goal, tasks: [] })) {
-        setCreating(false); setTitle(''); setGoal('');
-      }
+      await mutate('create_plan', { title: title.trim(), goal, tasks: [] });
     }}>
       <h3>{t('New research plan')}</h3>
       <label>{t('Plan title')}<input autoFocus aria-label={t('Plan title')} required maxLength={180} value={title} onChange={event => setTitle(event.target.value)} /></label>
@@ -178,7 +254,7 @@ export function TaskBoard({ host }: PluginViewProps) {
         event.preventDefault();
         const { id, ...fields } = editor.task;
         const args = editor.fresh ? { plan_id: editor.planId, task: editor.task } : { plan_id: editor.planId, task_id: id, ...fields };
-        if (await mutate(editor.fresh ? 'add_task' : 'update_task', args, editor.revision)) { setTaskId(id); setEditor(undefined); }
+        await mutate(editor.fresh ? 'add_task' : 'update_task', args, editor.revision);
       }}>
         <h3>{t(editor.fresh ? 'Add task' : 'Edit task')}</h3>
         {stale && <div className="mc-task-conflict" role="status"><p>{t('The board changed while you were editing. Your draft is retained.')}</p>
@@ -206,7 +282,7 @@ export function TaskBoard({ host }: PluginViewProps) {
         <div className="mc-task-actions"><button disabled={busy || !!stale || !editor.task.title.trim()}>{t('Save task')}</button>
           <button type="button" disabled={busy} onClick={() => { setEditor(undefined); setError(''); }}>{t('Cancel')}</button>
           {!editor.fresh && <button type="button" disabled={busy || !!stale} onClick={async () => {
-            if (await mutate('remove_task', { plan_id: editor.planId, task_id: editor.task.id }, editor.revision)) returnToTasks();
+            await mutate('remove_task', { plan_id: editor.planId, task_id: editor.task.id }, editor.revision);
           }}>{t('Remove task')}</button>}
         </div>
       </form> : taskId !== undefined ? <article className="mc-task-detail" aria-label={t('Task detail')}>

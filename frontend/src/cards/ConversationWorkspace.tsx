@@ -19,6 +19,7 @@ import {
 } from "../state/conversationMentions";
 import { useWorldStore } from "../state/worldStore";
 import { useConversationView } from "../state/conversationView";
+import { surfaceDraftKey, useSurfaceDraft } from '../state/nodeSurfaces';
 import { useOpenFiles } from "../state/openFiles";
 import type { ContextStatus, ConversationAgent, ConversationAttachment, ConversationMessage, ConversationSession, WorldCard } from "../types/world";
 import { reportInteraction } from '../state/interactions';
@@ -26,6 +27,8 @@ import { WorkspaceSection, useWorkspaceSections } from '../workspace/WorkspaceSe
 import './conversationWorkspace.css';
 
 type OutgoingMessage = { message: ConversationMessage; status: "sending" | "confirmed" | "unconfirmed"; error?: string };
+const NO_ATTACHMENTS: ConversationAttachment[] = [];
+const NO_OUTGOING: OutgoingMessage[] = [];
 
 export function ConversationWorkspace({ card }: { card: WorldCard }) {
   useLocale();
@@ -77,11 +80,11 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   }, [activateConversation]);
   useEffect(() => () => useOpenFiles.getState().clear(card.id), [card.id, activeSessionId]);
 
-  const [draft, setDraft] = useState("");
-  const [attachments, setAttachments] = useState<ConversationAttachment[]>([]);
+  const [draft, setDraft] = useSurfaceDraft(surfaceDraftKey(card.id, 'composer', activeSessionId), '');
+  const [attachments, setAttachments] = useSurfaceDraft(surfaceDraftKey(card.id, 'attachments', activeSessionId), NO_ATTACHMENTS);
   const [uploading, setUploading] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const [outgoing, setOutgoing] = useState<OutgoingMessage[]>([]);
+  const [outgoing, setOutgoing] = useSurfaceDraft(surfaceDraftKey(card.id, 'outgoing'), NO_OUTGOING);
   const [stoppingRuns, setStoppingRuns] = useState<Set<string>>(() => new Set());
   const revealOutgoing = useRef(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string>();
@@ -213,8 +216,6 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
     setParticipantAgentIds([]);
     setMentionCaret(undefined);
     setRenaming(undefined);
-    setDraft("");
-    setAttachments([]);
   }, [activeSessionId]);
 
   const createSession = async (title: string, participantIds: string[], groupId?: string) => {

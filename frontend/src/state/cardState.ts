@@ -36,10 +36,12 @@ export function cardStateSession(id: string): string | undefined {
 }
 
 export function useCardStateSession(id: string): string | undefined {
-  const cards = useWorldStore(state => state.cards);
-  const types = useWorldStore(state => state.catalog.node_types);
-  const view = useConversationView();
-  return resolveCardStateSession(id, cards, types, view);
+  // Subscribe to the resolved scope, not every card or unrelated conversation edit.
+  useConversationView(view => {
+    const world = useWorldStore.getState();
+    return resolveCardStateSession(id, world.cards, world.catalog.node_types, view);
+  });
+  return useWorldStore(world => resolveCardStateSession(id, world.cards, world.catalog.node_types, useConversationView.getState()));
 }
 
 export function stateSessionHeaders(sessionId: string | null | undefined): Record<string, string> {

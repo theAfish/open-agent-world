@@ -118,14 +118,15 @@ def workspace_router(manifest):
         return await resources.resource_content(resource_id, services)
 
     @router.get("/nodes/{node_id}/document")
-    async def document(node_id: str, services=Depends(get_services)):
+    async def document(node_id: str, services=Depends(get_services), summary_only: bool = False):
         access = manifest.get("plugin_access", {}).get(node_id)
         if access is not None:
             if not access["document_fields"] and not access["summary_fields"]:
                 raise HTTPException(404, "This operation is not published")
-            return project_document(await node_documents.get_document(node_id, services), access)
+            projected = project_document(await node_documents.get_document(node_id, services), access)
+            return {"revision": projected["revision"], "summary": projected["summary"]} if summary_only else projected
         require(node_id, "tasks")
-        return await node_documents.get_document(node_id, services)
+        return await node_documents.get_document(node_id, services, summary_only)
 
     @router.post("/nodes/{node_id}/actions/{action}")
     async def action(node_id: str, action: str, request: DocumentActionRequest, services=Depends(get_services)):
