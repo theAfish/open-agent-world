@@ -2,8 +2,10 @@
 
 Date: 2026-09-26. Base: `dev` at `10b58ea90db3627a619a08b824f791b0ca54759a`.
 
-This records local Windows results. The new Linux GitHub Actions workflow has
-not yet run, and required branch checks have not been configured. This slice
+This records local Windows results. The first GitHub Actions run on `2dc0aec`
+passed the Linux frontend/build/deployment job and Windows core smoke job;
+the full Linux backend job was still running at this checkpoint. Required
+branch checks have not been configured. This slice
 does not enable shared-database tenancy, employee login or RBAC enforcement.
 
 ## Results
@@ -15,6 +17,7 @@ does not enable shared-database tenancy, employee login or RBAC enforcement.
 | Frontend Vitest | 734 passed, 0 failed |
 | Frontend TypeScript and production build | Passed |
 | Playwright deployment acceptance | 1 passed |
+| Documentation tests, strict build and generated-site check | 6 tests passed; 60 pages and 5,754 local links/assets checked |
 
 The focused backend skip is the existing opt-in native deployment-clone test
 (`OAW_DEPLOY_NATIVE` was not enabled). Other full-suite skips retain their
@@ -26,8 +29,9 @@ environment with provider adapters installed. PyMuPDF 1.26.7 was installed in
 an isolated task dependency directory. The original checkout and its virtual
 environment were not modified. Frontend dependencies came from `npm ci` in
 the task clone. The deployment runner's `OAW_TEST_PYTHON` override selected
-that existing Python environment. A clean locked install on the CI runners
-remains a distinct acceptance gate.
+that existing Python environment. Clean locked installs also succeeded on
+all three CI runners in the first run; local results and remote results remain
+separate evidence.
 
 All 18 backend failures were independently reproduced against an unchanged
 worktree at the base commit. No additional backend failures were observed in
@@ -70,6 +74,10 @@ The deployment browser test also replaced a removed participant-summary label
 with the visible participant row and mention control. It still checks login,
 conversation sessions, tasks, plugin notes/downloads, persistence after reload,
 mobile layout, logout, and hidden engineering routes.
+
+The documentation build also exposed missing navigation entries for the two
+new enterprise pages and two existing performance reports. All four pages are
+now included in navigation; strict missing-page validation remains enabled.
 
 ## Remaining acceptance boundaries
 

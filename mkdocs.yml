@@ -118,6 +118,8 @@ nav:
       - Host development:
           - Run from source: getting-started.md
           - Architecture: architecture.md
+          - Enterprise foundations: enterprise-foundations.md
+          - Enterprise validation: enterprise-foundations-validation.md
           - Canvas control: canvas-control.md
           - Canvas placement: layout.md
           - Canvas performance: canvas-performance.md
@@ -134,4 +136,6 @@ nav:
       - 插件开发路线: developers/index.zh-CN.md
       - 从源码运行: getting-started.zh-CN.md
       - 交互教程与实现: tutorial.zh-CN.md
+      - Legion 实例化性能排查: legion-performance-diagnosis.md
+      - 画布平移与缩放测量: panzoom-performance.md
       - 工作区部署: deployment.zh-CN.md
