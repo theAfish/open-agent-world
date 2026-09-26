@@ -7047,5 +7047,69 @@
   "Store is temporarily unavailable. Please retry.": [
     "Store is temporarily unavailable. Please retry.",
     "商店暂不可用，请重试。"
+  ],
+  "Pack removed. Restart OAW to finish uninstalling.": [
+    "Pack removed. Restart OAW to finish uninstalling.",
+    "卡包已移除，重启 OAW 后完成卸载。"
+  ],
+  "Pack uninstalled.": [
+    "Pack uninstalled.",
+    "卡包已卸载。"
+  ],
+  "View pack {name}": [
+    "View pack {name}",
+    "查看卡包 {name}"
+  ],
+  "VIEW PACK": [
+    "VIEW PACK",
+    "查看卡包"
+  ],
+  "Uninstall pending restart": [
+    "Uninstall pending restart",
+    "待重启卸载"
+  ],
+  "Environment failed": [
+    "Environment failed",
+    "环境准备失败"
+  ],
+  "Back to packs": [
+    "Back to packs",
+    "返回卡包"
+  ],
+  "View cards": [
+    "View cards",
+    "查看卡牌"
+  ],
+  "Uninstall Pack": [
+    "Uninstall Pack",
+    "卸载卡包"
+  ],
+  "Uninstall {name}? This takes effect after restart.": [
+    "Uninstall {name}? This takes effect after restart.",
+    "卸载 {name}？重启后生效。"
+  ],
+  "Confirm uninstall": [
+    "Confirm uninstall",
+    "确认卸载"
+  ],
+  "Pack guide": [
+    "Pack guide",
+    "使用说明"
+  ],
+  "Other versions": [
+    "Other versions",
+    "其他版本"
+  ],
+  "Loaded": [
+    "Loaded",
+    "已加载"
+  ],
+  "Adds Legion templates. Restart to use this Pack.": [
+    "Adds Legion templates. Restart to use this Pack.",
+    "添加军团模板，重启后即可使用。"
+  ],
+  "Runs application code. Install only from a trusted source.": [
+    "Runs application code. Install only from a trusted source.",
+    "此卡包会运行程序代码，请确认来源可信。"
   ]
 }

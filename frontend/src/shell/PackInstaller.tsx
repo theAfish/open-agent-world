@@ -1,29 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { apiErrorMessage, worldApi } from '../api/client';
 import { t } from '../i18n';
 import type { PackInspection, PackInstallations } from '../types/packs';
 import { PackGuide } from './PackCreator';
 
-export function PackInstaller() {
+export function PackInstaller({ actionTarget, onInstalled }: {
+  actionTarget: HTMLElement | null; onInstalled: (value: PackInstallations) => void;
+}) {
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File>();
   const [inspection, setInspection] = useState<PackInspection>();
-  const [state, setState] = useState<PackInstallations>();
   const [phase, setPhase] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const generation = useRef(0);
-  useEffect(() => {
-    let active = true;
-    const refresh = async () => {
-      const current = generation.current;
-      try { const value = await worldApi.getInstalledPacks(); if (active && current === generation.current) setState(value); }
-      catch (cause) { if (active) setError(apiErrorMessage(cause)); }
-    };
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 2500);
-    return () => { active = false; generation.current++; window.clearInterval(timer); };
-  }, []);
+  useEffect(() => () => { generation.current++; }, []);
   const inspect = async (selected?: File) => {
     if (!selected) return;
     const current = ++generation.current;
@@ -37,7 +29,7 @@ export function PackInstaller() {
       setPhase('Validating');
       const result = await worldApi.inspectPack(selected);
       if (current !== generation.current) return;
-      setInspection(result); setFile(selected); setPhase('Ready to install');
+      setInspection(result); setFile(selected); setPhase('');
     } catch (cause) { if (current === generation.current) { setError(apiErrorMessage(cause)); setPhase('Failed'); } }
     finally { if (current === generation.current) setBusy(false); }
   };
@@ -47,43 +39,34 @@ export function PackInstaller() {
     try {
       const result = await operation();
       if (current !== generation.current) return;
-      generation.current++;
-      setState(result); setInspection(undefined); setFile(undefined); setPhase('');
+      setInspection(undefined); setFile(undefined); setPhase(''); onInstalled(result);
     }
-    catch (cause) { setError(apiErrorMessage(cause)); setPhase('Failed'); }
-    finally { setBusy(false); }
+    catch (cause) { if (current === generation.current) { setError(apiErrorMessage(cause)); setPhase(''); } }
+    finally { if (current === generation.current) setBusy(false); }
   };
-  return <section className="pack-installer" aria-label={t('Local Pack management')}>
+  const dismiss = () => { setInspection(undefined); setFile(undefined); setPhase(''); setError(''); };
+  return <>
     <input ref={input} type="file" accept=".oawpack" hidden aria-label={t('Pack file')} onChange={event => {
       void inspect(event.target.files?.[0]); event.target.value = '';
     }} />
-    <button className="secondary-button" disabled={busy} onClick={() => input.current?.click()}>{t('Install Pack from File...')}</button>
-    {phase && <p role="status">{t(phase)}</p>}
-    {inspection && file && <div className="pack-install-review">
-      <strong>{inspection.manifest.name} {inspection.manifest.version}</strong>
-      <p>{t(inspection.manifest.kind === 'content'
-        ? 'This content Pack adds Legion templates. Their connected tools can perform actions when you run them.'
-        : 'Packs run trusted application code. Install only files from a source you trust.')}</p>
-      <PackGuide creator={inspection.manifest.creator} />
-      <button className="secondary-button" disabled={busy} onClick={() => void mutate(() => worldApi.installPack(file))}>{t('Install Pack')}</button>
-      <button className="library-text-button" disabled={busy} onClick={() => { setInspection(undefined); setFile(undefined); setPhase(''); }}>{t('Cancel')}</button>
-    </div>}
-    {error && <p role="alert" className="library-error">{error}</p>}
-    {state?.restart_required && <p role="status">{t('Restart OAW to activate Pack changes.')}</p>}
-    {state?.versions.length ? <details><summary>{t('Manage installed Packs')}</summary>
-      {state.versions.map(item => <div className="pack-install-record" key={`${item.id}@${item.version}`}>
-        <strong>{item.name} {item.version}</strong>
-        <span>{t('Pack')}: {t('Installed')}{item.selected && !item.loaded ? ` · ${t('Restart required')}` : !item.selected ? ` · ${t('Retained version')}` : ''}</span>
-        {item.loaded && item.kind !== 'content' && <span>{t('Sandbox runtime')}: {t(item.environment?.state === 'environment_ready' ? 'Ready' : item.environment?.state === 'environment_failed' ? 'Failed' : 'Environment preparing')}</span>}
-        <PackGuide creator={item.creator} />
-        {item.environment?.error && <p role="alert">{item.environment.error}</p>}
-        <div>
-          {item.environment?.state === 'environment_failed' && <button className="library-text-button" disabled={busy} onClick={() => void mutate(() => worldApi.managePack('environment/retry', 'POST'), 'Environment preparing')}>{t('Retry environment preparation')}</button>}
-          {!item.selected && <button className="library-text-button" disabled={busy} onClick={() => void mutate(() => worldApi.managePack(`${encodeURIComponent(item.id)}/activate`, 'POST', { version: item.version }), 'Validating')}>{t('Use this version on restart')}</button>}
-          {item.selected && <button className="library-text-button" disabled={busy} onClick={() => void mutate(() => worldApi.managePack(encodeURIComponent(item.id), 'DELETE'), 'Validating')}>{t('Uninstall on restart')}</button>}
-          {!item.selected && !item.loaded && <button className="library-text-button" disabled={busy} onClick={() => void mutate(() => worldApi.managePack(`${encodeURIComponent(item.id)}/versions/${encodeURIComponent(item.version)}`, 'DELETE'), 'Validating')}>{t('Remove retained version')}</button>}
+    {actionTarget && createPortal(<>
+      <button className="secondary-button" disabled={busy} onClick={() => input.current?.click()}>{t('Install Pack from File...')}</button>
+      {(phase || inspection || error) && <section className="pack-install-popover" aria-label={t('Install Pack')} aria-busy={busy}>
+        <header><strong>{inspection?.manifest.name ?? t('Install Pack')}</strong>
+          {inspection && <span>{inspection.manifest.version}</span>}</header>
+        {phase && !error && <p role="status">{t(phase)}</p>}
+        {inspection && file && <>
+          <p>{t(inspection.manifest.kind === 'content'
+            ? 'Adds Legion templates. Restart to use this Pack.'
+            : 'Runs application code. Install only from a trusted source.')}</p>
+          {inspection.manifest.creator && <details><summary>{t('Pack guide')}</summary><PackGuide creator={inspection.manifest.creator} /></details>}
+        </>}
+        {error && <p role="alert" className="pack-action-error">{error}</p>}
+        <div className="pack-detail-actions">
+          {inspection && file && <button className="secondary-button" disabled={busy} onClick={() => void mutate(() => worldApi.installPack(file))}>{t(busy ? 'Installing' : 'Install Pack')}</button>}
+          <button className="library-text-button" disabled={busy} onClick={dismiss}>{t(inspection ? 'Cancel' : 'Close')}</button>
         </div>
-      </div>)}
-    </details> : null}
-  </section>;
+      </section>}
+    </>, actionTarget)}
+  </>;
 }
