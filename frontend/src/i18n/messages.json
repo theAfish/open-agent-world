@@ -44,6 +44,96 @@
   "The model list is too large. Add a model manually.": ["The model list is too large. Add a model manually.", "模型列表过大，请手动添加模型。"],
   "Could not reach the model service. Check its address and network, then retry.": ["Could not reach the model service. Check its address and network, then retry.", "无法连接模型服务，请检查地址和网络后重试。"],
   "The service returned an unsupported model list. Add a model manually.": ["The service returned an unsupported model list. Add a model manually.", "服务返回的模型列表格式不受支持，请手动添加模型。"],
+  "User guide": ["User guide", "使用指南"],
+  "Build plugins": ["Build plugins", "插件开发"],
+  "Technical reference": ["Technical reference", "技术参考"],
+  "Search documentation": ["Search documentation", "搜索文档"],
+  "Documentation topics": ["Documentation topics", "文档目录"],
+  "Documentation content": ["Documentation content", "文档内容"],
+  "No documentation matches your search.": ["No documentation matches your search.", "没有找到匹配的文档。"],
+  "Included with this version · Available offline": ["Included with this version · Available offline", "随当前版本提供 · 支持离线阅读"],
+  "Previous topic": ["Previous topic", "上一篇"],
+  "Next topic": ["Next topic", "下一篇"],
+  "This topic is currently available in English.": ["This topic is currently available in English.", "此主题目前提供英文文档。"],
+  "Opens online (internet required)": ["Opens online (internet required)", "在线打开（需要网络）"],
+  "Help": ["Help", "帮助"],
+  "Tutorial": ["Tutorial", "教程"],
+  "Documentation": ["Documentation", "文档"],
+  "Status check": ["Status check", "状态检查"],
+  "Versions and updates": ["Versions and updates", "版本与更新"],
+  "Close help": ["Close help", "关闭帮助"],
+  "Update OAW": ["Update OAW", "更新 OAW"],
+  "Automatic installation is not available in this version. Download the latest official installer, close OAW, then install the update.": ["Automatic installation is not available in this version. Download the latest official installer, close OAW, then install the update.", "当前版本暂不支持自动安装更新。请下载最新官方安装包，关闭 OAW 后安装。"],
+  "Open official releases": ["Open official releases", "打开官方下载页"],
+  "Running from source or using a hosted workspace? Update the source installation or ask your administrator to update the server.": ["Running from source or using a hosted workspace? Update the source installation or ask your administrator to update the server.", "如果从源码运行，请更新源码安装；如果使用托管工作区，请联系管理员更新服务器。"],
+  "Installation guide": ["Installation guide", "安装指南"],
+  "Checks saved configuration and current runtime status across the canvas. Does not run Agents, execute commands or change your data.": ["Checks saved configuration and current runtime status across the canvas. Does not run Agents, execute commands or change your data.", "检查整个画布的已保存配置和当前运行状态，不会运行智能体、执行命令或更改数据。"],
+  "Check again": ["Check again", "重新检查"],
+  "Show passed checks": ["Show passed checks", "显示通过的检查"],
+  "Checking components…": ["Checking components…", "正在检查组件…"],
+  "{count} items need attention": ["{count} items need attention", "有 {count} 项需要处理"],
+  "No issues found in the checks performed": ["No issues found in the checks performed", "已检查的项目中未发现问题"],
+  "{cards} cards checked · {count} notes or unverified checks": ["{cards} cards checked · {count} notes or unverified checks", "已检查 {cards} 张卡片 · {count} 项提示或尚未验证"],
+  "Checked at {time}": ["Checked at {time}", "检查时间：{time}"],
+  "The status check could not finish": ["The status check could not finish", "状态检查未能完成"],
+  "Make sure OAW is running, then check again. For the desktop app, close and reopen it after saving your work. For a hosted workspace, contact the administrator.": ["Make sure OAW is running, then check again. For the desktop app, close and reopen it after saving your work. For a hosted workspace, contact the administrator.", "请确认 OAW 正在运行，然后重试。桌面版可在保存工作后关闭并重新打开；托管工作区请联系管理员。"],
+  "Troubleshooting guide": ["Troubleshooting guide", "故障排查指南"],
+  "Live updates": ["Live updates", "实时更新"],
+  "Backend connection": ["Backend connection", "后端连接"],
+  "Canvas connections": ["Canvas connections", "画布连接"],
+  "Pack environments": ["Pack environments", "卡包环境"],
+  "Note / unverified": ["Note / unverified", "提示 / 未验证"],
+  "Check passed": ["Check passed", "检查通过"],
+  "Locate on canvas": ["Locate on canvas", "在画布中定位"],
+  "Repair guide": ["Repair guide", "修复指南"],
+  "A passed configuration check does not guarantee an external service will respond. Recheck after making changes.": ["A passed configuration check does not guarantee an external service will respond. Recheck after making changes.", "配置检查通过不代表外部服务一定可用。修改设置后，请重新检查。"],
+  "The backend responded. Canvas data can be read.": ["The backend responded. Canvas data can be read.", "后端已响应，画布数据可读取。"],
+  "All saved connections have both endpoints.": ["All saved connections have both endpoints.", "已保存的连线两端均存在。"],
+  "Some connections point to missing cards. Refresh the canvas, then reconnect the affected cards.": ["Some connections point to missing cards. Refresh the canvas, then reconnect the affected cards.", "部分连线指向不存在的卡片。请刷新画布，然后重新连接相关卡片。"],
+  "The card type is loaded and no saved error was found.": ["The card type is loaded and no saved error was found.", "卡片类型已加载，未发现已记录的错误。"],
+  "This card reports an error. Open it to review the latest failure and its settings, then retry there.": ["This card reports an error. Open it to review the latest failure and its settings, then retry there.", "这张卡片报告了错误。请打开卡片查看最近的错误和设置，再从卡片中重试。"],
+  "This card needs an unavailable plugin. Open the Library to enable or reinstall its pack, then restart OAW.": ["This card needs an unavailable plugin. Open the Library to enable or reinstall its pack, then restart OAW.", "这张卡片需要的插件不可用。请打开卡牌库，启用或重新安装对应卡包，然后重启 OAW。"],
+  "Pack dependencies could not be prepared. Check Sandbox availability and follow the pack troubleshooting guide.": ["Pack dependencies could not be prepared. Check Sandbox availability and follow the pack troubleshooting guide.", "卡包依赖准备失败。请检查沙箱是否可用，并参考卡包修复指南。"],
+  "Pack dependencies are still being prepared. Wait a moment, then check again.": ["Pack dependencies are still being prepared. Wait a moment, then check again.", "卡包依赖仍在准备中，请稍后重新检查。"],
+  "The plugin is loaded. Its tools and external services have not been tested; open the card to check its own status.": ["The plugin is loaded. Its tools and external services have not been tested; open the card to check its own status.", "插件已加载，尚未实测其工具和外部服务；请打开卡片查看自身状态。"],
+  "The Agent runtime is unavailable. Check its provider in the card settings and follow the runtime setup guide.": ["The Agent runtime is unavailable. Check its provider in the card settings and follow the runtime setup guide.", "智能体运行环境不可用。请在卡片设置中检查运行提供方，并参考运行环境配置指南。"],
+  "This Agent uses its own runtime. Check login, model and service status in its card; OAW model settings do not apply.": ["This Agent uses its own runtime. Check login, model and service status in its card; OAW model settings do not apply.", "此智能体使用独立运行环境。请在其卡片内检查登录、模型和服务状态，无需配置 OAW 的默认模型。"],
+  "This Agent uses a legacy model name. Check its provider credentials, or select a saved model in Settings.": ["This Agent uses a legacy model name. Check its provider credentials, or select a saved model in Settings.", "此智能体使用旧版模型名称。请检查服务凭据，或在设置中选择已保存的模型。"],
+  "The selected model or its credentials are missing, disabled or unreadable. Check Settings → Models and the Agent or Legion model selection.": ["The selected model or its credentials are missing, disabled or unreadable. Check Settings → Models and the Agent or Legion model selection.", "所选模型或凭据缺失、已禁用或无法读取。请检查“设置 → 模型”，以及智能体或 Legion 选择的模型。"],
+  "The selected model and credentials are configured. No paid request was sent; provider connectivity is untested.": ["The selected model and credentials are configured. No paid request was sent; provider connectivity is untested.", "所选模型和凭据已配置。未发送付费请求，尚未实测服务连接。"],
+  "This Sandbox runtime is unavailable. Open the card to see the reason, then follow the Sandbox setup guide.": ["This Sandbox runtime is unavailable. Open the card to see the reason, then follow the Sandbox setup guide.", "此沙箱运行环境不可用。请打开卡片查看原因，并参考沙箱配置指南。"],
+  "Sandbox networking is enabled but unavailable. Open its environment settings and repair the networking prerequisites.": ["Sandbox networking is enabled but unavailable. Open its environment settings and repair the networking prerequisites.", "沙箱已开启网络，但网络环境不可用。请打开其环境设置，补全所需网络组件。"],
+  "The Sandbox is stopped and its runtime is available. Start it from the card when needed.": ["The Sandbox is stopped and its runtime is available. Start it from the card when needed.", "沙箱已停止，运行环境可用。需要时可从卡片中启动。"],
+  "The Sandbox runtime is available. Commands and network access have not been tested.": ["The Sandbox runtime is available. Commands and network access have not been tested.", "沙箱运行环境可用，尚未实测命令执行和网络访问。"],
+  "No Agent is connected to this Conversation. Connect one and add it to the session when you want replies.": ["No Agent is connected to this Conversation. Connect one and add it to the session when you want replies.", "此对话尚未连接智能体。如需回复，请连接智能体并将其加入会话。"],
+  "The live event stream is connected.": ["The live event stream is connected.", "实时事件连接正常。"],
+  "Live updates are disconnected. OAW is reconnecting automatically. If this continues, check the backend and network, then reopen OAW.": ["Live updates are disconnected. OAW is reconnecting automatically. If this continues, check the backend and network, then reopen OAW.", "实时更新已断开，OAW 正在自动重连。如果持续断开，请检查后端和网络，再重新打开 OAW。"],
+  "This check could not finish. Check again, or open the card to inspect its status.": ["This check could not finish. Check again, or open the card to inspect its status.", "此项检查未能完成。请重试，或打开卡片查看其状态。"],
+  "Make a Pack…": ["Make a Pack…", "制作卡包…"],
+  "Share this saved Legion as a content Pack.": ["Share this saved Legion as a content Pack.", "将这个已保存的 Legion 制作为内容型卡包。"],
+  "Pack name": ["Pack name", "卡包名称"],
+  "Author (self-declared)": ["Author (self-declared)", "作者（自行填写）"],
+  "Accent color": ["Accent color", "强调色"],
+  "First-use guide": ["First-use guide", "初次使用说明"],
+  "Preparation": ["Preparation", "使用前准备"],
+  "Example task": ["Example task", "示例任务"],
+  "Expected result": ["Expected result", "预期结果"],
+  "Pack identity": ["Pack identity", "卡包标识"],
+  "Keep this ID for updates; increase the version for each release.": ["Keep this ID for updates; increase the version for each release.", "更新时保留此 ID，每次发布提高版本号。"],
+  "Include initial content": ["Include initial content", "携带初始内容"],
+  "Only select documents and resources you intend to share.": ["Only select documents and resources you intend to share.", "仅勾选你准备分享的文档和资源。"],
+  "Check Pack": ["Check Pack", "检查卡包"],
+  "Export .oawpack": ["Export .oawpack", "导出 .oawpack"],
+  "Review your instructions and selected content for private information before sharing.": ["Review your instructions and selected content for private information before sharing.", "分享前，请检查指令和所选内容中是否含有私密信息。"],
+  "Pack exported. Share the file; recipients can install it from the Library.": ["Pack exported. Share the file; recipients can install it from the Library.", "卡包已导出。分享此文件，接收者可在 Library 中安装。"],
+  "This content Pack adds Legion templates. Their connected tools can perform actions when you run them.": ["This content Pack adds Legion templates. Their connected tools can perform actions when you run them.", "此内容型卡包包含 Legion 模板。运行后，其中连接的工具可以执行操作。"],
+  "Remove this credential or private binding before sharing.": ["Remove this credential or private binding before sharing.", "分享前请移除此凭据或私有绑定。"],
+  "Review this machine-local path; the recipient may need to replace it.": ["Review this machine-local path; the recipient may need to replace it.", "请检查此本机路径，接收者可能需要重新配置。"],
+  "Review this service address or link before sharing.": ["Review this service address or link before sharing.", "分享前请检查此服务地址或链接。"],
+  "Remove credentials from this address before sharing.": ["Remove credentials from this address before sharing.", "分享前请移除此地址中的凭据。"],
+  "Model selection reset to the recipient's default.": ["Model selection reset to the recipient's default.", "模型选择已重置为接收者的默认设置。"],
+  "This card cannot omit its initial content. Select it explicitly or remove the card from the saved Legion.": ["This card cannot omit its initial content. Select it explicitly or remove the card from the saved Legion.", "此卡牌无法省略初始内容。请明确勾选携带内容，或从已保存 Legion 中移除此卡牌。"],
+  "This dependency has no distributable Pack.": ["This dependency has no distributable Pack.", "此依赖尚无可分发的卡包。"],
   "Waiting to deploy {name}…": ["Waiting to deploy {name}…", "等待部署 {name}…"],
   "Deploying {name}…": ["Deploying {name}…", "正在部署 {name}…"],
   "Legion contents": ["Legion contents", "Legion 内部卡牌"],
@@ -96,7 +186,7 @@
   "Place Conversation first, then dock Sandbox beside it. Choose Done editing to save your layout.": ["Place Conversation first, then dock Sandbox beside it. Choose Done editing to save your layout.", "先放入 Conversation，再把 Sandbox 停靠在它旁边。点击「完成编辑」保存布局。"],
   "Drag from Workspace cards, or select a card and use Place selected card and Dock right. You can leave Agent unplaced.": ["Drag from Workspace cards, or select a card and use Place selected card and Dock right. You can leave Agent unplaced.", "从「工作区卡片」拖入，也可以选中卡片后使用「放入所选卡片」和「停靠右侧」。Agent 可以暂时不放入。"],
   "These are your live cards. Edit layout can split panels, add tabs or arrange individual sections. Your saved layout reopens with this Legion. Click Back to canvas when ready.": ["These are your live cards. Edit layout can split panels, add tabs or arrange individual sections. Your saved layout reopens with this Legion. Click Back to canvas when ready.", "这里显示的是原来的卡片。「编辑布局」可以分屏、添加标签页或单独排列卡片分区。下次打开 Legion 时会恢复保存的布局。看好后点击「返回画布」。"],
-  "Your Legion and workspace stay here. Later, save the Legion to your library to reuse its setup. I’ll tidy my temporary props. Replay Tutorial is at the compass whenever you want another walk.": ["Your Legion and workspace stay here. Later, save the Legion to your library to reuse its setup. I’ll tidy my temporary props. Replay Tutorial is at the compass whenever you want another walk.", "你的 Legion 和工作区会保留下来。以后可将 Legion 保存到卡牌库，重复使用这套配置。我来收好临时道具；想再逛一遍，点击罗盘里的「重播教程」。"],
+  "Your Legion and workspace stay here. Later, save the Legion to your library to reuse its setup. I’ll tidy my temporary props. Open Help → Tutorial whenever you want another walk.": ["Your Legion and workspace stay here. Later, save the Legion to your library to reuse its setup. I’ll tidy my temporary props. Open Help → Tutorial whenever you want another walk.", "你的 Legion 和工作区会保留在这里。以后可以将 Legion 保存到卡牌库，重复使用这套配置。我会收拾临时道具。想再走一遍时，打开“帮助 → 教程”即可。"],
   "Open Workspace mode again to continue arranging your Legion.": ["Open Workspace mode again to continue arranging your Legion.", "重新打开「工作区模式」，继续布置你的 Legion。"],
   "Moves on next restart. The original folder is kept as a backup.": ["Moves on next restart. The original folder is kept as a backup.", "下次重启时迁移，原文件夹保留为备份。"],
   "After verifying the new files, please delete unused backup folders manually.": ["After verifying the new files, please delete unused backup folders manually.", "确认新文件无误后，请手动删除不再使用的备份文件夹。"],
@@ -305,10 +395,10 @@
   "The settings button beside the Minister badge opens history, nearby cards, and confirmations. Open it now.": ["The settings button beside the Minister badge opens history, nearby cards, and confirmations. Open it now.", "Minister 徽章旁的设置按钮可以打开历史、附近卡片和待确认操作。现在试着打开它。"],
   "Other controls are locked. Pause to explore freely.": ["Other controls are locked. Pause to explore freely.", "其他控件暂时锁定，暂停教程后可自由探索。"],
   "Pause tutorial": ["Pause tutorial", "暂停教程"],
-  "Use default model": ["Use default model", "??????"],
-  "Choose a default model": ["Choose a default model", "??????"],
-  "Set up your default model": ["Set up your default model", "???????"],
-  "Add your API key, check the Base URL, and choose a default model in Settings before using your agents.": ["Add your API key, check the Base URL, and choose a default model in Settings before using your agents.", "?????????????? API Key??? Base URL?????????"],
+  "Use default model": ["Use default model", "使用默认模型"],
+  "Choose a default model": ["Choose a default model", "请选择默认模型"],
+  "Set up your default model": ["Set up your default model", "设置默认模型"],
+  "Add your API key, check the Base URL, and choose a default model in Settings before using your agents.": ["Add your API key, check the Base URL, and choose a default model in Settings before using your agents.", "使用智能体前，请在设置中添加 API Key、检查 Base URL 并选择默认模型。"],
   "Continue": ["Continue", "继续"],
   "The Text card is here. Take a moment to look; when you are ready, we will place yours.": ["The Text card is here. Take a moment to look; when you are ready, we will place yours.", "文本卡已经放好了。先看一看，准备好后点继续，再来放置你的卡片。"],
   "Both cards are now connected with Participate. Follow the line from the Agent to the Conversation, then continue when you are ready.": ["Both cards are now connected with Participate. Follow the line from the Agent to the Conversation, then continue when you are ready.", "两张卡已通过“参与”连接。沿着连线看看智能体与对话的关系，准备好了再继续。"],
@@ -7067,5 +7157,69 @@
   "Store is temporarily unavailable. Please retry.": [
     "Store is temporarily unavailable. Please retry.",
     "商店暂不可用，请重试。"
+  ],
+  "Pack removed. Restart OAW to finish uninstalling.": [
+    "Pack removed. Restart OAW to finish uninstalling.",
+    "卡包已移除，重启 OAW 后完成卸载。"
+  ],
+  "Pack uninstalled.": [
+    "Pack uninstalled.",
+    "卡包已卸载。"
+  ],
+  "View pack {name}": [
+    "View pack {name}",
+    "查看卡包 {name}"
+  ],
+  "VIEW PACK": [
+    "VIEW PACK",
+    "查看卡包"
+  ],
+  "Uninstall pending restart": [
+    "Uninstall pending restart",
+    "待重启卸载"
+  ],
+  "Environment failed": [
+    "Environment failed",
+    "环境准备失败"
+  ],
+  "Back to packs": [
+    "Back to packs",
+    "返回卡包"
+  ],
+  "View cards": [
+    "View cards",
+    "查看卡牌"
+  ],
+  "Uninstall Pack": [
+    "Uninstall Pack",
+    "卸载卡包"
+  ],
+  "Uninstall {name}? This takes effect after restart.": [
+    "Uninstall {name}? This takes effect after restart.",
+    "卸载 {name}？重启后生效。"
+  ],
+  "Confirm uninstall": [
+    "Confirm uninstall",
+    "确认卸载"
+  ],
+  "Pack guide": [
+    "Pack guide",
+    "使用说明"
+  ],
+  "Other versions": [
+    "Other versions",
+    "其他版本"
+  ],
+  "Loaded": [
+    "Loaded",
+    "已加载"
+  ],
+  "Adds Legion templates. Restart to use this Pack.": [
+    "Adds Legion templates. Restart to use this Pack.",
+    "添加军团模板，重启后即可使用。"
+  ],
+  "Runs application code. Install only from a trusted source.": [
+    "Runs application code. Install only from a trusted source.",
+    "此卡包会运行程序代码，请确认来源可信。"
   ]
 }

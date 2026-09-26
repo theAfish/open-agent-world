@@ -284,6 +284,12 @@ describe('first-run persistence and ownership', () => {
     const created = card('late-prop');
     const reveal = vi.fn();
     const place = vi.fn(async () => {});
+    const text = TEST_CATALOG.node_types.find(item => item.id === 'text')!;
+    useCardLibrary.setState({ snapshot: { schema_version: 1, revision: 1, migration_pending: false, plugins: {}, packs: {},
+      card_definitions: { text }, collection: { text: { card_id: 'text', plugin_id: text.plugin_id,
+        source_pack_ids: [], unlocked: true, unlocked_at: '2026-09-12T00:00:00Z' } },
+      decks: [{ id: 'tutorial', name: 'Tutorial', icon: 'folder', entries: [{ kind: 'node', id: 'text' }] }],
+      active_deck_id: 'tutorial', available_card_ids: ['text'], available_pack_ids: [] } });
     detach = tutorial.attach({ ...bridge, preparePlace: () => reveal, place });
     vi.spyOn(worldApi, 'createNode').mockImplementation(() => new Promise(done => { resolve = done; }));
     vi.spyOn(worldApi, 'getTextContent').mockResolvedValue('');

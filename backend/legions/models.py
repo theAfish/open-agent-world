@@ -164,6 +164,28 @@ class LegionBlueprint(BaseModel):
         return self
 
 
+class LegionBlueprintPreset(BaseModel):
+    """Host-owned adapter for a saved formation in a content Pack.
+
+    Preserve the complete portable contract (sizes, state scopes, layout keys
+    and versioned payloads); converting to PresetNode would lose that data.
+    """
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
+    revision: int = Field(default=1, ge=1)
+    blueprint: LegionBlueprint
+
+    @property
+    def nodes(self):
+        return self.blueprint.nodes
+
+    @property
+    def edges(self):
+        return self.blueprint.edges
+
+
 class LegionRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

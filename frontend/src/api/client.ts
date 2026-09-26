@@ -251,6 +251,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ? undefined
     : contentType.includes("application/json")
       ? await response.json()
+      : response.ok && contentType.includes("application/vnd.oaw.pack")
+      ? await response.blob()
       : await response.text();
 
   if (!response.ok) {
@@ -273,6 +275,15 @@ function unwrap<T>(input: unknown, key: string): T {
 }
 
 export const worldApi = {
+  getDiagnostics(signal?: AbortSignal): Promise<import('../shell/helpChecks').HelpDiagnostics> {
+    return request('/diagnostics', { signal });
+  },
+  inspectContentPack(input: import('../types/packs').CreatorRequest): Promise<import('../types/packs').CreatorInspection> {
+    return request('/packs/creator/inspect', { method: 'POST', headers: { 'X-OAW-Pack-Install': '1' }, body: JSON.stringify(input) });
+  },
+  exportContentPack(input: import('../types/packs').CreatorRequest): Promise<Blob> {
+    return request('/packs/creator/export', { method: 'POST', headers: { 'X-OAW-Pack-Install': '1' }, body: JSON.stringify(input) });
+  },
   getStorePacks(query: string, cursor?: string, signal?: AbortSignal): Promise<import('../types/packs').StorePage> {
     const params = new URLSearchParams({ query, limit: '20' });
     if (cursor) params.set('cursor', cursor);

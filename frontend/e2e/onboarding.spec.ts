@@ -37,7 +37,8 @@ test.describe('canvas onboarding', () => {
     await expect(page.locator('.onboarding-layer')).toHaveCount(0);
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Open Agent World' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Replay Tutorial', exact: true }).click();
+    await page.getByRole('button', { name: 'Help', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Tutorial', exact: true }).click();
     await at(page, 'enter');
     await page.getByRole('button', { name: 'Skip tutorial', exact: true }).click();
     await page.goto('about:blank');

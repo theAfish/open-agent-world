@@ -27,7 +27,7 @@ def registry_with_preset():
         # plugin, rather than a guessed owner based on member node types.
         r.register_legion_preset(LegionPresetDefinition(id=PRESET, name="Example formation", nodes=(
             PresetNode(key="group", type="legion", name="Group", parent_key=None),
-            PresetNode(key="note", type="text", name="Note"),
+            PresetNode(key="note", type="text", name="Note", payload={"content": ""}),
         )))
 
     registry.install(PluginDefinition(PluginDescriptor(id="example", version="1", plugin_api_version="1.18"), register))

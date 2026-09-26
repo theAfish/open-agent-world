@@ -8,7 +8,11 @@
 .library-header > div:nth-child(2) { flex: 1; }
 .library-header span { font-size: 10px; text-transform: uppercase; letter-spacing: .13em; color: var(--ink-faint); }
 .library-header h2 { margin: 3px 0 0; font-size: 21px; font-weight: 640; }
-.library-tabs { display: flex; padding: 0 24px; gap: 5px; border-bottom: 1px solid var(--line); }
+.library-tab-row { display: flex; align-items: center; gap: 12px; padding: 0 24px; border-bottom: 1px solid var(--line); }
+.library-tabs { display: flex; gap: 5px; min-width: 0; }
+.library-tab-actions { margin-left: auto; flex-shrink: 0; }
+.library-tab-actions:empty { display: none; }
+.library-tab-actions .secondary-button { font-size: 12px; padding: 8px 12px; }
 .library-tabs button { display: flex; align-items: center; gap: 8px; padding: 12px 16px; color: var(--ink-soft); background: transparent; border: 0; border-bottom: 2px solid transparent; }
 .library-tabs button.is-active { border-bottom-color: var(--accent); color: var(--accent); }
 .library-tabs small { color: var(--ink-faint); font-size: 10px; }
@@ -101,8 +105,33 @@
   .library-card-layout { grid-template-columns: minmax(0, 1fr); }
   .library-card-sidebar { position: static; overflow: visible; }
 }
-.pack-installer { padding: 12px 20px; border-bottom: 1px solid var(--border, #d6d8da); font-size: 13px; }
-.pack-installer p { margin: 8px 0; }
-.pack-installer summary { cursor: pointer; margin-top: 10px; }
-.pack-install-record { display: flex; flex-direction: column; gap: 5px; padding: 12px 0; }
-.pack-install-review { padding: 10px 0; }
+.library-tab-row { position: relative; }
+.pack-install-popover { position: absolute; z-index: 4; top: calc(100% + 8px); right: 24px; width: min(360px, calc(100% - 32px)); max-height: min(420px, 50dvh); overflow: auto; padding: 20px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface-solid); box-shadow: 0 12px 35px var(--shadow-deep); font-size: 12px; }
+.pack-install-popover header { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; }
+.pack-install-popover header strong { font-size: 15px; overflow-wrap: anywhere; }
+.pack-install-popover header span { color: var(--ink-faint); }
+.pack-install-popover p { line-height: 1.6; color: var(--ink-soft); }
+.pack-install-popover details { margin-bottom: 14px; }
+.pack-install-popover summary, .pack-detail-section summary { cursor: pointer; color: var(--ink-soft); }
+.pack-inventory-status { display: block; text-align: center; color: var(--ink-faint); font-size: 11px; padding: 0 8px 6px; }
+.installed-pack-detail { max-width: 720px; margin: 0 auto; font-size: 13px; }
+.pack-back-button, .pack-uninstall-button { display: inline-flex; align-items: center; gap: 6px; }
+.installed-pack-heading { display: flex; align-items: center; gap: 16px; margin: 20px 0 16px; }
+.installed-pack-heading h3 { margin: 0 0 7px; font-size: 24px; overflow-wrap: anywhere; }
+.installed-pack-heading span { color: var(--ink-faint); font-size: 12px; }
+.installed-pack-icon { display: grid; place-items: center; flex-shrink: 0; width: 60px; height: 60px; border-radius: 14px; background: var(--surface-soft); color: var(--accent); }
+.installed-pack-detail p { line-height: 1.65; color: var(--ink-soft); overflow-wrap: anywhere; }
+.pack-restart-note { font-size: 12px; }
+.pack-detail-actions { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.pack-detail-actions .pack-uninstall-button { color: var(--danger); margin-left: auto; }
+.pack-detail-section { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 24px; }
+.pack-version-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding-top: 12px; }
+.pack-version-row > span { margin-right: auto; }
+.pack-uninstall-confirm { margin-top: 16px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+.pack-uninstall-confirm p { margin-top: 0; }
+.card-library-modal .pack-action-error { color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .library-tab-row { padding-inline: 12px; gap: 8px; flex-wrap: wrap; }
+  .library-tab-row .library-tabs { padding: 0; }
+  .library-tab-actions { padding-block: 6px; }
+}

@@ -7,6 +7,7 @@ from backend.api.ministers import router as ministers_router
 from backend.api.conversations import router as conversations_router
 from backend.api.dependencies import get_services
 from backend.api.desktop import router as desktop_router
+from backend.api.diagnostics import router as diagnostics_router
 from backend.api.legions import router as legions_router
 from backend.api.node_documents import router as node_documents_router
 from backend.api.node_resources import router as node_resources_router
@@ -64,6 +65,7 @@ api_router.include_router(capabilities_router)
 api_router.include_router(conversations_router)
 api_router.include_router(runtime_router)
 api_router.include_router(desktop_router)
+api_router.include_router(diagnostics_router)
 
 api_router.include_router(storage_router)
 api_router.include_router(library_translation_router)
