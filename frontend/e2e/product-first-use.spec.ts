@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { resetTutorialProfile } from './tutorial-profile';
 
 // Run with the isolated E2E backend (core.mock), never against a user's world.
-test('first goal survives model setup, becomes a draft, and opens a resumable workspace', async ({ page, request }) => {
+test('first use connects a model and opens a resumable conversation', async ({ page, request }) => {
   await resetTutorialProfile(request);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   let catalog = { revision: 1, connections: [], default_model: null } as Record<string, unknown>;
@@ -19,8 +19,13 @@ test('first goal survives model setup, becomes a draft, and opens a resumable wo
   try {
     await page.goto('/');
     const goal = 'Help me organize my notes.';
-    await page.getByLabel('What would you like help with?').fill(goal);
+    await expect(page.locator('.onboarding-welcome textarea')).toHaveCount(0);
     await page.getByRole('button', { name: 'Open workspace', exact: true }).click();
+    const providers = page.locator('.connect-ai-providers');
+    await expect(providers.getByRole('button', { name: 'Custom', exact: true })).toBeVisible();
+    const rows = await providers.getByRole('button').evaluateAll(buttons => buttons.map(button => Math.round(button.getBoundingClientRect().top)));
+    expect(new Set(rows).size).toBe(1);
+    await page.screenshot({ path: 'test-results/first-use-model-options.png' });
     await page.getByRole('button', { name: 'OpenAI', exact: true }).click();
     await page.getByLabel('API key', { exact: true }).fill('test-only-placeholder');
     await page.getByRole('button', { name: 'Get available models', exact: true }).click();
@@ -29,8 +34,9 @@ test('first goal survives model setup, becomes a draft, and opens a resumable wo
     await page.getByRole('button', { name: 'Save settings', exact: true }).click();
     const workspace = page.locator('dialog.legion-workspace[open]');
     await expect(workspace).toBeVisible();
-    await expect(workspace.locator('.workspace-composer textarea')).toHaveValue(goal);
+    await expect(workspace.locator('.workspace-composer textarea')).toHaveValue('');
     await expect(workspace.locator('.workspace-message.is-user')).toHaveCount(0);
+    await workspace.locator('.workspace-composer textarea').fill(goal);
     await workspace.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect(workspace.locator('.workspace-message.is-user')).toContainText(goal);
     await expect(workspace.locator('.workspace-message.is-agent')).toContainText('Mock response:');

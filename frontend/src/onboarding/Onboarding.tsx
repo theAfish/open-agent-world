@@ -443,7 +443,8 @@ export function Onboarding() {
       setResolvedTarget(element?.dataset.tutorial);
       setHasConnection(Boolean(document.querySelector('[data-tutorial="model-credentials"]')));
       const width = window.innerWidth, height = window.innerHeight;
-      let x = width / 2 - 80, y = height <= 700 ? 16 : Math.min(72, height * .09);
+      const smallWelcome = height <= 700 || width <= 560;
+      let x = width / 2 - (smallWelcome ? 48 : 80), y = smallWelcome ? 16 : Math.min(72, height * .09);
       if (!welcome) {
         const rect = bounds && bounds.width > 0 && bounds.height > 0 ? bounds : undefined;
         const bubbleWidth = Math.min(256, width - 32);
@@ -535,7 +536,7 @@ export function Onboarding() {
       <h1>{t("Open Agent World")}</h1>
       <BlueprintChooser />
       <div className="onboarding-actions">
-        <button className="secondary-button onboarding-start" disabled={s.busy || sync === 'offline'} onClick={() => void tutorial.start()}><span>{t("Start Tutorial")}<small>{t("Learn to customize cards and connections")}</small></span><ArrowRight size={19} /></button>
+        <button className="onboarding-text-button" disabled={s.busy || sync === 'offline'} onClick={() => void tutorial.start()}>{t("Start Tutorial")}</button>
         <button className="onboarding-text-button" disabled={s.busy} onClick={() => void tutorial.directly()}>{t("Start Empty")}</button>
       </div>
       {s.error && <p className="onboarding-error" role="alert">{s.error}</p>}

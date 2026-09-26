@@ -37,7 +37,6 @@ interface TutorialState {
   quickStart?: { agentId: string; conversationId: string; legionId?: string; goal?: string; sessionId?: string };
   celebration: number;
   ready: boolean;
-  choosingWorkspace?: boolean;
 }
 export const useTutorialStore = createStore<TutorialState>()(persist((): TutorialState => ({
   status: 'new', view: 'hidden', busy: false, celebration: 0, ready: false,
@@ -348,14 +347,10 @@ function runTask(work: (signal: AbortSignal) => Promise<void>) {
 
 export const tutorial = {
   checkWelcome,
-  chooseWorkspace() {
-    if (state().busy || state().session) return;
-    useTutorialStore.setState({ view: 'welcome', choosingWorkspace: true, error: undefined });
-  },
   attach(bridge: GuideVisuals) {
     visuals = bridge;
     const unsubscribers = [useWorldStore.subscribe(() => {
-      if (state().view === 'welcome' && !state().choosingWorkspace && !state().busy && world().cards.length) void tutorial.directly();
+      if (state().view === 'welcome' && !state().busy && world().cards.length) void tutorial.directly();
       observe(); void checkWelcome();
     }),
       useNodeSurfaceStore.subscribe(() => observe()), useCardLibrary.subscribe(() => observe()),

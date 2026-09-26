@@ -1,4 +1,9 @@
 {
+  "Custom": ["Custom", "自定义"],
+  "Choose a workspace": ["Choose a workspace", "选择工作空间"],
+  "Chat with an agent": ["Chat with an agent", "与智能体对话"],
+  "Work on code": ["Work on code", "编写与修改代码"],
+  "Plan and review together": ["Plan and review together", "多智能体协作"],
   "Describe your goal or choose a starting workspace. You can change it later.": ["Describe your goal or choose a starting workspace. You can change it later.", "写下目标，选择一个工作空间。以后还可以随时调整。"],
   "What would you like help with?": ["What would you like help with?", "你想做什么？"],
   "For example: help me work on a code project": ["For example: help me work on a code project", "例如：帮我修改一个代码项目"],
@@ -7,7 +12,6 @@
   "Create a new workspace from a saved Legion. The saved template is kept.": ["Create a new workspace from a saved Legion. The saved template is kept.", "从已保存的 Legion 创建新工作空间，保留原模板。"],
   "Learn to customize cards and connections": ["Learn to customize cards and connections", "学习调整卡片与连接"],
   "Your workspace is ready. Open it to review and send your first message.": ["Your workspace is ready. Open it to review and send your first message.", "工作空间已准备好，打开后检查并发送第一条消息。"],
-  "New workspace": ["New workspace", "新建工作空间"],
   "Connect AI": ["Connect AI", "连接 AI"],
   "Choose your service, connect your account, then pick a model. Your workspace will be ready after saving.": ["Choose your service, connect your account, then pick a model. Your workspace will be ready after saving.", "选择服务、填写密钥，再选择模型。保存后即可进入工作空间。"],
   "Start the local model server first. The address refers to the computer running OAW.": ["Start the local model server first. The address refers to the computer running OAW.", "请先启动本地模型服务。这里的地址指运行 OAW 后端的电脑。"],

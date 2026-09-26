@@ -1,15 +1,12 @@
 import { AppearanceButtons, SettingsButton } from './PreferenceButtons';
-import { Activity, LibraryBig, RefreshCw, Wifi, WifiOff, Plus } from "lucide-react";
+import { Activity, LibraryBig, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useLocale, t } from "../i18n";
-import { tutorial, useTutorialStore } from '../onboarding/controller';
 import { HelpMenu } from './HelpMenu';
 import { useCardLibrary } from "../state/cardLibrary";
 import { useWorldStore } from "../state/worldStore";
 
 export function TopBar() {
   useLocale();
-  const tutorialBusy = useTutorialStore(state => state.busy);
-  const tutorialSession = useTutorialStore(state => state.session);
   const cards = useWorldStore((state) => state.cards);
   const edges = useWorldStore((state) => state.edges);
   const syncState = useWorldStore((state) => state.syncState);
@@ -45,7 +42,6 @@ export function TopBar() {
       </div>
 
       <div className="top-actions">
-        <button type="button" className="top-icon-button" disabled={tutorialBusy || !!tutorialSession} onClick={() => tutorial.chooseWorkspace()} aria-label={t('New workspace')} title={t('New workspace')}><Plus size={16} /></button>
         <button type="button" className="top-icon-button" data-tutorial="library" onClick={useCardLibrary.getState().show} aria-label={t("Open Pack and Card Library")} title={t("Packs, Cards and Decks")}><LibraryBig size={16} /></button>
         <SettingsButton />
         <button

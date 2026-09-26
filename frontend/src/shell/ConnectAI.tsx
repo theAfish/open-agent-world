@@ -18,14 +18,15 @@ export function ConnectAI({ value, onChange, busy, onAdvanced }: {
   const update = (patch: Partial<ModelConnection>) => onChange({ ...value, connections: [{ ...connection, ...patch }] });
   return <fieldset className="connect-ai" disabled={busy}>
     <h3>{t('Connect AI')}</h3>
-    <p>{t('Choose your service, connect your account, then pick a model. Your workspace will be ready after saving.')}</p>
     <div className="connect-ai-providers">{providers.map(provider => <button type="button" key={provider.id} className="secondary-button"
       aria-pressed={connection?.name === provider.name} onClick={() => {
         if (connection?.name === provider.name) return;
         onChange({ ...value, default_model: null, connections: [{ id: crypto.randomUUID(), name: provider.name,
           adapter: provider.adapter, base_url: provider.base_url, auth_mode: ['ollama', 'lmstudio'].includes(provider.id) ? 'none' : 'api_key',
           enabled: true, api_key_configured: false, models: [] }] });
-      }}>{provider.name}</button>)}</div>
+      }}>{provider.name}</button>)}
+      <button type="button" className="secondary-button" onClick={onAdvanced}>{t('Custom')}</button>
+    </div>
     {connection && <>
       {connection.auth_mode === 'none' ? <p>{t('Start the local model server first. The address refers to the computer running OAW.')}</p>
         : <label className="field-label"><span>{t('API key')}</span><input type="password" autoComplete="new-password" spellCheck={false} value={connection.api_key ?? ''} onChange={e => update({ api_key: e.target.value })} /></label>}
@@ -33,6 +34,5 @@ export function ConnectAI({ value, onChange, busy, onAdvanced }: {
         connections: [{ ...connection, models: [model] }], default_model: modelRef(model.id) })} />
       {connection.models[0] && <p role="status">{t('Selected model')}: <strong>{connection.models[0].name}</strong>. {t('Save to finish connecting.')}</p>}
     </>}
-    <button type="button" className="text-button" onClick={onAdvanced}>{t('Custom service or manual model setup')}</button>
   </fieldset>;
 }

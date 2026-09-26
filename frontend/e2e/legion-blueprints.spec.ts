@@ -18,7 +18,7 @@ for (const [name, count, links] of [['General assistant', 2, 1], ['Coding worksp
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: 'What would you like to do here?' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Choose a workspace' })).toBeVisible();
     await expect(page.locator('.blueprint-option')).toHaveCount(3);
     if (name === 'General assistant') {
       await page.screenshot({ path: 'test-results/blueprints-welcome-light.png' });
@@ -50,13 +50,31 @@ for (const [name, count, links] of [['General assistant', 2, 1], ['Coding worksp
 }
 
 test('welcome blueprints remain usable on a small canvas', async ({ page }) => {
-  await page.setViewportSize({ width: 800, height: 640 });
   await page.goto('/');
   await expect(page.locator('.blueprint-option')).toHaveCount(3);
-  await page.screenshot({ path: 'test-results/blueprints-welcome-small.png' });
+  const welcome = page.locator('.onboarding-welcome');
+  await expect(page.locator('.component-palette')).toBeHidden();
+  await expect(page.locator('.world-controls')).toBeHidden();
+  for (const viewport of [{ width: 800, height: 640 }, { width: 1024, height: 600 }, { width: 390, height: 640 }]) {
+    await page.setViewportSize(viewport);
+    expect(await welcome.evaluate(element => element.scrollHeight <= element.clientHeight && element.scrollWidth <= element.clientWidth)).toBe(true);
+    const bounds = await welcome.boundingBox();
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
+    await expect(page.getByRole('button', { name: 'Open workspace', exact: true })).toBeInViewport();
+    await expect(page.getByRole('button', { name: 'Start Empty', exact: true })).toBeInViewport();
+    await page.screenshot({ path: `test-results/blueprints-welcome-${viewport.width}.png` });
+  }
+  await expect(page.getByRole('button', { name: 'New workspace', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '切换到中文', exact: true }).click();
+  expect(await welcome.evaluate(element => element.scrollHeight <= element.clientHeight && element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: 'test-results/blueprints-welcome-390-zh.png' });
+  await page.getByRole('button', { name: 'Switch to English', exact: true }).click();
   await page.getByRole('button', { name: 'Start Empty', exact: true }).click();
   await expect(page.locator('.onboarding-welcome')).toHaveCount(0);
   await expect(page.locator('.world-card')).toHaveCount(0);
+  await expect(page.locator('.component-palette')).toBeVisible();
+  await expect(page.locator('.world-controls')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'New workspace', exact: true })).toHaveCount(0);
 });
 
 test('header settings are optional; saving restores four display states and layout', async ({ page, request }) => {
