@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useLocale } from "../i18n";

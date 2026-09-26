@@ -58,6 +58,8 @@ from backend.errors import (
 from backend.events.hub import EventHub
 from backend.events.models import EventType, RuntimeEvent
 from backend.persistence.database import Database
+from backend.idempotency import IdempotencyStore
+from backend.request_context import LOCAL_TENANT_SCOPE, RequestContext
 from backend.legions import (
     LegionBlueprint,
     LegionBounds,
@@ -2625,17 +2627,49 @@ class ApplicationServices:
         return self.conversations.list_agent_sessions(agent_id)
 
     async def create_conversation_session(
-        self, conversation_id: str, request: ConversationSessionCreate
+        self, conversation_id: str, request: ConversationSessionCreate, *,
+        idempotency_key: str | None = None, request_context: RequestContext | None = None,
     ) -> ConversationSession:
-        self._require_card_type(conversation_id, CardType.CONVERSATION)
+        # This repository still owns one local profile. A new context cannot
+        # select another tenant until repositories actually enforce that scope.
+        if request_context is not None and request_context.tenant != LOCAL_TENANT_SCOPE:
+            raise NotFoundError("Conversation does not exist in this scope")
         participants = list(dict.fromkeys(request.participant_ids))
-        for agent_id in participants:
-            self._require_conversation_connection(agent_id, conversation_id)
-        session = self.conversations.create_session(
-            conversation_id,
-            request.model_copy(update={"participant_ids": participants}),
-        )
-        self.state.ensure_scope("session", session.id, schema_id="core.session")
+
+        def authorize() -> None:
+            self._require_card_type(conversation_id, CardType.CONVERSATION)
+            for agent_id in participants:
+                self._require_conversation_connection(agent_id, conversation_id)
+
+        def mutate() -> dict:
+            session = self.conversations.create_session(
+                conversation_id,
+                request.model_copy(update={"participant_ids": participants}),
+            )
+            self.state.ensure_scope("session", session.id, schema_id="core.session")
+            return session.model_dump(mode="json")
+
+        if idempotency_key is not None:
+            if request_context is None:
+                raise PermissionDeniedError("A trusted request context is required for idempotency")
+            result = IdempotencyStore(self.database).execute(
+                request_context,
+                operation="conversation.session.create.v1",
+                key=idempotency_key,
+                payload={"conversation_id": conversation_id, "request": request.model_dump(mode="json")},
+                authorize=authorize,
+                mutate=mutate,
+            )
+            session = ConversationSession.model_validate(result.value)
+            if result.replayed:
+                return session
+        else:
+            with self.database.transaction(immediate=True):
+                authorize()
+                session = ConversationSession.model_validate(mutate())
+
+        # The mutation and replay result are already committed. Events remain
+        # best-effort: a crash here can lose the notification, never the session.
         await self.events.publish(
             EventType.CONVERSATION_SESSION_CREATED,
             node_id=conversation_id,

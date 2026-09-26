@@ -2,13 +2,25 @@
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ComponentPalette } from "./ComponentPalette";
+import { CardLibrary } from "../shell/CardLibrary";
+import { worldApi } from "../api/client";
+import { useLocale } from "../i18n";
 import { useWorldStore } from "../state/worldStore";
-import { useCardLibrary } from "../state/cardLibrary";
+import { useCardLibrary, type DeckEntry, type LibrarySnapshot } from "../state/cardLibrary";
 import type { LegionSummary } from "../types/world";
+
+const originalLibraryState = useCardLibrary.getState();
+function librarySnapshot(entries: DeckEntry[] = []): LibrarySnapshot {
+  return { schema_version: 1, revision: 1, migration_pending: false, plugins: {}, packs: {},
+    card_definitions: {}, collection: {}, available_card_ids: [], available_pack_ids: [],
+    active_deck_id: "custom", decks: [{ id: "custom", name: "Custom", icon: "folder", entries }] };
+}
 
 let hit: Element;
 let frame: FrameRequestCallback | undefined;
 beforeEach(() => {
+  useLocale.setState({ locale: "en" });
+  useCardLibrary.setState({ ...originalLibraryState, refresh: vi.fn().mockResolvedValue(undefined) });
   vi.stubGlobal("PointerEvent", class extends MouseEvent {
     pointerId = 1;
     isPrimary = true;
@@ -17,7 +29,7 @@ beforeEach(() => {
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frame = callback; return 1; });
   vi.stubGlobal("cancelAnimationFrame", () => { frame = undefined; });
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); useCardLibrary.setState(originalLibraryState); });
 function startDrag(source: HTMLElement) {
   source.setPointerCapture = vi.fn(); source.hasPointerCapture = () => false;
   fireEvent.pointerDown(source, { button: 0, buttons: 1, clientX: 10, clientY: 10 });
@@ -34,15 +46,24 @@ function dropOn(target: HTMLElement) {
   fireEvent.pointerUp(window, { button: 0, clientX: 50, clientY: 50 });
 }
 
-it("exposes saved Legions without deck membership and tracks library changes", () => {
+it("discovers saved Legions in the Library before adding them to a deck and tracks availability", async () => {
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
   const instantiate = vi.fn();
-  useCardLibrary.setState({ snapshot: null, refresh: vi.fn().mockResolvedValue(undefined) });
+  const snapshot = librarySnapshot();
+  useCardLibrary.setState({ snapshot, open: true, tab: "cards" });
+  const saved = { ...librarySnapshot([{ kind: "legion", id: "saved-team" }]), revision: 2 };
+  const edit = vi.spyOn(worldApi, "editCardLibrary").mockResolvedValue(saved);
   const legion: LegionSummary = { id: "saved-team", name: "Research team", node_count: 2, edge_count: 1,
     bounds: { width: 200, height: 200 }, node_types: [], plugin_ids: [], compatible: true, issues: [], revision: 1 };
   useWorldStore.setState({ legions: [legion], legionError: undefined, instantiateLegion: instantiate });
-  const screen = render(<ComponentPalette />);
-  fireEvent.click(screen.getByRole("tab", { name: /Legions/ }));
+  const screen = render(<><CardLibrary /><ComponentPalette /></>);
+  expect(screen.getByRole("button", { name: "Inspect Research team" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Place Research team" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Add Research team to deck" }));
+  await waitFor(() => expect(edit).toHaveBeenCalledWith({ action: "move_entry", id: "custom",
+    entry: { kind: "legion", id: "saved-team" }, expected_revision: 1 }));
+  await waitFor(() => expect(useCardLibrary.getState().snapshot).toEqual(saved));
+  fireEvent.click(screen.getByRole("button", { name: "Close Library" }));
   const place = screen.getByRole("button", { name: "Place Research team" });
   expect(place.draggable).toBe(false); // Deck previews use Pointer Events, not an OS drag image.
   fireEvent.click(place);
@@ -60,29 +81,29 @@ it("exposes saved Legions without deck membership and tracks library changes", (
   expect(unavailable.getAttribute("aria-disabled")).toBeNull();
   fireEvent.click(unavailable);
   expect(useCardLibrary.getState().inspectedEntry).toEqual({ kind: "legion", id: "saved-team" });
-  act(() => useCardLibrary.setState({ open: false, inspectedEntry: null }));
-  fireEvent.click(screen.getByRole("tab", { name: /Legions/ }));
   act(() => useWorldStore.setState({ legions: [] }));
-  expect(screen.getByText("No saved Legions")).toBeTruthy();
-  expect(screen.getByRole("tab", { name: /Legions/ }).getAttribute("aria-selected")).toBe("true");
+  expect(screen.queryByRole("button", { name: "Inspect Research team" })).toBeNull();
+  expect(screen.getByRole("button", { name: "saved-team unavailable" })).toBeTruthy();
+  expect(screen.getByRole("tab", { name: /Custom/ }).getAttribute("aria-selected")).toBe("true");
 });
 
-it("deletes a saved Legion directly with confirmation without placing it", async () => {
+it("deletes a saved Legion from the Library with confirmation without placing it", async () => {
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
   const remove = vi.fn().mockResolvedValue(true);
   const place = vi.fn();
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-  useCardLibrary.setState({ snapshot: null, busy: false, refresh: vi.fn().mockResolvedValue(undefined) });
-  useWorldStore.setState({ legions: [{ id: "team", name: "Team", compatible: false } as LegionSummary],
+  useCardLibrary.setState({ snapshot: librarySnapshot(), open: true, tab: "cards" });
+  useWorldStore.setState({ legions: [{ id: "team", name: "Team", compatible: false, issues: [],
+    node_count: 2, edge_count: 1, node_types: [], plugin_ids: [], revision: 1,
+    bounds: { width: 200, height: 200 } }],
     deleteLegion: remove, instantiateLegion: place });
-  const screen = render(<ComponentPalette />);
-  fireEvent.click(screen.getByRole("tab", { name: /Legions/ }));
-  startDrag(screen.getByRole("button", { name: "Team unavailable" }));
-  dropOn(screen.getByRole("region", { name: "Discard card" }));
+  const screen = render(<><CardLibrary /><ComponentPalette /></>);
+  fireEvent.click(screen.getByRole("button", { name: "Inspect Team" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete saved formation" }));
+  expect(confirm).toHaveBeenCalledWith("Remove Team from the Legion library?");
   expect(remove).not.toHaveBeenCalled();
   confirm.mockReturnValue(true);
-  startDrag(screen.getByRole("button", { name: "Team unavailable" }));
-  dropOn(screen.getByRole("region", { name: "Discard card" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete saved formation" }));
   await waitFor(() => expect(remove).toHaveBeenCalledWith("team"));
   expect(place).not.toHaveBeenCalled();
 });

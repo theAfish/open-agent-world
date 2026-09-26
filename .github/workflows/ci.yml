@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  backend-linux:
+    name: Backend (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+      - name: Install locked backend and adapter dependencies
+        run: uv sync --project backend --locked --dev --all-extras --python 3.12
+      - name: Install PDF plugin test dependency
+        run: >-
+          uv pip install --python backend/.venv/bin/python --no-deps
+          --only-binary :all: -r .github/requirements-ci.txt
+      - name: Run backend and public SDK tests
+        run: backend/.venv/bin/python .github/run-backend-tests.py tests backend/tests --junitxml=.tmp/backend-linux.xml
+      - name: Upload backend results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-linux-results
+          path: .tmp/backend-linux.xml
+          include-hidden-files: true
+          retention-days: 7
+
+  frontend-deployment:
+    name: Frontend and deployment (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+      - name: Install locked deployment backend
+        run: uv sync --project backend --locked --dev --python 3.12
+      - name: Install locked frontend dependencies
+        run: npm --prefix frontend ci --ignore-scripts --no-audit --no-fund
+      - name: Run frontend unit tests
+        run: npm --prefix frontend test
+      - name: Check TypeScript and build production frontend
+        run: npm --prefix frontend run build
+      - name: Install deployment browser
+        working-directory: frontend
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Run deployment acceptance against production frontend
+        run: npm --prefix frontend run test:e2e:deployment
+      - name: Upload deployment failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-browser-failure
+          path: |
+            .tmp/deployment-playwright/
+            .tmp/deployment-desktop.png
+            .tmp/deployment-mobile.png
+          include-hidden-files: true
+          retention-days: 7
+
+  windows-smoke:
+    name: Core smoke (Windows)
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+      - name: Install locked backend dependencies
+        run: uv sync --project backend --locked --dev --python 3.12
+      - name: Check startup, access boundaries, deployment, persistence and migration
+        run: >-
+          backend/.venv/Scripts/python.exe .github/run-backend-tests.py
+          backend/tests/test_application_launch.py
+          backend/tests/test_control_plane.py
+          backend/tests/test_http_foundations.py
+          backend/tests/test_request_context.py
+          backend/tests/test_idempotency.py
+          backend/tests/test_deployments.py
+          backend/tests/test_persistence_and_events.py
+          backend/tests/test_lifecycle_migration.py
+          backend/tests/test_storage_location.py
+          backend/tests/test_windows_acceptance_helpers.py
+          --junitxml=.tmp/windows-smoke.xml
+      - name: Upload Windows results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke-results
+          path: .tmp/windows-smoke.xml
+          include-hidden-files: true
+          retention-days: 7
