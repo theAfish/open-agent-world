@@ -19,4 +19,4 @@ You can explore cards and the canvas before adding a model. Receiving a real Age
 | Find tools and add cards to the tray | [Plugins and packs](plugins.md) |
 | Fix an empty tray or an Agent that cannot respond | [Troubleshooting](troubleshooting.md) |
 
-The in-app compass replays the interactive tutorial on your real canvas. Your cards remain available after the tutorial.
+**Help (?) → Tutorial** replays the interactive tutorial on your real canvas. Your cards remain available after the tutorial.

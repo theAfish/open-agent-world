@@ -273,6 +273,9 @@ function unwrap<T>(input: unknown, key: string): T {
 }
 
 export const worldApi = {
+  getDiagnostics(signal?: AbortSignal): Promise<import('../shell/helpChecks').HelpDiagnostics> {
+    return request('/diagnostics', { signal });
+  },
   getStorePacks(query: string, cursor?: string, signal?: AbortSignal): Promise<import('../types/packs').StorePage> {
     const params = new URLSearchParams({ query, limit: '20' });
     if (cursor) params.set('cursor', cursor);

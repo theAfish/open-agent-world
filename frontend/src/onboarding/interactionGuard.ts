@@ -27,7 +27,7 @@ const controls = 'button, a, input, textarea, select, [tabindex], [contenteditab
 
 /** Interaction ownership is independent of the visual mask (drag steps have none). */
 export function tutorialAllows(target: Element, scope: InteractionScope, kind = 'click'): boolean {
-  if (!scope.active || target.closest('.tutorial-guide')) return true;
+  if (!scope.active || target.closest('.tutorial-guide, [data-help-trigger], .help-menu, .help-dialog')) return true;
   if (scope.busy) return false;
   const { step, refs } = scope;
   const within = (selector: string) => Boolean(target.closest(selector));
@@ -100,6 +100,8 @@ export function installTutorialInteractionGuard(getScope: () => InteractionScope
     const scope = getScope();
     if (!scope.active) { pointerGesture = false; return; }
     const target = event.target instanceof Element ? event.target : document.body;
+    // Help owns its menu/dialog keyboard handling, including Escape and Tab.
+    if (target.closest('[data-help-trigger], .help-menu, .help-dialog')) return;
     if (event.type === 'submit') {
       if (target.closest('.settings-dialog') && (scope.busy || scope.step.id !== 'model-save')) stop(event);
       else if (!target.closest('.settings-dialog') && !tutorialAllows(target, scope)) stop(event);
