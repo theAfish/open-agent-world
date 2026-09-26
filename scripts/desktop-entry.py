@@ -5,7 +5,11 @@ import sys
 root = Path(__file__).resolve().parent
 sys.path.insert(0, str(root))
 
-if "--self-test" in sys.argv:
+if "--backup-for-update" in sys.argv:
+    from backend.config import Settings
+    from backend.desktop_backup import backup_for_update
+    print(backup_for_update(Settings.from_environment()), flush=True)
+elif "--self-test" in sys.argv:
     import json
     import tempfile
     import google.adk
