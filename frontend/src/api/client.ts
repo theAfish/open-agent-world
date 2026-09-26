@@ -1,4 +1,5 @@
 import { cardStateSession, stateSessionHeaders } from "../state/cardState";
+import { normalizeCardFinish } from '../cards/cardFinish';
 import type { SummoningSnapshot, SummonedInstance } from "../cards/Barracks";
 import type {
   CardConfig,
@@ -135,6 +136,7 @@ export function normalizeCard(input: unknown): WorldCard {
     state_scope: source.state_scope as WorldCard["state_scope"],
     state_scope_override: source.state_scope_override as WorldCard["state_scope_override"],
     id: String(source.id),
+    finish: normalizeCardFinish(source.finish),
     revision: typeof source.revision === "number" ? source.revision : undefined,
     equipment: source.equipment as WorldCard["equipment"] ?? null,
     minister: source.minister as WorldCard["minister"] ?? null,
@@ -478,6 +480,7 @@ export const worldApi = {
     const payload = {
       ...("id" in node ? { id: node.id } : {}),
       type: node.type,
+      finish: node.finish,
       parent_id: node.parent_id,
       equipment: node.equipment,
       minister: node.minister,
@@ -525,6 +528,7 @@ export const worldApi = {
       body: JSON.stringify({
         id: node.id,
         type: node.type,
+        finish: node.finish,
         parent_id: node.parent_id,
       equipment: node.equipment,
         name: node.name,

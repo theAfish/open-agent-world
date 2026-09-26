@@ -41,3 +41,6 @@
 .shadow-collection.is-releasing .shadow-core {stroke-opacity:0;}
 @media(prefers-reduced-motion:reduce){.shadow-collection.is-releasing .shadow-core{fill-opacity:.9;}.shadow-collection.is-releasing .shadow-feather{opacity:1;}}
 .shadow-actions button[aria-pressed=true] {border-color:#d7a181;color:#efbb97;background:#534238;}
+.shadow-counts.card-finish-surface { position: absolute; border-radius: 8px; }
+.shadow-counts.card-finish-surface:not([data-finish="normal"]) { background: #30302c; padding: 7px; margin-top: -7px; }
+.shadow-counts.card-finish-surface > span[title] { position: relative; z-index: 2; }

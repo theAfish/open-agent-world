@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { CardFinish } from '../cards/cardFinish';
 import { ApiError, apiErrorMessage, worldApi } from "../api/client";
 import type { NodeTypeCatalogItem, PackDefinition, PluginCatalog } from "../types/world";
 import { loadLegacyDecks } from "../palette/legacyDecks";
@@ -14,7 +15,7 @@ export interface LibrarySnapshot {
   plugins: Record<string, { descriptor: PluginCatalog["plugins"][number]; installed: boolean; enabled: boolean }>;
   packs: Record<string, { definition: PackDefinition; owned: boolean; opened: boolean; opened_at: string | null }>;
   card_definitions: Record<string, NodeTypeCatalogItem>;
-  collection: Record<string, { card_id: string; plugin_id: string; source_pack_ids: string[]; unlocked: boolean; unlocked_at: string }>;
+  collection: Record<string, { card_id: string; plugin_id: string; source_pack_ids: string[]; unlocked: boolean; unlocked_at: string; finish?: CardFinish }>;
   decks: CardDeck[];
   active_deck_id: string;
   available_card_ids: string[];

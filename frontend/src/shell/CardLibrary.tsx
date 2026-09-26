@@ -1,4 +1,5 @@
 import { CardFace, CardStock } from "../components/CardFace";
+import { finishLabel } from "../cards/cardFinish";
 import { t, useLocale } from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import { Archive, Check, ChevronLeft, ChevronRight, Layers3, LibraryBig, Plus, Search, Store, X } from "lucide-react";
@@ -15,7 +16,7 @@ import { usePackInstallations } from "../state/packInstallations";
 import type { PackInstallations } from "../types/packs";
 import { PackStore } from "./PackStore";
 import { PackCreator } from "./PackCreator";
-import { LibraryCard as PhysicalLibraryCard } from "./LibraryCard";
+import { LibraryCard as PhysicalLibraryCard, LibraryCardPreview } from "./LibraryCard";
 import "./cardLibrary.css";
 import { startPalettePointerDrag } from "../palette/pointerDrag";
 
@@ -37,6 +38,10 @@ export function CardLibrary() {
   const [showInternal, setShowInternal] = useState(false);
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<DeckEntry | null>(null);
+  const detailSidebar = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (detailSidebar.current) detailSidebar.current.scrollTop = 0;
+  }, [selected?.kind, selected?.id]);
   const [installAction, setInstallAction] = useState<HTMLDivElement | null>(null);
   const [inspectedPack, setInspectedPack] = useState<string | null>(null);
   const [packNotice, setPackNotice] = useState('');
@@ -139,7 +144,7 @@ export function CardLibrary() {
         }} data-library-card={item.id} onClick={event => {
           if (suppressClick.current && event.detail !== 0) { suppressClick.current = false; return; }
           setSelected(item);
-        }} aria-label={t("Inspect {v0}", { v0: String(item.label) })}><CardStock data-deck-visual className="library-card-stock"><CardFace icon={item.kind === "legion" ? <Layers3 /> : <CatalogIcon definition={item.definition} />} label={item.label} description={item.description} />
+        }} aria-label={t("Inspect {v0}", { v0: String(item.label) })}><CardStock finish={item.finish} data-deck-visual className="library-card-stock"><CardFace icon={item.kind === "legion" ? <Layers3 /> : <CatalogIcon definition={item.definition} />} label={item.label} description={item.description} />
         {!item.available && !item.internal ? <span className="library-unavailable">{t("Unavailable")}</span> : null}</CardStock></button>
       {item.internal && !included ? <div className="library-card-usage">{item.owners.length ? t("Use through its container") : t("Created by a world action")}</div> :
         <button className={`library-card-add ${included ? "is-in-deck" : ""}`} disabled={library.busy || !deck || (!included && !item.available)} onClick={() => toggleCard(item)} aria-label={t(included ? 'Remove {v0} from deck' : 'Add {v0} to deck', { v0: item.label })}>
@@ -159,7 +164,7 @@ export function CardLibrary() {
     <div className="library-flow">{t("Open a pack")} <ChevronRight size={12} /> {t("Collect cards")} <ChevronRight size={12} /> {t("Build a deck")} <ChevronRight size={12} /> {t("Place in your world")}</div>
     {library.error ? <div className="library-error" role="alert">{library.error}<button onClick={() => void library.refresh()}>{t("Refresh")}</button></div> : null}
     {!snapshot ? <div className="library-empty">{library.error ? t("Your collection could not be loaded.") : t("Loading your collection…")}</div> :
-      <div className="library-body">
+      <div className={`library-body${tab === "cards" ? " library-body--cards" : ""}`}>
         {tab === "packs" ? <>
           {library.open ? <PackInstaller actionTarget={installAction} onInstalled={value => { acceptInstallations(value); setInspectedPack(null); setQuery(''); }} /> : null}
           {installations.error && <p className="pack-action-error" role="alert">{installations.error}</p>}
@@ -176,7 +181,7 @@ export function CardLibrary() {
           {reveal && snapshot.packs[reveal] ? <span className="library-announcement" role="status">{t(snapshot.packs[reveal].definition.name)} {t("opened. Click its empty wrapper to view cards.")}</span> : null}
           </>}
         </> : null}
-        {tab === "cards" ? <><div className="library-card-layout"><div data-tutorial="library-cards">
+        {tab === "cards" ? <><div className={`library-card-layout${detail ? " has-card-detail" : ""}`}><div className="library-card-collection" data-tutorial="library-cards">
           <div className="library-section-heading"><div><h3>{t("Card Library")}</h3><p>{allCards.length} {t("collected cards and saved formations · Grouped by source pack")}</p></div><span className="library-current-deck">{t("Drag cards into your deck below")}</span></div>
           {sourcePack ? <div className="library-source-actions" aria-label={t("Source pack controls")}>
             <span>{t(sourcePack.definition.name)} · {!sourcePlugin?.installed ? t("Pack uninstalled") : !sourcePlugin.enabled ? t("Pack disabled") : t("Installed · Enabled")}</span>
@@ -200,7 +205,8 @@ export function CardLibrary() {
             </details>)}
             {!filtered.length ? <div className="library-empty"><LibraryBig size={30} /><strong>{allCards.length ? t("No matching cards") : t("Your collection starts with a pack")}</strong><p>{!showInternal && internalCount ? t("{v0} matching internal cards are hidden. Show internal cards to inspect their purpose and container.", { v0: String(internalCount) }) : allCards.length ? t("Try another search, source pack or category.") : t("Visit Packs and open one to discover its cards.")}</p><button className="secondary-button" onClick={() => { if (!showInternal && internalCount) setShowInternal(true); else { setTab("packs"); setQuery(""); } }}>{!showInternal && internalCount ? t("Show internal cards") : t("Browse packs")}</button></div> : null}
             {pages > 1 ? <div className="library-pagination"><button aria-label={t("Previous cards")} disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={16} /></button><span>{t("Page")} {currentPage + 1} {t("of")} {pages}</span><button aria-label={t("Next cards")} disabled={currentPage >= pages - 1} onClick={() => setPage(currentPage + 1)}><ChevronRight size={16} /></button></div> : null}
-          </div><div className="library-card-sidebar"><aside className="library-card-detail" aria-label={t("Card details")}>{detail ? <>{detail.kind === "legion" ? <Layers3 size={36} /> : <CatalogIcon definition={detail.definition} size={36} />}<span className="library-badge">{t(detail.category)}</span><h3>{detail.label}</h3><p>{detail.description}</p>
+          </div><div ref={detailSidebar} className="library-card-sidebar"><aside className="library-card-detail" aria-label={t("Card details")}>{detail ? <>{detail.kind === "legion" ? <Layers3 size={36} /> : <LibraryCardPreview key={detail.id} card={detail} />}<span className="library-badge">{t(detail.category)}</span><h3>{detail.label}</h3><p>{detail.description}</p>
+            {detail.kind === "node" && <small className="library-finish-metadata">{t("Finish")}: {t(finishLabel(detail.finish))}</small>}
             {detailLegion ? <section className="library-dependencies" aria-label={t("Dependency details")}>
               <h4>{t("Dependency details")}</h4>
               {detailLegion.issues.length ? <ul className="library-unavailable">{detailLegion.issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul> : null}

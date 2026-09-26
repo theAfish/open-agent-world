@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { LibrarySnapshot } from "../src/state/cardLibrary";
+import { normalizeCardFinish } from "../src/cards/cardFinish";
 
 test("packs, collection and active decks persist and recover from plugin disable", async ({ page, request, context }) => {
   test.setTimeout(90000);
@@ -45,6 +46,8 @@ test("packs, collection and active decks persist and recover from plugin disable
   await page.keyboard.press("Enter");
   await expect(library.getByRole("status")).toContainText("Core essentials opened");
   await expect(pack).toHaveClass(/is-opened/);
+  const collected: LibrarySnapshot = await (await request.get("/api/card-library")).json();
+  const savedFinish = normalizeCardFinish(collected.collection.text?.finish);
   await pack.evaluate(element => element.getAnimations({ subtree: true }).forEach(animation => { animation.pause(); animation.currentTime = 1220; }));
   const openingTop = await pack.locator(".pack-drawn-cards").evaluate(element => Math.min(...[...element.children].map(card => card.getBoundingClientRect().top)));
   expect(openingTop).toBeGreaterThan((await library.locator(".library-section-heading").boundingBox())!.y + 45);
@@ -53,6 +56,8 @@ test("packs, collection and active decks persist and recover from plugin disable
   await pack.getByRole("button", { name: "View cards in Core essentials" }).click();
   await library.getByLabel("Search cards", { exact: true }).fill("Text file");
   await library.getByRole("button", { name: "Inspect Text file" }).click();
+  await expect(library.locator('[data-library-card="text"] .card-stock')).toHaveAttribute("data-finish", savedFinish);
+  await expect(library.locator(".library-card-preview")).toHaveAttribute("data-finish", savedFinish);
   await page.screenshot({ path: "../.tmp/library-paper-cards.png" });
   await expect(library.getByRole("complementary", { name: "Card details" })).toContainText("Core essentials");
   await library.getByRole("button", { name: "Add Text file to deck" }).click();
@@ -60,14 +65,18 @@ test("packs, collection and active decks persist and recover from plugin disable
   await library.getByRole("button", { name: "Close Library" }).click();
   await tray.hover();
   await expect(tray.getByRole("button", { name: "Place Text file", exact: true })).toBeVisible();
+  await expect(tray.locator('[data-palette-card="text"] .card-stock')).toHaveAttribute("data-finish", savedFinish);
   await expect(tray.getByRole("button", { name: "Place Agent", exact: true })).toHaveCount(0);
   await tray.getByRole("button", { name: "Place Text file", exact: true }).dragTo(page.locator(".react-flow__pane").first(), { targetPosition: { x: 420, y: 250 } });
   await expect.poll(async () => (await (await request.get("/api/nodes")).json()).some((node: { type: string }) => node.type === "text")).toBe(true);
+  await expect(page.locator('.world-card[data-card-type="text"]')).toHaveAttribute("data-finish", savedFinish);
   await page.keyboard.press("Control+z");
   await expect.poll(async () => (await (await request.get("/api/nodes")).json()).length).toBe(0);
   await page.keyboard.press("Control+Shift+z");
   await expect.poll(async () => (await (await request.get("/api/nodes")).json()).length).toBe(1);
+  await expect(page.locator('.world-card[data-card-type="text"]')).toHaveAttribute("data-finish", savedFinish);
   await page.reload();
+  await expect(page.locator('.world-card[data-card-type="text"]')).toHaveAttribute("data-finish", savedFinish);
   await tray.hover();
   await expect(tray.getByRole("button", { name: "Place Text file", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Open Pack and Card Library" }).click();
@@ -207,23 +216,33 @@ test("source packs organize the collection and scoped Skills lead to their usabl
 
 
 test("compact Library cards keep actions outside their single surface", async ({ page, request }) => {
+  test.setTimeout(90000);
   let snapshot: LibrarySnapshot = await (await request.get("/api/card-library")).json();
   const id = snapshot.available_pack_ids.find(id => snapshot.packs[id].definition.name === "Core essentials")!;
   const opened = await request.post("/api/card-library/actions", { data: { action: "open_pack", id, expected_revision: snapshot.revision } });
   expect(opened.ok()).toBe(true);
+  snapshot = await opened.json();
   await page.goto("/");
   const startEmpty = page.getByRole("button", { name: "Start Empty", exact: true });
-  await expect(startEmpty).toBeVisible();
+  // A cold Vite import of the full workspace is slower than the interaction budget.
+  await expect(startEmpty).toBeVisible({ timeout: 60000 });
   await startEmpty.click();
   await expect(startEmpty).not.toBeVisible();
   await page.getByRole("button", { name: "Open Pack and Card Library" }).click();
   const library = page.getByRole("dialog", { name: "Pack & Card Library" });
   await library.getByRole("button", { name: /^Cards/ }).click();
   await library.getByLabel("Source pack", { exact: true }).selectOption(`pack:${id}`);
-  const card = library.locator(".library-card").first();
+  // Prefer a special print when this pack rolled one, while accepting every valid roll.
+  const standaloneIds = ["agent", "conversation", "text", "image", "sandbox", "core.shadow-collection"];
+  const printedId = snapshot.packs[id].definition.cards.find(cardId => standaloneIds.includes(cardId)
+    && normalizeCardFinish(snapshot.collection[cardId]?.finish) !== "normal") ?? "text";
+  const card = library.locator(`[data-library-card=${JSON.stringify(printedId)}]`).locator("..");
   const inspect = card.locator(".library-card-inspect");
   const surface = card.locator(".card-stock--compact");
   await expect(surface).toBeVisible();
+  const inspectedId = (await inspect.getAttribute("data-library-card"))!;
+  const savedFinish = normalizeCardFinish(snapshot.collection[inspectedId]?.finish);
+  await expect(surface).toHaveAttribute("data-finish", savedFinish);
   expect(await library.locator(".library-card").count()).toBeGreaterThan(1);
   const checkSurface = async () => {
     expect(await surface.evaluate(element => getComputedStyle(element).boxShadow.split(/,(?![^(]*\))/).filter(shadow => !shadow.includes("inset")).every(shadow => {
@@ -243,10 +262,14 @@ test("compact Library cards keep actions outside their single surface", async ({
   await inspect.focus();
   await page.keyboard.press("Enter");
   await expect(card).toHaveClass(/is-selected/);
+  await expect(library.locator(".library-card-preview")).toHaveAttribute("data-finish", savedFinish);
+  await library.locator(".library-card-preview").hover();
+  await library.locator(".library-card-preview").screenshot({ path: "../.tmp/library-finish-detail.png" });
   await card.locator(".library-card-add").click();
   await expect(card).toHaveClass(/is-in-deck/);
   await expect(surface).toHaveCSS("border-top-color", "rgb(53, 53, 53)");
   const deckSurface = page.locator(".component-palette .palette-item").first();
+  await expect(deckSurface).toHaveAttribute("data-finish", savedFinish);
   for (const viewport of [{ width: 1280, height: 800 }, { width: 600, height: 780 }, { width: 1280, height: 600 }]) {
     await page.setViewportSize(viewport);
     const dimensions = (element: Element) => { const style = getComputedStyle(element); return [style.width, style.height]; };
@@ -256,4 +279,17 @@ test("compact Library cards keep actions outside their single surface", async ({
   await page.setViewportSize({ width: 640, height: 780 });
   await page.screenshot({ path: "../.tmp/library-compact-narrow.png" });
   expect(await library.locator(".library-body").evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  await library.getByRole("button", { name: "Close Library" }).click();
+  await page.getByRole("complementary", { name: "Active card deck" }).hover();
+  await page.locator(`[data-palette-card=${JSON.stringify(inspectedId)}]`).click();
+  const placed = page.locator(`.react-flow__node [data-card-id][data-card-type=${JSON.stringify(inspectedId)}]`);
+  await expect(placed).toHaveAttribute("data-finish", savedFinish);
+  const nativeHeader = placed.locator('.node-surface-header');
+  if (await nativeHeader.count()) await expect(nativeHeader).toHaveCSS('position', 'absolute');
+  await page.keyboard.press("Control+z");
+  await expect(placed).toHaveCount(0);
+  await page.keyboard.press("Control+Shift+z");
+  await expect(placed).toHaveAttribute("data-finish", savedFinish);
+  await page.reload();
+  await expect(placed).toHaveAttribute("data-finish", savedFinish, { timeout: 20000 });
 });

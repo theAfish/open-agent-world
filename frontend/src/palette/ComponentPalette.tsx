@@ -1,4 +1,5 @@
 import { CardFace, CardStock } from "../components/CardFace";
+import { normalizeCardFinish } from "../cards/cardFinish";
 import { t, useLocale } from "../i18n";
 import { AlertTriangle, Layers3, LibraryBig, Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
@@ -159,7 +160,8 @@ export function ComponentPalette() {
               if (!library.open) entry.kind === "node" ? void createCard(entry.id) : void instantiateLegion(entry.id);
             }}
             aria-label={available ? t("Place {v0}", { v0: String(label) }) : t("{v0} unavailable", { v0: String(label) })} title={legion ? undefined : available ? (definition ? t(definition.description) : undefined) : t("Content unavailable. Inspect it in the Library.")}>
-            <CardStock style={{ "--collection-color": definition?.color ?? "#78967b" } as CSSProperties} className={`palette-item palette-item--${entry.kind === "node" ? entry.id : "legion"}`} data-deck-visual>
+            <CardStock finish={entry.kind === "node" ? normalizeCardFinish(snapshot?.collection[entry.id]?.finish) : undefined}
+              style={{ "--collection-color": definition?.color ?? "#78967b" } as CSSProperties} className={`palette-item palette-item--${entry.kind === "node" ? entry.id : "legion"}`} data-deck-visual>
               <CardFace icon={available ? definition ? <CatalogIcon definition={definition} /> : <Layers3 /> : <AlertTriangle />} label={label}
                 description={available ? (definition ? t(definition.description) : undefined) ?? t(legion?.preset ? "Preset formation" : "Saved formation") : t("Unavailable")} />
             </CardStock>

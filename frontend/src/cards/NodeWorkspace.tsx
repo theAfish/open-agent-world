@@ -31,6 +31,8 @@ import { AgentCardBody } from "./AgentCard";
 import { modelLabel } from "./modelLabel";
 import { PluginSurface } from "../plugins/PluginSurface";
 import { CatalogIcon } from "../components/CatalogIcon";
+import { CardFinishLayer } from "./CardFinishLayer";
+import { normalizeCardFinish } from "./cardFinish";
 
 interface WorkspaceSurfaceProps {
   card: WorldCard;
@@ -45,7 +47,7 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
   const canCollapse = collapsedSurface(nodePresentation(card.type, catalog), "workspace", base) !== "workspace";
 
   return (
-    <header className="workspace-titlebar node-drag-region">
+    <header className="workspace-titlebar node-drag-region card-finish-surface" data-finish={normalizeCardFinish(card.finish)}>
       <div className="workspace-app-mark"><CatalogIcon definition={catalog.node_types.find((d) => d.id === card.type)} size={16} /></div>
       <div>
         <span>{card.type === "xrd.match" ? "XRD 谱解析" : (catalog.node_types.find((item) => item.id === card.type)?.label ?? card.type)} {t("workspace")}</span>
@@ -56,6 +58,7 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
           label={t("Remove {v0}", { v0: String(card.name) })} title={t("Remove object (Ctrl+Z to undo)")} />}
         {canCollapse && <IconButton icon={X} size="sm" quiet onClick={() => closeWorkspace(card.id)} label={t("Close workspace")} />}
       </div>
+      <CardFinishLayer finish={card.finish} quality="thumbnail" />
     </header>
   );
 }

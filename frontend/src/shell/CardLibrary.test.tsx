@@ -101,6 +101,32 @@ afterEach(() => {
   useCardLibrary.setState({ snapshot: null, busy: false, open: false, tab: "packs", inspectedEntry: null, error: "", refresh: originalRefresh });
 });
 
+it("keeps the collected finish across library, detail and deck rerenders with normal legacy cards", () => {
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener() {}, removeEventListener() {} })));
+  const state = snapshot();
+  state.collection["card.1"].finish = "rainbow";
+  state.decks[0].entries = [{ kind: "node", id: "card.1" }];
+  useCardLibrary.setState({ snapshot: state, open: true, tab: "cards", refresh: async () => {} });
+  useWorldStore.setState({ catalog: TEST_CATALOG, legions: [] });
+  const { container } = render(<><CardLibrary /><ComponentPalette /></>);
+  const stock = () => container.querySelector('[data-library-card="card.1"] .card-stock')!;
+  const deck = () => container.querySelector('[data-palette-card="card.1"] .card-stock')!;
+  expect(stock().getAttribute("data-finish")).toBe("rainbow");
+  expect(stock().querySelector(".card-finish-layer")?.getAttribute("data-quality")).toBe("thumbnail");
+  expect(deck().getAttribute("data-finish")).toBe("rainbow");
+  const normal = container.querySelector('[data-library-card="card.2"] .card-stock')!;
+  expect(normal.getAttribute("data-finish")).toBe("normal");
+  expect(normal.querySelector(".card-finish-layer")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Inspect Tool 01" }));
+  expect(screen.getByText("Finish: Rainbow")).toBeTruthy();
+  expect(container.querySelector('.library-card-preview .card-finish-layer')?.getAttribute("data-quality")).toBe("showcase");
+  act(() => useCardLibrary.setState({ snapshot: { ...structuredClone(state), revision: state.revision + 1 } }));
+  expect(stock().getAttribute("data-finish")).toBe("rainbow");
+  expect(deck().getAttribute("data-finish")).toBe("rainbow");
+  expect(screen.getByText("Finish: Rainbow")).toBeTruthy();
+});
+
 it("browses a large collection in bounded pages and resets pagination for search and filters", () => {
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
   HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };

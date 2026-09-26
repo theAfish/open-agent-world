@@ -6,6 +6,7 @@ from typing import Any, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from backend.card_finishes import CardFinish
 from backend.world.models import Card, Edge, EdgeDirection, Point, Size
 
 
@@ -96,6 +97,7 @@ class LegionTemplateNode(BaseModel):
     initial_document: dict[str, Any] | None = None
     initial_shared_state: dict[str, Any] | None = None
     type: str
+    finish: CardFinish = "normal"
     plugin_id: str
     name: str
     position: Point

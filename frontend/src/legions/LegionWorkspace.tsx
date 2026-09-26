@@ -4,6 +4,8 @@ import { createPortal } from 'react-dom';
 import { ArrowLeft, Check, GripVertical, LayoutTemplate, Pencil, Plus, Save, X } from 'lucide-react';
 import { apiErrorMessage } from '../api/client';
 import { CardContent } from '../cards/CardFrame';
+import { CardFinishLayer } from '../cards/CardFinishLayer';
+import { normalizeCardFinish } from '../cards/cardFinish';
 import { WorkspaceContent } from '../cards/NodeWorkspace';
 import { CatalogIcon } from '../components/CatalogIcon';
 import { t, useLocale } from '../i18n';
@@ -185,9 +187,9 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
   return <dialog ref={dialog} className="legion-workspace" data-legion-workspace={card.id} aria-label={t('{v0} workspace mode', { v0: card.name })}
     onCancel={event => { event.preventDefault(); if (event.target !== event.currentTarget) return; if (drawerCard) setDrawerId(null); else requestClose(); }} onKeyDown={event => event.stopPropagation()}
     onDragEnd={() => { setDragging(false); setSelected(null); }}>
-    <header className="legion-window-titlebar">
+    <header className="legion-window-titlebar" data-finish={normalizeCardFinish(card.finish)}>
       <span className="legion-window-mark"><LayoutTemplate size={16} /></span>
-      <div className="legion-window-title"><strong>{card.name}</strong></div>
+      <div className="legion-window-title card-finish-surface"><strong>{card.name}</strong><CardFinishLayer finish={card.finish} quality="thumbnail" /></div>
       <span className="legion-window-status" role="status">{busy ? t('Saving...') : dirty ? t('Unsaved layout') : saved ? t('Layout saved') : ''}</span>
       {actions}
       {!locked && <><PublishApplication card={card} disabled={busy || dirty || editing} />
@@ -283,12 +285,13 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
         </div>
       </main>
       <section id="legion-card-drawer" className="legion-card-drawer" hidden={!drawerCard} aria-label={t('Unplaced card details')}>
-        <header className="legion-drawer-titlebar">
+        <header className="legion-drawer-titlebar card-finish-surface">
           {drawerCard && <><CatalogIcon definition={catalog.node_types.find(item => item.id === drawerCard.type)} size={14} /><strong>{drawerCard.name}</strong></>}
           <button className="legion-tab-close" aria-label={t('Collapse card details')} onClick={() => {
             const id = drawerId; setDrawerId(null);
             if (id) document.getElementById(`legion-tray-${id}`)?.focus();
           }}><X size={14} /></button>
+          {drawerCard && <CardFinishLayer finish={drawerCard.finish} quality="thumbnail" />}
         </header>
         {unplaced.filter(member => mountedIds.current.has(member.id)).map(member =>
           <PaneMount key={member.id} id={member.id} host={surfaceHosts.current.get(viewKey({ card_id: member.id }))} hidden={member.id !== drawerCard?.id} label={member.name} />)}
@@ -297,12 +300,13 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
     <footer className="legion-window-footer"><span><i />{editing ? t('Layout editor') : t('Live workspace')}</span>
     <div className="legion-workspace-preferences" role="group" aria-label={t('Application preferences')}>{!locked && <SettingsButton />}<AppearanceButtons /></div>
     {!locked && !!unplaced.length && <nav className="legion-unplaced-bar" aria-label={t('Unplaced workspace cards')}>
-      {unplaced.map(member => <button key={member.id} id={`legion-tray-${member.id}`} className="legion-unplaced-card"
+      {unplaced.map(member => <button key={member.id} id={`legion-tray-${member.id}`} className="legion-unplaced-card card-finish-surface" data-finish={normalizeCardFinish(member.finish)}
         aria-label={member.name} title={`${member.name} · ${catalog.node_types.find(item => item.id === member.type)?.label ?? member.type}`}
         aria-expanded={drawerCard?.id === member.id} aria-controls="legion-card-drawer"
         draggable={editing && !busy} onDragStart={event => startDrag(event, { card_id: member.id })}
         onClick={() => setDrawerId(drawerCard?.id === member.id ? null : member.id)}>
         <CatalogIcon definition={catalog.node_types.find(item => item.id === member.type)} size={17} />
+        <CardFinishLayer finish={member.finish} quality="thumbnail" />
       </button>)}
     </nav>}
       <span className="legion-footer-hint">{locked ? t('Published application') : editing ? t('Drag dividers to resize. Removing a pane keeps its card in the Legion.') : t('Drag dividers to resize; sizes save automatically. Use Edit layout to move cards.')}</span>
@@ -433,7 +437,7 @@ function WorkspacePane({ leaf, members, hosts, viewTitle, editing, selected, dra
           const member = members.find(item => item.id === tabView.card_id)!;
           const tabDefinition = catalog.node_types.find(item => item.id === member.type);
           return <span key={tabId} className={`legion-tab-item ${tabId === id ? 'is-active' : ''} ${dragging && tabHover === tabId ? 'is-drop-before' : ''}`} role="presentation" data-workspace-tab={tabId}>
-            <button className="legion-workspace-tab" role="tab" id={`legion-tab-${tabId}`} aria-controls={`legion-panel-${tabId}`}
+            <button className="legion-workspace-tab card-finish-surface" data-finish={normalizeCardFinish(member.finish)} role="tab" id={`legion-tab-${tabId}`} aria-controls={`legion-panel-${tabId}`}
               aria-selected={tabId === id} aria-disabled={!selectable} tabIndex={tabId === id ? 0 : -1}
               title={viewTitle(tabView)} draggable={editing}
               onDragStart={event => startDrag(event, tabView)} onClick={() => activate(tabView)}
@@ -445,6 +449,7 @@ function WorkspacePane({ leaf, members, hosts, viewTitle, editing, selected, dra
                 buttons?.[nextIndex]?.focus(); activate(views[nextIndex]);
               }}>
               <CatalogIcon definition={tabDefinition} size={13} /><span>{viewTitle(tabView)}</span>
+              <CardFinishLayer finish={member.finish} quality="thumbnail" />
             </button>
             {editing && tabView.section_id && <button className="legion-tab-close" title={t('Restore to card')}
               aria-label={t('Restore {v0} to card', { v0: viewTitle(tabView) })} onClick={() => restore(tabView)}><ArrowLeft size={12} /></button>}

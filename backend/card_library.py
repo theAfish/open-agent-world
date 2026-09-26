@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.card_finishes import CardFinish, roll_card_finish
 from backend.errors import ConflictError, GraphValidationError, NotFoundError, RevisionConflictError
 from backend.persistence.database import Database
 from backend.plugins.registry import NodePresentation, NodeTypeCatalogItem, PackCatalogItem, PluginDescriptor, PluginRegistry
@@ -44,6 +45,7 @@ class CollectionEntry(Model):
     source_pack_ids: list[str]
     unlocked: bool = True
     unlocked_at: str
+    finish: CardFinish = "normal"
 
 
 class DeckEntry(Model):
@@ -216,15 +218,16 @@ class CardLibraryStore:
         except (ValueError, GraphValidationError):
             return False
 
-    def assert_collected(self, card_id: str) -> None:
+    def assert_collected(self, card_id: str) -> CollectionEntry:
         state = self.read()
         if card_id not in state.collection or not state.collection[card_id].unlocked:
             raise GraphValidationError("Open this card's pack in the Library before adding it to the world")
         if not self.card_available(state, card_id):
             raise GraphValidationError("This card is unavailable; its plugin must be installed and enabled")
+        return state.collection[card_id]
 
     @staticmethod
-    def _unlock(state: LibraryState, pack: UserPackState) -> None:
+    def _unlock(state: LibraryState, pack: UserPackState, *, roll_finishes: bool = False) -> None:
         timestamp = now()
         pack.opened = True
         pack.opened_at = pack.opened_at or timestamp
@@ -236,7 +239,8 @@ class CardLibraryStore:
                 entry.unlocked = True
             else:
                 state.collection[cid] = CollectionEntry(card_id=cid, plugin_id=pack.definition.plugin_id,
-                    source_pack_ids=[pack.definition.id], unlocked_at=timestamp)
+                    source_pack_ids=[pack.definition.id], unlocked_at=timestamp,
+                    finish=roll_card_finish() if roll_finishes else "normal")
 
     def _preset_pack_ids(self, packs: Iterable[PackCatalogItem]) -> dict[str, list[str]]:
         # Presets are registered by plugins, not by the plugins of their member
@@ -282,7 +286,7 @@ class CardLibraryStore:
                     raise NotFoundError("Owned pack is not currently installed")
                 if not self.registry.is_enabled(pack.definition.plugin_id):
                     raise GraphValidationError("Enable the pack's plugin before opening it")
-                self._unlock(state, pack)
+                self._unlock(state, pack, roll_finishes=True)
             elif request.action == "create_deck":
                 if not request.name or len(state.decks) >= 100:
                     raise GraphValidationError("Provide a deck name; at most 100 decks are supported")

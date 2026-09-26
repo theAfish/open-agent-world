@@ -306,6 +306,8 @@ class Database:
             card_columns = {
                 row["name"] for row in self._connection.execute("PRAGMA table_info(cards)")
             }
+            if "finish" not in card_columns:
+                self._connection.execute("ALTER TABLE cards ADD COLUMN finish TEXT NOT NULL DEFAULT 'normal'")
             if "state_scope" not in card_columns:
                 self._connection.execute("ALTER TABLE cards ADD COLUMN state_scope TEXT CHECK(state_scope IN ('shared', 'session'))")
             if "equipment_json" not in card_columns:

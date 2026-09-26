@@ -1828,6 +1828,7 @@ class ApplicationServices:
                 state_scope=card.state_scope_override,
                 initial_shared_state=shared_states[card.id]["value"] if card.id in shared_states else None,
                 type=card.type,
+                finish=card.finish,
                 plugin_id=self.plugins.node_type_owner_id(card.type),
                 name=card.name,
                 position={"x": card.position.x - min_x, "y": card.position.y - min_y},
@@ -2010,6 +2011,7 @@ class ApplicationServices:
                         parent_id=node_ids.get(node.parent_key) if node.parent_key else (wrapper.id if wrapper and not node.owner_key else None),
                         equipment={"owner_id": node_ids[node.owner_key], "relationship": node.equipment_relationship} if node.owner_key else None,
                         type=node.type,
+                        finish=node.finish,
                         state_scope=node.state_scope,
                         name=node.name,
                         position={

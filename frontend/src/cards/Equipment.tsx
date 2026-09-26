@@ -13,6 +13,8 @@ import { useNodeSurfaceStore } from "../state/nodeSurfaces";
 import "./equipment.css";
 import { ActivityGlow } from "../effects/ActivityGlow";
 import { useNodeActivity } from "../effects/useNodeActivity";
+import { CardFinishLayer } from "./CardFinishLayer";
+import { normalizeCardFinish } from "./cardFinish";
 
 function useToggleEquipment(ownerId: string) {
   return () => {
@@ -86,7 +88,7 @@ export function EquipmentCardNode({ data }: NodeProps<CanvasNode>) {
   const onOriginClick = (event: MouseEvent<HTMLDivElement>) => {
     if (origin && !(event.target as HTMLElement).closest(".equipment-item-remove, select")) inspect();
   };
-  return <div className={`equipment-card nodrag nopan ${origin ? "is-open-origin" : ""}`} data-card-id={origin ? undefined : card.id}
+  return <div className={`equipment-card nodrag nopan card-finish-surface ${origin ? "is-open-origin" : ""}`} data-card-id={origin ? undefined : card.id} data-finish={normalizeCardFinish(card.finish)}
     data-equipment-origin={origin ? card.id : undefined} data-activity={activity.phase} aria-label={t("{v0} equipment", { v0: String(card.name) })} onClick={onOriginClick}>
     {!origin && <ConnectionDropSurface nodeId={card.id} />}
     <ActivityGlow phase={activity.phase} />
@@ -99,5 +101,6 @@ export function EquipmentCardNode({ data }: NodeProps<CanvasNode>) {
       {options.map((option) => <option value={option.value} key={option.value}>{t(option.label)}</option>)}
     </select>}
     {!origin && <Handle type="source" position={Position.Right} id="boundary-right" aria-label={t("Connect {v0} right", { v0: String(card.name) })} />}
+    <CardFinishLayer finish={card.finish} quality="thumbnail" />
   </div>;
 }

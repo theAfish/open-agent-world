@@ -26,7 +26,8 @@ def workspace_snapshot(manifest, services):
             plugin_types.add(card.type)
             config = {key: value for key, value in card.config.items() if key in access["config_fields"]}
         cards.append({"id": card.id, "type": card.type, "name": card.name, "status": card.status,
-                      "parent_id": manifest["legion_id"], "config": config, "state_scope": card.state_scope})
+                      "parent_id": manifest["legion_id"], "config": config, "state_scope": card.state_scope,
+                      "finish": card.finish})
         sections = {"conversation": ("sessions", "conversation", "participants"),
                     "sandbox": ("files", "preview", "terminal")}.get(card.type, ())
         if access is not None:
@@ -42,7 +43,8 @@ def workspace_snapshot(manifest, services):
             definition["frontend"] = {key: value for key, value in node.frontend.items() if key in {"body", "workspace"}}
     layout = {**deepcopy(manifest["layout"]), "hidden_sections": hidden}
     return {"cards": cards, "plugin_access": manifest.get("plugin_access", {}), "legion": {"id": manifest["legion_id"], "name": manifest["name"],
-            "type": "legion", "config": {"workspace_layout": layout}},
+            "type": "legion", "finish": services.world.get_card(manifest["legion_id"]).finish,
+            "config": {"workspace_layout": layout}},
             "catalog": {"node_types": definitions, "relationships": [], "plugins": [], "packs": []}}
 
 

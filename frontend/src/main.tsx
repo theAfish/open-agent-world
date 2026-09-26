@@ -6,6 +6,11 @@ import { initializeProfile } from "./state/profileStorage";
 
 async function start() {
   const root = document.getElementById("root")!;
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has('card-finishes')) {
+    const { FinishPreview } = await import('./debug/FinishPreview');
+    ReactDOM.createRoot(root).render(<FinishPreview />);
+    return;
+  }
   root.classList.add("application-startup");
   root.textContent = "Open Agent World · 正在连接工作区 / Connecting to your workspace…";
   try {

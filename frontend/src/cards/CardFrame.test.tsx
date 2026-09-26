@@ -17,7 +17,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); useEquipmentPanel.setState({
 
 it('keeps one working backpack across surfaces and mounts inspector actions only while open', () => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
-  const card: WorldCard = { id: 'owner', type: 'agent', name: 'Equipment owner', status: 'idle', config: {},
+  const card: WorldCard = { id: 'owner', type: 'agent', name: 'Equipment owner', status: 'idle', config: {}, finish: 'starlight',
     position: { x: 0, y: 0 }, size: { width: 360, height: 240 }, expanded: false };
   useWorldStore.setState({ cards: [card], edges: [], events: [], catalog: TEST_CATALOG });
   useNodeSurfaceStore.setState({ surfaceLevels: { [card.id]: 'node' }, baseLevels: { [card.id]: 'preview' },
@@ -35,10 +35,15 @@ it('keeps one working backpack across surfaces and mounts inspector actions only
     expect(surface.querySelector('.node-surface-close')).toBeNull();
     expect(backpack()).toHaveLength(1);
     expect(surface.querySelector(':scope > .equipment-toggle')).toBe(backpack()[0]);
+    expect(surface.getAttribute('data-finish')).toBe('starlight');
+    expect(surface.querySelector(':scope > .card-finish-layer')?.getAttribute('data-quality')).toBe(level === 'node' ? 'thumbnail' : 'standard');
   }
   fireEvent.click(backpack()[0]);
   expect(useEquipmentPanel.getState().openIds).toEqual([card.id]);
   act(() => useNodeSurfaceStore.getState().openInspector(card.id));
+  expect(surface.querySelector(':scope > .card-finish-layer')).toBeNull();
+  expect(surface.querySelector('.card-header .card-finish-layer')?.getAttribute('data-finish')).toBe('starlight');
+  expect(screen.getByText('Finish: Starlight')).toBeTruthy();
   expect(backpack()).toHaveLength(1);
   expect(surface.querySelector('.node-inspector-footer .equipment-toggle')).toBe(backpack()[0]);
   expect(backpack()[0].getAttribute('aria-expanded')).toBe('true');

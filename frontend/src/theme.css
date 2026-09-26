@@ -480,6 +480,8 @@ svg.contour-chunk[data-canvas-ready="true"] { visibility: hidden; }
 .card-footer { min-height: 27px; margin-top: 8px; padding-top: 8px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); }
 .card-id { max-width: 90px; color: var(--ink-faint); font-size: 8px; font-family: "Cascadia Code", Consolas, monospace; letter-spacing: 0.05em; overflow: hidden; text-overflow: ellipsis; }
 .card-footer-actions { display: flex; align-items: center; gap: 5px; }
+.card-finish-metadata { color: var(--ink-faint); font-size: 9px; white-space: nowrap; }
+.card-finish-surface .card-title-group, .card-finish-surface .card-status { z-index: 2; }
 .card-footer .icon-button { width: 27px; height: 27px; border-radius: 8px; }
 .card-expand-button { height: 27px; display: flex; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink-soft); background: var(--surface-soft); font-size: 8px; font-weight: 670; text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; }
 
@@ -1136,6 +1138,8 @@ svg.contour-chunk[data-canvas-ready="true"] { visibility: hidden; }
 
 .node-surface-header {
   position: absolute;
+  border-top-left-radius: inherit;
+  border-top-right-radius: inherit;
   z-index: 4;
   top: 0;
   left: 0;
@@ -1249,6 +1253,7 @@ svg.contour-chunk[data-canvas-ready="true"] { visibility: hidden; }
 .workspace-titlebar { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 7px 9px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--chrome-raised) 88%, transparent); }
 .workspace-app-mark { width: 34px; height: 34px; display: grid; place-items: center; color: var(--agent); border: 1px solid var(--line); border-radius: 11px; background: var(--surface-raised); }
 .workspace-titlebar > div:nth-child(2) { min-width: 0; display: grid; gap: 1px; }
+.workspace-titlebar.card-finish-surface > div { position: relative; z-index: 2; }
 .workspace-titlebar span { color: var(--ink-faint); font-size: 7px; text-transform: uppercase; letter-spacing: 0.1em; }
 .workspace-titlebar strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-name-input { width: 100%; min-width: 0; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--ink); font: inherit; font-size: 11px; font-weight: 700; text-overflow: ellipsis; }
@@ -2438,7 +2443,8 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
 
 /* Body drop targets only intercept input during a connection gesture. Containers
    restrict this surface to their header so members retain their own hit areas. */
-.container-header { position: relative; }
+.container-header { position: relative; border-top-left-radius: inherit; border-top-right-radius: inherit; }
+.container-header.card-finish-surface > div:not(.connection-drop-surface), .container-header.card-finish-surface > button, .container-header.card-finish-surface > span:not(.card-finish-layer) { z-index: 2; }
 .react-flow__handle.connection-drop-surface {
   inset: 0 !important;
   width: 100% !important;
