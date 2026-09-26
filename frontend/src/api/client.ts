@@ -1,5 +1,6 @@
 import { cardStateSession, stateSessionHeaders } from "../state/cardState";
 import { normalizeCardFinish } from '../cards/cardFinish';
+import { fetchWithRetry } from './fetchWithRetry';
 import type { SummoningSnapshot, SummonedInstance } from "../cards/Barracks";
 import type {
   CardConfig,
@@ -239,7 +240,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}${path}`, { ...init, headers });
+    response = await fetchWithRetry(`${API_BASE}${path}`, { ...init, headers });
   } catch (error) {
     throw new ApiError(
       "The world service is not reachable.",

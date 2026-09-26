@@ -1,4 +1,4 @@
-import { createServer as createHttpServer, request as httpRequest } from "node:http";
+import { Agent, createServer as createHttpServer, request as httpRequest } from "node:http";
 import { networkInterfaces } from "node:os";
 import { describe, expect, it } from "vitest";
 import { createServer as createViteServer } from "vite";
@@ -9,6 +9,51 @@ const request = (peer, headers = {}) => ({
 });
 
 describe("local development proxy control-plane ingress", () => {
+  it("reuses an upstream connection across API polls and releases it on shutdown", async () => {
+    const sockets = new Set();
+    const upstream = createHttpServer((request, response) => {
+      sockets.add(request.socket);
+      response.end("ok");
+    });
+    await new Promise(resolve => upstream.listen(0, "127.0.0.1", resolve));
+    const options = localManagementProxy(`http://127.0.0.1:${upstream.address().port}`);
+    const client = new Agent({ keepAlive: true });
+    const reservation = createHttpServer();
+    await new Promise(resolve => reservation.listen(0, "127.0.0.1", resolve));
+    const listenPort = reservation.address().port;
+    await new Promise(resolve => reservation.close(resolve));
+    const vite = await createViteServer({
+      configFile: false, appType: "custom", plugins: [localControlPlaneProxy()],
+      optimizeDeps: { noDiscovery: true, include: [] },
+      server: { host: "127.0.0.1", port: listenPort, strictPort: true, proxy: { "/api": options } },
+    });
+    try {
+      await vite.listen();
+      const url = `http://127.0.0.1:${vite.httpServer.address().port}/api/application`;
+      for (let i = 0; i < 12; i++) {
+        await new Promise((resolve, reject) => {
+          const outgoing = httpRequest(url, { agent: client }, incoming => {
+            incoming.resume();
+            incoming.on("end", () => { expect(incoming.statusCode).toBe(200); resolve(); });
+          });
+          outgoing.on("error", reject);
+          outgoing.end();
+        });
+      }
+      expect(sockets.size).toBe(1);
+      const idle = Object.values(options.agent.freeSockets).flat();
+      expect(idle).toHaveLength(1);
+      client.destroy();
+      await vite.close();
+      expect(idle.every(socket => socket.destroyed)).toBe(true);
+    } finally {
+      client.destroy();
+      await vite.close();
+      upstream.closeAllConnections();
+      await new Promise(resolve => upstream.close(resolve));
+    }
+  }, 15_000);
+
   it.each(["127.0.0.1", "127.0.0.2", "::1", "::ffff:127.0.0.1"])("accepts local peer %s", (peer) => {
     expect(isLocalManagementRequest(request(peer))).toBe(true);
   });
