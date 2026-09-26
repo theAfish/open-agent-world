@@ -157,6 +157,52 @@ def test_host_timer_and_restart_receipts_never_launch_work(runtime_client, monke
     client.portal.call(scenario)
 
 
+@pytest.mark.parametrize('wait_seconds', [None, 60])
+def test_cancelled_submission_waits_for_worker_cleanup(runtime_client, wait_seconds):
+    client, _, _ = runtime_client
+    agent, sandbox, *_ = setup_skill(client)
+    services = client.app.state.services
+
+    async def scenario():
+        started = asyncio.Event()
+        cleaning = asyncio.Event()
+        release = asyncio.Event()
+        cleaned = asyncio.Event()
+
+        async def execute(_):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleaning.set()
+                await release.wait()
+                cleaned.set()
+
+        submission = asyncio.create_task(services.sandbox_operations.submit(
+            agent['id'], sandbox['id'], 'test', execute, wait_seconds=wait_seconds))
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            submission.cancel()
+            await asyncio.wait_for(cleaning.wait(), 1)
+            assert not submission.done()
+            submission.cancel()
+            await asyncio.sleep(0)
+            assert not submission.done()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(submission, 1)
+            assert cleaned.is_set()
+            assert not services.sandbox_operations.tasks
+            assert not services._sandbox_tasks
+            assert not services._sandbox_commands
+            assert history.read(services, sandbox['id'])[0]['state'] == 'cancelled'
+        finally:
+            release.set()
+            await asyncio.gather(submission, return_exceptions=True)
+
+    client.portal.call(scenario)
+
+
 def test_cancel_before_admission_closes_receipt(runtime_client):
     client, _, _ = runtime_client
     agent, sandbox, *_ = setup_skill(client)

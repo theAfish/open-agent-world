@@ -125,8 +125,7 @@ nav:
           - Canvas control: canvas-control.md
           - Canvas placement: layout.md
           - Canvas performance: canvas-performance.md
-          - Legion performance diagnosis: legion-performance-diagnosis.md
-          - Pan and zoom performance: panzoom-performance.md
+          - Card finishes: developers/card-finishes.md
           - Tutorial implementation: tutorial.md
           - Desktop development: desktop.md
           - Workspace deployment: deployment.md
