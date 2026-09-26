@@ -2,6 +2,7 @@ import { t, useLocale } from "../i18n";
 import { useWorldStore } from "../state/worldStore";
 import { useState } from "react";
 import { modelRef } from "../state/modelConnections";
+import { modelLabel } from "./modelLabel";
 
 export function ModelSelect({ value, onChange, allowEmpty = false, label = t("Model") }: {
   value: string; onChange: (value: string) => void; allowEmpty?: boolean; label?: string;
@@ -14,7 +15,7 @@ export function ModelSelect({ value, onChange, allowEmpty = false, label = t("Mo
   return <div className="model-select"><input aria-label={t("Search {v0}", { v0: String(label.toLowerCase()) })} placeholder={t("Search models…")} value={query} onChange={e => setQuery(e.target.value)} />
     <select aria-label={label} value={value} onChange={e => { onChange(e.target.value); setQuery(""); }}>
     {allowEmpty && <option value="">{t("Use each agent’s model")}</option>}
-    {!allowEmpty && <option value="oaw:default">{t("Use default model")}</option>}
+    {!allowEmpty && <option value="oaw:default">{modelLabel(catalog, "oaw:default")}{catalog.default_model ? ` (${t("Use default model")})` : ""}</option>}
     {value && value !== "oaw:default" && !known && <option value={value}>{value.startsWith("oaw:model:") ? t("Unavailable model — choose another") : value}</option>}
     {catalog.connections.filter(c => c.enabled).map(c => <optgroup key={c.id} label={c.name}>
       {c.models.filter(m => m.enabled && (modelRef(m.id) === value || `${c.name} ${m.name} ${m.model_id}`.toLowerCase().includes(query.toLowerCase()))).map(m => <option key={m.id} value={modelRef(m.id)}>{m.name}</option>)}
