@@ -77,6 +77,7 @@ nav:
       - user-guide/index.md
       - Install OAW: install.md
       - Your first team: user-guide/first-team.md
+      - First task and recovery: product-first-use.md
       - Models and settings: user-guide/models.md
       - Cards and connections: user-guide/canvas.md
       - Packs and cards: user-guide/plugins.md
@@ -121,6 +122,8 @@ nav:
           - Canvas control: canvas-control.md
           - Canvas placement: layout.md
           - Canvas performance: canvas-performance.md
+          - Legion performance diagnosis: legion-performance-diagnosis.md
+          - Pan and zoom performance: panzoom-performance.md
           - Tutorial implementation: tutorial.md
           - Desktop development: desktop.md
           - Workspace deployment: deployment.md
