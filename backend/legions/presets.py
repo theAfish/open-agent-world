@@ -73,6 +73,11 @@ def preset_record(preset_id: str, registry: PluginRegistry) -> LegionRecord:
                 "second": {"kind": "pane", "view": {"card_id": "sandbox"}}},
             "hidden_sections": [],
         }
+    else:
+        nodes[0].config["workspace_layout"] = {
+            "version": 2, "root": {"kind": "pane", "view": {"card_id": "conversation"}},
+            "hidden_sections": [],
+        }
     now = datetime(2026, 9, 16, tzinfo=UTC)
     return LegionRecord(
         id=preset_id, name=name, description=description, created_at=now, updated_at=now, revision=1,

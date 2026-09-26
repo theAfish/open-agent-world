@@ -532,12 +532,10 @@ export function Onboarding() {
     </svg>
     <div className={`onboarding-logo-ring ${welcome ? '' : 'has-entered'}`}><OawGuide ringOnly /></div>
     {welcome && <section className="onboarding-welcome" aria-label={t("Welcome to Open Agent World")}>
-      <span className="onboarding-eyebrow">{t("A world of possibilities")}</span>
       <h1>{t("Open Agent World")}</h1>
-      <p>{t("A little space. A few cards. Something entirely yours.")}</p>
       <BlueprintChooser />
       <div className="onboarding-actions">
-        <button className="primary-button onboarding-start" disabled={s.busy || sync === 'offline'} onClick={() => void tutorial.start()}><span>{t("Start Tutorial")}<small>{t("Recommended · A guided walk through your first world")}</small></span><ArrowRight size={19} /></button>
+        <button className="secondary-button onboarding-start" disabled={s.busy || sync === 'offline'} onClick={() => void tutorial.start()}><span>{t("Start Tutorial")}<small>{t("Learn to customize cards and connections")}</small></span><ArrowRight size={19} /></button>
         <button className="onboarding-text-button" disabled={s.busy} onClick={() => void tutorial.directly()}>{t("Start Empty")}</button>
       </div>
       {s.error && <p className="onboarding-error" role="alert">{s.error}</p>}

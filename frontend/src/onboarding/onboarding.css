@@ -19,6 +19,12 @@
 .blueprint-option span { font-size: 11px; line-height: 1.6; color: var(--ink-soft); }
 .blueprint-option:hover, .blueprint-option:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
 .blueprint-option:disabled { opacity: .5; cursor: default; }
+.blueprint-option[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.blueprint-goal { display: grid; gap: 12px; text-align: left; }
+.blueprint-goal > label { font-size: 13px; }
+.blueprint-goal textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 72px; max-height: 180px; border: 1px solid var(--line-strong); border-radius: 12px; padding: 12px; color: var(--ink); background: var(--surface-raised); font: inherit; }
+.blueprint-goal > small { color: var(--ink-soft); font-size: 11px; text-align: center; }
+.blueprint-start { justify-self: center; min-width: 180px; padding: 10px 20px; }
 .blueprint-saved { margin: 12px 0; text-align: left; font-size: 12px; }
 .blueprint-saved summary { cursor: pointer; color: var(--ink-soft); }
 .blueprint-saved > button { margin: 10px 8px 0 0; }

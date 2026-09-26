@@ -952,6 +952,13 @@ svg.contour-chunk[data-canvas-ready="true"] { visibility: hidden; }
 .settings-page-heading h3 { margin: 0; font-size: 20px; }
 .settings-page-heading p { color: var(--ink-faint); font-size: 12px; line-height: 1.6; margin: 6px 0 14px; }
 .model-editor { display: grid; gap: 16px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.connect-ai { display: grid; gap: 18px; border: 0; padding: 0; min-width: 0; }
+.connect-ai h3, .connect-ai p { margin: 0; }
+.connect-ai p, .model-discovery small { font-size: 12px; line-height: 1.6; color: var(--ink-soft); }
+.connect-ai-providers { display: flex; flex-wrap: wrap; gap: 8px; }
+.connect-ai-providers button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.model-discovery { display: grid; gap: 10px; padding: 12px 0; }
+.model-discovery > button { justify-self: start; }
 .model-select { display: grid; gap: 5px; min-width: 0; }
 .model-select input, .model-select select { width: 100%; min-width: 0; }
 .connection-add { display: flex; gap: 8px; }

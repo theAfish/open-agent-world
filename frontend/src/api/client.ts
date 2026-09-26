@@ -824,6 +824,10 @@ export const worldApi = {
     return request("/settings/models");
   },
 
+  discoverModels(connection: import("../state/modelConnections").ModelConnection, signal?: AbortSignal): Promise<{ models: { id: string; name: string }[]; truncated: boolean }> {
+    return request("/settings/models/discover", { method: "POST", body: JSON.stringify(connection), signal });
+  },
+
   saveModelConnections(settings: import("../state/modelConnections").ModelCatalog): Promise<import("../state/modelConnections").ModelCatalog> {
     return request("/settings/models", { method: "PUT", body: JSON.stringify(settings) });
   },

@@ -7,6 +7,8 @@ import type { FormEvent } from "react";
 import { useWorldStore } from "../state/worldStore";
 import { EMPTY_MODEL_CATALOG, importLegacyModels, type ModelCatalog } from "../state/modelConnections";
 import { ModelConnectionsEditor } from "./ModelConnectionsEditor";
+import { ConnectAI } from './ConnectAI';
+import { useTutorialStore } from '../onboarding/controller';
 import { worldApi } from "../api/client";
 import type { SandboxSettings, StorageSettings } from "../api/client";
 import type { SandboxRuntime } from "../types/world";
@@ -24,6 +26,7 @@ export function SettingsPanel() {
   const [modelLoaded, setModelLoaded] = useState(false);
   const [modelError, setModelError] = useState("");
   const [modelRetry, setModelRetry] = useState(0);
+  const [simpleSetup, setSimpleSetup] = useState(false);
   const [section, setSection] = useState<"model" | "sandbox" | "storage" | "deepl">("model");
   const [storage, setStorage] = useState<StorageSettings | null>(null);
   const [storagePath, setStoragePath] = useState("");
@@ -60,6 +63,7 @@ export function SettingsPanel() {
         if (!active) return;
         setSavedCatalog(value);
         setDraft(importLegacyModels(value, settings));
+        setSimpleSetup(!value.connections.length && !settings.models.length && useTutorialStore.getState().view !== 'active');
         useWorldStore.setState(state => value.revision >= state.modelCatalog.revision ? { modelCatalog: value } : {});
         setModelLoaded(true);
       })
@@ -95,6 +99,7 @@ export function SettingsPanel() {
     event.preventDefault();
     if (section === "deepl") return;
     if (busy || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)) return;
+    if (section === 'model' && simpleSetup && !draft.default_model) { setError(t('Choose a model before saving.')); return; }
     setBusy(true);
     setError("");
     try {
@@ -151,8 +156,9 @@ export function SettingsPanel() {
         {section === "deepl" ? <DeepLSettings /> : section === "model" ? <div className="settings-form">
           {!modelLoaded && !modelError && <p role="status">{t("Loading model settings…")}</p>}
           {modelLoaded && <>
-            {draft.revision === 0 && draft.connections.length > 0 && <p className="settings-description">{t("Previous models are included in this draft. Save to keep them on the backend.")}</p>}
-            <ModelConnectionsEditor value={draft} onChange={setDraft} saved={savedCatalog} busy={busy} />
+            {draft.revision === 0 && draft.connections.some(connection => connection.id === 'legacy') && <p className="settings-description">{t("Previous models are included in this draft. Save to keep them on the backend.")}</p>}
+            {simpleSetup ? <ConnectAI value={draft} onChange={setDraft} busy={busy} onAdvanced={() => setSimpleSetup(false)} />
+              : <ModelConnectionsEditor value={draft} onChange={setDraft} saved={savedCatalog} busy={busy} />}
           </>}
         </div> : section === "storage" ? <div className="settings-form">
           <div className="settings-page-heading"><h3>{t("Storage")}</h3></div>

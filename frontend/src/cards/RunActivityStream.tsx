@@ -4,6 +4,7 @@ import { t, useLocale } from "../i18n";
 import type { ConversationRunSummary } from "../types/world";
 import { toolFailed, withoutFinalReply, type RunActivityItem, type RunActivityState } from "../state/runActivity";
 import { MarkdownMessage } from "./MarkdownMessage";
+import { runStatusLabel } from '../state/runPresentation';
 
 function format(value: unknown): string {
   if (typeof value === "string") return value;
@@ -71,10 +72,10 @@ export function RunActivityStream({ activity, active = false, waiting = false, s
       {onStop ? <button type="button" className="run-stop-button" disabled={stopping} onClick={onStop}>
         <Square size={10} aria-hidden="true" />{stopping ? t("Stopping…") : t("Stop")}
       </button> : null}
-      {waiting || !activity?.items.length ? <span role="status">
+      <span role="status">
         {!waiting ? <LoaderCircle size={12} className="run-activity-spinner" aria-hidden="true" /> : null}
-        {waiting ? t("Waiting") : t("Waiting for activity…")}
-      </span> : null}
+        {waiting ? t("Waiting") : t("Working")}
+      </span>
     </div> : null}
   </div>;
 }
@@ -90,12 +91,12 @@ export function RunActivityDetails({ run, activity, finalReply }: {
   const count = run?.tool_count ?? activity?.items.filter(item => item.type.startsWith("tool_")).length ?? 0;
   const seconds = run?.started_at && run.finished_at
     ? Math.max(0, Math.round((Date.parse(run.finished_at) - Date.parse(run.started_at)) / 1000)) : undefined;
-  if (detailsActivity && !detailsActivity.items.length && !detailsActivity.truncated && !count) return null;
+  if (!run && detailsActivity && !detailsActivity.items.length && !detailsActivity.truncated && !count) return null;
   return <details className="run-activity-history" open={open} onToggle={event => {
     // Ignore toggle events from nested tool disclosures.
     if (event.target === event.currentTarget) setOpen(event.currentTarget.open);
   }}>
-    <summary>{seconds === undefined ? t("Execution details") : t("Worked for {v0}s", { v0: seconds })}
+    <summary>{run ? `${t(runStatusLabel(run.status))} · ` : ''}{seconds === undefined ? t("Execution details") : t("Worked for {v0}s", { v0: seconds })}
       {count ? ` · ${count} ${t("tool calls")}` : ""}</summary>
     {open ? <RunActivityStream activity={detailsActivity} /> : null}
   </details>;

@@ -18,9 +18,14 @@ export function describeRuntimeError(error: unknown, model = "configured model")
   if (credential && /missing credentials|api[_ ]key|authenticate/i.test(detail)) {
     return {
       title: "Model credentials unavailable",
-      detail: `ADK could not authenticate ${model}. Set ${credential} in the terminal that runs scripts/dev.ps1, then restart the development server.`,
+      detail: 'Open Settings → Models to check the API key and selected model, then retry your request.',
     };
   }
+  if (/unauthori[sz]ed|authentication|401|403|api.?key|credentials|model connection.*missing/i.test(detail)) {
+    return { title: 'Model connection needs attention', detail: 'Open Settings → Models to check the API key and selected model, then retry your request.' };
+  }
+  if (/429|rate.?limit|quota/i.test(detail)) return { title: 'Model service limit reached', detail: 'Wait and retry, or check the usage limit with your model service.' };
+  if (/timeout|timed out|connection|network|503|502/i.test(detail)) return { title: 'Model service unavailable', detail: 'Check the connection and retry when the service is available. Completed actions may already have taken effect.' };
   return {
     title: "Agent run failed",
     detail: `${model}: ${detail.slice(0, 500)}`,

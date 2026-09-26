@@ -44,6 +44,7 @@ test.describe('canvas onboarding', () => {
     await resetTutorialProfile(request);
     await page.goto('/');
     await page.getByRole('button', { name: /^General assistant/ }).click();
+    await page.getByRole('button', { name: 'Open workspace', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeVisible();
     expect((await (await request.get('/api/nodes')).json()).every((card: { minister?: unknown }) => !card.minister)).toBe(true);
     await expect(page.locator('.onboarding-layer')).toHaveCount(0);

@@ -2,6 +2,7 @@ import { reportInteraction } from "../state/interactions";
 import { t, useLocale } from "../i18n";
 import { Plus, Server, Star, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { ModelDiscovery } from './ModelDiscovery';
 import { availableModels, DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_OUTPUT_TOKENS, modelRef, type ModelCatalog, type ModelConnection } from "../state/modelConnections";
 
 const presets = {
@@ -117,6 +118,9 @@ export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
           </div>}
         </div>
         <div data-tutorial="model-list">
+        <ModelDiscovery connection={connection} onSelect={model => onChange({ ...value,
+          connections: value.connections.map(c => c.id === connection.id ? { ...c, models: [...c.models, model] } : c),
+          default_model: value.default_model ?? modelRef(model.id) })} />
         <div className="connection-model-heading"><h4>{t("Models")}</h4><button type="button" className="secondary-button" disabled={connection.models.length >= 100} onClick={() => update({ models: [...connection.models, { id: crypto.randomUUID(), name: "", model_id: "", enabled: true, context_window: DEFAULT_CONTEXT_WINDOW, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS }] })}><Plus size={13} /> {t("Add model")}</button></div>
         {!connection.models.length && <p className="settings-description">{t("Add a model using the model ID supplied by your service.")}</p>}
         {connection.models.map((model, index) => <div className="connection-model-row" key={model.id}>
