@@ -7,10 +7,11 @@ import { t, useLocale } from '../i18n';
 import { tutorial, useTutorialStore } from '../onboarding/controller';
 import { useCardLibrary } from '../state/cardLibrary';
 import { useWorldStore } from '../state/worldStore';
-import { checkMessage, DOCS_URL, RELEASES_URL, repairGuide, type HelpCheck, type HelpDiagnostics } from './helpChecks';
+import { checkMessage, RELEASES_URL, repairGuide, type HelpCheck, type HelpDiagnostics } from './helpChecks';
+import { DocumentationPanel } from './DocumentationPanel';
 import './helpMenu.css';
 
-type Panel = 'diagnostics' | 'updates';
+type Panel = 'documentation' | 'diagnostics' | 'updates';
 
 export function HelpMenu() {
   const { locale } = useLocale();
@@ -74,7 +75,7 @@ export function HelpMenu() {
     {open && createPortal(<div ref={menu} id="oaw-help-menu" className="help-menu" role="menu" aria-label={t('Help')}
       style={position} onKeyDown={menuKey}>
       <button role="menuitem" disabled={busy} onClick={() => { closeMenu(true); void tutorial.replay(); }}><Compass size={17} /><span>{t('Tutorial')}</span></button>
-      <a role="menuitem" href={`${DOCS_URL}${locale === 'zh-CN' ? 'README.zh-CN/' : ''}`} target="_blank" rel="noopener noreferrer" onClick={() => closeMenu(true)}><BookOpen size={17} /><span>{t('Documentation')}</span><ExternalLink size={13} /></a>
+      <button role="menuitem" onClick={() => show('documentation')}><BookOpen size={17} /><span>{t('Documentation')}</span></button>
       <button role="menuitem" onClick={() => show('diagnostics')}><Activity size={17} /><span>{t('Status check')}</span></button>
       <button role="menuitem" onClick={() => show('updates')}><Download size={17} /><span>{t('Versions and updates')}</span></button>
     </div>, document.body)}
@@ -84,31 +85,33 @@ export function HelpMenu() {
 
 function HelpDialog({ panel, onClose }: { panel: Panel; onClose: () => void }) {
   useLocale();
+  const [documentationPage, setDocumentationPage] = useState<string>();
+  const showingDocs = panel === 'documentation' || documentationPage !== undefined;
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { const element = dialog.current!; element.showModal(); return () => element.close(); }, []);
   // Leave the native modal top layer before restoring focus or opening Settings.
   const close = () => { dialog.current?.close(); onClose(); };
-  return createPortal(<dialog ref={dialog} className="help-dialog" aria-labelledby="help-dialog-title"
+  return createPortal(<dialog ref={dialog} className={`help-dialog${showingDocs ? ' help-dialog--documentation' : ''}`} aria-labelledby="help-dialog-title"
     onCancel={event => { event.preventDefault(); close(); }} onKeyDown={event => event.stopPropagation()}
     onClick={event => {
       if (event.target !== event.currentTarget) return;
       const bounds = event.currentTarget.getBoundingClientRect();
       if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) close();
     }}>
-    <header><h2 id="help-dialog-title">{t(panel === 'diagnostics' ? 'Status check' : 'Versions and updates')}</h2>
+    <header><h2 id="help-dialog-title">{t(showingDocs ? 'Documentation' : panel === 'diagnostics' ? 'Status check' : 'Versions and updates')}</h2>
       <button className="icon-button" aria-label={t('Close help')} onClick={close} autoFocus><X size={18} /></button></header>
-    {panel === 'diagnostics' ? <StatusCheck onClose={close} /> : <div className="help-update-content">
+    {showingDocs ? <DocumentationPanel initialPage={documentationPage} /> : panel === 'diagnostics' ? <StatusCheck onClose={close} onDocumentation={setDocumentationPage} /> : <div className="help-update-content">
       <Download size={30} aria-hidden="true" />
       <h3>{t('Update OAW')}</h3>
       <p>{t('Automatic installation is not available in this version. Download the latest official installer, close OAW, then install the update.')}</p>
       <a className="primary-button" href={RELEASES_URL} target="_blank" rel="noopener noreferrer">{t('Open official releases')} <ExternalLink size={14} /></a>
       <p className="help-muted">{t('Running from source or using a hosted workspace? Update the source installation or ask your administrator to update the server.')}</p>
-      <a href={`${DOCS_URL}install/`} target="_blank" rel="noopener noreferrer">{t('Installation guide')}</a>
+      <button className="help-guide-link" onClick={() => setDocumentationPage('install.md')}>{t('Installation guide')}</button>
     </div>}
   </dialog>, document.body);
 }
 
-function StatusCheck({ onClose }: { onClose: () => void }) {
+function StatusCheck({ onClose, onDocumentation }: { onClose: () => void; onDocumentation: (page: string) => void }) {
   const { locale } = useLocale();
   const tutorialBusy = useTutorialStore(state => state.busy);
   const socket = useWorldStore(state => state.socketState);
@@ -163,7 +166,7 @@ function StatusCheck({ onClose }: { onClose: () => void }) {
     {error && <div className="help-check-error" role="alert">
       <strong>{t('The status check could not finish')}</strong>
       <p>{t('Make sure OAW is running, then check again. For the desktop app, close and reopen it after saving your work. For a hosted workspace, contact the administrator.')}</p>
-      <a href={`${DOCS_URL}user-guide/troubleshooting/`} target="_blank" rel="noopener noreferrer">{t('Troubleshooting guide')}</a>
+      <button className="help-guide-link" onClick={() => onDocumentation('user-guide/troubleshooting.md')}>{t('Troubleshooting guide')}</button>
     </div>}
     <div className="help-check-list">
       {visible.map(check => <article key={check.id} className={`help-check help-check--${check.status}`}>
@@ -177,7 +180,7 @@ function StatusCheck({ onClose }: { onClose: () => void }) {
           {check.focus_id && <button className="secondary-button" disabled={tutorialBusy} onClick={() => locate(check)}>{t('Locate on canvas')}</button>}
           {(check.code === 'model_configuration' || check.code === 'legacy_model') && <button className="secondary-button" disabled={tutorialBusy} onClick={openSettings}>{t('Open settings')}</button>}
           {check.code === 'plugin_unavailable' && <button className="secondary-button" disabled={tutorialBusy} onClick={() => { leave(); useCardLibrary.getState().show(); }}>{t('Open Library')}</button>}
-          <a href={repairGuide(check.code)} target="_blank" rel="noopener noreferrer">{t('Repair guide')} <ExternalLink size={12} /></a>
+          <button className="help-guide-link" onClick={() => onDocumentation(repairGuide(check.code))}>{t('Repair guide')}</button>
         </div>}
       </article>)}
     </div>

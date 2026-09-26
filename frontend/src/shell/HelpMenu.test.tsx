@@ -6,7 +6,7 @@ import { useLocale } from '../i18n';
 import { tutorial, useTutorialStore } from '../onboarding/controller';
 import { useWorldStore } from '../state/worldStore';
 import { HelpMenu } from './HelpMenu';
-import { DOCS_URL, RELEASES_URL, type HelpDiagnostics } from './helpChecks';
+import { RELEASES_URL, type HelpDiagnostics } from './helpChecks';
 
 const { setCenter } = vi.hoisted(() => ({ setCenter: vi.fn() }));
 vi.mock('@xyflow/react', () => ({ useReactFlow: () => ({ setCenter }) }));
@@ -64,13 +64,31 @@ describe('Help menu', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Help' }));
   });
 
-  it('dismisses on outside click and links to localized docs', () => {
+  it('dismisses on outside click and opens localized documentation offline', () => {
     openMenu();
-    expect(screen.getByRole('menuitem', { name: 'Documentation' }).getAttribute('href')).toBe(DOCS_URL);
-    act(() => useLocale.setState({ locale: 'zh-CN' }));
-    expect(screen.getByRole('menuitem', { name: '文档' }).getAttribute('href')).toBe(`${DOCS_URL}README.zh-CN/`);
+    expect(screen.getByRole('menuitem', { name: 'Documentation' }).tagName).toBe('BUTTON');
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('menu')).toBeNull();
+    act(() => useLocale.setState({ locale: 'zh-CN' }));
+    fireEvent.click(screen.getByRole('button', { name: '帮助' }));
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    fireEvent.click(screen.getByRole('menuitem', { name: '文档' }));
+    expect(screen.getByRole('dialog', { name: '文档' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '使用入门', level: 1 })).toBeTruthy();
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(worldApi.getDiagnostics).not.toHaveBeenCalled();
+    fireEvent(screen.getByRole('dialog'), new Event('cancel', { bubbles: false, cancelable: true }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '帮助' }));
+  });
+
+  it('opens the bundled installation guide from updates', () => {
+    openMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Versions and updates' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Installation guide' }));
+    expect(screen.getByRole('dialog', { name: 'Documentation' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Download and install / 下载与安装', level: 1 })).toBeTruthy();
   });
 
   it('explains manual updates without claiming an automatic updater or a version comparison', () => {
@@ -86,6 +104,13 @@ describe('Help menu', () => {
 });
 
 describe('Status check', () => {
+  it('opens a relevant repair topic in the same dialog', async () => {
+    await openStatus();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Repair guide' })[0]);
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'Models and settings', level: 1 })).toBeTruthy();
+  });
+
   it('shows actionable issues and unverified notes, with passed checks available on demand', async () => {
     await openStatus();
     expect(screen.getByText('1 items need attention')).toBeTruthy();

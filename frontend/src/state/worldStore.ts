@@ -486,7 +486,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
 
   initialize: async () => {
     const mutationEpoch = worldMutationEpoch;
-    const modelsLoaded = worldApi.getModelConnections().then(modelCatalog => set(state => modelCatalog.revision >= state.modelCatalog.revision ? { modelCatalog } : {}))
+    void worldApi.getModelConnections().then(modelCatalog => set(state => modelCatalog.revision >= state.modelCatalog.revision ? { modelCatalog } : {}))
       .catch(error => get().pushToast({ tone: "error", title: "Model settings unavailable", detail: apiErrorMessage(error) }));
     const keys = getViewportChunkKeys(get().viewport);
     set({ activeChunkKeys: keys });
@@ -498,7 +498,6 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         loadLegionLibrary(),
       ]);
       const legionError = library.ok ? undefined : apiErrorMessage(library.error);
-      await modelsLoaded;
       set({
         catalog,
         terrainSeed: snapshot.terrain_seed ?? 0x5eeda11,

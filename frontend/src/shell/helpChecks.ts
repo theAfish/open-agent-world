@@ -39,8 +39,8 @@ export function checkMessage(code: string): string {
 }
 
 export function repairGuide(code: string): string {
-  if (code.startsWith('sandbox')) return `${DOCS_URL}sandbox-workspace/`;
-  if (code.startsWith('model') || code === 'legacy_model') return `${DOCS_URL}user-guide/models/`;
-  if (code.startsWith('plugin')) return `${DOCS_URL}user-guide/plugins/`;
-  return `${DOCS_URL}user-guide/troubleshooting/`;
+  if (code.startsWith('sandbox')) return 'sandbox-workspace.md';
+  if (code.startsWith('model') || code === 'legacy_model') return 'user-guide/models.md';
+  if (code.startsWith('plugin')) return 'user-guide/plugins.md';
+  return 'user-guide/troubleshooting.md';
 }

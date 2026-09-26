@@ -28,6 +28,7 @@ import { ConversationWorkspace } from "./ConversationWorkspace";
 import { MinisterRoleSettings } from './MinisterRoleCard';
 import { openMinisterSettings, useMinisterRole } from '../state/ministerRole';
 import { AgentCardBody } from "./AgentCard";
+import { modelLabel } from "./modelLabel";
 import { PluginSurface } from "../plugins/PluginSurface";
 import { CatalogIcon } from "../components/CatalogIcon";
 
@@ -61,6 +62,7 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
 
 function AgentWorkspace({ card }: { card: WorldCard }) {
   useLocale();
+  const modelCatalog = useWorldStore(state => state.modelCatalog);
   const catalog = useWorldStore((state) => state.catalog);
   const edges = useWorldStore((state) => state.edges);
   const cards = useWorldStore((state) => state.cards);
@@ -117,7 +119,7 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
         </div>
         <div className="workspace-agent-state">
           <span data-status={card.status} />
-          <div><strong>{card.status}</strong><small>{String(card.config.model ?? t("Default model"))}</small></div>
+          <div><strong>{card.status}</strong><small>{modelLabel(modelCatalog, card.config.model)}</small></div>
         </div>
       </nav>
 
