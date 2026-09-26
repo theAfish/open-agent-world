@@ -27,13 +27,31 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-          cache-dependency-glob: backend/uv.lock
-      - name: Sync locked dependencies
+          cache-dependency-glob: |
+            backend/uv.lock
+            plugins/*/pyproject.toml
+      - name: Sync locked backend dependencies
         working-directory: backend
         run: uv sync --frozen --all-extras --group dev
-      - name: Run backend test suite
+      - name: Install repository plugins
         working-directory: backend
-        run: uv run pytest
+        shell: bash
+        run: |
+          mapfile -t plugin_roots < <(
+            find ../plugins -mindepth 2 -maxdepth 2 -name pyproject.toml -printf '%h\n' | sort
+          )
+          if ((${#plugin_roots[@]} == 0)); then
+            echo "No repository plugin packages found" >&2
+            exit 1
+          fi
+          install_args=()
+          for plugin_root in "${plugin_roots[@]}"; do
+            install_args+=(--editable "$plugin_root")
+          done
+          uv pip install --python .venv/bin/python "${install_args[@]}"
+      - name: Run backend and plugin test suite
+        working-directory: backend
+        run: .venv/bin/python -m pytest
 
   frontend:
     name: Frontend tests and build
