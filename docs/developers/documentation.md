@@ -26,6 +26,12 @@ uv pip install --python .tmp/docs-venv/bin/python -r scripts/docs-requirements.t
 
 The preview prints its local URL. To build with link and navigation validation, replace `serve` with `build --strict`. Output goes to `.tmp/docs-site` and is not committed. Run `scripts/docs_tests.py` and `scripts/docs_check_site.py` with the same environment's Python for source-link tests and a full generated-link/search check.
 
+## Theme
+
+`docs/stylesheets/extra.css` maps the app palette in [`frontend/src/theme.css`](../../frontend/src/theme.css) to Material's light (`default`) and dark (`slate`) schemes. Keep the warm gray surfaces, copper accents, and system font aligned when changing either theme. Documentation uses the stronger accent for links and the secondary ink for muted reading text so both remain legible on page, card, and code backgrounds.
+
+Keep header surface colors separate from link and button colors. Check both themes on the home page, a guide with tables, a developer page with code, search results, and the mobile navigation drawer. Verify theme selection survives navigation and reload, and check text contrast in normal, hover, and focus states.
+
 ## Put content in the right place
 
 | Audience | Location | Writing rule |

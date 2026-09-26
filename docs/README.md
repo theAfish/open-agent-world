@@ -17,7 +17,8 @@ Connect agents, files, and tools. Give each agent a role and a place to work tog
 
 </div>
 
-![An OAW workspace with agents, a conversation, documents, and a task board](assets/demos/world-overview.png)
+![An OAW workspace with agents, a conversation, documents, and a task board](assets/demos/world-overview.png#only-light)
+![An OAW workspace in dark mode](assets/demos/world-overview-dark.png#only-dark)
 
 <div class="grid cards" markdown>
 
