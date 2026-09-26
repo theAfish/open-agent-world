@@ -11,6 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+mod updates;
 
 fn open_external(url: &tauri::Url) {
     if !matches!(url.scheme(), "http" | "https") {
@@ -137,6 +138,7 @@ struct Backend {
 struct Runtime {
     backend: Mutex<Option<Backend>>,
     exiting: AtomicBool,
+    updating: AtomicBool,
 }
 
 fn status(app: &tauri::AppHandle, message: &str) {
@@ -269,6 +271,7 @@ fn launch(app: tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 let _ = splash.close();
             }
             ready = true;
+            updates::check(app.clone(), true);
         }
     }
     if !app.state::<Runtime>().exiting.load(Ordering::SeqCst) {
@@ -284,29 +287,31 @@ fn launch(app: tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn stop(app: &tauri::AppHandle) {
+fn stop(app: &tauri::AppHandle) -> bool {
     if let Some(mut backend) = app.state::<Runtime>().backend.lock().unwrap().take() {
         if let Some(mut input) = backend.child.stdin.take() {
             let _ = input.write_all(b"shutdown\n");
         }
         let deadline = Instant::now() + Duration::from_secs(40);
         loop {
-            if matches!(backend.child.try_wait(), Ok(Some(_))) {
-                break;
+            if let Ok(Some(status)) = backend.child.try_wait() {
+                return status.success();
             }
             if Instant::now() >= deadline {
                 let _ = backend.child.kill();
                 let _ = backend.child.wait();
-                break;
+                return false;
             }
             std::thread::sleep(Duration::from_millis(100));
         }
         // Dropping the Windows job also cleans up any descendants after forced exit.
     }
+    true
 }
 
 fn main() {
     let application = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(window) = app
                 .get_webview_window("main")
@@ -320,8 +325,14 @@ fn main() {
         .manage(Runtime {
             backend: Mutex::new(None),
             exiting: AtomicBool::new(false),
+            updating: AtomicBool::new(false),
         })
         .setup(|app| {
+            if option_env!("OAW_UPDATER_ENABLED") == Some("1") {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
+            updates::setup(app.handle())?;
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 if let Err(error) = launch(handle.clone()) {

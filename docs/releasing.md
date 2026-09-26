@@ -15,8 +15,41 @@ The workflow uses GitHub's automatic `GITHUB_TOKEN` with write permission only i
 
 Failed builds keep their logs under Actions. Fix the issue before tagging a new version. Rerunning a tag workflow can replace assets in its existing draft; it refuses to change an already published Release. Never move a published version tag.
 
-## Signing and current limits
+## Signing and automatic updates
 
-Windows builds are unsigned. macOS builds use ad-hoc signing and are not notarized. The current pipeline does not configure certificate import or notarization; add and validate those steps with your signing credentials before promising a warning-free installation. Keep macOS marked as preview until native installation acceptance passes. macOS local Sandbox support is a separate gap.
+The native desktop menu has **Check for updates / 检查更新**. Builds with a configured updater check once after startup; offline checks do not interrupt startup. The user approves download and later approves installation. Downloads are verified by Tauri's updater signature before the backend is stopped. The UI does not expose native updater commands to hosted pages or plugin JavaScript.
 
-GitHub Release downloads are the user-facing distribution channel. Actions artifacts are temporary build/test outputs and are not the primary download link. There is no in-app automatic updater yet.
+Set these repository values before enabling this distribution channel:
+
+| Location | Name | Value |
+| --- | --- | --- |
+| Variable | `OAW_UPDATER_PUBLIC_KEY` | Public key from `npx tauri signer generate` in `desktop` |
+| Secret | `TAURI_SIGNING_PRIVATE_KEY` | Matching private signing key, backed up securely |
+| Secret | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Signing key password, if set |
+| Secret | `WINDOWS_CERTIFICATE` | Base64 code-signing PFX supported by the Windows certificate store |
+| Secret | `WINDOWS_CERTIFICATE_PASSWORD` | PFX password |
+| Secret | `APPLE_CERTIFICATE` | Base64 Developer ID Application P12 |
+| Secret | `APPLE_CERTIFICATE_PASSWORD` | P12 password |
+| Variable | `APPLE_SIGNING_IDENTITY` | Full Developer ID Application identity |
+| Variable | `APPLE_TEAM_ID` | Apple developer team ID |
+| Secret | `APPLE_ID` | Apple account for notarization |
+| Secret | `APPLE_PASSWORD` | App-specific Apple password |
+| Variable | `OAW_SIGNED_RELEASE` | `true` to require updater keys, platform certificates and notarization |
+
+Certificate acquisition and account verification happen outside this repository. The PFX path supports exportable certificates; hardware-backed or cloud signing needs the provider's signing integration. Signing also does not guarantee immediate Windows SmartScreen reputation. Do not set `OAW_SIGNED_RELEASE=true` until the credentials are installed; the workflow deliberately fails rather than silently publishing unsigned builds under this setting.
+
+Without credentials, preview/manual builds keep the existing unsigned Windows and ad-hoc macOS behavior. The native menu explains that automatic updates are unavailable and offers the official releases page. `createUpdaterArtifacts` and the public key are injected only into configured release builds. Private keys are never written to app configuration or payloads.
+
+All three build jobs upload signed updater artifacts (`.exe` for Windows; `.app.tar.gz` for macOS). The release job assembles `latest.json` only when every platform and version agrees. Publish that manifest and its matching artifacts together. The fixed endpoint uses GitHub's latest stable release; prereleases are installed manually and do not advance this channel. Keep the same signing key across releases. Older builds without the updater need a one-time manual upgrade.
+
+### Update backup and recovery
+
+After the user confirms installation, OAW hides its workspace, requests a clean backend shutdown, and invokes the bundled backup command. A shutdown timeout, active store lock, failed copy, changed source, or failed integrity verification cancels installation. The entire active managed data directory is copied to a sibling `*.before-update-<time>-<id>` folder; SQLite data, documents, installed packs and encryption keys remain together. A pending storage move is not executed during backup. External folders outside the managed data directory and unsaved UI drafts are not included: finish active work and save drafts before confirming.
+
+The native dialog shows the retained backup path. Backups are never automatically deleted. To restore, quit all OAW processes, retain the current failed data directory for investigation, and restore the backup **at its original source path** recorded in `.oaw-update-backup.json`; do not merge two versions' files. Use the matching earlier app installer if reverting a data migration. Keep backups private because they include credential storage.
+
+### Native acceptance before publication
+
+On Windows x64 and both macOS architectures, test a real installed version upgrading to a newer signed draft/release: check/download, cancel, corrupt-signature rejection, install/relaunch, saved model credentials and workspace, offline check, backup failure/disk full, and pending storage migration. Verify Authenticode on Windows and Gatekeeper/stapling on macOS. CI's signature checks do not replace these tests. macOS local Sandbox support remains a separate limitation.
+
+GitHub Release downloads remain the public distribution channel. Actions artifacts are temporary build/test outputs.

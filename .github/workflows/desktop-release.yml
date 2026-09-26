@@ -31,6 +31,17 @@ jobs:
             manual_dmg: '1'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    env:
+      OAW_SIGNED_RELEASE: ${{ vars.OAW_SIGNED_RELEASE }}
+      OAW_UPDATER_PUBLIC_KEY: ${{ vars.OAW_UPDATER_PUBLIC_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -97,6 +108,39 @@ jobs:
         run: rustup toolchain install stable --profile minimal
       - name: Select Rust
         run: rustup default stable
+      - name: Import Windows signing certificate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ($env:WINDOWS_CERTIFICATE) {
+            $pfx = Join-Path $env:RUNNER_TEMP 'oaw-signing.pfx'
+            try {
+              [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+              $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force)
+              "OAW_WINDOWS_CERTIFICATE_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+            } finally { Remove-Item $pfx -ErrorAction SilentlyContinue }
+          }
+      - name: Import macOS Developer ID certificate
+        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/oaw-build.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          export OAW_CERTIFICATE_PATH="$RUNNER_TEMP/oaw-signing.p12"
+          python3 -c 'import os,base64,pathlib; pathlib.Path(os.environ["OAW_CERTIFICATE_PATH"]).write_bytes(base64.b64decode(os.environ["APPLE_CERTIFICATE"]))'
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$OAW_CERTIFICATE_PATH" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          rm -f "$OAW_CERTIFICATE_PATH"
+      - name: Configure signing and updater
+        run: python scripts/configure-desktop-release.py
       - name: Build Windows installer and verify payload
         if: runner.os == 'Windows'
         shell: pwsh
@@ -129,6 +173,24 @@ jobs:
           shutil.copy2(files[0], target)
           digest = hashlib.file_digest(target.open('rb'), 'sha256').hexdigest()
           (output / (name + '.sha256')).write_text(f'{digest}  {name}\n')
+      - name: Collect signed updater payload
+        if: env.OAW_UPDATER_ENABLED == '1'
+        run: python scripts/collect-desktop-update.py --platform ${{ matrix.platform }}
+      - name: Verify Windows installer signature
+        if: runner.os == 'Windows' && env.OAW_SIGNED_RELEASE == 'true'
+        shell: pwsh
+        run: |
+          Get-ChildItem release-assets/*.exe | ForEach-Object {
+            if ((Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid') { throw 'Installer signature is not valid' }
+          }
+      - name: Verify macOS notarization
+        if: runner.os == 'macOS' && env.OAW_SIGNED_RELEASE == 'true'
+        run: |
+          xcrun stapler validate 'desktop/src-tauri/target/release/bundle/macos/Open Agent World.app'
+          spctl --assess --type execute --verbose=2 'desktop/src-tauri/target/release/bundle/macos/Open Agent World.app'
+      - name: Remove temporary macOS signing keychain
+        if: always() && runner.os == 'macOS' && env.APPLE_CERTIFICATE != ''
+        run: security delete-keychain "$RUNNER_TEMP/oaw-build.keychain-db"
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.platform }}
@@ -148,6 +210,9 @@ jobs:
           pattern: installer-*
           merge-multiple: true
           path: release-assets
+      - name: Assemble complete updater manifest
+        if: vars.OAW_UPDATER_PUBLIC_KEY != ''
+        run: python3 scripts/collect-desktop-update.py --manifest
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
