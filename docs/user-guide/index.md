@@ -19,4 +19,11 @@ You can explore cards and the canvas before adding a model. Receiving a real Age
 | Find tools and add cards to the tray | [Plugins and packs](plugins.md) |
 | Fix an empty tray or an Agent that cannot respond | [Troubleshooting](troubleshooting.md) |
 
-The in-app compass replays the interactive tutorial on your real canvas. Your cards remain available after the tutorial.
+**Help (?) → Tutorial** replays the interactive tutorial on your real canvas. Your cards remain available after the tutorial.
+
+**Help → Documentation** opens the built-in manual. Choose a topic in the left
+directory or search its text, then read the details on the right. Pages and images
+ship with your version of OAW and work without an internet connection. Links to
+other manual pages stay in the panel; links marked with an external-link icon
+open online and require internet access. Status-check repair guides and the
+installation guide open in the same reader.

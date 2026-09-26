@@ -275,6 +275,9 @@ function unwrap<T>(input: unknown, key: string): T {
 }
 
 export const worldApi = {
+  getDiagnostics(signal?: AbortSignal): Promise<import('../shell/helpChecks').HelpDiagnostics> {
+    return request('/diagnostics', { signal });
+  },
   inspectContentPack(input: import('../types/packs').CreatorRequest): Promise<import('../types/packs').CreatorInspection> {
     return request('/packs/creator/inspect', { method: 'POST', headers: { 'X-OAW-Pack-Install': '1' }, body: JSON.stringify(input) });
   },

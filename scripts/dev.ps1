@@ -121,6 +121,18 @@ function Get-AvailableLocalPort {
     throw "No available loopback port was found in the range $PreferredPort-$($PreferredPort + $MaximumAttempts - 1)."
 }
 
+function Test-BackendReady {
+    param([int]$Port)
+
+    try {
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/api/catalog" -UseBasicParsing -TimeoutSec 1
+        return $response.StatusCode -eq 200
+    }
+    catch {
+        return $false
+    }
+}
+
 function Wait-BackendListener {
     param(
         [System.Diagnostics.Process]$Backend,
@@ -135,7 +147,9 @@ function Wait-BackendListener {
     Write-Host "Waiting for backend startup (including any scheduled storage migration). Ctrl+C cancels."
     while ($TimeoutMilliseconds -eq 0 -or $started.ElapsedMilliseconds -lt $TimeoutMilliseconds) {
         $listener = Get-BackendListener -Port $Port
-        if ($null -ne $listener) {
+        # The launcher binds before application initialization. A listening
+        # socket alone does not mean persisted state loaded successfully.
+        if ($null -ne $listener -and (Test-BackendReady -Port $Port)) {
             return $listener
         }
         if ($Backend.HasExited) {
