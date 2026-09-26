@@ -557,6 +557,20 @@ describe("authoritative world synchronization", () => {
     expect(useWorldStore.getState().syncState).toBe("online");
   });
 
+  it("loads the world without waiting for model settings and accepts them when they arrive", async () => {
+    const models = deferred<Awaited<ReturnType<typeof worldApi.getModelConnections>>>();
+    vi.mocked(worldApi.getModelConnections).mockReturnValue(models.promise);
+    vi.spyOn(worldApi, "getWorld").mockResolvedValue({ nodes: [card("agent", "agent")], edges: [], chunks: [[0, 0]] });
+    useWorldStore.setState({ modelCatalog: { revision: 0, connections: [], default_model: null } });
+
+    await useWorldStore.getState().initialize();
+    expect(useWorldStore.getState().syncState).toBe("online");
+    expect(useWorldStore.getState().cards[0].id).toBe("agent");
+    models.resolve({ revision: 1, connections: [], default_model: null });
+    await models.promise;
+    expect(useWorldStore.getState().modelCatalog.revision).toBe(1);
+  });
+
   it("keeps the world online when only the Legion library fails to initialize", async () => {
     const agent = card("agent", "agent");
     vi.spyOn(worldApi, "getWorld").mockResolvedValue({ nodes: [agent], edges: [], chunks: [[0, 0]] });
