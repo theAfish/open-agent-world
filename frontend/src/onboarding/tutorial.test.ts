@@ -288,7 +288,18 @@ describe('first-run persistence and ownership', () => {
     vi.spyOn(worldApi, 'createNode').mockImplementation(() => new Promise(done => { resolve = done; }));
     vi.spyOn(worldApi, 'getTextContent').mockResolvedValue('');
     vi.spyOn(worldApi, 'deleteNode').mockResolvedValue(undefined);
+    // Placement follows collecting the card and choosing a deck in the guide.
+    // Keep the real collection gate so this test reaches an in-flight creation.
+    useCardLibrary.setState({ snapshot: {
+      schema_version: 1, revision: 1, migration_pending: false, plugins: {}, packs: {},
+      card_definitions: { text: TEST_CATALOG.node_types.find(item => item.id === 'text')! },
+      collection: { text: { card_id: 'text', plugin_id: 'open-agent-world.core', source_pack_ids: [],
+        unlocked: true, unlocked_at: '2026-09-12T00:00:00Z' } },
+      decks: [{ id: 'tutorial', name: 'Tutorial', icon: 'folder', entries: [{ kind: 'node', id: 'text' }] }],
+      active_deck_id: 'tutorial', available_card_ids: ['text'], available_pack_ids: [],
+    } });
     await tutorial.start();
+    useTutorialStore.setState(state => ({ session: { ...state.session!, step: 'place-demo' } }));
     const action = tutorial.perform('place');
     await vi.waitFor(() => expect(resolve).toBeDefined());
     const skipped = tutorial.exit('skipped');

@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.api.dependencies import get_services
+from backend.request_context import ActorRef, establish_request_context, request_context_scope
 
 COOKIE = "oaw_operator"
 
@@ -30,15 +31,28 @@ def runtime_router(manifest: dict, *, secure_cookie: bool = False):
         if request.headers.get("sec-fetch-site") == "cross-site" or (origin and urlsplit(origin).netloc != request.headers.get("host")):
             raise HTTPException(403, "Cross-origin changes are not allowed")
 
-    def operator(request: Request):
+    async def public(request: Request):
+        context = establish_request_context(request.scope, ActorRef("anonymous", "deployment-public"),
+                                            auth_method="deployment_public")
+        with request_context_scope(context):
+            yield context
+
+    async def operator(request: Request):
         token = request.cookies.get(COOKIE, "")
         if sessions.get(token, 0) <= time.monotonic():
             sessions.pop(token, None)
             raise HTTPException(401, "Sign in to this application")
         if request.method not in {"GET", "HEAD"}:
             same_origin(request)
+        # The shared deployment password identifies a session, not a human user.
+        # Never carry the bearer cookie itself into logs, traces, or persistence.
+        session_id = hashlib.sha256(b"oaw-deployment-session\x00" + token.encode("utf-8")).hexdigest()
+        context = establish_request_context(request.scope, ActorRef("deployment_session", session_id),
+                                            auth_method="deployment_cookie")
+        with request_context_scope(context):
+            yield context
 
-    @router.get("/api/deployment")
+    @router.get("/api/deployment", dependencies=[Depends(public)])
     def info(request: Request):
         return {"mode": "runtime", "name": manifest["name"], "release_id": manifest["id"],
                 "authenticated": sessions.get(request.cookies.get(COOKIE, ""), 0) > time.monotonic()}
@@ -47,7 +61,7 @@ def runtime_router(manifest: dict, *, secure_cookie: bool = False):
         model_config = ConfigDict(extra="forbid")
         password: str = Field(min_length=1, max_length=1024)
 
-    @router.post("/api/deployment/session")
+    @router.post("/api/deployment/session", dependencies=[Depends(public)])
     async def login(body: Login, request: Request, response: Response):
         same_origin(request)
         # Socket peer is intentional: a reverse proxy shares one conservative rate limit.

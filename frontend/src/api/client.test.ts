@@ -14,6 +14,37 @@ afterEach(() => {
 });
 
 describe("API normalization boundary", () => {
+  it("preserves field validation messages inside the correlated error envelope", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { code: "invalid_request", message: "Request validation failed.", request_id: "validation-id", retryable: false },
+      detail: [{ type: "missing", loc: ["body", "title"], msg: "Field required" }],
+    }), { status: 422, headers: { "content-type": "application/json" } })));
+    await expect(worldApi.createConversationSession("chat", { title: "", participant_ids: [] }))
+      .rejects.toMatchObject({ message: "Field required", requestId: "validation-id", detail: [
+        { type: "missing", loc: ["body", "title"], msg: "Field required" },
+      ] });
+  });
+  it("keeps server diagnostics and does not automatically retry a failed mutation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: {
+      message: "Please retry later", code: "unavailable", retryable: true, request_id: "body-id",
+    } }), { status: 503, headers: { "content-type": "application/json", "X-Request-ID": "server-id" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(worldApi.createConversationSession("chat", { title: "Review", participant_ids: [] }, "logical-operation-1"))
+      .rejects.toMatchObject({ status: 503, requestId: "server-id", retryable: true, code: "unavailable" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const headers = fetchMock.mock.calls[0][1].headers as Headers;
+    expect(headers.get("Idempotency-Key")).toBe("logical-operation-1");
+    expect(headers.get("X-Request-ID")).toMatch(/^[a-f0-9]{32}$/);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ title: "Review", participant_ids: [] });
+  });
+  it("retains the sent request ID when a response is lost", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("connection lost"));
+    vi.stubGlobal("fetch", fetchMock);
+    const error = await worldApi.getConversation("chat").catch(error => error);
+    expect(error).toMatchObject({ status: 0, retryable: false });
+    expect(error.requestId).toBe(fetchMock.mock.calls[0][1].headers.get("X-Request-ID"));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
   it('preserves the persisted unsigned 32-bit terrain seed without accepting malformed values', () => {
     for (const seed of [0, 123, 456, 0xFFFFFFFF]) {
       expect(normalizeWorldSnapshot({ terrain_seed: seed }).terrain_seed).toBe(seed);

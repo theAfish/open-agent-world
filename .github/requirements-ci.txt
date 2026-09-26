@@ -1,0 +1,5 @@
+# test_research_plugins imports the bundled library plugin's PDF dependency.
+# The backend lock does not yet own plugin test dependencies. Keep this pinned
+# until these dependencies are moved into a shared, locked development group.
+# Release metadata: https://pypi.org/project/pymupdf/1.26.7/
+pymupdf==1.26.7

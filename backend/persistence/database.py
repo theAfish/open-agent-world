@@ -485,6 +485,18 @@ class Database:
         finally:
             self._connection.execute("PRAGMA foreign_keys = ON")
 
+    def is_ready(self) -> bool:
+        """Check the migrated schema without queueing behind in-process writes."""
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            self._connection.execute("SELECT key FROM application_settings LIMIT 1").fetchone()
+            return True
+        except sqlite3.Error:
+            return False
+        finally:
+            self._lock.release()
+
     @contextmanager
     def transaction(self, *, immediate: bool = False) -> Iterator[sqlite3.Connection]:
         with self._lock:

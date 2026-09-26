@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test';
 import path from 'node:path';
 
 const repository = path.resolve(import.meta.dirname, '..');
-const python = path.join(repository, 'backend', '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+const python = process.env.OAW_TEST_PYTHON ?? path.join(repository, 'backend', '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
 export default defineConfig({
   testDir: './e2e', testMatch: 'deployment.runtime.spec.ts', workers: 1, timeout: 45_000,
   outputDir: path.join(repository, '.tmp', 'deployment-playwright'),

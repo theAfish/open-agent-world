@@ -47,6 +47,9 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly detail?: unknown,
+    readonly requestId?: string,
+    readonly retryable: boolean = false,
+    readonly code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -234,6 +237,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers.set("Content-Type", "application/json");
   }
   headers.set("Accept", "application/json");
+  // Correlation survives a lost response; it never identifies a user or tenant.
+  if (!headers.has("X-Request-ID")) {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    headers.set("X-Request-ID", Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join(""));
+  }
 
   let response: Response;
   try {
@@ -243,6 +251,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       "The world service is not reachable.",
       0,
       error instanceof Error ? error.message : error,
+      headers.get("X-Request-ID") ?? undefined,
     );
   }
 
@@ -257,11 +266,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (response.status === 401 && API_BASE !== BUILDER_API_BASE) window.dispatchEvent(new Event('oaw-session-expired'));
     const bodyRecord = asRecord(body);
     const errorRecord = asRecord(bodyRecord.error);
-    const detail = errorRecord.message ?? bodyRecord.detail ?? body;
+    const detail = Array.isArray(bodyRecord.detail)
+      ? bodyRecord.detail
+      : errorRecord.message ?? bodyRecord.detail ?? body;
     throw new ApiError(
       errorMessage(detail, response.status),
       response.status,
       detail,
+      response.headers.get("X-Request-ID") ??
+        (typeof errorRecord.request_id === "string" ? errorRecord.request_id : headers.get("X-Request-ID") ?? undefined),
+      errorRecord.retryable === true,
+      typeof errorRecord.code === "string" ? errorRecord.code : undefined,
     );
   }
   return body as T;
@@ -723,9 +738,11 @@ export const worldApi = {
   createConversationSession(
     conversationId: string,
     input: { title: string; participant_ids: string[]; group_id?: string; group_title?: string },
+    idempotencyKey?: string,
   ): Promise<ConversationSession> {
     return request<ConversationSession>(`/conversations/${encodeURIComponent(conversationId)}/sessions`, {
       method: "POST",
+      ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {}),
       body: JSON.stringify(input),
     });
   },

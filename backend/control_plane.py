@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import hmac
 from ipaddress import ip_address
+from uuid import uuid4
 
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+from backend.request_context import ActorRef, establish_request_context, request_context_scope
 
 
 def is_loopback_peer(host: str) -> bool:
@@ -52,14 +55,22 @@ class ControlPlaneMiddleware:
             and hmac.compare_digest(authorization[0], b"Bearer " + self._token)
         )
         if local or authenticated:
-            await self.app(scope, receive, send)
+            context = establish_request_context(
+                scope,
+                ActorRef("host_credential", "control-plane") if authenticated else ActorRef("local_host", "local-host"),
+                auth_method="host_bearer" if authenticated else "local_socket",
+            )
+            with request_context_scope(context):
+                await self.app(scope, receive, send)
             return
 
         message = "Management access requires a local host connection or the host control-plane credential."
         if scope["type"] == "websocket":
             await send({"type": "websocket.close", "code": 1008, "reason": message})
         else:
+            request_id = scope.setdefault("state", {}).setdefault("request_id", uuid4().hex)
             await JSONResponse(
                 status_code=403,
-                content={"error": {"code": "control_plane_access_denied", "message": message}},
+                content={"error": {"code": "control_plane_access_denied", "message": message,
+                                   "request_id": request_id, "retryable": False}},
             )(scope, receive, send)

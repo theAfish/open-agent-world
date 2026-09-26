@@ -19,7 +19,8 @@ test('deployment reuses Legion workspace and business controls without engineeri
   await page.getByRole('button', { name: 'New group', exact: true }).click();
   await page.getByRole('button', { name: 'Create group', exact: true }).click();
   await expect(page.locator('.conversation-group-draft')).toHaveCount(0);
-  await expect(page.getByText('1 active participants', { exact: true })).toBeVisible();
+  await expect(page.locator('.conversation-participant-row')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Assistant idle · insert mention', exact: true })).toBeVisible();
   await page.getByLabel('Conversation message', { exact: true }).fill('Hello from the shared workspace');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.locator('.workspace-message.is-agent')).toBeVisible();
