@@ -1,15 +1,158 @@
+/* Keep the warm mineral palette aligned with frontend/src/theme.css.
+   Reading text uses ink-soft rather than the app's faint decorative labels. */
 :root {
-  --md-primary-fg-color: #233d50;
-  --md-primary-fg-color--light: #3b6171;
-  --md-primary-fg-color--dark: #142b3a;
+  --md-text-font: "Segoe UI Variable", "Aptos", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
 }
-.md-header__button.md-logo img { height: 1.6rem; filter: brightness(0) invert(1); }
+
+[data-md-color-scheme="default"] {
+  color-scheme: light;
+  --oaw-canvas: #e3e1db;
+  --oaw-surface: #f4f3ef;
+  --oaw-surface-soft: #ebe9e3;
+  --oaw-card: #fffefa;
+  --oaw-ink: #35332e;
+  --oaw-ink-soft: #625e55;
+  --oaw-line: rgba(65, 61, 53, 0.16);
+  --oaw-accent: #914833;
+  --oaw-accent-hover: #7c3d2b;
+  --oaw-accent-soft: rgba(180, 95, 72, 0.13);
+  --oaw-on-accent: #fffefa;
+  --oaw-shadow: 0 4px 14px rgba(42, 40, 35, 0.08);
+  --oaw-logo-filter: brightness(0) invert(.2);
+  --md-default-bg-color--light: rgba(227, 225, 219, 0.7);
+  --md-default-bg-color--lighter: rgba(227, 225, 219, 0.3);
+  --md-default-bg-color--lightest: rgba(227, 225, 219, 0.12);
+  --md-code-hl-number-color: #914833;
+  --md-code-hl-special-color: #9b3c51;
+  --md-code-hl-function-color: #795080;
+  --md-code-hl-constant-color: #66528a;
+  --md-code-hl-keyword-color: #914833;
+  --md-code-hl-string-color: #526342;
+}
+
+[data-md-color-scheme="slate"] {
+  color-scheme: dark;
+  --oaw-canvas: #22211e;
+  --oaw-surface: #302f2b;
+  --oaw-surface-soft: #292824;
+  --oaw-card: #383732;
+  --oaw-ink: #e9e6de;
+  --oaw-ink-soft: #c2bdb1;
+  --oaw-line: rgba(231, 226, 214, 0.13);
+  --oaw-accent: #e29a7d;
+  --oaw-accent-hover: #f2b49b;
+  --oaw-accent-soft: rgba(208, 122, 97, 0.15);
+  --oaw-on-accent: #22211e;
+  --oaw-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  --oaw-logo-filter: brightness(0) invert(.9);
+  --md-default-bg-color--light: rgba(34, 33, 30, 0.7);
+  --md-default-bg-color--lighter: rgba(34, 33, 30, 0.3);
+  --md-default-bg-color--lightest: rgba(34, 33, 30, 0.12);
+  --md-code-hl-number-color: #e29a7d;
+  --md-code-hl-special-color: #e8a0ad;
+  --md-code-hl-function-color: #d5adda;
+  --md-code-hl-constant-color: #c4b3e5;
+  --md-code-hl-keyword-color: #e29a7d;
+  --md-code-hl-string-color: #b5c6a4;
+}
+
+/* Define Material's semantic colors on the palette element, where its slate
+   defaults live. Header surfaces and reading links have separate roles. */
+[data-md-color-scheme] {
+  --md-primary-fg-color: var(--oaw-surface);
+  --md-primary-fg-color--light: var(--oaw-card);
+  --md-primary-fg-color--dark: var(--oaw-surface-soft);
+  --md-primary-bg-color: var(--oaw-ink);
+  --md-primary-bg-color--light: var(--oaw-ink-soft);
+  --md-accent-fg-color: var(--oaw-accent-hover);
+  --md-accent-fg-color--transparent: var(--oaw-accent-soft);
+  --md-accent-bg-color: var(--oaw-on-accent);
+  --md-accent-bg-color--light: var(--oaw-on-accent);
+  --md-default-fg-color: var(--oaw-ink);
+  --md-default-fg-color--light: var(--oaw-ink-soft);
+  --md-default-fg-color--lighter: var(--oaw-ink-soft);
+  --md-default-fg-color--lightest: var(--oaw-line);
+  --md-default-bg-color: var(--oaw-canvas);
+  --md-typeset-color: var(--oaw-ink);
+  --md-typeset-a-color: var(--oaw-accent);
+  --md-typeset-table-color: var(--oaw-line);
+  --md-typeset-table-color--light: var(--oaw-accent-soft);
+  --md-typeset-mark-color: var(--oaw-accent-soft);
+  --md-typeset-kbd-color: var(--oaw-surface-soft);
+  --md-typeset-kbd-accent-color: var(--oaw-card);
+  --md-typeset-kbd-border-color: var(--oaw-line);
+  --md-code-fg-color: var(--oaw-ink);
+  --md-code-bg-color: var(--oaw-surface-soft);
+  --md-code-bg-color--light: var(--oaw-surface-soft);
+  --md-code-bg-color--lighter: var(--oaw-surface-soft);
+  --md-code-hl-color: var(--oaw-accent);
+  --md-code-hl-color--light: var(--oaw-accent-soft);
+  --md-code-hl-comment-color: var(--oaw-ink-soft);
+  --md-code-hl-generic-color: var(--oaw-ink-soft);
+  --md-code-hl-variable-color: var(--oaw-ink-soft);
+  --md-code-hl-operator-color: var(--oaw-ink-soft);
+  --md-code-hl-punctuation-color: var(--oaw-ink-soft);
+  --md-admonition-fg-color: var(--oaw-ink);
+  --md-admonition-bg-color: var(--oaw-surface);
+  --md-footer-fg-color: var(--oaw-ink);
+  --md-footer-fg-color--light: var(--oaw-ink-soft);
+  --md-footer-fg-color--lighter: var(--oaw-ink-soft);
+  --md-footer-bg-color: var(--oaw-surface);
+  --md-footer-bg-color--dark: var(--oaw-surface-soft);
+}
+
+.md-header,
+.md-tabs { box-shadow: 0 1px 0 var(--oaw-line); }
+.md-banner { color: var(--oaw-ink-soft); background: var(--oaw-surface-soft); }
+.md-header__button.md-logo img,
+.md-nav__button.md-logo img { height: 1.6rem; filter: var(--oaw-logo-filter); }
+.md-tabs__link { color: var(--oaw-ink-soft); opacity: 1; }
+.md-tabs__item--active .md-tabs__link,
+.md-tabs__link:hover,
+.md-tabs__link:focus { color: var(--oaw-accent); }
+.md-nav__link--active { font-weight: 700; }
+
+/* Keep both collapsed search and expanded results readable. */
+.md-search__form { color: var(--oaw-ink); background: var(--oaw-surface-soft); }
+.md-search__form:hover { background: var(--oaw-canvas); }
+.md-search-result mark { color: var(--oaw-accent); }
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 { color: var(--oaw-ink); }
 .md-typeset .hero { margin: 1.5rem 0 2rem; max-width: 46rem; }
-.md-typeset .hero h1 { color: var(--md-default-fg-color); font-size: 2.4rem; font-weight: 700; letter-spacing: -.04em; margin-bottom: .5rem; }
+.md-typeset .hero h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -.04em; margin-bottom: .5rem; }
 .md-typeset .hero p { font-size: 1.05rem; }
-.md-typeset .grid.cards > ul > li { border-radius: .65rem; padding: 1.2rem; }
-.md-typeset .grid.cards > ul > li:hover { border-color: var(--md-accent-fg-color); }
-.md-typeset .md-button { border-radius: .4rem; }
+.md-typeset .grid.cards > ul > li {
+  border: 1px solid var(--oaw-line);
+  border-radius: .65rem;
+  padding: 1.2rem;
+  background: var(--oaw-card);
+  box-shadow: var(--oaw-shadow);
+}
+.md-typeset .grid.cards > ul > li:hover { border-color: var(--oaw-accent); }
+.md-typeset .md-button { border-radius: .4rem; color: var(--oaw-accent); }
+.md-typeset .md-button--primary {
+  color: var(--oaw-on-accent);
+  background: var(--oaw-accent);
+  border-color: var(--oaw-accent);
+}
+.md-typeset .md-button:hover,
+.md-typeset .md-button:focus {
+  color: var(--oaw-on-accent);
+  background: var(--oaw-accent-hover);
+  border-color: var(--oaw-accent-hover);
+}
 .md-typeset .hero .md-button { margin: 0 .3rem .5rem 0; }
+.md-typeset table:not([class]) { background: var(--oaw-card); }
+.md-typeset table:not([class]) th { background: var(--oaw-surface); }
+.md-typeset pre > code { border-radius: .4rem; }
 .md-typeset img { border-radius: .5rem; }
+
+/* Material also uses primary-fg for a back-to-top hover; it is a surface here. */
+.md-top:hover,
+.md-top:focus { color: var(--oaw-on-accent); background: var(--oaw-accent); }
+:focus-visible { outline: 2px solid var(--oaw-accent); outline-offset: 3px; }
+::selection { color: var(--oaw-ink); background: var(--oaw-accent-soft); }
+
 @media (max-width: 600px) { .md-typeset .hero h1 { font-size: 1.85rem; } }
