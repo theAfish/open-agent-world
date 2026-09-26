@@ -16,6 +16,7 @@ from backend.plugins.template import NodeTemplateHandler
 from backend.plugins.presets import LegionPresetDefinition
 
 if TYPE_CHECKING:
+    from backend.legions.models import LegionBlueprintPreset
     from backend.plugins.summoning import NodeSummoningDefinition
     from backend.agents import AgentCapabilityProvider, RuntimeProvider
     from backend.capabilities import Capability
@@ -65,7 +66,7 @@ class PackDefinition(BaseModel):
     id: str
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=1000)
-    cards: tuple[str, ...] = Field(min_length=1)
+    cards: tuple[str, ...] = ()
     artwork_asset: str | None = Field(default=None, min_length=1, max_length=128)
     accent_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
 
@@ -385,10 +386,11 @@ class PluginRegistration:
         self.state_schemas: dict[str, StateSchema] = {}
         self.assets: dict[str, PluginAsset] = {}
         self.packs: dict[str, PackDefinition] = {}
-        self.legion_presets: dict[str, LegionPresetDefinition] = {}
+        self.legion_presets: dict[str, LegionPresetDefinition | LegionBlueprintPreset] = {}
 
-    def register_legion_preset(self, definition: LegionPresetDefinition) -> None:
-        if not isinstance(definition, LegionPresetDefinition):
+    def register_legion_preset(self, definition: LegionPresetDefinition | LegionBlueprintPreset) -> None:
+        from backend.legions.models import LegionBlueprintPreset
+        if not isinstance(definition, (LegionPresetDefinition, LegionBlueprintPreset)):
             raise TypeError("Legion preset must be a LegionPresetDefinition")
         if not definition.id.startswith(self.descriptor.id + "."):
             raise ValueError("Legion preset IDs must use their plugin namespace")
@@ -455,7 +457,7 @@ class PluginRegistry:
         self._owners: dict[tuple[str, str], str] = {}
         self._assets: dict[tuple[str, str], PluginAsset] = {}
         self._packs: dict[str, PackCatalogItem] = {}
-        self._legion_presets: dict[str, LegionPresetDefinition] = {}
+        self._legion_presets: dict[str, LegionPresetDefinition | LegionBlueprintPreset] = {}
         self._disabled: set[str] = set()
 
     def install(self, plugin: Plugin, *, distribution=None) -> None:
@@ -618,6 +620,8 @@ class PluginRegistry:
 
         covered = set()
         for pack in staged.packs.values():
+            if not pack.cards and not staged.legion_presets:
+                raise ValueError("A Pack must contain cards or Legion presets")
             if pack.artwork_asset is not None and pack.artwork_asset not in staged.assets:
                 raise ValueError("pack artwork must reference an asset registered by the same plugin")
             if len(set(pack.cards)) != len(pack.cards):
@@ -843,7 +847,7 @@ class PluginRegistry:
     def has_trait(self, type_id: str, trait: str) -> bool:
         return trait in self.node_type(type_id).traits
 
-    def legion_presets(self) -> tuple[LegionPresetDefinition, ...]:
+    def legion_presets(self) -> tuple[LegionPresetDefinition | LegionBlueprintPreset, ...]:
         return tuple(value.model_copy(deep=True) for key, value in self._legion_presets.items()
                      if self.is_enabled(self.owner_id("legion_preset", key))
                      and all(self.is_enabled(self.node_type_owner_id(node.type)) for node in value.nodes)

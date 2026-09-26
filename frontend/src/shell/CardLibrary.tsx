@@ -10,6 +10,7 @@ import { collectedLibraryCards, collectedLibraryLegions, compareLibraryCards, di
 import { LibraryPack } from "./LibraryPack";
 import { PackInstaller } from "./PackInstaller";
 import { PackStore } from "./PackStore";
+import { PackCreator } from "./PackCreator";
 import { LibraryCard as PhysicalLibraryCard } from "./LibraryCard";
 import "./cardLibrary.css";
 import { startPalettePointerDrag } from "../palette/pointerDrag";
@@ -55,7 +56,7 @@ export function CardLibrary() {
       }
       if (event.key === 'Tab') {
         const surfaces = [modal.current, document.querySelector('.component-palette.is-library-open'), document.querySelector('.tutorial-guide')];
-        const controls = surfaces.flatMap(surface => [...(surface?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, a[href], [tabindex="0"]') ?? [])])
+        const controls = surfaces.flatMap(surface => [...(surface?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, a[href], [tabindex="0"]') ?? [])])
           .filter(element => element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden');
         const index = controls.indexOf(document.activeElement as HTMLElement);
         if (controls.length) {
@@ -187,6 +188,7 @@ export function CardLibrary() {
               ? "A Pack preset. Deploy it, customize its members and workspace, then save your own copy."
               : "A formation you saved from your world. Its members keep their original Pack dependencies.")}</p>}
             {detailLegion?.preset ? <><small>{t("Collected from")}</small><p>{detail.sources.map(source => source.name).join(", ")}</p></> : null}
+            {detailLegion && !detailLegion.preset ? <PackCreator key={detailLegion.id} legion={detailLegion} /> : null}
             {(detail.definition && (!snapshot.plugins[detail.definition.plugin_id]?.installed || !snapshot.plugins[detail.definition.plugin_id]?.enabled)) || (!detail.available && !detail.internal) ? <p className="library-unavailable">{detail.kind === "legion" ? t("This formation has unavailable dependencies.") : t("This content is unavailable. Install or enable its Pack to use it again.")}</p> : null}
             {!detail.internal || deck?.entries.some(entry => same(entry, detail)) ? <button className="secondary-button" disabled={library.busy || !deck || (!detail.available && !deck.entries.some(entry => same(entry, detail)))}
               aria-label={deck?.entries.some(entry => same(entry, detail)) ? t("Remove inspected card from deck") : t("Add inspected card to deck")} onClick={() => toggleCard(detail)}>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { apiErrorMessage, worldApi } from '../api/client';
 import { t } from '../i18n';
 import type { PackInspection, PackInstallations } from '../types/packs';
+import { PackGuide } from './PackCreator';
 
 export function PackInstaller() {
   const input = useRef<HTMLInputElement>(null);
@@ -60,7 +61,10 @@ export function PackInstaller() {
     {phase && <p role="status">{t(phase)}</p>}
     {inspection && file && <div className="pack-install-review">
       <strong>{inspection.manifest.name} {inspection.manifest.version}</strong>
-      <p>{t('Packs run trusted application code. Install only files from a source you trust.')}</p>
+      <p>{t(inspection.manifest.kind === 'content'
+        ? 'This content Pack adds Legion templates. Their connected tools can perform actions when you run them.'
+        : 'Packs run trusted application code. Install only files from a source you trust.')}</p>
+      <PackGuide creator={inspection.manifest.creator} />
       <button className="secondary-button" disabled={busy} onClick={() => void mutate(() => worldApi.installPack(file))}>{t('Install Pack')}</button>
       <button className="library-text-button" disabled={busy} onClick={() => { setInspection(undefined); setFile(undefined); setPhase(''); }}>{t('Cancel')}</button>
     </div>}
@@ -70,7 +74,8 @@ export function PackInstaller() {
       {state.versions.map(item => <div className="pack-install-record" key={`${item.id}@${item.version}`}>
         <strong>{item.name} {item.version}</strong>
         <span>{t('Pack')}: {t('Installed')}{item.selected && !item.loaded ? ` · ${t('Restart required')}` : !item.selected ? ` · ${t('Retained version')}` : ''}</span>
-        {item.loaded && <span>{t('Sandbox runtime')}: {t(item.environment?.state === 'environment_ready' ? 'Ready' : item.environment?.state === 'environment_failed' ? 'Failed' : 'Environment preparing')}</span>}
+        {item.loaded && item.kind !== 'content' && <span>{t('Sandbox runtime')}: {t(item.environment?.state === 'environment_ready' ? 'Ready' : item.environment?.state === 'environment_failed' ? 'Failed' : 'Environment preparing')}</span>}
+        <PackGuide creator={item.creator} />
         {item.environment?.error && <p role="alert">{item.environment.error}</p>}
         <div>
           {item.environment?.state === 'environment_failed' && <button className="library-text-button" disabled={busy} onClick={() => void mutate(() => worldApi.managePack('environment/retry', 'POST'), 'Environment preparing')}>{t('Retry environment preparation')}</button>}

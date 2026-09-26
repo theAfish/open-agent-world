@@ -80,6 +80,7 @@ nav:
       - Models and settings: user-guide/models.md
       - Cards and connections: user-guide/canvas.md
       - Packs and cards: user-guide/plugins.md
+      - Create and share Packs: creator-packs.md
       - Troubleshooting: user-guide/troubleshooting.md
   - Build plugins:
       - developers/index.md
