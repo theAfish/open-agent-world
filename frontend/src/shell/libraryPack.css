@@ -48,6 +48,8 @@
 .pack-drawn-card > svg, .pack-drawn-card > .catalog-asset-icon { color: var(--collection-color); flex-shrink: 0; }
 .pack-drawn-card > strong { font-size: 9px; text-align: center; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .pack-drawn-card > small { font-size: 5px; letter-spacing: .12em; margin-top: auto; }
+.pack-drawn-card > strong, .pack-drawn-card > small { position: relative; z-index: 2; }
+.pack-drawn-card .card-finish-layer[data-reveal="true"]::after { animation-duration: 650ms; animation-delay: 80ms; }
 .library-pack.is-opened .pack-object { --pack-depth: 1; }
 .library-pack.is-opened .pack-shadow { opacity: .55; filter: blur(3px); }
 .library-pack.is-opened .pack-wrapper { clip-path: polygon(0 3px, 7% 0, 13% 5px, 21% 1px, 28% 4px, 34% 0, 43% 4px, 51% 1px, 59% 5px, 67% 0, 75% 4px, 82% 1px, 90% 5px, 96% 0, 100% 3px, 100% 100%, 0 100%); }
@@ -68,5 +70,4 @@
 @keyframes packDrawOut { 0%, 18% { opacity: 1; transform: translateY(110px); } 58%, 69% { opacity: 1; transform: translateY(-144px); } 82%, 100% { opacity: 0; transform: translateY(-158px); } }
 @keyframes packFanOut { 0%, 35% { transform: translateX(calc(var(--card-offset) * 4px)); } 60%, 100% { transform: translateX(calc(var(--card-offset) * 25px)) rotate(calc(var(--card-offset) * 12deg)); } }
 @media (max-width: 480px) { .pack-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 13px; } .pack-touch-area { height: 264px; padding-inline: 3px; } .pack-object { height: 216px; } .pack-emblem { width: 37px; height: 37px; min-height: 28px; margin: 4px 0; } .pack-emblem svg { width: 25px; } .pack-title { font-size: 17px; } .pack-subtitle { -webkit-line-clamp: 1; margin-top: 5px; } .pack-print { padding: 8px 6px 6px; } .pack-print-footer { padding-top: 5px; } .library-pack.is-revealing .pack-touch-area { height: 394px; } }
-@media (prefers-reduced-motion: reduce) { .pack-object { transition: none; } .pack-touch-area, .pack-shadow { transition: none; } .library-pack.is-revealing .pack-touch-area { height: 294px; padding-top: 30px; } .library-pack.is-revealing .pack-object, .library-pack.is-revealing .pack-shadow, .library-pack.is-revealing .pack-top-seal, .library-pack.is-revealing .pack-drawn-cards, .library-pack.is-revealing .pack-drawn-card { animation: none; } .library-pack.is-revealing .pack-card-pocket { visibility: hidden; } }
-@media (max-width: 480px) and (prefers-reduced-motion: reduce) { .library-pack.is-revealing .pack-touch-area { height: 264px; } }
+@media (prefers-reduced-motion: reduce) { .pack-object { transition: none; } .pack-touch-area, .pack-shadow { transition: none; } .library-pack.is-revealing .pack-object, .library-pack.is-revealing .pack-shadow, .library-pack.is-revealing .pack-top-seal, .library-pack.is-revealing .pack-drawn-cards, .library-pack.is-revealing .pack-drawn-card { animation: none; } .library-pack.is-revealing .pack-drawn-cards { transform: translateY(-144px); } .library-pack.is-revealing .pack-drawn-card { transform: translateX(calc(var(--card-offset) * 25px)) rotate(calc(var(--card-offset) * 12deg)); } }

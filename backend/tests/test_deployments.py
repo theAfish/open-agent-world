@@ -134,6 +134,8 @@ def test_runtime_conversation_tasks_and_restart(deployed):
         payload = {"arguments": {"tasks": [{"id": "report", "title": "Deliver report"}]}, "expected_revision": initial["revision"]}
         updated = client.post(action, json=payload)
         assert updated.status_code == 200, updated.text
+        assert client.get(document + "?summary_only=true").json() == {
+            "revision": updated.json()["revision"], "summary": updated.json()["summary"]}
         assert client.post(action, json=payload).status_code == 409
         assert client.post(action.replace("upsert", "configure_execution"), json={"arguments": {}}).status_code == 403
         assert client.post(action, json={"arguments": {"tasks": [{"id": "report", "title": "Bad", "executor_id": records["hidden"]["id"]}]}}).status_code == 403

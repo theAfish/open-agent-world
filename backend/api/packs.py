@@ -5,7 +5,7 @@ import mimetypes
 from zipfile import BadZipFile
 
 from fastapi import APIRouter, Depends, Request, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict
 
 from backend.api.dependencies import get_services
@@ -14,6 +14,7 @@ from backend.card_library import LibraryEdit
 from backend.errors import ConflictError, ResourceValidationError
 from backend.events.models import EventType, RuntimeEvent
 from backend.packs.archive import MAX_ARCHIVE_BYTES
+from backend.packs.content import CreatorRequest, export_archive, prepare_export
 from backend.sandbox.python_runtime import finish_thread
 
 router = APIRouter(prefix="/packs", tags=["packs"])
@@ -61,7 +62,27 @@ async def installations(services=Depends(get_services)):
 async def inspect(request: Request, services=Depends(get_services)):
     pack = await checked(services.pack_installations.inspect, await archive_body(request))
     return {"manifest": pack.manifest.model_dump(mode="json"), "sha256": pack.digest,
-            "restart_required": True, "trusted_code": True}
+            "restart_required": True, "trusted_code": pack.manifest.kind == "plugin"}
+
+
+@router.post("/creator/inspect", dependencies=[Depends(mutation_request)])
+async def inspect_creation(request: CreatorRequest, services=Depends(get_services)):
+    record = services.legions.get(request.legion_id)
+    result, _ = await checked(prepare_export, record, request, services.plugins)
+    return result
+
+
+@router.post("/creator/export", dependencies=[Depends(mutation_request)])
+async def export_creation(request: CreatorRequest, services=Depends(get_services)):
+    record = services.legions.get(request.legion_id)
+    result, files = await checked(prepare_export, record, request, services.plugins)
+    if not result["can_export"]:
+        raise ResourceValidationError("Resolve the publication checks before exporting")
+    data = await checked(export_archive, files)
+    return Response(data, media_type="application/vnd.oaw.pack", headers={
+        "Content-Disposition": f'attachment; filename="{result["manifest"]["id"]}-{result["manifest"]["version"]}.oawpack"',
+        "Cache-Control": "no-store",
+    })
 
 
 @router.post("/install", status_code=201, dependencies=[Depends(mutation_request)])

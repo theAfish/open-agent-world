@@ -34,6 +34,28 @@ def edit(store, action, **kwargs):
     return store.edit(LibraryEdit(expected_revision=store.read().revision, action=action, **kwargs))
 
 
+def test_legacy_empty_pack_snapshot_survives_restart(tmp_path):
+    db = Database(tmp_path / "world.db")
+    registry = create_builtin_registry()
+    install(registry)
+    store = CardLibraryStore(db, registry)
+    expected = edit(store, "open_pack", id="example.default")
+    payload = expected.model_dump(mode="json")
+    payload["packs"]["example.default"]["definition"]["cards"] = []
+    with db.transaction(immediate=True) as connection:
+        connection.execute("UPDATE application_settings SET value_json=? WHERE key=?", (json.dumps(payload), KEY))
+    restarted = CardLibraryStore(db, create_builtin_registry())
+    restored = restarted.read()
+    assert restored.packs["example.default"].model_dump(mode="json") == payload["packs"]["example.default"]
+    assert restored.collection == expected.collection
+    assert restored.decks == expected.decks
+    assert restarted.read().revision == restored.revision
+    # Content Packs can now contain only Legion presets. Their empty card list
+    # also makes the shared catalog model compatible with these older snapshots.
+    assert PackDefinition(id="empty", name="Empty", cards=()).cards == ()
+    db.close()
+
+
 @pytest.mark.parametrize("compatibility", [False, True])
 def test_retired_pack_metadata_migrates_without_losing_user_state(tmp_path, compatibility):
     db = Database(tmp_path / "world.db")

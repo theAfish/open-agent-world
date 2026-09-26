@@ -34,6 +34,9 @@ import { useNodeGeneration } from "../effects/generation";
 import { PluginSurface } from "../plugins/PluginSurface";
 import { CatalogIcon } from "../components/CatalogIcon";
 import { useCollectionHover } from "../state/shadowCollection";
+import { CardFinishLayer } from "./CardFinishLayer";
+import { useCardFinish } from "./useCardFinish";
+import { finishLabel, normalizeCardFinish } from "./cardFinish";
 
 const DRAG_THRESHOLD_PX = 5;
 const NON_DRAG_SELECTOR = "button, input, textarea, select, label, a, summary, [role='button'], [role='separator'], [contenteditable]:not([contenteditable='false']), .nodrag, .react-flow__handle";
@@ -111,11 +114,17 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
   const [ministerNodeHovered, setMinisterNodeHovered] = useState(false);
   const pointerStart = useRef<{ x: number; y: number; moved: boolean }>();
   const visualLevel = level;
+  const finishQuality = visualLevel === "preview" ? "standard" : "thumbnail";
+  const material = useCardFinish(card.finish, finishQuality);
   // Preview cards do not need editors, plugin bodies or their subscriptions.
-  // Once visited, retain the body on collapse so local unsaved drafts survive.
+  // Unknown plugin bodies may still own local drafts. Host editors retain drafts
+  // outside their mounts, so their hidden DOM and subscriptions can be released.
   const [inspectorVisited, setInspectorVisited] = useState(level === 'inspector');
   useEffect(() => { if (level === 'inspector') setInspectorVisited(true); }, [level]);
   const definition = catalog.node_types.find((item) => item.id === card.type);
+  const hostInspector = !definition?.frontend?.body && (['text', 'conversation', 'sandbox', 'image'].includes(card.type)
+    || definition?.traits.includes('ui.task-board.v1'));
+  const retainedInspector = !hostInspector && !card.type.startsWith('xrd.');
   const label = t(definition?.label ?? card.type);
   const eligible = canAppointMinister(card, catalog);
   const roleDrag = useEquipmentDrag(s => s.resource?.type === MINISTER_ROLE_CARD);
@@ -135,6 +144,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
   }, [card.id, connectingNodeId]);
 
   const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    material.onPointerMove?.(event);
     if (card.ephemeral || connectingNodeId === card.id) return;
     updateConnectionHoverHint(event, cardRef.current);
   };
@@ -147,12 +157,13 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
   return (<>
     <article
       ref={cardRef}
-      className={`world-card node-surface world-card--${card.type} is-${visualLevel} ${selected ? "is-selected" : ""} ${card.status === "running" ? "is-running" : ""} ${card.status === "error" ? "is-error" : ""} ${card.ephemeral ? "is-ephemeral" : ""}`}
+      className={`world-card node-surface card-finish-surface world-card--${card.type} is-${visualLevel} ${selected ? "is-selected" : ""} ${card.status === "running" ? "is-running" : ""} ${card.status === "error" ? "is-error" : ""} ${card.ephemeral ? "is-ephemeral" : ""}`}
       style={{ "--card-kind": definition?.color, borderRadius: NODE_SURFACE_RADIUS[visualLevel] } as CSSProperties}
       aria-label={`${label} ${card.name}`}
       data-card-id={card.id}
       data-card-revision={card.revision}
       data-card-type={card.type}
+      data-finish={normalizeCardFinish(card.finish)}
       data-card-expanded={visualLevel === "inspector" || visualLevel === "workspace" ? "true" : "false"}
       data-surface-level={level}
       data-activity={activity.phase}
@@ -162,8 +173,9 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
       data-minister={Boolean(card.minister) || undefined}
       data-minister-eligible={eligible && roleDrag || undefined}
       data-promotion={promotion ? 'appointing' : undefined}
-      onPointerEnter={() => { if (card.minister && level === 'node') setMinisterNodeHovered(true); }}
-      onPointerLeave={() => { setMinisterNodeHovered(false); clearConnectionHoverHint(cardRef.current); }}
+      onPointerEnter={event => { material.onPointerEnter?.(event); if (card.minister && level === 'node') setMinisterNodeHovered(true); }}
+      onPointerLeave={() => { material.onPointerLeave?.(); setMinisterNodeHovered(false); clearConnectionHoverHint(cardRef.current); }}
+      onPointerCancel={material.onPointerCancel}
       onPointerMoveCapture={(event) => {
         const start = pointerStart.current;
         if (start && event.buttons && Math.hypot(event.clientX - start.x, event.clientY - start.y) >= DRAG_THRESHOLD_PX) start.moved = true;
@@ -205,7 +217,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
 
       {visualLevel !== "inspector" && <EquipmentToggle card={card} />}
       {visualLevel === "workspace" ? <WorkspaceSurface card={card} /> : <>
-        <header className="card-header node-surface-header node-drag-region">
+        <header className={`card-header node-surface-header node-drag-region ${visualLevel === "inspector" ? "card-finish-surface" : ""}`}>
           <div className="card-kind-icon" aria-hidden="true"><CatalogIcon definition={definition} size={18} /></div>
           <div className="card-title-group">
             <span className="card-eyebrow">{label}</span>
@@ -227,22 +239,24 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
                 else hidePreview(card.id);
               }} />
           ) : null}
-          {canCollapseInspector && <IconButton icon={X} size="sm" quiet className="node-surface-close"
+          {visualLevel === 'inspector' && canCollapseInspector && <IconButton icon={X} size="sm" quiet className="node-surface-close"
             onClick={() => closeInspector(card.id)} label={t("Close {v0} inspector", { v0: String(card.name) })} />}
+          {visualLevel === 'inspector' && <CardFinishLayer finish={card.finish} quality="thumbnail" />}
         </header>
 
         <div className="node-preview-content" aria-hidden={visualLevel !== "preview"}>
-          {(visualLevel==='preview'||!card.type.startsWith('xrd.')) && <div className="node-preview-body"><NodePreview card={card} /></div>}
+          {visualLevel === 'preview' && <div className="node-preview-body"><NodePreview card={card} /></div>}
           {presentation.open !== "preview" && <span className="node-preview-hint">{t(presentation.open === "workspace" ? "Open workspace" : "Click for details")}</span>}
         </div>
 
         <div className="card-body node-inspector-content nodrag nopan" aria-hidden={visualLevel !== "inspector"}>
-          {(visualLevel === 'inspector' || (inspectorVisited && !card.type.startsWith('xrd.'))) && <CardContent card={card} level={level} />}
+          {(visualLevel === 'inspector' || (inspectorVisited && retainedInspector)) && <CardContent card={card} level={level} />}
         </div>
 
-        <footer className="card-footer node-inspector-footer nodrag nopan">
+        {visualLevel === 'inspector' && <footer className="card-footer node-inspector-footer nodrag nopan">
           {definition?.traits.includes("core.agent") && !card.ephemeral ? <EquipmentToggle card={card} />
             : <span className="card-id">{card.ephemeral ? "synthetic" : card.id.slice(0, 8)}</span>}
+          {!card.ephemeral && <small className="card-finish-metadata">{t("Finish")}: {t(finishLabel(card.finish))}</small>}
           <div className="card-footer-actions">
             {!card.ephemeral ? <IconButton icon={Trash2} danger
               onClick={() => { dismissSurface(card.id); void deleteCard(card.id); }} label={t("Remove {v0}", { v0: String(card.name) })}
@@ -256,8 +270,9 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
               </button>
             ) : null}
           </div>
-        </footer>
+        </footer>}
       </>}
+      {(visualLevel === "node" || visualLevel === "preview") && <CardFinishLayer finish={card.finish} quality={finishQuality} />}
     </article>
     {card.minister && <MinisterAgent card={card} nodeHovered={ministerNodeHovered && level === 'node'} />}
   </>);

@@ -18,14 +18,14 @@ theme:
     - media: '(prefers-color-scheme: light)'
       scheme: default
       primary: custom
-      accent: teal
+      accent: custom
       toggle:
         icon: material/weather-night
         name: Switch to dark mode
     - media: '(prefers-color-scheme: dark)'
       scheme: slate
       primary: custom
-      accent: teal
+      accent: custom
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
@@ -64,6 +64,8 @@ exclude_docs: |
   /assets/demos/README.md
   /marketplace-production.md
   /pack-store-acceptance.md
+  /legion-performance-diagnosis.md
+  /panzoom-performance.md
 validation:
   nav:
     omitted_files: warn
@@ -77,9 +79,11 @@ nav:
       - user-guide/index.md
       - Install OAW: install.md
       - Your first team: user-guide/first-team.md
+      - First task and recovery: product-first-use.md
       - Models and settings: user-guide/models.md
       - Cards and connections: user-guide/canvas.md
       - Packs and cards: user-guide/plugins.md
+      - Create and share Packs: creator-packs.md
       - Troubleshooting: user-guide/troubleshooting.md
   - Build plugins:
       - developers/index.md
@@ -121,6 +125,7 @@ nav:
           - Canvas control: canvas-control.md
           - Canvas placement: layout.md
           - Canvas performance: canvas-performance.md
+          - Card finishes: developers/card-finishes.md
           - Tutorial implementation: tutorial.md
           - Desktop development: desktop.md
           - Workspace deployment: deployment.md

@@ -28,3 +28,5 @@
 .agent-window-tabs button { border: 0; border-radius: 6px; padding: 5px 12px; background: transparent; color: var(--ink-soft); cursor: pointer; }
 .agent-window-tabs button[aria-selected="true"] { background: var(--surface-soft); color: var(--ink); }
 .agent-window-body { height: calc(100% - 46px); min-height: 0; }
+.equipment-card.card-finish-surface .equipment-item-open > span { position: relative; z-index: 2; }
+.equipment-card.card-finish-surface > select { z-index: 2; }

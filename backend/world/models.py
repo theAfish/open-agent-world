@@ -5,6 +5,7 @@ from enum import StrEnum
 from typing import Any, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from backend.card_finishes import CardFinish
 from backend.legion_workspace import WorkspaceLayout
 
 
@@ -193,6 +194,7 @@ class CardCreate(BaseModel):
     equipment: EquipmentBinding | None = None
     minister: MinisterRole | None = None
     type: str = Field(min_length=1, max_length=128)
+    finish: CardFinish = "normal"
     name: str | None = Field(default=None, min_length=1, max_length=200)
     position: Point = Field(default_factory=Point)
     size: Size | None = None
@@ -267,6 +269,7 @@ class Card(BaseModel):
     equipment: EquipmentBinding | None = None
     minister: MinisterRole | None = None
     type: str
+    finish: CardFinish = "normal"
     name: str
     position: Point
     size: Size

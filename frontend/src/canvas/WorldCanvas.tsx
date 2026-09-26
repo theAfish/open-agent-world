@@ -6,6 +6,8 @@ import { reportInteraction } from "../state/interactions";
 import { findGlue, glueGroup, reflowGlueSurfaces, refreshGlue, beginGlueEdit, cancelGlueRefresh, persistGlue, useGlueStore, type GlueBox, type GlueCandidate } from "../state/glue";
 import { MapAtlas } from "./MapAtlas";
 import { WorldBackground } from './WorldBackground';
+import { CanvasCardLayers } from './CanvasCardLayers';
+import { LegionDeploymentLayer } from './LegionDeploymentLayer';
 import { stableNode, stableNodeList } from './stableNodes';
 import { cardIndex } from '../state/cardIndex';
 import {
@@ -89,7 +91,9 @@ function nodeFromCard(
     type: "worldCard",
     position: positionSurfaceAtNodeCenter(position, surfaceLevel),
     data: { card, surfaceLevel, displaced },
-    width: size.width, height: size.height, className: undefined,
+    width: size.width, height: size.height,
+    className: (surfaceLevel === 'node' || surfaceLevel === 'preview') && size.width <= 360 && size.height <= 420
+      ? 'can-cache-card' : undefined,
     style: { width: size.width, height: size.height },
     parentId: undefined,
     extent: undefined,
@@ -972,10 +976,12 @@ export function WorldCanvas() {
         proOptions={{ hideAttribution: true }}
         aria-label={t("Open Agent World spatial canvas")}
       >
+        <CanvasCardLayers />
         <ContourLayer />
         <GlueLayer nodes={nodes} preview={gluePreview} />
         <ResizeLayer nodes={nodes} setNodes={setNodes} />
         <GenerationLayer />
+        <LegionDeploymentLayer />
         {nodes.filter((node) => node.data.equipmentDetail && !node.hidden).map((node) =>
           <SurfaceBridge key={node.id} sourceId={equipmentOriginId(node.id)} targetId={node.id} />)}
         <WorldBackground />

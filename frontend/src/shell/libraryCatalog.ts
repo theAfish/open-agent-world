@@ -1,9 +1,11 @@
 import { t } from "../i18n";
 import type { DeckEntry, LibrarySnapshot } from "../state/cardLibrary";
 import type { LegionSummary, NodeTypeCatalogItem } from "../types/world";
+import { normalizeCardFinish, type CardFinish } from "../cards/cardFinish";
 
 export interface LibrarySource { id: string; name: string; pluginName: string }
 export interface LibraryCard extends DeckEntry {
+  finish?: CardFinish;
   label: string;
   description: string;
   category: string;
@@ -41,7 +43,7 @@ export function collectedLibraryCards(snapshot: LibrarySnapshot): LibraryCard[] 
       pluginName: snapshot.plugins[snapshot.packs[id]?.definition.plugin_id]?.descriptor.name || pluginName,
     }));
     if (!sources.length) sources.push({ id: `plugin:${definition.plugin_id}`, name: pluginName, pluginName: "Other collected cards" });
-    return [{ kind: "node", id: entry.card_id, ...libraryCardMetadata(snapshot, definition),
+    return [{ kind: "node", id: entry.card_id, finish: normalizeCardFinish(entry.finish), ...libraryCardMetadata(snapshot, definition),
       description: t(definition.description), category: definition.deck_label,
       available: snapshot.available_card_ids.includes(entry.card_id), internal: definition.user_creatable === false,
       definition, sources }];

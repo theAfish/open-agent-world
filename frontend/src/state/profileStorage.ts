@@ -1,3 +1,5 @@
+import { fetchWithRetry } from '../api/fetchWithRetry';
+
 /** Hydrated before importing any persisted stores. The backend owns profile identity. */
 export interface ApplicationProfile {
   mode: "production" | "development" | "preview";
@@ -17,7 +19,7 @@ export const currentProfile = () => profile;
 export const applicationUrl = (path = "") => `${API}/application${path}`;
 
 export async function fetchProfile(): Promise<ApplicationProfile> {
-  const response = await fetch(applicationUrl(), { cache: "no-store", signal: AbortSignal.timeout(5000) });
+  const response = await fetchWithRetry(applicationUrl(), { cache: "no-store", signal: AbortSignal.timeout(5000) });
   if (!response.ok) throw new Error(`Application startup failed (${response.status})`);
   return response.json();
 }

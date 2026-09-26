@@ -5,6 +5,7 @@ import {
   normalizeLegionInstantiation,
   normalizeLegionSummary,
   normalizeRuntimeEvent,
+  normalizeWorldSnapshot,
   worldApi,
 } from "./client";
 
@@ -13,6 +14,27 @@ afterEach(() => {
 });
 
 describe("API normalization boundary", () => {
+  it('loads and restores the same finish, defaulting old cards to normal', async () => {
+    const card = normalizeCard({ id: 'printed', type: 'text', finish: 'starlight' });
+    expect(card.finish).toBe('starlight');
+    expect(normalizeCard({ id: 'old', type: 'text' }).finish).toBe('normal');
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify(card), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect((await worldApi.restoreNode(card)).finish).toBe('starlight');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).finish).toBe('starlight');
+    await worldApi.createNode(card);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).finish).toBe('starlight');
+  });
+  it('preserves the persisted unsigned 32-bit terrain seed without accepting malformed values', () => {
+    for (const seed of [0, 123, 456, 0xFFFFFFFF]) {
+      expect(normalizeWorldSnapshot({ terrain_seed: seed }).terrain_seed).toBe(seed);
+    }
+    for (const seed of [undefined, null, '123', -1, 1.5, NaN, Infinity, 0x100000000]) {
+      expect(normalizeWorldSnapshot({ terrain_seed: seed })).not.toHaveProperty('terrain_seed');
+    }
+  });
   it("saves cached glue candidates without gesture offsets", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ revision: 1, boxes: {}, bonds: [] })));
     vi.stubGlobal("fetch", fetchMock);

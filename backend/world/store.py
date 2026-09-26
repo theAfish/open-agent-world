@@ -292,6 +292,7 @@ class WorldStore:
             equipment=request.equipment,
             minister=request.minister,
             type=request.type,
+            finish=request.finish,
             name=request.name or definition.default_name,
             position=request.position,
             size=size,
@@ -325,6 +326,7 @@ class WorldStore:
             card.equipment.model_dump_json() if card.equipment else None,
             card.minister.model_dump_json() if card.minister else None,
             card.state_scope_override,
+            card.finish,
         )
         try:
             with (nullcontext(_connection) if _connection is not None else self.database.transaction(immediate=True)) as connection:
@@ -332,8 +334,8 @@ class WorldStore:
                     """
                     INSERT INTO cards (
                         id, type, plugin_id, name, x, y, width, height, expanded,
-                        config_json, chunk_x, chunk_y, created_at, updated_at, parent_id, equipment_json, minister_json, state_scope
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        config_json, chunk_x, chunk_y, created_at, updated_at, parent_id, equipment_json, minister_json, state_scope, finish
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     values,
                 )
@@ -822,6 +824,7 @@ class WorldStore:
             equipment=json.loads(row["equipment_json"]) if row["equipment_json"] else None,
             minister=json.loads(row["minister_json"]) if row["minister_json"] else None,
             type=card_type,
+            finish=row["finish"],
             name=row["name"],
             position={"x": row["x"], "y": row["y"]},
             size={"width": row["width"], "height": row["height"]},

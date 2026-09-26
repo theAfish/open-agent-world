@@ -120,8 +120,16 @@ with mutation_lock(root):
     time.sleep(.15)
     with (root/'events').open('a') as log: log.write('end\\n')
 '''
-    processes = [subprocess.Popen([sys.executable, '-c', code, str(tmp_path)]) for _ in range(2)]
-    assert all(p.wait(timeout=10) == 0 for p in processes)
+    processes = [subprocess.Popen([sys.executable, '-c', code, str(tmp_path)],
+        cwd=Path(__file__).resolve().parents[2],
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0) for _ in range(2)]
+    try:
+        assert [p.wait(timeout=10) for p in processes] == [0, 0]
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=10)
     assert (tmp_path / 'events').read_text().splitlines() == ['start', 'end', 'start', 'end']
 
 

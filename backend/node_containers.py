@@ -1,6 +1,7 @@
 """Materialize declared document collections as live world nodes."""
 from backend.events import EventType
 from backend.events.models import RuntimeEvent
+from backend.errors import NotFoundError
 from backend.state import StateContext
 from backend.world.models import CardCreate, CardPatch
 from backend.world.layout import compact_member_region
@@ -17,8 +18,12 @@ def touch_parent(services, parent_id):
     if spec is None or spec.document_field is None:
         return
     scope = services.state.ensure_scope("node_document", parent_id, schema_id="core.node_document")
-    value = services.state.resolve(StateContext((scope,)), "document")
-    services.state.set(scope, "document", value.value, expected_revision=value.revision)
+    try:
+        services.state.touch(scope, "document")
+    except NotFoundError:
+        # Legacy/directly-created containers can still have only a schema default.
+        value = services.state.get_record(scope, "document")
+        services.state.set(scope, "document", value.value, expected_revision=value.revision)
 
 
 def member_documents(services, node_id):

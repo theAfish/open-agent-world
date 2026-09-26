@@ -125,6 +125,15 @@ def load_installed_packs(registry: PluginRegistry, data_root: Path) -> None:
             raise RuntimeError("Cyclic installed Pack dependencies")
         for manifest in ready:
             try:
+                if manifest.kind == "content":
+                    from backend.packs.content import content_plugin
+                    root = manager.version_path(manifest.id, manifest.version)
+                    plugin = content_plugin(manifest, {name: (root / name).read_bytes() for name in manifest.content.legions}, registry)
+                    registry.install(plugin, distribution=manifest)
+                    registry.installed_packs[manifest.id] = manifest
+                    registry.runtime_requirements[manifest.id] = ()
+                    del pending[manifest.id]
+                    continue
                 origin = manager.version_path(manifest.id, manifest.version) / manifest.entrypoints.backend
                 existing = importlib.util.find_spec(manifest.module_name)
                 if existing is not None:

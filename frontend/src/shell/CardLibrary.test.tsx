@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ComponentPalette } from "../palette/ComponentPalette";
 import { CardLibrary } from "./CardLibrary";
 import { useCardLibrary, type LibrarySnapshot } from "../state/cardLibrary";
@@ -10,6 +10,81 @@ import { worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 
 const originalRefresh = useCardLibrary.getState().refresh;
+beforeEach(() => { vi.spyOn(worldApi, 'getInstalledPacks').mockResolvedValue({ restart_required: false, versions: [] }); });
+const installedContentPack = { id: 'local.research', name: 'Research kit', version: '1.0.0', selected: true, loaded: false,
+  kind: 'content' as const, environment: null };
+
+it('adds an installed file to the inventory immediately and closes its installation panel', async () => {
+  useCardLibrary.setState({ snapshot: snapshot(), open: true, tab: 'packs', refresh: async () => {} });
+  useWorldStore.setState({ legions: [] });
+  vi.spyOn(worldApi, 'inspectPack').mockResolvedValue({ manifest: installedContentPack, sha256: 'digest' });
+  vi.spyOn(worldApi, 'installPack').mockResolvedValue({ restart_required: true, versions: [installedContentPack] });
+  const { container } = render(<CardLibrary />);
+  const file = new File(['zip'], 'research.oawpack');
+  vi.spyOn(file, 'slice').mockReturnValue({ arrayBuffer: async () => new Uint8Array([0x50, 0x4b, 3, 4]).buffer } as Blob);
+  await act(async () => fireEvent.change(screen.getByLabelText('Pack file'), { target: { files: [file] } }));
+  expect(screen.getByRole('region', { name: 'Install Pack' })).toBeTruthy();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Install Pack' })));
+  const pack = screen.getByRole('article', { name: 'Research kit' });
+  expect(within(pack).getByText('Restart required')).toBeTruthy();
+  expect(container.querySelector('.pack-install-popover')).toBeNull();
+  expect(container.querySelector('.pack-installer')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Install Pack from File...' }).hasAttribute('disabled')).toBe(false);
+  expect(screen.queryByRole('button', { name: 'Uninstall Pack' })).toBeNull();
+  fireEvent.click(within(pack).getByRole('button'));
+  expect(screen.getByRole('button', { name: 'Uninstall Pack' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Open pack' })).toBeNull();
+});
+
+it('plays the opening animation for installed packs before allowing entry into their details', async () => {
+  const state = packSnapshot();
+  state.packs.alpha.opened = false;
+  state.available_pack_ids = ['alpha'];
+  const item = { ...installedContentPack, id: state.packs.alpha.definition.plugin_id, loaded: true };
+  vi.mocked(worldApi.getInstalledPacks).mockResolvedValue({ restart_required: false, versions: [item] });
+  useCardLibrary.setState({ snapshot: state, open: true, tab: 'packs', refresh: async () => {} });
+  useWorldStore.setState({ legions: [] });
+  const saved = structuredClone(state);
+  saved.revision++;
+  saved.packs.alpha.opened = true;
+  vi.spyOn(worldApi, 'editCardLibrary').mockResolvedValue(saved);
+  await act(async () => { render(<CardLibrary />); });
+  const pack = screen.getByRole('article', { name: 'Alpha pack' });
+  expect(within(pack).getByRole('button', { name: 'Tear open Alpha pack' })).toBeTruthy();
+  await act(async () => fireEvent.click(within(pack).getByRole('button')));
+  expect(pack.classList.contains('is-revealing')).toBe(true);
+  expect(screen.queryByRole('region', { name: 'Pack details' })).toBeNull();
+  expect(within(pack).getByRole('button').hasAttribute('disabled')).toBe(true);
+  const animationEnd = new Event('animationend', { bubbles: true });
+  Object.defineProperty(animationEnd, 'animationName', { value: 'packDeflate' });
+  fireEvent(pack.querySelector('.pack-object')!, animationEnd);
+  fireEvent.click(within(pack).getByRole('button', { name: 'View pack Alpha pack' }));
+  expect(screen.getByRole('button', { name: 'Uninstall Pack' })).toBeTruthy();
+});
+
+it('keeps loaded local packs in the regular inventory without duplicates and manages them inside', async () => {
+  const state = packSnapshot();
+  const id = state.packs.alpha.definition.plugin_id;
+  const item = { ...installedContentPack, id, loaded: true };
+  vi.mocked(worldApi.getInstalledPacks).mockResolvedValue({ restart_required: false, versions: [item] });
+  useCardLibrary.setState({ snapshot: state, open: true, tab: 'packs', refresh: async () => {} });
+  useWorldStore.setState({ legions: [] });
+  await act(async () => { render(<CardLibrary />); });
+  expect(screen.getAllByRole('article')).toHaveLength(2);
+  fireEvent.click(screen.getByRole('button', { name: 'View pack Alpha pack' }));
+  expect(screen.getByRole('button', { name: 'View cards' })).toBeTruthy();
+  const manage = vi.spyOn(worldApi, 'managePack').mockRejectedValueOnce(new Error('Pack is in use'));
+  fireEvent.click(screen.getByRole('button', { name: 'Uninstall Pack' }));
+  expect(manage).not.toHaveBeenCalled();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Confirm uninstall' })));
+  expect(screen.getByRole('alert').textContent).toContain('Pack is in use');
+  manage.mockResolvedValueOnce({ restart_required: true, versions: [{ ...item, selected: false }] });
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Confirm uninstall' })));
+  expect(manage).toHaveBeenLastCalledWith(encodeURIComponent(id), 'DELETE', undefined);
+  expect(screen.getByText('Pack removed. Restart OAW to finish uninstalling.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Uninstall Pack' })).toBeNull();
+  expect(screen.queryAllByRole('article')).toHaveLength(0);
+});
 function snapshot(revision = 1): LibrarySnapshot {
   const definitions = Array.from({ length: 75 }, (_, i) => ({ ...TEST_CATALOG.node_types[0], id: `card.${i + 1}`,
     label: `Tool ${String(i + 1).padStart(2, "0")}`, deck_label: i % 2 ? "Even" : "Odd", user_creatable: true }));
@@ -24,6 +99,32 @@ function snapshot(revision = 1): LibrarySnapshot {
 afterEach(() => {
   cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals();
   useCardLibrary.setState({ snapshot: null, busy: false, open: false, tab: "packs", inspectedEntry: null, error: "", refresh: originalRefresh });
+});
+
+it("keeps the collected finish across library, detail and deck rerenders with normal legacy cards", () => {
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener() {}, removeEventListener() {} })));
+  const state = snapshot();
+  state.collection["card.1"].finish = "rainbow";
+  state.decks[0].entries = [{ kind: "node", id: "card.1" }];
+  useCardLibrary.setState({ snapshot: state, open: true, tab: "cards", refresh: async () => {} });
+  useWorldStore.setState({ catalog: TEST_CATALOG, legions: [] });
+  const { container } = render(<><CardLibrary /><ComponentPalette /></>);
+  const stock = () => container.querySelector('[data-library-card="card.1"] .card-stock')!;
+  const deck = () => container.querySelector('[data-palette-card="card.1"] .card-stock')!;
+  expect(stock().getAttribute("data-finish")).toBe("rainbow");
+  expect(stock().querySelector(".card-finish-layer")?.getAttribute("data-quality")).toBe("thumbnail");
+  expect(deck().getAttribute("data-finish")).toBe("rainbow");
+  const normal = container.querySelector('[data-library-card="card.2"] .card-stock')!;
+  expect(normal.getAttribute("data-finish")).toBe("normal");
+  expect(normal.querySelector(".card-finish-layer")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Inspect Tool 01" }));
+  expect(screen.getByText("Finish: Rainbow")).toBeTruthy();
+  expect(container.querySelector('.library-card-preview .card-finish-layer')?.getAttribute("data-quality")).toBe("showcase");
+  act(() => useCardLibrary.setState({ snapshot: { ...structuredClone(state), revision: state.revision + 1 } }));
+  expect(stock().getAttribute("data-finish")).toBe("rainbow");
+  expect(deck().getAttribute("data-finish")).toBe("rainbow");
+  expect(screen.getByText("Finish: Rainbow")).toBeTruthy();
 });
 
 it("browses a large collection in bounded pages and resets pagination for search and filters", () => {

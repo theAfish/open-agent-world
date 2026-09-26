@@ -137,3 +137,5 @@
 .legion-workspace-preferences { display: flex; flex-shrink: 0; align-items: center; gap: 4px; }
 .legion-workspace-preferences .top-icon-button { width: 28px; height: 28px; border-radius: 6px; }
 .legion-workspace-preferences + .legion-unplaced-bar { margin-left: 5px; padding-left: 14px; }
+.legion-workspace-tab.card-finish-surface > span:not(.card-finish-layer), .legion-drawer-titlebar.card-finish-surface > strong { position: relative; z-index: 2; }
+.legion-window-title.card-finish-surface > strong { position: relative; z-index: 2; }

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import { useNodeSurfaceStore } from "../state/nodeSurfaces";
+import { runStatusLabel } from '../state/runPresentation';
 
 interface RunSnapshot {
   run_id: string; agent_id: string; status: string; error?: string;
@@ -44,7 +45,7 @@ export function LifecycleStatus({ agentId }: { agentId?: string }) {
     <header><strong>{t("Execution and cleanup")}</strong><button className="secondary-button" onClick={() => setRefresh(n => n + 1)}>{t("Refresh state")}</button></header>
     {error && <p role="alert">{error}</p>}
     {snapshot?.runs.filter(r => !agentId || r.agent_id === agentId).slice(-30).reverse().map(run => <article key={run.run_id}>
-      <strong>{run.status} {t("· Run")} {run.run_id.slice(0, 8)}</strong>
+      <strong>{t(runStatusLabel(run.status))} {t("· Run")} {run.run_id.slice(0, 8)}</strong>
       <p>{t("Owner")} {run.lifecycle.owner_id ?? run.agent_id} · {run.lifecycle.holds_capacity ? t("holds Agent capacity") : t("capacity released")}</p>
       {run.lifecycle.awaiting && <p>{t("Awaiting")} {run.lifecycle.awaiting}</p>}
       <p>{t("Execution:")} {run.lifecycle.execution ?? "unknown"} {t("· Cleanup:")} {run.lifecycle.cleanup ?? "none"}</p>

@@ -3,14 +3,20 @@ import "@xyflow/react/dist/style.css";
 import "./theme.css";
 import "./startup.css";
 import { initializeProfile } from "./state/profileStorage";
+import { fetchWithRetry } from './api/fetchWithRetry';
 
 async function start() {
   const root = document.getElementById("root")!;
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has('card-finishes')) {
+    const { FinishPreview } = await import('./debug/FinishPreview');
+    ReactDOM.createRoot(root).render(<FinishPreview />);
+    return;
+  }
   root.classList.add("application-startup");
   root.textContent = "Open Agent World · 正在连接工作区 / Connecting to your workspace…";
   try {
     const apiBase = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? '/api';
-    const response = await fetch(`${apiBase}/deployment`, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+    const response = await fetchWithRetry(`${apiBase}/deployment`, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
     if (!response.ok) throw new Error('Deployment mode unavailable');
     const mode = await response.json();
     if (mode.mode === 'runtime') {

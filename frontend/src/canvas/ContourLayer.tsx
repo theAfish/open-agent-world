@@ -1,11 +1,15 @@
-import { useOnViewportChange, useStore, type Viewport } from "@xyflow/react";
+import { useOnViewportChange, useStoreApi, type Viewport } from "@xyflow/react";
 import { ViewportPortal } from "./FlowPortal";
-import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { CHUNK_SIZE, getViewportChunkBounds, getViewportChunkKeys } from "../state/chunks";
 import { useWorldStore } from "../state/worldStore";
 import type { FlowViewportState } from "../types/world";
 import { terrainResolutionForZoom, type TerrainChunkGeometry } from "./terrain";
 import { useTerrainChunks } from './useTerrainChunks';
+
+// Internal benchmark only. The production renderer remains SVG.
+const CanvasExperiment = import.meta.env.DEV
+  ? lazy(() => import('./TerrainCanvasExperiment')) : null;
 
 interface TerrainView {
   keys: string[];
@@ -13,34 +17,28 @@ interface TerrainView {
   signature: string;
 }
 
-function terrainViewSignature(viewport: FlowViewportState) {
+function terrainViewSignature(viewport: FlowViewportState, resolution: number) {
   const { minX, maxX, minY, maxY } = getViewportChunkBounds(viewport, 0);
-  return `${terrainResolutionForZoom(viewport.zoom)}|${minX}:${maxX}:${minY}:${maxY}`;
+  return `${resolution}|${minX}:${maxX}:${minY}:${maxY}`;
 }
 
-function terrainViewFor(viewport: FlowViewportState, signature = terrainViewSignature(viewport)): TerrainView {
+function terrainViewFor(viewport: FlowViewportState, resolution = terrainResolutionForZoom(viewport.zoom)): TerrainView {
   const visible = new Set(getViewportChunkKeys(viewport, 0));
   const keys = getViewportChunkKeys(viewport).sort((a, b) => Number(visible.has(b)) - Number(visible.has(a)));
-  const resolution = terrainResolutionForZoom(viewport.zoom);
-  return { keys, resolution, signature };
+  return { keys, resolution, signature: terrainViewSignature(viewport, resolution) };
 }
 
 // Worker arrivals and coverage changes should only render new/replaced tiles.
-const ContourChunk = memo(function ContourChunk({ chunk, zoom }: { chunk: TerrainChunkGeometry; zoom: number }) {
+const ContourChunk = memo(function ContourChunk({ chunk }: { chunk: TerrainChunkGeometry }) {
   return <svg
     className="contour-chunk"
     data-chunk={`${chunk.chunkX}:${chunk.chunkY}`}
     data-resolution={chunk.resolution}
     viewBox={`0 0 ${CHUNK_SIZE} ${CHUNK_SIZE}`}
     style={{
-      '--contour-stroke-scale': 1 / zoom,
-      // At overview scale many complex paths fit on screen. Cache each tile's
-      // raster for panning; only small on-screen tiles get a promoted layer.
-      // Avoid retaining large textures when zoomed in (2048 * 2.2 per tile).
-      willChange: zoom < 0.45 ? 'transform' : undefined,
       left: chunk.chunkX * CHUNK_SIZE,
       top: chunk.chunkY * CHUNK_SIZE,
-    } as CSSProperties}
+    }}
     role="presentation"
   >
     {chunk.fillPaths.map((path, index) => path && (
@@ -52,20 +50,19 @@ const ContourChunk = memo(function ContourChunk({ chunk, zoom }: { chunk: Terrai
 });
 
 export const ContourLayer = memo(function ContourLayer() {
-  // React Flow scales an HTML ancestor. SVG vector-effect does not compensate
-  // that outer CSS transform, so convert screen pixels back to world units.
-  const zoom = useStore(state => state.transform[2]);
+  const store = useStoreApi();
+  const layer = useRef<HTMLDivElement>(null);
   const storedViewport = useWorldStore((state) => state.viewport);
   const terrainSeed = useWorldStore((state) => state.terrainSeed);
   const [terrainView, setTerrainView] = useState(() => terrainViewFor(storedViewport));
-  const signature = useRef(terrainView.signature);
+  const currentView = useRef(terrainView);
   const acceptViewport = useCallback((viewport: FlowViewportState) => {
     // Constant-time boundary check on pointer moves; enumerate/sort only when
     // coverage or LOD actually changes, regardless of how wide the view is.
-    const nextSignature = terrainViewSignature(viewport);
-    if (nextSignature === signature.current) return;
-    signature.current = nextSignature;
-    setTerrainView(terrainViewFor(viewport, nextSignature));
+    const resolution = terrainResolutionForZoom(viewport.zoom, currentView.current.resolution);
+    if (terrainViewSignature(viewport, resolution) === currentView.current.signature) return;
+    currentView.current = terrainViewFor(viewport, resolution);
+    setTerrainView(currentView.current);
   }, []);
   const onViewportChange = useCallback((viewport: Viewport) => {
     const { width, height } = useWorldStore.getState().viewport;
@@ -75,13 +72,34 @@ export const ContourLayer = memo(function ContourLayer() {
   useOnViewportChange({ onChange: onViewportChange, onEnd: onViewportChange });
   useEffect(() => acceptViewport(storedViewport), [acceptViewport, storedViewport]);
 
+  useLayoutEffect(() => {
+    // Outer HTML scaling is not compensated by SVG vector-effect. One inherited
+    // property keeps exact screen-space strokes without rendering every tile.
+    // This still repaints SVG strokes during zoom; benchmark browser paint too.
+    const update = () => {
+      const zoom = store.getState().transform[2];
+      layer.current?.style.setProperty('--contour-stroke-scale', String(1 / zoom));
+      layer.current?.style.setProperty('--contour-promotion', zoom < 0.45 ? 'transform' : 'auto');
+    };
+    update();
+    return store.subscribe((state, previous) => {
+      if (state.transform[2] !== previous.transform[2]) update();
+    });
+  }, [store]);
+
   const chunks = useTerrainChunks(terrainView.keys, terrainView.resolution, terrainSeed);
+  const canvasExperiment = CanvasExperiment && new URLSearchParams(location.search).get('terrainRenderer') === 'canvas';
+  const zoom = store.getState().transform[2];
 
   return (
     <ViewportPortal>
-      {chunks.map((chunk) => (
-        <ContourChunk key={`${chunk.chunkX}:${chunk.chunkY}`} chunk={chunk} zoom={zoom} />
-      ))}
+      <div ref={layer} className="contour-layer" data-terrain-renderer={canvasExperiment ? 'canvas-experiment' : 'svg'}
+        style={{ '--contour-stroke-scale': 1 / zoom, '--contour-promotion': zoom < 0.45 ? 'transform' : 'auto' } as CSSProperties}>
+        {chunks.map((chunk) => (
+          <ContourChunk key={`${chunk.chunkX}:${chunk.chunkY}`} chunk={chunk} />
+        ))}
+        {canvasExperiment && <Suspense fallback={null}><CanvasExperiment chunks={chunks} /></Suspense>}
+      </div>
     </ViewportPortal>
   );
 });

@@ -7,9 +7,11 @@ import { CircleStop, Play, Radio, RotateCcw, LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNodeSurfaceStore } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
-import type { WorldCard } from "../types/world";
+import type { WorldCard, WorldEdge } from "../types/world";
 import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { InstrumentOutput } from "./CardUtilities";
+const NO_CARDS: WorldCard[] = [];
+const NO_EDGES: WorldEdge[] = [];
 
 export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSurfaceLevel }) {
   useLocale();
@@ -25,8 +27,8 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
     return () => { current = false; };
   }, [card.id, card.status, xrdMatch]);
   const directRun = definition?.traits.includes("ui.direct-run.v1");
-  const edges = useWorldStore((state) => state.edges);
-  const cards = useWorldStore((state) => state.cards);
+  const edges = useWorldStore((state) => level === 'workspace' ? state.edges : NO_EDGES);
+  const cards = useWorldStore((state) => level === 'workspace' ? state.cards : NO_CARDS);
   const updateCard = useWorldStore((state) => state.updateCard);
   const runAgent = useWorldStore((state) => state.runAgent);
   const stopAgent = useWorldStore((state) => state.stopAgent);
@@ -51,14 +53,14 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
     }, 100);
     return () => { active = false; clearTimeout(timer); };
   }, [card.id, card.ephemeral, level, cards, edges, socketState]);
-  const output = Array.isArray(card.config.output)
+  const output = level === 'workspace' && Array.isArray(card.config.output)
     ? card.config.output.map(String)
     : [];
 
   return (
     <div className="expanded-stack">
       <PluginSurface card={card} slot="settings" level={level}>
-      {schemaSettings ? <AgentSchemaSettings card={card} /> : <>
+      {schemaSettings ? <AgentSchemaSettings card={card} active={level === 'inspector' || level === 'workspace'} /> : <>
       {level === "workspace" && <><label className="field-label"><span>{t("When to use this Agent")}</span><textarea defaultValue={String(card.config.description ?? "")} maxLength={500}
         onBlur={(event) => { if (event.target.value !== card.config.description) void updateCard(card.id, { config: { description: event.target.value } }); }} /></label>
       {cards.some(c => c.id === card.parent_id && c.type === "legion" && (c.config.mode ?? 'team') === 'team') && <section className="card-section">

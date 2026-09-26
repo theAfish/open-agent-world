@@ -1,0 +1,11 @@
+/* Only collectible faces tilt. Canvas nodes and their connection handles keep
+   their original transform; deck fan movement remains on its outer wrapper. */
+.card-stock.card-stock {
+  transform: perspective(800px) rotateX(var(--card-angle-x, 0deg)) rotateY(var(--card-angle-y, 0deg));
+  transform-origin: center;
+  transition: transform 320ms cubic-bezier(.2, .7, .25, 1), box-shadow 180ms ease, border-color 180ms ease;
+}
+.card-stock.card-stock[data-card-tilting] { transition-duration: 100ms, 180ms, 180ms; }
+@media (prefers-reduced-motion: reduce) {
+  .card-stock.card-stock { transform: none; transition: none; }
+}

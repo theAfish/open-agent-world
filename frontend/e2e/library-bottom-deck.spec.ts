@@ -24,6 +24,7 @@ test('library adds directly to the visible bottom deck at desktop and narrow wid
   await expect(library.locator('.library-deck-rail')).toHaveCount(0);
   const drag = async (destination: import('@playwright/test').Locator) => {
     const source = library.locator('[data-library-card="text"]');
+    await expect(source).toHaveAttribute('data-can-drag', 'true');
     await source.scrollIntoViewIfNeeded();
     const a = (await source.boundingBox())!, b = (await destination.boundingBox())!;
     await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);

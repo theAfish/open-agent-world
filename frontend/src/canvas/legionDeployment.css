@@ -1,0 +1,13 @@
+.legion-deployment {
+  position: absolute; z-index: 100; pointer-events: none; transform-origin: center;
+  display: flex; align-items: center; gap: 10px; width: 260px; padding: 14px 16px;
+  color: var(--ink); background: var(--surface-solid); border: 1px dashed var(--accent);
+  border-radius: 12px; box-shadow: 0 4px 14px var(--shadow); font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.legion-deployment-spinner {
+  width: 16px; height: 16px; flex: 0 0 16px; border: 2px solid var(--line);
+  border-top-color: var(--accent); border-radius: 50%; animation: legion-deployment-spin 1s linear infinite;
+}
+@keyframes legion-deployment-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .legion-deployment-spinner { animation: none; } }

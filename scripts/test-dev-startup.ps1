@@ -9,6 +9,8 @@ $waitFunction = $ast.Find({ param($node) $node -is [Management.Automation.Langua
 Invoke-Expression $waitFunction.Extent.Text
 
 $script:readyAfter = 11
+$script:applicationReady = $true
+function Test-BackendReady { param([int]$Port) return $script:applicationReady }
 $script:elapsed = [Diagnostics.Stopwatch]::StartNew()
 function Get-BackendListener {
     param([int]$Port)
@@ -18,6 +20,11 @@ function Get-BackendListener {
 $live = Get-Process -Id $PID
 $result = Wait-BackendListener -Backend $live -Port 1
 if ($null -eq $result -or $script:elapsed.Elapsed.TotalSeconds -lt 10) { throw 'Slow startup was not allowed to finish.' }
+$script:readyAfter = 0
+$script:applicationReady = $false
+$result = Wait-BackendListener -Backend $live -Port 1 -TimeoutMilliseconds 100
+if ($null -ne $result) { throw 'A bound socket was treated as a ready application.' }
+$script:applicationReady = $true
 $script:readyAfter = 999
 $script:elapsed.Restart()
 $result = Wait-BackendListener -Backend $live -Port 1 -TimeoutMilliseconds 100

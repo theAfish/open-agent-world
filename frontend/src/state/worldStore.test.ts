@@ -4,8 +4,9 @@ import type { LegionSummary, WorldCard, WorldEdge, WorldSnapshot } from "../type
 import { buildCardDraft } from "./helpers";
 import { TEST_CATALOG } from "./catalog.fixture";
 import { mergeEdges, useWorldStore } from "./worldStore";
-import { useNodeSurfaceStore } from "./nodeSurfaces";
+import { surfaceDraftKey, useNodeSurfaceStore } from "./nodeSurfaces";
 import { useCardLibrary } from "./cardLibrary";
+import { useLegionDeployments } from "./legionDeployments";
 
 function card(id: string, type: WorldCard["type"]): WorldCard {
   return { id, ...buildCardDraft(type, { x: 0, y: 0 }) };
@@ -40,6 +41,7 @@ function deferred<T>() {
 describe("authoritative world synchronization", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    useLegionDeployments.setState({ pending: [] });
     useCardLibrary.setState({ busy: false, snapshot: {
       schema_version: 1, revision: 1, migration_pending: false, plugins: {}, packs: {},
       card_definitions: {}, decks: [], active_deck_id: "", available_card_ids: [], available_pack_ids: [],
@@ -555,6 +557,20 @@ describe("authoritative world synchronization", () => {
     expect(useWorldStore.getState().syncState).toBe("online");
   });
 
+  it("loads the world without waiting for model settings and accepts them when they arrive", async () => {
+    const models = deferred<Awaited<ReturnType<typeof worldApi.getModelConnections>>>();
+    vi.mocked(worldApi.getModelConnections).mockReturnValue(models.promise);
+    vi.spyOn(worldApi, "getWorld").mockResolvedValue({ nodes: [card("agent", "agent")], edges: [], chunks: [[0, 0]] });
+    useWorldStore.setState({ modelCatalog: { revision: 0, connections: [], default_model: null } });
+
+    await useWorldStore.getState().initialize();
+    expect(useWorldStore.getState().syncState).toBe("online");
+    expect(useWorldStore.getState().cards[0].id).toBe("agent");
+    models.resolve({ revision: 1, connections: [], default_model: null });
+    await models.promise;
+    expect(useWorldStore.getState().modelCatalog.revision).toBe(1);
+  });
+
   it("keeps the world online when only the Legion library fails to initialize", async () => {
     const agent = card("agent", "agent");
     vi.spyOn(worldApi, "getWorld").mockResolvedValue({ nodes: [agent], edges: [], chunks: [[0, 0]] });
@@ -947,6 +963,67 @@ describe("authoritative world synchronization", () => {
     expect(useWorldStore.getState().toasts.at(-1)).toMatchObject({
       title: "Use the dedicated creation action",
     });
+  });
+
+  it("shows queued deployments immediately and keeps their drop anchors while panning", async () => {
+    const summary = legion();
+    const first = deferred<{ legion_id: string; nodes: WorldCard[]; edges: WorldEdge[] }>();
+    const second = deferred<{ legion_id: string; nodes: WorldCard[]; edges: WorldEdge[] }>();
+    useWorldStore.setState({ legions: [summary] });
+    const deploy = vi.spyOn(worldApi, "instantiateLegion")
+      .mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise);
+    const pending = () => useLegionDeployments.getState().pending;
+    const one = useWorldStore.getState().instantiateLegion(summary.id, { x: 160, y: 120 });
+    await vi.waitFor(() => expect(deploy).toHaveBeenCalledTimes(1));
+    const anchor = { x: 400, y: 300 };
+    const two = useWorldStore.getState().instantiateLegion(summary.id, anchor);
+    expect(pending().map(p => p.stage)).toEqual(['deploying', 'queued']);
+    expect(pending()[1].position).toEqual(anchor);
+    expect(useWorldStore.getState().cards).toEqual([]);
+    expect(useWorldStore.getState().undoStack).toEqual([]);
+    anchor.x = 999;
+    useWorldStore.setState(s => ({ viewport: { ...s.viewport, x: 800, y: 800, zoom: 0.5 } }));
+    first.resolve({ legion_id: summary.id, nodes: [card('first', 'text')], edges: [] });
+    await one;
+    await vi.waitFor(() => expect(deploy).toHaveBeenCalledTimes(2));
+    expect(pending()).toMatchObject([{ stage: 'deploying', position: { x: 400, y: 300 } }]);
+    expect(deploy.mock.calls[1][1]).toEqual({ x: 280, y: 252 });
+    second.reject(new Error('Deployment failed'));
+    await two;
+    expect(pending()).toEqual([]);
+    expect(useWorldStore.getState().cards.map(c => c.id)).toEqual(['first']);
+    expect(useWorldStore.getState().undoStack).toHaveLength(1);
+    expect(useWorldStore.getState().toasts.at(-1)?.title).toBe('Legion was not deployed');
+  });
+
+  it('retires drafts only after confirmed deletion and ignores stale deletion events', async () => {
+    const node = { ...card('draft-owner', 'agent'), revision: 3 };
+    const key = surfaceDraftKey(node.id, 'editor', 'session-a');
+    const otherKey = surfaceDraftKey('other', 'editor');
+    useWorldStore.setState({ cards: [node] });
+    useNodeSurfaceStore.setState({ drafts: { [key]: 'unsaved', [otherKey]: 'other draft' } });
+    const remove = vi.spyOn(worldApi, 'deleteNode').mockRejectedValueOnce(new Error('offline'));
+    await useWorldStore.getState().deleteCard(node.id);
+    expect(useNodeSurfaceStore.getState().drafts[key]).toBe('unsaved');
+    useWorldStore.getState().ingestEvent({ id: 'old-delete', type: 'card_deleted', timestamp: 'now',
+      payload: { node: { ...node, revision: 2 } } });
+    expect(useNodeSurfaceStore.getState().drafts[key]).toBe('unsaved');
+    remove.mockResolvedValue(undefined);
+    await useWorldStore.getState().deleteCard(node.id);
+    expect(useNodeSurfaceStore.getState().drafts).toEqual({ [otherKey]: 'other draft' });
+    useNodeSurfaceStore.getState().setDraft(key, 'offscreen draft');
+    useWorldStore.getState().ingestEvent({ id: 'confirmed-delete', type: 'card_deleted', timestamp: 'now', payload: { node } });
+    expect(useNodeSurfaceStore.getState().drafts).toEqual({ [otherKey]: 'other draft' });
+  });
+
+  it("clears placement feedback when deployment validation declines the request", async () => {
+    useWorldStore.setState({ legions: [legion()], syncState: 'offline' });
+    const deploy = vi.spyOn(worldApi, 'instantiateLegion');
+    const result = useWorldStore.getState().instantiateLegion('legion-1');
+    expect(useLegionDeployments.getState().pending).toHaveLength(1);
+    expect(await result).toBeUndefined();
+    expect(useLegionDeployments.getState().pending).toEqual([]);
+    expect(deploy).not.toHaveBeenCalled();
   });
 
   it("merges a Legion instance as one undoable topology operation", async () => {

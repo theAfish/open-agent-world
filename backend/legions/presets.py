@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from backend.errors import NotFoundError
 from backend.legions.models import LegionBlueprint, LegionRecord, LegionTemplateDependency, LegionTemplateEdge, LegionTemplateNode
 from backend.plugins.presets import LegionPresetDefinition
+from backend.legions.models import LegionBlueprintPreset
 from backend.plugins.registry import PluginRegistry
 
 
@@ -73,6 +74,11 @@ def preset_record(preset_id: str, registry: PluginRegistry) -> LegionRecord:
                 "second": {"kind": "pane", "view": {"card_id": "sandbox"}}},
             "hidden_sections": [],
         }
+    else:
+        nodes[0].config["workspace_layout"] = {
+            "version": 2, "root": {"kind": "pane", "view": {"card_id": "conversation"}},
+            "hidden_sections": [],
+        }
     now = datetime(2026, 9, 16, tzinfo=UTC)
     return LegionRecord(
         id=preset_id, name=name, description=description, created_at=now, updated_at=now, revision=1,
@@ -82,7 +88,12 @@ def preset_record(preset_id: str, registry: PluginRegistry) -> LegionRecord:
     )
 
 
-def plugin_preset_record(preset: LegionPresetDefinition, registry: PluginRegistry) -> LegionRecord:
+def plugin_preset_record(preset: LegionPresetDefinition | LegionBlueprintPreset, registry: PluginRegistry) -> LegionRecord:
+    if isinstance(preset, LegionBlueprintPreset):
+        now = datetime(2026, 9, 26, tzinfo=UTC)
+        return LegionRecord(id=preset.id, name=preset.name, description=preset.description,
+            revision=preset.revision, created_at=now, updated_at=now,
+            blueprint=preset.blueprint.model_copy(deep=True))
     nodes = []
     for item in preset.nodes:
         definition = registry.node_type(item.type)

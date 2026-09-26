@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { worldApi } from '../api/client';
 import { useWorldStore } from './worldStore';
 import { useConversationView } from './conversationView';
 import { TEST_CATALOG } from './catalog.fixture';
-import { resolveCardStateSession } from './cardState';
+import { resolveCardStateSession, useCardStateSession } from './cardState';
 import { TaskBoardBody } from '../cards/TaskBoard';
+import { clearTaskBoardCache } from '../cards/taskBoardCache';
+import { useNodeSurfaceStore } from './nodeSurfaces';
 import type { NodeTypeCatalogItem, WorldCard } from '../types/world';
 
 const board: WorldCard = { id: 'board', type: 'oaw.tasks', name: 'Tasks', status: 'available', config: { description: 'Same config' },
@@ -18,8 +20,9 @@ const document = (title: string) => ({ value: { tasks: title ? [{ id: title, tit
   summary: { total: title ? 1 : 0, done: 0, ready_ids: title ? [title] : [] } });
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); useConversationView.setState({ sessions: {}, activeConversationId: undefined }); });
+beforeEach(() => { clearTaskBoardCache(); useNodeSurfaceStore.setState({ drafts: {} }); });
 
-it('switches the same card A → B → A without retaining drafts or adding scope UI', async () => {
+it('switches the same card A → B → A with isolated drafts and no scope UI', async () => {
   useWorldStore.setState({ cards: [board, { ...board, id: "chat", type: "conversation" }], catalog: { ...TEST_CATALOG, node_types: [definition] }, events: [] });
   useConversationView.setState({ activeConversationId: 'chat', sessions: { chat: 'A' } });
   vi.spyOn(worldApi, 'getNodeDocument').mockImplementation(async (_id, session) => document(session === 'A' ? 'Original task' : ''));
@@ -36,6 +39,7 @@ it('switches the same card A → B → A without retaining drafts or adding scop
   act(() => useConversationView.getState().selectSession('chat', 'A'));
   await screen.findByRole('button', { name: 'Edit task Original task' });
   expect(view.container.querySelectorAll('button, select').length).toBe(controls);
+  expect((screen.getByLabelText('New task title') as HTMLInputElement).value).toBe('Unsubmitted draft');
   expect(board.config).toEqual({ description: 'Same config' });
 });
 
@@ -63,4 +67,15 @@ it('resolves the owning workspace conversation before an unrelated active conver
   expect(resolveCardStateSession(card.id, [card, group, chat], types, view)).toBe('A');
   expect(resolveCardStateSession(card.id, [card], [{ ...definition, state: { mode: 'none' } }], view)).toBeUndefined();
   expect(resolveCardStateSession(card.id, [{ ...card, state_scope: 'shared' }], types, view)).toBeUndefined();
+});
+
+it('does not rerender a stateless card when unrelated cards or conversation selection change', () => {
+  useWorldStore.setState({ cards: [board], catalog: { ...TEST_CATALOG, node_types: [{ ...definition, state: { mode: 'none' } }] } });
+  const rendered = vi.fn();
+  function Surface() { const session = useCardStateSession(board.id); rendered(); return <span>{session ?? 'shared'}</span>; }
+  render(<Surface />);
+  const initial = rendered.mock.calls.length;
+  act(() => useWorldStore.setState({ cards: [board, { ...board, id: 'unrelated' }] }));
+  act(() => useConversationView.getState().selectSession('other-chat', 'B'));
+  expect(rendered).toHaveBeenCalledTimes(initial);
 });

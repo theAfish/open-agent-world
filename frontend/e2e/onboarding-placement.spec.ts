@@ -7,7 +7,10 @@ test('placement stays hidden until its single flight starts', async ({ page, req
   const initialIds: string[] = (await (await request.get('/api/nodes')).json()).map((card: { id: string }) => card.id);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.goto('/');
-  await page.getByRole('button', { name: initialIds.length ? 'Replay Tutorial' : /^Start Tutorial/ }).click();
+  if (initialIds.length) {
+    await page.getByRole('button', { name: 'Help', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Tutorial', exact: true }).click();
+  } else await page.getByRole('button', { name: /^Start Tutorial/ }).click();
   await page.locator('.tutorial-next').click();
   await page.mouse.move(160, 140); await page.mouse.down();
   await page.mouse.move(280, 190, { steps: 10 }); await page.mouse.up();

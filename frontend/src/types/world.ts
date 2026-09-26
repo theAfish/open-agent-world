@@ -1,6 +1,7 @@
 export type PluginStateSpec = { mode: "none" } | { mode: "scoped"; supportedScopes: ("shared" | "session")[]; defaultScope: "shared" | "session"; userConfigurable?: boolean };
 
 export type CardType = string;
+export type { CardFinish } from '../cards/cardFinish';
 
 export type NodeSurfaceLevel = "node" | "preview" | "inspector" | "workspace";
 export interface NodePresentation {
@@ -109,6 +110,8 @@ export interface CardConfig extends Record<string, unknown> {
 }
 
 export interface WorldCard {
+  /** Missing on old snapshots; rendered as normal. Set once by the backend. */
+  finish?: import('../cards/cardFinish').CardFinish;
   state_scope?: "shared" | "session" | null;
   state_scope_override?: "shared" | "session" | null;
   id: string;

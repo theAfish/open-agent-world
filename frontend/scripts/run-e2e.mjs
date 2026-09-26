@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +11,17 @@ const dataRoot = path.resolve(projectRoot, ".open-agent-world", "playwright");
 const resultFile = path.join(dataRoot, "result.json");
 const children = [];
 const ministerSuite = process.argv.includes("--minister");
-const testArgs = process.argv.slice(2).filter(arg => arg !== "--minister");
+const args = process.argv.slice(2);
+const testArgs = [];
+let viteConfig;
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--minister") continue;
+  if (args[i] === "--vite-config") {
+    const value = args[++i];
+    if (!value || value.startsWith("--")) throw new Error("--vite-config requires a configuration file path");
+    viteConfig = path.resolve(value);
+  } else testArgs.push(args[i]);
+}
 if (ministerSuite) testArgs.unshift("e2e/minister.spec.ts");
 
 async function resetDataRoot() {
@@ -26,6 +36,7 @@ function start(command, args, options) {
   const child = spawn(command, args, {
     ...options,
     detached: process.platform !== "win32",
+    windowsHide: true,
     stdio: "inherit",
   });
   children.push(child);
@@ -49,7 +60,14 @@ async function waitFor(url, label) {
 function stopTree(child) {
   if (!child.pid || child.exitCode !== null) return;
   try {
-    if (process.platform === "win32") child.kill("SIGKILL");
+    if (process.platform === "win32") {
+      // A timed-out Playwright parent can leave its workers/browser alive.
+      // Target only this runner's still-running, directly spawned child PID.
+      const stopped = spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        windowsHide: true, stdio: "ignore", timeout: 10_000,
+      });
+      if (stopped.status !== 0) child.kill("SIGKILL");
+    }
     else process.kill(-child.pid, "SIGTERM");
   } catch {
     // It exited between the state check and signal.
@@ -90,7 +108,7 @@ try {
   );
   start(
     process.execPath,
-    ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "5177"],
+    ["node_modules/vite/bin/vite.js", ...(viteConfig ? ["--config", viteConfig] : []), "--host", "127.0.0.1", "--port", "5177"],
     {
       cwd: frontendRoot,
       env: {
@@ -115,9 +133,8 @@ try {
     },
   );
   exitCode = await waitForResult(runner);
-  stopTree(runner);
 } finally {
-  children.slice(0, 2).forEach(stopTree);
+  children.slice().reverse().forEach(stopTree);
 }
 
 process.exitCode = exitCode;

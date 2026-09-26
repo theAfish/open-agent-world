@@ -200,6 +200,58 @@ class StateStore:
             run_id=run_id,
         )
 
+    def touch(
+        self,
+        scope: StateScope | StateScopeRef,
+        key: str,
+        *,
+        expected_revision: int | None = None,
+        permissions: Iterable[str] | None = None,
+        actor_id: str | None = None,
+        run_id: str | None = None,
+    ) -> int:
+        """Invalidate an existing value without decoding or replacing its JSON.
+
+        Collection documents assemble their members at read time. A member edit
+        changes the parent's revision, not the parent's stored value. Keep the
+        same scope revision and mutation event contract as an ordinary write.
+        Missing/deleted values must be initialized explicitly by their owner.
+        """
+        persisted = self._authoritative_scope(scope)
+        definition = self._field(persisted, key)
+        self._check_write_permissions(definition, permissions, key)
+        with self.database.transaction(immediate=True) as connection:
+            row = connection.execute(
+                "SELECT revision, deleted FROM state_values WHERE scope_id = ? AND key = ?",
+                (persisted.scope_id, key),
+            ).fetchone()
+            if row is None or bool(row["deleted"]):
+                raise NotFoundError(
+                    f"state value {persisted.scope_kind}:{persisted.owner_id}.{key} does not exist"
+                )
+            previous_revision = int(row["revision"])
+            self._check_revision(expected_revision, previous_revision, persisted, key)
+            now = _now()
+            connection.execute(
+                "UPDATE state_values SET revision = revision + 1, updated_at = ? "
+                "WHERE scope_id = ? AND key = ?",
+                (now, persisted.scope_id, key),
+            )
+            connection.execute(
+                "UPDATE state_scopes SET revision = revision + 1, updated_at = ? WHERE scope_id = ?",
+                (now, persisted.scope_id),
+            )
+        revision = previous_revision + 1
+        self._emit(StateMutation(
+            kind=StateMutationKind.UPDATED,
+            scope=self.get_scope(persisted),
+            key=key,
+            revision=revision,
+            actor_id=actor_id,
+            run_id=run_id,
+        ))
+        return revision
+
     def delete(
         self,
         scope: StateScope | StateScopeRef,

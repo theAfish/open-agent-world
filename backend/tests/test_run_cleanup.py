@@ -1,6 +1,7 @@
 ﻿import asyncio
 import pytest
 from backend.tests.test_runs import RecordingProvider, _services, HangingStopProvider
+from backend.tests.conversation_helpers import wait_for_conversation_run, wait_for_conversation_delivery
 from backend.world.models import CardCreate, EdgeCreate
 from backend.conversations import ConversationPost, ConversationSessionCreate
 from backend.runs import RunStatus
@@ -38,9 +39,9 @@ async def test_provider_stream_keeps_one_context_through_stop_and_next_turn(tmp_
         await services.create_edge(EdgeCreate(source=agent.id, target=conversation.id, relationship='participate'))
         session = await services.create_conversation_session(conversation.id,
             ConversationSessionCreate(title='Stop and resend', participant_ids=[agent.id]))
-        await services.post_conversation_message(conversation.id, session.id,
+        sent = await services.post_conversation_message(conversation.id, session.id,
             ConversationPost(content='first turn', mention_agent_ids=[agent.id]))
-        first = manager.list_runs(agent_id=agent.id)[0]
+        first = await wait_for_conversation_run(services, sent.message.id, agent.id)
         if cancel:
             await asyncio.wait_for(provider.started.wait(), 1)
             if cancel == 'agent':
@@ -51,13 +52,16 @@ async def test_provider_stream_keeps_one_context_through_stop_and_next_turn(tmp_
         record = manager.get_run(first.run_id)
         assert record.status == (RunStatus.CANCELLED if cancel else RunStatus.SUCCEEDED)
         assert record.lifecycle.get('cleanup') not in {'pending', 'failed'}
+        await wait_for_conversation_delivery(services, conversation.id, session.id)
         provider.mode = 'success'
         sent = await services.post_conversation_message(conversation.id, session.id,
             ConversationPost(content='npm install -g @dptech-corp/bohr-cli@latest', mention_agent_ids=[agent.id]))
         assert sent.accepted_agent_ids == [agent.id]
-        second = next(run for run in manager.list_runs(agent_id=agent.id) if run.run_id != first.run_id)
+        second = await wait_for_conversation_run(services, sent.message.id, agent.id)
+        assert second.run_id != first.run_id
         await asyncio.wait_for(manager.wait_execution(second.run_id), 1)
         assert manager.get_run(second.run_id).status == RunStatus.SUCCEEDED
+        await wait_for_conversation_delivery(services, conversation.id, session.id)
     finally:
         provider.continue_tool.set()
         await services.shutdown()

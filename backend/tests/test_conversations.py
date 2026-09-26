@@ -15,6 +15,7 @@ from backend.runs import InvocationCaller, InvocationContext
 from backend.runs.manager import _current_invocation
 from backend.services import create_services
 from backend.conversations import ConversationSessionCreate
+from backend.tests.conversation_helpers import wait_for_conversation_delivery
 from backend.world.models import CardCreate, EdgeCreate
 
 
@@ -68,14 +69,20 @@ def test_session_members_must_have_live_conversation_connections(client: TestCli
     capability = client.get(f"/api/agents/{agent['id']}/capabilities").json()
     assert any(item["kind"] == "conversation.request_turn" for item in capability["capabilities"])
 
-    unavailable = client.post(
+    queued = client.post(
         f"/api/conversations/{conversation['id']}/sessions/{created.json()['id']}/messages",
         json={"content": "@Atlas answer", "mention_agent_ids": [agent["id"]]},
     )
-    assert unavailable.status_code == 503
-    assert client.get(
+    assert queued.status_code == 202
+    assert queued.json()["accepted_agent_ids"] == [agent["id"]]
+    messages = client.get(
         f"/api/conversations/{conversation['id']}/sessions/{created.json()['id']}/messages"
-    ).json() == []
+    ).json()
+    assert [message["id"] for message in messages] == [queued.json()["message"]["id"]]
+    timeline = client.get(
+        f"/api/conversations/{conversation['id']}/sessions/{created.json()['id']}/timeline"
+    ).json()
+    assert [(item["agent_id"], item["status"]) for item in timeline["deliveries"]] == [(agent["id"], "queued")]
 
     assert client.delete(f"/api/edges/{edge['id']}").status_code == 200
     rejected = client.post(
@@ -85,7 +92,7 @@ def test_session_members_must_have_live_conversation_connections(client: TestCli
     assert rejected.status_code == 403
     assert client.get(
         f"/api/conversations/{conversation['id']}/sessions/{created.json()['id']}/messages"
-    ).json() == []
+    ).json() == messages
 
 
 def test_conversation_contact_roster_is_not_limited_to_loaded_canvas_chunks(
@@ -594,6 +601,7 @@ async def test_busy_conversation_agent_queues_and_batches_later_messages(
         assert "Additional messages received while you were working" in runtime.prompts[1]
         assert "Do not change the schema" in runtime.prompts[1]
         assert "Also add tests" in runtime.prompts[1]
+        await wait_for_conversation_delivery(services, conversation.id, session.id)
         assert services.conversations.page_messages(
             conversation.id, session.id
         ).deliveries == []
@@ -660,6 +668,7 @@ async def test_one_message_creates_independent_deliveries_for_multiple_agents(
         ]
         assert {run.agent_id for run in targeted} == {atlas.id, river.id}
         assert all(run.lifecycle["delivery_message_ids"] == [result.message.id] for run in targeted)
+        await wait_for_conversation_delivery(services, conversation.id, session.id)
         assert services.conversations.page_messages(
             conversation.id, session.id
         ).deliveries == []
@@ -713,6 +722,7 @@ async def test_cancelled_conversation_run_drains_the_next_queued_turn(
         assert runs[0].status is RunStatus.CANCELLED
         assert runs[1].status is RunStatus.SUCCEEDED
         assert "Next task" in runtime.prompts[1]
+        await wait_for_conversation_delivery(services, conversation.id, session.id)
         assert services.conversations.page_messages(
             conversation.id, session.id
         ).deliveries == []

@@ -22,7 +22,8 @@ test("local plugin assets and settings work through the host window", async ({ p
     const surface = page.locator(`[data-card-id="${card.id}"]`);
     await expect(surface).toBeVisible();
     await expect(surface.locator(".card-kind-icon .catalog-asset-icon")).toHaveCSS("mask-image", /\/api\/plugins\/openai.codex\/assets\/logo/);
-    await surface.click({ position: { x: 150, y: 30 } });
+    await surface.locator('.card-kind-icon').click();
+    await expect(surface).toHaveAttribute('data-surface-level', 'inspector');
     await surface.getByRole("button", { name: "Open workspace", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Plugin UI check workspace", exact: true });
     await dialog.getByRole("tab", { name: "Settings", exact: true }).click();

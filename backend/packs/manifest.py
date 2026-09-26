@@ -90,15 +90,52 @@ class Entrypoints(Model):
         return self
 
 
+class Content(Model):
+    legions: tuple[str, ...] = Field(min_length=1, max_length=50)
+
+    @field_validator("legions")
+    @classmethod
+    def paths(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(values)) != len(values):
+            raise ValueError("Content paths must be unique")
+        for value in values:
+            safe_path(value)
+            if not value.startswith("content/") or not value.endswith(".json"):
+                raise ValueError("Legions must be JSON files under content/")
+        return values
+
+
+class CreatorMetadata(Model):
+    description: str = Field(default="", max_length=500)
+    author: str = Field(default="", max_length=120)
+    preparation: str = Field(default="", max_length=2000)
+    example: str = Field(default="", max_length=2000)
+    expected_result: str = Field(default="", max_length=2000)
+    accent_color: str = Field(default="#617b72", pattern=r"^#[0-9a-fA-F]{6}$")
+
+
 class PackManifest(Model):
-    schema_version: Literal[1]
+    schema_version: Literal[1, 2]
+    kind: Literal["plugin", "content"] = "plugin"
     id: str = Field(pattern=PACK_ID, max_length=120)
     name: str = Field(min_length=1, max_length=120)
     version: str = Field(min_length=1, max_length=64)
     compatibility: Compatibility
     dependencies: Dependencies = Field(default_factory=Dependencies)
     runtime: Runtime = Field(default_factory=Runtime)
-    entrypoints: Entrypoints
+    entrypoints: Entrypoints | None = None
+    content: Content | None = None
+    creator: CreatorMetadata | None = None
+
+    @model_validator(mode="after")
+    def pack_kind(self) -> Self:
+        if self.kind == "plugin":
+            if self.schema_version != 1 or self.entrypoints is None or self.content is not None or self.creator is not None:
+                raise ValueError("Plugin Packs require schema 1 and code entrypoints")
+        elif (self.schema_version != 2 or self.entrypoints is not None or self.content is None
+                or self.creator is None or self.runtime.sandbox.python):
+            raise ValueError("Content Packs require schema 2, content and creator metadata, without code entrypoints or runtime installs")
+        return self
 
     @field_validator("version")
     @classmethod

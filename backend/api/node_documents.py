@@ -27,9 +27,10 @@ async def download_document(node_id: str, name: str, services: ApplicationServic
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(result.filename, safe='')}"})
 
 @router.get("/{node_id}/document")
-async def get_document(node_id: str, services: ApplicationServices = Depends(get_services)):
+async def get_document(node_id: str, services: ApplicationServices = Depends(get_services), summary_only: bool = False):
     async with services._node_mutation(read_only=True):
-        return read_document(services, node_id)
+        document = read_document(services, node_id)
+        return {"revision": document["revision"], "summary": document["summary"]} if summary_only else document
 
 @router.post("/{node_id}/actions/{action}")
 async def action(node_id: str, action: str, request: DocumentActionRequest, services: ApplicationServices = Depends(get_services)):

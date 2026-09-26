@@ -110,12 +110,21 @@ class PackInstallationManager:
                 raise ValueError("Pack version is already installed and immutable")
             self._check_identity(db, pack)
             self._check_selection({**self.selected(db), pack.manifest.id: pack.manifest})
+            self._check_content(pack)
         return pack
+
+    def _check_content(self, pack: InspectedPack) -> None:
+        if pack.manifest.kind == "content":
+            from backend.packs.content import content_plugin
+            if self.registry is None:
+                raise ValueError("Content Pack validation requires a loaded plugin registry")
+            content_plugin(pack.manifest, pack.files, self.registry)
 
     def install(self, data: bytes, *, expected_id: str | None = None,
                 expected_version: str | None = None, expected_sha256: str | None = None) -> dict:
         pack = inspect_archive(data)
         manifest = pack.manifest
+        self._check_content(pack)
         if expected_sha256 is not None and pack.digest != expected_sha256:
             raise ValueError("Pack SHA-256 differs from the requested artifact")
         if ((expected_id is not None and manifest.id != expected_id)
@@ -166,6 +175,10 @@ class PackInstallationManager:
             manifest = PackManifest.model_validate_json(row['manifest'])
             self.verify_installed(manifest)
             self._check_selection({**self.selected(db), pack_id: manifest})
+            if manifest.kind == "content":
+                from backend.packs.content import content_plugin
+                path = self.version_path(pack_id, version)
+                content_plugin(manifest, {name: (path / name).read_bytes() for name in manifest.content.legions}, self.registry)
             db.execute("INSERT INTO selections VALUES (?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version", (pack_id, version))
         return self.status()
 
@@ -208,7 +221,7 @@ class PackInstallationManager:
             shutil.rmtree(trash)
         return self.status()
 
-    def verify_installed(self, manifest: PackManifest, *, backend_only=False) -> str:
+    def verify_installed(self, manifest: PackManifest, *, backend_only=False) -> str | None:
         path = self.version_path(manifest.id, manifest.version)
         checksums = self._checksums(manifest.id, manifest.version)
         if not isinstance(checksums, dict) or "manifest.json" not in checksums:
@@ -216,7 +229,7 @@ class PackInstallationManager:
         for name, digest in checksums.items():
             # Frontend files are verified when served. A missing/broken view must
             # not prevent the backend or other Packs from starting.
-            if backend_only and name not in {'manifest.json', manifest.entrypoints.backend}:
+            if backend_only and manifest.kind == "plugin" and name not in {'manifest.json', manifest.entrypoints.backend}:
                 continue
             asset = path / safe_path(name)
             if not asset.resolve().is_relative_to(path.resolve()) or asset.is_symlink() or hashlib.sha256(asset.read_bytes()).hexdigest() != digest:
@@ -225,6 +238,12 @@ class PackInstallationManager:
         if actual != manifest:
             raise ValueError("Installed Pack manifest differs from installation record")
         manifest.check_compatibility()
+        if manifest.kind == "content":
+            from backend.packs.content import read_presets
+            if not set(manifest.content.legions) <= checksums.keys():
+                raise ValueError("Content templates are missing installed checksums")
+            read_presets(manifest, {name: (path / name).read_bytes() for name in manifest.content.legions})
+            return None
         return inspect_wheel((path / manifest.entrypoints.backend).read_bytes(), manifest)
 
     def _checksums(self, pack_id: str, version: str) -> dict:
@@ -259,6 +278,7 @@ class PackInstallationManager:
             versions = [dict(row) for row in db.execute("SELECT id,version,manifest,digest FROM versions ORDER BY id,version")]
         for row in versions:
             manifest = PackManifest.model_validate_json(row.pop('manifest'))
-            row.update(name=manifest.name, installation="installed", selected=selected.get(row['id']) == manifest,
+            row.update(name=manifest.name, kind=manifest.kind, creator=manifest.creator.model_dump() if manifest.creator else None,
+                       installation="installed", selected=selected.get(row['id']) == manifest,
                        loaded=loaded.get(row['id']) == manifest)
         return {"versions": versions, "restart_required": selected != loaded}

@@ -50,6 +50,9 @@ test('research plans follow workspace sessions without session inputs or copied 
     await addPlan('B silicon study');
     await workspace.locator('button.workspace-session[title]').filter({ hasText: a.title }).click();
     await expect(tasks.getByRole('heading', { name: 'A copper study', exact: true })).toBeVisible();
+    await expect(tasks.getByLabel('Task title', { exact: true })).toHaveValue('Unsaved A draft');
+    await tasks.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await tasks.getByRole('button', { name: '‹ Tasks', exact: true }).click();
     await expect(tasks.getByRole('button', { name: 'A structure calculation', exact: true })).toBeVisible();
     await expect(tasks).not.toContainText('B silicon study');
     const nodes = await (await request.get('/api/nodes')).json();

@@ -1,4 +1,5 @@
 import { useConversationView } from "./conversationView";
+import { useLegionDeployments } from "./legionDeployments";
 import { ensureCardsCollected } from "./cardDependencies";
 import type { MapPinLocation } from "../canvas/MapAtlas";
 import { create } from "zustand";
@@ -27,7 +28,7 @@ import type {
   WorldPosition,
   WorldSnapshot,
 } from "../types/world";
-import { filterCardsToChunks, getViewportChunkKeys, viewportCenterToWorld } from "./chunks";
+import { filterCardsToChunks, getViewportChunkKeys, sameViewportChunks, viewportCenterToWorld } from "./chunks";
 import { EMPTY_CATALOG, getNodeType } from "./catalog";
 import { buildCardDraft, makeStressCards, mergeCardPatch } from "./helpers";
 import { summarizeLegionSelection } from "./legions";
@@ -42,6 +43,7 @@ import {
 } from "./modelSettings";
 
 import { applyGraphEvents, eventType, isGraphEvent, isOlder, mergeCards, mergeEdges, sequenceEvents, type Tombstones } from "./graphEvents";
+import { forgetTaskBoardCache } from '../cards/taskBoardCache';
 export { isOlder, mergeCards, mergeEdges } from "./graphEvents";
 
 export type SyncState = "loading" | "online" | "syncing" | "offline";
@@ -221,6 +223,9 @@ async function deletePersistentCards(cards: WorldCard[]): Promise<void> {
   } else {
     await worldApi.deleteNodes(persistent.map(card => card.id));
   }
+  const ids = persistent.map(card => card.id);
+  useNodeSurfaceStore.getState().forgetDrafts(ids);
+  forgetTaskBoardCache(ids);
 }
 
 function appendHistory(
@@ -481,7 +486,7 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
 
   initialize: async () => {
     const mutationEpoch = worldMutationEpoch;
-    const modelsLoaded = worldApi.getModelConnections().then(modelCatalog => set(state => modelCatalog.revision >= state.modelCatalog.revision ? { modelCatalog } : {}))
+    void worldApi.getModelConnections().then(modelCatalog => set(state => modelCatalog.revision >= state.modelCatalog.revision ? { modelCatalog } : {}))
       .catch(error => get().pushToast({ tone: "error", title: "Model settings unavailable", detail: apiErrorMessage(error) }));
     const keys = getViewportChunkKeys(get().viewport);
     set({ activeChunkKeys: keys });
@@ -493,7 +498,6 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         loadLegionLibrary(),
       ]);
       const legionError = library.ok ? undefined : apiErrorMessage(library.error);
-      await modelsLoaded;
       set({
         catalog,
         terrainSeed: snapshot.terrain_seed ?? 0x5eeda11,
@@ -630,6 +634,14 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   },
 
   setViewport: (viewport) => {
+    const previous = get().viewport;
+    if (previous.x === viewport.x && previous.y === viewport.y && previous.zoom === viewport.zoom
+      && previous.width === viewport.width && previous.height === viewport.height) return;
+    if (sameViewportChunks(previous, viewport)) {
+      // Persist the camera, but leave card filtering and chunk requests asleep.
+      set({ viewport });
+      return;
+    }
     const keys = getViewportChunkKeys(viewport);
     set({ viewport, activeChunkKeys: keys });
     void get().ensureChunks(keys);
@@ -1043,69 +1055,78 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
   })),
 
-  instantiateLegion: (id, anchor, options = {}) => withHistoryTransaction(() => withLegionOperation(id, async () => {
-    const legion = options.blueprint ?? get().legions.find((item) => item.id === id);
-    if (!legion) {
-      get().pushToast({ tone: "error", title: "Legion is unavailable", detail: "Refresh the Legion library and try again." });
-      return undefined;
-    }
-    if (!legion.compatible) {
-      get().pushToast({
-        tone: "error",
-        title: `${legion.name} cannot be deployed`,
-        detail: legion.issues.join(" ") || "One or more required plugins are unavailable.",
-      });
-      return undefined;
-    }
-    if (get().syncState === "offline") {
-      get().pushToast({ tone: "error", title: "Deployment paused", detail: "Reconnect the world service first." });
-      return undefined;
-    }
-    if (!await ensureCardsCollected(legion.required_card_ids ?? legion.node_types)) return undefined;
-    const finalAnchor = anchor ?? viewportCenterToWorld(get().viewport);
-    const origin = {
-      x: finalAnchor.x - legion.bounds.width / 2,
-      y: finalAnchor.y - legion.bounds.height / 2,
-    };
-    set({ syncState: "syncing" });
-    try {
-      const deployment = { unwrap: options.unwrap, preset: options.preset ?? legion.preset };
-      const instance = await worldApi.instantiateLegion(id, origin, deployment);
-      useNodeSurfaceStore.getState().restorePresentation(instance.nodes, get().catalog, instance.presentation);
-      const cards = instance.nodes.map(copyCard);
-      const edges = instance.edges.map(copyEdge);
-      markWorldMutation();
-      set((state) => ({
-        cards: mergeCards(state.cards, instance.nodes, state.cardTombstones),
-        edges: mergeEdges(state.edges, instance.edges, state.edgeTombstones),
-        selectedCardIds: deployedLegionSelection(cards, deployment.preset && !deployment.unwrap),
-        selectionRevision: state.selectionRevision + 1,
-        selectedEdgeId: undefined,
-        syncState: "online",
-        undoStack: appendHistory(state.undoStack, {
-          id: ++historySequence,
-          label: `Deploy ${legion.name}`,
-          kind: "legion-instantiated",
-          options: deployment,
-          legionId: legion.id,
-          position: { ...origin },
-          cards,
-          edges,
-        }),
-        redoStack: [],
-      }));
-      get().pushToast({
-        tone: "success",
-        title: `${legion.name} deployed`,
-        detail: `${instance.nodes.length} cards and ${instance.edges.length} links instantiated.`,
-      });
-      return instance;
-    } catch (error) {
-      set({ syncState: "online" });
-      get().pushToast({ tone: "error", title: "Legion was not deployed", detail: apiErrorMessage(error) });
-      return undefined;
-    }
-  })),
+  instantiateLegion: (id, anchor, options = {}) => {
+    // Feedback and the drop anchor belong to the gesture, even when another
+    // history operation is still running. Pending markers are never graph nodes.
+    const initial = options.blueprint ?? get().legions.find((item) => item.id === id);
+    const finalAnchor = { ...(anchor ?? viewportCenterToWorld(get().viewport)) };
+    const pendingId = initial ? useLegionDeployments.getState().begin(initial.name, finalAnchor) : undefined;
+    return withHistoryTransaction(() => withLegionOperation(id, async () => {
+      const legion = options.blueprint ?? get().legions.find((item) => item.id === id);
+      if (!legion) {
+        get().pushToast({ tone: "error", title: "Legion is unavailable", detail: "Refresh the Legion library and try again." });
+        return undefined;
+      }
+      if (!legion.compatible) {
+        get().pushToast({
+          tone: "error",
+          title: `${legion.name} cannot be deployed`,
+          detail: legion.issues.join(" ") || "One or more required plugins are unavailable.",
+        });
+        return undefined;
+      }
+      if (get().syncState === "offline") {
+        get().pushToast({ tone: "error", title: "Deployment paused", detail: "Reconnect the world service first." });
+        return undefined;
+      }
+      if (!await ensureCardsCollected(legion.required_card_ids ?? legion.node_types)) return undefined;
+      const origin = {
+        x: finalAnchor.x - legion.bounds.width / 2,
+        y: finalAnchor.y - legion.bounds.height / 2,
+      };
+      set({ syncState: "syncing" });
+      try {
+        const deployment = { unwrap: options.unwrap, preset: options.preset ?? legion.preset };
+        if (pendingId !== undefined) useLegionDeployments.getState().start(pendingId);
+        const instance = await worldApi.instantiateLegion(id, origin, deployment);
+        useNodeSurfaceStore.getState().restorePresentation(instance.nodes, get().catalog, instance.presentation);
+        const cards = instance.nodes.map(copyCard);
+        const edges = instance.edges.map(copyEdge);
+        markWorldMutation();
+        set((state) => ({
+          cards: mergeCards(state.cards, instance.nodes, state.cardTombstones),
+          edges: mergeEdges(state.edges, instance.edges, state.edgeTombstones),
+          selectedCardIds: deployedLegionSelection(cards, deployment.preset && !deployment.unwrap),
+          selectionRevision: state.selectionRevision + 1,
+          selectedEdgeId: undefined,
+          syncState: "online",
+          undoStack: appendHistory(state.undoStack, {
+            id: ++historySequence,
+            label: `Deploy ${legion.name}`,
+            kind: "legion-instantiated",
+            options: deployment,
+            legionId: legion.id,
+            position: { ...origin },
+            cards,
+            edges,
+          }),
+          redoStack: [],
+        }));
+        get().pushToast({
+          tone: "success",
+          title: `${legion.name} deployed`,
+          detail: `${instance.nodes.length} cards and ${instance.edges.length} links instantiated.`,
+        });
+        return instance;
+      } catch (error) {
+        set({ syncState: "online" });
+        get().pushToast({ tone: "error", title: "Legion was not deployed", detail: apiErrorMessage(error) });
+        return undefined;
+      }
+    })).finally(() => {
+      if (pendingId !== undefined) useLegionDeployments.getState().finish(pendingId);
+    });
+  },
 
   dissolveContainer: (id) => withHistoryTransaction(async () => {
     const group = get().cards.find((c) => c.id === id && isContainer(c, get().catalog));
@@ -1733,6 +1754,19 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         eventStream: sequenced.eventStream,
         eventSequence: sequenced.eventSequence,
       }));
+      // Only confirmed deletions retire drafts. Chunk eviction and stale delete
+      // events must not erase the editor state of an offscreen or restored card.
+      const deleted = graph.filter(event => eventType(event) === 'card_deleted');
+      if (deleted.length) {
+        const live = new Set(get().cards.map(card => card.id));
+        const ids = deleted.flatMap(event => {
+          const node = event.payload.node as { id?: unknown } | undefined;
+          const id = node?.id ?? event.node_id ?? event.agent_id ?? event.sandbox_id ?? event.resource_id;
+          return typeof id === 'string' && !live.has(id) ? [id] : [];
+        });
+        useNodeSurfaceStore.getState().forgetDrafts(ids);
+        forgetTaskBoardCache(ids);
+      }
       if (sequenced.gap) void get().refreshWorld();
     };
     for (const event of events) {
