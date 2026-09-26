@@ -14,11 +14,11 @@ test.afterEach(async ({ request }) => {
 });
 
 for (const [name, count, links] of [['General assistant', 2, 1], ['Coding workspace', 3, 2], ['Multi-Agent collaboration', 4, 6]] as const) {
-  test(`${name} starts an unwrapped canvas and supports undo, redo and reload`, async ({ page, request }) => {
+  test(`${name} creates a workspace and supports undo, redo and reload`, async ({ page, request }) => {
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: 'What would you like to do here?' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Choose a workspace' })).toBeVisible();
     await expect(page.locator('.blueprint-option')).toHaveCount(3);
     if (name === 'General assistant') {
       await page.screenshot({ path: 'test-results/blueprints-welcome-light.png' });
@@ -26,35 +26,55 @@ for (const [name, count, links] of [['General assistant', 2, 1], ['Coding worksp
       await page.screenshot({ path: 'test-results/blueprints-welcome-dark.png' });
     }
     await page.getByRole('button', { name: new RegExp(`^${name}`) }).click();
+    await page.getByRole('button', { name: 'Open workspace', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Close settings', exact: true }).click();
     await page.getByRole('button', { name: 'Set up later', exact: true }).click();
-    await expect(page.locator('.world-card')).toHaveCount(count);
-    await expect(page.locator('[data-card-type="legion"]')).toHaveCount(0);
+    const nodeCount = async () => (await (await request.get('/api/nodes')).json()).length;
+    await expect.poll(nodeCount).toBe(count + 1);
     const world = await (await request.get('/api/world')).json();
     expect(world.edges).toHaveLength(links);
-    expect(world.nodes.every((n: { parent_id: string | null }) => n.parent_id === null)).toBe(true);
+    const legion = world.nodes.find((n: { type: string }) => n.type === 'legion');
+    expect(legion.config.workspace_layout.root).toBeTruthy();
+    expect(world.nodes.filter((n: { type: string }) => n.type !== 'legion').every((n: { parent_id: string | null }) => n.parent_id === legion.id)).toBe(true);
     await page.screenshot({ path: `test-results/blueprint-${count}-deployed.png` });
     await page.keyboard.press('Control+z');
-    await expect(page.locator('.world-card')).toHaveCount(0);
+    await expect.poll(nodeCount).toBe(0);
     await page.keyboard.press('Control+Shift+z');
-    await expect(page.locator('.world-card')).toHaveCount(count);
-    await expect(page.locator('[data-card-type="legion"]')).toHaveCount(0);
+    await expect.poll(nodeCount).toBe(count + 1);
     await page.reload();
-    await expect(page.locator('.world-card')).toHaveCount(count);
+    await expect.poll(nodeCount).toBe(count + 1);
     await expect(page.locator('.onboarding-welcome')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 }
 
 test('welcome blueprints remain usable on a small canvas', async ({ page }) => {
-  await page.setViewportSize({ width: 800, height: 640 });
   await page.goto('/');
   await expect(page.locator('.blueprint-option')).toHaveCount(3);
-  await page.screenshot({ path: 'test-results/blueprints-welcome-small.png' });
+  const welcome = page.locator('.onboarding-welcome');
+  await expect(page.locator('.component-palette')).toBeHidden();
+  await expect(page.locator('.world-controls')).toBeHidden();
+  for (const viewport of [{ width: 800, height: 640 }, { width: 1024, height: 600 }, { width: 390, height: 640 }]) {
+    await page.setViewportSize(viewport);
+    expect(await welcome.evaluate(element => element.scrollHeight <= element.clientHeight && element.scrollWidth <= element.clientWidth)).toBe(true);
+    const bounds = await welcome.boundingBox();
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
+    await expect(page.getByRole('button', { name: 'Open workspace', exact: true })).toBeInViewport();
+    await expect(page.getByRole('button', { name: 'Start Empty', exact: true })).toBeInViewport();
+    await page.screenshot({ path: `test-results/blueprints-welcome-${viewport.width}.png` });
+  }
+  await expect(page.getByRole('button', { name: 'New workspace', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '切换到中文', exact: true }).click();
+  expect(await welcome.evaluate(element => element.scrollHeight <= element.clientHeight && element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: 'test-results/blueprints-welcome-390-zh.png' });
+  await page.getByRole('button', { name: 'Switch to English', exact: true }).click();
   await page.getByRole('button', { name: 'Start Empty', exact: true }).click();
   await expect(page.locator('.onboarding-welcome')).toHaveCount(0);
   await expect(page.locator('.world-card')).toHaveCount(0);
+  await expect(page.locator('.component-palette')).toBeVisible();
+  await expect(page.locator('.world-controls')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'New workspace', exact: true })).toHaveCount(0);
 });
 
 test('header settings are optional; saving restores four display states and layout', async ({ page, request }) => {

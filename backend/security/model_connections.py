@@ -123,6 +123,25 @@ class ModelConnectionStore:
         with self.database.locked() as db:
             return self._public(self._read(db))
 
+    def discovery_key(self, edit: ConnectionEdit) -> str | None:
+        """Resolve a draft's credentials without saving it or retargeting a saved secret."""
+        if edit.api_key and not edit.clear_api_key:
+            return edit.api_key
+        if edit.auth_mode == "none":
+            return None
+        if edit.auth_mode == "environment":
+            key = os.environ.get(edit.environment_variable or _provider_environment_variable(edit.adapter))
+            if not key:
+                raise ResourceValidationError("Backend credentials are unavailable. Enter an API key or configure the server environment.")
+            return key
+        with self.database.locked() as db:
+            previous = next((c for c in self._read(db)["connections"] if c["id"] == edit.id), None)
+        if previous and not edit.clear_api_key and previous.get("api_key_encrypted"):
+            if (previous["adapter"], previous["base_url"]) != (edit.adapter, edit.base_url):
+                raise ResourceValidationError("Enter the API key again to check a changed service address or API format.")
+            return self.secrets._fernet(create=False).decrypt(previous["api_key_encrypted"].encode()).decode()
+        raise ResourceValidationError("Enter an API key to connect to this service.")
+
     def context_limits(self, reference: str) -> tuple[int, int] | None:
         """Saved per-connection model limits, including defaults for older rows.
 

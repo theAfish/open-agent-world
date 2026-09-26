@@ -538,6 +538,17 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
                   ? <details className="conversation-tool-message"><summary>{message.content.split("\n")[0]}</summary><pre>{message.content.split("\n").slice(1).join("\n").trim() || t("No additional details")}</pre></details>
                   : message.content ? (message.sender_kind === "agent" ? <MarkdownMessage content={message.content} /> : <p>{message.content}</p>) : null}
                 {message.attachments?.length ? <ConversationAttachments conversationId={card.id} sessionId={message.session_id} files={message.attachments} /> : null}
+                {message.run_id && ['failed', 'interrupted'].includes(history.runSummaries[message.run_id]?.status) && <div className="conversation-recovery" role="status">
+                  <p>{t('This attempt ended before completion. Review its details and send a follow-up, or review an earlier message to try again. Completed actions may already have taken effect.')}</p>
+                  {!deployed && <button type="button" className="secondary-button" onClick={() => {
+                    useWorldStore.setState({ settingsOpen: true });
+                  }}>{t('Check model settings')}</button>}
+                </div>}
+                {message.sender_kind === 'user' && !visibleOutgoing.some(item => item.message.id === message.id && item.status !== 'confirmed') && <button type="button" className="onboarding-text-button"
+                  disabled={busy || uploading || !!draft.trim() || attachments.length > 0 || activeRuns.length > 0}
+                  onClick={() => { setDraft(message.content); setAttachments(message.attachments ?? []); setSelectedAgentId(message.mention_agent_ids?.[0]); messageInput.current?.focus(); }}>
+                  {t('Review and resend')}
+                </button>}
                 {message.sender_kind === "user" ? (() => {
                   const queued = history.deliveries.filter((delivery) => delivery.message_id === message.id && delivery.status === "queued");
                   if (!queued.length) return null;
@@ -665,10 +676,6 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
           ))}
           {participants.length === 0 ? <p>{t("This session has no Agents. Create a direct or group session from the left.")}</p> : null}
         </section>
-        {!deployed && <section>
-          <span className="workspace-panel-label">{t("Field policy")}</span>
-          <p>{t("Canvas connections authorize access. Session membership selects the group. Removing an edge keeps history but blocks future turns.")}</p>
-        </section>}
         </div>
       </aside>
       </WorkspaceSection>
