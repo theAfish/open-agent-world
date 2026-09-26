@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ComponentPalette } from "./ComponentPalette";
 import { useWorldStore } from "../state/worldStore";
-import { useCardLibrary } from "../state/cardLibrary";
+import { useCardLibrary, type LibrarySnapshot } from "../state/cardLibrary";
 import type { LegionSummary } from "../types/world";
 
 let hit: Element;
@@ -33,16 +33,23 @@ function dropOn(target: HTMLElement) {
   hit = target;
   fireEvent.pointerUp(window, { button: 0, clientX: 50, clientY: 50 });
 }
+function librarySnapshot(entries: Array<{ kind: "node" | "legion"; id: string }>): LibrarySnapshot {
+  return { schema_version: 1, revision: 1, migration_pending: false, plugins: {}, packs: {},
+    card_definitions: {}, collection: {}, available_card_ids: [], available_pack_ids: [],
+    active_deck_id: "custom", decks: [{ id: "custom", name: "Custom", icon: "folder", entries }] };
+}
 
-it("exposes saved Legions without deck membership and tracks library changes", () => {
+it("shows only saved Legions explicitly added to the active deck and tracks compatibility", () => {
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
   const instantiate = vi.fn();
-  useCardLibrary.setState({ snapshot: null, refresh: vi.fn().mockResolvedValue(undefined) });
+  useCardLibrary.setState({ snapshot: librarySnapshot([{ kind: "legion", id: "saved-team" }]), busy: false,
+    open: false, inspectedEntry: null, refresh: vi.fn().mockResolvedValue(undefined) });
   const legion: LegionSummary = { id: "saved-team", name: "Research team", node_count: 2, edge_count: 1,
     bounds: { width: 200, height: 200 }, node_types: [], plugin_ids: [], compatible: true, issues: [], revision: 1 };
-  useWorldStore.setState({ legions: [legion], legionError: undefined, instantiateLegion: instantiate });
+  const unlisted: LegionSummary = { ...legion, id: "unlisted-team", name: "Unlisted team" };
+  useWorldStore.setState({ legions: [legion, unlisted], legionError: undefined, instantiateLegion: instantiate });
   const screen = render(<ComponentPalette />);
-  fireEvent.click(screen.getByRole("tab", { name: /Legions/ }));
+  expect(screen.queryByRole("button", { name: "Place Unlisted team" })).toBeNull();
   const place = screen.getByRole("button", { name: "Place Research team" });
   expect(place.draggable).toBe(false); // Deck previews use Pointer Events, not an OS drag image.
   fireEvent.click(place);
@@ -55,35 +62,29 @@ it("exposes saved Legions without deck membership and tracks library changes", (
   expect(document.querySelector(".palette-drag-preview")).toBeNull();
   fireEvent.click(place);
   expect(instantiate).toHaveBeenCalledWith("saved-team");
-  act(() => useWorldStore.setState({ legions: [{ ...legion, compatible: false }] }));
+  act(() => useWorldStore.setState({ legions: [{ ...legion, compatible: false }, unlisted] }));
   const unavailable = screen.getByRole("button", { name: "Research team unavailable" });
   expect(unavailable.getAttribute("aria-disabled")).toBeNull();
   fireEvent.click(unavailable);
   expect(useCardLibrary.getState().inspectedEntry).toEqual({ kind: "legion", id: "saved-team" });
-  act(() => useCardLibrary.setState({ open: false, inspectedEntry: null }));
-  fireEvent.click(screen.getByRole("tab", { name: /Legions/ }));
-  act(() => useWorldStore.setState({ legions: [] }));
-  expect(screen.getByText("No saved Legions")).toBeTruthy();
-  expect(screen.getByRole("tab", { name: /Legions/ }).getAttribute("aria-selected")).toBe("true");
+  act(() => useWorldStore.setState({ legions: [unlisted] }));
+  expect(screen.getByRole("button", { name: "saved-team unavailable" })).toBeTruthy();
 });
 
-it("deletes a saved Legion directly with confirmation without placing it", async () => {
+it("removes a saved Legion from the current deck without deleting its source", async () => {
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
-  const remove = vi.fn().mockResolvedValue(true);
+  const edit = vi.fn().mockResolvedValue(null);
+  const remove = vi.fn();
   const place = vi.fn();
-  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-  useCardLibrary.setState({ snapshot: null, busy: false, refresh: vi.fn().mockResolvedValue(undefined) });
+  useCardLibrary.setState({ snapshot: librarySnapshot([{ kind: "legion", id: "team" }]), busy: false,
+    refresh: vi.fn().mockResolvedValue(undefined), edit });
   useWorldStore.setState({ legions: [{ id: "team", name: "Team", compatible: false } as LegionSummary],
     deleteLegion: remove, instantiateLegion: place });
   const screen = render(<ComponentPalette />);
-  fireEvent.click(screen.getByRole("tab", { name: /Legions/ }));
   startDrag(screen.getByRole("button", { name: "Team unavailable" }));
   dropOn(screen.getByRole("region", { name: "Discard card" }));
+  await waitFor(() => expect(edit).toHaveBeenCalledWith({ action: "update_deck", id: "custom", entries: [] }));
   expect(remove).not.toHaveBeenCalled();
-  confirm.mockReturnValue(true);
-  startDrag(screen.getByRole("button", { name: "Team unavailable" }));
-  dropOn(screen.getByRole("region", { name: "Discard card" }));
-  await waitFor(() => expect(remove).toHaveBeenCalledWith("team"));
   expect(place).not.toHaveBeenCalled();
 });
 
