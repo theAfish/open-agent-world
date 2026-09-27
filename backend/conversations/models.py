@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from uuid import UUID
-from typing import Annotated, Literal
+from typing import Any, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from backend.agents.context import ContextStatus
@@ -112,8 +112,34 @@ class ConversationSessionRename(BaseModel):
     title: Annotated[str, Field(min_length=1, max_length=200)]
 
 
+class ConversationRunSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+    agent_id: str
+    status: str
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    awaiting: str | None = None
+    progress: str | None = None
+    tool_count: int = 0
+    tool_trace: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ConversationDeliveryState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message_id: str
+    agent_id: str
+    status: Literal["queued", "claimed"]
+    claimed_run_id: str | None = None
+
+
 class ConversationMessagePage(BaseModel):
     active_agent_ids: list[str] = Field(default_factory=list)
+    active_runs: list[ConversationRunSummary] = Field(default_factory=list)
+    deliveries: list[ConversationDeliveryState] = Field(default_factory=list)
+    run_summaries: dict[str, ConversationRunSummary] = Field(default_factory=dict)
     items: list[ConversationMessage]
     has_before: bool
     has_after: bool

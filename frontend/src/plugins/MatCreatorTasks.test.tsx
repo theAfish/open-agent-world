@@ -1,14 +1,148 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { PluginViewProps } from './sdk';
-import { TaskBoard } from '../../../plugins/matcreator/frontend/TaskBoard';
+import { TaskBoard, TaskPreview } from '../../../plugins/matcreator/frontend/TaskBoard';
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 const task = { id: 'build', title: 'Build copper', description: '', status: 'pending', depends_on: [] as string[], result: '', outputs: [] as string[] };
 const board = (revision: number, title = task.title) => ({ revision, value: { plans: [
   { id: 'research', title: 'Copper study', goal: 'Verify a structure', session_id: '', tasks: [{ ...task, title }] },
 ] } });
+function transientDraft() {
+  let value: Record<string, unknown> | undefined;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set: (next: typeof value) => { value = next; listeners.forEach(listener => listener()); },
+    subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+  };
+}
+
+it('uses the summary projection for preview without collecting execution or reading the board', async () => {
+  const documentAction = vi.fn().mockResolvedValue({ revision: 2, value: { total: 4, done: 1, latest_title: 'Copper study' } });
+  const readDocument = vi.fn();
+  const delegationAction = vi.fn();
+  render(<TaskPreview {...{ host: { documentAction, readDocument, delegationAction } } as unknown as PluginViewProps} />);
+  await screen.findByText('1 / 4 Done');
+  expect(documentAction).toHaveBeenCalledWith('summary', {});
+  expect(readDocument).not.toHaveBeenCalled();
+  expect(delegationAction).not.toHaveBeenCalled();
+});
+
+it('pauses hidden polling and restores the unsaved editor after viewport unmount', async () => {
+  let draft: Record<string, unknown> | undefined;
+  const readDocument = vi.fn().mockResolvedValue(board(1));
+  const props = { host: { readDocument, documentAction: vi.fn(), draft: { get: () => draft, set: (value: typeof draft) => { draft = value; } } }, level: 'inspector' } as unknown as PluginViewProps;
+  const first = render(<TaskBoard {...props} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Build copper' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+  fireEvent.change(screen.getByLabelText('Task title'), { target: { value: 'Unfinished calculation' } });
+  first.rerender(<TaskBoard {...props} level="preview" />);
+  expect(first.container.childElementCount).toBe(0);
+  vi.useFakeTimers();
+  await act(async () => { vi.advanceTimersByTime(12000); });
+  expect(readDocument).toHaveBeenCalledTimes(1);
+  vi.useRealTimers();
+  first.unmount();
+  render(<TaskBoard {...props} />);
+  await screen.findByRole('heading', { name: 'Copper study' });
+  expect((screen.getByLabelText('Task title') as HTMLInputElement).value).toBe('Unfinished calculation');
+});
+
+it.each(['before', 'after'])('clears a saved task draft when its view remounts %s save completion', async timing => {
+  const draft = transientDraft();
+  const readDocument = vi.fn().mockResolvedValue(board(1));
+  let finish!: (next: ReturnType<typeof board>) => void;
+  const documentAction = vi.fn().mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const props = { host: { readDocument, documentAction, draft } } as unknown as PluginViewProps;
+  const first = render(<TaskBoard {...props} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Build copper' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+  fireEvent.change(screen.getByLabelText('Task title'), { target: { value: 'Saved calculation' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save task' }));
+  first.unmount();
+  if (timing === 'before') {
+    render(<TaskBoard {...props} />);
+    await screen.findByLabelText('Task title');
+    expect((screen.getByRole('button', { name: 'Save task' }) as HTMLButtonElement).disabled).toBe(true);
+  }
+  readDocument.mockResolvedValue(board(2, 'Saved calculation'));
+  await act(async () => finish(board(2, 'Saved calculation')));
+  if (timing === 'after') render(<TaskBoard {...props} />);
+  await screen.findByText('Saved calculation');
+  expect(screen.queryByLabelText('Task title')).toBeNull();
+  expect(screen.queryByText('The board changed while you were editing. Your draft is retained.')).toBeNull();
+  expect(draft.get()).toBeUndefined();
+  expect(documentAction).toHaveBeenCalledTimes(1);
+});
+
+it('preserves edits typed in a remounted task while the old save completes and advances their revision', async () => {
+  const draft = transientDraft();
+  const readDocument = vi.fn().mockResolvedValue(board(1));
+  let finish!: (next: ReturnType<typeof board>) => void;
+  const documentAction = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+    .mockResolvedValue(board(3, 'Later edit'));
+  const props = { host: { readDocument, documentAction, draft } } as unknown as PluginViewProps;
+  const first = render(<TaskBoard {...props} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Build copper' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+  fireEvent.change(screen.getByLabelText('Task title'), { target: { value: 'Submitted edit' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save task' }));
+  first.unmount();
+  render(<TaskBoard {...props} />);
+  fireEvent.change(await screen.findByLabelText('Task title'), { target: { value: 'Later edit' } });
+  readDocument.mockResolvedValue(board(2, 'Submitted edit'));
+  await act(async () => finish(board(2, 'Submitted edit')));
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Save task' }) as HTMLButtonElement).disabled).toBe(false));
+  expect((screen.getByLabelText('Task title') as HTMLInputElement).value).toBe('Later edit');
+  fireEvent.click(screen.getByRole('button', { name: 'Save task' }));
+  await waitFor(() => expect(documentAction).toHaveBeenLastCalledWith('update_task', expect.objectContaining({ title: 'Later edit' }), 2));
+});
+
+it('does not offer to create an already saved plan after remounting during submission', async () => {
+  const draft = transientDraft();
+  const readDocument = vi.fn().mockResolvedValue(board(1));
+  let finish!: (next: ReturnType<typeof board>) => void;
+  const documentAction = vi.fn().mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const props = { host: { readDocument, documentAction, draft } } as unknown as PluginViewProps;
+  const first = render(<TaskBoard {...props} />);
+  await screen.findByRole('heading', { name: 'Copper study' });
+  fireEvent.click(screen.getByLabelText('Plan details and actions'));
+  fireEvent.click(screen.getByRole('button', { name: 'New plan' }));
+  fireEvent.change(screen.getByLabelText('Plan title'), { target: { value: 'New study' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Create plan' }));
+  first.unmount();
+  render(<TaskBoard {...props} />);
+  expect((screen.getByRole('button', { name: 'Create plan' }) as HTMLButtonElement).disabled).toBe(true);
+  const next = board(2);
+  next.value.plans.push({ ...next.value.plans[0], id: 'new', title: 'New study', tasks: [] });
+  readDocument.mockResolvedValue(next);
+  await act(async () => finish(next));
+  await screen.findByRole('heading', { name: 'New study' });
+  expect(screen.queryByLabelText('Plan title')).toBeNull();
+  expect(draft.get()).toBeUndefined();
+  expect(documentAction).toHaveBeenCalledTimes(1);
+});
+
+it('keeps a failed in-flight edit retryable after its view remounts', async () => {
+  const draft = transientDraft();
+  let fail!: (error: Error) => void;
+  const documentAction = vi.fn().mockImplementation(() => new Promise((_resolve, reject) => { fail = reject; }));
+  const props = { host: { readDocument: vi.fn().mockResolvedValue(board(1)), documentAction, draft } } as unknown as PluginViewProps;
+  const first = render(<TaskBoard {...props} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Build copper' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+  fireEvent.change(screen.getByLabelText('Task title'), { target: { value: 'Retained edit' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save task' }));
+  first.unmount();
+  render(<TaskBoard {...props} />);
+  await screen.findByLabelText('Task title');
+  await act(async () => fail(new Error('Save unavailable')));
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Save unavailable'));
+  expect((screen.getByLabelText('Task title') as HTMLInputElement).value).toBe('Retained edit');
+  expect((screen.getByRole('button', { name: 'Save task' }) as HTMLButtonElement).disabled).toBe(false);
+});
 
 it('creates plans without session inputs and does not display legacy session labels', async () => {
   const state = board(1);

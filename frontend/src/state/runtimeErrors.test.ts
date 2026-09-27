@@ -8,7 +8,7 @@ describe("describeRuntimeError", () => {
       "openai/gpt-4o-mini",
     )).toEqual({
       title: "Model credentials unavailable",
-      detail: "ADK could not authenticate openai/gpt-4o-mini. Set OPENAI_API_KEY in the terminal that runs scripts/dev.ps1, then restart the development server.",
+      detail: "Open Settings → Models to check the API key and selected model, then retry your request.",
     });
   });
 });

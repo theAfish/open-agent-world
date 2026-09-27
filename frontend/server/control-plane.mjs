@@ -1,4 +1,6 @@
 import { isIP } from "node:net";
+import { Agent as HttpAgent } from "node:http";
+import { Agent as HttpsAgent } from "node:https";
 
 export function isLocalManagementRequest(request) {
   const peer = request.socket.remoteAddress ?? "";
@@ -12,8 +14,14 @@ export function isLocalManagementRequest(request) {
 }
 
 export function localManagementProxy(target, ws = false) {
+  // http-proxy otherwise uses agent:false and Connection:close, allocating a
+  // new Windows ephemeral port for every API request (including profile polls).
+  // WebSocket upgrades own their sockets and must not consume this HTTP pool.
+  const Agent = new URL(target).protocol === "https:" ? HttpsAgent : HttpAgent;
+  const agent = ws ? undefined : new Agent({ keepAlive: true, maxSockets: 8, maxFreeSockets: 8 });
   return {
     target, ws, changeOrigin: !ws,
+    ...(agent ? { agent } : {}),
     // Upgrade events have multiple listeners. Refuse in the proxy itself as
     // well as closing the incoming socket in our first upgrade listener.
     bypass(request) {
@@ -25,6 +33,11 @@ export function localManagementProxy(target, ws = false) {
 /** The local Vite proxy must not turn remote traffic into trusted loopback API calls. */
 export function localControlPlaneProxy() {
   function configure(server) {
+    server.httpServer?.once("close", () => {
+      for (const options of [...Object.values(server.config.server.proxy ?? {}), ...Object.values(server.config.preview.proxy ?? {})]) {
+        if (typeof options === "object") options.agent?.destroy();
+      }
+    });
     server.middlewares.use((request, response, next) => {
       if (isLocalManagementRequest(request)) return next();
       response.statusCode = 403;

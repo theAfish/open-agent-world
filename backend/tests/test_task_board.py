@@ -39,6 +39,21 @@ def test_dependency_validation_progress_and_conflicts(client):
     assert state["value"]["tasks"][0]["note"] == "Sources verified"
 
 
+def test_preview_summary_excludes_document_and_tracks_mutations(client):
+    node, url = board(client)
+    created = action(client, url, "upsert", {"tasks": [
+        {"id": "a", "title": "Research", "description": "Detailed instructions " * 100},
+        {"id": "b", "title": "Write", "depends_on": ["a"]},
+    ]}, 0).json()
+    projected = client.get(url + "/document?summary_only=true")
+    assert projected.status_code == 200
+    assert projected.json() == {"revision": created["revision"], "summary": created["summary"]}
+    assert "value" not in projected.json()
+    updated = action(client, url, "progress", {"task_id": "a", "status": "done"}, created["revision"]).json()
+    assert client.get(url + "/document?summary_only=true").json() == {
+        "revision": updated["revision"], "summary": {"total": 2, "done": 1, "ready_ids": ["b"]}}
+
+
 def test_live_connection_permissions_are_scoped_and_revocable(client):
     node, url = board(client)
     other, _ = board(client)

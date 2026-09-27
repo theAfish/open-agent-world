@@ -4,6 +4,7 @@ import { useLocale } from "../i18n";
 import { currentProfile, flushPreferences } from "../state/profileStorage";
 import { useWorldStore } from "../state/worldStore";
 import "./development.css";
+import { FinishPreview } from './FinishPreview';
 
 type Scope = "workspace" | "decks" | "packs" | "tutorial" | "interface" | "models" | "runtime" | "all";
 interface Plan { profile_id: string; generation: string; data_root: string; profile: string; scopes: Scope[]; world_cards: number }
@@ -83,13 +84,14 @@ export default function DevelopmentPanel() {
     {open && <div className="development-backdrop" onPointerDown={event => { if (event.target === event.currentTarget && !busy) setOpen(false); }}>
       <section className="development-panel" role="dialog" aria-modal="true" aria-labelledby="development-title" onKeyDown={event => {
         if (event.key !== "Tab") return;
-        const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)'));
+        const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href]'));
         const first = items[0], last = items.at(-1);
         if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
       }}>
         <header><div><small>OPEN AGENT WORLD · DEVELOPMENT</small><h2 id="development-title">{tr("开发调试", "Development tools")}</h2></div><button ref={close} disabled={busy} onClick={() => setOpen(false)} aria-label={tr("关闭调试面板", "Close development tools")}><X size={20} /></button></header>
         <p>{tr("选择需要初始化的内容。操作仅作用于当前开发档案，重置前会保留恢复备份。", "Choose what to initialize in this development profile. A recovery backup is kept before reset.")}</p>
+        <details><summary>Card finish preview</summary><FinishPreview embedded /></details>
         <div className="development-presets">
           <button disabled={busy} onClick={() => choose(["workspace", "decks", "packs", "interface"])}>{tr("测试首次启动", "Test first launch")}</button>
           <button disabled={busy} onClick={() => choose(["packs", "decks"])}>{tr("测试开包", "Test pack opening")}</button>

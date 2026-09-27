@@ -19,6 +19,7 @@ from backend.services import create_services
 from backend.security.model_connections import CatalogEdit
 from backend.world.models import CardCreate, EdgeCreate
 from backend.tests.test_agent_runtime import MutableCapabilityProvider
+from backend.tests.conversation_helpers import wait_for_conversation_run, wait_for_conversation_delivery
 
 
 class ScriptedModel(BaseLlm):
@@ -523,17 +524,17 @@ async def test_conversation_run_integration_ingests_new_turns_past_tool_events(s
     # Execute through the public conversation service and RunManager, including
     # streaming persistence. Tool messages stay nonfinal in canonical history.
     model._tool_rounds = 1
-    await services.post_conversation_message(room.id, session.id,
+    sent = await services.post_conversation_message(room.id, session.id,
         ConversationPost(content="What is the confirmed code?", mention_agent_ids=[agent.id]))
-    run = services.run_manager.store.list(agent_id=agent.id)[-1]
+    run = await wait_for_conversation_run(services, sent.message.id, agent.id)
     finished = await services.run_manager.wait_terminal(run.run_id)
     assert finished.status == "succeeded", finished.error
-    await asyncio.sleep(.01)
+    await wait_for_conversation_delivery(services, room.id, session.id)
     assert services.contexts.load(agent.id, session.id).compaction_count >= 1
     tool_count = len(runtime._provider.invocations)
-    await services.post_conversation_message(room.id, session.id,
+    sent = await services.post_conversation_message(room.id, session.id,
         ConversationPost(content="New instruction: use delta-942 next.", mention_agent_ids=[agent.id]))
-    run = services.run_manager.store.list(agent_id=agent.id)[-1]
+    run = await wait_for_conversation_run(services, sent.message.id, agent.id)
     finished = await services.run_manager.wait_terminal(run.run_id)
     assert finished.status == "succeeded", finished.error
     assert "delta-942" in model._requests[-1]
@@ -541,7 +542,7 @@ async def test_conversation_run_integration_ingests_new_turns_past_tool_events(s
     projection = services.conversation_summary(room.id).model_dump(mode="json")
     assert projection["context_statuses"][session.id][agent.id]["compaction_count"] >= 1
     assert "cobalt-731" not in encoded(projection)
-    await asyncio.sleep(.01)
+    await wait_for_conversation_delivery(services, room.id, session.id)
 
 
 @pytest.mark.asyncio

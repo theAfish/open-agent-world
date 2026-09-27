@@ -1,5 +1,7 @@
 """Host-owned persistence; plugins only receive copies of their node document."""
 from __future__ import annotations
+import asyncio
+from copy import deepcopy
 import json
 from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -72,34 +74,71 @@ def write_document(services, node_id, value, expected_revision, *, actor_id=None
     return read_document(services, node_id, state_identity=state_identity)
 
 
+def _authorize_action(services, node_id, action, capability):
+    handler = definition(services, node_id).actions.get(action)
+    if action == "replace" or (handler is not None and not handler.read_only):
+        services.node_execution.assert_editable(node_id, allow_delegated=True)
+    if capability is not None:
+        live = services.capabilities.capability_for_id(capability.agent_id, capability.id)
+        if live.target_id != node_id or handler is None or handler.capability_kind != live.kind:
+            raise PermissionDeniedError("This connection does not allow that document action")
+    return handler
+
+
+def _action_document(services, node_id, handler, request):
+    if handler is None:
+        raise ResourceValidationError("Unknown document action")
+    current = read_document(services, node_id)
+    if not handler.read_only:
+        if request.expected_revision is None:
+            raise ResourceValidationError("Read the board first and supply expected_revision")
+        if current["revision"] != request.expected_revision:
+            raise RevisionConflictError("The board changed. Reload and retry your change.")
+    return current
+
+
+def _apply_action(services, node_id, handler, current, request, capability):
+    try:
+        value = handler.handler(current["value"], request.arguments)
+    except (ValidationError, ValueError) as exc:
+        raise ResourceValidationError(validation_message(exc)) from exc
+    if handler.read_only:
+        return {"value": value, "revision": current["revision"]} if handler.project else current
+    context = services.run_manager.current_context if services.run_manager else None
+    return write_document(services, node_id, value, request.expected_revision,
+        actor_id=capability.agent_id if capability else None, run_id=context.run_id if context else None)
+
+
 async def invoke_document_action(services, node_id, action, request, *, capability=None):
+    already_locked = services._node_mutation_owner.get() is asyncio.current_task()
     async with services._node_mutation():
-        spec = definition(services, node_id)
-        handler = spec.actions.get(action)
-        if action == "replace" or (handler is not None and not handler.read_only):
-            services.node_execution.assert_editable(node_id, allow_delegated=True)
-        if capability is not None:
-            live = services.capabilities.capability_for_id(capability.agent_id, capability.id)
-            if live.target_id != node_id or handler is None or handler.capability_kind != live.kind:
-                raise PermissionDeniedError("This connection does not allow that document action")
-        elif action == "replace":
+        handler = _authorize_action(services, node_id, action, capability)
+        if capability is None and action == "replace":
             if request.expected_revision is None:
                 raise ResourceValidationError("expected_revision is required")
             return write_document(services, node_id, request.arguments, request.expected_revision)
-        if handler is None:
-            raise ResourceValidationError("Unknown document action")
-        current = read_document(services, node_id)
-        if not handler.read_only:
-            if request.expected_revision is None:
-                raise ResourceValidationError("Read the board first and supply expected_revision")
-            if current["revision"] != request.expected_revision:
-                raise RevisionConflictError("The board changed. Reload and retry your change.")
-        try:
-            value = handler.handler(current["value"], request.arguments)
-        except (ValidationError, ValueError) as exc:
-            raise ResourceValidationError(validation_message(exc)) from exc
-        if handler.read_only:
-            return {"value": value, "revision": current["revision"]} if handler.project else current
-        context = services.run_manager.current_context if services.run_manager else None
-        return write_document(services, node_id, value, request.expected_revision,
-            actor_id=capability.agent_id if capability else None, run_id=context.run_id if context else None)
+        current = _action_document(services, node_id, handler, request)
+        if handler.prepare is None:
+            return _apply_action(services, node_id, handler, current, request, capability)
+        # A reentrant caller still owns the outer gate after this block exits.
+        if already_locked:
+            raise ResourceValidationError("Prepared document actions must be invoked outside a node mutation")
+        node_type = services.world.get_card(node_id).type
+        prepared_request = request.model_copy(deep=True)
+        source_value = deepcopy(current["value"])
+        arguments = deepcopy(request.arguments)
+
+    try:
+        prepared = await handler.prepare(source_value, arguments)
+    except (ValidationError, ValueError) as exc:
+        raise ResourceValidationError(validation_message(exc)) from exc
+    if not isinstance(prepared, dict):
+        raise ResourceValidationError("Document preparation must return an argument object")
+    prepared_request.arguments = deepcopy(prepared)
+
+    async with services._node_mutation():
+        live_handler = _authorize_action(services, node_id, action, capability)
+        if services.world.get_card(node_id).type != node_type or live_handler is not handler:
+            raise RevisionConflictError("The document action changed. Reload and retry your change.")
+        current = _action_document(services, node_id, live_handler, prepared_request)
+        return _apply_action(services, node_id, live_handler, current, prepared_request, capability)

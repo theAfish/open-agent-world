@@ -1,5 +1,27 @@
 # Troubleshooting
 
+## Start with Help
+
+Open **Help (?) → Status check** in the canvas controls. The check covers saved
+cards across the whole canvas, including off-screen cards. It checks backend and
+live-update connections, card/plugin status, configured model credentials, and
+Sandbox runtime availability. Cards inside groups or backpacks can be located
+through their outer container or owner.
+
+Results distinguish **Needs attention**, **Note / unverified**, and **Check
+passed**. Follow the suggested settings, Library or repair-guide link, then use
+**Check again**. A stopped Sandbox is not an error. Plugin Agents with their own
+runtime do not require OAW model credentials.
+
+Checks do not send model requests, execute tools, start Sandboxes or repair data.
+An available configuration does not prove that an external service will respond.
+Plugins without a host check remain unverified; inspect their own card status.
+
+**Help → Documentation** opens the documentation site. **Help → Versions and
+updates** opens official releases and installation instructions. This build does
+not have an automatic installer; close OAW before installing a desktop update.
+Source installations and hosted deployments are updated by their operator.
+
 ## The tray is empty
 
 Open **Pack & Card Library**, open a pack, add collected cards to a deck, and activate that deck. A fresh installation can have unopened packs and an empty deck.
@@ -24,7 +46,7 @@ Read the runtime diagnostics in the Sandbox card and address the reported missin
 
 ## The tutorial gets in the way
 
-Minimize its bubble, pause it, or skip with ×. Use the compass to replay it. The tutorial uses real cards; your placed cards remain in the world afterward.
+Minimize its bubble, pause it, or skip with ×. Use **Help (?) → Tutorial** to replay it. The tutorial uses real cards; your placed cards remain in the world afterward.
 
 ## Report a problem
 

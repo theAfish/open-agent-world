@@ -25,9 +25,14 @@ test('install local Pack into the production host without a frontend rebuild', a
   await page.getByRole('button', { name: 'Open Pack and Card Library' }).click();
   const library = page.getByRole('dialog', { name: 'Pack & Card Library' });
   await library.getByLabel('Pack file', { exact: true }).setInputFiles(process.env.OAW_PACK_ARTIFACT!);
-  await expect(library.getByText('Ready to install', { exact: true })).toBeVisible();
+  await expect(library.getByRole('region', { name: 'Install Pack', exact: true })).toBeVisible();
   await library.getByRole('button', { name: 'Install Pack', exact: true }).click();
-  await expect(library.getByText('Restart OAW to activate Pack changes.', { exact: true })).toBeVisible();
+  const pendingPack = library.locator('[data-pack-id="installed:example.greeter"]');
+  await expect(pendingPack.getByText('Restart required', { exact: true })).toBeVisible();
+  await expect(library.getByRole('region', { name: 'Install Pack', exact: true })).toHaveCount(0);
+  await pendingPack.getByRole('button', { name: 'View pack Greeter', exact: true }).click();
+  await expect(library.getByRole('button', { name: 'Uninstall Pack', exact: true })).toBeVisible();
+  await library.getByRole('button', { name: 'Back to packs', exact: true }).click();
   const installed = await (await request.get('/api/packs')).json();
   expect(installed.versions[0]).toMatchObject({ id: 'example.greeter', selected: true, loaded: false });
   expect((await (await request.get('/api/catalog')).json()).frontend_modules['example.greeter']).toBeUndefined();
@@ -92,9 +97,11 @@ test('restart activates backend, runtime frontend, Python, Library, Deck and a u
     await expect(remote.getByText('Installed · Restart required', { exact: true })).toHaveCount(0);
   }
   await library.getByRole('button', { name: /^Packs/ }).click();
+  await expect(library.locator('[data-pack-id="installed:example.greeter"]')).toHaveCount(0);
   await pack.getByRole('button', { name: 'Tear open Greeter', exact: true }).click();
   await expect(pack).toHaveClass(/is-opened/);
-  await pack.getByRole('button', { name: 'View cards in Greeter', exact: true }).click();
+  await pack.getByRole('button', { name: 'View pack Greeter', exact: true }).click();
+  await library.getByRole('button', { name: 'View cards', exact: true }).click();
   await library.getByRole('button', { name: 'Add Greeter to deck', exact: true }).click();
   await library.getByRole('button', { name: 'Close Library', exact: true }).click();
   const tray = page.getByRole('complementary', { name: 'Active card deck' });

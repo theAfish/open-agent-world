@@ -68,7 +68,7 @@ class TranscriptRuntime(MockAgentRuntime):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fail", [False, True])
-async def test_provider_timeline_is_durable_without_subscribers_and_final_identity_is_stable(data_root: Path, fail: bool):
+async def test_provider_stream_is_live_only_and_terminal_history_is_durable(data_root: Path, fail: bool):
     settings = Settings.for_data_root(data_root)
     services = create_services(settings)
     runtime = TranscriptRuntime(WorldAgentCapabilityProvider(services))
@@ -85,16 +85,26 @@ async def test_provider_timeline_is_durable_without_subscribers_and_final_identi
             history = services.conversations.list_messages(room.id, session.id)
             if len(history) == 2:
                 break
-        timeline = services.conversations.page_messages(room.id, session.id).items
-        assert [m.content.split('\n')[0] for m in timeline[:6]] == ['Start', 'Checking', 'Using read', 'Finished read', 'Checking', 'Done']
-        assert [m.sequence for m in timeline] == list(range(1, len(timeline) + 1))
+        page = services.conversations.page_messages(room.id, session.id)
+        timeline = page.items
+        assert timeline[0].content == 'Start'
+        assert len(timeline) == 2
+        assert all(m.is_final for m in timeline)
+        assert not any(m.kind.startswith('tool_') for m in timeline)
         assert history[-1].id == timeline[-1].id
         if fail:
-            assert timeline[-1].sender_kind == 'system' and 'failed' in timeline[-1].content
-            assert not timeline[5].is_final
+            assert timeline[-1].sender_kind == 'system' and 'could not respond' in timeline[-1].content
         else:
-            assert len(timeline) == 6
-        assert sum(m.is_final for m in timeline) == 2
+            assert timeline[-1].sender_kind == 'agent' and timeline[-1].content == 'Done'
+            summary = page.run_summaries[timeline[-1].run_id]
+            assert summary.tool_count == 1
+            assert [item['name'] for item in summary.tool_trace] == ['read', 'read']
+        with services.database.locked() as db:
+            # Streaming snapshots and tool activity no longer become messages.
+            assert db.execute(
+                "SELECT COUNT(*) FROM conversation_messages WHERE session_id=?",
+                (session.id,),
+            ).fetchone()[0] == 2
         ids = [m.id for m in timeline]
     finally:
         await services.shutdown()

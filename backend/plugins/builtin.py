@@ -508,6 +508,10 @@ class AgentNodeTemplateHandler(_CoreConfigProjection, NodeTemplateHandler):
         return (NodeTemplateDependency("runtime_provider", provider_id),)
 
 
+class ConversationNodeTemplateHandler(_CoreConfigProjection, NodeTemplateHandler):
+    portable_config_fields = frozenset({"description", "status"})
+
+
 class SandboxNodeTemplateHandler(_CoreConfigProjection, NodeTemplateHandler):
     portable_config_fields = frozenset({"status", "runtime"})
 
@@ -987,7 +991,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         traits=frozenset({"core.field", "core.conversation", "core.file-source"}),
         presentation=NodePresentation(states=("node", "preview", "workspace"), initial="workspace", open="workspace"),
         lifecycle=ConversationNodeBehavior(),
-        templateable=True,
+        template_handler=ConversationNodeTemplateHandler(), templateable=True,
     ))
     registry.register_node_type(NodeTypeDefinition(
         canvas_create_requires_confirmation=False, id="text", label="Text file", description="Managed knowledge", icon="file-text",

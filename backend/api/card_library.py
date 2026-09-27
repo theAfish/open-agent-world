@@ -62,5 +62,5 @@ async def edit_library(request: LibraryEdit, services: ApplicationServices = Dep
 @router.post("/nodes", status_code=201)
 async def place_collected_card(request: CardCreate, services: ApplicationServices = Depends(get_services)):
     async with services._node_mutation():
-        services.card_library.assert_collected(request.type)
-        return await services.create_card(request)
+        collected = services.card_library.assert_collected(request.type)
+        return await services.create_card(request.model_copy(update={"finish": collected.finish}))

@@ -9,6 +9,8 @@ import { collectionCounts, collectionState, shadowPresentation, shadowPoints, SH
 import { ContainerActions, AddSelectedMembers } from "./ContainerFrame";
 import "./shadowCollection.css";
 import { ShadowGasBoundary } from "../effects/ShadowGasBoundary";
+import { CardFinishLayer } from "./CardFinishLayer";
+import { normalizeCardFinish } from "./cardFinish";
 
 function ShadowCollectionComponent({data,selected}:NodeProps<CanvasNode>) {
   useLocale();
@@ -45,7 +47,7 @@ function ShadowCollectionComponent({data,selected}:NodeProps<CanvasNode>) {
     lastCount.current=members.length;
   },[members.length,state,card.id,card.config,update,syncing]);
   const advance=()=>void update(card.id,{config:{...card.config,display_state:state==="minimal"?"stacked":"expanded"}});
-  return <section className={`shadow-collection container-frame ${selected?"is-selected":""} ${releasing?"is-releasing":""}`} data-card-id={card.id} data-card-type={card.type} data-state={state} aria-label={t("{v0} collection", { v0: String(card.name) })} style={{width,height,transform:live&&origin?`translate(${rect.x-origin.x}px,${rect.y-origin.y}px)`:undefined}}>
+  return <section className={`shadow-collection container-frame ${selected?"is-selected":""} ${releasing?"is-releasing":""}`} data-card-id={card.id} data-card-type={card.type} data-finish={normalizeCardFinish(card.finish)} data-state={state} aria-label={t("{v0} collection", { v0: String(card.name) })} style={{width,height,transform:live&&origin?`translate(${rect.x-origin.x}px,${rect.y-origin.y}px)`:undefined}}>
     <svg className="shadow-silhouette" width={width} height={height} style={{overflow:"visible"}} aria-hidden="true">
       <defs><filter id={`feather-${id}`} x="-30%" y="-30%" width="160%" height="160%">
         <feGaussianBlur stdDeviation={SHADOW.feather}/>
@@ -56,10 +58,11 @@ function ShadowCollectionComponent({data,selected}:NodeProps<CanvasNode>) {
         onPointerDown={e=>{pointer.current={x:e.clientX,y:e.clientY};}}
         onClick={e=>{if(pointer.current&&Math.hypot(e.clientX-pointer.current.x,e.clientY-pointer.current.y)<5&&state!=="expanded")advance();pointer.current=undefined;}} />
     </svg>
-    <div className="shadow-counts container-drag-region" role={state==="minimal"?"button":undefined} tabIndex={state==="minimal"?0:undefined} aria-label={state==="minimal"?t("展开集合堆叠"):undefined}
+    <div className="shadow-counts container-drag-region card-finish-surface" data-finish={normalizeCardFinish(card.finish)} role={state==="minimal"?"button":undefined} tabIndex={state==="minimal"?0:undefined} aria-label={state==="minimal"?t("展开集合堆叠"):undefined}
       onPointerDown={e=>{pointer.current={x:e.clientX,y:e.clientY};}}
       onClick={e=>{if(state!=="expanded"&&pointer.current&&Math.hypot(e.clientX-pointer.current.x,e.clientY-pointer.current.y)<5)advance();}}
       onKeyDown={e=>{if((e.key==="Enter"||e.key===" ")&&state!=="expanded"){e.preventDefault();advance();}}}>
+      <CardFinishLayer finish={card.finish} quality="thumbnail" />
       <span title={t("PDF")}><FileText size={17}/>{counts.pdf}</span>
       {state!=="minimal"&&<span title={t("Other objects")}><Box size={17}/>{counts.object}</span>}
       <span title={t("Agents")}><Bot size={17}/>{counts.agent}</span>

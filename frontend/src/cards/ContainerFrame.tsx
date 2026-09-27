@@ -11,6 +11,8 @@ import type { WorldCard } from "../types/world";
 import { ActivityGlow } from "../effects/ActivityGlow";
 import { useNodeActivity } from "../effects/useNodeActivity";
 import { useNodeGeneration } from "../effects/generation";
+import { CardFinishLayer } from "./CardFinishLayer";
+import { normalizeCardFinish } from "./cardFinish";
 
 /** Shared spatial shell. Plugin presentations provide their header and controls. */
 export function ContainerFrame({ card, selected, className, label, header, children }: {
@@ -31,14 +33,14 @@ export function ContainerFrame({ card, selected, className, label, header, child
     if (connectingNodeId === card.id) clearConnectionHoverHint(frameRef.current);
   }, [card.id, connectingNodeId]);
   return <section ref={frameRef} className={`container-frame ${className} ${spec.virtual ? "virtual-workspace" : ""} ${materializing ? "is-materializing" : ""} ${selected ? "is-selected" : ""}`}
-    data-card-id={card.id} data-card-type={card.type} data-activity={activity.phase} aria-label={label}
+    data-card-id={card.id} data-card-type={card.type} data-finish={normalizeCardFinish(card.finish)} data-activity={activity.phase} aria-label={label}
     onPointerMoveCapture={(event) => { if (spec.connectable && connectingNodeId !== card.id) updateConnectionHoverHint(event, frameRef.current); }}
     onPointerLeave={() => clearConnectionHoverHint(frameRef.current)}>
     <ActivityGlow phase={activity.phase} />
     {spec.connectable && ([[Position.Top, "top"], [Position.Right, "right"], [Position.Bottom, "bottom"], [Position.Left, "left"]] as const).map(([position, side]) =>
       <Handle key={side} type="source" id={`boundary-${side}`} position={position} className={`semantic-handle semantic-handle--${side}`} data-connection-side={side} aria-label={t("Connect {v0} {v1}", { v0: String(card.name), v1: String(side) })} />)}
     {spec.connectable && <ConnectionHoverHint />}
-    <header className="container-drag-region container-header">{header}{spec.connectable && <ConnectionDropSurface nodeId={card.id} />}</header>
+    <header className="container-drag-region container-header card-finish-surface">{header}{spec.connectable && <ConnectionDropSurface nodeId={card.id} />}<CardFinishLayer finish={card.finish} quality="thumbnail" /></header>
     {(spec.virtual || activity.phase !== "idle") && <span className="container-activity" role="status" data-phase={activity.phase}><i />{activityLabel}</span>}
     {children}
   </section>;

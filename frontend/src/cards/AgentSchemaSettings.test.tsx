@@ -29,3 +29,15 @@ it("edits plugin-defined settings and shows detected runtime without exposing co
   fireEvent.blur(model);
   await waitFor(() => expect(update).toHaveBeenCalledWith("custom", { config: { model: "chosen-model" } }));
 });
+
+it('pauses runtime discovery for a retained hidden inspector', async () => {
+  const card: WorldCard = { id: 'hidden-agent', type: 'agent', name: 'Agent', position: { x: 0, y: 0 },
+    size: { width: 300, height: 190 }, expanded: false, status: 'idle', config: {} };
+  const get = vi.spyOn(worldApi, 'getAgentInfo').mockResolvedValue({ session_id: 'runtime', details: {} });
+  const view = render(<AgentSchemaSettings card={card} active={false} />);
+  expect(get).not.toHaveBeenCalled();
+  view.rerender(<AgentSchemaSettings card={card} active />);
+  await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+  view.rerender(<AgentSchemaSettings card={{ ...card, status: 'running', config: { changed: true } }} active={false} />);
+  expect(get).toHaveBeenCalledTimes(1);
+});

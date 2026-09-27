@@ -24,6 +24,7 @@ class RunStore:
         self,
         *,
         agent_id: str,
+        run_id: str | None = None,
         runtime_provider_id: str,
         caller_kind: str,
         caller_id: str | None = None,
@@ -31,7 +32,7 @@ class RunStore:
         task_id: str | None = None,
         context_id: str | None = None,
     ) -> RunRecord:
-        run_id = str(uuid4())
+        run_id = run_id or str(uuid4())
         root_run_id = run_id
         if parent_run_id is not None:
             parent = self.get(parent_run_id)

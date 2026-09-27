@@ -34,6 +34,28 @@ def edit(store, action, **kwargs):
     return store.edit(LibraryEdit(expected_revision=store.read().revision, action=action, **kwargs))
 
 
+def test_legacy_empty_pack_snapshot_survives_restart(tmp_path):
+    db = Database(tmp_path / "world.db")
+    registry = create_builtin_registry()
+    install(registry)
+    store = CardLibraryStore(db, registry)
+    expected = edit(store, "open_pack", id="example.default")
+    payload = expected.model_dump(mode="json")
+    payload["packs"]["example.default"]["definition"]["cards"] = []
+    with db.transaction(immediate=True) as connection:
+        connection.execute("UPDATE application_settings SET value_json=? WHERE key=?", (json.dumps(payload), KEY))
+    restarted = CardLibraryStore(db, create_builtin_registry())
+    restored = restarted.read()
+    assert restored.packs["example.default"].model_dump(mode="json") == payload["packs"]["example.default"]
+    assert restored.collection == expected.collection
+    assert restored.decks == expected.decks
+    assert restarted.read().revision == restored.revision
+    # Content Packs can now contain only Legion presets. Their empty card list
+    # also makes the shared catalog model compatible with these older snapshots.
+    assert PackDefinition(id="empty", name="Empty", cards=()).cards == ()
+    db.close()
+
+
 @pytest.mark.parametrize("compatibility", [False, True])
 def test_retired_pack_metadata_migrates_without_losing_user_state(tmp_path, compatibility):
     db = Database(tmp_path / "world.db")
@@ -255,6 +277,7 @@ def test_revision_conflicts_and_deck_validation(tmp_path):
         store.edit(LibraryEdit(expected_revision=stale, action="delete_deck", id="starter"))
     with pytest.raises(GraphValidationError, match="duplicate"):
         edit(store, "update_deck", id="starter", entries=[{"id": "text"}, {"id": "text"}])
+    edit(store, "delete_deck", id="saved-legions")
     with pytest.raises(GraphValidationError, match="at least one"):
         edit(store, "delete_deck", id="starter")
     with pytest.raises(GraphValidationError, match="Only collected"):
@@ -395,7 +418,7 @@ def test_move_unavailable_reference_preserves_collection_rules(tmp_path):
     edit(store, "set_plugin_enabled", id="example", enabled=False)
     state = edit(store, "move_entry", source_deck_id="starter", id=target, entry={"id": "example.card"})
     assert not state.decks[0].entries
-    assert state.decks[1].entries[0].id == "example.card"
+    assert next(deck for deck in state.decks if deck.id == target).entries[0].id == "example.card"
     with pytest.raises(GraphValidationError, match="Only collected"):
         edit(store, "move_entry", id="starter", entry={"id": "example.card"})
     assert store.read().model_dump(mode="json") == state.model_dump(mode="json")

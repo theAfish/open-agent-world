@@ -20,6 +20,8 @@ class AgentCapabilityProvider(Protocol):
     after the model saw a tool cannot still be exercised.
     """
 
+    async def read_own_document(self, agent_id: str) -> dict[str, Any]: ...
+
     async def list_tools(self, agent_id: str) -> Sequence[ScopedToolDefinition]: ...
 
     async def invoke_tool(

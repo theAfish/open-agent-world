@@ -122,7 +122,7 @@ class InspectedPack:
     manifest: PackManifest
     files: dict[str, bytes]
     digest: str
-    backend_entry: str
+    backend_entry: str | None
 
 
 def inspect_archive(data: bytes) -> InspectedPack:
@@ -137,7 +137,12 @@ def inspect_archive(data: bytes) -> InspectedPack:
     manifest = PackManifest.model_validate(json_object(files["manifest.json"]))
     manifest.check_compatibility()
     for name in files:
-        if name not in {"manifest.json", "checksums.json", "README.md"} and not name.startswith(("backend/", "frontend/", "assets/")):
+        allowed = name in {"manifest.json", "checksums.json", "README.md"}
+        if manifest.kind == "content":
+            allowed = allowed or name in manifest.content.legions
+        else:
+            allowed = allowed or name.startswith(("backend/", "frontend/", "assets/"))
+        if not allowed:
             raise ValueError(f"Unexpected Pack file: {name}")
     checksums = json_object(files["checksums.json"])
     if isinstance(checksums, dict):
@@ -148,6 +153,11 @@ def inspect_archive(data: bytes) -> InspectedPack:
     for name, digest in checksums.items():
         if hashlib.sha256(files[name]).hexdigest() != digest:
             raise ValueError(f"Checksum mismatch: {name}")
+    if manifest.kind == "content":
+        from backend.packs.content import read_presets
+        read_presets(manifest, files)
+        return InspectedPack(manifest, files, hashlib.sha256(data).hexdigest(), None)
+    assert manifest.entrypoints is not None
     for entry in (manifest.entrypoints.backend, manifest.entrypoints.frontend):
         if entry not in files:
             raise ValueError(f"Missing Pack artifact: {entry}")

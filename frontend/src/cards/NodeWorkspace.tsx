@@ -28,8 +28,11 @@ import { ConversationWorkspace } from "./ConversationWorkspace";
 import { MinisterRoleSettings } from './MinisterRoleCard';
 import { openMinisterSettings, useMinisterRole } from '../state/ministerRole';
 import { AgentCardBody } from "./AgentCard";
+import { modelLabel } from "./modelLabel";
 import { PluginSurface } from "../plugins/PluginSurface";
 import { CatalogIcon } from "../components/CatalogIcon";
+import { CardFinishLayer } from "./CardFinishLayer";
+import { normalizeCardFinish } from "./cardFinish";
 
 interface WorkspaceSurfaceProps {
   card: WorldCard;
@@ -44,10 +47,10 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
   const canCollapse = collapsedSurface(nodePresentation(card.type, catalog), "workspace", base) !== "workspace";
 
   return (
-    <header className="workspace-titlebar node-drag-region">
+    <header className="workspace-titlebar node-drag-region card-finish-surface" data-finish={normalizeCardFinish(card.finish)}>
       <div className="workspace-app-mark"><CatalogIcon definition={catalog.node_types.find((d) => d.id === card.type)} size={16} /></div>
       <div>
-        <span>{catalog.node_types.find((item) => item.id === card.type)?.label ?? card.type} {t("workspace")}</span>
+        <span>{card.type === "xrd.match" ? "XRD 谱解析" : (catalog.node_types.find((item) => item.id === card.type)?.label ?? card.type)} {t("workspace")}</span>
         <CardName card={card} workspace label={catalog.node_types.find(item => item.id === card.type)?.label ?? card.type} />
       </div>
       <div className="workspace-window-actions">
@@ -55,12 +58,14 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
           label={t("Remove {v0}", { v0: String(card.name) })} title={t("Remove object (Ctrl+Z to undo)")} />}
         {canCollapse && <IconButton icon={X} size="sm" quiet onClick={() => closeWorkspace(card.id)} label={t("Close workspace")} />}
       </div>
+      <CardFinishLayer finish={card.finish} quality="thumbnail" />
     </header>
   );
 }
 
 function AgentWorkspace({ card }: { card: WorldCard }) {
   useLocale();
+  const modelCatalog = useWorldStore(state => state.modelCatalog);
   const catalog = useWorldStore((state) => state.catalog);
   const edges = useWorldStore((state) => state.edges);
   const cards = useWorldStore((state) => state.cards);
@@ -117,7 +122,7 @@ function AgentWorkspace({ card }: { card: WorldCard }) {
         </div>
         <div className="workspace-agent-state">
           <span data-status={card.status} />
-          <div><strong>{card.status}</strong><small>{String(card.config.model ?? t("Default model"))}</small></div>
+          <div><strong>{card.status}</strong><small>{modelLabel(modelCatalog, card.config.model)}</small></div>
         </div>
       </nav>
 
@@ -194,7 +199,7 @@ export function WorkspaceContent({ card }: WorkspaceSurfaceProps) {
   return (
       <div className="workspace-content">
       <PluginSurface card={card} slot="workspace" level="workspace">
-      {catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("core.agent") ? deployed ? <div className="workspace-welcome"><Bot size={22} /><strong>{card.name}</strong><p>{t(card.status)}</p></div> : <>
+      {card.type === "xrd.match" ? <div className="agent-window-body"><div className="agent-settings-window nodrag nopan nowheel"><AgentCardBody card={card} level="workspace" /></div></div> : catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("core.agent") ? deployed ? <div className="workspace-welcome"><Bot size={22} /><strong>{card.name}</strong><p>{t(card.status)}</p></div> : <>
         <nav className="agent-window-tabs nodrag nopan" role="tablist" aria-label={t("Agent window")}>
           <button role="tab" aria-selected={!ministerTab && agentTab === "activity"} onClick={() => { useMinisterRole.setState({ settingsCardId: undefined }); setAgentTab("activity"); }}>{t("Activity")}</button>
           <button role="tab" aria-selected={!ministerTab && agentTab === "settings"} onClick={() => { useMinisterRole.setState({ settingsCardId: undefined }); setAgentTab("settings"); }}>{t("Settings")}</button>

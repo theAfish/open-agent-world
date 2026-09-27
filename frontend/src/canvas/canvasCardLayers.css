@@ -1,0 +1,6 @@
+/* Only bounded node/preview surfaces opt in. Cache at most 512 mounted surfaces
+   in this flow (including when more are visible), not nested graphs or large
+   editors/Glue. React Flow still culls offscreen nodes. Release above overview zoom. */
+.react-flow[data-card-layers="true"] > .react-flow__renderer > .react-flow__pane > .react-flow__viewport > .react-flow__nodes > .react-flow__node-worldCard.can-cache-card:nth-child(-n+512) {
+  will-change: transform;
+}

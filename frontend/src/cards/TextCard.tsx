@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useWorldStore } from "../state/worldStore";
 import type { ModificationRecord, WorldCard } from "../types/world";
 import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
+import { surfaceDraftKey, useNodeSurfaceStore, useSurfaceDraft } from '../state/nodeSurfaces';
 import { RelationshipList } from "./CardUtilities";
 import { worldApi, apiErrorMessage } from "../api/client";
 
@@ -12,15 +13,37 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
   useLocale();
   const { deployed } = useWorkspaceAccess();
   const saveText = useWorldStore((state) => state.saveText);
-  const [content, setContent] = useState("");
-  const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving">("saved");
+  const draftKey = surfaceDraftKey(card.id, 'text');
+  const [storedDraft, setStoredDraft] = useSurfaceDraft<{ content: string; revision?: number; saving?: boolean } | undefined>(draftKey, undefined);
+  const [content, setContent] = useState(storedDraft?.content ?? '');
+  const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving">(storedDraft ? 'dirty' : 'saved');
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
-  const [revision, setRevision] = useState<number>();
+  const [revision, setRevision] = useState<number | undefined>(storedDraft?.revision);
   const [history, setHistory] = useState<ModificationRecord[]>([]);
   const [reload, setReload] = useState(0);
-  const draft = useRef({ content: "", dirty: false });
+  const draft = useRef({ content: storedDraft?.content ?? '', dirty: !!storedDraft });
   const saving = useRef(false);
+  const previousStoredDraft = useRef(storedDraft);
+
+  useEffect(() => {
+    const previous = previousStoredDraft.current;
+    previousStoredDraft.current = storedDraft;
+    saving.current = !!storedDraft?.saving;
+    if (!storedDraft) {
+      if (previous) {
+        draft.current = { content: previous.content, dirty: false };
+        setContent(previous.content);
+        setSaveState('saved');
+        setReload(value => value + 1);
+      }
+      return;
+    }
+    draft.current = { content: storedDraft.content, dirty: true };
+    setContent(storedDraft.content);
+    setRevision(storedDraft.revision);
+    setSaveState(storedDraft.saving ? 'saving' : 'dirty');
+  }, [storedDraft]);
 
   useEffect(() => {
     if ((level !== "inspector" && level !== "workspace") || card.ephemeral) return;
@@ -44,15 +67,21 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
     if (deployed || !ready || !draft.current.dirty || saving.current) return;
     saving.current = true;
     const submitted = draft.current.content;
+    setStoredDraft(current => current ? { ...current, saving: true } : current);
     setSaveState("saving");
     const saved = await saveText(card.id, submitted, revision);
     saving.current = false;
     if (saved) {
-      setRevision(Number(useWorldStore.getState().cards.find(item => item.id === card.id)?.config.revision));
-      draft.current.dirty = draft.current.content !== submitted;
+      const nextRevision = Number(useWorldStore.getState().cards.find(item => item.id === card.id)?.config.revision);
+      setRevision(nextRevision);
+      const latest = useNodeSurfaceStore.getState().drafts[draftKey];
+      const current = latest ? JSON.parse(latest) as { content: string } : undefined;
+      draft.current.dirty = !!current && current.content !== submitted;
+      setStoredDraft(current && current.content !== submitted ? { content: current.content, revision: nextRevision } : undefined);
       setError("");
       setReload(value => value + 1);
     } else {
+      setStoredDraft(current => current ? { ...current, saving: false } : current);
       setError(t("保存失败；草稿已保留。若正文被其他参与者更新，请先核对新版本，避免覆盖。"));
     }
     setSaveState(draft.current.dirty ? "dirty" : "saved");
@@ -82,6 +111,7 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
           spellCheck
           onChange={(event) => {
             draft.current = { content: event.target.value, dirty: true };
+            setStoredDraft({ content: event.target.value, revision, saving: saving.current });
             setContent(event.target.value);
             setSaveState("dirty");
           }}

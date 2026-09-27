@@ -96,6 +96,12 @@ class SandboxOperations:
             # Cancelling an independent wait below never cancels the operation.
             if not task.done() and not task.cancelling():
                 task.cancel()
+            # The worker owns native termination, ACL revocation and journal
+            # cleanup. Do not report cancellation until that cleanup completes,
+            # even if the caller cancels again while it is being drained.
+            async def finish():
+                await asyncio.gather(task, return_exceptions=True)
+            await self.services._complete_committed(finish())
             raise
 
     async def _run(self, receipt, invoke):

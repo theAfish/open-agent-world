@@ -5,7 +5,7 @@ import { SkillToolboxPreview } from "./SkillToolbox";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
 import { PluginSurface } from "../plugins/PluginSurface";
-import { modelRef } from "../state/modelConnections";
+import { modelLabel } from "./modelLabel";
 import { MINISTER_ROLE_CARD } from '../state/ministerRole';
 import { MinisterRoleCardPreview } from './MinisterRoleCard';
 
@@ -35,11 +35,7 @@ function DefaultNodePreview({ card }: { card: WorldCard }) {
 
 
   if (catalog.node_types.find((definition) => definition.id === card.type)?.traits.includes("core.agent")) {
-    const reference = String(card.config.model ?? "");
-    const configuredModel = modelCatalog.connections.flatMap(connection => connection.models)
-      .find(model => modelRef(model.id) === reference);
-    const modelName = configuredModel?.name || (reference.startsWith("oaw:model:")
-      ? t("Unavailable model") : reference || t("Default model"));
+    const modelName = modelLabel(modelCatalog, card.config.model);
     return (
       <div className="node-preview-summary">
         <p>{compactText(card.config.system_instruction, t("Ready for a scoped instruction."))}</p>

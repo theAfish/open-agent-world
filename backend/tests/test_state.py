@@ -73,6 +73,53 @@ def test_builtin_run_schema_is_generic_and_all_state_is_durable() -> None:
     assert not hasattr(next(iter(run_fields.values())), "durability")
 
 
+def test_touch_preserves_json_and_revision_events_without_serialization(state_store, monkeypatch):
+    import backend.state.store as persistence
+    from backend.state.models import StateMutationKind
+
+    scope = state_store.ensure_scope("node_document", "large-collection", schema_id="core.node_document")
+    value = {"snapshots": {"source": "x" * 1_100_000}}
+    original = state_store.set(scope, "document", value)
+    events = []
+    state_store.event_sink = events.append
+
+    def no_json(*args, **kwargs):
+        raise AssertionError("Invalidating a collection must not decode/re-encode its stored document")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(persistence.json, "loads", no_json)
+        patch.setattr(persistence.json, "dumps", no_json)
+        assert state_store.touch(scope, "document", expected_revision=1, actor_id="editor", run_id="run") == 2
+    current = state_store.get_record(scope, "document")
+    assert current.value == value
+    assert current.revision == 2
+    assert current.scope.revision == original.scope.revision + 1
+    assert current.updated_at >= original.updated_at
+    assert len(events) == 1
+    assert events[0].kind is StateMutationKind.UPDATED
+    assert (events[0].revision, events[0].actor_id, events[0].run_id) == (2, "editor", "run")
+    with pytest.raises(RevisionConflictError):
+        state_store.touch(scope, "document", expected_revision=1)
+    assert len(events) == 1
+    assert state_store.get_record(scope, "document").revision == 2
+
+
+def test_touch_rejects_defaults_deleted_values_and_stale_scope_identities(state_store):
+    scope = state_store.ensure_scope("node_document", "collection", schema_id="core.node_document")
+    # A default is not a stored document; its owner must initialize it explicitly.
+    with pytest.raises(NotFoundError):
+        state_store.touch(scope, "document")
+    state_store.set(scope, "document", {})
+    state_store.delete(scope, "document")
+    with pytest.raises(NotFoundError):
+        state_store.touch(scope, "document")
+    state_store.delete_scope(scope)
+    replacement = state_store.ensure_scope("node_document", "collection", schema_id="core.node_document")
+    state_store.set(replacement, "document", {})
+    with pytest.raises(ValueError, match="identity"):
+        state_store.touch(scope, "document")
+
+
 def test_merge_policies_revision_conflicts_and_permissions(tmp_path: Path) -> None:
     registry = create_builtin_registry()
     schema = StateSchema(id="example.runtime", fields={
@@ -124,6 +171,10 @@ def test_merge_policies_revision_conflicts_and_permissions(tmp_path: Path) -> No
             StateContext([scope]), permissions={"example.write"}
         )
         assert permitted.set(scope, "restricted", "yes").value == "yes"
+        with pytest.raises(PermissionDeniedError):
+            store.touch(scope, "restricted", permissions=())
+        assert store.touch(scope, "restricted", permissions={"example.write"}, expected_revision=1) == 2
+        assert store.get(scope, "restricted") == "yes"
     finally:
         database.close()
 

@@ -42,7 +42,7 @@ Setup installs application dependencies and builds the frontend. Later launches 
 ## First use
 
 1. In **Settings → Models**, add your connection, credentials, and model; choose a default.
-2. Follow the first-use tutorial on the canvas, or replay it with the compass button.
+2. Follow the first-use tutorial on the canvas, or replay it from **Help (?) → Tutorial**.
 3. Open **Pack & Card Library**, collect cards, add them to your active deck, then place them on the canvas.
 
 Continue with [Your first team](user-guide/first-team.md), or [中文使用入门](user-guide/index.zh-CN.md).

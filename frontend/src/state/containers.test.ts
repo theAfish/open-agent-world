@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { containerContentBounds, resizeContainerLayout, memberSurfacePosition, containerSizes, containerDisplayOwners, ownedCardIds } from './containers';
 import { TEST_CATALOG } from './catalog.fixture';
+import { EMPTY_CATALOG } from './catalog';
+import { positionSurfaceAtNodeCenter } from '../canvas/nodeDisplacement';
 import { buildCardDraft } from './helpers';
 import { NODE_SURFACE_SIZE, type NodeSurfaceLevel } from './nodeSurfaces';
 import type { WorldCard } from '../types/world';
@@ -16,6 +18,16 @@ it('expands overlapping roots, nested members and equipment without selecting ex
     .toEqual(new Set([parent.id, agent.id, equipment.id, nested.id]));
 });
 describe('container resize reflow', () => {
+  it('renders members before their container catalog arrives, then applies its insets', () => {
+    const parent = card('parent', 'legion', 200, 100);
+    const member = { ...card('member', 'text', 250, 200), parent_id: parent.id };
+    expect(memberSurfacePosition(member, parent, 'inspector', EMPTY_CATALOG))
+      .toEqual(positionSurfaceAtNodeCenter(member.position, 'inspector'));
+    const definition = TEST_CATALOG.node_types.find(type => type.id === parent.type)!.container!;
+    expect(memberSurfacePosition(member, parent, 'inspector', TEST_CATALOG))
+      .toEqual({ x: parent.position.x + definition.content_inset[0], y: parent.position.y + definition.content_inset[1] });
+  });
+
   it('preserves clamped expanded member placement when the frame origin moves', () => {
     const parent = { ...card('parent', 'legion', 200, 100), size: { width: 1200, height: 1000 } };
     const member = { ...card('member', 'text', 250, 200), parent_id: parent.id };

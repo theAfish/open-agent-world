@@ -110,6 +110,20 @@ def test_unknown_preset_does_not_create_nodes(client):
     assert client.get("/api/nodes").json() == []
 
 
+@pytest.mark.parametrize('preset', ['assistant', 'coding', 'team'])
+def test_starter_workspace_opens_with_remapped_layout(client, preset):
+    response = client.post(f'/api/legions/presets/{preset}/instances', json={'as_group': True})
+    assert response.status_code == 201, response.text
+    nodes = response.json()['nodes']
+    legion = next(node for node in nodes if node['type'] == 'legion')
+    layout = legion['config']['workspace_layout']
+    assert layout['root'] is not None
+    serialized = json.dumps(layout)
+    conversation = next(node for node in nodes if node['type'] == 'conversation')
+    assert conversation['id'] in serialized
+    assert conversation['parent_id'] == legion['id']
+
+
 @pytest.mark.asyncio
 async def test_legacy_team_template_still_deploys(tmp_path: Path):
     services = create_services(Settings.for_data_root(tmp_path))

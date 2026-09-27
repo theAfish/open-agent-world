@@ -1,5 +1,5 @@
 import type { FlowViewportState, WorldCard, WorldPosition, PluginCatalog } from "../types/world";
-import { descendants, isContainer, parentFirst } from "./containers";
+import { isContainer, parentFirst } from "./containers";
 
 export const CHUNK_SIZE = 2048;
 export const PREFETCH_RING = 1;
@@ -45,11 +45,35 @@ export function getViewportChunkKeys(
   return keys;
 }
 
+/** Compare coverage without allocating the full prefetch list on camera moves. */
+export function sameViewportChunks(a: FlowViewportState, b: FlowViewportState): boolean {
+  const left = getViewportChunkBounds(a);
+  const right = getViewportChunkBounds(b);
+  return left.minX === right.minX && left.maxX === right.maxX
+    && left.minY === right.minY && left.maxY === right.maxY;
+}
+
 export function filterCardsToChunks(cards: WorldCard[], keys: Iterable<string>, catalog?: PluginCatalog): WorldCard[] {
+  // A boundary update can include a large Legion. Build direct children once;
+  // descendants(cards, id) rescanned every card even for each leaf in that Legion.
+  const childrenByParent = new Map<string, WorldCard[]>();
+  for (const card of cards) {
+    if (card.parent_id == null) continue;
+    const children = childrenByParent.get(card.parent_id) ?? [];
+    children.push(card);
+    childrenByParent.set(card.parent_id, children);
+  }
   const keySet = keys instanceof Set ? keys : new Set(keys);
   const visible = new Set(cards.filter((card) => keySet.has(positionToChunk(card.position).key)).map((c) => c.id));
-  for (const group of parentFirst(cards.filter((c) => catalog ? isContainer(c, catalog) : cards.some((member) => member.parent_id === c.id))).reverse()) {
-    const members = descendants(cards, group.id);
+  for (const group of parentFirst(cards.filter((c) => catalog ? isContainer(c, catalog) : childrenByParent.has(c.id))).reverse()) {
+    const members: WorldCard[] = [];
+    const pending = [...(childrenByParent.get(group.id) ?? [])].reverse();
+    while (pending.length) {
+      const member = pending.pop()!;
+      members.push(member);
+      const children = childrenByParent.get(member.id);
+      if (children) for (let index = children.length - 1; index >= 0; index--) pending.push(children[index]);
+    }
     const intersects = [...keySet].some((key) => {
       const [x, y] = key.split(":").map(Number);
       return group.position.x < (x + 1) * CHUNK_SIZE && group.position.x + group.size.width >= x * CHUNK_SIZE

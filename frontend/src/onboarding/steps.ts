@@ -73,7 +73,7 @@ export const STEPS: readonly TutorialStep[] = [
   { id: 'legion-open', chapter: 5, dialogue: 'Here is your Legion! Click Workspace mode in its header to bring its cards into one window.', target: 'legion', role: 'legion', expects: 'legion-workspace' },
   { id: 'legion-layout', chapter: 5, dialogue: 'Place Conversation first, then dock Sandbox beside it. Choose Done editing to save your layout.', hint: 'Drag from Workspace cards, or select a card and use Place selected card and Dock right. You can leave Agent unplaced.', target: 'legion-layout', role: 'legion', expects: 'legion-layout' },
   { id: 'legion-return', chapter: 5, dialogue: 'These are your live cards. Edit layout can split panels, add tabs or arrange individual sections. Your saved layout reopens with this Legion. Click Back to canvas when ready.', target: 'legion-back', role: 'legion', expects: 'legion-canvas' },
-  { id: 'finish', chapter: 5, dialogue: 'Your Legion and workspace stay here. Later, save the Legion to your library to reuse its setup. I’ll tidy my temporary props. Replay Tutorial is at the compass whenever you want another walk.', target: 'center', button: 'Finish & keep my world' },
+  { id: 'finish', chapter: 5, dialogue: 'Your Legion and workspace stay here. Later, save the Legion to your library to reuse its setup. I’ll tidy my temporary props. Open Help → Tutorial whenever you want another walk.', target: 'center', button: 'Finish & keep my world' },
 ];
 
 export interface Observation {

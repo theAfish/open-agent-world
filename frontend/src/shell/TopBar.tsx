@@ -1,13 +1,12 @@
 import { AppearanceButtons, SettingsButton } from './PreferenceButtons';
-import { Activity, Compass, LibraryBig, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { Activity, LibraryBig, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useLocale, t } from "../i18n";
-import { tutorial, useTutorialStore } from '../onboarding/controller';
+import { HelpMenu } from './HelpMenu';
 import { useCardLibrary } from "../state/cardLibrary";
 import { useWorldStore } from "../state/worldStore";
 
 export function TopBar() {
   useLocale();
-  const tutorialBusy = useTutorialStore(state => state.busy);
   const cards = useWorldStore((state) => state.cards);
   const edges = useWorldStore((state) => state.edges);
   const syncState = useWorldStore((state) => state.syncState);
@@ -55,7 +54,7 @@ export function TopBar() {
           <Activity size={16} />
         </button>
         <AppearanceButtons />
-        <button type="button" className="top-icon-button" disabled={tutorialBusy} onClick={() => void tutorial.replay()} aria-label={t("Replay Tutorial")} title={t("Replay Tutorial")}><Compass size={16} /></button>
+        <HelpMenu />
       </div>
     </aside>
   );

@@ -1,0 +1,56 @@
+.help-dialog.help-dialog--documentation { width: min(1180px, calc(100vw - 40px)); max-width: none; height: min(820px, calc(100dvh - 48px)); max-height: none; overflow: hidden; }
+.help-dialog--documentation[open] { display: flex; flex-direction: column; }
+.help-dialog--documentation > header { flex-shrink: 0; position: static; }
+.documentation-panel { display: grid; grid-template-columns: 270px minmax(0, 1fr); flex: 1; min-height: 0; }
+.docs-sidebar { display: flex; flex-direction: column; min-height: 0; padding: 18px 12px 12px; border-right: 1px solid var(--line); background: var(--surface-soft); }
+.docs-search { display: flex; align-items: center; gap: 8px; margin: 0 2px 14px; padding: 9px 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface-raised); color: var(--ink-soft); }
+.docs-search:focus-within { outline: 2px solid var(--accent); }
+.docs-search input { width: 100%; min-width: 0; padding: 0; border: 0; outline: 0; font: inherit; font-size: 12px; color: var(--ink); background: transparent; }
+.docs-sidebar nav { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 4px 12px 0; }
+.docs-sidebar nav section + section { margin-top: 22px; }
+.help-dialog .docs-sidebar h3 { margin: 8px 10px; font-size: 11px; color: var(--ink-soft); letter-spacing: .06em; }
+.docs-sidebar nav button { display: block; width: 100%; border: 0; border-radius: 7px; padding: 9px 10px; background: transparent; color: var(--ink); font: inherit; font-size: 12px; line-height: 1.45; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.docs-sidebar nav button:hover { background: var(--highlight); }
+.docs-sidebar nav button[aria-current="page"] { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; }
+.documentation-panel button:focus-visible, .docs-article:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.help-dialog .docs-offline-note { margin: 12px 6px 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--ink-soft); }
+.docs-reader { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.docs-toolbar { display: flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 10px 22px; border-bottom: 1px solid var(--line); }
+.docs-toolbar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-soft); }
+.docs-toolbar button:disabled { opacity: .35; cursor: default; }
+.docs-article { flex: 1; min-height: 0; padding: 24px 36px 48px; overflow: auto; overscroll-behavior: contain; line-height: 1.75; font-size: 14px; overflow-wrap: anywhere; }
+.docs-article > :first-child { margin-top: 0; }
+.help-dialog .docs-article h1 { margin: 0 0 20px; font-size: 28px; line-height: 1.3; letter-spacing: -.025em; }
+.help-dialog .docs-article h2 { margin: 32px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); font-size: 20px; line-height: 1.4; }
+.help-dialog .docs-article h3 { margin: 24px 0 10px; font-size: 16px; }
+.help-dialog .docs-article p { font-size: 14px; line-height: 1.75; }
+.docs-article li { margin: 6px 0; }
+.docs-article :is(ul, ol) { padding-left: 24px; }
+.docs-article pre { padding: 16px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); overflow-x: auto; font-size: 12px; line-height: 1.6; }
+.docs-article code { font-family: Consolas, "SFMono-Regular", monospace; font-size: .9em; }
+.docs-article :not(pre) > code { padding: 2px 5px; border-radius: 4px; background: var(--surface-soft); }
+.docs-article blockquote { margin: 18px 0; padding: 1px 16px; border-left: 3px solid var(--accent); color: var(--ink-soft); }
+.docs-article img { display: block; max-width: 100%; height: auto; margin: 18px auto; border: 1px solid var(--line); border-radius: 9px; }
+.docs-table-scroll { overflow-x: auto; margin: 18px 0; }
+.docs-article table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.docs-article :is(th, td) { padding: 9px 12px; border: 1px solid var(--line); text-align: left; }
+.docs-article th { background: var(--surface-soft); }
+.docs-article hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
+.docs-external-icon { display: inline; vertical-align: baseline; margin-left: 4px; }
+.help-dialog .docs-language-note { margin: 0 0 18px; color: var(--ink-soft); font-size: 12px; }
+.help-guide-link { padding: 0; border: 0; background: transparent; font: inherit; color: var(--accent-strong); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+@media (max-width: 720px) {
+  .help-dialog.help-dialog--documentation { width: calc(100vw - 20px); height: calc(100dvh - 24px); }
+  .documentation-panel { grid-template-columns: 190px minmax(0, 1fr); }
+  .docs-sidebar { padding: 12px 8px; }
+  .docs-toolbar { padding: 8px 12px; }
+  .docs-article { padding: 20px 18px 36px; }
+}
+@media (max-width: 480px) {
+  .documentation-panel { grid-template-columns: minmax(0, 1fr); grid-template-rows: 170px minmax(0, 1fr); }
+  .docs-sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+  .docs-sidebar nav section + section { margin-top: 8px; }
+  .docs-search { margin-bottom: 6px; }
+  .docs-offline-note { display: none; }
+  .help-dialog .docs-article h1 { font-size: 24px; }
+}

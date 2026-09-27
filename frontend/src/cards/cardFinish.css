@@ -1,0 +1,165 @@
+/* Shared print plates stay attached to the stock. Only the broad reflection
+   changes with orientation. No idle animation or permanent promoted layers. */
+/* A fallback containing block must never replace an existing absolute header/slot. */
+:where(.card-finish-surface) { position: relative; isolation: isolate; }
+.card-finish-surface .card-face-copy { position: relative; z-index: 2; }
+.card-finish-surface .card-face-corner { z-index: 2; }
+.card-finish-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+  user-select: none;
+  /* Leave this wrapper out of a stacking context so each plate blends with the art. */
+  --finish-rest-x: 32%;
+  --finish-rest-y: 24%;
+  --finish-intensity: 1;
+}
+.card-finish-layer > span,
+.card-finish-layer::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.card-finish-base {
+  /* Normal compositing retains both dark and coloured facets on white stock. */
+  background: linear-gradient(116deg, #273a587a 0%, #afc7d457 13%, #ffffff55 25%, #3d527578 38%, #a2bcc728 48%, #e6deb74d 63%, #49537173 80%, #c8e0e957);
+  box-shadow: inset 0 0 0 1px #afbec693, inset 0 1px 1px #ffffffd9, inset 0 -1px 2px #26334460;
+  opacity: calc(.8 * var(--finish-intensity));
+  -webkit-mask-image: linear-gradient(#000 0 48%, #000b 69%, #0003 91%, #0008);
+  mask-image: linear-gradient(#000 0 48%, #000b 69%, #0003 91%, #0008);
+}
+.card-finish-pattern {
+  background-position: var(--finish-shift-x, 50%) var(--finish-shift-y, 50%);
+  opacity: calc((.54 + var(--finish-active, 0) * .1) * var(--finish-intensity));
+  transition: opacity 180ms ease;
+  /* The clear coat catches light mostly across the art, falling away before the copy. */
+  -webkit-mask-image: linear-gradient(#000 0 47%, #000d 64%, #0005 82%, #0003);
+  mask-image: linear-gradient(#000 0 47%, #000d 64%, #0005 82%, #0003);
+}
+.card-finish-grain {
+  background-image: var(--finish-grain-plate);
+  background-size: 160px 160px;
+  mix-blend-mode: soft-light;
+  opacity: .22;
+  -webkit-mask-image: linear-gradient(#0009, #000 35%, #0003 74%, #0000);
+  mask-image: linear-gradient(#0009, #000 35%, #0003 74%, #0000);
+}
+.card-finish-sheen {
+  background:
+    radial-gradient(ellipse at var(--finish-light-x, var(--finish-rest-x)) var(--finish-light-y, var(--finish-rest-y)), #fff9df75, #f2fcff18 22%, transparent 48%),
+    linear-gradient(var(--finish-angle, 124deg), transparent 24%, #f1feff00 36%, #fffdf280 44%, #f3ffff38 48%, transparent 61%);
+  background-size: 100% 100%, 220% 220%;
+  background-position: center, var(--finish-shift-x, 50%) var(--finish-shift-y, 50%);
+  mix-blend-mode: screen;
+  opacity: calc((.24 + var(--finish-active, 0) * .12) * var(--finish-intensity));
+  transition: opacity 180ms ease;
+  -webkit-mask-image: linear-gradient(#000 0 48%, #0008 69%, #0002 88%, #0005);
+  mask-image: linear-gradient(#000 0 48%, #0008 69%, #0002 88%, #0005);
+}
+
+/* Foil: steel shadows and broad silver highlights with fine stock grain. */
+.card-finish-layer--foil .card-finish-pattern {
+  background-image: linear-gradient(var(--finish-angle, 124deg), #30405e66 8%, #e4eff04d 21%, #96c4c440 33%, #e2edf673 40%, #3e52798f 51%, #a6bac14d 61%, #d2ba794d 77%, #47547370 91%);
+  background-size: 175% 175%;
+  opacity: calc((.56 + var(--finish-active, 0) * .12) * var(--finish-intensity));
+}
+
+/* Spectral lobes retain their colours on light stock before interaction. */
+.card-finish-layer--rainbow .card-finish-base {
+  background: linear-gradient(135deg, #2848af7a, #22c3d466 22%, #ab31b175 45%, #ee71806b 65%, #534ac173 82%, #2fbca16b);
+  box-shadow: inset 0 0 0 1px #a3dbefb3, inset 0 1px 2px #fffedbdd;
+  opacity: calc(.65 * var(--finish-intensity));
+}
+.card-finish-layer--rainbow .card-finish-pattern {
+  background-image:
+    conic-gradient(from 140deg at 52% 38%, #159dce, #5846d9 16%, #d945ad 33%, #f1ba4e 48%, #88c961 62%, #22cabc 78%, #298bdf 92%, #159dce);
+  background-size: 115% 115%;
+  opacity: calc((.46 + var(--finish-active, 0) * .1) * var(--finish-intensity));
+}
+.card-finish-layer--rainbow .card-finish-sheen {
+  background-image:
+    radial-gradient(ellipse at var(--finish-light-x, var(--finish-rest-x)) var(--finish-light-y, var(--finish-rest-y)), #e2ffff66, #d2fcff1a 23%, transparent 54%),
+    linear-gradient(var(--finish-angle, 124deg), transparent 28%, #bafff330 37%, #fffde67a 44%, #dec7ff40 51%, transparent 63%);
+}
+
+/* Starlight: bright irregular foil flakes set into smoky translucent resin. */
+.card-finish-layer--starlight .card-finish-base {
+  background: radial-gradient(ellipse at 23% 18%, #1e516d70, transparent 67%), linear-gradient(148deg, #233a6c6b, #1b233b80 41%, #5940765c 74%, #172c494d);
+  box-shadow: inset 0 0 0 1px #c2d5e49c, inset 0 1px 2px #f0f8ffd9;
+  opacity: calc(.92 * var(--finish-intensity));
+}
+.card-finish-layer--starlight .card-finish-pattern {
+  background-image: var(--finish-star-plate);
+  background-size: 100% 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: calc((.94 + var(--finish-active, 0) * .06) * var(--finish-intensity));
+}
+.card-finish-layer--starlight .card-finish-grain { opacity: .18; }
+.card-finish-layer--starlight .card-finish-sheen {
+  background-image:
+    radial-gradient(ellipse at var(--finish-light-x, var(--finish-rest-x)) var(--finish-light-y, var(--finish-rest-y)), #d8e9ff85, #b6bcf221 27%, transparent 60%),
+    linear-gradient(var(--finish-angle, 124deg), transparent 32%, #c6e9fc52 43%, #eee2ff6e 48%, transparent 62%);
+  opacity: calc(.28 + var(--finish-active, 0) * .12);
+}
+
+/* Laser: fixed holographic security rosettes and crystalline facets. */
+.card-finish-layer--laser .card-finish-base {
+  background: conic-gradient(from 165deg at 68% 28%, #81dcd073, #8273d680 23%, #e781af73 40%, #efd8788c 56%, #5fd6dc70 78%, #81dcd073);
+  box-shadow: inset 0 0 0 1px #b8e8edcc, inset 0 1px 2px #ffffe6dd, inset 0 -1px 2px #49588066;
+  opacity: calc(.86 * var(--finish-intensity));
+}
+.card-finish-layer--laser .card-finish-pattern {
+  background-image: var(--finish-laser-plate);
+  background-size: 100% 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: calc((.65 + var(--finish-active, 0) * .13) * var(--finish-intensity));
+}
+.card-finish-layer--laser .card-finish-sheen {
+  background-image:
+    radial-gradient(ellipse at var(--finish-light-x, var(--finish-rest-x)) var(--finish-light-y, var(--finish-rest-y)), #effffb99, transparent 42%),
+    linear-gradient(var(--finish-angle, 124deg), transparent 19%, #7bfded33 29%, #e4c7ff8a 37%, #fff9cbd9 43%, #abfae98a 49%, #78aeff33 57%, transparent 67%);
+  opacity: calc(.36 + var(--finish-active, 0) * .15);
+}
+
+/* Smaller faces use just three passive plates. */
+.card-finish-layer[data-quality="thumbnail"] { --finish-intensity: .94; }
+.card-finish-layer[data-quality="thumbnail"] .card-finish-pattern,
+.card-finish-layer[data-quality="thumbnail"] .card-finish-sheen { transition: none; }
+.card-finish-layer[data-quality="showcase"] { --finish-intensity: 1.08; }
+
+/* Reveal runs once, after the face is visible. No permanent animation is attached. */
+.card-finish-layer[data-reveal="true"]::after {
+  content: "";
+  inset: -25% -80%;
+  background: linear-gradient(113deg, transparent 37%, #d1eaf200 43%, #faf5da88 48%, #c1e0eb27 52%, transparent 60%);
+  mix-blend-mode: screen;
+  opacity: 0;
+  transform: translateX(-42%);
+  animation: card-finish-reveal 1250ms cubic-bezier(.2, .65, .25, 1) 250ms 1 both;
+}
+.card-finish-layer--starlight[data-reveal="true"]::after { background-image: linear-gradient(113deg, transparent 37%, #d0e1ff00 43%, #dbe9ffa6 48%, #d9cef633 52%, transparent 60%); }
+.card-finish-layer--laser[data-reveal="true"]::after { animation-duration: 1450ms; }
+@keyframes card-finish-reveal {
+  0% { transform: translateX(-42%); opacity: 0; }
+  22% { opacity: .72; }
+  62% { opacity: .43; }
+  100% { transform: translateX(42%); opacity: 0; }
+}
+
+/* If blend or mask support is absent the printed face still remains readable. */
+@supports not ((mask-image: linear-gradient(#000, transparent)) or (-webkit-mask-image: linear-gradient(#000, transparent))) {
+  .card-finish-layer .card-finish-base { opacity: .32; }
+  .card-finish-layer .card-finish-pattern { opacity: .3; }
+  .card-finish-layer--starlight .card-finish-pattern { opacity: .65; }
+  .card-finish-layer .card-finish-sheen { opacity: .18; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .card-finish-layer { --finish-active: 0; --finish-light-x: 32%; --finish-light-y: 24%; --finish-shift-x: 50%; --finish-shift-y: 50%; --finish-angle: 124deg; }
+  .card-finish-layer > span { transition: none; }
+  .card-finish-layer[data-reveal="true"]::after { animation: none; content: none; }
+}

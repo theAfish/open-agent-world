@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath, PurePosixPath
 from typing import TYPE_CHECKING, Any, TypeVar
-from uuid import uuid4, uuid5, NAMESPACE_URL
+from uuid import uuid4
 
 from backend.spatial import Rectangle
 
@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from backend.canvas_control import CanvasControl, CanvasScope
 
 from backend.agents import (
-    AgentEvent,
     AgentNotFoundError,
     GoogleAdkAgentRuntime,
     RuntimeProvider,
@@ -44,6 +43,7 @@ from backend.conversations import (
     ConversationStore,
     ConversationSummary,
 )
+from backend.conversations.deliveries import ConversationDeliveryStore
 from backend.errors import (
     ConflictError,
     ConversationValidationError,
@@ -539,6 +539,7 @@ class ApplicationServices:
     events: EventHub
     plugins: PluginRegistry
     conversations: ConversationStore
+    deliveries: ConversationDeliveryStore
     state: StateStore
     contexts: ContextStore
     legions: LegionStore
@@ -547,6 +548,8 @@ class ApplicationServices:
     _sandbox_commands: dict[str, dict] = field(default_factory=dict, init=False, repr=False)
     _sandbox_tasks: dict[str, asyncio.Task] = field(default_factory=dict, init=False, repr=False)
     _sandbox_stopping: set[str] = field(default_factory=set, init=False, repr=False)
+    _conversation_delivery_locks: dict[str, asyncio.Lock] = field(default_factory=dict, init=False, repr=False)
+    _conversation_delivery_waiters: dict[str, asyncio.Task] = field(default_factory=dict, init=False, repr=False)
     # Short-lived desktop review requests. Restart expires them; approval never
     # becomes a durable grant or an Agent tool argument.
     _minister_proposals: dict[str, dict] = field(default_factory=dict, init=False, repr=False)
@@ -677,6 +680,56 @@ class ApplicationServices:
         manager = self._require_run_manager()
         manager.admission_check = self.summoning.assert_admission
         await manager.startup()
+        for run in manager.list_runs():
+            if (
+                run.caller_kind != "conversation"
+                or run.status not in TERMINAL_RUN_STATUSES
+                or not run.caller_id
+                or not run.context_id
+            ):
+                continue
+            with self.database.locked() as db:
+                already_visible = db.execute(
+                    """SELECT 1 FROM conversation_messages
+                    WHERE run_id=? AND session_id=? AND is_final=1
+                    AND sender_kind IN ('agent','system') LIMIT 1""",
+                    (run.run_id, run.context_id),
+                ).fetchone()
+            if already_visible is not None:
+                continue
+            if run.status is RunStatus.SUCCEEDED:
+                final_text = manager.final_text(run.run_id)
+                if final_text and self._can_agent_post_to_conversation_session(
+                    run.agent_id, run.caller_id, run.context_id
+                ):
+                    agent = self.world.get_card(run.agent_id)
+                    message = self._conversation_final_message(
+                        run.caller_id,
+                        run.context_id,
+                        sender_id=agent.id,
+                        sender_name=agent.name,
+                        content=final_text,
+                        run_id=run.run_id,
+                    )
+                    await self._publish_conversation_message(message)
+                    continue
+                notice = f"{self._conversation_agent_name(run.agent_id)} finished without producing a response."
+            elif run.status is RunStatus.FAILED:
+                notice = (
+                    f"{self._conversation_agent_name(run.agent_id)} could not respond: "
+                    f"{run.error or 'the runtime reported no error detail'}"
+                )
+            elif run.status is RunStatus.CANCELLED:
+                notice = f"{self._conversation_agent_name(run.agent_id)}'s response was stopped before completion."
+            else:
+                notice = f"{self._conversation_agent_name(run.agent_id)}'s response was interrupted by a backend restart."
+            await self._persist_conversation_outcome_notice(
+                run.run_id, run.caller_id, run.context_id, notice
+            )
+        self.deliveries.recover_after_restart()
+        for agent_id in self.deliveries.all_queued_agents():
+            task = asyncio.create_task(self._drain_conversation_agent(agent_id))
+            task.add_done_callback(self._consume_background_task)
         await self.node_execution.startup()
         await self._retry_pending_node_deletions()
         context = self._node_lifecycle_context()
@@ -1775,6 +1828,7 @@ class ApplicationServices:
                 state_scope=card.state_scope_override,
                 initial_shared_state=shared_states[card.id]["value"] if card.id in shared_states else None,
                 type=card.type,
+                finish=card.finish,
                 plugin_id=self.plugins.node_type_owner_id(card.type),
                 name=card.name,
                 position={"x": card.position.x - min_x, "y": card.position.y - min_y},
@@ -1957,6 +2011,7 @@ class ApplicationServices:
                         parent_id=node_ids.get(node.parent_key) if node.parent_key else (wrapper.id if wrapper and not node.owner_key else None),
                         equipment={"owner_id": node_ids[node.owner_key], "relationship": node.equipment_relationship} if node.owner_key else None,
                         type=node.type,
+                        finish=node.finish,
                         state_scope=node.state_scope,
                         name=node.name,
                         position={
@@ -2099,222 +2154,13 @@ class ApplicationServices:
         )
 
     def _legion_compatibility_issues(self, record: LegionRecord) -> list[str]:
-        if record.blueprint.format_version != 1:
-            return [
-                f"blueprint format {record.blueprint.format_version} is not supported"
-            ]
-        issues: list[str] = []
-        nodes = {node.key: node for node in record.blueprint.nodes}
-        if len(nodes) != len(record.blueprint.nodes):
-            issues.append("blueprint contains duplicate node keys")
-        for node in record.blueprint.nodes:
-            if not self.plugins.has_plugin(node.plugin_id):
-                issues.append(
-                    f"node type {node.type!r} requires missing plugin {node.plugin_id!r}"
-                )
-                continue
-            if not self.plugins.is_enabled(node.plugin_id):
-                issues.append(f"node type {node.type!r} requires disabled plugin {node.plugin_id!r}")
-                continue
-            try:
-                definition = self.plugins.node_type(node.type)
-                owner = self.plugins.node_type_owner_id(node.type)
-            except (GraphValidationError, PluginUnavailableError, ValueError) as error:
-                issues.append(str(error))
-                continue
-            if owner != node.plugin_id:
-                issues.append(
-                    f"node type {node.type!r} is now owned by {owner!r}, not "
-                    f"{node.plugin_id!r}"
-                )
-            if not definition.templateable:
-                issues.append(f"node type {node.type!r} is no longer templateable")
-            if (
-                definition.template_status is not None
-                and node.status != definition.template_status
-            ):
-                issues.append(
-                    f"node type {node.type!r} now requires template status "
-                    f"{definition.template_status!r}, not {node.status!r}"
-                )
-            validated_config = node.config
-            config_is_valid = True
-            try:
-                self.plugins.validate_status(node.type, node.status)
-                validated_config = self.plugins.validate_config(node.type, node.config)
-                if validated_config != node.config:
-                    issues.append(
-                        f"node type {node.type!r} portable configuration is no longer "
-                        "accepted unchanged"
-                    )
-                restored_status = str(
-                    validated_config.get("status", definition.default_status)
-                )
-                if restored_status != node.status:
-                    issues.append(
-                        f"node type {node.type!r} template status {node.status!r} "
-                        f"does not match its portable configuration ({restored_status!r})"
-                    )
-            except GraphValidationError as error:
-                issues.append(str(error))
-                config_is_valid = False
-            if node.initial_document is not None:
-                if definition.document is None:
-                    issues.append(f"node type {node.type!r} no longer provides its document contract")
-                else:
-                    try:
-                        definition.document.model.model_validate(node.initial_document)
-                    except ValueError as error:
-                        issues.append(f"node type {node.type!r} document is incompatible: {error}")
-            handler = definition.template_handler
-            if handler is not None and config_is_valid:
-                try:
-                    declared_dependencies = {
-                        (dependency.kind, dependency.id)
-                        for dependency in self._node_template_dependencies(
-                            handler, validated_config
-                        )
-                    }
-                except PluginCompatibilityError as error:
-                    issues.append(
-                        f"node type {node.type!r} template dependencies are invalid: "
-                        f"{error}"
-                    )
-                    declared_dependencies = set()
-                stored_dependencies = {
-                    (dependency.kind, dependency.id)
-                    for dependency in node.dependencies
-                }
-                for dependency_kind, dependency_id in sorted(
-                    declared_dependencies - stored_dependencies
-                ):
-                    issues.append(
-                        f"node type {node.type!r} requires unrecorded template "
-                        f"dependency {dependency_kind.replace('_', ' ')} "
-                        f"{dependency_id!r}"
-                    )
-            seen_dependencies: set[tuple[str, str]] = set()
-            for dependency in node.dependencies:
-                dependency_key = (dependency.kind, dependency.id)
-                if dependency_key in seen_dependencies:
-                    issues.append(
-                        f"node type {node.type!r} contains duplicate template dependency "
-                        f"{dependency.kind.replace('_', ' ')} {dependency.id!r}"
-                    )
-                    continue
-                seen_dependencies.add(dependency_key)
-                try:
-                    dependency_owner = self.plugins.owner_id(
-                        dependency.kind, dependency.id
-                    )
-                except ValueError:
-                    if not self.plugins.has_plugin(dependency.plugin_id):
-                        issues.append(
-                            f"node type {node.type!r} template dependency "
-                            f"{dependency.kind.replace('_', ' ')} {dependency.id!r} "
-                            f"requires missing plugin {dependency.plugin_id!r}"
-                        )
-                    else:
-                        issues.append(
-                            f"node type {node.type!r} requires missing template "
-                            f"dependency {dependency.kind.replace('_', ' ')} "
-                            f"{dependency.id!r}"
-                        )
-                    continue
-                if dependency_owner != dependency.plugin_id:
-                    issues.append(
-                        f"node type {node.type!r} template dependency "
-                        f"{dependency.kind.replace('_', ' ')} {dependency.id!r} "
-                        f"is now owned by {dependency_owner!r}, not "
-                        f"{dependency.plugin_id!r}"
-                    )
-                elif not self.plugins.is_enabled(dependency.plugin_id):
-                    issues.append(
-                        f"node type {node.type!r} template dependency "
-                        f"{dependency.kind.replace('_', ' ')} {dependency.id!r} "
-                        f"requires unavailable plugin {dependency.plugin_id!r}"
-                    )
-            if node.payload is None and handler is not None:
-                issues.append(
-                    f"node type {node.type!r} now requires template payload that the "
-                    "saved Legion does not contain"
-                )
-            elif node.payload is not None:
-                if handler is None:
-                    issues.append(
-                        f"node type {node.type!r} no longer provides its template handler"
-                    )
-                elif node.payload_version is None or not handler.supports_payload_version(
-                    node.payload_version
-                ):
-                    issues.append(
-                        f"node type {node.type!r} template payload version "
-                        f"{node.payload_version!r} is unsupported"
-                    )
-                else:
-                    try:
-                        handler.validate_payload(node.payload, node.payload_version)
-                    except PluginCompatibilityError as error:
-                        issues.append(
-                            f"node type {node.type!r} template payload is invalid: "
-                            f"{error}"
-                        )
-        for edge in record.blueprint.edges:
-            source = nodes.get(edge.source)
-            target = nodes.get(edge.target)
-            if source is None or target is None:
-                issues.append(f"edge {edge.key!r} references an unknown node")
-                continue
-            if not self.plugins.has_plugin(edge.plugin_id):
-                issues.append(
-                    f"relationship {edge.relationship!r} requires missing plugin "
-                    f"{edge.plugin_id!r}"
-                )
-                continue
-            try:
-                definition = self.plugins.relationship(edge.relationship)
-                owner = self.plugins.relationship_owner_id(edge.relationship)
-                if owner != edge.plugin_id:
-                    issues.append(
-                        f"relationship {edge.relationship!r} is now owned by {owner!r}, "
-                        f"not {edge.plugin_id!r}"
-                    )
-                if not definition.templateable:
-                    issues.append(
-                        f"relationship {edge.relationship!r} is no longer templateable"
-                    )
-                self.plugins.validate_relationship_order(
-                    source.type, target.type, edge.relationship
-                )
-                self.plugins.validate_direction(
-                    edge.relationship, edge.direction.value
-                )
-            except (GraphValidationError, PluginUnavailableError, ValueError) as error:
-                issues.append(str(error))
-        return list(dict.fromkeys(issues))
+        from backend.legions.validation import compatibility_issues
+        return compatibility_issues(record, self.plugins)
 
     @staticmethod
-    def _node_template_dependencies(
-        handler: NodeTemplateHandler, config: Mapping[str, Any]
-    ) -> tuple[NodeTemplateDependency, ...]:
-        dependencies = handler.dependencies(config)
-        if not isinstance(dependencies, tuple):
-            raise PluginCompatibilityError(
-                "template dependencies must be returned as a tuple"
-            )
-        if not all(
-            isinstance(dependency, NodeTemplateDependency)
-            for dependency in dependencies
-        ):
-            raise PluginCompatibilityError(
-                "template dependencies must be NodeTemplateDependency values"
-            )
-        keys = [(dependency.kind, dependency.id) for dependency in dependencies]
-        if len(keys) != len(set(keys)):
-            raise PluginCompatibilityError(
-                "template dependencies must not contain duplicates"
-            )
-        return dependencies
+    def _node_template_dependencies(handler: NodeTemplateHandler, config: Mapping[str, Any]):
+        from backend.legions.validation import template_dependencies
+        return template_dependencies(handler, config)
 
     async def create_edge(
         self, request: EdgeCreate, *, _publish_event: bool = True
@@ -2694,9 +2540,9 @@ class ApplicationServices:
         for agent_id in mentions:
             self._require_session_participant(session, agent_id)
             self._require_conversation_connection(agent_id, conversation_id)
-        manager = self._require_run_manager()
-        for agent_id in mentions:
-            manager.assert_can_start(agent_id)
+
+        # Persistence is deliberately independent from Run admission. A busy
+        # Agent must never make the user's message disappear or fail to send.
         message = self.conversations.add_message(
             conversation_id,
             session_id,
@@ -2707,20 +2553,126 @@ class ApplicationServices:
             message_id=str(request.message_id) if request.message_id else None,
             mention_agent_ids=mentions,
             attachments=attachments,
+            delivery_agent_ids=mentions,
         )
         await self._publish_conversation_message(message)
-        accepted: list[str] = []
+
         for agent_id in mentions:
-            prompt = self._conversation_prompt(
-                conversation_id, session, agent_id, request.content
+            task = asyncio.create_task(self._drain_conversation_agent(agent_id))
+            task.add_done_callback(self._consume_background_task)
+        return ConversationPostResult(
+            message=message, accepted_agent_ids=mentions
+        )
+
+    def _conversation_delivery_prompt(
+        self,
+        conversation_id: str,
+        session: ConversationSession,
+        agent_id: str,
+        message_ids: list[str],
+        max_sequence: int,
+    ) -> str:
+        messages = [self.conversations.get_message(message_id) for message_id in message_ids]
+        if len(messages) == 1:
+            latest = messages[0].content
+        else:
+            chunks = []
+            for index, message in enumerate(messages, start=1):
+                text = message.content
+                for attachment in message.attachments:
+                    text += (
+                        f"\n[Attachment: {attachment.name}; version_id={attachment.version_id}; "
+                        f"path={attachment.path}; {attachment.size_bytes} bytes]"
+                    )
+                chunks.append(f"{index}. {text}")
+            latest = (
+                "Additional messages received while you were working:\n\n"
+                + "\n".join(chunks)
             )
-            run = await self._require_run_manager().start_run(
-                agent_id,
-                prompt,
-                caller_kind="conversation",
-                caller_id=conversation_id,
-                context_id=session_id,
+        return self._conversation_prompt(
+            conversation_id, session, agent_id, latest, max_sequence=max_sequence
+        )
+
+    async def _drain_conversation_agent(self, agent_id: str) -> None:
+        """Start at most one queued Conversation burst for an Agent.
+
+        RunManager remains the capacity authority. This method only bridges the
+        durable delivery ledger into it and therefore never bypasses
+        max_concurrent_runs or provider admission.
+        """
+        lock = self._conversation_delivery_locks.setdefault(agent_id, asyncio.Lock())
+        async with lock:
+            batch = self.deliveries.next_batch(agent_id)
+            if batch is None:
+                return
+            conversation_id, session_id, message_ids, max_sequence = batch
+            manager = self._require_run_manager()
+            try:
+                manager.assert_can_start(agent_id)
+            except RuntimeUnavailableError:
+                runs = manager.list_runs(agent_id=agent_id)
+                active = [
+                    run for run in runs
+                    if run.status not in TERMINAL_RUN_STATUSES
+                ]
+                cleanup_blockers = [
+                    run for run in runs
+                    if run.lifecycle.get("cleanup") in {"pending", "failed"}
+                ]
+                if (
+                    agent_id not in self._conversation_delivery_waiters
+                    or self._conversation_delivery_waiters[agent_id].done()
+                ):
+                    if active:
+                        waiter = asyncio.create_task(
+                            self._wait_for_conversation_capacity(
+                                agent_id, [run.run_id for run in active]
+                            )
+                        )
+                    elif cleanup_blockers:
+                        waiter = asyncio.create_task(
+                            self._join_conversation_cleanup(
+                                agent_id, [run.run_id for run in cleanup_blockers]
+                            )
+                        )
+                    else:
+                        return
+                    self._conversation_delivery_waiters[agent_id] = waiter
+                    waiter.add_done_callback(self._consume_background_task)
+                return
+            try:
+                session = self.conversations.get_session(conversation_id, session_id)
+                self._require_session_participant(session, agent_id)
+                self._require_conversation_connection(agent_id, conversation_id)
+            except (NotFoundError, PermissionDeniedError):
+                return
+
+            run_id = str(uuid4())
+            claimed = self.deliveries.claim_batch(
+                conversation_id, session_id, agent_id, run_id, message_ids
             )
+            if not claimed:
+                return
+            prompt = self._conversation_delivery_prompt(
+                conversation_id, session, agent_id, claimed, max_sequence
+            )
+            try:
+                run = await manager.start_run(
+                    agent_id,
+                    prompt,
+                    caller_kind="conversation",
+                    caller_id=conversation_id,
+                    context_id=session_id,
+                    run_id=run_id,
+                    initial_lifecycle={
+                        "delivery_message_ids": claimed,
+                        "conversation_max_sequence": max_sequence,
+                    },
+                )
+            except Exception:
+                self.deliveries.requeue_run(run_id)
+                raise
+
             task = asyncio.create_task(
                 self._persist_conversation_run(
                     agent_id, run.run_id, conversation_id, session_id
@@ -2731,10 +2683,40 @@ class ApplicationServices:
                     completed.exception() if not completed.cancelled() else None
                 )
             )
-            accepted.append(agent_id)
-        return ConversationPostResult(
-            message=message, accepted_agent_ids=accepted
-        )
+
+    async def _wait_for_conversation_capacity(
+        self, agent_id: str, run_ids: list[str]
+    ) -> None:
+        manager = self._require_run_manager()
+        waiters = [
+            asyncio.create_task(manager.wait_terminal(run_id))
+            for run_id in run_ids
+        ]
+        try:
+            if waiters:
+                done, pending = await asyncio.wait(
+                    waiters, return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in done:
+                    task.result()
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
+        finally:
+            self._conversation_delivery_waiters.pop(agent_id, None)
+        await self._drain_conversation_agent(agent_id)
+
+    async def _join_conversation_cleanup(
+        self, agent_id: str, run_ids: list[str]
+    ) -> None:
+        manager = self._require_run_manager()
+        try:
+            for run_id in run_ids:
+                await manager.cancel_run(run_id)
+        finally:
+            self._conversation_delivery_waiters.pop(agent_id, None)
+        await self._drain_conversation_agent(agent_id)
 
     async def request_conversation_turn(
         self,
@@ -3282,19 +3264,7 @@ class ApplicationServices:
             manager = self._require_run_manager()
             record = await manager.wait_execution(run_id)
             if record.status not in TERMINAL_RUN_STATUSES:
-                # The provider turn ended without a durable result. Surface the
-                # wait state instead of leaving the transcript stalled, then
-                # keep following the Run until it terminates.
-                suspension = manager.get_suspension(run_id)
-                reason = suspension.reason if suspension is not None else None
-                name = self._conversation_agent_name(agent_id)
-                await self._persist_conversation_outcome_notice(
-                    run_id,
-                    conversation_id,
-                    session_id,
-                    f"{name} paused this response to wait on external work"
-                    + (f" ({reason})." if reason else "."),
-                )
+                # WAITING is live Run state, not durable chat history.
                 record = await manager.wait_terminal(run_id)
             final_text = manager.final_text(run_id)
             if record.status is RunStatus.SUCCEEDED and final_text:
@@ -3332,6 +3302,23 @@ class ApplicationServices:
                 conversation_id,
                 session_id,
             )
+        finally:
+            # A terminal attempt consumes its claimed input even when cancelled
+            # or failed. If persistence itself was interrupted before the Run
+            # became terminal, keep the claim for startup recovery instead.
+            try:
+                terminal = self._require_run_manager().get_run(run_id).status in TERMINAL_RUN_STATUSES
+            except Exception:
+                terminal = False
+            if terminal:
+                self.deliveries.mark_run_done(run_id)
+                try:
+                    await self._drain_conversation_agent(agent_id)
+                except Exception:
+                    logger.exception(
+                        "failed to drain queued conversation deliveries for agent %s",
+                        agent_id,
+                    )
 
     def _conversation_agent_name(self, agent_id: str) -> str:
         agent = self.world.maybe_get_card(agent_id)
@@ -3356,41 +3343,9 @@ class ApplicationServices:
             sender_name="System",
             content=content,
             run_id=run_id,
+            kind="run_outcome",
         )
         await self._publish_conversation_message(message)
-
-    async def _persist_conversation_provider_event(self, event: AgentEvent, record: RunRecord, conversation_id: str, session_id: str) -> str | None:
-        if not self._can_agent_post_to_conversation_session(record.agent_id, conversation_id, session_id):
-            return None
-        kind = event.type.value
-        if kind == "agent_message":
-            content = event.payload.get("text")
-            if not isinstance(content, str) or not content.strip():
-                return None
-            kind = "text"
-        elif kind in ("tool_started", "tool_completed"):
-            name = str(event.payload.get("name") or "tool")
-            content = ("Using " if kind == "tool_started" else "Finished ") + name
-            # Store only the provider's public tool result/arguments, not runtime credentials or config.
-            detail = event.payload.get("arguments" if kind == "tool_started" else "response")
-            if detail is not None:
-                content += "\n\n" + json.dumps(detail, ensure_ascii=False, indent=2, default=str)
-        else:
-            return None
-        provider_message_id = event.payload.get('provider_message_id') if kind == 'text' else None
-        if isinstance(provider_message_id, str) and provider_message_id:
-            message_id = str(uuid5(NAMESPACE_URL, json.dumps([
-                'oaw:provider-message', conversation_id, session_id, record.run_id, provider_message_id])))
-            message = self.conversations.update_provider_message(conversation_id, session_id,
-                message_id=message_id, run_id=record.run_id, sender_id=record.agent_id,
-                sender_name=self._conversation_agent_name(record.agent_id), content=content)
-        else:
-            message = self.conversations.add_message(conversation_id, session_id,
-                sender_kind="agent", sender_id=record.agent_id,
-                sender_name=self._conversation_agent_name(record.agent_id), content=content,
-                run_id=record.run_id, kind=kind, is_final=False)
-        await self._publish_conversation_message(message)
-        return message.id
 
     def _conversation_final_message(self, conversation_id: str, session_id: str, *, run_id: str,
                                     sender_id: str, sender_name: str, content: str) -> ConversationMessage:
@@ -3456,6 +3411,8 @@ class ApplicationServices:
         session: ConversationSession,
         target_agent_id: str,
         latest_message: str,
+        *,
+        max_sequence: int | None = None,
     ) -> str:
         participants = [
             self.world.get_card(agent_id)
@@ -3467,6 +3424,11 @@ class ApplicationServices:
         # older than 40 and peer turns. Plugin continuation remains provider-owned.
         transcript = [] if managed else self.conversations.list_messages(
             conversation_id, session.id, limit=40)
+        if max_sequence is not None:
+            transcript = [
+                item for item in transcript
+                if item.sequence <= max_sequence
+            ]
         lines = "\n".join(
             f"{item.sender_name}: {item.content}" + ''.join(
                 f"\n[Attachment: {file.name}; version_id={file.version_id}; path={file.path}; {file.size_bytes} bytes]"
@@ -3757,6 +3719,7 @@ def create_services(
         raise
     resources = ManagedResourceStore(database, settings.data_root)
     conversations = ConversationStore(database)
+    deliveries = ConversationDeliveryStore(database)
     capabilities = CapabilityBroker(world, resources, plugin_registry)
     events = EventHub(queue_size=settings.event_queue_size)
 
@@ -3813,6 +3776,7 @@ def create_services(
         events=events,
         plugins=plugin_registry,
         conversations=conversations,
+        deliveries=deliveries,
         state=state,
         contexts=contexts,
         legions=legions,
@@ -3838,7 +3802,6 @@ def create_services(
         plugins=plugin_registry,
         capability_provider=provider,
         state=state,
-        persist_provider_event=services._persist_conversation_provider_event,
         cleanup_execution=services.sandbox_operations.cancel_run,
         default_runtime_provider_id=(
             default_runtime_provider_id

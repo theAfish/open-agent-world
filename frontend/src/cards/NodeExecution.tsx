@@ -17,7 +17,7 @@ export interface ExecutionSnapshot {
 }
 
 /** Shared host UI: no assumptions about DAGs, task fields or acceptance rules. */
-export function useNodeExecution(nodeId: string, onChanged: () => Promise<void>) {
+export function useNodeExecution(nodeId: string, onChanged: () => Promise<void>, active = true) {
   const sessionId = useCardStateSession(nodeId);
   const { deployed } = useWorkspaceAccess();
   const [state, setState] = useState<ExecutionSnapshot>();
@@ -33,12 +33,12 @@ export function useNodeExecution(nodeId: string, onChanged: () => Promise<void>)
     try { const next = await worldApi.getNodeExecution(nodeId, sessionId ?? null); if (request === sequence.current) setState(next); }
     catch (e) { if (request === sequence.current) setError(apiErrorMessage(e)); }
   }, [nodeId, sessionId]);
-  useEffect(() => { void reload(); return () => { sequence.current++; }; }, [reload, eventId, socketState]);
+  useEffect(() => { if (active) void reload(); return () => { sequence.current++; }; }, [reload, eventId, socketState, active]);
   useEffect(() => {
-    if (!state?.active && !deployed) return;
+    if (!active || (!state?.active && !deployed)) return;
     const timer = window.setInterval(() => { void reload(); }, state?.active ? 1000 : 3000);
     return () => window.clearInterval(timer);
-  }, [reload, state?.active, deployed]);
+  }, [reload, state?.active, deployed, active]);
   const act = async (operation: () => Promise<ExecutionSnapshot>) => {
     setBusy(true); setError(""); ++sequence.current;
     try { await operation(); await reload(); await onChanged(); }

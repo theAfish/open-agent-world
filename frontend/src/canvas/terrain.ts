@@ -165,7 +165,12 @@ export function terrainHeightAt(worldX: number, worldY: number, seed = TERRAIN_S
   );
 }
 
-export function terrainResolutionForZoom(zoom: number) {
+export function terrainResolutionForZoom(zoom: number, previous?: number) {
+  // A small dead band prevents replacement work when wheel/trackpad input
+  // oscillates around a boundary. Initial loads retain the original tiers.
+  if (previous === 32) return zoom >= 1.2 ? 80 : zoom >= 0.48 ? 56 : 32;
+  if (previous === 56) return zoom >= 1.2 ? 80 : zoom < 0.42 ? 32 : 56;
+  if (previous === 80) return zoom < 0.42 ? 32 : zoom < 1.1 ? 56 : 80;
   if (zoom >= 1.15) return 80;
   if (zoom >= 0.45) return 56;
   return 32;

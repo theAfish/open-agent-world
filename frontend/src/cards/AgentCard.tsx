@@ -3,20 +3,32 @@ import { ModelSelect } from "./ModelSelect";
 import { AgentSchemaSettings } from "./AgentSchemaSettings";
 import { PluginSurface } from "../plugins/PluginSurface";
 import { worldApi, apiErrorMessage } from "../api/client";
-import { CircleStop, Play, Radio } from "lucide-react";
+import { CircleStop, Play, Radio, RotateCcw, LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNodeSurfaceStore } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
-import type { WorldCard } from "../types/world";
+import type { WorldCard, WorldEdge } from "../types/world";
 import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { InstrumentOutput } from "./CardUtilities";
+const NO_CARDS: WorldCard[] = [];
+const NO_EDGES: WorldEdge[] = [];
 
 export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSurfaceLevel }) {
   useLocale();
   const definition = useWorldStore((state) => state.catalog.node_types.find((item) => item.id === card.type));
   const schemaSettings = definition?.traits.includes("ui.schema-agent.v1");
-  const edges = useWorldStore((state) => state.edges);
-  const cards = useWorldStore((state) => state.cards);
+  const xrdMatch = card.type === "xrd.match";
+  const activeRun = card.status === "running" || card.status === "waiting";
+  const [hasResult, setHasResult] = useState(false);
+  useEffect(() => {
+    if (!xrdMatch) return;
+    let current = true;
+    void worldApi.getAgentInfo(card.id).then(info => { if (current) setHasResult(Boolean(info.details?.result)); }).catch(() => {});
+    return () => { current = false; };
+  }, [card.id, card.status, xrdMatch]);
+  const directRun = definition?.traits.includes("ui.direct-run.v1");
+  const edges = useWorldStore((state) => level === 'workspace' ? state.edges : NO_EDGES);
+  const cards = useWorldStore((state) => level === 'workspace' ? state.cards : NO_CARDS);
   const updateCard = useWorldStore((state) => state.updateCard);
   const runAgent = useWorldStore((state) => state.runAgent);
   const stopAgent = useWorldStore((state) => state.stopAgent);
@@ -41,14 +53,14 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
     }, 100);
     return () => { active = false; clearTimeout(timer); };
   }, [card.id, card.ephemeral, level, cards, edges, socketState]);
-  const output = Array.isArray(card.config.output)
+  const output = level === 'workspace' && Array.isArray(card.config.output)
     ? card.config.output.map(String)
     : [];
 
   return (
     <div className="expanded-stack">
       <PluginSurface card={card} slot="settings" level={level}>
-      {schemaSettings ? <AgentSchemaSettings card={card} /> : <>
+      {schemaSettings ? <AgentSchemaSettings card={card} active={level === 'inspector' || level === 'workspace'} /> : <>
       {level === "workspace" && <><label className="field-label"><span>{t("When to use this Agent")}</span><textarea defaultValue={String(card.config.description ?? "")} maxLength={500}
         onBlur={(event) => { if (event.target.value !== card.config.description) void updateCard(card.id, { config: { description: event.target.value } }); }} /></label>
       {cards.some(c => c.id === card.parent_id && c.type === "legion" && (c.config.mode ?? 'team') === 'team') && <section className="card-section">
@@ -91,7 +103,7 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
 
       </>}
       </PluginSurface>
-      {level === "workspace" && <section className="card-section">
+      {level === "workspace" && !xrdMatch && <section className="card-section">
         <div className="section-heading">
           <span>{t("Effective capabilities")}</span>
         </div>
@@ -103,7 +115,7 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
         </div>
       </section>}
 
-      <label className="field-label prompt-field">
+      {!directRun && <label className="field-label prompt-field">
         <span>{t("Prompt")}</span>
         <textarea
           value={prompt}
@@ -116,26 +128,37 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
             }
           }}
         />
-      </label>
+      </label>}
 
-      <div className="action-row">
+      {!(xrdMatch && level === "workspace") && <div className="action-row">
         <button
           type="button"
           className="primary-button"
-          onClick={() => void runAgent(card.id, prompt.trim())}
-          disabled={!prompt.trim() || card.status === "running"}
+          aria-label={xrdMatch ? (activeRun ? "正在检索" : hasResult ? "重新检索" : "开始检索") : undefined}
+          title={xrdMatch ? (activeRun ? "正在检索" : hasResult ? "重新检索" : "开始检索") : undefined}
+          onClick={() => void (async () => {
+            try {
+              if (xrdMatch) await updateCard(card.id, { config: { workflow_stage: "search" } }, { throwOnError: true });
+              await runAgent(card.id, directRun ? "Run configured analysis" : prompt.trim());
+            } catch (error) {
+              useWorldStore.getState().pushToast({ tone: "error", title: "无法启动分析", detail: apiErrorMessage(error) });
+            }
+          })()}
+          disabled={(!directRun && !prompt.trim()) || card.status === "running" || card.status === "waiting"}
         >
-          <Play size={14} fill="currentColor" /> {t("Run agent")} </button>
-        <button
+          {xrdMatch ? activeRun ? <LoaderCircle size={17} /> : hasResult ? <RotateCcw size={17} /> : <Play size={17} fill="currentColor" /> : <><Play size={14} fill="currentColor" /> {t("Run agent")}</>} </button>
+        {(!xrdMatch || activeRun) && <button
           type="button"
           className="secondary-button"
+          aria-label={xrdMatch ? "停止检索" : undefined}
+          title={xrdMatch ? "停止检索" : undefined}
           onClick={() => void stopAgent(card.id)}
           disabled={card.status !== "running" && card.status !== "waiting"}
         >
-          <CircleStop size={14} /> {t("Stop")} </button>
-      </div>
+          <CircleStop size={14} /> {!xrdMatch && t("Stop")} </button>}
+      </div>}
 
-      {level === "workspace" && <section className="card-section output-section">
+      {level === "workspace" && !xrdMatch && <section className="card-section output-section">
         <div className="section-heading"><span>{t("Runtime activity")}</span><small>{t("operational log")}</small></div>
         <InstrumentOutput lines={output} empty="Run output and tool activity will appear here." />
       </section>}

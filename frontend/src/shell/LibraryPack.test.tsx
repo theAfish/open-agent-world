@@ -79,3 +79,33 @@ it("retains the torn wrapper for an opened pack with new cards and falls back wh
   expect(container.querySelector(".is-opened")).toBeTruthy();
   expect(container.querySelector("details")).toBeNull();
 });
+
+it("reveals the saved finish after the face emerges even when parent props are stale", async () => {
+  vi.useFakeTimers();
+  const state = fixture();
+  const id = state.packs.tools.definition.cards[0];
+  state.collection[id] = { card_id: id, plugin_id: state.packs.tools.definition.plugin_id, source_pack_ids: [],
+    unlocked: true, unlocked_at: "2026-09-10T00:00:00Z", finish: "foil" };
+  const saved = structuredClone(state);
+  saved.packs.tools.opened = true;
+  saved.collection[id].finish = "laser";
+  useCardLibrary.setState({ snapshot: state, refresh: async () => {} });
+  let resolve!: (value: LibrarySnapshot) => void;
+  vi.spyOn(worldApi, "editCardLibrary").mockReturnValue(new Promise(done => { resolve = done; }));
+  const element = <LibraryPack pack={state.packs.tools} snapshot={state} onOpened={opened} onBrowse={browse} />;
+  const { container, rerender } = render(element);
+  expect(container.querySelector(".card-finish-layer")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Tear open Tools" }));
+  expect(container.querySelector(".card-finish-layer")).toBeNull();
+  await act(async () => resolve(saved));
+  expect(container.querySelector(".is-opened.is-revealing")).toBeTruthy();
+  expect(container.querySelector(".card-finish-layer")).toBeNull();
+  act(() => vi.advanceTimersByTime(720));
+  const material = container.querySelector(".pack-drawn-card .card-finish-layer");
+  expect(material?.getAttribute("data-finish")).toBe("laser");
+  expect(material?.getAttribute("data-reveal")).toBe("true");
+  rerender(element);
+  expect(container.querySelector(".card-finish-layer")?.getAttribute("data-finish")).toBe("laser");
+  act(() => vi.advanceTimersByTime(1380));
+  expect(container.querySelector(".card-finish-layer")).toBeNull();
+});

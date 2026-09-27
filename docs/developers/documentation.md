@@ -26,6 +26,12 @@ uv pip install --python .tmp/docs-venv/bin/python -r scripts/docs-requirements.t
 
 The preview prints its local URL. To build with link and navigation validation, replace `serve` with `build --strict`. Output goes to `.tmp/docs-site` and is not committed. Run `scripts/docs_tests.py` and `scripts/docs_check_site.py` with the same environment's Python for source-link tests and a full generated-link/search check.
 
+## Theme
+
+`docs/stylesheets/extra.css` maps the app palette in [`frontend/src/theme.css`](../../frontend/src/theme.css) to Material's light (`default`) and dark (`slate`) schemes. Keep the warm gray surfaces, copper accents, and system font aligned when changing either theme. Documentation uses the stronger accent for links and the secondary ink for muted reading text so both remain legible on page, card, and code backgrounds.
+
+Keep header surface colors separate from link and button colors. Check both themes on the home page, a guide with tables, a developer page with code, search results, and the mobile navigation drawer. Verify theme selection survives navigation and reload, and check text contrast in normal, hover, and focus states.
+
 ## Put content in the right place
 
 | Audience | Location | Writing rule |
@@ -40,6 +46,25 @@ Keep English as the primary language. Link Chinese entry pages explicitly and la
 Add published pages to `mkdocs.yml`. Unlisted pages and broken local links fail the strict build. Excluded planning notes stay out of generated HTML and search. General search covers landing pages, installation, user guides, and guided developer pages; detailed contracts remain accessible through Technical reference and the extension-point directory. This keeps implementation details out of ordinary search results.
 
 `scripts/docs_hooks.py` converts repository source links and excluded-note links to GitHub while leaving normal documentation links for MkDocs to validate. The GitHub target must exist in the checkout or the build fails.
+
+## In-app offline manual
+
+**Help → Documentation** renders the same Markdown locally in a searchable,
+two-column reader. Vite includes the Markdown and `docs/assets/` images in the
+frontend build, so desktop packaging needs no docs server or internet connection.
+Internal page links and section anchors navigate within the reader. Source-code
+and other external links are explicitly marked as online resources.
+
+`frontend/src/shell/documentation.ts` defines the introductory topic order and
+excludes repository-only notes. Other included pages appear under Technical
+reference. Keep exclusions aligned with `mkdocs.yml`; corresponding `.zh-CN.md`
+pages are selected for Chinese UI. `DocumentationPanel` renders standard Markdown
+and GFM tables, strips the home page's MkDocs layout wrappers and does not execute
+HTML. Use relative Markdown image and page links for offline content.
+
+Run the documentation and Help tests with
+`npx vitest run src/shell/documentation.test.ts src/shell/DocumentationPanel.test.tsx src/shell/HelpMenu.test.tsx`
+from `frontend`, then `npm run build` to verify that assets are packaged.
 
 ## Publish
 

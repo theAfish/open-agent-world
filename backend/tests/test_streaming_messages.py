@@ -1,5 +1,3 @@
-import asyncio
-
 import pytest
 
 from backend.agents import MockAgentRuntime, AgentEvent, AgentEventType
@@ -7,6 +5,7 @@ from backend.capabilities.provider import WorldAgentCapabilityProvider
 from backend.config import Settings
 from backend.conversations import ConversationSessionCreate, ConversationPost
 from backend.services import create_services
+from backend.tests.conversation_helpers import wait_for_conversation_delivery
 from backend.world.models import CardCreate, EdgeCreate
 
 
@@ -21,7 +20,7 @@ class StreamingRuntime(MockAgentRuntime):
 
 
 @pytest.mark.asyncio
-async def test_stream_snapshots_share_identity_but_distinct_messages_and_runs_do_not(data_root):
+async def test_stream_snapshots_produce_one_durable_final_message_per_run(data_root):
     settings = Settings.for_data_root(data_root)
     services = create_services(settings)
     services.install_runtime_provider('core.mock', StreamingRuntime(WorldAgentCapabilityProvider(services)), default=True)
@@ -32,16 +31,17 @@ async def test_stream_snapshots_share_identity_but_distinct_messages_and_runs_do
         session = await services.create_conversation_session(room.id, ConversationSessionCreate(participant_ids=[agent.id]))
         for turn in range(2):
             await services.post_conversation_message(room.id, session.id, ConversationPost(content=f'Start {turn}', mention_agent_ids=[agent.id]))
-            for _ in range(200):
-                await asyncio.sleep(.01)
-                if len(services.conversations.list_messages(room.id, session.id)) == (turn + 1) * 2:
-                    break
+            await wait_for_conversation_delivery(services, room.id, session.id)
             timeline = services.conversations.page_messages(room.id, session.id).items
-            assert len(timeline) == (turn + 1) * 3
-            assert [m.content for m in timeline[-2:]] == ['Checking resources.'] * 2
-            assert timeline[-2].id != timeline[-1].id
-        assert len({m.id for m in timeline}) == 6
-        assert [m.sequence for m in timeline] == list(range(1, 7))
+            # Provider snapshots, even with different provider message IDs,
+            # stay in live Run state; each turn persists only its final answer.
+            assert len(timeline) == (turn + 1) * 2
+            assert timeline[-1].sender_kind == 'agent'
+            assert timeline[-1].content == 'Checking resources.'
+            assert timeline[-1].is_final
+        assert len({m.id for m in timeline}) == 4
+        assert timeline[1].run_id != timeline[3].run_id
+        assert [m.sequence for m in timeline] == list(range(1, 5))
         ids = [m.id for m in timeline]
     finally:
         await services.shutdown()

@@ -57,6 +57,10 @@ def test_session_creation_is_lazy_and_board_switch_preserves_graph_config(client
     assert saved.status_code == 200, saved.text
     assert client.get(url + "/document", headers=headers(b)).json()["value"]["tasks"] == []
     assert client.get(url + "/document", headers=headers(a)).json() == saved.json()
+    summary_a = client.get(url + "/document?summary_only=true", headers=headers(a)).json()
+    summary_b = client.get(url + "/document?summary_only=true", headers=headers(b)).json()
+    assert summary_a == {"revision": saved.json()["revision"], "summary": saved.json()["summary"]}
+    assert summary_b["summary"]["total"] == 0 and "value" not in summary_b
     assert client.get(url).json()["config"] == board["config"]
     after = counts(services)
     assert after[0] == before[0] and after[1] == 2

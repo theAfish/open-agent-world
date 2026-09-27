@@ -61,6 +61,24 @@ def test_toolbox_editing_progressive_read_and_legion_copy(client):
         read({})
 
 
+def test_member_edit_invalidates_parent_revision_and_preserves_assembled_document(client):
+    box = create_node(client, "oaw.skills")
+    edit(client, box, "upsert", {"name": "Review", "instructions": "Before", "files": {"guide.md": "Keep"}})
+    url = f"/api/nodes/{box['id']}"
+    before = client.get(url + "/document").json()
+    skill = before["value"]["skills"][0]
+    edit(client, {"id": skill["node_id"]}, "replace", {**skill, "instructions": "After"})
+    after = client.get(url + "/document").json()
+    assert after["revision"] > before["revision"]
+    assert after["value"]["skills"][0]["instructions"] == "After"
+    assert after["value"]["skills"][0]["files"] == {"guide.md": "Keep"}
+    stale = client.post(url + "/actions/configure", json={
+        "arguments": {"instructions": "Stale edit"}, "expected_revision": before["revision"],
+    })
+    assert stale.status_code == 409
+    assert client.get(url + "/document").json() == after
+
+
 def test_exported_plugin_owns_cards_and_updates_only_new_instances(client, tmp_path, monkeypatch):
     node = create_node(client, "oaw.skills")
     edit(client, node, "configure", {"package_id": "example.review", "name": "Review Bench", "author": "Example", "version": "1.0.0"})

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 for (const type of ["agent", "text", "environment", "oaw.tasks", "oaw.skills.skill", "core.artifact-collection"]) {
-  test(`${type} inspector selects text and drags from empty content`, async ({ page, request }) => {
+  test(`${type} inspector selects text and only drags from its header`, async ({ page, request }) => {
     const response = await request.post("/api/nodes", { data: { type, name: "Drag and copy", position: { x: 550, y: 340 } } });
     expect(response.ok()).toBe(true);
     const { id } = await response.json();
@@ -56,6 +56,7 @@ for (const type of ["agent", "text", "environment", "oaw.tasks", "oaw.skills.ski
       expect(await page.evaluate(() => window.getSelection()?.toString().trim().length)).toBeGreaterThan(0);
       expect(Math.abs((await card.boundingBox())!.x - before.x)).toBeLessThan(2);
 
+
       // Shift on the pane must not extend the existing text selection across
       // the page. Ordinary panning must also leave no browser text selection.
       for (const shift of [true, false]) {
@@ -76,7 +77,18 @@ for (const type of ["agent", "text", "environment", "oaw.tasks", "oaw.skills.ski
         expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("");
       }
 
-      // Test both the body's padding and blank space inside a nested content block.
+      if (type === "agent") {
+        const before = (await card.boundingBox())!;
+        const input = card.locator("textarea").first();
+        const bounds = (await input.boundingBox())!;
+        await page.mouse.move(bounds.x + 12, bounds.y + 14); await page.mouse.down();
+        await page.mouse.move(bounds.x + 150, bounds.y + 14, { steps: 10 }); await page.mouse.up();
+        expect(await input.evaluate(element => element.selectionEnd - element.selectionStart)).toBeGreaterThan(0);
+        expect(Math.abs((await card.boundingBox())!.x - before.x)).toBeLessThan(2);
+        expect(Math.abs((await card.boundingBox())!.y - before.y)).toBeLessThan(2);
+      }
+
+      // Even blank body space belongs to text interaction, never window dragging.
       for (const nested of [false, true]) {
         const point = await body.evaluate((element, nested) => {
           const box = element.getBoundingClientRect();
@@ -97,10 +109,14 @@ for (const type of ["agent", "text", "environment", "oaw.tasks", "oaw.skills.ski
         const start = (await card.boundingBox())!;
         await page.mouse.move(point.x, point.y); await page.mouse.down();
         await page.mouse.move(point.x + 55, point.y + 25, { steps: 10 }); await page.mouse.up();
-        await expect.poll(async () => (await card.boundingBox())!.x - start.x).toBeGreaterThan(40);
+        expect(Math.abs((await card.boundingBox())!.x - start.x)).toBeLessThan(2);
+        expect(Math.abs((await card.boundingBox())!.y - start.y)).toBeLessThan(2);
       }
-      await card.getByRole("button", { name: "Close Drag and copy inspector" }).click();
-      await expect(card).not.toHaveAttribute("data-surface-level", "inspector");
+      const header = (await card.locator(".node-surface-header").boundingBox())!;
+      const start = (await card.boundingBox())!;
+      await page.mouse.move(header.x + 20, header.y + header.height / 2); await page.mouse.down();
+      await page.mouse.move(header.x + 75, header.y + header.height / 2 + 25, { steps: 10 }); await page.mouse.up();
+      await expect.poll(async () => (await card.boundingBox())!.x - start.x).toBeGreaterThan(40);
     } finally { await request.delete(`/api/nodes/${id}`); }
   });
 }

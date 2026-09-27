@@ -2,44 +2,71 @@ import { useCardStateSession } from "../state/cardState";
 import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
 import { t, useLocale } from "../i18n";
 import { Check, Circle, GitBranch, ListTodo, Play, Plus, RefreshCw, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type SetStateAction } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
 import { NodeExecutionControls, useNodeExecution } from "./NodeExecution";
+import { useNodeSurfaceStore, surfaceDraftKey, type NodeSurfaceLevel } from '../state/nodeSurfaces';
+import { acceptBoard, boardCacheEntry, boardError, loadBoard, subscribeBoard } from './taskBoardCache';
 
 export interface BoardTask {
   id: string; title: string; description: string; status: "todo" | "doing" | "done" | "blocked"; depends_on: string[]; note: string;
   executor_id?: string | null; last_run_id?: string | null; execution_status?: string | null;
 }
 interface BoardExecution { default_executor_id: string | null; max_parallel: number; pause_on_failure: boolean }
-interface BoardSnapshot { value: { tasks: BoardTask[]; execution: BoardExecution }; revision: number; summary: { total: number; done: number; ready_ids: string[] } }
+export interface BoardSummary { revision: number; summary: { total: number; done: number; ready_ids: string[] } }
+export interface BoardSnapshot extends BoardSummary { value: { tasks: BoardTask[]; execution: BoardExecution } }
 const statuses = { todo: "To do", doing: "In progress", done: "Done", blocked: "Blocked" };
 const snapshot = (value: unknown) => value as BoardSnapshot;
 
-function useBoard(id: string) {
+function useBoard(card: WorldCard, kind: 'summary' | 'full', active = true) {
+  const id = card.id;
   const sessionId = useCardStateSession(id);
   const { deployed } = useWorkspaceAccess();
   const eventId = useWorldStore((state) => state.events.find((e) => e.payload.scope_kind === "node_document" && e.payload.owner_id === id)?.id);
   const socketState = useWorldStore((state) => state.socketState);
-  const [board, setBoard] = useState<BoardSnapshot>();
-  const [error, setError] = useState("");
-  const accept = useCallback((next: BoardSnapshot) => setBoard((current) => !current || next.revision >= current.revision ? next : current), []);
-  const reload = useCallback(async () => {
-    try { accept(snapshot(await worldApi.getNodeDocument(id, sessionId ?? null))); setError(""); }
-    catch (e) { setError(apiErrorMessage(e)); }
-  }, [id, sessionId, accept]);
+  const entry = useMemo(() => boardCacheEntry(JSON.stringify([id, card.state_scope, sessionId, deployed])), [id, card.state_scope, sessionId, deployed]);
+  const subscribe = useCallback((listener: () => void) => active ? subscribeBoard(entry, listener) : () => {}, [entry, active]);
+  const state = useSyncExternalStore(subscribe, () => entry.snapshot);
+  const token = JSON.stringify([eventId, socketState, card.revision]);
+  const accept = useCallback((next: BoardSnapshot) => acceptBoard(entry, next, token), [entry, token]);
+  const setError = useCallback((error: string) => boardError(entry, error), [entry]);
+  const reload = useCallback(() => loadBoard(entry, id, sessionId ?? null, kind, token, true), [entry, id, sessionId, kind, token]);
+  const summaryRevision = kind === 'full' ? state.summary?.revision : undefined;
   useEffect(() => {
-    let active = true;
-    worldApi.getNodeDocument(id, sessionId ?? null).then((value) => { if (active) accept(snapshot(value)); }).catch((e) => { if (active) setError(apiErrorMessage(e)); });
-    return () => { active = false; };
-  }, [id, sessionId, eventId, socketState, accept]);
+    if (!active) return;
+    let current = true;
+    void loadBoard(entry, id, sessionId ?? null, kind, token).then(() => {
+      // A preview joining a full read can still use its lightweight endpoint if
+      // that full read fails. One fallback preserves the inspector's own error.
+      if (current && kind === 'summary' && !entry.snapshot.summary
+        && entry.snapshot.readErrors.full && !entry.snapshot.readErrors.summary) {
+        void loadBoard(entry, id, sessionId ?? null, kind, token);
+      }
+    });
+    return () => { current = false; };
+  }, [active, entry, id, sessionId, kind, token]);
   useEffect(() => {
-    if (!deployed) return;
+    if (!active || kind !== 'full' || summaryRevision === undefined || entry.snapshot.readErrors.full
+      || (entry.snapshot.board?.revision ?? -1) >= summaryRevision) return;
+    let current = true;
+    // A preview may finish with a newer revision while a full read is in flight.
+    // Wait for the shared read to settle before replacing an older response.
+    void loadBoard(entry, id, sessionId ?? null, kind, token).then(() => {
+      if (current && !entry.snapshot.readErrors.full
+        && (entry.snapshot.board?.revision ?? -1) < (entry.snapshot.summary?.revision ?? -1)) {
+        void loadBoard(entry, id, sessionId ?? null, kind, token, true);
+      }
+    });
+    return () => { current = false; };
+  }, [active, entry, id, sessionId, kind, token, summaryRevision]);
+  useEffect(() => {
+    if (!deployed || !active) return;
     const timer = window.setInterval(() => { void reload(); }, 3000);
     return () => window.clearInterval(timer);
-  }, [deployed, reload]);
-  return { board, accept, reload, error, setError };
+  }, [deployed, reload, active]);
+  return { board: state.board, summary: state.summary, accept, reload, error: state.error || state.readErrors[kind] || '', setError };
 }
 
 export function TaskBoardPreview({ card }: { card: WorldCard }) {
@@ -49,7 +76,7 @@ export function TaskBoardPreview({ card }: { card: WorldCard }) {
 
 function TaskBoardPreviewView({ card }: { card: WorldCard }) {
   useLocale();
-  const { board, error } = useBoard(card.id);
+  const { summary: board, error } = useBoard(card, 'summary');
   return <div className="node-preview-summary task-board-preview">
     <p>{board ? t("{v0} of {v1} tasks complete", { v0: String(board.summary.done), v1: String(board.summary.total) }) : error || t("Loading tasks...")}</p>
     <progress aria-label={t("Task completion")} value={board?.summary.done ?? 0} max={board?.summary.total || 1} />
@@ -122,23 +149,38 @@ function DependencyGraph({ tasks, onSelect }: { tasks: BoardTask[]; onSelect: (t
   </svg></div>;
 }
 
-export function TaskBoardBody(props: { card: WorldCard; workspace?: boolean }) {
+export function TaskBoardBody(props: { card: WorldCard; workspace?: boolean; level?: NodeSurfaceLevel }) {
   const sessionId = useCardStateSession(props.card.id);
   return <TaskBoardBodyView key={`${props.card.id}:${props.card.state_scope}:${sessionId ?? ''}`} {...props} />;
 }
 
-function TaskBoardBodyView({ card, workspace = false }: { card: WorldCard; workspace?: boolean }) {
+function TaskBoardBodyView({ card, workspace = false, level = 'inspector' }: { card: WorldCard; workspace?: boolean; level?: NodeSurfaceLevel }) {
   const sessionId = useCardStateSession(card.id);
   useLocale();
   const { deployed } = useWorkspaceAccess();
-  const { board, accept, reload, error, setError } = useBoard(card.id);
-  const execution = useNodeExecution(card.id, reload);
+  const active = workspace || level === 'inspector' || level === 'workspace';
+  const { board, accept, reload, error, setError } = useBoard(card, 'full', active);
+  const execution = useNodeExecution(card.id, reload, active);
   const [editing, setBusy] = useState(false);
   const busy = editing || execution.busy || !!execution.state?.active;
   const [view, setView] = useState<"list" | "graph">("list");
   const [filter, setFilter] = useState<"all" | "ready" | "done">("all");
-  const [quickTitle, setQuickTitle] = useState("");
-  const [draft, setDraft] = useState<{ task: BoardTask; revision: number }>();
+  const draftKey = surfaceDraftKey(card.id, 'task-board', card.state_scope, sessionId);
+  type Draft = { quickTitle?: string; task?: { task: BoardTask; revision: number } };
+  const rawDraft = useNodeSurfaceStore(state => state.drafts[draftKey] ?? '{}');
+  const storedDraft = useMemo(() => JSON.parse(rawDraft) as Draft, [rawDraft]);
+  const quickTitle = storedDraft.quickTitle ?? '';
+  const draft = storedDraft.task;
+  const editDraft = (patch: Partial<Draft> | ((previous: Draft) => Partial<Draft>)) => {
+    const previous = JSON.parse(useNodeSurfaceStore.getState().drafts[draftKey] || '{}') as Draft;
+    const next = { ...previous, ...(typeof patch === 'function' ? patch(previous) : patch) };
+    useNodeSurfaceStore.getState().setDraft(draftKey, next.task || next.quickTitle ? JSON.stringify(next) : '');
+  };
+  const setQuickTitle = (value: string) => editDraft({ quickTitle: value });
+  const setDraft = (value: SetStateAction<Draft['task']>) => editDraft(previous => ({ task: typeof value === 'function' ? value(previous.task) : value }));
+  const clearSubmittedDraft = (submitted: Draft['task']) => editDraft(previous => (
+    JSON.stringify(previous.task) === JSON.stringify(submitted) ? { task: undefined } : {}));
+  if (!active) return null;
   const tasks = board?.value.tasks ?? [];
   const settings = board?.value.execution ?? { default_executor_id: null, max_parallel: 1, pause_on_failure: true };
   const executors = execution.state?.executors ?? [];
@@ -153,8 +195,9 @@ function TaskBoardBodyView({ card, workspace = false }: { card: WorldCard; works
   };
   const add = async () => {
     if (!quickTitle.trim()) return;
+    const submitted = quickTitle;
     const task: BoardTask = { id: `task_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`, title: quickTitle.trim(), description: "", status: "todo", depends_on: [], note: "" };
-    if (await mutate("upsert", { tasks: [task] })) setQuickTitle("");
+    if (await mutate("upsert", { tasks: [task] })) editDraft(previous => previous.quickTitle === submitted ? { quickTitle: '' } : {});
   };
   const patch = (change: Partial<BoardTask>) => setDraft((current) => current ? { ...current, task: { ...current.task, ...change } } : current);
   return <div className={`task-board nowheel ${workspace ? "is-workspace" : ""}`}>
@@ -191,7 +234,7 @@ function TaskBoardBodyView({ card, workspace = false }: { card: WorldCard; works
         })}</div>}
     {tasks.length > 0 && view === "list" && filter !== "all" && !tasks.some((task) => filter === "ready" ? ready.has(task.id) : task.status === "done") && <p className="task-board-help">{filter === "ready" ? t("No tasks are ready. Check prerequisites and blockers.") : t("No completed tasks yet.")}</p>}
     </div>
-    {draft && <form className="task-editor" aria-label={t("Task details")} onSubmit={async (e) => { e.preventDefault(); if (await mutate("upsert", { tasks: [draft.task] }, draft.revision)) setDraft(undefined); }}>
+    {draft && <form className="task-editor" aria-label={t("Task details")} onSubmit={async (e) => { e.preventDefault(); if (await mutate("upsert", { tasks: [draft.task] }, draft.revision)) clearSubmittedDraft(draft); }}>
       <header><strong>{t("Task details")}</strong><button type="button" aria-label={t("Close task details")} onClick={() => setDraft(undefined)}><X size={16} /></button></header>
       <fieldset disabled={busy}><label>{t("Title")}<input aria-label={t("Task title")} maxLength={200} required value={draft.task.title} onChange={(e) => patch({ title: e.target.value })} /></label>
       <label>{t("Description")}<textarea aria-label={t("Task description")} rows={3} maxLength={4000} placeholder={t("Expected outcome or instructions")} value={draft.task.description} onChange={(e) => patch({ description: e.target.value })} /></label>
@@ -201,7 +244,7 @@ function TaskBoardBodyView({ card, workspace = false }: { card: WorldCard; works
       <label>{t("Status")}<select aria-label={t("Task status")} value={draft.task.status} onChange={(e) => patch({ status: e.target.value as BoardTask["status"] })}>{Object.entries(statuses).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</select></label>
       <label>{t("Progress note")}<textarea aria-label={t("Progress note")} rows={2} maxLength={4000} placeholder={t("Result, blocker, or next step")} value={draft.task.note} onChange={(e) => patch({ note: e.target.value })} /></label>
       <div className="task-dependencies"><strong>{t("Depends on")}</strong><p>{t("These tasks must finish first.")}</p>{tasks.filter((task) => task.id !== draft.task.id).map((task) => <label key={task.id}><input type="checkbox" aria-label={t("Depends on {v0}", { v0: String(task.title) })} checked={draft.task.depends_on.includes(task.id)} onChange={(e) => patch({ depends_on: e.target.checked ? [...draft.task.depends_on, task.id] : draft.task.depends_on.filter((id) => id !== task.id) })} />{task.title}</label>)}{tasks.length < 2 && <p>{t("Add another task to set a dependency.")}</p>}</div>
-      <div className="task-editor-actions"><button type="button" className="secondary-button" aria-label={t("Delete task")} title={t("Delete this task")} onClick={async () => { if (await mutate("remove", { task_id: draft.task.id }, draft.revision)) setDraft(undefined); }}><Trash2 size={14} /></button><button className="primary-button">{t("Save task")}</button></div></fieldset>
+      <div className="task-editor-actions"><button type="button" className="secondary-button" aria-label={t("Delete task")} title={t("Delete this task")} onClick={async () => { if (await mutate("remove", { task_id: draft.task.id }, draft.revision)) clearSubmittedDraft(draft); }}><Trash2 size={14} /></button><button className="primary-button">{t("Save task")}</button></div></fieldset>
       <small>{t("Task ID:")} {draft.task.id}</small>
     </form>}
     </div><p className="task-board-help task-board-footnote">{t("Run ready work continues through newly unlocked dependencies. Stop preserves completed work. Retry runs only the selected task; resume the remaining plan with Run ready work.")}</p>

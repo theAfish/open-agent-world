@@ -7,6 +7,7 @@ export async function resetTutorialProfile(request: APIRequestContext, session?:
     profile_id: profile.profile_id, generation: profile.generation, changes: {
       'oaw-onboarding-v1': session ? JSON.stringify({ version: 1, state: { status: 'started', session } }) : null,
       'oaw-canvas-viewport-v1': null, 'oaw-node-surfaces-v1': null, 'oaw-theme': null,
+      'oaw-active-workspace-v1': null,
     },
   } });
   expect(response.ok()).toBe(true);

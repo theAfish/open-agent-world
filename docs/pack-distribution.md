@@ -2,7 +2,9 @@
 
 OAW's user model is **Pack → Card Library → Deck → World**. The Store tab remains
 a placeholder for a future online catalog. A `.oawpack` is the supported local
-installation unit for a third-party Pack, including its backend and frontend.
+installation unit for a third-party Pack. Code Packs include their backend and
+frontend; [content Packs](creator-packs.md) carry portable Legion templates and
+reference their required Packs without bundling executable plugins.
 
 `PluginRegistry`, `PluginDescriptor`, `FrontendPlugin` and runtime owner are
 internal implementation concepts. Installed and bundled Packs use the existing
@@ -10,7 +12,7 @@ registry, collection, enable/disable controls, lifecycle checks and deck storage
 Bundled plugins may still own several Packs. An external distribution owns
 exactly one Pack, with the same ID as its runtime owner.
 
-## Version 1 archive
+## Version 1 code archive
 
 A `.oawpack` is a ZIP with these files at the archive root (no wrapper directory):
 

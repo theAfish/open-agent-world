@@ -42,7 +42,7 @@ class ModelConnection(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     name: str = Field(min_length=1, max_length=120)
-    adapter: Literal["openai", "anthropic", "gemini", "legacy"] = "openai"
+    adapter: Literal["openai", "anthropic", "gemini", "typesafe", "legacy"] = "openai"
     base_url: str = Field(default="", max_length=2000)
     enabled: bool = True
     api_key_configured: bool = False
@@ -127,6 +127,25 @@ class ModelConnectionStore:
     def read(self):
         with self.database.locked() as db:
             return self._public(self._read(db))
+
+    def discovery_key(self, edit: ConnectionEdit) -> str | None:
+        """Resolve a draft's credentials without saving it or retargeting a saved secret."""
+        if edit.api_key and not edit.clear_api_key:
+            return edit.api_key
+        if edit.auth_mode == "none":
+            return None
+        if edit.auth_mode == "environment":
+            key = os.environ.get(edit.environment_variable or _provider_environment_variable(edit.adapter))
+            if not key:
+                raise ResourceValidationError("Backend credentials are unavailable. Enter an API key or configure the server environment.")
+            return key
+        with self.database.locked() as db:
+            previous = next((c for c in self._read(db)["connections"] if c["id"] == edit.id), None)
+        if previous and not edit.clear_api_key and previous.get("api_key_encrypted"):
+            if (previous["adapter"], previous["base_url"]) != (edit.adapter, edit.base_url):
+                raise ResourceValidationError("Enter the API key again to check a changed service address or API format.")
+            return self.secrets._fernet(create=False).decrypt(previous["api_key_encrypted"].encode()).decode()
+        raise ResourceValidationError("Enter an API key to connect to this service.")
 
     def context_limits(self, reference: str) -> tuple[int, int] | None:
         """Saved per-connection model limits, including defaults for older rows.
@@ -253,4 +272,5 @@ def _provider_environment_variable(adapter: str) -> str:
         "openai": "OPENAI_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
         "gemini": "GEMINI_API_KEY",
+        "typesafe": "TYPESAFE_API_KEY",
     }.get(adapter, "OPENAI_API_KEY")

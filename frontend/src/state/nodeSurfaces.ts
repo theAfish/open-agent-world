@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useCallback, useMemo, type SetStateAction } from 'react';
 import { createJSONStorage, persist } from "zustand/middleware";
 import { profileStorage } from "./profileStorage";
 import { clampSurfaceSize, type SurfaceSizes, type SurfaceSize } from "./surfaceGeometry";
@@ -97,6 +98,7 @@ interface NodeSurfaceState {
   closeWorkspace: (nodeId?: string) => void;
   closeExpanded: () => void;
   setDraft: (nodeId: string, value: string) => void;
+  forgetDrafts: (nodeIds: string | string[]) => void;
   toggleWorkspaceMaximized: (nodeId: string) => void;
   beginConnection: (nodeId: string) => void;
   endConnection: () => void;
@@ -229,9 +231,20 @@ export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set, get)
     return target ? closeSurfaces(state, target, undefined, true) : state;
   }),
 
-  setDraft: (nodeId, value) => set((state) => ({
-    drafts: { ...state.drafts, [nodeId]: value },
-  })),
+  setDraft: (nodeId, value) => set((state) => {
+    if ((state.drafts[nodeId] ?? '') === value) return state;
+    const drafts = { ...state.drafts };
+    if (value) drafts[nodeId] = value; else delete drafts[nodeId];
+    return { drafts };
+  }),
+  forgetDrafts: nodeIds => set(state => {
+    const ids = new Set(typeof nodeIds === 'string' ? [nodeIds] : nodeIds);
+    const drafts = Object.fromEntries(Object.entries(state.drafts).filter(([key]) => {
+      const owner = key.startsWith('card:') ? decodeURIComponent(key.split(':')[1]) : key.slice(key.lastIndexOf(':') + 1);
+      return !ids.has(owner);
+    }));
+    return Object.keys(drafts).length === Object.keys(state.drafts).length ? state : { drafts };
+  }),
 
   toggleWorkspaceMaximized: (nodeId) => set((state) => ({
     maximizedWorkspaces: {
@@ -279,4 +292,22 @@ export function surfaceLevelForNode(
   surfaceLevels: Readonly<Record<string, NodeSurfaceLevel>>,
 ): NodeSurfaceLevel {
   return surfaceLevels[nodeId] ?? "preview";
+}
+
+export function surfaceDraftKey(cardId: string, surface: string, ...scope: unknown[]) {
+  return `card:${encodeURIComponent(cardId)}:${surface}:${JSON.stringify(scope)}`;
+}
+
+/** Small adapter for the existing transient store; never persisted to preferences. */
+export function useSurfaceDraft<T>(key: string, initial: T): [T, (value: SetStateAction<T>) => void] {
+  const raw = useNodeSurfaceStore(state => state.drafts[key]);
+  const value = useMemo(() => raw ? JSON.parse(raw) as T : initial, [raw, initial]);
+  const setValue = useCallback((next: SetStateAction<T>) => {
+    const store = useNodeSurfaceStore.getState();
+    const previous = store.drafts[key] ? JSON.parse(store.drafts[key]) as T : initial;
+    const result = typeof next === 'function' ? (next as (value: T) => T)(previous) : next;
+    const serialized = JSON.stringify(result);
+    store.setDraft(key, serialized === JSON.stringify(initial) ? '' : serialized ?? '');
+  }, [key, initial]);
+  return [value, setValue];
 }

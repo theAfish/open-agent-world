@@ -1,0 +1,31 @@
+.finish-preview { --ink: #263b34; --ink-soft: #52675d; --line-strong: #abb8ab; --card-surface: #f5f4eb; --surface-solid: #e2e7d9; --highlight: #ffffffb0; --shadow: #1c36251a; padding: 42px; min-height: 100vh; background: #ebece7; color: #24362e; font-family: system-ui, sans-serif; }
+.finish-preview[data-theme="dark"] { --ink: #e4eee7; --ink-soft: #adbeb4; --line-strong: #50645c; --card-surface: #233830; --surface-solid: #182720; --highlight: #d9ffef22; --shadow: #0008; background: #111c18; color: #d8e6db; }
+.finish-preview-heading small { font-size: 10px; letter-spacing: .2em; opacity: .65; }
+.finish-preview-heading h2 { font-family: Georgia, serif; font-size: 36px; font-weight: 500; margin: 12px 0; }
+.finish-preview-heading p, .finish-preview-note { font-size: 12px; line-height: 1.6; opacity: .7; }
+.finish-preview-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; margin: 25px 0 36px; font-size: 12px; }
+.finish-preview-controls label { display: flex; align-items: center; gap: 7px; }
+.finish-preview-controls button, .finish-preview-controls select { display: inline-flex; align-items: center; gap: 7px; background: transparent; color: inherit; font: inherit; padding: 8px 12px; border: 1px solid #83978a70; border-radius: 6px; cursor: pointer; }
+.finish-preview-controls a { color: inherit; }
+.finish-preview-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 26px; max-width: 1400px; }
+.finish-preview-grid figure { margin: 0; min-width: 0; }
+.finish-preview-card { position: relative; display: block; width: 100%; aspect-ratio: 0.72; padding: 7px; }
+.finish-preview-card .card-face { padding: 18px 13px; gap: 16px; }
+.finish-preview-card .card-face-art > svg { width: 66px; height: 66px; stroke-width: 1.1; }
+.finish-preview-card .card-face-copy strong { font: 500 20px/1.1 Georgia, serif; -webkit-line-clamp: unset; }
+.finish-preview-card .card-face-copy small { font-size: 10px; -webkit-line-clamp: unset; }
+.finish-preview-grid figcaption { margin-top: 18px; display: grid; gap: 8px; font-size: 13px; }
+.finish-preview-grid figcaption span { font-size: 11px; line-height: 1.6; opacity: .65; }
+.finish-preview-note { margin-top: 34px; }
+.finish-preview-grid.is-dense { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 20px; }
+.finish-preview-card.is-compact { padding: 4px; }
+.finish-preview-card.is-compact .card-face { padding: 6px; gap: 4px; }
+.finish-preview-card.is-compact .card-face-art > svg { width: 25px; height: 25px; }
+.finish-preview-card.is-compact .card-face-copy strong { font: 600 10px/1.2 system-ui, sans-serif; }
+.finish-preview-card.is-compact .card-face-copy small { display: none; }
+.finish-preview.is-embedded { min-height: 0; margin: 18px 0; padding: 18px; border: 1px solid #83978a50; border-radius: 10px; }
+.finish-preview.is-embedded h2 { font-size: 22px; }
+.finish-preview.is-embedded .finish-preview-grid { grid-template-columns: 220px; justify-content: center; }
+.finish-preview.is-embedded .finish-preview-controls { margin-bottom: 20px; }
+@media (max-width: 850px) { .finish-preview { padding: 24px; } .finish-preview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (prefers-reduced-motion: reduce) { .finish-preview-card { transform: none; } }

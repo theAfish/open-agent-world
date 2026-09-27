@@ -1,0 +1,15 @@
+.pack-creator { width: 100%; min-width: 0; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.pack-creator form, .pack-creator fieldset { display: grid; gap: 12px; min-width: 0; }
+.pack-creator fieldset { border: 0; padding: 0; margin: 0; }
+.pack-creator label { display: grid; gap: 5px; font-size: 12px; }
+.pack-creator input, .pack-creator textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 7px; color: inherit; background: var(--surface-solid); font: inherit; }
+.pack-creator textarea { resize: vertical; }
+.pack-creator-row { display: grid; grid-template-columns: 1fr 80px; gap: 10px; }
+.pack-creator input[type="color"] { padding: 2px; height: 32px; }
+.pack-creator summary { cursor: pointer; font-size: 12px; padding-bottom: 8px; }
+.pack-creator p, .pack-guide p { font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pack-creator .pack-creator-check { display: flex; flex-direction: row; align-items: center; margin-top: 8px; gap: 8px; }
+.pack-creator input[type="checkbox"] { width: auto; }
+.pack-creator-review { padding: 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; overflow-wrap: anywhere; }
+.pack-creator-review ul { margin: 8px 0; padding-left: 18px; }
+.pack-guide { max-width: 640px; }

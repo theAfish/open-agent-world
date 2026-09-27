@@ -13,7 +13,7 @@ test('six compact controls keep their order and switch the open settings without
   const actions = page.locator('.top-actions > button');
   await expect(actions).toHaveCount(6);
   await expect(actions.first()).toHaveAccessibleName('Open Pack and Card Library');
-  await expect(actions.last()).toHaveAccessibleName('Replay Tutorial');
+  await expect(actions.last()).toHaveAccessibleName('Help');
   for (const width of [1280, 800, 390]) {
     await page.setViewportSize({ width, height: 800 });
     const boxes = await actions.evaluateAll(buttons => buttons.map(button => {
@@ -27,7 +27,7 @@ test('six compact controls keep their order and switch the open settings without
   await page.getByRole('button', { name: '切换到中文', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
   await expect(actions.first()).toHaveAccessibleName('打开卡包与卡片图书馆');
-  await expect(actions.last()).toHaveAccessibleName('重播教程');
+  await expect(actions.last()).toHaveAccessibleName('帮助');
   await page.screenshot({ path: 'test-results/i18n-hud-zh-light.png' });
   await page.getByRole('button', { name: '使用深色主题', exact: true }).click();
   await page.screenshot({ path: 'test-results/i18n-hud-zh-dark.png' });

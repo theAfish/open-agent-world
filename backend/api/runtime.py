@@ -22,6 +22,18 @@ router = APIRouter(tags=["runtime"])
 from backend.security.model_connections import CatalogEdit, ModelCatalog, ModelConnectionStore
 
 
+@router.post("/settings/models/discover")
+async def discover_model_connections(request: Request, services: ApplicationServices = Depends(get_services)):
+    from backend.security.model_connections import ConnectionEdit
+    from backend.security.model_discovery import discover_models
+    try:
+        edit = ConnectionEdit.model_validate(await request.json())
+    except (ValidationError, ValueError):
+        # Never echo credential-bearing input, including validation contexts.
+        raise HTTPException(422, detail="Invalid model connection. Check the service address and credentials.") from None
+    return await discover_models(edit, ModelConnectionStore(services.llm_settings))
+
+
 @router.get("/settings/models", response_model=ModelCatalog)
 async def get_model_connections(services: ApplicationServices = Depends(get_services)):
     return ModelConnectionStore(services.llm_settings).read()

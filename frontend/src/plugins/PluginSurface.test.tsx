@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useLegionWorkspace } from '../state/legionWorkspace';
+import { WorkspaceSurfaceContext } from './WorkspaceSurfaceContext';
 import { afterEach, expect, it, vi } from "vitest";
 import { worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
@@ -9,11 +11,22 @@ import { PluginSurface } from "./PluginSurface";
 import { CatalogIcon } from "../components/CatalogIcon";
 import * as registry from './registry';
 import { useConversationView } from '../state/conversationView';
+import { useNodeSurfaceStore } from '../state/nodeSurfaces';
 import type { PluginViewProps } from './sdk';
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); useLegionWorkspace.getState().close(); useNodeSurfaceStore.setState({ drafts: {} }); vi.restoreAllMocks(); });
 const card: WorldCard = { id: "extension-card", type: "example.agent", name: "Extension", status: "idle",
   position: { x: 0, y: 0 }, size: { width: 300, height: 190 }, expanded: false, config: { effort: "default" } };
+
+it('suspends covered XRD graph canvases but keeps Legion panes and restores them on exit', () => {
+  const canvas = { ...card, type: 'xrd.structure-canvas' };
+  render(<><PluginSurface card={canvas} slot="settings" level="workspace"><p>Graph canvas</p></PluginSurface><WorkspaceSurfaceContext.Provider value={true}><PluginSurface card={canvas} slot="settings" level="workspace"><p>Legion canvas</p></PluginSurface></WorkspaceSurfaceContext.Provider></>);
+  act(() => useLegionWorkspace.getState().open('legion'));
+  expect(screen.queryByText('Graph canvas')).toBeNull();
+  expect(screen.getByText('Legion canvas')).toBeTruthy();
+  act(() => useLegionWorkspace.getState().close());
+  expect(screen.getByText('Graph canvas')).toBeTruthy();
+});
 
 function install(pluginId: string, frontend: { settings?: string } = {}) {
   const updateCard = vi.fn().mockResolvedValue(undefined);
@@ -33,7 +46,7 @@ it("loads the actual local plugin entry and saves through the scoped host SDK", 
   expect(screen.queryByText("Local runtime")).toBeNull();
   expect(screen.queryByText("Fallback")).toBeNull();
   fireEvent.change(screen.getByLabelText("Effort"), { target: { value: "high" } });
-  await waitFor(() => expect(update).toHaveBeenCalledWith(card.id, { config: { effort: "high" } }));
+  await waitFor(() => expect(update).toHaveBeenCalledWith(card.id, { config: { effort: "high" } }, { throwOnError: true }));
 });
 
 it("uses the host view when no override is declared", () => {
@@ -88,12 +101,32 @@ it('binds the SDK to the originating session while exposing no session argument 
   let props!: PluginViewProps;
   vi.spyOn(registry, 'pluginView').mockReturnValue(((value: PluginViewProps) => { props = value; return <p>Stateful</p>; }) as ReturnType<typeof registry.pluginView>);
   const api = vi.spyOn(worldApi, 'cardState').mockResolvedValue({ value: {}, revision: 1 });
-  render(<PluginSurface card={scoped} slot="settings" level="inspector" />);
+  const view = render(<PluginSurface card={scoped} slot="settings" level="inspector" />);
   await screen.findByText('Stateful');
   const stateA = props.host.state!;
+  const draftA = props.host.draft!;
+  const changedA = vi.fn();
+  const unsubscribe = draftA.subscribe!(changedA);
+  props.host.draft!.set({ title: 'Unfinished A' });
+  expect(changedA).toHaveBeenCalledTimes(1);
   expect(props.host.setDataPersistence).toBeTypeOf('function');
   act(() => useConversationView.getState().selectSession('chat', 'B'));
+  expect(props.host.draft!.get()).toBeUndefined();
+  props.host.draft!.set({ title: 'Unfinished B' });
+  expect(changedA).toHaveBeenCalledTimes(1);
   await stateA.set({ saved: 'A' }, 0);
   expect(api).toHaveBeenCalledWith(card.id, 'PUT', { saved: 'A' }, 0, 'A');
+  act(() => useConversationView.getState().selectSession('chat', 'A'));
+  expect(props.host.draft!.get()).toEqual({ title: 'Unfinished A' });
+  view.unmount();
+  render(<PluginSurface card={scoped} slot="settings" level="inspector" />);
+  expect(props.host.draft!.get()).toEqual({ title: 'Unfinished A' });
+  act(() => draftA.set({ title: 'Finished in an old mount' }));
+  expect(props.host.draft!.get()).toEqual({ title: 'Finished in an old mount' });
+  expect(changedA).toHaveBeenCalledTimes(2);
+  act(() => useNodeSurfaceStore.getState().forgetDrafts(scoped.id));
+  expect(props.host.draft!.get()).toBeUndefined();
+  expect(changedA).toHaveBeenCalledTimes(3);
+  unsubscribe();
   act(() => useConversationView.setState({ activeConversationId: undefined, sessions: {} }));
 });

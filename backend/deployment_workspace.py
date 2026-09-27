@@ -26,7 +26,8 @@ def workspace_snapshot(manifest, services):
             plugin_types.add(card.type)
             config = {key: value for key, value in card.config.items() if key in access["config_fields"]}
         cards.append({"id": card.id, "type": card.type, "name": card.name, "status": card.status,
-                      "parent_id": manifest["legion_id"], "config": config, "state_scope": card.state_scope})
+                      "parent_id": manifest["legion_id"], "config": config, "state_scope": card.state_scope,
+                      "finish": card.finish})
         sections = {"conversation": ("sessions", "conversation", "participants"),
                     "sandbox": ("files", "preview", "terminal")}.get(card.type, ())
         if access is not None:
@@ -42,7 +43,8 @@ def workspace_snapshot(manifest, services):
             definition["frontend"] = {key: value for key, value in node.frontend.items() if key in {"body", "workspace"}}
     layout = {**deepcopy(manifest["layout"]), "hidden_sections": hidden}
     return {"cards": cards, "plugin_access": manifest.get("plugin_access", {}), "legion": {"id": manifest["legion_id"], "name": manifest["name"],
-            "type": "legion", "config": {"workspace_layout": layout}},
+            "type": "legion", "finish": services.world.get_card(manifest["legion_id"]).finish,
+            "config": {"workspace_layout": layout}},
             "catalog": {"node_types": definitions, "relationships": [], "plugins": [], "packs": []}}
 
 
@@ -118,14 +120,15 @@ def workspace_router(manifest):
         return await resources.resource_content(resource_id, services)
 
     @router.get("/nodes/{node_id}/document")
-    async def document(node_id: str, services=Depends(get_services)):
+    async def document(node_id: str, services=Depends(get_services), summary_only: bool = False):
         access = manifest.get("plugin_access", {}).get(node_id)
         if access is not None:
             if not access["document_fields"] and not access["summary_fields"]:
                 raise HTTPException(404, "This operation is not published")
-            return project_document(await node_documents.get_document(node_id, services), access)
+            projected = project_document(await node_documents.get_document(node_id, services), access)
+            return {"revision": projected["revision"], "summary": projected["summary"]} if summary_only else projected
         require(node_id, "tasks")
-        return await node_documents.get_document(node_id, services)
+        return await node_documents.get_document(node_id, services, summary_only)
 
     @router.post("/nodes/{node_id}/actions/{action}")
     async def action(node_id: str, action: str, request: DocumentActionRequest, services=Depends(get_services)):

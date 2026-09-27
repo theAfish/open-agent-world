@@ -135,6 +135,7 @@ def test_plugin_preset_is_available_in_decks_and_disabled_with_its_plugin(client
     services = client.app.state.services
     library = services.card_library
     state = library.read()
+    state = library.edit(LibraryEdit(action='open_pack', id='matcreator.default', expected_revision=state.revision))
     state = library.edit(LibraryEdit(action='update_deck', id=state.active_deck_id, expected_revision=state.revision,
         entries=[{'kind': 'legion', 'id': 'matcreator.research'}]))
     assert any(e.id == 'matcreator.research' for d in state.decks for e in d.entries)

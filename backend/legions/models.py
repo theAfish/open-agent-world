@@ -6,6 +6,7 @@ from typing import Any, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from backend.card_finishes import CardFinish
 from backend.world.models import Card, Edge, EdgeDirection, Point, Size
 
 
@@ -96,6 +97,7 @@ class LegionTemplateNode(BaseModel):
     initial_document: dict[str, Any] | None = None
     initial_shared_state: dict[str, Any] | None = None
     type: str
+    finish: CardFinish = "normal"
     plugin_id: str
     name: str
     position: Point
@@ -162,6 +164,28 @@ class LegionBlueprint(BaseModel):
                     visited.add(parent.key)
                     parent = nodes.get(parent.owner_key or parent.parent_key)
         return self
+
+
+class LegionBlueprintPreset(BaseModel):
+    """Host-owned adapter for a saved formation in a content Pack.
+
+    Preserve the complete portable contract (sizes, state scopes, layout keys
+    and versioned payloads); converting to PresetNode would lose that data.
+    """
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
+    revision: int = Field(default=1, ge=1)
+    blueprint: LegionBlueprint
+
+    @property
+    def nodes(self):
+        return self.blueprint.nodes
+
+    @property
+    def edges(self):
+        return self.blueprint.edges
 
 
 class LegionRecord(BaseModel):

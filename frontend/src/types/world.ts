@@ -1,6 +1,7 @@
 export type PluginStateSpec = { mode: "none" } | { mode: "scoped"; supportedScopes: ("shared" | "session")[]; defaultScope: "shared" | "session"; userConfigurable?: boolean };
 
 export type CardType = string;
+export type { CardFinish } from '../cards/cardFinish';
 
 export type NodeSurfaceLevel = "node" | "preview" | "inspector" | "workspace";
 export interface NodePresentation {
@@ -115,6 +116,8 @@ export interface CardConfig extends Record<string, unknown> {
 }
 
 export interface WorldCard {
+  /** Missing on old snapshots; rendered as normal. Set once by the backend. */
+  finish?: import('../cards/cardFinish').CardFinish;
   state_scope?: "shared" | "session" | null;
   state_scope_override?: "shared" | "session" | null;
   id: string;
@@ -394,8 +397,37 @@ export interface ContainerDefinition {
   document_field: string | null;
 }
 
+export interface ConversationToolTrace {
+  type: string;
+  name: string;
+  call_id?: string;
+}
+
+export interface ConversationRunSummary {
+  run_id: string;
+  agent_id: string;
+  status: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  awaiting?: string | null;
+  progress?: string | null;
+  tool_count: number;
+  tool_trace: ConversationToolTrace[];
+  live_text?: string;
+}
+
+export interface ConversationDeliveryState {
+  message_id: string;
+  agent_id: string;
+  status: "queued" | "claimed";
+  claimed_run_id?: string | null;
+}
+
 export interface ConversationMessagePage {
   active_agent_ids?: string[];
+  active_runs?: ConversationRunSummary[];
+  deliveries?: ConversationDeliveryState[];
+  run_summaries?: Record<string, ConversationRunSummary>;
   items: ConversationMessage[];
   has_before: boolean;
   has_after: boolean;

@@ -6,6 +6,20 @@ const scope = (id: string): InteractionScope => ({ active: true, busy: false, st
 function el(html: string) { document.body.innerHTML = html; return document.body.firstElementChild!; }
 afterEach(() => { document.body.innerHTML = ''; });
 describe('tutorial interaction ownership', () => {
+  it('keeps help and its keyboard handling available during a demonstration', () => {
+    const current = { ...scope('place'), busy: true };
+    expect(tutorialAllows(el('<button data-help-trigger />'), current)).toBe(true);
+    const close = el('<dialog class="help-dialog"><button /></dialog>').querySelector('button')!;
+    expect(tutorialAllows(close, current)).toBe(true);
+    const pause = vi.fn();
+    const remove = installTutorialInteractionGuard(() => current, pause);
+    try {
+      const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      close.dispatchEvent(escape);
+      expect(escape.defaultPrevented).toBe(false);
+      expect(pause).not.toHaveBeenCalled();
+    } finally { remove(); }
+  });
   it('forms only the three tutorial cards and keeps workspace guidance inside its owner', () => {
     const current = { ...scope('legion-form'), refs: { agent: 'a', conversation: 'c', sandbox: 's', legion: 'g' }, selectedIds: ['a', 'c'] };
     const form = el('<button data-tutorial="legion-selection" />');

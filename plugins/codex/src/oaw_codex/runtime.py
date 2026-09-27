@@ -280,6 +280,11 @@ class CodexRuntime(RuntimeProvider):
                         yield event(AgentEventType.MESSAGE, {"text": final_text, "final": True, "provider_message_id": item.get("id")})
                     elif kind in {"commandExecution", "fileChange", "mcpToolCall", "webSearch"}:
                         started = method == "item/started"
+                        if started:
+                            yield event(AgentEventType.PROGRESS, {
+                                "kind": "status",
+                                "text": f"Running {kind}",
+                            })
                         yield event(AgentEventType.TOOL_STARTED if started else AgentEventType.TOOL_COMPLETED, {
                             "name": kind, "call_id": item.get("id"),
                             "arguments" if started else "response": {
