@@ -13,7 +13,8 @@ let profile: ApplicationProfile | undefined;
 let pending: Record<string, string | null> = {};
 let saving: Promise<void> | undefined;
 let timer: ReturnType<typeof setTimeout> | undefined;
-let monitor: ReturnType<typeof setInterval> | undefined;
+let stopMonitor: (() => void) | undefined;
+let removePagehide: (() => void) | undefined;
 
 export const currentProfile = () => profile;
 export const applicationUrl = (path = "") => `${API}/application${path}`;
@@ -78,6 +79,8 @@ export const profileStorage = {
 };
 
 export async function initializeProfile() {
+  stopMonitor?.();
+  removePagehide?.();
   configureProfile(await fetchProfile());
   const browserRead = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
   // One-time production migration only. Development never imports daily-use browser state.
@@ -91,18 +94,43 @@ export async function initializeProfile() {
     await flushPreferences();
     try { localStorage.setItem(marker, "true"); } catch { /* The backend remains authoritative without browser storage. */ }
   }
-  if (monitor) clearInterval(monitor);
-  monitor = setInterval(() => {
-    void fetchProfile().then(next => {
-      if (next.profile_id !== profile?.profile_id || next.generation !== profile?.generation) window.location.reload();
-    }).catch(() => {});
-  }, 2000);
-  window.addEventListener("pagehide", () => {
+  // Poll serially: the monitor itself retries, so do not stack fetchWithRetry
+  // on top. A disconnected backend backs off to one probe per minute.
+  let stopped = false;
+  let delay = 2000;
+  let monitor: ReturnType<typeof setTimeout>;
+  let controller: AbortController | undefined;
+  const poll = async () => {
+    controller = new AbortController();
+    const timeout = setTimeout(() => controller?.abort(), 5000);
+    try {
+      const response = await fetch(applicationUrl(), { cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw new Error(`Application monitor failed (${response.status})`);
+      const next: ApplicationProfile = await response.json();
+      if (stopped) return;
+      if (next.profile_id !== profile?.profile_id || next.generation !== profile?.generation) {
+        stopped = true;
+        window.location.reload();
+        return;
+      }
+      delay = 2000;
+    } catch {
+      delay = Math.min(delay * 2, 60000);
+    } finally {
+      clearTimeout(timeout);
+      if (!stopped) monitor = setTimeout(() => { void poll(); }, delay);
+    }
+  };
+  monitor = setTimeout(() => { void poll(); }, delay);
+  stopMonitor = () => { stopped = true; clearTimeout(monitor); controller?.abort(); };
+  const onPagehide = () => {
     if (profile && Object.keys(pending).length) {
       void fetch(applicationUrl("/preferences"), { method: "PATCH", keepalive: true,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profile_id: profile.profile_id, generation: profile.generation, changes: pending }),
       }).catch(() => {});
     }
-  });
+  };
+  window.addEventListener("pagehide", onPagehide);
+  removePagehide = () => window.removeEventListener("pagehide", onPagehide);
 }

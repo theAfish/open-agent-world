@@ -1,0 +1,16 @@
+{
+  "synthetic": true,
+  "rejection_reason": "Inventing a precise page recommendation for a paper held only as metadata.",
+  "bad_output_excerpt": {
+    "status": "completed",
+    "reading_recommendations": [
+      {
+        "paper_id": "fixture:unread",
+        "locator": "page 9, paragraph 2",
+        "reason": "Invented recommendation",
+        "evidence_scope": "metadata"
+      }
+    ]
+  },
+  "required_correction": "Return only work actually performed with inspected sources; record missing capabilities and unknowns. Structural schema validity alone does not establish scientific correctness."
+}

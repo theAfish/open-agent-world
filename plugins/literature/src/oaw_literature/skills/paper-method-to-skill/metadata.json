@@ -1,0 +1,8 @@
+{
+  "name": "Method to Skill / 方法转技能",
+  "description": "Convert a source-backed MethodSpec into a portable Skill draft with explicit prerequisites, validation state and provenance.",
+  "required_capabilities": [
+    "paper_read_evidence",
+    "research_export_skill"
+  ]
+}

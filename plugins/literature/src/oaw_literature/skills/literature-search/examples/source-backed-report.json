@@ -1,0 +1,42 @@
+{
+  "status": "completed",
+  "missing_capabilities": [],
+  "sources": [
+    {
+      "source_id": "fixture:source-1",
+      "kind": "document",
+      "locator": "Synthetic fixture anchor; no real paper or external call",
+      "access": "fulltext"
+    }
+  ],
+  "limitations": [
+    "Synthetic report example only; no research operation was performed by packaging this Skill."
+  ],
+  "search_runs": [
+    {
+      "search_run_id": "fixture:search-1",
+      "query": "synthetic topic method",
+      "source": "synthetic-index",
+      "queried_at": "2026-09-24T00:00:00Z",
+      "result_paper_ids": [
+        "fixture:paper-1"
+      ],
+      "next_cursor": null,
+      "coverage_note": "One synthetic fixture record; no live index coverage claimed"
+    }
+  ],
+  "paper_ids": [
+    "fixture:paper-1"
+  ],
+  "screening": [
+    {
+      "paper_id": "fixture:paper-1",
+      "decision": "include",
+      "reason": "Fixture describes the scoped method",
+      "source_ids": [
+        "fixture:source-1"
+      ]
+    }
+  ],
+  "next_queries": []
+}

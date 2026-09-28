@@ -53,3 +53,15 @@ it("keeps successful imports when the summary read fails",async()=>{
   expect((await importPdf({name:"notes.pdf",size:1} as File,{x:0,y:0})).id).toBe("saved");
   expect(fetch.mock.calls.some(call=>call[1]?.method==="DELETE")).toBe(false);
 });
+
+it("attaches to the selected Paper and never deletes it after upload failure",async()=>{
+  vi.stubGlobal("FileReader",class {result="data:application/pdf;base64,QQ==";onload?:()=>void;readAsDataURL(){this.onload?.();}});
+  const open=vi.fn(),send=vi.fn();
+  vi.stubGlobal("XMLHttpRequest",class {status=400;responseText="bad attachment";upload={};onload?:()=>void;open=open;setRequestHeader(){}send(body:string){send(body);this.onload?.();}});
+  const fetch=vi.fn().mockResolvedValueOnce({ok:true,json:async()=>({id:"existing",type:"library.paper"})}).mockResolvedValueOnce({ok:true,json:async()=>({revision:7})});
+  vi.stubGlobal("fetch",fetch);
+  await expect(importPdf({name:"si.pdf",size:1} as File,{x:0,y:0},undefined,undefined,{paperId:"existing",kind:"supplement"})).rejects.toThrow("bad attachment");
+  expect(open).toHaveBeenCalledWith("POST","/api/literature/papers/existing/attach_pdf");
+  expect(JSON.parse(send.mock.calls[0][0])).toMatchObject({expected_revision:7,arguments:{kind:"supplement"}});
+  expect(fetch.mock.calls.some(call=>call[1]?.method==="DELETE"||call[1]?.method==="POST")).toBe(false);
+});

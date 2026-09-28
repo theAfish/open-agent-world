@@ -162,3 +162,23 @@ def test_translation_uses_configured_model_connection_and_rejects_disabled(clien
     assert client.put("/api/settings/models", json=saved).status_code == 200
     assert client.post("/api/library/translate", json=request).status_code == 422
     assert len(calls) == 1
+
+
+def test_paper_source_links_survive_pdf_import_in_lightweight_details(client):
+    paper = create_node(client, "library.paper")
+    path = f"/api/nodes/{paper['id']}"
+    before = client.get(path + "/document").json()
+    metadata = {"doi": "10.1234/source-test", "source_url": "https://example.org/paper"}
+    updated = client.post(path + "/actions/metadata", json={
+        "expected_revision": before["revision"], "arguments": {"metadata": metadata}})
+    assert updated.status_code == 200, updated.text
+    preview_path = f"/api/library/papers/{paper['id']}/preview?details=true"
+    assert client.get(preview_path).json()["value"]["metadata"] == metadata
+    imported = client.post(path + "/actions/import", json={
+        "expected_revision": updated.json()["revision"],
+        "arguments": {"filename": "source.pdf", "pdf": base64.b64encode(sample_pdf()).decode()}})
+    assert imported.status_code == 200, imported.text
+    value = client.get(preview_path).json()["value"]
+    assert value["metadata"] == metadata
+    assert value["pages"] == 1
+    assert "pdf" not in value and "text" not in value

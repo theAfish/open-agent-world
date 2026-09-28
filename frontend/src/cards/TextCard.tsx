@@ -100,6 +100,8 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
         </div>
       </div>
 
+      {card.config.research_projection === 'paper_skill' && card.config.projection_historical === true &&
+        <p role="status">{t("历史 Skill 摘录：该论文已不在当前研究来源中；正文和您的笔记已保留。")}</p>}
       {error && <p role="alert">{error}</p>}
       <label className="field-label text-editor-label">
         <span>{t("Contents")}</span>

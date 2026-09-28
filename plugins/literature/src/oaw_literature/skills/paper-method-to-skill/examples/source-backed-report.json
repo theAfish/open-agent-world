@@ -1,0 +1,32 @@
+{
+  "status": "completed",
+  "missing_capabilities": [],
+  "sources": [
+    {
+      "source_id": "fixture:source-1",
+      "kind": "document",
+      "locator": "Synthetic fixture anchor; no real paper or external call",
+      "access": "fulltext"
+    }
+  ],
+  "limitations": [
+    "Synthetic report example only; no research operation was performed by packaging this Skill."
+  ],
+  "skill_artifact_id": "fixture:skill-draft",
+  "method_status": "draft",
+  "missing_fields": [
+    "Treatment duration",
+    "Independent validation"
+  ],
+  "source_evidence_ids": [
+    "fixture:evidence-1"
+  ],
+  "artifact_files": [
+    "SKILL.md",
+    "references/sources.json"
+  ],
+  "validation_records": [],
+  "next_steps": [
+    "Resolve missing duration before requesting an authorized minimal run"
+  ]
+}

@@ -18,6 +18,7 @@ const preopt = { run_id: 'preopt-1', status: 'completed', result: { mode: 'pipel
 function mount({ workflow = { match_run_id: 'match-1' }, config = {}, status = 'idle', last = {}, progress, host: overrides = {}, matchResult = result }: { workflow?: Record<string, unknown>; config?: Record<string, unknown>; status?: string; last?: Record<string, unknown>; progress?: unknown; host?: Partial<PluginViewProps['host']>; matchResult?: typeof result } = {}) {
   const host: PluginViewProps['host'] = {
     delegationAction: vi.fn(), resourceAction: vi.fn(),
+    openWorkspace: vi.fn(), runAgent: vi.fn(), onDocumentChange: vi.fn(() => () => {}), registerVisualCapture: vi.fn(() => () => {}),
     runAnalysis: vi.fn().mockResolvedValue(undefined), stopAnalysis: vi.fn().mockResolvedValue(undefined), updateConfig: vi.fn().mockResolvedValue(undefined),
     getAgentInfo: vi.fn().mockResolvedValue({ session_id: '', details: { result: matchResult, workflow, last_run: last, progress } }),
     listCards: vi.fn().mockResolvedValue([]), readDocument: vi.fn(), documentAction: vi.fn(), documentDownloadUrl: vi.fn(), transform: vi.fn(), readFile: vi.fn(), openFile: vi.fn(), clearOpenedFile: vi.fn(), openInputNode: vi.fn().mockResolvedValue(undefined), ...overrides,

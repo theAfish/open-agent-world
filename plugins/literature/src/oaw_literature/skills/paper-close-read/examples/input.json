@@ -1,0 +1,19 @@
+{
+  "question": "Synthetic example: inspect the scoped method",
+  "scope_id": "fixture:scope-1",
+  "scope_revision": 1,
+  "request_id": "fixture:request-1",
+  "available_capabilities": [
+    "paper_read_sections",
+    "paper_read_evidence",
+    "research_record_evidence"
+  ],
+  "paper_id": "fixture:paper-1",
+  "document_version": "fixture:doc-v1",
+  "focus": [
+    "Reported method parameters"
+  ],
+  "available_materials": [
+    "fulltext"
+  ]
+}

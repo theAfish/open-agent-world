@@ -1,0 +1,8 @@
+.pdf-import-choice {width:min(560px,calc(100vw - 48px));box-sizing:border-box;border:1px solid var(--line,#54645e);border-radius:16px;background:var(--surface,#242622);color:var(--ink,#eee);padding:24px;}
+.pdf-import-choice::backdrop {background:#0008;backdrop-filter:blur(4px);}
+.pdf-import-choice header,.pdf-import-choice footer {display:flex;justify-content:space-between;gap:12px;align-items:center;}
+.pdf-import-choice label {display:grid;gap:6px;margin:16px 0;}
+.pdf-import-choice input,.pdf-import-choice select {max-width:100%;box-sizing:border-box;padding:10px;background:var(--surface-raised,#344039);color:inherit;border:1px solid var(--line,#54645e);border-radius:8px;}
+.pdf-import-choice p {overflow-wrap:anywhere;}.pdf-import-choice small {opacity:.75;}
+.pdf-import-choice button {padding:8px 14px;background:var(--surface-raised,#344039);color:inherit;border:1px solid var(--line,#54645e);border-radius:8px;cursor:pointer;}
+.pdf-import-choice button:disabled {opacity:.5;cursor:default;}.pdf-import-choice footer {justify-content:flex-end;margin-top:24px;}

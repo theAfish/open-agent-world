@@ -58,3 +58,17 @@ class NodeDocumentDefinition:
     max_size_bytes: int = 256 * 1024
     transformations: Mapping[str, NodeDocumentTransformation] = field(default_factory=dict)
     validate_update: Callable[[dict[str, Any], dict[str, Any]], None] | None = None
+    # Opt-in base64 fields retained by the host on replacement. Bytes are stored
+    # once by SHA256, outside the bounded JSON, with per-document ownership.
+    binary_history: tuple[str, ...] = ()
+    identity_field: str | None = None
+    # On returning to retained bytes, restore only these version-local fields
+    # before model validation. Metadata and cross-version provenance stay live.
+    binary_restore_fields: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+
+    def __post_init__(self):
+        for binary_field, restored_fields in self.binary_restore_fields.items():
+            if binary_field not in self.binary_history:
+                raise ValueError("Binary restoration requires retained history")
+            if any(name in self.binary_history or name == self.identity_field for name in restored_fields):
+                raise ValueError("Binary restoration cannot replace bytes or document identity")

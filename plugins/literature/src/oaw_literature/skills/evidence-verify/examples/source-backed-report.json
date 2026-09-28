@@ -1,0 +1,33 @@
+{
+  "status": "completed",
+  "missing_capabilities": [],
+  "sources": [
+    {
+      "source_id": "fixture:source-1",
+      "kind": "document",
+      "locator": "Synthetic fixture anchor; no real paper or external call",
+      "access": "fulltext"
+    }
+  ],
+  "limitations": [
+    "Synthetic report example only; no research operation was performed by packaging this Skill."
+  ],
+  "verdict": "supported",
+  "checked_evidence_ids": [
+    "fixture:evidence-1"
+  ],
+  "checks": [
+    {
+      "check": "Match the reported condition",
+      "outcome": "passed",
+      "source_ids": [
+        "fixture:source-1"
+      ],
+      "explanation": "The synthetic source states condition A; no broader conclusion follows"
+    }
+  ],
+  "correction": null,
+  "independence_notes": [
+    "Only one fixture source; no independent replication"
+  ]
+}

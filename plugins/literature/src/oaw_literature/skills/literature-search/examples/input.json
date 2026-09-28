@@ -1,0 +1,22 @@
+{
+  "question": "Synthetic example: inspect the scoped method",
+  "scope_id": "fixture:scope-1",
+  "scope_revision": 1,
+  "request_id": "fixture:request-1",
+  "available_capabilities": [
+    "literature_search",
+    "literature_resolve",
+    "paper_upsert_metadata"
+  ],
+  "query_terms": [
+    "synthetic topic method"
+  ],
+  "seed_paper_ids": [],
+  "max_queries": 2,
+  "inclusion_criteria": [
+    "Reports a testable method"
+  ],
+  "exclusion_criteria": [
+    "Outside the declared scope"
+  ]
+}

@@ -25,6 +25,9 @@ export function PdfPageSurface({pdf,number,scale,children,onReady,onPreparing,on
       container.replaceChildren();container.style.setProperty("--scale-factor",String(scale));container.style.setProperty("--total-scale-factor",String(scale*page.userUnit));
       render=page.render({canvas:canvas.current,viewport,transform:[ratio,0,0,ratio,0,0]});
       text=new TextLayer({textContentSource:page.streamTextContent(),container,viewport});await Promise.all([render.promise,text.render()]);
+      // Public PDF.js textDivs retain the ordinal of every string item, including
+      // empty strings whose span is not appended. Citation ranges use that ordinal.
+      if(active)text.textDivs.forEach((div,index)=>{div.dataset.textItemIndex=String(index);});
       // The canvas and selectable text must both be committed at this exact size.
       if(active)frame1=requestAnimationFrame(()=>{frame2=requestAnimationFrame(()=>{if(active)readyRef.current?.(scale);});});
     }).catch(e=>{if(active){setError(String(e));errorRef.current?.(String(e));}});

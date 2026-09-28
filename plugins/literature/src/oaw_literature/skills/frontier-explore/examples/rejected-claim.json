@@ -1,0 +1,13 @@
+{
+  "synthetic": true,
+  "rejection_reason": "Declaring an unexplored collection area a novel research gap and assigning an uncalibrated 90% breakthrough probability.",
+  "bad_output_excerpt": {
+    "status": "completed",
+    "signpost_ids": [
+      "invented:gap"
+    ],
+    "stop_or_continue": "continue",
+    "rationale": "90% breakthrough probability without calibration"
+  },
+  "required_correction": "Return only work actually performed with inspected sources; record missing capabilities and unknowns. Structural schema validity alone does not establish scientific correctness."
+}

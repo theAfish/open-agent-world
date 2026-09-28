@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oaw:literature:field-snapshot:output:1",
+  "title": "field-snapshot output",
+  "type": "object",
+  "properties": {
+    "status": {
+      "enum": [
+        "completed",
+        "partial",
+        "blocked"
+      ]
+    },
+    "missing_capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "snapshot_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "snapshot_revision": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "core_papers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "paper_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "enum": [
+              "foundation",
+              "representative_method",
+              "key_evidence",
+              "counterexample",
+              "recent_work",
+              "reproducible_resource"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "paper_id",
+          "role",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "scope": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "statement",
+          "source_ids",
+          "evidence_ids",
+          "scope"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "disagreements": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "reading_recommendations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "paper_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "locator": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_scope": {
+            "enum": [
+              "metadata",
+              "abstract",
+              "fulltext",
+              "si_code"
+            ]
+          }
+        },
+        "required": [
+          "paper_id",
+          "locator",
+          "reason",
+          "evidence_scope"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "changes_since_previous": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "coverage_gaps": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "required": [
+    "status",
+    "missing_capabilities",
+    "sources",
+    "limitations",
+    "snapshot_id",
+    "snapshot_revision",
+    "core_papers",
+    "findings",
+    "disagreements",
+    "reading_recommendations",
+    "changes_since_previous",
+    "coverage_gaps"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "source": {
+      "type": "object",
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "paper",
+            "abstract",
+            "document",
+            "search",
+            "code",
+            "data",
+            "user",
+            "agent_inference"
+          ]
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "access": {
+          "enum": [
+            "metadata",
+            "abstract",
+            "fulltext",
+            "si_code",
+            "user_input",
+            "not_read"
+          ]
+        }
+      },
+      "required": [
+        "source_id",
+        "kind",
+        "locator",
+        "access"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

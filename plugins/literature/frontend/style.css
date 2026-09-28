@@ -1,0 +1,30 @@
+.literature-scope {height:100%;min-height:0;overflow:auto;color:var(--ink);font-size:13px;line-height:1.55;padding:10px;box-sizing:border-box;}
+.literature-scope header {display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+.literature-scope h3 {margin:3px 0 12px;font-size:20px;line-height:1.4;}
+.literature-scope small {display:block;color:var(--ink-soft);font-size:11px;}
+.literature-scope p {white-space:pre-wrap;overflow-wrap:anywhere;}
+.literature-scope button,.literature-scope input,.literature-scope textarea {color:var(--ink);background:var(--surface-raised);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:inherit;}
+.literature-scope button {cursor:pointer;}
+.literature-scope button:disabled {cursor:default;opacity:.5;}
+.literature-scope a {color:var(--accent);}
+.literature-scope-form {display:grid;gap:10px;margin-bottom:18px;border:1px solid var(--line);padding:14px;border-radius:12px;background:var(--surface-soft);}
+.literature-scope-form label {display:grid;gap:5px;}
+.literature-scope-form textarea {min-height:70px;resize:vertical;width:100%;box-sizing:border-box;}
+.literature-scope-form>div {display:flex;gap:15px;flex-wrap:wrap;}
+.literature-scope-form input {width:90px;}
+.literature-scope-stats {display:flex;gap:15px;flex-wrap:wrap;color:var(--ink-soft);margin-bottom:12px;}
+.literature-search {display:flex;gap:8px;margin-bottom:6px;}
+.literature-search input {flex:1;min-width:80px;}
+.literature-results>section {margin-top:22px;border-top:1px solid var(--line);padding-top:14px;}
+.literature-results article {margin-top:12px;border:1px solid var(--line);padding:14px;border-radius:12px;background:var(--surface-raised);}
+.literature-scope .literature-paper-title {padding:0;border:0;text-align:left;font-size:15px;font-weight:600;background:transparent;margin-bottom:8px;}
+.literature-results footer {display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:12px;font-size:11px;}
+.literature-results summary {cursor:pointer;margin-top:8px;}
+.literature-scope.is-compact {padding:2px;font-size:12px;}
+.literature-scope.is-compact h3 {font-size:16px;}
+.literature-evidence {margin-top:20px;border-top:1px solid var(--line);padding-top:12px;}
+.literature-evidence h4 {margin:6px 0;}
+.literature-evidence article {margin:12px 0;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--surface-raised);}
+.literature-evidence blockquote {border-left:2px solid var(--accent);margin:12px 0;padding-left:12px;max-height:160px;overflow:auto;white-space:pre-wrap;}
+.literature-evidence select {max-width:100%;color:var(--ink);background:var(--surface-raised);border:1px solid var(--line);padding:6px;}
+.literature-evidence footer {display:flex;gap:15px;align-items:center;}

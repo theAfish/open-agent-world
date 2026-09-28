@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  <symbol id="signpost" viewBox="0 0 24 24"><path d="M12 3v18M8 21h8M5 5h12l3 3-3 3H5zM19 13H7l-3 3 3 3h12z"/></symbol>
+  <symbol id="paper" viewBox="0 0 24 24"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8zM14 3v5h5M8 12h8M8 16h6"/></symbol>
+  <symbol id="snapshot" viewBox="0 0 24 24"><path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2zM9 3v16M15 5v16"/><path d="m6 12 6-3 6 4"/></symbol>
+  <symbol id="scout" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="m15 8-2 6-4 2 2-6zM12 2v2M12 20v2M2 12h2M20 12h2"/></symbol>
+  <symbol id="dispute" viewBox="0 0 24 24"><path d="m10 3-8 9 8 9M14 3l8 9-8 9M12 5l-2 5 4 4-2 5"/></symbol>
+  <symbol id="empty-search" viewBox="0 0 24 24"><circle cx="11" cy="10" r="6"/><path d="m15 15 5 5M8 10h6"/></symbol>
+  <symbol id="paused" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+  <symbol id="failed" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></symbol>
+  <symbol id="unverified" viewBox="0 0 24 24"><path d="M20.4 8.8a9 9 0 1 0 .5 5.3M12 7v5l3 2"/></symbol>
+</svg>

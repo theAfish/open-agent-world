@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oaw:literature:literature-search:output:1",
+  "title": "literature-search output",
+  "type": "object",
+  "properties": {
+    "status": {
+      "enum": [
+        "completed",
+        "partial",
+        "blocked"
+      ]
+    },
+    "missing_capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "search_runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "search_run_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "queried_at": {
+            "type": "string",
+            "minLength": 1
+          },
+          "result_paper_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "coverage_note": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "search_run_id",
+          "query",
+          "source",
+          "queried_at",
+          "result_paper_ids",
+          "next_cursor",
+          "coverage_note"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "paper_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "screening": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "paper_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "decision": {
+            "enum": [
+              "include",
+              "exclude",
+              "uncertain"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "paper_id",
+          "decision",
+          "reason",
+          "source_ids"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "next_queries": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "required": [
+    "status",
+    "missing_capabilities",
+    "sources",
+    "limitations",
+    "search_runs",
+    "paper_ids",
+    "screening",
+    "next_queries"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "source": {
+      "type": "object",
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "paper",
+            "abstract",
+            "document",
+            "search",
+            "code",
+            "data",
+            "user",
+            "agent_inference"
+          ]
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "access": {
+          "enum": [
+            "metadata",
+            "abstract",
+            "fulltext",
+            "si_code",
+            "user_input",
+            "not_read"
+          ]
+        }
+      },
+      "required": [
+        "source_id",
+        "kind",
+        "locator",
+        "access"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "status": "completed",
+  "missing_capabilities": [],
+  "sources": [
+    {
+      "source_id": "fixture:source-1",
+      "kind": "document",
+      "locator": "Synthetic fixture anchor; no real paper or external call",
+      "access": "fulltext"
+    }
+  ],
+  "limitations": [
+    "Synthetic report example only; no research operation was performed by packaging this Skill."
+  ],
+  "signpost_ids": [
+    "fixture:signpost-1"
+  ],
+  "proposals": [
+    {
+      "question": "Can supplementary material resolve the missing duration?",
+      "basis": "evidence_gap",
+      "source_ids": [
+        "fixture:source-1"
+      ],
+      "scope_revision": 1,
+      "query_budget": 2,
+      "stop_rule": "Stop after two authorized queries or a directly reported value",
+      "acceptance": "Retain the exact source anchor or record that it remains missing"
+    }
+  ],
+  "decision_record_ids": [],
+  "stop_or_continue": "continue",
+  "rationale": "A bounded method gap can be checked within the declared budget"
+}

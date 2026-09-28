@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oaw:literature:frontier-explore:input:1",
+  "title": "frontier-explore input",
+  "type": "object",
+  "properties": {
+    "question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scope_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope_revision": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "available_capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "snapshot_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "known_search_run_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "remaining_queries": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_proposals": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20
+    }
+  },
+  "required": [
+    "question",
+    "scope_id",
+    "scope_revision",
+    "request_id",
+    "available_capabilities",
+    "snapshot_id",
+    "known_search_run_ids",
+    "remaining_queries",
+    "max_proposals"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "source": {
+      "type": "object",
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "paper",
+            "abstract",
+            "document",
+            "search",
+            "code",
+            "data",
+            "user",
+            "agent_inference"
+          ]
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "access": {
+          "enum": [
+            "metadata",
+            "abstract",
+            "fulltext",
+            "si_code",
+            "user_input",
+            "not_read"
+          ]
+        }
+      },
+      "required": [
+        "source_id",
+        "kind",
+        "locator",
+        "access"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

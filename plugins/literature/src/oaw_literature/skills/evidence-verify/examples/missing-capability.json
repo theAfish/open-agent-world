@@ -1,0 +1,22 @@
+{
+  "status": "blocked",
+  "missing_capabilities": [
+    "paper_read_evidence"
+  ],
+  "sources": [
+    {
+      "source_id": "fixture:scope-1",
+      "kind": "user",
+      "locator": "Synthetic example question; not a real paper or executed search",
+      "access": "user_input"
+    }
+  ],
+  "limitations": [
+    "Synthetic example: required capability is unavailable; no research operation was performed."
+  ],
+  "verdict": "insufficient",
+  "checked_evidence_ids": [],
+  "checks": [],
+  "correction": null,
+  "independence_notes": []
+}

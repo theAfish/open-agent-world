@@ -31,14 +31,20 @@ export default defineConfig({
     },
   }] } },
   resolve: {
-    dedupe: ["react", "react-dom", "svelte", "matterviz"],
-    alias: {
-      "@oaw/plugin-api": fileURLToPath(new URL("./src/plugins/sdk.ts", import.meta.url)),
-      "pdfjs-dist": fileURLToPath(new URL("./node_modules/pdfjs-dist", import.meta.url)),
-      "@xyflow/react": fileURLToPath(new URL("./node_modules/@xyflow/react", import.meta.url)),
-      "react": fileURLToPath(new URL("./node_modules/react", import.meta.url)),
-      "react-dom": fileURLToPath(new URL("./node_modules/react-dom", import.meta.url)),
-    },
+    dedupe: ["react", "react-dom", "svelte", "matterviz", "three"],
+    alias: [
+      { find: "@oaw/plugin-api", replacement: fileURLToPath(new URL("./src/plugins/sdk.ts", import.meta.url)) },
+      { find: "pdfjs-dist", replacement: fileURLToPath(new URL("./node_modules/pdfjs-dist", import.meta.url)) },
+      { find: "@xyflow/react", replacement: fileURLToPath(new URL("./node_modules/@xyflow/react", import.meta.url)) },
+      // Plugin sources are siblings of `frontend`, so they cannot discover its
+      // node_modules by walking their own parent directories. Keep this narrow:
+      // MatterViz also imports `three/webgpu`, which must retain Three's package
+      // export resolution rather than being rewritten as a filesystem path.
+      { find: /^three$/, replacement: fileURLToPath(new URL("./node_modules/three/build/three.module.js", import.meta.url)) },
+      { find: /^three\/examples\/jsm\/(.*)$/, replacement: `${fileURLToPath(new URL("./node_modules/three/examples/jsm/", import.meta.url))}$1` },
+      { find: "react", replacement: fileURLToPath(new URL("./node_modules/react", import.meta.url)) },
+      { find: "react-dom", replacement: fileURLToPath(new URL("./node_modules/react-dom", import.meta.url)) },
+    ],
   },
   plugins: [localControlPlaneProxy(), {
     name: "threlte-local-canvas-dimensions",

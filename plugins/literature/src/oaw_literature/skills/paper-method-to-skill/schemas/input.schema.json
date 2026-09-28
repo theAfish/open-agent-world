@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oaw:literature:paper-method-to-skill:input:1",
+  "title": "paper-method-to-skill input",
+  "type": "object",
+  "properties": {
+    "question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scope_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope_revision": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "available_capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "method_spec_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "requested_status": {
+      "enum": [
+        "draft",
+        "executable",
+        "validated"
+      ]
+    },
+    "execution_authorized": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "question",
+    "scope_id",
+    "scope_revision",
+    "request_id",
+    "available_capabilities",
+    "method_spec_id",
+    "source_evidence_ids",
+    "requested_status",
+    "execution_authorized"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "source": {
+      "type": "object",
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "paper",
+            "abstract",
+            "document",
+            "search",
+            "code",
+            "data",
+            "user",
+            "agent_inference"
+          ]
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "access": {
+          "enum": [
+            "metadata",
+            "abstract",
+            "fulltext",
+            "si_code",
+            "user_input",
+            "not_read"
+          ]
+        }
+      },
+      "required": [
+        "source_id",
+        "kind",
+        "locator",
+        "access"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

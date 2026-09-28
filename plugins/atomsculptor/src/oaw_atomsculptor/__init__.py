@@ -1,0 +1,394 @@
+"""AtomSculptor's OAW plugin entry point.
+
+This first contribution establishes the durable Structure card.  Agent-team,
+SkillPackage, file exchange and the complete editor are layered on this public
+document contract rather than on the retired AtomSculptor Sandbox APIs.
+"""
+
+from __future__ import annotations
+
+from collections import Counter
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from open_agent_world.plugin_api import (
+    CapabilityDefinition,
+    CapabilityGrantDefinition,
+    AgentNodeBehavior,
+    NodeDocumentAction,
+    NodeDocumentDefinition,
+    NodeTypeDefinition,
+    PackDefinition,
+    PluginDescriptor,
+    RelationshipDefinition,
+)
+from open_agent_world.skill_packages import register_skill_package
+
+from . import structure
+from .skill_package import atomsculptor_skills
+from .runtime import AtomSculptorRuntime
+
+
+READ = "atomsculptor.structure.read"
+WRITE = "atomsculptor.structure.write"
+RECORD_CANDIDATES = "atomsculptor.structure.record_interface_candidates"
+OBSERVE = "atomsculptor.structure.observe"
+WRITE_INPUT_SCHEMA = structure.ReplaceStructure.model_json_schema()
+WRITE_INPUT_SCHEMA["properties"]["expected_revision"] = {
+    "type": "integer",
+    "minimum": 0,
+    "description": "Revision returned by inspect_atom_structure. Re-inspect after a conflict.",
+}
+WRITE_INPUT_SCHEMA["required"].append("expected_revision")
+RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA = structure.RecordInterfaceCandidates.model_json_schema()
+RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA["properties"]["expected_revision"] = {
+    "type": "integer",
+    "minimum": 0,
+    "description": "Revision returned by inspect_atom_structure. Re-inspect after a conflict.",
+}
+RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA.setdefault("required", []).append("expected_revision")
+
+
+class PaperModelingProjection(BaseModel):
+    """Optional source links for desktop-created literature modelling cards.
+
+    These labels provide provenance and visibility, never tool permissions.
+    """
+    model_config = ConfigDict(extra="forbid")
+    research_projection: Literal["paper_modeling"] | None = None
+    paper_id: str | None = Field(default=None, max_length=128)
+    scope_id: str | None = Field(default=None, max_length=128)
+    modeling_key: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+
+class StructureConfig(PaperModelingProjection):
+    model_config = ConfigDict(extra="forbid")
+
+    # Explicit UI links only.  They neither grant capabilities nor carry
+    # credentials; OAW relationships remain the authorization source.
+    agent_id: str | None = None
+    sandbox_id: str | None = None
+    skill_id: str | None = None
+
+
+class AtomSculptorAgentConfig(PaperModelingProjection):
+    model_config = ConfigDict(extra="forbid")
+
+    # OAW persists status in legacy-compatible card configuration as well as
+    # host metadata.  Accept every lifecycle state because AgentNodeBehavior
+    # transitions this value while a Run is active.
+    status: Literal["idle", "running", "waiting", "error"] = "idle"
+    runtime_provider_id: Literal["atomsculptor.adk-team"] = "atomsculptor.adk-team"
+    model: str = "oaw:default"
+    max_concurrent_runs: Literal[1] = 1
+    inherit_legion_model: Literal[False] = False
+    system_instruction: str = "Coordinate atomistic modelling through the connected OAW resources."
+
+
+class ObserveStructure(BaseModel):
+    """A bounded, non-persistent camera request for a visual observation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # ``current`` preserves the researcher\'s active orbit.  The other values
+    # are fixed, canonical views which the frontend captures transiently and
+    # then restores, rather than exposing arbitrary browser-camera control.
+    view: Literal["current", "iso", "x", "y", "z"] = "current"
+
+
+OBSERVE_INPUT_SCHEMA = ObserveStructure.model_json_schema()
+
+
+class InspectStructure(BaseModel):
+    """Bound the document data returned to a model after an inspection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    detail: Literal["summary", "atoms"] = "summary"
+    atom_offset: int = Field(default=0, ge=0)
+    atom_limit: int = Field(default=100, ge=1, le=200)
+
+
+INSPECT_INPUT_SCHEMA = InspectStructure.model_json_schema()
+
+
+def _structure_overview(document: dict, *, revision: int, detail: str, offset: int, limit: int) -> dict:
+    """Return a model-sized inspection result without mutating its document."""
+
+    atoms = document.get("atoms") if isinstance(document.get("atoms"), list) else []
+    selected_ids = document.get("selected_atom_ids") if isinstance(document.get("selected_atom_ids"), list) else []
+    selected = [
+        {key: atom.get(key) for key in ("id", "symbol", "x", "y", "z", "layer_id")}
+        for atom in atoms
+        if isinstance(atom, dict) and atom.get("id") in selected_ids
+    ]
+    formula = " ".join(
+        f"{symbol}{count if count != 1 else ''}"
+        for symbol, count in sorted(Counter(
+            atom.get("symbol") for atom in atoms if isinstance(atom, dict) and isinstance(atom.get("symbol"), str)
+        ).items())
+    )
+    coordinates = [
+        (atom.get("x"), atom.get("y"), atom.get("z"))
+        for atom in atoms if isinstance(atom, dict)
+        and all(isinstance(atom.get(axis), (int, float)) for axis in ("x", "y", "z"))
+    ]
+    bounds = None if not coordinates else {
+        "min": [min(point[index] for point in coordinates) for index in range(3)],
+        "max": [max(point[index] for point in coordinates) for index in range(3)],
+    }
+    value = {
+        "format_version": document.get("format_version"),
+        "atom_count": len(atoms),
+        "formula": formula,
+        "coordinate_bounds": bounds,
+        "cell": document.get("cell"),
+        "pbc": document.get("pbc"),
+        "layers": document.get("layers", []),
+        "active_layer_ids": document.get("active_layer_ids", []),
+        "selected_atom_ids": selected_ids,
+        "selected_atoms": selected,
+        "source_name": document.get("source_name", ""),
+        "source_metadata": document.get("source_metadata", {}),
+        "interface_candidates": document.get("interface_candidates", []),
+    }
+    response = {
+        "revision": revision,
+        "summary": {
+            "atom_count": len(atoms),
+            "formula": formula,
+            "layer_count": len(value["layers"]),
+            "selected_atom_count": len(selected),
+            "source_name": value["source_name"],
+        },
+        "value": value,
+        "write_contract": {
+            "tool": "replace_atom_structure",
+            "note": "value is an inspection summary, not a writable document. Pass structure as a JSON object, never a serialized string. Atoms belong in top-level atoms; layers contain only layer settings.",
+            "minimal_structure_example": {
+                "atoms": [{"id": 0, "symbol": "C", "x": 0.0, "y": 0.0, "z": 0.0}],
+                "bonds": [], "cell": None, "pbc": [False, False, False],
+                "source_name": "Example only; preserve the actual source",
+                "source_metadata": {"reconstruction_status": "schematic"},
+            },
+            "preserve": "Keep existing source_name and source_metadata. Metadata values must be strings, numbers, booleans or null; serialize nested metadata to a JSON string.",
+            "not_writable": ["atom_count", "formula", "coordinate_bounds", "selected_atoms", "write_contract"],
+        },
+    }
+    if detail == "atoms":
+        start = min(offset, len(atoms))
+        end = min(start + limit, len(atoms))
+        response["atom_window"] = {
+            "offset": start,
+            "limit": limit,
+            "returned": end - start,
+            "total": len(atoms),
+            "atoms": [
+                {key: atom.get(key) for key in ("id", "symbol", "x", "y", "z", "layer_id")}
+                for atom in atoms[start:end] if isinstance(atom, dict)
+            ],
+        }
+    return response
+
+
+async def _read(context, capability, arguments):
+    request = InspectStructure.model_validate(arguments)
+    result = await context.node_document_action(capability, "inspect", {})
+    return _structure_overview(
+        result["value"], revision=result["revision"], detail=request.detail,
+        offset=request.atom_offset, limit=min(request.atom_limit, 200),
+    )
+
+
+async def _write(context, capability, arguments):
+    payload = dict(arguments)
+    expected_revision = payload.pop("expected_revision", None)
+    return await context.node_document_action(
+        capability, "replace_structure", payload, expected_revision=expected_revision
+    )
+
+
+async def _observe(context, capability, arguments):
+    request = ObserveStructure.model_validate(arguments)
+    return await context.capture_plugin_view(
+        capability,
+        capture_kind="atomsculptor.structure-viewport",
+        required_capability_kind=READ,
+        capture_options={"view": request.view},
+    )
+
+
+async def _record_interface_candidates(context, capability, arguments):
+    payload = dict(arguments)
+    expected_revision = payload.pop("expected_revision", None)
+    return await context.node_document_action(
+        capability, "record_interface_candidates", payload, expected_revision=expected_revision
+    )
+
+
+class AtomSculptorPlugin:
+    descriptor = PluginDescriptor(
+        id="atomsculptor",
+        version="0.1.0",
+        plugin_api_version="1.20",
+        name="AtomSculptor",
+        description="Agent-assisted atomistic structure modelling.",
+        # OAW provisions these as binary wheels in its managed Sandbox Python;
+        # they are never imported into the backend process.  This covers every
+        # bundled modelling/inspection skill without relying on a host Conda
+        # environment or a platform-specific prebuilt image.
+        python_requirements=(
+            "ase>=3.22", "matplotlib>=3.7", "numpy>=1.23", "pymatgen>=2024.0",
+        ),
+    )
+
+    def register(self, registration) -> None:
+        registration.register_runtime_provider(
+            "atomsculptor.adk-team",
+            AtomSculptorRuntime,
+            needs_model_connection_resolver=True,
+        )
+        register_skill_package(
+            registration,
+            node_type="atomsculptor.skills",
+            package=atomsculptor_skills(),
+        )
+        registration.register_capability(
+            CapabilityDefinition(
+                kind=READ,
+                tool_name="inspect_atom_structure",
+                description="Inspect a structure with a bounded summary, revision and selected atom coordinates. The default never returns every atom. Request detail='atoms' with atom_offset and atom_limit (at most 200) only for a necessary coordinate window.",
+                input_schema=INSPECT_INPUT_SCHEMA,
+            ),
+            _read,
+        )
+        registration.register_capability(
+            CapabilityDefinition(
+                kind=WRITE,
+                tool_name="replace_atom_structure",
+                description="Replace an AtomSculptor structure using a JSON object (not a string). Inspect first and pass its revision as expected_revision. Put atoms in structure.atoms, each with integer id, symbol and numeric x/y/z; never nest atoms in layers. Layers contain settings only. Keep existing source_name/source_metadata. Metadata values must be scalar or null, so serialize nested metadata to a JSON string. Do not copy derived inspection fields atom_count, formula, coordinate_bounds or selected_atoms into the document.",
+                input_schema=WRITE_INPUT_SCHEMA,
+            ),
+            _write,
+        )
+        registration.register_capability(
+            CapabilityDefinition(
+                kind=RECORD_CANDIDATES,
+                tool_name="record_interface_candidates",
+                description="Record structured interface candidates for a current Atom Structure after generating their Sandbox files. Inspect first and pass its revision.",
+                input_schema=RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA,
+            ),
+            _record_interface_candidates,
+        )
+        registration.register_capability(
+            CapabilityDefinition(
+                kind=OBSERVE,
+                tool_name="observe_atom_structure",
+                description="Capture an open 3D Atom Structure workspace as a transient image. Set view to current, iso, x, y, or z; fixed views are captured briefly and never alter the researcher\'s camera. Use only when visual geometry or visible selection materially helps; inspect the structure document for exact coordinates.",
+                input_schema=OBSERVE_INPUT_SCHEMA,
+            ),
+            _observe,
+        )
+        registration.register_node_type(
+            NodeTypeDefinition(
+                id="atomsculptor.agent",
+                label="AtomSculptor Agent",
+                description="A Planner, Structure Builder and Materials Project team using OAW resources.",
+                icon="bot",
+                color="#b07f53",
+                deck_id="agents",
+                deck_label="Agents",
+                deck_icon="bot",
+                default_name="AtomSculptor",
+                default_size=(320, 210),
+                default_status="idle",
+                statuses=frozenset({"idle", "running", "waiting", "error"}),
+                config_model=AtomSculptorAgentConfig,
+                traits=frozenset({"core.agent", "ui.schema-agent.v1"}),
+                surfaces={"preview": True, "inspector": True, "workspace": True},
+                lifecycle=AgentNodeBehavior(),
+                templateable=True,
+                template_status="idle",
+            )
+        )
+        registration.register_node_type(
+            NodeTypeDefinition(
+                id="atomsculptor.structure",
+                label="Atom Structure",
+                description="A versioned atomistic structure with stable atom identities and layers.",
+                icon="atom",
+                color="#4d8c9c",
+                deck_id="science",
+                deck_label="Science",
+                deck_icon="atom",
+                default_name="Untitled Structure",
+                default_size=(520, 420),
+                default_status="ready",
+                statuses=frozenset({"ready"}),
+                config_model=StructureConfig,
+                # ``core.file-viewer`` opts into the host's built-in
+                # "Follow opened files" relationship, so a connected Sandbox's
+                # native file tree can feed this document without new routes.
+                traits=frozenset({"atomsculptor.structure", "core.file-viewer"}),
+                surfaces={"preview": True, "inspector": True, "workspace": True},
+                frontend={"preview": "preview", "body": "workspace", "workspace": "workspace"},
+                templateable=True,
+                document=NodeDocumentDefinition(
+                    model=structure.StructureDocument,
+                    initial_value=structure.StructureDocument().model_dump(mode="json"),
+                    summarize=structure.summary,
+                    actions={
+                        "inspect": NodeDocumentAction(lambda value, arguments: value, capability_kind=READ, read_only=True),
+                        "replace_structure": NodeDocumentAction(structure.replace, capability_kind=WRITE),
+                        "select_atoms": NodeDocumentAction(structure.select),
+                        "select_layers": NodeDocumentAction(structure.select_layers),
+                        "record_interface_candidates": NodeDocumentAction(structure.record_interface_candidates, capability_kind=RECORD_CANDIDATES),
+                    },
+                    max_size_bytes=16 * 1024 * 1024,
+                ),
+            )
+        )
+        registration.register_relationship(
+            RelationshipDefinition(
+                id="atomsculptor.structure.inspect",
+                label="Inspect structure",
+                short_label="inspect",
+                description="Allow an Agent to inspect the current structure and stable selected atom IDs, and, for Vision-capable models, observe the currently open 3D view.",
+                source_traits=frozenset({"core.agent"}),
+                target_types=frozenset({"atomsculptor.structure"}),
+                capabilities=(CapabilityGrantDefinition(READ), CapabilityGrantDefinition(OBSERVE)),
+                templateable=True,
+            )
+        )
+        registration.register_relationship(
+            RelationshipDefinition(
+                id="atomsculptor.structure.modify",
+                label="Modify structure",
+                short_label="modify",
+                description="Allow an Agent to inspect and atomically replace a validated structure revision, and, for Vision-capable models, observe the currently open 3D view.",
+                source_traits=frozenset({"core.agent"}),
+                target_types=frozenset({"atomsculptor.structure"}),
+                capabilities=(CapabilityGrantDefinition(READ), CapabilityGrantDefinition(WRITE), CapabilityGrantDefinition(RECORD_CANDIDATES), CapabilityGrantDefinition(OBSERVE)),
+                templateable=True,
+            )
+        )
+        registration.register_relationship(RelationshipDefinition(
+            id="atomsculptor.figure_model", label="Figure / structure model", short_label="figure model",
+            description="Link a source Paper to its figure crop or derived schematic. This connection grants no model or source access.",
+            source_traits=frozenset({"library.readable"}),
+            target_types=frozenset({"image", "atomsculptor.structure"}),
+            templateable=True,
+        ))
+        registration.register_pack(
+            PackDefinition(
+                id="atomsculptor.default",
+                name="AtomSculptor",
+                description="Atomistic structure modelling cards and agents.",
+                cards=tuple(registration.nodes),
+            )
+        )
+
+
+def create_plugin() -> AtomSculptorPlugin:
+    return AtomSculptorPlugin()

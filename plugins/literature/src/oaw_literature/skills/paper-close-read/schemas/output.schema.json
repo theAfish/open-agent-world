@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oaw:literature:paper-close-read:output:1",
+  "title": "paper-close-read output",
+  "type": "object",
+  "properties": {
+    "status": {
+      "enum": [
+        "completed",
+        "partial",
+        "blocked"
+      ]
+    },
+    "missing_capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claim": {
+            "type": "string",
+            "minLength": 1
+          },
+          "classification": {
+            "enum": [
+              "author_statement",
+              "supported_observation",
+              "agent_inference",
+              "user_hypothesis"
+            ]
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          },
+          "source_anchor_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "conditions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "claim",
+          "classification",
+          "source_ids",
+          "source_anchor_ids",
+          "conditions"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "method_draft": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "objective": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "missing_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "objective",
+        "inputs",
+        "outputs",
+        "steps",
+        "missing_fields"
+      ],
+      "additionalProperties": false
+    },
+    "reading_route": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "locator": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "estimated_minutes": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          }
+        },
+        "required": [
+          "locator",
+          "source_ids",
+          "reason",
+          "estimated_minutes"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "status",
+    "missing_capabilities",
+    "sources",
+    "limitations",
+    "evidence_ids",
+    "claims",
+    "method_draft",
+    "reading_route"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "source": {
+      "type": "object",
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "paper",
+            "abstract",
+            "document",
+            "search",
+            "code",
+            "data",
+            "user",
+            "agent_inference"
+          ]
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "access": {
+          "enum": [
+            "metadata",
+            "abstract",
+            "fulltext",
+            "si_code",
+            "user_input",
+            "not_read"
+          ]
+        }
+      },
+      "required": [
+        "source_id",
+        "kind",
+        "locator",
+        "access"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

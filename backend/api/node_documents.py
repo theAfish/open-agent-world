@@ -9,6 +9,36 @@ from backend.node_execution import ExecutionRequest
 
 router = APIRouter(prefix="/nodes", tags=["node-documents"])
 
+
+@router.get("/{node_id}/document/binaries/{field}")
+async def binary_history(node_id: str, field: str, services: ApplicationServices = Depends(get_services)):
+    from backend.document_blobs import list_blobs
+    async with services._node_mutation(read_only=True):
+        return list_blobs(services, node_id, field)
+
+
+@router.get("/{node_id}/document/binaries/{field}/{digest}")
+async def binary_version(node_id: str, field: str, digest: str, services: ApplicationServices = Depends(get_services)):
+    from backend.document_blobs import read_blob, read_snapshot
+    async with services._node_mutation(read_only=True):
+        raw = read_blob(services, node_id, field, digest)
+        snapshot = read_snapshot(services, node_id, field, digest)
+    is_pdf = raw.startswith(b"%PDF-")
+    filename = digest + (".pdf" if is_pdf else ".bin")
+    if is_pdf and isinstance(snapshot, dict):
+        original = snapshot.get("value", snapshot).get("filename")
+        if isinstance(original, str) and original.lower().endswith(".pdf"):
+            filename = original.replace("\\", "/").rsplit("/", 1)[-1][:240]
+    return Response(raw, media_type="application/pdf" if is_pdf else "application/octet-stream",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename, safe='')}", "X-Content-Type-Options": "nosniff"})
+
+
+@router.get("/{node_id}/document/binaries/{field}/{digest}/snapshot")
+async def binary_snapshot(node_id: str, field: str, digest: str, services: ApplicationServices = Depends(get_services)):
+    from backend.document_blobs import read_snapshot
+    async with services._node_mutation(read_only=True):
+        return read_snapshot(services, node_id, field, digest)
+
 from backend.document_transformations import TransformationRequest, transform_document
 
 @router.post("/{node_id}/transformations/{operation}")

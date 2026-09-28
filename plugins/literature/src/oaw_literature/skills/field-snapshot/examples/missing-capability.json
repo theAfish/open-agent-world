@@ -1,0 +1,25 @@
+{
+  "status": "blocked",
+  "missing_capabilities": [
+    "research_create_snapshot"
+  ],
+  "sources": [
+    {
+      "source_id": "fixture:scope-1",
+      "kind": "user",
+      "locator": "Synthetic example question; not a real paper or executed search",
+      "access": "user_input"
+    }
+  ],
+  "limitations": [
+    "Synthetic example: required capability is unavailable; no research operation was performed."
+  ],
+  "snapshot_id": null,
+  "snapshot_revision": null,
+  "core_papers": [],
+  "findings": [],
+  "disagreements": [],
+  "reading_recommendations": [],
+  "changes_since_previous": [],
+  "coverage_gaps": []
+}

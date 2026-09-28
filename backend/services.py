@@ -560,6 +560,8 @@ class ApplicationServices:
     card_state: object = None
     node_execution: NodeExecutionService | None = None
     sandbox_operations: Any = None
+    reading_scores: Any = None
+    literature: Any = None
     summoning: SummoningService | None = None
     sandbox_backend: SandboxBackend | None = None
     plugin_bootstrap: Any = None
@@ -745,6 +747,10 @@ class ApplicationServices:
             self.plugin_bootstrap.enqueue()
 
     async def shutdown(self) -> None:
+        if self.literature is not None:
+            await self.literature.close()
+        if self.reading_scores is not None:
+            await self.reading_scores.close()
         if self.plugin_bootstrap is not None:
             await self.plugin_bootstrap.shutdown()
         await self.node_execution.shutdown()
@@ -783,6 +789,14 @@ class ApplicationServices:
                 f"node type {request.type!r} cannot be created directly; "
                 "use its dedicated creation operation"
             )
+        if request.type == "literature.scope":
+            from backend.literature_exploration import project_results
+            from backend.literature_service import service
+            async with self._node_mutation():
+                with self.database.transaction(immediate=True):
+                    card = await self._create_card(request)
+                    await project_results(service(self), card.id)
+                    return card
         return await self._create_card(request)
 
     async def restore_card(self, request: CardCreate) -> Card:
@@ -3780,6 +3794,7 @@ def create_services(
     services.sandbox_operations = SandboxOperations(services)
     services.summoning = SummoningService(services)
     from backend.security.model_connections import ModelConnectionStore
+    model_connections = ModelConnectionStore(services.llm_settings)
     services.run_manager = RunManager(
         store=RunStore(database),
         world=world,
@@ -3794,12 +3809,16 @@ def create_services(
             else settings.agent_runtime
         ),
         provider_options={
-            "google.adk": {"app_name": "open-agent-world", "model_connections": ModelConnectionStore(services.llm_settings),
-                           "context_store": contexts},
+            "google.adk": {
+                "app_name": "open-agent-world",
+                "model_connections": model_connections,
+                "context_store": contexts,
+            },
             "openai.codex": {
                 "workspace_root": SandboxSettingsStore(database, settings.data_root).resolve_workspace_root,
             },
         },
+        model_connection_resolver=model_connections,
         inactivity_timeout_seconds=settings.run_inactivity_timeout_seconds,
         execution_deadline_seconds=settings.run_execution_deadline_seconds,
         cleanup_timeout_seconds=settings.run_cleanup_timeout_seconds,

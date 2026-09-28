@@ -1,0 +1,10 @@
+{
+  "synthetic": true,
+  "rejection_reason": "Returning supported because three unread papers cite the same claim.",
+  "bad_output_excerpt": {
+    "status": "completed",
+    "verdict": "supported",
+    "checked_evidence_ids": []
+  },
+  "required_correction": "Return only work actually performed with inspected sources; record missing capabilities and unknowns. Structural schema validity alone does not establish scientific correctness."
+}

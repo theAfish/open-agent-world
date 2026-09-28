@@ -1,13 +1,14 @@
-import { Atom, Bot, Boxes, Crown, FileText, HardDrive, Image, MessagesSquare, Puzzle, Scan, Sparkles, Workflow, Wrench } from "lucide-react";
+import { Atom, Bot, Boxes, Compass, Crown, FileText, HardDrive, Image, Library, MessagesSquare, Puzzle, Scan, Signpost, Sparkles, Workflow, Wrench } from "lucide-react";
 import type { NodeTypeCatalogItem } from "../types/world";
 
-const icons = { "hard-drive": HardDrive, atom: Atom, bot: Bot, boxes: Boxes, crown: Crown, "file-text": FileText, image: Image, "messages-square": MessagesSquare, scan: Scan, sparkles: Sparkles, workflow: Workflow, wrench: Wrench };
+const icons = { "hard-drive": HardDrive, atom: Atom, bot: Bot, boxes: Boxes, compass: Compass, crown: Crown, "file-text": FileText, image: Image, library: Library, "messages-square": MessagesSquare, scan: Scan, signpost: Signpost, sparkles: Sparkles, workflow: Workflow, wrench: Wrench };
 
 export function CatalogIcon({ definition, size = 18 }: {
   definition?: Pick<NodeTypeCatalogItem, "icon" | "icon_url"> & { id?: string }; size?: number;
 }) {
   // Keep existing catalogs in sync with the Science structure viewer's mark.
   if (definition?.id === "xrd.structure-canvas") return <Atom size={size} strokeWidth={1.7} aria-hidden="true" />;
+  if (definition?.id === "library.paper") return <FileText size={size} strokeWidth={1.7} aria-hidden="true" />;
   if (definition?.icon_url) return <span aria-hidden="true" className="catalog-asset-icon" style={{
     display: "inline-block", flexShrink: 0, width: `var(--catalog-icon-size, ${size}px)`, height: `var(--catalog-icon-size, ${size}px)`, backgroundColor: "currentColor",
     mask: `url("${definition.icon_url}") center / contain no-repeat`,

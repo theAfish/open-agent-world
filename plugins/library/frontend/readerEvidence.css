@@ -1,0 +1,7 @@
+.library-reader-evidence {min-width:0;max-width:100%;}
+.library-reader-evidence>div {margin-top:10px;}
+.library-reader-evidence select {box-sizing:border-box;width:100%;min-width:0;max-width:100%;padding:6px;border:1px solid var(--line,#526357);border-radius:6px;background:var(--surface,#252b26);color:inherit;}
+.library-selection-popup .library-evidence-confirm {display:flex;align-items:flex-start;gap:7px;}
+.library-evidence-confirm input {flex:none;margin-top:2px;}
+.library-reader-evidence .literature-evidence-classification {display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.library-reader-evidence .literature-evidence-classification label {min-width:0;}

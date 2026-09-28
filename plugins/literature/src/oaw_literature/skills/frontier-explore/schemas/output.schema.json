@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oaw:literature:frontier-explore:output:1",
+  "title": "frontier-explore output",
+  "type": "object",
+  "properties": {
+    "status": {
+      "enum": [
+        "completed",
+        "partial",
+        "blocked"
+      ]
+    },
+    "missing_capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "signpost_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "proposals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "basis": {
+            "enum": [
+              "evidence_gap",
+              "perspective",
+              "contradiction",
+              "user_question",
+              "agent_hypothesis"
+            ]
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          },
+          "scope_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "query_budget": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "stop_rule": {
+            "type": "string",
+            "minLength": 1
+          },
+          "acceptance": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "question",
+          "basis",
+          "source_ids",
+          "scope_revision",
+          "query_budget",
+          "stop_rule",
+          "acceptance"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "decision_record_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "stop_or_continue": {
+      "enum": [
+        "stop",
+        "continue",
+        "needs_input"
+      ]
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "status",
+    "missing_capabilities",
+    "sources",
+    "limitations",
+    "signpost_ids",
+    "proposals",
+    "decision_record_ids",
+    "stop_or_continue",
+    "rationale"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "source": {
+      "type": "object",
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "paper",
+            "abstract",
+            "document",
+            "search",
+            "code",
+            "data",
+            "user",
+            "agent_inference"
+          ]
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "access": {
+          "enum": [
+            "metadata",
+            "abstract",
+            "fulltext",
+            "si_code",
+            "user_input",
+            "not_read"
+          ]
+        }
+      },
+      "required": [
+        "source_id",
+        "kind",
+        "locator",
+        "access"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

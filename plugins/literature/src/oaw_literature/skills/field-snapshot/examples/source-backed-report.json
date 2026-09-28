@@ -1,0 +1,49 @@
+{
+  "status": "completed",
+  "missing_capabilities": [],
+  "sources": [
+    {
+      "source_id": "fixture:source-1",
+      "kind": "document",
+      "locator": "Synthetic fixture anchor; no real paper or external call",
+      "access": "fulltext"
+    }
+  ],
+  "limitations": [
+    "Synthetic report example only; no research operation was performed by packaging this Skill."
+  ],
+  "snapshot_id": "fixture:snapshot-1",
+  "snapshot_revision": 1,
+  "core_papers": [
+    {
+      "paper_id": "fixture:paper-1",
+      "role": "representative_method",
+      "reason": "Illustrates the scoped procedure"
+    }
+  ],
+  "findings": [
+    {
+      "statement": "Fixture reports condition A with a missing duration",
+      "source_ids": [
+        "fixture:source-1"
+      ],
+      "evidence_ids": [
+        "fixture:evidence-1"
+      ],
+      "scope": "One synthetic fixture only"
+    }
+  ],
+  "disagreements": [],
+  "reading_recommendations": [
+    {
+      "paper_id": "fixture:paper-1",
+      "locator": "fixture:anchor-1",
+      "reason": "Resolve the method gap",
+      "evidence_scope": "fulltext"
+    }
+  ],
+  "changes_since_previous": [],
+  "coverage_gaps": [
+    "No independent replication"
+  ]
+}

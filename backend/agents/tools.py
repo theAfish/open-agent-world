@@ -47,6 +47,87 @@ def build_scoped_tool_callables(
     return callables
 
 
+def build_scoped_adk_tools(
+    provider: AgentCapabilityProvider,
+    agent_id: str,
+    definitions: Sequence[ScopedToolDefinition],
+) -> list[Any]:
+    """Expose the complete capability contract to ADK and its model adapter.
+
+    Inferring declarations from the compatibility callables loses nested JSON
+    schemas, selector enums and constraints. In particular a Pydantic ``$ref``
+    has no direct ``type`` and used to be advertised as a string. Execution
+    still delegates to the same callable and its live authorization check.
+    """
+    from google.adk.tools import FunctionTool
+    from google.genai import types
+
+    class ScopedFunctionTool(FunctionTool):
+        def __init__(self, function: Callable[..., Any], declaration: dict[str, Any]):
+            super().__init__(function)
+            self._scoped_declaration = types.FunctionDeclaration(
+                name=declaration["name"],
+                description=declaration["description"],
+                parameters_json_schema=_inline_schema_refs(declaration["parameters"]),
+            )
+
+        def _get_declaration(self):
+            # ADK adapters and toolsets can mutate declarations while preparing
+            # a request. Never let that alter another model turn's contract.
+            return self._scoped_declaration.model_copy(deep=True)
+
+    functions = build_scoped_tool_callables(provider, agent_id, definitions)
+    schemas = build_scoped_tool_schemas(definitions)
+    return [
+        ScopedFunctionTool(function, schema["function"])
+        for function, schema in zip(functions, schemas, strict=True)
+    ]
+
+
+def _inline_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Expand acyclic local references; retain recursive schemas unchanged.
+
+    Inlining avoids adapters which overlook ``$defs``. Recursive references
+    remain valid JSON Schema with their definitions instead of being truncated
+    or expanded indefinitely. The registered schema is never mutated.
+    """
+    root = deepcopy(schema)
+
+    class PreserveRefs(Exception):
+        pass
+
+    def visit(value: Any, ancestors: frozenset[str] = frozenset()) -> Any:
+        if isinstance(value, list):
+            return [visit(item, ancestors) for item in value]
+        if not isinstance(value, dict):
+            return value
+        reference = value.get("$ref")
+        if isinstance(reference, str) and not reference.startswith("#/"):
+            # Remote/anchor references need their original resolution scope.
+            raise PreserveRefs
+        if isinstance(reference, str) and reference.startswith("#/"):
+            if reference in ancestors:
+                raise RecursionError
+            target: Any = root
+            try:
+                for part in reference[2:].split("/"):
+                    target = target[part.replace("~1", "/").replace("~0", "~")]
+            except (KeyError, TypeError) as exc:
+                raise AgentConfigurationError(f"unresolved tool schema reference: {reference}") from exc
+            expanded = visit(target, ancestors | {reference})
+            siblings = {key: visit(item, ancestors) for key, item in value.items() if key not in {"$ref", "$defs", "definitions"}}
+            # Preserve conjunctive constraints when a reference has siblings.
+            if any(key in expanded and key not in {"title", "description", "default"} for key in siblings):
+                return {"allOf": [expanded, siblings]}
+            return {**expanded, **siblings}
+        return {key: visit(item, ancestors) for key, item in value.items() if key not in {"$defs", "definitions"}}
+
+    try:
+        return visit(root)
+    except (RecursionError, PreserveRefs):
+        return root
+
+
 def build_scoped_tool_schemas(
     definitions: Sequence[ScopedToolDefinition],
 ) -> list[dict[str, Any]]:

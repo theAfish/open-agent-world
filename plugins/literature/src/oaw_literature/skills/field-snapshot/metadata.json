@@ -1,0 +1,8 @@
+{
+  "name": "Field snapshot / 领域快照",
+  "description": "Synthesize screened literature into a versioned, source-linked field overview, core set, disagreements and targeted reading recommendations.",
+  "required_capabilities": [
+    "paper_read_evidence",
+    "research_create_snapshot"
+  ]
+}

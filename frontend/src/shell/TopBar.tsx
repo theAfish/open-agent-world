@@ -1,12 +1,15 @@
 import { AppearanceButtons, SettingsButton } from './PreferenceButtons';
-import { Activity, LibraryBig, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { Activity, LibraryBig, Map, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useLocale, t } from "../i18n";
 import { HelpMenu } from './HelpMenu';
 import { useCardLibrary } from "../state/cardLibrary";
 import { useWorldStore } from "../state/worldStore";
+import { useAutoResearch } from "../state/autoResearch";
 
 export function TopBar() {
   useLocale();
+  const autoResearch = useAutoResearch(state => state.enabled);
+  const toggleAutoResearch = useAutoResearch(state => state.toggle);
   const cards = useWorldStore((state) => state.cards);
   const edges = useWorldStore((state) => state.edges);
   const syncState = useWorldStore((state) => state.syncState);
@@ -41,6 +44,7 @@ export function TopBar() {
         </div>
       </div>
 
+      <button type="button" className="auto-research-toggle" aria-label="AutoResearch" aria-pressed={autoResearch} onClick={toggleAutoResearch} title={t("切换科研迷雾视图")}><Map size={14}/><span>AutoResearch</span><i aria-hidden="true"/></button>
       <div className="top-actions">
         <button type="button" className="top-icon-button" data-tutorial="library" onClick={useCardLibrary.getState().show} aria-label={t("Open Pack and Card Library")} title={t("Packs, Cards and Decks")}><LibraryBig size={16} /></button>
         <SettingsButton />

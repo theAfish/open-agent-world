@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:oaw:literature:evidence-verify:output:1",
+  "title": "evidence-verify output",
+  "type": "object",
+  "properties": {
+    "status": {
+      "enum": [
+        "completed",
+        "partial",
+        "blocked"
+      ]
+    },
+    "missing_capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "verdict": {
+      "enum": [
+        "supported",
+        "contradicted",
+        "insufficient",
+        "location_failed"
+      ]
+    },
+    "checked_evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "check": {
+            "type": "string",
+            "minLength": 1
+          },
+          "outcome": {
+            "enum": [
+              "passed",
+              "failed",
+              "unknown"
+            ]
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "explanation": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "check",
+          "outcome",
+          "source_ids",
+          "explanation"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "correction": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "independence_notes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "required": [
+    "status",
+    "missing_capabilities",
+    "sources",
+    "limitations",
+    "verdict",
+    "checked_evidence_ids",
+    "checks",
+    "correction",
+    "independence_notes"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "source": {
+      "type": "object",
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "paper",
+            "abstract",
+            "document",
+            "search",
+            "code",
+            "data",
+            "user",
+            "agent_inference"
+          ]
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "access": {
+          "enum": [
+            "metadata",
+            "abstract",
+            "fulltext",
+            "si_code",
+            "user_input",
+            "not_read"
+          ]
+        }
+      },
+      "required": [
+        "source_id",
+        "kind",
+        "locator",
+        "access"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

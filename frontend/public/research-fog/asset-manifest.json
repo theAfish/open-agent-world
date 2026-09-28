@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "version": "fog-ui-v1-main-canvas",
+  "date": "2026-09-24",
+  "generator": "built-in image_gen",
+  "origin": "Original generated art; no game artwork copied",
+  "units": "source pixels unless normalized or screen pixels explicitly named",
+  "assets": [
+    {"id":"concept-main-canvas","file":"concept-main-canvas.png","role":"preferred-concept-only","size":[1536,1024],"mode":"RGB","sha256":"87a620415952f4aadab0a5ff8b844affd99e9618e65e31a34c465fad84912f81","note":"Latest user-directed layout: existing WorldCanvas, bottom-left AutoResearch toggle, retained deck and minimap. Reference only; real text/data are code-rendered."},
+    {"id":"concept","file":"concept-map.png","role":"concept-only","size":[1536,1024],"mode":"RGB","sha256":"97525fbdd772d116b95871ce5787f2bf4d5919f370093eed95c91b612e9df5b9","note":"Visual direction only. Do not use as a production map background or literal UI/data specification."},
+    {"id":"fog-density","file":"gray-fog-noise.png","role":"texture","size":[1254,1254],"mode":"RGB","sha256":"bfda97d7455549922eec59220651fd4eee431b23abf17d4417158fcf076e340e","recommendedContrast":0.08,"tiling":"Mirror both axes into a 2x2 canvas tile at runtime, then repeat. Original opposite edges are not pixel-identical.","statistics":{"grayMean":111.859,"grayStd":7.851,"horizontalEdgeMAE":3.478,"verticalEdgeMAE":6.322,"adjacentPixelMAE":1.601}},
+    {"id":"frontier-signpost","file":"frontier-signpost.png","role":"single-sprite","size":[1254,1254],"mode":"RGBA","alphaRange":[0,255],"fullyTransparentFraction":0.812,"visibleBoundsAlpha64":[198,81,1069,1151],"visualMarginsAlpha64":[198,81,185,103],"hotspotPixels":[652,1130],"hotspotNormalized":[0.519936,0.901116],"recommendedImageSizeScreenPx":[90,90],"recommendedVisibleHeightScreenPx":[48,88],"sha256":"c8740deeb28eee131872a87a7a6f9d68d310fe09622ef5124f7a17ae9b4e915e"},
+    {"id":"landmark-atlas","file":"landmarks-atlas.png","role":"sprite-atlas","size":[1254,1254],"mode":"RGBA","alphaRange":[0,255],"fullyTransparentFraction":0.7248,"grid":[3,2],"cellSize":[418,627],"recommendedCellDisplayScreenPx":[64,96],"note":"Use the listed per-cell hotspot for baseline alignment. Alpha64 bounds describe visible art, not a hard alpha clipping threshold; preserve all original alpha pixels.","sha256":"1f56089a88507202f0e10128c204e1084271e2648ec0431af2ac3d07b5a18e74"}
+  ],
+  "sprites": [
+    {"id":"signpost","label":"探索路标","source":"landmarks-atlas.png","sourceRect":[0,0,418,627],"cssBackgroundPosition":"0% 0%","visibleBoundsInCellAlpha64":[60,171,413,598],"hotspotInCell":[237,590],"hotspotNormalized":[0.566986,0.940989]},
+    {"id":"paper","label":"论文证据","source":"landmarks-atlas.png","sourceRect":[418,0,418,627],"cssBackgroundPosition":"50% 0%","visibleBoundsInCellAlpha64":[84,200,350,599],"hotspotInCell":[218,590],"hotspotNormalized":[0.521531,0.940989]},
+    {"id":"snapshot","label":"领域快照","source":"landmarks-atlas.png","sourceRect":[836,0,418,627],"cssBackgroundPosition":"100% 0%","visibleBoundsInCellAlpha64":[40,282,374,600],"hotspotInCell":[210,590],"hotspotNormalized":[0.502392,0.940989]},
+    {"id":"scout","label":"探索者","source":"landmarks-atlas.png","sourceRect":[0,627,418,627],"cssBackgroundPosition":"0% 100%","visibleBoundsInCellAlpha64":[88,102,385,516],"hotspotInCell":[237,505],"hotspotNormalized":[0.566986,0.805423]},
+    {"id":"dispute","label":"证据争议","source":"landmarks-atlas.png","sourceRect":[418,627,418,627],"cssBackgroundPosition":"50% 100%","visibleBoundsInCellAlpha64":[68,123,365,511],"hotspotInCell":[218,503],"hotspotNormalized":[0.521531,0.802233]},
+    {"id":"empty-search","label":"已搜未见","source":"landmarks-atlas.png","sourceRect":[836,627,418,627],"cssBackgroundPosition":"100% 100%","visibleBoundsInCellAlpha64":[56,136,359,513],"hotspotInCell":[208,504],"hotspotNormalized":[0.497608,0.803828]}
+  ],
+  "vectorSymbols":{"file":"ui-symbols.svg","viewBox":[0,0,24,24],"strokeWidth":1.6,"color":"currentColor","ids":["signpost","paper","snapshot","scout","dispute","empty-search","paused","failed","unverified"],"recommendedSizeScreenPx":[16,24]},
+  "interaction":{"hitSizeFinePointer":40,"hitSizeCoarsePointer":48,"defaultHitSize":48,"overlayPointerEvents":"none","landmarkButtonPointerEvents":"auto","coordinateAnchor":"base-of-landmark","motionReduced":"no lift, pulse or animated reveal"},
+  "entryPoint":{"surface":"existing WorldCanvas","control":"bottom-left AutoResearch toggle","sharedReactFlow":true,"preservesViewport":true,"toggleStartsOrStopsTasks":false,"legionWorkspaceRequired":false},
+  "preview":{"entry":"preview.html","runtimeDependencies":[],"externalRequests":0,"data":"explicitly fictional interaction examples","qa":"preview-qa.json","screenshots":["preview-dark.png","preview-light.png","preview-main-canvas.png","preview-assets-dark.png","preview-assets-light.png","preview-mobile.png"]}
+}

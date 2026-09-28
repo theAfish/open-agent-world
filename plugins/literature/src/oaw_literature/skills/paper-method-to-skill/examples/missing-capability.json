@@ -1,0 +1,24 @@
+{
+  "status": "blocked",
+  "missing_capabilities": [
+    "research_export_skill"
+  ],
+  "sources": [
+    {
+      "source_id": "fixture:scope-1",
+      "kind": "user",
+      "locator": "Synthetic example question; not a real paper or executed search",
+      "access": "user_input"
+    }
+  ],
+  "limitations": [
+    "Synthetic example: required capability is unavailable; no research operation was performed."
+  ],
+  "skill_artifact_id": null,
+  "method_status": "draft",
+  "missing_fields": [],
+  "source_evidence_ids": [],
+  "artifact_files": [],
+  "validation_records": [],
+  "next_steps": []
+}

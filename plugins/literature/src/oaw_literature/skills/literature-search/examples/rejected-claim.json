@@ -1,0 +1,11 @@
+{
+  "synthetic": true,
+  "rejection_reason": "Claiming a search was completed from remembered papers when no literature_search tool exists.",
+  "bad_output_excerpt": {
+    "status": "completed",
+    "paper_ids": [
+      "invented:paper-1"
+    ]
+  },
+  "required_correction": "Return only work actually performed with inspected sources; record missing capabilities and unknowns. Structural schema validity alone does not establish scientific correctness."
+}

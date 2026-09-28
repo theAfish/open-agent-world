@@ -20,7 +20,9 @@ async def paper_preview(node_id: str, details: bool = False, services=Depends(ge
         value = document["value"]
         preview = {"thumbnail": value["thumbnail"], "pages": value["pages"], "filename": value["filename"]}
         if details:
-            preview.update(annotations=value["annotations"], page=value["page"])
+            preview.update(annotations=value["annotations"], page=value["page"],
+                           attachments=value.get("attachments", []),
+                           metadata={key: value.get("metadata", {}).get(key) for key in ("doi", "source_url")})
         return {"revision": document["revision"], "value": preview}
 
 class TranslationRequest(BaseModel):

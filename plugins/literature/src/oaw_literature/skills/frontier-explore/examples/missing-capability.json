@@ -1,0 +1,22 @@
+{
+  "status": "blocked",
+  "missing_capabilities": [
+    "research_create_signpost"
+  ],
+  "sources": [
+    {
+      "source_id": "fixture:scope-1",
+      "kind": "user",
+      "locator": "Synthetic example question; not a real paper or executed search",
+      "access": "user_input"
+    }
+  ],
+  "limitations": [
+    "Synthetic example: required capability is unavailable; no research operation was performed."
+  ],
+  "signpost_ids": [],
+  "proposals": [],
+  "decision_record_ids": [],
+  "stop_or_continue": "stop",
+  "rationale": "No authorized signpost capability is available."
+}

@@ -48,6 +48,18 @@ class _CapabilityContext:
         return await invoke_resource_action(self.services, capability.target_id, action,
             ResourceActionRequest(arguments=arguments), capability=capability)
 
+    async def literature_action(self, capability, arguments):
+        from backend.literature_service import service
+        return await service(self.services).invoke(capability.target_id, arguments.get("operation", "scope"),
+            arguments.get("arguments", {}), capability)
+
+    async def capture_plugin_view(self, capability, *, capture_kind, required_capability_kind, capture_options=None):
+        from backend.visual_observation import observe_plugin_view
+        return await observe_plugin_view(
+            self.services, capability, capture_kind=capture_kind,
+            required_capability_kind=required_capability_kind, capture_options=capture_options,
+        )
+
     async def minister_action(self, capability, arguments):
         from backend.minister import invoke
         return await invoke(self.services, capability, arguments)
@@ -309,6 +321,13 @@ class WorldAgentCapabilityProvider:
         async with self.services._node_mutation(read_only=True):
             operations = project_operations(self.services, agent_id)
         for operation in operations:
+            if operation.definition.tool_name == "observe_atom_structure":
+                from backend.errors import PermissionDeniedError
+                from backend.visual_observation import plugin_visual_model
+                try:
+                    plugin_visual_model(self.services, agent_id)
+                except PermissionDeniedError:
+                    continue
             schema = operation.schema()
             properties = schema.get("properties", {})
             required = set(schema.get("required", []))

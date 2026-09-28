@@ -1,0 +1,9 @@
+{
+  "name": "Paper close reading / 论文精读",
+  "description": "Read a paper for a specific question and produce source-anchored evidence, method gaps and a targeted reading route.",
+  "required_capabilities": [
+    "paper_read_sections",
+    "paper_read_evidence",
+    "research_record_evidence"
+  ]
+}

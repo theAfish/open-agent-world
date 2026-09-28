@@ -1,0 +1,26 @@
+.scope-frontiers { display: grid; gap: 12px; min-width: 0; color: var(--ink); font-size: 12px; }
+.scope-frontiers > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.scope-frontiers h4 { margin: 3px 0 0; font-size: 15px; }
+.scope-frontiers p { margin: 3px 0; line-height: 1.65; overflow-wrap: anywhere; }
+.scope-frontiers small { color: var(--ink-soft); font-size: 10px; line-height: 1.6; }
+.scope-frontiers button { min-height: 32px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 6px 9px; background: var(--surface-soft); cursor: pointer; }
+.scope-frontiers button:disabled { opacity: 1; color: var(--ink-soft); cursor: not-allowed; border-style: dashed; }
+.scope-frontiers button:hover:not(:disabled) { background: var(--surface-raised); }
+.scope-frontiers form { display: grid; gap: 10px; padding: 12px; background: var(--surface-soft); border-radius: 12px; }
+.scope-frontiers label { display: grid; gap: 5px; }
+.scope-frontiers input,.scope-frontiers textarea { min-width: 0; width: 100%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 6px; padding: 8px; }
+.scope-frontiers textarea { min-height: 66px; resize: vertical; }
+.scope-frontiers article { display: grid; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card-soft); }
+.scope-frontiers article[data-selected="true"] { border-color: var(--fog-selection, var(--accent)); }
+.scope-frontiers .scope-frontier-heading { display: grid; gap: 4px; text-align: left; padding: 0; background: transparent; border: 0; }
+.scope-frontier-heading strong { line-height: 1.6; overflow-wrap: anywhere; }
+.scope-frontier-states { display: flex; flex-wrap: wrap; gap: 6px; }
+.scope-frontier-states span { padding: 3px 7px; border: 1px solid var(--line); border-radius: 99px; color: var(--ink-soft); font-size: 10px; }
+.scope-frontiers ul { padding-left: 18px; margin: 0; line-height: 1.65; }
+.scope-frontiers footer { display: flex; gap: 6px; flex-wrap: wrap; }
+.scope-frontiers footer button:first-child { background: color-mix(in srgb, #87aba3 17%, var(--surface)); border-color: color-mix(in srgb, #87aba3 55%, var(--line)); }
+.scope-frontiers details { border-top: 1px solid var(--line); padding-top: 8px; }
+.scope-frontiers summary { cursor: pointer; line-height: 1.5; }
+.scope-frontiers .scope-frontier-paper { display: block; margin-top: 6px; width: 100%; text-align: left; overflow-wrap: anywhere; }
+.scope-frontier-evaluation p { margin: 8px 0; font-size: 11px; }
+.scope-frontiers .scope-frontiers-error { color: var(--danger); }

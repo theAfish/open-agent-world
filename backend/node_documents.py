@@ -40,6 +40,8 @@ def read_document(services, node_id, *, state_identity=None):
     try:
         initial = spec.initial_value if (services.plugins.node_type(services.world.get_card(node_id).type).state is not None
             and current.revision == 0 and spec.initial_value is not None) else current.value
+        if spec.identity_field:
+            initial = {**initial, spec.identity_field: node_id}
         value = spec.model.model_validate(initial).model_dump(mode="json")
     except ValueError as error:
         raise ResourceValidationError("Stored document is incompatible with this plugin: " + validation_message(error)) from error
@@ -52,21 +54,31 @@ def read_document(services, node_id, *, state_identity=None):
 
 def write_document(services, node_id, value, expected_revision, *, actor_id=None, run_id=None, state_identity=None):
     spec = definition(services, node_id)
-    try:
-        value = spec.model.model_validate(value).model_dump(mode="json")
-        if spec.validate_update is not None:
-            spec.validate_update(read_document(services, node_id, state_identity=state_identity)["value"], value)
-    except (ValidationError, ValueError) as exc:
-        raise ResourceValidationError(validation_message(exc)) from exc
-    if len(json.dumps(value).encode("utf-8")) > spec.max_size_bytes:
-        raise ResourceValidationError(f"This document is limited to {spec.max_size_bytes // 1024} KiB")
     scope = services.card_state.scope(node_id, state_identity)
     node = services.world.get_card(node_id)
     container = services.plugins.node_type(node.type).container
-    entries = value.get(container.document_field) if container and container.document_field else None
-    if entries is not None:
-        value = {**value, container.document_field: []}
-    services.state.set(scope, "document", value, expected_revision=expected_revision, actor_id=actor_id, run_id=run_id)
+    with services.database.transaction(immediate=True) as connection:
+        previous = read_document(services, node_id, state_identity=state_identity)["value"] if spec.binary_history else None
+        try:
+            if spec.binary_restore_fields:
+                from backend.document_blobs import restore_fields
+                value = restore_fields(connection, scope.scope_id, spec.binary_restore_fields, previous, value)
+            if spec.identity_field:
+                value = {**value, spec.identity_field: node_id}
+            value = spec.model.model_validate(value).model_dump(mode="json")
+            if spec.validate_update is not None:
+                spec.validate_update(read_document(services, node_id, state_identity=state_identity)["value"], value)
+        except (ValidationError, ValueError) as exc:
+            raise ResourceValidationError(validation_message(exc)) from exc
+        if len(json.dumps(value).encode("utf-8")) > spec.max_size_bytes:
+            raise ResourceValidationError(f"This document is limited to {spec.max_size_bytes // 1024} KiB")
+        entries = value.get(container.document_field) if container and container.document_field else None
+        if entries is not None:
+            value = {**value, container.document_field: []}
+        if spec.binary_history:
+            from backend.document_blobs import retain_changes
+            retain_changes(connection, scope.scope_id, spec.binary_history, previous, value)
+        services.state.set(scope, "document", value, expected_revision=expected_revision, actor_id=actor_id, run_id=run_id)
     from backend.node_containers import sync_members, touch_parent
     if entries is not None:
         sync_members(services, node_id, entries)

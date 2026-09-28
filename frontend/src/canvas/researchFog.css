@@ -1,0 +1,119 @@
+.world-canvas.is-auto-research { --fog-selection: #856039; --fog-surface: #fafbf7; --fog-text: #29322c; --fog-soft: #5d685e; --fog-line: #b4bdb1; --fog-active: #426c62; background: #e5e7e3; }
+:root[data-theme="dark"] .world-canvas.is-auto-research { --fog-selection: #c8ab88; --fog-surface: #252a27; --fog-text: #eef0e9; --fog-soft: #bdc3b9; --fog-line: #596259; --fog-active: #87aba3; background: #262928; }
+.research-fog-paint { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 4; pointer-events: none; }
+.research-roads { position:absolute; inset:0; width:100%; height:100%; z-index:2; pointer-events:none; overflow:hidden; }
+.research-roads path { fill:none; stroke-linecap:round; stroke-linejoin:round; }
+.research-road-shoulder { stroke:color-mix(in srgb,var(--fog-active) 32%,transparent); stroke-width:15; }
+.research-road-surface { stroke:color-mix(in srgb,var(--fog-surface) 65%,var(--fog-active)); stroke-width:9; }
+.research-road-center { stroke:color-mix(in srgb,var(--fog-active) 75%,var(--fog-text)); stroke-width:1.3; stroke-dasharray:5 9; opacity:.85; }
+.research-roads [data-road-mode="branch"] .research-road-shoulder { stroke:color-mix(in srgb,var(--fog-selection) 28%,transparent); }
+.research-roads [data-road-mode="branch"] .research-road-center { stroke:var(--fog-selection); }
+.world-canvas.is-auto-research .react-flow__node.is-outside-research { opacity: .36; }
+.world-canvas.is-auto-research .react-flow__node.is-outside-research:is(:hover,:focus-within),.world-canvas.is-auto-research .react-flow__node.is-outside-research.selected { opacity: 1; }
+.world-canvas.is-auto-research .react-flow__edge.is-outside-research { opacity: .2; }
+.research-fog-landmarks { position: absolute; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; color: var(--fog-text); }
+.research-fog-routes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.research-fog-routes line { stroke: var(--fog-soft); stroke-width: 1; stroke-dasharray: 4 8; opacity: .4; }
+.research-fog-routes line[data-selected="true"] { stroke: var(--fog-selection); opacity: .8; stroke-width: 1.5; }
+.research-fog-marker { position: absolute; width: 48px; height: 48px; margin: -24px 0 0 -24px; padding: 0; border: 1px solid var(--fog-line); border-radius: 50%; background: color-mix(in srgb,var(--fog-surface) 80%,transparent); pointer-events: auto; cursor: pointer; }
+.research-fog-marker:hover,.research-fog-marker[data-selected="true"] { border-color: var(--fog-selection); box-shadow: 0 0 0 2px color-mix(in srgb,var(--fog-selection) 30%,transparent); }
+.research-fog-road-badge { position:absolute; right:-7px; bottom:-3px; display:grid; place-items:center; width:24px; height:24px; border:1px solid var(--fog-line); border-radius:50%; background:var(--fog-surface); color:var(--fog-active); pointer-events:none; }
+.research-fog-cluster[data-near="true"] .research-fog-count { position:absolute; right:-7px; bottom:-3px; display:grid; place-items:center; min-width:23px; height:23px; padding:0 3px; border:1px solid var(--fog-line); border-radius:50%; background:var(--fog-surface); font-size:11px; }
+.research-fog-marker:focus-visible,.research-fog-cluster:focus-visible { outline: 2px solid var(--fog-text); outline-offset: 5px; }
+.research-fog-sprite { position: absolute; left: 50%; top: 50%; width: 72px; height: 108px; pointer-events: none; background: url('/research-fog/landmarks-atlas.png') 0% 0% / 300% 200% no-repeat; transform: translate(-56.6986%,-94.0989%); }
+.research-fog-marker[data-kind="snapshot"] .research-fog-sprite { background-position: 100% 0%; transform: translate(-50.2392%,-94.0989%); }
+.research-fog-marker[data-kind="scout"] .research-fog-sprite { background-position: 0% 100%; transform: translate(-56.6986%,-80.5423%); }
+.research-fog-marker[data-kind="dispute"] .research-fog-sprite { background-position: 50% 100%; transform: translate(-52.1531%,-80.2233%); }
+.research-fog-marker[data-kind="empty-search"] .research-fog-sprite { background-position: 100% 100%; transform: translate(-49.7608%,-80.3828%); }
+.research-fog-marker-label { position: absolute; top: 44px; left: 50%; transform: translateX(-50%); width: 138px; padding: 5px 7px; border: 1px solid var(--fog-line); border-radius: 7px; background: color-mix(in srgb,var(--fog-surface) 94%,transparent); color: var(--fog-text); font-size: 11px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; text-align: center; }
+.research-fog-marker-label small { display: block; color: var(--fog-soft); font-size: 9px; margin-top: 3px; }
+.research-fog-cluster { position: absolute; display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 48px; min-height: 48px; margin: -24px 0 0 -24px; padding: 8px; border: 1px solid var(--fog-line); border-radius: 50%; background: var(--fog-surface); color: var(--fog-text); pointer-events: auto; cursor: pointer; }
+.research-fog-toolbar,.research-fog-detail { position: absolute; z-index: 7; border: 1px solid var(--fog-line); border-radius: 15px; background: color-mix(in srgb,var(--fog-surface) 96%,transparent); color: var(--fog-text); box-shadow: 0 12px 35px #0002; pointer-events: auto; }
+.research-fog-toolbar { left: 18px; top: 18px; width: 306px; padding: 13px; display: grid; gap: 11px; font-size: 12px; max-height: calc(100% - 220px); overflow: auto; }
+:root:has(.development-badge) .research-fog-toolbar { top: 58px; max-height: calc(100% - 260px); }
+.research-fog-toolbar header { display: flex; align-items: center; gap: 7px; }
+.research-fog-toolbar header strong { font-size: 13px; letter-spacing: .02em; }
+.research-fog-toolbar header > span { margin-left: auto; color: var(--fog-soft); font-size: 10px; }
+.research-fog-toolbar p { margin: 0; line-height: 1.65; }
+.research-fog-toolbar small { color: var(--fog-soft); font-size: 10px; line-height: 1.7; }
+.research-fog-toolbar button,.research-fog-detail > header button { display: inline-flex; justify-content: center; align-items: center; gap: 6px; min-height: 32px; padding: 6px 8px; border: 1px solid var(--fog-line); border-radius: 8px; color: var(--fog-text); background: transparent; cursor: pointer; }
+.research-fog-toolbar button:hover,.research-fog-detail > header button:hover { background: color-mix(in srgb,var(--fog-active) 15%,transparent); }
+.research-fog-scope-picker { display: flex; gap: 6px; }
+.research-fog-scope-picker select { min-width: 0; flex: 1; padding: 7px 8px; border: 1px solid var(--fog-line); border-radius: 8px; color: var(--fog-text); background: var(--fog-surface); font-size: 12px; }
+.research-fog-question { font-weight: 600; overflow-wrap: anywhere; }
+.research-fog-toolbar-actions { display: flex; gap: 5px; }
+.research-fog-toolbar-actions button { font-size: 10px; }
+.research-fog-legend { border-top: 1px solid var(--fog-line); padding-top: 9px; }
+.research-fog-legend summary { cursor: pointer; color: var(--fog-soft); font-size: 11px; }
+.research-fog-legend p { display: flex; align-items: center; gap: 6px; font-size: 10px; margin-top: 8px; }
+.research-fog-legend small { display: block; margin-top: 8px; }
+.research-fog-key { width: 12px; height: 12px; border: 1px solid var(--fog-soft); border-radius: 50%; flex: 0 0 12px; }
+.research-fog-key.is-metadata { background: #8b928c; }
+.research-fog-key.is-evidence { background: var(--fog-surface); }
+.research-fog-error { color: var(--danger); overflow-wrap: anywhere; }
+.research-fog-detail { top: 18px; right: 18px; width: min(420px,calc(100% - 360px)); max-height: calc(100% - 165px); display: flex; flex-direction: column; overflow: hidden; font-size: 12px; }
+.research-fog-detail > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 13px; border-bottom: 1px solid var(--fog-line); flex-shrink: 0; }
+.research-fog-detail > header span { display: flex; align-items: center; gap: 7px; }
+.research-fog-detail-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 14px; }
+.research-fog-detail .literature-scope { padding: 0; }
+.top-bar .auto-research-toggle { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 31px; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface-soft); color: var(--ink); cursor: pointer; font-size: 11px; }
+.top-bar .auto-research-toggle[aria-pressed="true"] { background: color-mix(in srgb,#87aba3 20%,var(--surface)); border-color: #71948c; }
+.auto-research-toggle i { height: 5px; width: 5px; border-radius: 50%; background: var(--ink-faint); }
+.auto-research-toggle[aria-pressed="true"] i { background: #87aba3; box-shadow: 0 0 0 3px #87aba320; }
+@media (max-width: 760px) { .research-fog-toolbar { left: 12px; top: 12px; width: min(306px,calc(100% - 24px)); max-height: 28%; } :root:has(.development-badge) .research-fog-toolbar { max-height: calc(28% - 40px); } .research-fog-detail { top: auto; bottom: 215px; left: 12px; right: 12px; width: auto; max-height: 42%; } .research-fog-toolbar header > span { display: none; } }
+@media (prefers-reduced-motion: reduce) { .research-fog-marker,.research-fog-sprite { transition: none; animation: none; } }
+
+.research-signpost { width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--fog-text); cursor:grab; }
+.research-signpost-art { position:relative; width:130px; height:160px; border-bottom:2px solid var(--fog-line); border-radius:50%; background:radial-gradient(ellipse at bottom,var(--fog-surface),transparent 65%); }
+.research-signpost-art .research-fog-sprite { top:auto; bottom:0; left:50%; transform:translateX(-56.7%); width:120px; height:180px; }
+.research-signpost-far { display:none; }
+.research-signpost-title { display:grid; gap:5px; max-width:90%; padding:10px 14px; border:1px solid var(--fog-line); border-radius:10px; background:var(--fog-surface); color:inherit; cursor:pointer; text-align:center; }
+.research-signpost-title strong { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; font-size:14px; }
+.research-signpost-title small,.research-signpost-title span { font-size:10px; color:var(--fog-soft); }
+.research-signpost[data-selected="true"] .research-signpost-title,.research-signpost-title:focus-visible { outline:2px solid var(--fog-selection); }
+
+.research-signpost[data-far="true"] .research-fog-sprite { display:none; }
+.research-signpost[data-far="true"] .research-signpost-art { width:96px; height:96px; display:flex; align-items:center; justify-content:center; border:2px solid var(--fog-line); border-radius:50%; background:var(--fog-surface); }
+.research-signpost[data-far="true"] .research-signpost-far { display:block; width:40px; height:40px; }
+.research-signpost[data-far="true"] .research-signpost-title { display:none; }
+.research-signpost[data-far="true"] .research-signpost-art:hover,.research-signpost[data-far="true"] .research-signpost-art:focus-visible { border-color:var(--fog-active); outline:2px solid var(--fog-active); outline-offset:3px; }
+
+.research-signpost-detail-intro { padding:0 12px 10px; font-size:12px; line-height:1.6; color:var(--fog-soft); }
+.research-signpost-detail-intro button { border:1px solid var(--fog-line); border-radius:8px; padding:7px 10px; color:var(--fog-text); background:var(--fog-surface); cursor:pointer; }
+
+.research-fog-detail.is-signpost-window { overflow:visible; border-radius:16px; box-shadow:0 18px 50px #0006; animation:signpost-unfold .18s ease-out; transform-origin:50% 0; }
+.research-detail-hat { position:absolute; width:72px; height:108px; left:calc(50% - 36px); top:-91px; background:url('/research-fog/landmarks-atlas.png') 0% 0% / 300% 200% no-repeat; pointer-events:none; filter:drop-shadow(0 8px 8px #0005); }
+.research-signpost[data-detail-open="true"] { visibility:hidden; }
+.research-fog-detail.is-signpost-window > header { padding-top:22px; }
+.research-fog-detail.is-signpost-window .research-fog-detail-body { border-radius:0 0 16px 16px; }
+.research-fog-detail.is-signpost-window .literature-exploration { height:auto; overflow:visible; padding:0; }
+@keyframes signpost-unfold { from {opacity:0;transform:scale(.92)} to {opacity:1;transform:scale(1)} }
+@media(prefers-reduced-motion:reduce) { .research-fog-detail.is-signpost-window { animation:none; } }
+
+/* One world transform for frame, contents, controls and the stone hat. */
+.research-signpost-world-layer { position:absolute; inset:0; z-index:7; transform-origin:0 0; pointer-events:none; }
+.research-signpost-world-layer .is-signpost-window > header { cursor:grab; touch-action:none; user-select:none; }
+.research-signpost-world-layer .is-signpost-window > header:active { cursor:grabbing; }
+.research-signpost-world-layer .research-fog-detail-body { flex:1; }
+.research-signpost-world-layer .is-signpost-window { animation:signpost-unfold .3s cubic-bezier(.22,1,.36,1); }
+@media(prefers-reduced-motion:reduce) { .research-signpost-world-layer .is-signpost-window { animation:none; } }
+
+.research-fog-toolbar[hidden]{display:none}
+.research-fog-toolbar .research-fog-collapse{min-height:24px;width:24px;padding:3px;border-color:transparent;flex:none}
+.research-fog-dock{position:absolute;left:0;top:28px;z-index:7;display:flex;align-items:center;justify-content:center;width:40px;height:44px;padding:8px;border:1px solid var(--fog-line);border-left:0;border-radius:0 13px 13px 0;background:var(--fog-surface);color:var(--fog-active);box-shadow:0 5px 18px #0003;cursor:pointer;pointer-events:auto;transform-origin:left center;transition:transform .18s ease,box-shadow .18s ease}
+.research-fog-dock:hover,.research-fog-dock:focus-visible{transform:scale(1.15);box-shadow:0 7px 24px #0005}
+.research-fog-dock:focus-visible{outline:2px solid var(--fog-active);outline-offset:3px}
+.research-fog-dock:active{transform:scale(1.04)}
+:root:has(.development-badge) .research-fog-dock{top:68px}
+@media(prefers-reduced-motion:reduce){.research-fog-dock{transition:none}}
+
+/* Match the host's narrow-screen HUD rail without stretching its 34px controls. */
+@media (max-width: 1250px) {
+  .top-bar .auto-research-toggle { position: relative; width: 34px; min-width: 0; height: 32px; min-height: 32px; padding: 0; gap: 0; }
+  .top-bar .auto-research-toggle > span { display: none; }
+  .top-bar .auto-research-toggle > svg { flex-shrink: 0; }
+  .top-bar .auto-research-toggle > i { position: absolute; top: 4px; right: 4px; }
+  .research-fog-toolbar { left: calc(max(10px, env(safe-area-inset-left)) + 62px); width: min(306px, calc(100% - 90px)); }
+  .research-fog-toolbar-actions { flex-wrap: wrap; }
+  .research-fog-dock, :root:has(.development-badge) .research-fog-dock { top: min(324px, calc(100dvh - 200px)); }
+}

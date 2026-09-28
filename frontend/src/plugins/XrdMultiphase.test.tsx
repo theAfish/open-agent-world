@@ -31,6 +31,7 @@ function mount(initial: XrdMultiphaseState = { status: 'idle' }, overrides: Part
   let state = initial;
   const host: PluginViewProps['host'] = {
     delegationAction: vi.fn(), resourceAction: vi.fn(),
+    openWorkspace: vi.fn(), runAgent: vi.fn(), onDocumentChange: vi.fn(() => () => {}), registerVisualCapture: vi.fn(() => () => {}),
     getAgentInfo: vi.fn().mockResolvedValue({ session_id: '', details: { result: { mode: 'match', candidates }, workflow: { match_run_id: 'search-42' } } }),
     getMultiphase: vi.fn(async () => state),
     startMultiphase: vi.fn(async () => { state = { status: 'running', run_id: 'multi-1', source_match_run_id: 'search-42', trials: [] }; }),

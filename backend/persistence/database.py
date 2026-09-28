@@ -8,6 +8,33 @@ from typing import Iterator
 
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS node_document_blobs (
+    sha256 TEXT PRIMARY KEY,
+    content BLOB NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+-- Membership follows a document namespace, not merely a guessable content hash.
+-- Retain historical ownership across recoverable node deletion/undo.
+CREATE TABLE IF NOT EXISTS node_document_blob_members (
+    scope_id TEXT NOT NULL,
+    field TEXT NOT NULL,
+    sha256 TEXT NOT NULL REFERENCES node_document_blobs(sha256),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (scope_id, field, sha256)
+);
+
+-- Keep the last reading state associated with each byte version separately
+-- from the active document. Large base64 fields are referenced, never copied.
+CREATE TABLE IF NOT EXISTS node_document_blob_snapshots (
+    scope_id TEXT NOT NULL,
+    field TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (scope_id, field, sha256)
+);
+
 CREATE TABLE IF NOT EXISTS summoned_instances (
     id TEXT PRIMARY KEY,
     record_json TEXT NOT NULL

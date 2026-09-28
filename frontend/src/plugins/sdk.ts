@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import type { PluginVisualCapture, PluginVisualCaptureRequest, PluginVisualCaptureResult } from "./visualCapture";
 import type { NodeSurfaceLevel, NodeTypeCatalogItem, WorldCard } from "../types/world";
 export type { NodePresentation, NodeSurfaceLevel, PluginStateSpec } from "../types/world";
 export { SchemaFields } from "./SchemaFields";
@@ -123,6 +124,15 @@ export interface XrdMultiphaseState {
   optimizer?: string;
   model?: string;
 }
+
+/** A document mutation published by the authoritative backend. */
+export interface PluginDocumentChange {
+  nodeId: string;
+  revision: number;
+  actorId?: string;
+  runId?: string;
+}
+
 export interface PluginViewProps {
   card: WorldCard;
   definition: NodeTypeCatalogItem;
@@ -165,12 +175,25 @@ export interface PluginViewProps {
     readDocument(nodeId?: string): Promise<{ value: unknown; revision: number }>;
     transform(operation: string, request: Record<string, unknown>): Promise<Record<string, unknown>>;
     documentDownloadUrl(name: string, nodeId?:string): string;
+    /** Select a card and open its normal OAW workspace surface. */
+    openWorkspace(nodeId: string): void;
+    /** Start an Agent through the ordinary OAW run lifecycle. */
+    runAgent(nodeId: string, prompt: string): Promise<void>;
+    /** Observe future node-document mutations received by the OAW event stream. */
+    onDocumentChange(listener: (change: PluginDocumentChange) => void): () => void;
+    /**
+     * Register a transient capture of this card's active plugin workspace.
+     * The host sends it only after the backend has authorized a matching
+     * visual capability; image bytes are never persisted in the document.
+     */
+    registerVisualCapture(captureKind: string, capture: PluginVisualCapture): () => void;
     readFile(reference: import("../state/openFiles").FileReference, signal?: AbortSignal): Promise<{ name: string; size_bytes: number; data: string }>;
     openFile(reference: import("../state/openFiles").FileReference, name: string): void;
     clearOpenedFile(): void;
     openInputNode?(type: string, name: string, source: { filename: string; source_base64: string }, relationship?: string): Promise<void>;
   };
 }
+export type { PluginVisualCaptureRequest, PluginVisualCaptureResult };
 export interface FrontendPlugin {
   apiVersion: 1;
   views: Record<string, ComponentType<PluginViewProps>>;

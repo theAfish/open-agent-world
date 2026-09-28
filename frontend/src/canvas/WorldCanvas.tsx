@@ -6,6 +6,10 @@ import { reportInteraction } from "../state/interactions";
 import { findGlue, glueGroup, reflowGlueSurfaces, refreshGlue, beginGlueEdit, cancelGlueRefresh, persistGlue, useGlueStore, type GlueBox, type GlueCandidate } from "../state/glue";
 import { MapAtlas } from "./MapAtlas";
 import { WorldBackground } from './WorldBackground';
+import { ResearchSignpost } from './ResearchSignpost';
+import { ResearchFog } from './ResearchFog';
+import { useAutoResearch } from '../state/autoResearch';
+import { researchVisibleIds } from '../state/researchVisibility';
 import { CanvasCardLayers } from './CanvasCardLayers';
 import { LegionDeploymentLayer } from './LegionDeploymentLayer';
 import { stableNode, stableNodeList } from './stableNodes';
@@ -30,6 +34,7 @@ import { apiErrorMessage, worldApi } from "../api/client";
 import { transformationOptions } from "./documentTransformations";
 import { appointMinister, MINISTER_ROLE_CARD } from '../state/ministerRole';
 import { importPdf, type PdfImportProgress } from "./importPdf";
+import { choosePdfImport } from "./PdfImportChoice";
 import { PdfImportIndicator } from "./PdfImportIndicator";
 import { layoutIsPresented } from "./layoutPresentation";
 import { SHADOW, isShadow, collectionState, foldedAncestor, hiddenCollectionEdge, shadowLayout, shadowPoints, useCollectionDrag, useCollectionRelease, canReleaseMember, collectionAnchorFromSurface } from "../state/shadowCollection";
@@ -63,7 +68,7 @@ import {
   type SurfaceObstacle,
 } from "./nodeDisplacement";
 
-const nodeTypes = { worldCard: WorldCardNode, container: ContainerCardNode, equipment: EquipmentCardNode, equipmentPanel: EquipmentPanelNode };
+const nodeTypes = { researchSignpost: ResearchSignpost, worldCard: WorldCardNode, container: ContainerCardNode, equipment: EquipmentCardNode, equipmentPanel: EquipmentPanelNode };
 const edgeTypes = { semantic: SemanticEdge };
 
 function isScrollableArea(target: EventTarget | null, boundary: HTMLElement): boolean {
@@ -110,6 +115,10 @@ function nodeFromCard(
 
 export function WorldCanvas() {
   useLocale();
+  const autoResearch = useAutoResearch(state => state.enabled);
+  const researchMemberIds = useAutoResearch(state => state.memberIds);
+  const researchCreatedIds = useAutoResearch(state => state.createdIds);
+  const researchRoadPairs = useAutoResearch(state => state.roadPairs);
   const [pinToolActive, setPinToolActive] = useState(false);
   const [glueActive, setGlueActive] = useState(false);
   const [gluePreview, setGluePreview] = useState<GlueCandidate>();
@@ -847,18 +856,22 @@ export function WorldCanvas() {
     event.preventDefault();
     clearTransformationHints();
     if(event.dataTransfer.files.length){
-      const files=Array.from(event.dataTransfer.files).filter(f=>/\.pdf$/i.test(f.name));
+      const files=Array.from(event.dataTransfer.files).filter(f=>f.type === "application/pdf" || /\.pdf$/i.test(f.name));
       if(!files.length||importingPdf.current)return;
       if(!getNodeType(catalog,"library.paper")){setImportStatus(t("请先启用 Library 插件"));return;}
       const position=screenToFlowPosition({x:event.clientX,y:event.clientY});
       const parent=dropContainer(cards,{id:"",type:"library.paper"} as typeof cards[number],position,catalog);
+      const targetNode=(event.target as Element).closest('.react-flow__node');
+      const targetPaperId=cards.find(card=>card.id===targetNode?.getAttribute('data-id') && card.type==='library.paper')?.id;
       importingPdf.current=true;
       void (async()=>{
         let completed=0;
         try {
           for(const [i,file] of files.entries()) {
+            const target=await choosePdfImport(file,{targetPaperId});
+            if(!target)continue;
             setImportStatus(`${i+1} / ${files.length} · ${file.name}`);
-            const card=await importPdf(file,{x:position.x+(i%3)*40,y:position.y+Math.floor(i/3)*40},parent?.id,setImportProgress);
+            const card=await importPdf(file,{x:position.x+(i%3)*40,y:position.y+Math.floor(i/3)*40},parent?.id,setImportProgress,target);
             useWorldStore.getState().acceptImportedCard(card);
             completed++;
           }
@@ -890,10 +903,51 @@ export function WorldCanvas() {
     drop: (item, point) => { if (item.payload) placePaletteCard(item.payload, point); },
   });
 
+  // View-only dimming preserves the same nodes, callbacks, selection and viewport.
+  const researchMembers = useMemo(() => {
+    const ids = researchVisibleIds(cards,researchCreatedIds,researchMemberIds);
+    const byId = new Map(nodes.map(node => [node.id,node]));
+    for (const id of researchMemberIds) {
+      let parentId = byId.get(id)?.parentId;
+      const seen = new Set<string>();
+      while (parentId && !seen.has(parentId)) { seen.add(parentId); ids.add(parentId); parentId = byId.get(parentId)?.parentId; }
+    }
+    return ids;
+  },[researchMemberIds,researchCreatedIds,cards,nodes]);
+  const researchHubs = useMemo(() => new Map(cards.filter(card=>card.type==='literature.index' && typeof card.config.scope_id==='string').map(card=>[String(card.config.scope_id),card.id])),[cards]);
+  const researchConcealed = useMemo(() => new Set(cards.filter(card=>
+    card.type==='literature.scope' && researchHubs.has(card.id) ||
+    card.type==='literature.finding' && String(card.config.entity_id).startsWith('collection:') &&
+      !flowEdges.some(edge=>edge.data?.relationship==='literature.road' && (edge.source===card.id || edge.target===card.id))
+  ).map(card=>card.id)),[cards,researchHubs,flowEdges]);
+  const researchNodes = useMemo(() => !autoResearch ? nodes : nodes.map(node => {
+    const card=node.data.card;
+    const hub=card.type==='literature.index' || card.type==='literature.scope' && !researchHubs.has(card.id);
+    return {...node,
+      ...(researchConcealed.has(node.id) ? {hidden:true} : {}),
+      ...(card.type==='literature.trail' && node.data.surfaceLevel!=='workspace' ? {type:'researchSignpost' as const,dragHandle:undefined} : {}),
+      ...(hub ? {data:{...node.data,card:{...card,name:/^(文献目录(?: · Literature index)?|Literature index|Research scope|研究问题与预算|Literature question)$/.test(card.name) ? '研究中枢' : card.name}}} : {}),
+      className:`${node.className ?? ''}${researchMembers.size && !researchMembers.has(node.id) ? ' is-outside-research' : ''}`};
+  }),[nodes,autoResearch,researchMembers,researchHubs,researchConcealed]);
+  const researchEdges = useMemo(() => {
+    if(!autoResearch) return flowEdges;
+    const painted=new Set(researchRoadPairs);
+    return flowEdges.map(original => {
+      const source=researchHubs.get(original.source) ?? original.source;
+      const target=researchHubs.get(original.target) ?? original.target;
+      const edge={...original,source,target};
+      if(source===target || researchConcealed.has(source) || researchConcealed.has(target)) return {...edge,hidden:true};
+      return edge.data?.relationship === "literature.road" && painted.has(`${edge.source}/${edge.target}`)
+      ? {...edge,hidden:true}
+      : !researchMembers.size || researchMembers.has(edge.source) && researchMembers.has(edge.target) ? edge
+      : {...edge,className:`${edge.className ?? ""} is-outside-research`};
+    });
+  },[flowEdges,autoResearch,researchMembers,researchRoadPairs,researchHubs,researchConcealed]);
+
   return (
     <div
       ref={wrapper}
-      className={`world-canvas ${pinToolActive ? "pin-tool-active" : ""} ${cards.some((card) => selectedCardIds.includes(card.id) && isContainer(card, catalog)) ? "has-selected-container" : ""}`}
+      className={`world-canvas ${autoResearch ? "is-auto-research" : ""} ${pinToolActive ? "pin-tool-active" : ""} ${cards.some((card) => selectedCardIds.includes(card.id) && isContainer(card, catalog)) ? "has-selected-container" : ""}`}
       data-testid="world-canvas"
       onMouseDownCapture={(event) => {
         if (event.button !== 0 || !(event.target instanceof Element)) return;
@@ -915,7 +969,8 @@ export function WorldCanvas() {
       }}
       onDrop={onDrop}
       onDragOver={(event) => {
-        if (!hasPaletteDrag(event.dataTransfer)&&!event.dataTransfer.types.includes(t("Files"))) return;
+        // DataTransfer type tokens are browser protocol values, never translated.
+        if (!hasPaletteDrag(event.dataTransfer)&&!event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "copy";
         hoverPaletteCard(event);
@@ -925,8 +980,8 @@ export function WorldCanvas() {
       <ReactFlow<CanvasNode, CanvasEdge>
         id="oaw-world-map"
         ariaLabelConfig={{ 'controls.zoomIn.ariaLabel': t('Zoom in'), 'controls.zoomOut.ariaLabel': t('Zoom out'), 'controls.fitView.ariaLabel': t('Fit view'), 'minimap.ariaLabel': t('Nearby canvas · drag to pan') }}
-        nodes={nodes}
-        edges={flowEdges}
+        nodes={researchNodes}
+        edges={researchEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
@@ -985,6 +1040,7 @@ export function WorldCanvas() {
         {nodes.filter((node) => node.data.equipmentDetail && !node.hidden).map((node) =>
           <SurfaceBridge key={node.id} sourceId={equipmentOriginId(node.id)} targetId={node.id} />)}
         <WorldBackground />
+        {autoResearch && <ResearchFog nodes={researchNodes}/>}
         <LocalMiniMap />
         <MapAtlas active={pinToolActive} onActiveChange={active => { setPinToolActive(active); if (active) setGlueActive(false); }} glueActive={glueActive} onGlueChange={active => { setGlueActive(active); if (active) setPinToolActive(false); }} />
         <Controls

@@ -1,0 +1,9 @@
+{
+  "name": "Frontier exploration / 研究边界探索",
+  "description": "Turn evidence gaps and perspectives into bounded, budgeted search tasks with explicit stop rules and auditable proposals.",
+  "required_capabilities": [
+    "research_create_signpost",
+    "task_board_read",
+    "task_board_add_task"
+  ]
+}

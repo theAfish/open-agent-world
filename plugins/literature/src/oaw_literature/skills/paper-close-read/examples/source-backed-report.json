@@ -1,0 +1,58 @@
+{
+  "status": "completed",
+  "missing_capabilities": [],
+  "sources": [
+    {
+      "source_id": "fixture:source-1",
+      "kind": "document",
+      "locator": "Synthetic fixture anchor; no real paper or external call",
+      "access": "fulltext"
+    }
+  ],
+  "limitations": [
+    "Synthetic report example only; no research operation was performed by packaging this Skill."
+  ],
+  "evidence_ids": [
+    "fixture:evidence-1"
+  ],
+  "claims": [
+    {
+      "claim": "Fixture reports condition A",
+      "classification": "author_statement",
+      "source_ids": [
+        "fixture:source-1"
+      ],
+      "source_anchor_ids": [
+        "fixture:anchor-1"
+      ],
+      "conditions": [
+        "A"
+      ]
+    }
+  ],
+  "method_draft": {
+    "objective": "Reproduce the fixture procedure",
+    "inputs": [
+      "Sample"
+    ],
+    "outputs": [
+      "Measured endpoint"
+    ],
+    "steps": [
+      "Follow the reported treatment"
+    ],
+    "missing_fields": [
+      "Treatment duration"
+    ]
+  },
+  "reading_route": [
+    {
+      "locator": "fixture:anchor-1",
+      "source_ids": [
+        "fixture:source-1"
+      ],
+      "reason": "Check the reported condition and missing duration",
+      "estimated_minutes": null
+    }
+  ]
+}

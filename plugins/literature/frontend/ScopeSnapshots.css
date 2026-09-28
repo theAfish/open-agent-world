@@ -1,0 +1,14 @@
+.literature-snapshots {margin-top:18px;border-top:1px solid var(--line);padding-top:14px;min-width:0;}
+.literature-snapshots header {display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;}
+.literature-snapshots h4 {margin:0 0 4px;}
+.literature-snapshots small {display:block;color:var(--ink-soft);line-height:1.5;}
+.literature-snapshots nav {display:flex;gap:6px;flex-wrap:wrap;margin:12px 0;}
+.literature-snapshots nav button[aria-pressed="true"] {background:var(--accent-soft);border-color:var(--accent);}
+.literature-snapshots>article {padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-raised);}
+.literature-snapshots details {margin-top:12px;}
+.literature-snapshots summary {cursor:pointer;font-weight:600;}
+.literature-snapshots ul {padding-left:20px;}
+.literature-snapshots li,.literature-snapshots details section {margin:10px 0;overflow-wrap:anywhere;}
+.literature-snapshots p {line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin:7px 0;}
+.literature-snapshots .is-stale {color:var(--accent);}
+.literature-snapshots button {max-width:100%;text-align:left;overflow-wrap:anywhere;}

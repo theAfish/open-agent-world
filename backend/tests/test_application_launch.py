@@ -96,6 +96,25 @@ def test_reset_plan_is_scoped_and_blocks_new_writes(dev_settings):
         assert control.pending is not None
 
 
+def test_auto_research_mode_scope_and_created_cards_survive_restart(dev_settings):
+    # Match the actual Zustand persist payload sent by profileStorage.
+    saved = {"state": {"enabled": True, "scopeId": "polymer-scope",
+                        "createdIds": ["external-paper", "shared-perspective"]}, "version": 0}
+    payload = json.dumps(saved)
+    with TestClient(create_app(dev_settings)) as client:
+        profile = client.get("/api/application").json()
+        edit = {key: profile[key] for key in ("profile_id", "generation")}
+        edit["changes"] = {"oaw-auto-research-v1": payload}
+        response = client.patch("/api/application/preferences", json=edit)
+        assert response.status_code == 200, response.text
+        assert json.loads(client.get("/api/application").json()["values"]["oaw-auto-research-v1"]) == saved
+    with TestClient(create_app(dev_settings)) as client:
+        restored = client.get("/api/application").json()
+        assert restored["profile_id"] == profile["profile_id"]
+        assert restored["generation"] == profile["generation"]
+        assert json.loads(restored["values"]["oaw-auto-research-v1"]) == saved
+
+
 @pytest.mark.parametrize("selected", ["workspace", "decks", "packs", "models", "all"])
 def test_reset_preserves_unselected_state_and_external_workspaces(dev_settings, tmp_path, selected):
     services = create_services(dev_settings)

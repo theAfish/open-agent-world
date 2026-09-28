@@ -1,0 +1,9 @@
+{
+  "name": "Literature search / 文献检索",
+  "description": "Run a bounded, traceable literature search and resolve paper identities without inventing missing evidence.",
+  "required_capabilities": [
+    "literature_search",
+    "literature_resolve",
+    "paper_upsert_metadata"
+  ]
+}

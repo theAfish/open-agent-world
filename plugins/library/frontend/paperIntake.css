@@ -1,0 +1,7 @@
+.library-citation-collect {display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid var(--line,#54645e);}
+.library-citation-collect label {display:grid;gap:4px;width:100%;font-size:12px;}
+.library-citation-collect select {min-width:0;max-width:100%;padding:7px;background:var(--surface-raised,#344039);color:inherit;border:1px solid var(--line,#54645e);border-radius:6px;}
+.library-citation-collect small {width:100%;overflow-wrap:anywhere;}
+.library-citation-popup {max-height:calc(100vh - 96px);overflow:auto;}
+.library-paper-attachments {display:flex;flex-wrap:wrap;align-items:center;gap:8px;max-height:90px;overflow:auto;flex-shrink:0;padding:6px 0;font-size:12px;}
+.library-paper-attachments button {max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}

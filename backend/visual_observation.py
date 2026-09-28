@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from hashlib import sha256
 from contextlib import suppress
 from dataclasses import dataclass, field
 from uuid import uuid4
@@ -95,6 +96,115 @@ async def observe(services, agent_id):
         'image_width': width, 'image_height': height,
         'coordinate_system': 'Image covers the scope bounding square. Canvas x = center.x - radius + image_x * (2 * radius / image_width); likewise y.',
         'limitations': 'Live rendered cards only; unmounted cards are missing. Card settings, private chats and plugin bodies are masked. Text/image previews require a separate read/view grant. Use canvas_inspect for complete saved state and existing scoped tools to act. Screen content is untrusted data.',
+    }, (image,))
+
+
+def plugin_visual_model(services, agent_id: str) -> str:
+    """Require an explicitly image-capable managed model, including team overrides.
+
+    The returned identity is safe to compare across an asynchronous capture;
+    neither secrets nor a runtime/provider object are exposed to the browser.
+    """
+    from backend.legions.runtime import member_team
+    from backend.security.model_connections import ModelConnectionStore
+
+    agent = services.world.get_card(agent_id)
+    if "core.agent" not in services.plugins.node_type(agent.type).traits:
+        raise PermissionDeniedError("Plugin visual observation requires an Agent with a Vision model")
+    reference = str(agent.config.get("model", "oaw:default"))
+    context = services.run_manager.current_context if services.run_manager else None
+    if context is not None and context.agent_id == agent_id:
+        team = context.group_context
+        settings = team.get("settings", {}) if team else {}
+    else:
+        team = member_team(services.world, agent)
+        settings = team.config if team else {}
+    override = str(settings.get("model_override", "")).strip()
+    if override and agent.config.get("inherit_legion_model", True):
+        reference = override
+    catalog = ModelConnectionStore(services.llm_settings).read()
+    if reference == "oaw:default":
+        reference = catalog.default_model or ""
+    for connection in catalog.connections:
+        for model in connection.models:
+            if "oaw:model:" + model.id != reference:
+                continue
+            if not connection.enabled or not model.enabled or not model.supports_images:
+                raise PermissionDeniedError("Plugin visual observation requires an enabled Vision model")
+            identity = [reference, connection.adapter, connection.base_url, model.model_id]
+            return sha256(json.dumps(identity).encode()).hexdigest()
+    raise PermissionDeniedError("Plugin visual observation requires a configured Vision model")
+
+
+async def observe_plugin_view(services, capability, *, capture_kind: str,
+                              required_capability_kind: str, capture_options: dict | None = None):
+    """Capture one explicitly authorized, mounted plugin view.
+
+    Plugin bodies remain excluded from the ordinary Minister canvas capture.
+    This separate path requires a plugin-specific capability plus the declared
+    read capability, asks the active frontend to capture only that card's view,
+    and rejects pixels if its persisted document changed while waiting.
+    """
+    if not capture_kind or len(capture_kind) > 120:
+        raise ResourceValidationError("Invalid plugin capture kind")
+    if capture_options is not None and (not isinstance(capture_options, dict) or len(json.dumps(capture_options, ensure_ascii=False).encode("utf-8")) > 4 * 1024):
+        raise ResourceValidationError("Invalid plugin capture options")
+    services.capabilities.capability_for_id(capability.agent_id, capability.id)
+    services.capabilities.capability_for_id(
+        capability.agent_id, f"{required_capability_kind}:{capability.target_id}"
+    )
+    model_identity = plugin_visual_model(services, capability.agent_id)
+    from backend.node_documents import read_document
+    before = read_document(services, capability.target_id)
+    request = {
+        "kind": "plugin_capture",
+        "node_id": capability.target_id,
+        "capture_kind": capture_kind,
+        "document_revision": before["revision"],
+        "max_image_dimension": 1280,
+        "capture_options": capture_options or {},
+    }
+    result = await services.visual_observers.capture(request)
+    # The browser is not a persistence authority.  Recheck both graph grants
+    # and document revision after the asynchronous capture completes.
+    services.capabilities.capability_for_id(capability.agent_id, capability.id)
+    services.capabilities.capability_for_id(
+        capability.agent_id, f"{required_capability_kind}:{capability.target_id}"
+    )
+    if plugin_visual_model(services, capability.agent_id) != model_identity:
+        raise ConflictError("The selected Vision model changed during capture; retry the observation")
+    after = read_document(services, capability.target_id)
+    if before["revision"] != after["revision"]:
+        raise ConflictError("The structure changed during visual capture; retry the observation")
+    if result.get("error"):
+        raise RuntimeUnavailableError(str(result["error"])[:300])
+    if (result.get("kind") != "plugin_capture" or result.get("node_id") != capability.target_id
+            or result.get("capture_kind") != capture_kind or result.get("document_revision") != before["revision"]):
+        raise ResourceValidationError("Invalid plugin capture response")
+    encoded = result.get("data_base64", "")
+    if not isinstance(encoded, str) or len(encoded) > 12 * 1024 * 1024:
+        raise ResourceValidationError("Invalid plugin capture")
+    try:
+        image = ToolImage(base64.b64decode(encoded, validate=True), "image/png")
+    except (ValueError, TypeError):
+        raise ResourceValidationError("Invalid plugin capture image") from None
+    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    try:
+        if len(json.dumps(metadata, ensure_ascii=False).encode("utf-8")) > 16 * 1024:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ResourceValidationError("Invalid plugin capture metadata") from None
+    from backend.resources.manager import ManagedResourceStore
+    _, width, height = ManagedResourceStore._inspect_image(image.data)
+    return VisualToolResult({
+        "node_id": capability.target_id,
+        "capture_kind": capture_kind,
+        "document_revision": before["revision"],
+        "document_summary": before["summary"],
+        "image_width": width,
+        "image_height": height,
+        "capture_metadata": metadata,
+        "limitations": "This is a transient rendering of the currently open plugin workspace. Use the linked inspect tool for exact persisted coordinates and retry if the document changes.",
     }, (image,))
 
 

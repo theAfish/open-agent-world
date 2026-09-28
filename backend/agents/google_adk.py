@@ -23,7 +23,7 @@ from .models import (
     AgentStateError,
     AgentStatus,
 )
-from .tools import build_scoped_tool_callables
+from .tools import build_scoped_adk_tools
 from backend.runs.models import InvocationContext, RunStatus, RuntimeInput
 
 
@@ -208,7 +208,7 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
                             timestamp=event.timestamp, run_status=event.run_status,
                         )
                 return
-            tools = build_scoped_tool_callables(self._provider, agent_id, definitions)
+            tools = build_scoped_adk_tools(self._provider, agent_id, definitions)
             run_secret = getattr(selected_model, "_additional_args", {}).get("api_key")
             context_options = {}
             if self.context_store is not None:

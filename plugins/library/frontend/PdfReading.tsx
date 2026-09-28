@@ -1,5 +1,5 @@
 import { t, useLocale } from "@oaw/plugin-api";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from "pdfjs-dist";
 import { PdfPageSurface } from "./PdfPageSurface";
 import { decodePdf } from "./decodePdf";
@@ -8,11 +8,18 @@ import "pdfjs-dist/web/pdf_viewer.css";
 import { useLibrarySettings } from "../../../frontend/src/state/librarySettings";
 import { useWorldStore } from "../../../frontend/src/state/worldStore";
 import { availableModels } from "../../../frontend/src/state/modelConnections";
-import { StudyCanvas } from "./StudyCanvas";
+import { StudyCanvas, type StudyRelationship } from "./StudyCanvas";
+import { readPdfCitations } from "./pdfCitations";
+import { CitationPopover, CitationTargets, type ActiveCitation } from "./CitationPopover";
+import type { CitationIndex, CitationMarker, CitationRect, CitationReference } from "./citationIndex";
+import { useReadingScores, AdhdStatus, SurprisalOverlay } from "./AdhdReading";
+import type { SourceLocation } from "./PaperPortal";
+import { ReaderEvidenceCapture } from "./ReaderEvidenceCapture";
+import { PaperFigureModeling } from "./PaperFigureModeling";
 
 GlobalWorkerOptions.workerSrc = workerUrl;
-export type Annotation = {id:string;page:number;text:string;comment:string;translation:string;rects:number[][];title?:string;color?:string;title_color?:string;collapsed?:boolean;image?:string;learning?:boolean;position?:{x:number;y:number}};
-export type ReadingValue = {pdf:string;page:number;pages:number;annotations?:Annotation[];study_layout?:boolean;study_title?:string;filename?:string};
+export type Annotation = {id:string;page:number;text:string;comment:string;translation:string;rects:number[][];title?:string;color?:string;title_color?:string;collapsed?:boolean;image?:string;learning?:boolean;position?:{x:number;y:number};document_version_id?:string;source_anchor?:SourceLocation};
+export type ReadingValue = {pdf:string;page:number;pages:number;annotations?:Annotation[];study_layout?:boolean;study_title?:string;study_relationships?:StudyRelationship[];filename?:string;current_document_version_id?:string};
 type Selection = {page:number;text:string;rects:number[][];anchor:number[];annotation?:Annotation};
 async function request(path:string, init?:RequestInit) {
   const response=await fetch(`/api/${path}`,init);
@@ -21,10 +28,10 @@ async function request(path:string, init?:RequestInit) {
   return data;
 }
 
-export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettingsOpen,onReady,onPreparing,onLoadError}:{value:ReadingValue;save:(args:Record<string,unknown>)=>Promise<void>;fullscreen?:boolean;settingsOpen:boolean;setSettingsOpen:(open:boolean)=>void;onReady?:()=>void;onPreparing?:()=>void;onLoadError?:(error:string)=>void}) {
+export function PdfReading({value,paperId,sourceLocation,save,fullscreen=false,settingsOpen,setSettingsOpen,onReady,onPreparing,onLoadError}:{value:ReadingValue;paperId:string;sourceLocation?:SourceLocation;save:(args:Record<string,unknown>)=>Promise<void>;fullscreen?:boolean;settingsOpen:boolean;setSettingsOpen:(open:boolean)=>void;onReady?:()=>void;onPreparing?:()=>void;onLoadError?:(error:string)=>void}) {
   useLocale();
   const [pdf,setPdf]=useState<PDFDocumentProxy>();
-  const [page,setPage]=useState(value.page);
+  const [page,setPage]=useState(sourceLocation&&sourceLocation.document_version_id===value.current_document_version_id?Math.max(1,Math.min(value.pages,sourceLocation.page)):value.page);
   const [continuous,setContinuous]=useState(false);
   const [scale,setScale]=useState(1);
   const [autoFit,setAutoFit]=useState(true);
@@ -33,6 +40,8 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
   progress.current={page,saved:value.page,save};
   useEffect(()=>()=>{const p=progress.current;if(p.page!==p.saved)void p.save({page:p.page}).catch(()=>{});},[]);
   const [selection,setSelection]=useState<Selection>();
+  const [evidenceOpen,setEvidenceOpen]=useState(false);
+  const [modelingOpen,setModelingOpen]=useState(false);
   const [comment,setComment]=useState("");
   const [translation,setTranslation]=useState("");
   const [error,setError]=useState("");
@@ -45,9 +54,72 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
   const reading=useRef<HTMLDivElement>(null);
   const popup=useRef<HTMLDivElement>(null);
   const scroll=useRef<HTMLDivElement>(null);
+  const [citationIndex,setCitationIndex]=useState<CitationIndex>({references:[],markers:[]});
+  const [citationProgress,setCitationProgress]=useState(0);
+  const [citationState,setCitationState]=useState<"loading"|"ready"|"failed">("loading");
+  const [citationsEnabled,setCitationsEnabled]=useState(true);
+  const [citation,setCitation]=useState<ActiveCitation>();
+  const citationRef=useRef(citation);citationRef.current=citation;
+  const canOpenCitation=useRef(true);
+  const citationTimer=useRef<ReturnType<typeof setTimeout>>();
+  const [returnCitation,setReturnCitation]=useState<CitationMarker>();
+  const [citationLocation,setCitationLocation]=useState<{page:number;rect:CitationRect}>();
+  const sourceLocated=useRef(false);
+  useEffect(()=>{
+    if(!pdf||!fitted||sourceLocated.current||!sourceLocation||sourceLocation.document_version_id!==value.current_document_version_id)return;
+    sourceLocated.current=true;
+    const rect=sourceLocation.rects?.[0];
+    if(rect)setCitationLocation({page:sourceLocation.page,rect:{x:rect[0],y:rect[1],width:rect[2],height:rect[3]}});
+  },[pdf,fitted,sourceLocation,value.current_document_version_id]);
+  const cancelCitationTimer=useCallback(()=>{clearTimeout(citationTimer.current);},[]);
+  const closeCitation=useCallback((restoreFocus=false)=>{
+    clearTimeout(citationTimer.current);
+    const anchor=citationRef.current?.anchor;
+    setCitation(undefined);
+    if(restoreFocus)anchor?.focus({preventScroll:true});
+  },[]);
+  const leaveCitation=useCallback(()=>{
+    clearTimeout(citationTimer.current);
+    if(!citationRef.current?.pinned)citationTimer.current=setTimeout(()=>setCitation(undefined),220);
+  },[]);
+  const openCitation=useCallback((marker:CitationMarker,anchor:HTMLButtonElement,pinned:boolean)=>{
+    clearTimeout(citationTimer.current);
+    if(!pinned&&citationRef.current?.pinned)return;
+    const open=()=>{if(canOpenCitation.current&&anchor.isConnected)setCitation({marker,anchor,pinned});};
+    if(pinned)open();else citationTimer.current=setTimeout(open,180);
+  },[]);
+  useEffect(()=>()=>clearTimeout(citationTimer.current),[]);
+  useEffect(()=>{
+    setCitationIndex({references:[],markers:[]});setCitationProgress(0);setCitationState("loading");
+    closeCitation();setReturnCitation(undefined);setCitationLocation(undefined);
+    if(!pdf)return;
+    const abort=new AbortController();
+    void readPdfCitations(pdf,abort.signal,setCitationProgress).then(index=>{
+      if(!abort.signal.aborted){setCitationIndex(index);setCitationState("ready");}
+    }).catch(()=>{if(!abort.signal.aborted)setCitationState("failed");});
+    return()=>abort.abort();
+  },[pdf,closeCitation]);
+  useEffect(()=>{
+    if(!citationLocation)return;
+    let frame=0,attempts=0;
+    const locate=()=>{
+      const container=scroll.current,el=container?.querySelector<HTMLElement>(`[data-pdf-page="${citationLocation.page}"]`);
+      if(!container||!el){if(attempts++<20)frame=requestAnimationFrame(locate);return;}
+      const pageBox=el.getBoundingClientRect(),clip=container.getBoundingClientRect();
+      const scaleY=clip.height/container.offsetHeight||1;
+      container.scrollTop+=(pageBox.top+citationLocation.rect.y*pageBox.height-clip.top)/scaleY-64;
+      const scaleX=clip.width/container.offsetWidth||1;
+      const left=pageBox.left+citationLocation.rect.x*pageBox.width;
+      const right=left+citationLocation.rect.width*pageBox.width;
+      if(left<clip.left+16||right>clip.right-16)container.scrollLeft+=(left-clip.left)/scaleX-24;
+    };
+    frame=requestAnimationFrame(()=>{frame=requestAnimationFrame(locate);});
+    const timer=setTimeout(()=>setCitationLocation(undefined),3500);
+    return()=>{cancelAnimationFrame(frame);clearTimeout(timer);};
+  },[citationLocation,scale]);
   const [popupPosition,setPopupPosition]=useState<{left:number;top:number;visible:boolean}>();
   const selectionEpoch=useRef(0);
-  function dismissSelection(){selectionEpoch.current++;setSelection(undefined);setPopupPosition(undefined);}
+  function dismissSelection(){selectionEpoch.current++;setSelection(undefined);setPopupPosition(undefined);setEvidenceOpen(false);setModelingOpen(false);}
   const {provider,model:selectedModel,target}=useLibrarySettings();
   const catalog=useWorldStore(state=>state.modelCatalog);
   const legacyModels=useWorldStore(state=>state.modelSettings.models);
@@ -57,11 +129,15 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
   const [annotating,setAnnotating]=useState(false);
   const [tool,setTool]=useState<"text"|"crop">("text");
   const [studyOpen,setStudyOpen]=useState(false);
+  const [adhd,setAdhd]=useState(false),[scoreIntensity,setScoreIntensity]=useState(.2);
+  const scores=useReadingScores(pdf,paperId,value.current_document_version_id,page,adhd&&!studyOpen);
   const [editing,setEditing]=useState<Annotation>();
   const [crop,setCrop]=useState<number[]>();
   const cropStart=useRef<number[]>();
   const imageInput=useRef<HTMLInputElement>(null);
   const deleting=useRef(false);
+  canOpenCitation.current=!selection&&!editing&&!busy&&!saving&&!annotating&&!studyOpen;
+  useEffect(()=>{closeCitation();},[page,continuous,scale,fitVersion,studyOpen,annotating,citationsEnabled,closeCitation]);
   useEffect(()=>{
     const onDelete=(event:KeyboardEvent)=>{
       if(event.key!=="Backspace"&&event.key!=="Delete")return;
@@ -164,6 +240,7 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
     const selected=window.getSelection();if(!selected?.rangeCount||!sheet.current)return;
     const range=selected.getRangeAt(0);if(!layer.current?.contains(range.commonAncestorContainer))return;
     const text=selected.toString().trim();if(!text)return;
+    closeCitation();
     const bounds=sheet.current.getBoundingClientRect();
     const clamp=(n:number)=>Math.max(0,Math.min(1,n));
     const rects=Array.from(range.getClientRects()).filter(r=>r.width>0&&r.height>0).map(r=>[clamp((r.x-bounds.x)/bounds.width),clamp((r.y-bounds.y)/bounds.height),clamp(r.width/bounds.width),clamp(r.height/bounds.height)]);
@@ -174,6 +251,17 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
     setSelection({page,text,rects,anchor:focusAtEnd?rects[rects.length-1]:rects[0]});setTranslation("");setComment("");
   }
   async function go(next:number){if(busy)return;dismissSelection();setPage(next);jumpToPage(next);try{await save({page:next});}catch(e){setError(String(e));}}
+  function locateReference(reference:CitationReference){
+    if(citation)setReturnCitation(citation.marker);
+    closeCitation();void go(reference.page);
+    setCitationLocation({page:reference.page,rect:reference.rect});
+  }
+  function returnToCitation(){
+    if(!returnCitation)return;
+    void go(returnCitation.page);
+    setCitationLocation({page:returnCitation.page,rect:returnCitation.rects[0]});
+    setReturnCitation(undefined);
+  }
   async function translate(){if(!selection)return;const epoch=selectionEpoch.current;setBusy(true);setError("");try{const result=await request("library/translate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:selection.text,model,target,provider})});if(epoch===selectionEpoch.current)setTranslation(result.translation);}catch(e){if(epoch===selectionEpoch.current)setError(String(e));}finally{setBusy(false);}}
   async function add(){if(!selection||saving)return;setSaving(true);try{await save({page,annotation:{text:selection.text,rects:selection.rects,comment,translation}});dismissSelection();setTranslation("");setComment("");window.getSelection()?.removeAllRanges();}catch(e){setError(String(e));}finally{setSaving(false);}}
   const selectedRects=selection?.rects??[];
@@ -184,6 +272,11 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
   return <div ref={reading} className={`library-reading ${annotating?"is-annotating":""}`}>
     <nav className="library-reading-nav"><button disabled={page<=1} onClick={()=>void go(page-1)}>{t("上一页")}</button><span>{page} / {value.pages}</span><button disabled={page>=value.pages} onClick={()=>void go(page+1)}>{t("下一页")}</button><button onClick={()=>{setAutoFit(false);setScale(s=>Math.max(.1,s-.2));}}>−</button><button title={t("适应窗口")} aria-label={t("适应窗口")} onClick={()=>setAutoFit(true)}>{Math.round(scale*100)}%</button><button onClick={()=>{setAutoFit(false);setScale(s=>Math.min(3,s+.2));}}>＋</button><button aria-label={t("切换滚动和翻页模式")} aria-pressed={continuous} onClick={()=>{dismissSelection();setContinuous(v=>!v);jumpToPage(page);}}>{continuous?t("连续滚动"):t("单页翻页")}</button></nav>
     <div className="library-annotation-tools">
+      <button type="button" className="library-adhd-toggle" aria-label="ADHD" aria-pressed={adhd} title={t("本地原文词元惊讶度阅读视图")} onClick={()=>setAdhd(value=>!value)}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><path d="M3 12h3l3-7 5 14 4-9 3 2"/></svg><span>ADHD</span></button>
+      <button type="button" className="library-citation-toggle" aria-label={t("引用气泡")} aria-pressed={citationsEnabled}
+        title={citationState==="loading"?t("正在本地识别引用：{page}/{pages}",{page:citationProgress,pages:value.pages}):citationState==="failed"?t("引用识别失败；仍可正常阅读"):citationIndex.markers.length?t("悬停预览引用，点击固定气泡"):t("未找到可匹配的引用；扫描件需要文字层")}
+        onClick={()=>setCitationsEnabled(v=>!v)}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M7 6H3v8h5v-4H3m14-4h-4v8h5v-4h-5M8 14c0 3-2 4-4 4m14-4c0 3-2 4-4 4"/></svg><span>{t("引用")}</span><small>{citationState==="loading"?"…":citationIndex.references.length}</small></button>
+      {returnCitation&&<button type="button" className="library-citation-return" aria-label={t("返回引用处")} onClick={returnToCitation}>↶ {t("返回引用处")}</button>}
       <button className="library-study-toggle" title={studyOpen?t("返回文章"):t("学习画布")} aria-label={studyOpen?t("返回文章"):t("学习画布")} aria-pressed={studyOpen} onClick={()=>{setStudyOpen(v=>!v);dismissSelection();}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">{studyOpen?<><path d="M5 3h10l4 4v14H5zM15 3v5h4M8 12h8M8 16h8"/></>:<><rect x="2" y="9" width="6" height="6" rx="1"/><rect x="16" y="3" width="6" height="6" rx="1"/><rect x="16" y="15" width="6" height="6" rx="1"/><path d="M8 12h4M12 6v12M12 6h4M12 18h4"/></>}</svg></button>
       <button title={t("切换阅读 / 批注模式")} aria-label={t("批注模式")} aria-pressed={annotating} onClick={()=>{setAnnotating(v=>!v);dismissSelection();}}>✎</button>
       {annotating&&<><button title={t("划词")} aria-label={t("划词")} aria-pressed={tool==="text"} onClick={()=>setTool("text")}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M5 5h14M12 5v12M8 17h8M4 21h16"/></svg></button><button title={t("框选截图")} aria-label={t("框选截图")} aria-pressed={tool==="crop"} onClick={()=>setTool("crop")}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5"/><rect x="7" y="7" width="10" height="10" rx="1" strokeDasharray="2 2"/></svg></button><button title={t("添加图片")} aria-label={t("添加图片")} onClick={()=>imageInput.current?.click()}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M13 3H4a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-9M3 17l6-6 5 5 3-3 4 4M19 1v8M15 5h8"/><circle cx="7.5" cy="7.5" r="1"/></svg></button></>}
@@ -194,6 +287,7 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
         await storeAnnotation({id:crypto.randomUUID(),page,text:"",title:file.name,comment:"",translation:"",rects:[],image:c.toDataURL("image/jpeg",.85),learning:true,position:{x:(count%3)*280,y:Math.floor(count/3)*320}});setStudyOpen(true);
       }catch(err){setError(String(err));}}}/>
     </div>
+    <AdhdStatus state={scores} intensity={scoreIntensity} setIntensity={setScoreIntensity}/>
     {error&&<p role="alert">{error}</p>}
       {settingsOpen&&<section className="library-settings-popover" role="dialog" aria-label={t("Library 设置")}>
         <header><strong>{t("Library 设置")}</strong><button aria-label={t("关闭 Library 设置")} onClick={()=>setSettingsOpen(false)}>×</button></header>
@@ -203,7 +297,8 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
         <label>{t("目标语言")}<input value={target} onChange={e=>useLibrarySettings.setState({target:e.target.value})}/></label>
         <small>{t("连接配置：返回窗口后，打开 OAW 设置 → Models / DeepL。此处修改不影响 Agent 的模型选择。")}</small>
       </section>}
-    {studyOpen&&<StudyCanvas name={value.study_title??t("学习画布")} rename={study_title=>save({study_title})} title={value.filename??t("文章")} linked={value.study_layout??false} layout={positions=>save({study_positions:positions})} items={(value.annotations??[]).filter(a=>a.learning)} move={storeAnnotation} open={setEditing} locate={p=>{setStudyOpen(false);void go(p);}}/>}
+    {studyOpen&&<StudyCanvas name={value.study_title??t("学习画布")} rename={study_title=>save({study_title})} title={value.filename??t("文章")} linked={value.study_layout??false} layout={positions=>save({study_positions:positions})} items={(value.annotations??[]).filter(a=>a.learning)} move={storeAnnotation} open={setEditing} locate={p=>{setStudyOpen(false);void go(p);}}
+      relationships={value.study_relationships} saveRelationships={study_relationships=>save({study_relationships})} locateSource={annotation=>{setStudyOpen(false);void go(annotation.page);const rect=annotation.source_anchor?.rects?.[0]??annotation.rects[0];if(rect)setCitationLocation({page:annotation.page,rect:{x:rect[0],y:rect[1],width:rect[2],height:rect[3]}});}}/>}
     <div style={studyOpen?{display:"none"}:undefined} className={`library-reading-grid ${sidebarOpen?"is-sidebar-open":""}`}><div ref={scroll} className="library-page-scroll" onScroll={()=>{
       if(!continuous||selection||cropStart.current||!scroll.current)return;
       const top=scroll.current.getBoundingClientRect().top;
@@ -216,6 +311,9 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
       const a=(value.annotations??[]).find(a=>a.page===pageNumber&&a.rects.some(r=>x>=r[0]&&x<=r[0]+r[2]&&y>=r[1]&&y<=r[1]+r[3]));
       if(a)setSelection({page:pageNumber,text:a.text,rects:a.rects,anchor:[x,y,0,0],annotation:a});
     }}>
+      {citationsEnabled&&!annotating&&!studyOpen&&<CitationTargets markers={citationIndex.markers.filter(marker=>marker.page===pageNumber)} active={citation} onOpen={openCitation} onLeave={leaveCitation}/>}
+      {scores.status==="ready"&&scores.data?.page===pageNumber&&<SurprisalOverlay data={scores.data} intensity={scoreIntensity}/>}
+      {citationLocation?.page===pageNumber&&<div className="library-citation-location" aria-hidden="true" style={{left:`${citationLocation.rect.x*100}%`,top:`${citationLocation.rect.y*100}%`,width:`${citationLocation.rect.width*100}%`,height:`${citationLocation.rect.height*100}%`}}/>}
       <div className="library-highlight-layer">{(value.annotations??[]).filter(a=>a.page===pageNumber).flatMap(a=>a.rects.map((r,i)=><span key={`${a.id}-${i}`} style={{background:`${a.color??"#f4d144"}66`,left:`${r[0]*100}%`,top:`${r[1]*100}%`,width:`${r[2]*100}%`,height:`${r[3]*100}%`}}/>))}</div>
       {selectionBounds&&selection?.page===pageNumber&&<div className="library-selected-outline" aria-hidden="true" style={{left:`${selectionBounds.left*100}%`,top:`${selectionBounds.top*100}%`,width:`${(selectionBounds.right-selectionBounds.left)*100}%`,height:`${(selectionBounds.bottom-selectionBounds.top)*100}%`}}/>}
       {annotating&&tool==="crop"&&<div className="library-crop-layer" onPointerDown={e=>{e.stopPropagation();const b=e.currentTarget.getBoundingClientRect();cropStart.current=[(e.clientX-b.left)/b.width,(e.clientY-b.top)/b.height];e.currentTarget.setPointerCapture(e.pointerId);}}
@@ -228,7 +326,9 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
       <details><summary>{t("Contents ({count})", { count: outline.length })}</summary>{outline.map((item,i)=><button key={i} onClick={async()=>{if(!pdf)return;try{const dest=typeof item.dest==="string"?await pdf.getDestination(item.dest):item.dest as any[];if(dest){const first=dest[0];await go(typeof first==="number"?first+1:await pdf.getPageIndex(first)+1);}}catch(e){setError(String(e));}}}>{item.title}</button>)}</details>
       <h4>{t("Annotations ({count})", { count: value.annotations?.length ?? 0 })}</h4>{(value.annotations??[]).map(a=><article key={a.id}><button onClick={()=>void go(a.page)}>{t("Locate page {page}", { page: a.page })}</button><blockquote>{a.text}</blockquote><p>{a.comment}</p><p className="library-translation">{a.translation}</p><button onClick={()=>void save({delete_annotation:a.id}).catch(e=>setError(String(e)))}>{t("删除批注")}</button></article>)}
     </aside></div>
-    {selection&&<div ref={popup} role="dialog" aria-label={t("划词批注与翻译")} aria-modal="false" className={`library-selection-popup nodrag nopan nowheel ${selection.annotation?"is-excerpt-bar":""}`} style={{left:popupPosition?.left??0,top:popupPosition?.top??0,visibility:popupPosition?.visible?"visible":"hidden"}}>
+    {citation&&!selection&&!annotating&&!studyOpen&&citationsEnabled&&<CitationPopover active={citation} paperId={paperId} documentVersionId={value.current_document_version_id} references={citation.marker.referenceIds.flatMap(id=>citationIndex.references.filter(reference=>reference.id===id))}
+      host={reading} scroller={scroll} onClose={closeCitation} onEnter={cancelCitationTimer} onLeave={leaveCitation} onLocate={locateReference}/>}
+    {selection&&<div ref={popup} role="dialog" aria-label={t("划词批注与翻译")} aria-modal="false" className={`library-selection-popup nodrag nopan nowheel ${selection.annotation&&!evidenceOpen&&!modelingOpen?"is-excerpt-bar":""}`} style={{left:popupPosition?.left??0,top:popupPosition?.top??0,visibility:popupPosition?.visible?"visible":"hidden"}}>
       {selection.annotation?<>
         <button onClick={()=>{const count=(value.annotations??[]).filter(a=>a.learning).length;changeExcerpt({learning:true,position:selection.annotation?.position??{x:(count%3)*280,y:Math.floor(count/3)*320}});}}>{selection.annotation.learning?t("已添加到学习"):t("添加到学习")}</button>
         <label title={t("调色盘")} className="library-color-picker">◉<input type="color" aria-label={t("调色盘")} value={selection.annotation.color??"#f4d144"} onChange={e=>changeExcerpt({color:e.target.value})}/></label>
@@ -243,6 +343,8 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
       {error&&<p role="alert">{error}</p>}
       <small>{t("仅点击翻译时发送选中文字 ·")} {provider==="deepl"?t("DeepL Free"):model}</small>
       </>}
+      {selection.annotation?.image && selection.annotation.rects.length > 0 && <PaperFigureModeling key={`${paperId}:${value.current_document_version_id}:${selection.annotation.id}`} paperId={paperId} documentVersionId={value.current_document_version_id} annotation={selection.annotation} saved={(value.annotations??[]).some(item=>item.id===selection.annotation?.id)} onOpenChange={setModelingOpen}/>}
+      <ReaderEvidenceCapture key={`${paperId}:${value.current_document_version_id}:${selection.page}:${selection.annotation?.id??selection.text}`} paperId={paperId} documentVersionId={value.current_document_version_id} page={selection.page} text={selection.text} comment={selection.annotation?.comment??comment} onOpenChange={setEvidenceOpen}/>
     </div>}
     {editing&&<div className="library-edit-backdrop"><section className="library-excerpt-editor" role="dialog" aria-label={t("编辑摘录")}>
       <header><strong>{t("编辑摘录")}</strong><button aria-label={t("关闭编辑")} onClick={()=>setEditing(undefined)}>×</button></header>

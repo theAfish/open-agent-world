@@ -1,0 +1,8 @@
+{
+  "name": "Evidence verification / 证据核验",
+  "description": "Check a concrete claim against inspected sources, conditions and counterevidence, preserving uncertainty and source independence.",
+  "required_capabilities": [
+    "paper_read_evidence",
+    "research_record_evidence"
+  ]
+}

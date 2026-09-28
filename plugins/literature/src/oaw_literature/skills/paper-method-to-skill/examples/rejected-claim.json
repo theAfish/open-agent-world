@@ -1,0 +1,11 @@
+{
+  "synthetic": true,
+  "rejection_reason": "Treating a successfully exported ZIP as an independently validated scientific method.",
+  "bad_output_excerpt": {
+    "status": "completed",
+    "skill_artifact_id": "fixture:export",
+    "method_status": "validated",
+    "validation_records": []
+  },
+  "required_correction": "Return only work actually performed with inspected sources; record missing capabilities and unknowns. Structural schema validity alone does not establish scientific correctness."
+}

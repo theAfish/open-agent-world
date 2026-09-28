@@ -7,6 +7,7 @@ function pdfFixture(){
   return Buffer.from(pdf).toString("base64");
 }
 async function setup(page:Page,delay=0,broken=false){
+  await page.addInitScript(()=>localStorage.setItem("oaw.locale","zh-CN"));
   const doc={revision:1,value:{pdf:broken?"broken":pdfFixture(),thumbnail:"",notes:"",page:1,pages:1,annotations:[]}};
   await page.route("**/api/**",async route=>{
     const url=route.request().url();
@@ -76,7 +77,7 @@ test("reduced motion still requires actual rendering",async({page})=>{
   await expect(page.locator("dialog.library-reader")).toHaveAttribute("data-entrance-phase","complete");
 });
 test("DPR two and resize keep the rendered page at the target dimensions",async({browser})=>{
-  const context=await browser.newContext({deviceScaleFactor:2,viewport:{width:1205,height:900},baseURL:"http://127.0.0.1:5173"});const page=await context.newPage();
+  const context=await browser.newContext({deviceScaleFactor:2,viewport:{width:1205,height:900},baseURL:process.env.OAW_E2E_BASE_URL??"http://127.0.0.1:5173"});const page=await context.newPage();
   try{await setup(page,700);await page.getByRole("button",{name:"打开阅读器",exact:true}).click();
     await page.waitForFunction(()=>document.querySelector("dialog.library-reader")?.getAttribute("data-entrance-phase")==="revealing",undefined,{polling:"raf"});await page.setViewportSize({width:1000,height:800});
     await expect(page.locator("dialog.library-reader")).toHaveAttribute("data-entrance-phase","complete");
