@@ -2439,3 +2439,5 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
 .react-flow__handle.connection-drop-surface.valid {
   box-shadow: inset 0 0 0 2px var(--accent, #69aa96);
 }
+
+.settings-dialog > footer .settings-save-status { margin-right: auto; color: var(--accent-strong); font-size: 12px; }

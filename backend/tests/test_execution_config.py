@@ -327,14 +327,24 @@ def test_deleted_id_restoration_cannot_reclaim_binding(client):
     assert client.get(f"/api/nodes/{restored['id']}/credentials").json() == {"token": False}
 
 
-def test_secret_output_redacts_split_chunks_events_and_errors(runtime_client, monkeypatch):
+@pytest.mark.parametrize("global_secret", [False, True])
+def test_secret_output_redacts_split_chunks_events_and_errors(runtime_client, monkeypatch, global_secret):
     client, backend, native = runtime_client
     services = client.app.state.services
     backend._event_sink = services.publish_sandbox_event
     agent, sandbox, _, _, _ = setup_skill(client)
-    env = profile(client)
-    secret = bind(client, env)
-    connect(client, agent, env, "environment.use")
+    if global_secret:
+        secret = "test-private-token-742"
+        response = client.put('/api/settings/sandbox', json={
+            'environment_variables': {'API_TOKEN': {'secret_ref': 'token'}},
+            'secrets': {'token': secret}})
+        assert response.status_code == 200, response.text
+        selection = {}
+    else:
+        env = profile(client)
+        secret = bind(client, env)
+        connect(client, agent, env, "environment.use")
+        selection = {"environment": env["id"]}
     provider, definitions = tools(client, agent)
     events = []
     original_publish = services.events.publish
@@ -349,7 +359,7 @@ def test_secret_output_redacts_split_chunks_events_and_errors(runtime_client, mo
         kwargs["on_stdout"](secret[8:])
         return replace(result, stdout="before " + secret + " after", stderr=secret)
     monkeypatch.setattr(native, "run_appcontainer", emitting)
-    result = invoke(client, provider, agent, definitions["execute_command"], sandbox=sandbox["id"], argv=["cmd.exe"], environment=env["id"])
+    result = invoke(client, provider, agent, definitions["execute_command"], sandbox=sandbox["id"], argv=["cmd.exe"], **selection)
     assert result["stdout"] == "before [REDACTED] after" and result["stderr"] == "[REDACTED]"
     assert secret not in str(events) and secret[:8] not in str(events)
     assert "[REDACTED]" in str(events)
@@ -357,7 +367,7 @@ def test_secret_output_redacts_split_chunks_events_and_errors(runtime_client, mo
         raise RuntimeError("failure: " + secret)
     monkeypatch.setattr(native, "run_appcontainer", failing)
     with pytest.raises(SandboxError, match=r"failure: \[REDACTED\]"):
-        invoke(client, provider, agent, definitions["execute_command"], sandbox=sandbox["id"], argv=["cmd.exe"], environment=env["id"])
+        invoke(client, provider, agent, definitions["execute_command"], sandbox=sandbox["id"], argv=["cmd.exe"], **selection)
     assert secret not in str(events)
 
 
@@ -499,3 +509,46 @@ def test_real_execution_environment_reaches_only_command_and_children(tmp_path):
         assert "test-private-token-742" not in result["stdout"]
         assert result["exit_code"] != 0 if runtime == "windows" else result["exit_code"] == 0
         assert client.delete(f"/api/nodes/{sandbox['id']}").status_code == 200
+
+
+def test_global_secret_lifecycle_and_resolution(client):
+    from backend.execution_config import resolve_sandbox_configuration, configuration_summary
+    from backend.sandbox.settings import SandboxSettingsStore
+    services = client.app.state.services
+    sandbox = create_node(client, "sandbox")
+    variables = {"API_TOKEN": {"secret_ref": "global-token"}, "REGION": "test"}
+    secret = "global-private-token-735"
+    payload = {"environment_variables": variables, "secrets": {"global-token": secret}}
+    response = client.put('/api/settings/sandbox', json=payload)
+    assert response.status_code == 200, response.text
+    assert secret not in response.text and "secrets" not in response.json()
+    assert response.json()['secret_bindings'] == {'global-token': True}
+    store = SandboxSettingsStore(services.database, services.settings.data_root)
+    with services.database.locked() as connection:
+        stored = connection.execute("SELECT value_json FROM application_settings").fetchall()
+    assert all(secret not in row['value_json'] for row in stored)
+    assert secret not in client.get('/api/settings/sandbox').text
+    summary = configuration_summary(services, sandbox['id'])
+    assert summary['ready'] and secret not in json.dumps(summary)
+    assert resolve_sandbox_configuration(services, sandbox['id']) == ({'API_TOKEN': secret, 'REGION': 'test'}, (secret,))
+    # Blank edit preserves the encrypted binding.
+    assert client.put('/api/settings/sandbox', json={'environment_variables': variables}).status_code == 200
+    assert store.credentials.resolve(None, 'global-token') == secret
+    replacement = 'replacement-global-token-931'
+    payload['secrets']['global-token'] = replacement
+    assert client.put('/api/settings/sandbox', json=payload).status_code == 200
+    assert resolve_sandbox_configuration(services, sandbox['id'])[1] == (replacement,)
+    edit(client, sandbox, 'replace', {'variables': {'api_token': 'local'}})
+    assert resolve_sandbox_configuration(services, sandbox['id']) == ({'api_token': 'local', 'REGION': 'test'}, ())
+    assert client.put('/api/settings/sandbox', json={'environment_variables': {'API_TOKEN': 'plain'}}).status_code == 200
+    assert not store.credentials.configured(None, 'global-token')
+    assert client.put('/api/settings/sandbox', json={'environment_variables': variables}).status_code == 422
+
+
+@pytest.mark.parametrize('secrets', [{'token': ''}, {'token': 'private-invalid\0'}, {'token': 123}, {'unused': 'private-unused'}])
+def test_global_secret_invalid_requests_do_not_echo_or_persist(client, secrets):
+    response = client.put('/api/settings/sandbox', json={
+        'environment_variables': {'TOKEN': {'secret_ref': 'token'}}, 'secrets': secrets})
+    assert response.status_code == 422, response.text
+    assert 'private-' not in response.text
+    assert client.get('/api/settings/sandbox').json()['environment_variables'] == {}

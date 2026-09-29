@@ -88,13 +88,17 @@ export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, 
 
 export async function saveEnvironmentRows(id: string, rows: EnvironmentVariableRow[], secrets: Record<string, string>, bindings: Record<string, boolean>, revision: number) {
   const value = environmentVariablesToValue(rows);
+  return worldApi.saveEnvironment(id, value, environmentSecretUpdates(rows, secrets, bindings), revision);
+}
+
+export function environmentSecretUpdates(rows: EnvironmentVariableRow[], secrets: Record<string, string>, bindings: Record<string, boolean>) {
   const updates: Record<string, string> = {};
   for (const row of rows) {
     if (row.kind !== "secret") continue;
     if (secrets[row.value]) updates[row.value] = secrets[row.value];
     else if (!bindings[row.value]) throw new Error(t("Enter a secret for {v0}, or remove the unused variable.", { v0: String(row.name) }));
   }
-  return worldApi.saveEnvironment(id, value, updates, revision);
+  return updates;
 }
 
 /** The same document editor also supports plugin-declared structured target fields. */

@@ -366,9 +366,12 @@ export const worldApi = {
     return request<SandboxSettings>("/settings/sandbox");
   },
 
-  saveSandboxSettings(settings: SandboxSettings): Promise<SandboxSettings> {
+  saveSandboxSettings(settings: SandboxSettings & { secrets?: Record<string, string> }): Promise<SandboxSettings> {
     return request<SandboxSettings>("/settings/sandbox", {
-      method: "PUT", body: JSON.stringify({ workspace_root: settings.workspace_root, runtime: settings.runtime }),
+      method: "PUT", body: JSON.stringify({
+        workspace_root: settings.workspace_root, runtime: settings.runtime,
+        environment_variables: settings.environment_variables, secrets: settings.secrets,
+      }),
     });
   },
   async getSummoning(id: string): Promise<SummoningSnapshot> {
@@ -922,7 +925,8 @@ export const worldApi = {
 export interface SandboxSettings {
   workspace_root: string | null;
   runtime: string;
-  environment_variables?: Record<string, string>;
+  environment_variables?: Record<string, string | { secret_ref: string }>;
+  secret_bindings?: Record<string, boolean>;
   backup_paths?: string[];
 }
 

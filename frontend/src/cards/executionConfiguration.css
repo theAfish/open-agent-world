@@ -16,8 +16,8 @@
 .execution-config .variable-value-row > select,
 .execution-target-settings .skill-setting input:not([type="checkbox"]),
 .execution-target-settings .skill-setting select { min-width: 0; height: 32px; padding: 0 9px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--surface-soft) 88%, transparent); color: var(--ink); font-size: 10px; box-shadow: inset 0 1px 3px color-mix(in srgb, var(--shadow) 55%, transparent), inset 0 1px 0 var(--highlight); }
-.execution-config .variable-value-row > select { width: 110px; flex-shrink: 0; }
-.execution-config .variable-value-row > input { flex: 1; }
+.environment-variables-editor .variable-value-row > select { width: 85px; min-width: 0; flex: 0 0 85px; }
+.environment-variables-editor .variable-value-row > input { width: 0; min-width: 0; flex: 1 1 0; }
 .execution-config .variable-remove { flex-shrink: 0; display: grid; place-items: center; width: 24px; height: 32px; padding: 0; border-radius: 6px; }
 .execution-config .variable-remove:hover:enabled { color: var(--danger); background: var(--danger-soft); }
 .execution-config :is(input, select, textarea, button):disabled { opacity: 0.65; }

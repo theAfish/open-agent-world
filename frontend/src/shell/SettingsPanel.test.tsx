@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { worldApi } from "../api/client";
+import { type SandboxSettings, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import { SettingsPanel } from "./SettingsPanel";
 
@@ -34,6 +34,11 @@ describe("Application settings", () => {
     fireEvent.change(screen.getByLabelText("Environment variable 1 value"), { target: { value: " after=change " } });
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
     await waitFor(() => expect(save).toHaveBeenCalledWith({ workspace_root: null, runtime: "auto", environment_variables: { REGION: " after=change " } }));
+    await screen.findByText("Settings saved");
+    expect(useWorldStore.getState().settingsOpen).toBe(true);
+    expect((screen.getByLabelText("Environment variable 1 value") as HTMLInputElement).value).toBe(" after=change ");
+    fireEvent.change(screen.getByLabelText("Environment variable 1 value"), { target: { value: "another edit" } });
+    expect(screen.queryByText("Settings saved")).toBeNull();
   });
 
   it("shows numeric model defaults and saves edited limits", async () => {
@@ -116,7 +121,8 @@ describe("Application settings", () => {
     fireEvent.change(folder, { target: { value: "E:\\Projects" } });
     fireEvent.change(screen.getByLabelText("Default runtime"), { target: { value: "windows" } });
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
-    await waitFor(() => expect(useWorldStore.getState().settingsOpen).toBe(false));
+    await screen.findByText("Settings saved");
+    expect(useWorldStore.getState().settingsOpen).toBe(true);
     expect(save).toHaveBeenCalledWith({ workspace_root: "E:\\Projects", runtime: "windows", environment_variables: {} });
     expect(saveModel).not.toHaveBeenCalled();
   });
@@ -130,7 +136,9 @@ describe("Application settings", () => {
     await waitFor(() => expect(folder.value).toBe("D:\\Workspaces"));
     fireEvent.change(folder, { target: { value: saved.workspace_root } });
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
-    await screen.findByText("Workspace settings saved.");
+    const notice = await screen.findByText("Settings saved");
+    expect(notice.closest("footer")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Old workspace folders" }).contains(notice)).toBe(false);
     expect(useWorldStore.getState().settingsOpen).toBe(true);
     for (const path of saved.backup_paths) expect(screen.getByText(path)).toBeTruthy();
     expect(screen.getByText(/please delete unused backup folders manually/)).toBeTruthy();
@@ -283,4 +291,84 @@ describe("Application settings", () => {
     await waitFor(() => expect((screen.getByLabelText("Connection name") as HTMLInputElement).value).toBe("Work account"));
   });
 
+});
+
+
+it("saves global secrets with the shared type selector and retains configured bindings", async () => {
+  useWorldStore.setState({ settingsOpen: true });
+  vi.spyOn(worldApi, "getModelConnections").mockResolvedValue(savedCatalog());
+  vi.spyOn(worldApi, "getSandboxRuntimes").mockResolvedValue({ default_runtime: "auto", runtimes: [] });
+  const current = { workspace_root: null, runtime: "auto", environment_variables: { TOKEN: { secret_ref: "existing" }, REGION: "plain" }, secret_bindings: { existing: true } };
+  vi.spyOn(worldApi, "getSandboxSettings").mockResolvedValue(current);
+  const save = vi.spyOn(worldApi, "saveSandboxSettings").mockResolvedValue(current);
+  render(<SettingsPanel />);
+  fireEvent.click(screen.getByRole("button", { name: "Sandbox" }));
+  await screen.findByDisplayValue("plain");
+  expect((screen.getByLabelText("Environment variable 1 value") as HTMLInputElement).type).toBe("password");
+  expect((screen.getByLabelText("Environment variable 1 value") as HTMLInputElement).value).toBe("");
+  fireEvent.change(screen.getByLabelText("Environment variable 2 type"), { target: { value: "secret" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+  await screen.findByRole("alert");
+  expect(save).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Environment variable 2 value"), { target: { value: "new-private-value" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  const request = save.mock.calls[0][0];
+  const ref = (request.environment_variables!.REGION as { secret_ref: string }).secret_ref;
+  expect(request.secrets).toEqual({ [ref]: "new-private-value" });
+  expect(request.environment_variables!.TOKEN).toEqual({ secret_ref: "existing" });
+  cleanup();
+});
+
+
+describe("Sandbox settings HTTP persistence", () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+  it("sends values and secrets through the real API client and restores rows after reopening", async () => {
+    vi.restoreAllMocks();
+    useWorldStore.setState({ settingsOpen: true });
+    vi.spyOn(worldApi, "getModelConnections").mockResolvedValue(savedCatalog());
+    vi.spyOn(worldApi, "getSandboxRuntimes").mockResolvedValue({ default_runtime: "auto", runtimes: [] });
+    let persisted: SandboxSettings = { workspace_root: null, runtime: "auto", environment_variables: {}, secret_bindings: {} };
+    const requests: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe("/api/settings/sandbox");
+      if (init?.method === "PUT") {
+        const body = JSON.parse(String(init.body));
+        requests.push(body);
+        persisted = { workspace_root: body.workspace_root, runtime: body.runtime,
+          environment_variables: body.environment_variables ?? {},
+          secret_bindings: { ...persisted.secret_bindings, ...Object.fromEntries(Object.keys(body.secrets ?? {}).map(ref => [ref, true])) } };
+      }
+      return new Response(JSON.stringify(persisted), { headers: { "content-type": "application/json" } });
+    }));
+    let view = render(<SettingsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: /^Sandbox$/ }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Add variable" }) as HTMLButtonElement).closest("fieldset")?.disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Add variable" }));
+    fireEvent.change(screen.getByLabelText("Environment variable 1 name"), { target: { value: "REGION" } });
+    fireEvent.change(screen.getByLabelText("Environment variable 1 value"), { target: { value: "west" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add variable" }));
+    fireEvent.change(screen.getByLabelText("Environment variable 2 name"), { target: { value: "TOKEN" } });
+    fireEvent.change(screen.getByLabelText("Environment variable 2 type"), { target: { value: "secret" } });
+    fireEvent.change(screen.getByLabelText("Environment variable 2 value"), { target: { value: "private-test-value" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await screen.findByText("Settings saved");
+    const reference = (persisted.environment_variables!.TOKEN as { secret_ref: string }).secret_ref;
+    expect(requests[0]).toMatchObject({ environment_variables: { REGION: "west", TOKEN: { secret_ref: reference } }, secrets: { [reference]: "private-test-value" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Close$/ }));
+    view.unmount();
+    useWorldStore.setState({ settingsOpen: true });
+    view = render(<SettingsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: /^Sandbox$/ }));
+    await screen.findByDisplayValue("west");
+    expect(screen.getByDisplayValue("TOKEN")).toBeTruthy();
+    expect((screen.getByLabelText("Environment variable 2 type") as HTMLSelectElement).value).toBe("secret");
+    expect((screen.getByLabelText("Environment variable 2 value") as HTMLInputElement).value).toBe("");
+    expect(screen.getByText("Configured", { exact: true })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await screen.findByText("Settings saved");
+    expect(requests[1]).not.toHaveProperty("secrets");
+    expect(requests[1].environment_variables).toEqual(requests[0].environment_variables);
+  });
 });
