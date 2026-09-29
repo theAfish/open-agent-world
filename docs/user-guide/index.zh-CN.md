@@ -1,10 +1,12 @@
 # 使用入门
 
+[English](index.md) | **简体中文**
+
 OAW 用卡片组织智能体、文档和工具。先让一个智能体读一份文档，再根据需要增加协作者和工具；不需要从源码或架构开始学起。
 
 ## 第一次使用
 
-1. 在 [下载与安装](../install.md) 中选择适合电脑的安装包。
+1. 在 [下载与安装](../install.zh-CN.md) 中选择适合电脑的安装包。
 2. 打开 **Settings → Models**，添加服务连接、API 密钥和准确的模型 ID，选择默认模型并保存。
 3. 在欢迎页选择 **Start Tutorial**，或者选择 **Start Empty** 自己操作。
 4. 打开 **Pack & Card Library**，开启 **Core essentials** 卡包，把 Text、Agent、Conversation 加入当前牌组，再从底部拖到画布。

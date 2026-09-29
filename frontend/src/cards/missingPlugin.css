@@ -1,0 +1,25 @@
+.world-card[data-missing="true"], .node-workspace-window[data-missing="true"], .equipment-card[data-missing="true"] {
+  background: conic-gradient(#ba00e6 25%, #17131c 0 50%, #ba00e6 0 75%, #17131c 0) 0 0 / 32px 32px;
+  border-color: #d34ff1;
+}
+.world-card[data-missing="true"] .card-header,
+.world-card[data-missing="true"] .card-footer,
+.world-card[data-missing="true"] .card-body,
+.world-card[data-missing="true"] .node-preview-body {
+  background: rgb(19 14 25 / 90%);
+  color: #f9eaff;
+}
+.world-card[data-missing="true"] > .card-finish-layer { display: none; }
+.missing-plugin-message { display: grid; gap: 6px; padding: 12px; overflow-wrap: anywhere; background: #17131c; color: #f9eaff; border-radius: 6px; }
+.missing-plugin-message strong { color: #ed9bff; letter-spacing: .14em; font-size: 13px; }
+.missing-plugin-message code { font-size: 11px; }
+.missing-plugin-message p { margin: 0; font-size: 12px; line-height: 1.5; }
+.world-card[data-missing="true"] .card-eyebrow,
+.world-card[data-missing="true"] .node-preview-hint { color: #ed9bff; }
+.world-card[data-missing="true"] .node-preview-hint { background: #17131c; padding: 3px; }
+.semantic-edge-label.is-missing {
+  background: repeating-linear-gradient(135deg, #17131c 0 8px, #8500a5 8px 16px);
+  color: #fff;
+  border-color: #ed9bff;
+}
+.semantic-edge-path.is-missing { stroke-width: 6px; }

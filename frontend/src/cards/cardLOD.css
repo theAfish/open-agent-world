@@ -1,0 +1,52 @@
+.card-render-boundary { width: 100%; height: 100%; }
+.world-card.card-lod-view { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; padding: 0; overflow: hidden; contain: layout paint; transition: none; box-shadow: 0 4px 10px var(--shadow); background: var(--card-surface); }
+.card-lod-view .card-lod-heading { flex: 0 0 auto; min-width: 0; color: var(--ink); transition: none; }
+.card-lod-title { min-width: 0; }
+.card-lod-title strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; }
+.card-lod-kind { display: grid; place-items: center; flex: 0 0 auto; width: 38px; height: 38px; color: var(--card-kind, var(--accent)); border: 1px solid color-mix(in srgb, var(--card-kind, var(--accent)) 22%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--card-kind, var(--accent)) 10%, var(--card-surface)); }
+.card-lod-status { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--ink-faint); }
+.card-lod-status[data-status="running"], .card-lod-status[data-status="ready"] { background: var(--accent); }
+.card-lod-status[data-status="error"] { background: var(--danger); }
+.card-lod-view[data-render-lod="far"] { background: linear-gradient(155deg, color-mix(in srgb, var(--card-kind, var(--accent)) 12%, var(--card-surface)), var(--card-surface) 75%); }
+.card-lod-symbol { position: relative; display: flex; flex: 1; flex-direction: column; justify-content: center; align-items: center; gap: 10px; padding: 12px; text-align: center; }
+.card-lod-symbol > svg, .card-lod-symbol > .catalog-asset-icon { flex: 0 0 auto; color: var(--card-kind, var(--accent)); }
+.card-lod-symbol > strong { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; }
+.card-lod-symbol::after { content: ''; position: absolute; top: 10%; right: 10%; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); }
+.card-lod-symbol[data-status="running"]::after, .card-lod-symbol[data-status="ready"]::after { background: var(--accent); }
+.card-lod-symbol[data-status="error"]::after { background: var(--danger); }
+.card-lod-view.is-node .card-lod-heading { display: flex; height: 100%; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 8px; }
+.card-lod-view.is-node .card-lod-kind { width: 32px; height: 32px; border-radius: 9px; }
+.card-lod-view.is-node .card-lod-kind svg { width: 22px; height: 22px; }
+.card-lod-view.is-node .card-lod-title strong { font-size: 11px; }
+.card-lod-view.is-node .card-lod-symbol > strong { font-size: 11px; }
+.card-lod-view.is-node .card-lod-symbol > svg { width: 22px; height: 22px; }
+.card-lod-view.is-node .card-eyebrow, .card-lod-view.is-node .card-lod-status { display: none; }
+.card-lod-view.is-preview .card-lod-heading.node-surface-header { position: relative; box-sizing: border-box; }
+.card-lod-view.is-preview .node-surface-header .card-lod-kind { width: 54px; height: 54px; margin: 0 auto; border-radius: 12px; }
+.card-lod-view.is-preview .node-surface-header .card-lod-title strong { font-size: 15px; }
+.card-lod-view.is-preview .card-lod-heading.node-surface-header .card-lod-status { position: absolute; top: 22px; right: 18px; }
+.card-lod-view .workspace-titlebar { display: flex; gap: 10px; min-height: 40px; padding: 7px 12px; }
+.card-lod-view .workspace-titlebar .card-lod-kind { width: 26px; height: 26px; border-radius: 7px; }
+.card-lod-view .workspace-titlebar .card-lod-kind svg { width: 17px; height: 17px; }
+.card-lod-view .workspace-titlebar .card-lod-title { flex: 1; }
+.card-lod-view .workspace-titlebar strong { font-size: 13px; }
+.card-lod-view .workspace-titlebar .card-eyebrow { font-size: 8px; }
+.card-lod-view .container-header { pointer-events: auto; }
+.card-static-preview, .card-static-workspace { pointer-events: none; }
+.card-lod-view .card-static-preview { display: flex; flex: 1; min-height: 0; overflow: hidden; margin: 6px 16px 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+.card-static-preview .node-preview-body { display: flex; flex: 1; flex-direction: column; justify-content: space-between; }
+.card-static-preview p, .card-static-workspace main > p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.55; color: var(--ink-soft); }
+.card-static-metadata { display: flex; justify-content: space-between; gap: 8px; margin-top: 12px; color: var(--ink-faint); font-size: 9px; }
+.card-static-metadata span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-static-image { display: flex; flex: 1; min-height: 0; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--card-kind, var(--ink-faint)); }
+.card-static-image img { width: 100%; max-height: 100px; object-fit: contain; }
+.card-static-image > span { overflow: hidden; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); font-size: 11px; }
+.card-static-workspace { flex: 1; min-height: 0; display: flex; flex-direction: column; color: var(--ink-soft); font-size: 12px; }
+.card-static-toolbar { display: flex; flex: 0 0 42px; align-items: center; gap: 18px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--chrome); }
+.card-static-workspace-body { display: grid; grid-template-columns: 22% minmax(0, 1fr); flex: 1; min-height: 0; }
+.card-static-workspace-body aside { display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 16px; border-right: 1px solid var(--line); background: var(--card-soft); }
+.card-static-workspace-body aside span { overflow: hidden; text-overflow: ellipsis; }
+.card-static-workspace-body main { position: relative; padding: 24px; min-width: 0; overflow: hidden; }
+.card-static-workspace-body main > p { -webkit-line-clamp: 10; font-size: 15px; }
+.card-static-composer { position: absolute; bottom: 16px; left: 20px; right: 20px; padding: 20px; color: var(--ink-faint); border: 1px solid var(--line); border-radius: 12px; background: var(--card-soft); }
+.card-static-workspace-image { display: block; flex: 1; width: 100%; height: 0; min-height: 0; object-fit: fill; pointer-events: none; }

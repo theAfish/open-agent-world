@@ -51,6 +51,7 @@ from backend.errors import (
     NotFoundError,
     PermissionDeniedError,
     PluginCompatibilityError,
+    PluginUnavailableError,
     ResourceValidationError,
     RevisionConflictError,
     RuntimeUnavailableError,
@@ -58,6 +59,8 @@ from backend.errors import (
 from backend.events.hub import EventHub
 from backend.events.models import EventType, RuntimeEvent
 from backend.persistence.database import Database
+from backend.idempotency import IdempotencyStore
+from backend.request_context import LOCAL_TENANT, RequestContext
 from backend.legions import (
     LegionBlueprint,
     LegionBounds,
@@ -72,6 +75,7 @@ from backend.legions import (
     LegionTemplateNode,
 )
 from backend.plugins import (
+    PLUGIN_API_VERSION,
     NodeLifecycleContext,
     NodeLifecycleTransaction,
     PluginRegistry,
@@ -734,7 +738,7 @@ class ApplicationServices:
         await self._retry_pending_node_deletions()
         context = self._node_lifecycle_context()
         for card in self.world.list_cards():
-            lifecycle = self.plugins.node_type(card.type).lifecycle
+            lifecycle = self.plugins.node_type(card.type).lifecycle if not card.missing_plugin else None
             if lifecycle is not None:
                 await lifecycle.on_startup(context, card)
         await self.summoning.recover()
@@ -751,12 +755,14 @@ class ApplicationServices:
         await self.sandbox_operations.shutdown()
         context = self._node_lifecycle_context()
         for card in self.world.list_cards():
-            lifecycle = self.plugins.node_type(card.type).lifecycle
+            lifecycle = self.plugins.node_type(card.type).lifecycle if not card.missing_plugin else None
             if lifecycle is not None:
                 await lifecycle.on_shutdown(context, card)
         await self._require_run_manager().shutdown()
 
     def enrich_card(self, card: Card) -> Card:
+        if card.missing_plugin:
+            return card
         record = self.resources.maybe_get_record(card.id)
         if record is None:
             return card
@@ -968,7 +974,7 @@ class ApplicationServices:
                 return (await self.update_cards([CardBatchPatch(node_id=card_id, patch=request)]))[0]
             updated = self.world.preview_update_card(card_id, request)
             self._validate_membership_change(current, updated)
-            lifecycle = self.plugins.node_type(current.type).lifecycle
+            lifecycle = self.plugins.node_type(current.type).lifecycle if not current.missing_plugin else None
             context = self._node_lifecycle_context()
             transaction = (
                 await lifecycle.prepare_update(context, current, updated, request)
@@ -1030,7 +1036,7 @@ class ApplicationServices:
                 current = self.world.get_card(item.node_id)
                 updated = self.world.preview_update_card(item.node_id, item.patch)
                 self._validate_membership_change(current, updated)
-                lifecycle = self.plugins.node_type(current.type).lifecycle
+                lifecycle = self.plugins.node_type(current.type).lifecycle if not current.missing_plugin else None
                 transaction = (
                     await lifecycle.prepare_update(
                         context, current, updated, item.patch
@@ -1110,7 +1116,7 @@ class ApplicationServices:
             context = self._node_lifecycle_context()
             transactions: list[NodeLifecycleTransaction] = []
             for card in cards:
-                lifecycle = self.plugins.node_type(card.type).lifecycle
+                lifecycle = self.plugins.node_type(card.type).lifecycle if not card.missing_plugin else None
                 transactions.append(
                     await lifecycle.prepare_delete(context, card)
                     if lifecycle is not None
@@ -1276,7 +1282,8 @@ class ApplicationServices:
             )
         with self.database.transaction(immediate=True) as connection:
             for sequence, (card, transaction) in enumerate(ordered):
-                plugin_id = self.plugins.node_type_owner_id(card.type)
+                plugin_id = card.missing_plugin.plugin_id if card.missing_plugin else self.plugins.node_type_owner_id(card.type)
+                version, api_version = ("unavailable", PLUGIN_API_VERSION) if card.missing_plugin else plugin_versions[plugin_id]
                 resource = self.resources.maybe_get_record(card.id)
                 edges_json = json.dumps(
                     outgoing_edges.get(card.id, []), separators=(",", ":")
@@ -1294,8 +1301,8 @@ class ApplicationServices:
                         batch_id,
                         sequence,
                         plugin_id,
-                        plugin_versions[plugin_id][0],
-                        plugin_versions[plugin_id][1],
+                        version,
+                        api_version,
                         int(transaction.has_delete_finalizer),
                         json.dumps(
                             dict(transaction.delete_recovery_payload),
@@ -1359,12 +1366,16 @@ class ApplicationServices:
         node_still_exists: bool,
         timeout_seconds: float,
     ) -> NodeLifecycleTransaction:
+        card = Card.model_validate_json(str(row["card_json"]))
+        # A placeholder deletion only changed host-owned rows; there is no
+        # plugin-side commit to compensate, even if its pack is still absent.
+        if card.missing_plugin and not bool(row["requires_finalize"]):
+            return NodeLifecycleTransaction()
         plugin_id = str(row["plugin_id"])
         if not self.plugins.has_plugin(plugin_id):
             raise PluginCompatibilityError(
                 f"pending deletion requires missing plugin {plugin_id!r}"
             )
-        card = Card.model_validate_json(str(row["card_json"]))
         owner_id = self.plugins.node_type_owner_id(card.type)
         if owner_id != plugin_id:
             raise PluginCompatibilityError(
@@ -1378,7 +1389,7 @@ class ApplicationServices:
                     f"pending deletion rollback for {card.id!r} no longer "
                     "matches the live node revision"
                 )
-        lifecycle = self.plugins.node_type(card.type).lifecycle
+        lifecycle = self.plugins.node_type(card.type).lifecycle if not card.missing_plugin else None
         if lifecycle is None:
             if bool(row["requires_finalize"]):
                 raise PluginCompatibilityError(
@@ -2211,6 +2222,8 @@ class ApplicationServices:
     async def _update_edge_locked(self, edge_id: str, request: EdgePatch) -> Edge:
         old = self.world.get_edge(edge_id)
         self.world.check_revision(old, request.expected_revision)
+        if old.missing_plugin:
+            raise PluginUnavailableError("Restore the missing plugin before editing this connection")
         if (self.plugins.relationship(old.relationship).generated
                 or self.plugins.relationship(request.relationship or old.relationship).generated):
             raise GraphValidationError("Generated connections cannot change relationship")
@@ -2418,17 +2431,49 @@ class ApplicationServices:
         return self.conversations.list_agent_sessions(agent_id)
 
     async def create_conversation_session(
-        self, conversation_id: str, request: ConversationSessionCreate
+        self, conversation_id: str, request: ConversationSessionCreate, *,
+        idempotency_key: str | None = None, request_context: RequestContext | None = None,
     ) -> ConversationSession:
-        self._require_card_type(conversation_id, CardType.CONVERSATION)
+        # This repository still owns one local profile. A new context cannot
+        # select another tenant until repositories actually enforce that scope.
+        if request_context is not None and request_context.tenant != LOCAL_TENANT:
+            raise NotFoundError("Conversation does not exist in this scope")
         participants = list(dict.fromkeys(request.participant_ids))
-        for agent_id in participants:
-            self._require_conversation_connection(agent_id, conversation_id)
-        session = self.conversations.create_session(
-            conversation_id,
-            request.model_copy(update={"participant_ids": participants}),
-        )
-        self.state.ensure_scope("session", session.id, schema_id="core.session")
+
+        def authorize() -> None:
+            self._require_card_type(conversation_id, CardType.CONVERSATION)
+            for agent_id in participants:
+                self._require_conversation_connection(agent_id, conversation_id)
+
+        def mutate() -> dict:
+            session = self.conversations.create_session(
+                conversation_id,
+                request.model_copy(update={"participant_ids": participants}),
+            )
+            self.state.ensure_scope("session", session.id, schema_id="core.session")
+            return session.model_dump(mode="json")
+
+        if idempotency_key is not None:
+            if request_context is None:
+                raise PermissionDeniedError("A trusted request context is required for idempotency")
+            result = IdempotencyStore(self.database).execute(
+                request_context,
+                operation="conversation.session.create.v1",
+                key=idempotency_key,
+                payload={"conversation_id": conversation_id, "request": request.model_dump(mode="json")},
+                authorize=authorize,
+                mutate=mutate,
+            )
+            session = ConversationSession.model_validate(result.value)
+            if result.replayed:
+                return session
+        else:
+            with self.database.transaction(immediate=True):
+                authorize()
+                session = ConversationSession.model_validate(mutate())
+
+        # The mutation and replay result are already committed. Events remain
+        # best-effort: a crash here can lose the notification, never the session.
         await self.events.publish(
             EventType.CONVERSATION_SESSION_CREATED,
             node_id=conversation_id,
@@ -3046,7 +3091,7 @@ class ApplicationServices:
                     await self._emit_sandbox_event(SandboxEvent(sandbox_id, SandboxEventType.COMMAND_STARTED,
                         {"command_id": command_id, "argv": receipt["argv"], "concurrent_commands": peers}))
                     result = await backend.execute(
-                        sandbox_id, execution_argv, timeout_seconds=timeout_seconds or self.world.get_card(sandbox_id).config.get("command_timeout", 600), **options
+                        sandbox_id, execution_argv, timeout_seconds=timeout_seconds or self.world.get_card(sandbox_id).config.get("command_timeout", 6000), **options
                     )
                     if self._execution_secrets.get():
                         from backend.security.redaction import redact
@@ -3538,7 +3583,7 @@ class ApplicationServices:
             return sorted(
                 candidate.source
                 for candidate in self.world.list_edges_to(target.id)
-                if any(grant.kind == "sandbox.execute" for grant in self.plugins.relationship(candidate.relationship).capabilities)
+                if not candidate.missing_plugin and any(grant.kind == "sandbox.execute" for grant in self.plugins.relationship(candidate.relationship).capabilities)
             )
         return []
 
@@ -3594,6 +3639,7 @@ class ApplicationServices:
     def _require_agent(self, card_id: str) -> Card:
         self._assert_no_live_pending_deletions()
         card = self.world.get_card(card_id)
+        self.world.require_available_card(card)
         if not self.plugins.has_trait(card.type, "core.agent"):
             raise NotFoundError(f"agent card {card_id!r} does not exist")
         return card
@@ -3601,6 +3647,7 @@ class ApplicationServices:
     def _require_card_type(self, card_id: str, expected: str) -> Card:
         self._assert_no_live_pending_deletions()
         card = self.world.get_card(card_id)
+        self.world.require_available_card(card)
         if card.type != expected:
             raise NotFoundError(f"{expected} card {card_id!r} does not exist")
         return card
@@ -3713,7 +3760,6 @@ def create_services(
         card_library = CardLibraryStore(database, plugin_registry)
         from backend.migrations.barracks import check_legacy
         check_legacy(database)
-        world.assert_plugin_availability()
     except BaseException:
         database.close()
         raise

@@ -1,48 +1,38 @@
 import { expect, test } from '@playwright/test';
 
-test('composited grid preserves dot phase, size and viewport coverage', async ({ page }) => {
+test('procedural grid stays world-anchored through pan, resize and theme changes', async ({ page, request }) => {
+  const profile = await (await request.get('/api/application')).json();
+  await request.patch('/api/application/preferences', { data: {
+    profile_id: profile.profile_id, generation: profile.generation, changes: {
+      'oaw-onboarding-v1': JSON.stringify({ version: 1, state: { status: 'skipped' } }),
+      'oaw-theme': 'light',
+      'oaw-canvas-viewport-v1': JSON.stringify({ version: 0, state: { viewport: { x: 0, y: 0, zoom: 1, width: 1280, height: 800 } } }),
+    },
+  } });
   await page.goto('/');
-  const grid = page.locator('#oaw-world-map > .world-grid');
-  await expect(grid).toBeVisible();
-  const check = async () => {
-    const state = await grid.evaluate(el => {
-      const root = el.parentElement!;
-      const viewport = root.querySelector('.react-flow__viewport')!;
-      const transform = new DOMMatrix(getComputedStyle(viewport).transform);
-      const translated = new DOMMatrix(getComputedStyle(el).transform);
-      const pattern = el.querySelector('pattern')!;
-      const gap = Number(pattern.getAttribute('width'));
-      const bounds = el.getBoundingClientRect(), canvas = root.getBoundingClientRect();
-      return { gap, zoom: transform.a, x: translated.e, y: translated.f,
-        expectedX: transform.e % gap, expectedY: transform.f % gap,
-        radius: el.querySelector('circle')!.getAttribute('r'),
-        covers: bounds.left <= canvas.left && bounds.top <= canvas.top && bounds.right >= canvas.right && bounds.bottom >= canvas.bottom,
-      };
-    });
-    expect(state.covers).toBe(true);
-    expect(state.radius).toBe('1');
-    expect(state.x).toBeCloseTo(state.expectedX, 3);
-    expect(state.y).toBeCloseTo(state.expectedY, 3);
-    expect(state.gap).toBeCloseTo(24 * state.zoom * 2 ** Math.max(0, Math.ceil(Math.log2(18 / (24 * state.zoom)))), 3);
+  const background = page.locator('.terrain-webgl-background');
+  await expect(background).toHaveAttribute('data-terrain-status', 'ready');
+  // Isolate the procedural grid pixels without changing camera or renderer code.
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--contour', 'rgba(0,0,0,0)');
+    document.documentElement.style.setProperty('--contour-fill', 'rgba(0,0,0,0)');
+  });
+  const clip = { x: 500, y: 300, width: 144, height: 144 };
+  const original = await page.screenshot({ clip });
+  const pan = async (dx: number) => {
+    await page.mouse.move(800, 500); await page.mouse.down({ button: 'middle' });
+    await page.mouse.move(800 + dx, 500, { steps: 6 }); await page.mouse.up({ button: 'middle' });
   };
-  await check();
-  for (const end of [{ x: 320, y: 230 }, { x: 1140, y: 560 }]) {
-    await page.mouse.move(800, 400);
-    await page.mouse.down();
-    await page.mouse.move(end.x, end.y, { steps: 20 });
-    await page.mouse.up();
-    await check();
-  }
-  for (const selector of ['.react-flow__controls-zoomout', '.react-flow__controls-zoomin']) {
-    for (let i = 0; i < 5; i++) await page.locator(`.world-controls ${selector}`).click();
-    await page.waitForTimeout(250);
-    await check();
-  }
+  // At zoom 1 the full major/minor lattice repeats every 48 CSS pixels.
+  await pan(48);
+  expect((await page.screenshot({ clip })).equals(original)).toBe(true);
+  await pan(7);
+  expect((await page.screenshot({ clip })).equals(original)).toBe(false);
+  await pan(-7);
+  expect((await page.screenshot({ clip })).equals(original)).toBe(true);
   await page.setViewportSize({ width: 1700, height: 1000 });
-  await check();
-  for (const theme of ['light', 'dark']) {
-    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
-    await page.screenshot({ path: `../.outputs/viewport-grid-${theme}.png` });
-    await check();
-  }
+  expect((await page.screenshot({ clip })).equals(original)).toBe(true);
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+  expect((await page.screenshot({ clip })).equals(original)).toBe(false);
+  await expect(page.locator('.world-grid')).toHaveCount(0);
 });

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import type { LibrarySnapshot } from '../state/cardLibrary';
-import { packInventory, type InstalledPack } from './installedPacks';
+import { packInventory, packIssue, type InstalledPack } from './installedPacks';
 
 function snapshot(): LibrarySnapshot {
   return { schema_version: 1, revision: 1, migration_pending: false, plugins: {},
@@ -31,4 +31,25 @@ it('keeps selected packs without duplicating older retained versions', () => {
     versions: [version, { ...version, version: '2.0.0', selected: true }] });
   expect(inventory.map(item => item.pack.definition.id)).toEqual(['core', 'local']);
   expect(inventory[1].versions).toHaveLength(2);
+});
+
+it('does not mark a new installation waiting for restart as missing', () => {
+  const state = snapshot();
+  expect(packIssue(state.packs.local, state, [{ ...version, selected: true }])).toBeUndefined();
+  expect(packIssue(state.packs.local, state)).toEqual({ kind: 'missing', label: 'Pack uninstalled' });
+});
+
+it('distinguishes disabled and preparing packs from unavailable and failed packs', () => {
+  const state = snapshot();
+  state.plugins['local.tools'] = { descriptor: { id: 'local.tools', name: 'Tools', description: '', version: '1.0.0', plugin_api_version: '1.0' }, installed: true, enabled: false };
+  expect(packIssue(state.packs.local, state)).toBeUndefined();
+  state.plugins['local.tools'].enabled = true;
+  expect(packIssue(state.packs.local, state)?.kind).toBe('missing');
+  state.available_pack_ids = ['local'];
+  const loaded = { ...version, selected: true, loaded: true, environment: { state: 'environment_preparing', error: null } };
+  expect(packIssue(state.packs.local, state, [loaded])).toBeUndefined();
+  loaded.environment.state = 'environment_failed';
+  expect(packIssue(state.packs.local, state, [loaded])).toEqual({ kind: 'error', label: 'Environment failed' });
+  loaded.environment.state = 'environment_ready';
+  expect(packIssue(state.packs.local, state, [loaded])).toBeUndefined();
 });

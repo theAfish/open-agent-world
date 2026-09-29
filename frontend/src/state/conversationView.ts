@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { profileStorage } from './profileStorage';
 import type { WorldCard } from '../types/world';
+import { useOpenFiles } from './openFiles';
 
 /** Local viewing state; session contents and workspace geometry remain in the world. */
 export const useConversationView = create<{
@@ -13,12 +14,14 @@ export const useConversationView = create<{
 }>()(persist((set) => ({
   sessions: {},
   activate: (activeConversationId) => set({ activeConversationId }),
-  selectSession: (conversationId, sessionId) => set(state => ({
-    sessions: { ...state.sessions, [conversationId]: sessionId },
-  })),
-  showSession: (conversationId, sessionId) => set(state => ({
-    activeConversationId: conversationId, sessions: { ...state.sessions, [conversationId]: sessionId },
-  })),
+  selectSession: (conversationId, sessionId) => set(state => {
+    if (state.sessions[conversationId] !== sessionId) useOpenFiles.getState().clear(conversationId);
+    return { sessions: { ...state.sessions, [conversationId]: sessionId } };
+  }),
+  showSession: (conversationId, sessionId) => set(state => {
+    if (state.sessions[conversationId] !== sessionId) useOpenFiles.getState().clear(conversationId);
+    return { activeConversationId: conversationId, sessions: { ...state.sessions, [conversationId]: sessionId } };
+  }),
 }), {
   name: 'oaw-conversation-view-v1',
   storage: createJSONStorage(() => profileStorage),

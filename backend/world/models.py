@@ -117,9 +117,9 @@ class SandboxConfig(BaseModel):
     workspace_path: str | None = Field(default=None, max_length=4096, json_schema_extra={"privileged": True})
     workspace_access: Literal["read_only", "read_write"] = Field(default="read_write", json_schema_extra={"privileged": True})
     network_enabled: bool = Field(default=False, json_schema_extra={"privileged": True})
-    memory_bytes: int = Field(default=512 * 1024 * 1024, ge=16 * 1024 * 1024, le=8 * 1024 * 1024 * 1024)
+    memory_bytes: int = Field(default=2048 * 1024 * 1024, ge=16 * 1024 * 1024, le=8 * 1024 * 1024 * 1024)
     active_process_limit: int = Field(default=64, ge=1, le=256)
-    command_timeout: float = Field(default=600, gt=0, le=36000)
+    command_timeout: float = Field(default=6000, gt=0, le=36000)
     presets: dict[str, str] = Field(default_factory=dict, max_length=30)
 
     @field_validator("presets")
@@ -261,10 +261,17 @@ class CardsUpdate(BaseModel):
         return value
 
 
+class MissingPlugin(BaseModel):
+    """Read-time diagnostic; never replaces persisted plugin identity or data."""
+    plugin_id: str
+    reason: Literal["plugin_missing", "plugin_disabled", "type_missing", "owner_mismatch", "endpoint_missing"]
+
+
 class Card(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
+    missing_plugin: MissingPlugin | None = None
     parent_id: str | None = None
     equipment: EquipmentBinding | None = None
     minister: MinisterRole | None = None
@@ -314,6 +321,7 @@ class Edge(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
+    missing_plugin: MissingPlugin | None = None
     source: str
     target: str
     relationship: str

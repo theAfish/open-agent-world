@@ -13,7 +13,9 @@ test.describe('canvas onboarding', () => {
   });
   test.afterEach(async ({ request }) => {
     const cards = await (await request.get('/api/nodes')).json();
-    for (const card of cards) if (!originalIds.has(card.id)) await request.delete(`/api/nodes/${card.id}`);
+    // Children are removed before their functional containers.
+    for (const card of [...cards].reverse()) if (!originalIds.has(card.id)) await request.delete(`/api/nodes/${card.id}`);
+    for (const card of (await (await request.get('/api/nodes')).json())) if (!originalIds.has(card.id)) await request.delete(`/api/nodes/${card.id}`);
   });
   const at = async (page: Page, step: string) => expect(page.getByRole('region', { name: 'Tutorial guide' })).toHaveAttribute('data-step', step);
   const move = async (page: Page, card: ReturnType<Page['locator']>, dx: number, dy: number) => {
@@ -27,14 +29,32 @@ test.describe('canvas onboarding', () => {
     await page.mouse.up();
   };
 
-  test('welcome choices persist and a blueprint guides missing model setup', async ({ page, request }) => {
+  test('welcome choices persist and multiple workspaces open on canvas', async ({ page, request }) => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Open Agent World' })).toBeVisible();
+    await expect(page.locator('.top-bar')).toBeHidden();
+    await expect(page.locator('.world-controls')).toBeHidden();
+    await expect(page.locator('.component-palette')).toBeHidden();
+    for (const viewport of [{ width: 1280, height: 800 }, { width: 800, height: 600 }, { width: 390, height: 640 }]) {
+      await page.setViewportSize(viewport);
+      for (const button of await page.locator('.onboarding-actions button').all()) await expect(button).toBeInViewport();
+      const primary = (await page.locator('.welcome-action--primary').boundingBox())!;
+      const secondary = await page.locator('.welcome-action--secondary').all();
+      const left = (await secondary[0].boundingBox())!;
+      const right = (await secondary[1].boundingBox())!;
+      expect(primary.width).toBeGreaterThan(left.width * 1.9);
+      expect(left.y).toBe(right.y);
+      expect(left.height).toBe(right.height);
+      await page.screenshot({ path: `test-results/welcome-${viewport.width}.png` });
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
     await page.screenshot({ path: 'test-results/onboarding-welcome-light.png' });
-    await page.getByRole('button', { name: 'Use dark theme' }).click();
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
     await page.screenshot({ path: 'test-results/onboarding-welcome-dark.png' });
-    await page.getByRole('button', { name: 'Start Empty', exact: true }).click();
+    await page.getByRole('button', { name: 'Start blank', exact: true }).click();
     await expect(page.locator('.onboarding-layer')).toHaveCount(0);
+    await expect(page.locator('.top-bar')).toBeVisible();
+    await expect(page.locator('.world-controls')).toBeVisible();
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Open Agent World' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Help', exact: true }).click();
@@ -44,11 +64,62 @@ test.describe('canvas onboarding', () => {
     await page.goto('about:blank');
     await resetTutorialProfile(request);
     await page.goto('/');
+    await expect(page.locator('.onboarding-actions button')).toHaveCount(3);
+    await expect(page.locator('.blueprint-chooser')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Choose a workspace', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to welcome', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Start Tutorial', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Choose a workspace', exact: true }).click();
     await page.getByRole('button', { name: /^General assistant/ }).click();
-    await page.getByRole('button', { name: 'Open workspace', exact: true }).click();
-    await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: /^Coding workspace/ }).click();
+    await expect(page.locator('.blueprint-option[aria-pressed="true"]')).toHaveCount(2);
+    await page.screenshot({ path: 'test-results/onboarding-workspace-chooser.png' });
+    await page.getByRole('button', { name: /^Place workspaces/ }).click();
+    await expect(page.locator('.onboarding-layer')).toHaveCount(0);
+    const deployed = (await (await request.get('/api/nodes')).json()).filter((card: { id: string }) => !originalIds.has(card.id));
+    expect(deployed).toHaveLength(7);
+    expect(deployed.filter((card: { type: string }) => card.type === 'legion')).toHaveLength(2);
+    for (const card of deployed.filter((card: { type: string }) => ['agent', 'conversation', 'sandbox'].includes(card.type))) {
+      await expect(page.locator(`.react-flow__node[data-id="${card.id}"] [data-surface-level]`).first()).toHaveAttribute('data-surface-level', card.type === 'agent' ? 'preview' : 'workspace');
+    }
+    await expect(page.locator('.world-canvas > .react-flow > .react-flow__renderer > .react-flow__pane > .react-flow__viewport > .react-flow__nodes > .react-flow__node')).toHaveCount(7);
+    await expect.poll(async () => page.locator('.world-canvas > .react-flow > .react-flow__renderer > .react-flow__pane > .react-flow__viewport > .react-flow__nodes > .react-flow__node').evaluateAll(nodes => {
+      const boxes = nodes.filter(node => !node.classList.contains('react-flow__node-worldCard')).map(node => node.getBoundingClientRect());
+      return boxes.every((a, i) => boxes.slice(i + 1).every(b => a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top));
+    })).toBe(true);
+    await expect.poll(async () => page.locator('.world-canvas > .react-flow > .react-flow__renderer > .react-flow__pane > .react-flow__viewport > .react-flow__nodes > .react-flow__node').evaluateAll(nodes => nodes.every(node => {
+      const box = node.getBoundingClientRect();
+      return box.top >= 0 && box.left >= 0 && box.right <= innerWidth && box.bottom <= innerHeight - 60;
+    }))).toBe(true);
+    await page.screenshot({ path: 'test-results/onboarding-workspaces-placed.png' });
+    await page.reload();
+    await expect(page.locator('.onboarding-layer')).toHaveCount(0);
+    await expect(page.locator('.world-canvas > .react-flow > .react-flow__renderer > .react-flow__pane > .react-flow__viewport > .react-flow__nodes > .react-flow__node')).toHaveCount(7);
     expect((await (await request.get('/api/nodes')).json()).every((card: { minister?: unknown }) => !card.minister)).toBe(true);
     await expect(page.locator('.onboarding-layer')).toHaveCount(0);
+  });
+
+  test('all available presets retain functional links without overlapping workspace roots', async ({ page, request }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Choose a workspace', exact: true }).click();
+    await expect(page.getByRole('button', { name: /^MatCreator research/ })).toBeVisible();
+    for (const option of await page.locator('.blueprint-option:not(:disabled)').all()) await option.click();
+    await page.getByRole('button', { name: /^Place workspaces/ }).click();
+    await expect(page.locator('.onboarding-layer')).toHaveCount(0, { timeout: 30_000 });
+    const cards = await (await request.get('/api/nodes')).json();
+    const research = cards.find((card: { type: string; name: string }) => card.type === 'legion' && card.name === 'MatCreator research');
+    expect(research).toBeTruthy();
+    expect(research.config.workspace_layout.root.kind).toBe('split');
+    expect(cards.some((card: { type: string }) => card.type === 'oaw.barracks')).toBe(true);
+    const roots = cards.filter((card: { parent_id?: string; equipment?: unknown }) => !card.parent_id && !card.equipment);
+    await expect.poll(async () => page.locator('.world-canvas > .react-flow > .react-flow__renderer > .react-flow__pane > .react-flow__viewport > .react-flow__nodes > .react-flow__node').evaluateAll((nodes, ids) => {
+      const boxes = nodes.filter(node => ids.includes(node.getAttribute('data-id')!)).map(node => node.getBoundingClientRect());
+      return boxes.length === ids.length && boxes.every((a, i) => boxes.slice(i + 1).every(b => a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top));
+    }, roots.map((card: { id: string }) => card.id))).toBe(true);
+    await page.screenshot({ path: 'test-results/onboarding-all-workspaces.png' });
+    await page.locator(`.react-flow__node[data-id="${research.id}"]`).getByRole('button', { name: 'Workspace mode', exact: true }).click();
+    await expect(page.locator(`dialog[data-legion-workspace="${research.id}"]`)).toBeVisible();
+    await page.screenshot({ path: 'test-results/onboarding-matcreator-workspace.png' });
   });
 
   test('the logo walks into a smaller canvas and the hint remains usable after resize', async ({ page }) => {
@@ -241,8 +312,8 @@ test.describe('canvas onboarding', () => {
       expect(approach[0].x - approach.at(-1)!.x).toBeGreaterThan(50);
       for (let i = 1; i < approach.length; i++) expect(approach[i].x - approach[i - 1].x).toBeLessThan(2);
     }
-    const first = page.locator('.react-flow__node').filter({ has: page.getByText('Tutorial · stick me', { exact: true }) });
-    const second = page.locator('.react-flow__node').filter({ has: page.getByText('Tutorial · stick with me', { exact: true }) });
+    const first = page.locator('.world-canvas > .react-flow > .react-flow__renderer > .react-flow__pane > .react-flow__viewport > .react-flow__nodes > .react-flow__node').filter({ has: page.getByText('Tutorial · stick me', { exact: true }) });
+    const second = page.locator('.world-canvas > .react-flow > .react-flow__renderer > .react-flow__pane > .react-flow__viewport > .react-flow__nodes > .react-flow__node').filter({ has: page.getByText('Tutorial · stick with me', { exact: true }) });
     await expect(first).toHaveClass(/is-glued/);
     await page.screenshot({ path: 'test-results/onboarding-glue.png' });
     await page.getByRole('button', { name: 'My turn', exact: true }).click();

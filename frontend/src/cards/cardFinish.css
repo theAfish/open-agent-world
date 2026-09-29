@@ -106,25 +106,51 @@
   opacity: calc(.28 + var(--finish-active, 0) * .12);
 }
 
-/* Laser: fixed holographic security rosettes and crystalline facets. */
+/* Laser: a continuous diffraction film over fixed, overlapping circular grooves.
+   Both passes use the same engraved plate: dark recesses below, angle-dependent
+   bright edges above. Only illumination moves; the engraving never slides. */
 .card-finish-layer--laser .card-finish-base {
-  background: conic-gradient(from 165deg at 68% 28%, #81dcd073, #8273d680 23%, #e781af73 40%, #efd8788c 56%, #5fd6dc70 78%, #81dcd073);
-  box-shadow: inset 0 0 0 1px #b8e8edcc, inset 0 1px 2px #ffffe6dd, inset 0 -1px 2px #49588066;
-  opacity: calc(.86 * var(--finish-intensity));
+  background-image:
+    linear-gradient(32deg, #39284466, #fff1bf66 28%, #76bdc411 49%, #27133e77 72%, #e7b58455),
+    repeating-linear-gradient(var(--finish-angle, 124deg), #dd91ab 0%, #e2bd75 9%, #c2d87c 18%, #73ceba 27%, #689ddc 36%, #ac65cb 45%, #d77eae 54%, #dd91ab 63%);
+  background-size: 150% 150%, 185% 185%;
+  background-position: center, var(--finish-shift-x, 50%) var(--finish-shift-y, 50%);
+  background-blend-mode: soft-light;
+  box-shadow: inset 0 0 0 1px #e9e9dfb3, inset 0 1px 2px #ffffe6dd, inset 0 -1px 2px #49588066;
+  opacity: calc(.74 * var(--finish-intensity));
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 .card-finish-layer--laser .card-finish-pattern {
-  background-image: var(--finish-laser-plate);
-  background-size: 100% 100%;
-  background-position: center;
-  background-repeat: no-repeat;
-  opacity: calc((.65 + var(--finish-active, 0) * .13) * var(--finish-intensity));
+  background: #203044;
+  opacity: calc(.3 * var(--finish-intensity));
+  /* Keep grooves above two CSS pixels apart even on compact faces. */
+  -webkit-mask: var(--finish-laser-plate) center / max(100%, 320px) auto no-repeat;
+  mask: var(--finish-laser-plate) center / max(100%, 320px) auto no-repeat;
 }
 .card-finish-layer--laser .card-finish-sheen {
-  background-image:
-    radial-gradient(ellipse at var(--finish-light-x, var(--finish-rest-x)) var(--finish-light-y, var(--finish-rest-y)), #effffb99, transparent 42%),
-    linear-gradient(var(--finish-angle, 124deg), transparent 19%, #7bfded33 29%, #e4c7ff8a 37%, #fff9cbd9 43%, #abfae98a 49%, #78aeff33 57%, transparent 67%);
-  opacity: calc(.36 + var(--finish-active, 0) * .15);
+  /* A wide bank of reflected light, not a spotlight attached to the cursor. */
+  background-image: linear-gradient(var(--finish-angle, 124deg), #10233722 10%, transparent 28%, #fff7de24 43%, #f0ffed40 49%, #c3f4f61a 56%, transparent 70%, #44275a22 90%);
+  background-size: 210% 210%;
+  background-position: var(--finish-shift-x, 50%) var(--finish-shift-y, 50%);
+  mix-blend-mode: normal;
+  opacity: calc(.55 * var(--finish-intensity));
+  -webkit-mask-image: none;
+  mask-image: none;
 }
+.card-finish-layer--laser .card-finish-sheen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  /* Offset by a fraction of a pixel to give each groove a lit and a recessed lip. */
+  transform: translate(.45px, -.45px);
+  background-image: linear-gradient(var(--finish-angle, 124deg), #a3cee333 8%, #b4f0e680 25%, #fffbdc 40%, #fffef5 48%, #d9f9f3b3 55%, #d19edb40 69%, #b1d7ea33 88%);
+  background-size: 240% 240%;
+  background-position: var(--finish-shift-x, 50%) var(--finish-shift-y, 50%);
+  -webkit-mask: var(--finish-laser-plate) center / max(100%, 320px) auto no-repeat;
+  mask: var(--finish-laser-plate) center / max(100%, 320px) auto no-repeat;
+}
+.card-finish-layer--laser .card-finish-grain { opacity: .09; }
 
 /* Smaller faces use just three passive plates. */
 .card-finish-layer[data-quality="thumbnail"] { --finish-intensity: .94; }

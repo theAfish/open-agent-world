@@ -5,6 +5,15 @@ import type { NodePresentation, NodeSurfaceLevel } from "../types/world";
 import { buildCardDraft } from './helpers';
 
 describe("node surface state", () => {
+  it('keeps private hydration drafts out of persisted preferences and clears them on deletion', () => {
+    const store = useNodeSurfaceStore.getState();
+    store.setPrivateDraft('secret-card', { token: 'sensitive draft' });
+    const persisted = useNodeSurfaceStore.persist.getOptions().partialize!(useNodeSurfaceStore.getState());
+    expect(JSON.stringify(persisted)).not.toContain('sensitive draft');
+    expect(JSON.stringify(persisted)).not.toContain('privateDrafts');
+    store.forgetDrafts('secret-card');
+    expect(useNodeSurfaceStore.getState().privateDrafts['secret-card']).toBeUndefined();
+  });
   it('starts new container members at node level and preserves explicit choices', () => {
     useNodeSurfaceStore.setState({ surfaceLevels: { saved: 'inspector' }, baseLevels: {} });
     useNodeSurfaceStore.getState().syncCards([

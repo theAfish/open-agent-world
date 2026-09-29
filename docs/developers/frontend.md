@@ -121,3 +121,5 @@ OAW discovers frontend entries in immediate `plugins/*/frontend` directories at 
 ## Grow the interface
 
 Use [workspace sections](../plugins.md#composable-workspace-sections) for rearrangeable panes and [file viewer contracts](../plugins.md#connected-file-viewers) for connected files. Keep UI state inside the plugin and use the public SDK instead of importing host stores or internal components.
+
+Continue with [Test and distribute](testing.md) to verify and package the result.

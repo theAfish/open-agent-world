@@ -17,6 +17,7 @@ import { TopBar } from "./shell/TopBar";
 import { CardLibrary } from "./shell/CardLibrary";
 import { useWorldStore } from "./state/worldStore";
 import { useLocale } from "./i18n";
+import './shell/motion.css';
 
 const DevelopmentPanel = import.meta.env.DEV ? lazy(() => import("./debug/DevelopmentPanel")) : null;
 

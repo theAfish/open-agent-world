@@ -6,6 +6,8 @@ import { DOCS_URL } from './helpChecks';
 describe('bundled manual', () => {
   it('includes every published navigation page and local image', () => {
     const nav = siteConfig.slice(siteConfig.indexOf('\nnav:'));
+    const published = [...nav.matchAll(/(?:^|\s)([\w./-]+\.md)\s*$/gm)].map(match => match[1]);
+    expect(Object.keys(documentation).sort()).toEqual(published.sort());
     for (const match of nav.matchAll(/(?:^|\s)([\w./-]+\.md)\s*$/gm)) {
       expect(documentation[match[1]], match[1]).toBeDefined();
     }
@@ -17,7 +19,7 @@ describe('bundled manual', () => {
     expect(documentationAssets['assets/demos/connect-cards.gif']).toBeTruthy();
     expect(documentation['README.md'].markdown).not.toMatch(/hide:|<div|\.md-button/);
     expect(documentation['node-effects.md'].markdown).toContain('<div style={{');
-    expect(documentation['SHADOW_COLLECTION.md']).toBeUndefined();
+    expect(Object.keys(documentation).some(path => path.startsWith('internal/'))).toBe(false);
   });
 
   it('lists every topic once per language and falls back to available source text', () => {

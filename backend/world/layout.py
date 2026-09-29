@@ -42,7 +42,7 @@ def card_footprints(nodes: Sequence[Card], registry: PluginRegistry, *, compact:
     def footprint(node: Card) -> Rectangle:
         if node.id in bounds:
             return bounds[node.id]
-        spec = registry.node_type(node.type).container
+        spec = registry.node_type(node.type).container if not node.missing_plugin else None
         if spec:
             width, height = max(node.size.width, spec.min_size[0]), max(node.size.height, spec.min_size[1])
             left, top, right, bottom = spec.content_inset

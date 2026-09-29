@@ -49,6 +49,9 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly detail?: unknown,
+    readonly requestId?: string,
+    readonly retryable: boolean = false,
+    readonly code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -134,6 +137,7 @@ export function normalizeCard(input: unknown): WorldCard {
     config.preview_url = resourceContentUrl(String(source.id));
   }
   return {
+    missing_plugin: source.missing_plugin as WorldCard["missing_plugin"],
     state_scope: source.state_scope as WorldCard["state_scope"],
     state_scope_override: source.state_scope_override as WorldCard["state_scope_override"],
     id: String(source.id),
@@ -154,7 +158,7 @@ export function normalizeCard(input: unknown): WorldCard {
     },
     expanded: Boolean(source.expanded),
     status: String(config.status ?? source.status ?? (type === "sandbox" ? "stopped" : type === "agent" ? "idle" : "available")) as CardStatus,
-    config: !(["agent", "conversation", "text", "image", "sandbox"].includes(type)) ? { ...asRecord(source.config) } : config,
+    config: source.missing_plugin || !(["agent", "conversation", "text", "image", "sandbox"].includes(type)) ? { ...asRecord(source.config) } : config,
     created_at: typeof source.created_at === "string" ? source.created_at : undefined,
     updated_at: typeof source.updated_at === "string" ? source.updated_at : undefined,
   };
@@ -163,6 +167,7 @@ export function normalizeCard(input: unknown): WorldCard {
 export function normalizeEdge(input: unknown): WorldEdge {
   const source = asRecord(input);
   return {
+    missing_plugin: source.missing_plugin as WorldEdge["missing_plugin"],
     id: String(source.id),
     revision: typeof source.revision === "number" ? source.revision : undefined,
     source: String(source.source ?? source.source_id),
@@ -237,6 +242,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers.set("Content-Type", "application/json");
   }
   headers.set("Accept", "application/json");
+  // Correlation survives a lost response; it never identifies a user or tenant.
+  if (!headers.has("X-Request-ID")) {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    headers.set("X-Request-ID", Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join(""));
+  }
 
   let response: Response;
   try {
@@ -246,6 +256,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       "The world service is not reachable.",
       0,
       error instanceof Error ? error.message : error,
+      headers.get("X-Request-ID") ?? undefined,
     );
   }
 
@@ -262,11 +273,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (response.status === 401 && API_BASE !== BUILDER_API_BASE) window.dispatchEvent(new Event('oaw-session-expired'));
     const bodyRecord = asRecord(body);
     const errorRecord = asRecord(bodyRecord.error);
-    const detail = errorRecord.message ?? bodyRecord.detail ?? body;
+    const detail = Array.isArray(bodyRecord.detail)
+      ? bodyRecord.detail
+      : errorRecord.message ?? bodyRecord.detail ?? body;
     throw new ApiError(
       errorMessage(detail, response.status),
       response.status,
       detail,
+      response.headers.get("X-Request-ID") ??
+        (typeof errorRecord.request_id === "string" ? errorRecord.request_id : headers.get("X-Request-ID") ?? undefined),
+      errorRecord.retryable === true,
+      typeof errorRecord.code === "string" ? errorRecord.code : undefined,
     );
   }
   return body as T;
@@ -349,9 +366,12 @@ export const worldApi = {
     return request<SandboxSettings>("/settings/sandbox");
   },
 
-  saveSandboxSettings(settings: SandboxSettings): Promise<SandboxSettings> {
+  saveSandboxSettings(settings: SandboxSettings & { secrets?: Record<string, string> }): Promise<SandboxSettings> {
     return request<SandboxSettings>("/settings/sandbox", {
-      method: "PUT", body: JSON.stringify({ workspace_root: settings.workspace_root, runtime: settings.runtime }),
+      method: "PUT", body: JSON.stringify({
+        workspace_root: settings.workspace_root, runtime: settings.runtime,
+        environment_variables: settings.environment_variables, secrets: settings.secrets,
+      }),
     });
   },
   async getSummoning(id: string): Promise<SummoningSnapshot> {
@@ -739,9 +759,11 @@ export const worldApi = {
   createConversationSession(
     conversationId: string,
     input: { title: string; participant_ids: string[]; group_id?: string; group_title?: string },
+    idempotencyKey?: string,
   ): Promise<ConversationSession> {
     return request<ConversationSession>(`/conversations/${encodeURIComponent(conversationId)}/sessions`, {
       method: "POST",
+      ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {}),
       body: JSON.stringify(input),
     });
   },
@@ -903,7 +925,8 @@ export const worldApi = {
 export interface SandboxSettings {
   workspace_root: string | null;
   runtime: string;
-  environment_variables?: Record<string, string>;
+  environment_variables?: Record<string, string | { secret_ref: string }>;
+  secret_bindings?: Record<string, boolean>;
   backup_paths?: string[];
 }
 

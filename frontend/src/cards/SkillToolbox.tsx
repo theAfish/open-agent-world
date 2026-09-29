@@ -3,6 +3,8 @@ import { Boxes, Download, FilePlus2, Plus, RefreshCw, Settings2, Trash2, Wrench,
 import { useCallback, useEffect, useState } from "react";
 import { apiErrorMessage, nodeDocumentDownloadUrl, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
+import { surfaceDraftKey, useSurfaceDraft } from '../state/nodeSurfaces';
+import { useHydrationLease } from '../canvas/useCardRendering';
 import type { WorldCard } from "../types/world";
 import { SkillDefaultsEditor, settingsFromValue, settingsToValue, type SettingRow } from "./SkillDefaultsEditor";
 import { SkillFilesEditor, type SkillFiles } from "./SkillFilesEditor";
@@ -70,11 +72,12 @@ export function SkillToolboxBody({ card, workspace = false, single = false }: { 
   const { box, accept, reload, error, setError } = useToolbox(card.id, single);
   const updateCard = useWorldStore((state) => state.updateCard);
   const [busy, setBusy] = useState(false);
-  const [search, setSearch] = useState("");
-  const [skillTab, setSkillTab] = useState<"instructions" | "settings" | "files">("instructions");
-  const [draft, setDraft] = useState<{ skill: Skill; defaults: SettingRow[]; revision: number; isNew: boolean }>();
-  const [settings, setSettings] = useState<{ value: Package; revision: number }>();
+  const [search, setSearch] = useSurfaceDraft(surfaceDraftKey(card.id, 'toolbox-search'), '');
+  const [skillTab, setSkillTab] = useSurfaceDraft<'instructions' | 'settings' | 'files'>(surfaceDraftKey(card.id, 'toolbox-tab'), 'instructions');
+  const [draft, setDraft] = useSurfaceDraft<{ skill: Skill; defaults: SettingRow[]; revision: number; isNew: boolean } | undefined>(surfaceDraftKey(card.id, 'toolbox-draft'), undefined);
+  const [settings, setSettings] = useSurfaceDraft<{ value: Package; revision: number } | undefined>(surfaceDraftKey(card.id, 'toolbox-settings'), undefined);
   const editing = !!draft || !!settings;
+  useHydrationLease(card.id, 'toolbox-edit', busy || editing);
   const mutate = async (action: string, args: Record<string, unknown>, revision: number) => {
     setBusy(true); setError("");
     try {

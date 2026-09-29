@@ -3,6 +3,22 @@ import type { PackInstallations } from '../types/packs';
 
 export type InstalledPack = PackInstallations['versions'][number];
 
+/** Keep pending restarts and intentional disabling separate from broken packs. */
+export function packIssue(pack: LibrarySnapshot['packs'][string], snapshot: LibrarySnapshot, versions: InstalledPack[] = []) {
+  const loaded = versions.find(item => item.loaded);
+  const selected = versions.find(item => item.selected);
+  if ((loaded ?? selected)?.environment?.state === 'environment_failed') {
+    return { kind: 'error', label: 'Environment failed' } as const;
+  }
+  if (selected && !selected.loaded) return undefined;
+  const plugin = snapshot.plugins[pack.definition.plugin_id];
+  if (!plugin?.installed) return { kind: 'missing', label: 'Pack uninstalled' } as const;
+  if (plugin.enabled && !snapshot.available_pack_ids.includes(pack.definition.id)) {
+    return { kind: 'missing', label: 'Pack unavailable' } as const;
+  }
+  return undefined;
+}
+
 export function installedPackStatus(versions: InstalledPack[]) {
   const selected = versions.find(item => item.selected);
   const loaded = versions.find(item => item.loaded);

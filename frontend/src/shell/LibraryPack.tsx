@@ -6,12 +6,14 @@ import { useSurfaceTilt } from "../components/useSurfaceTilt";
 import { useCardLibrary, type LibrarySnapshot } from "../state/cardLibrary";
 import { CardFinishLayer } from "../cards/CardFinishLayer";
 import { libraryCardMetadata } from "./libraryCatalog";
+import { packIssue, type InstalledPack } from './installedPacks';
 import "./libraryPack.css";
 
-export function LibraryPack({ pack, snapshot, onOpened, onBrowse, onInspect, status, contentCountKnown = true }: {
+export function LibraryPack({ pack, snapshot, onOpened, onBrowse, onInspect, status, versions, contentCountKnown = true }: {
   pack: LibrarySnapshot["packs"][string]; snapshot: LibrarySnapshot;
   onOpened: (id: string) => void; onBrowse: (id: string) => void;
   onInspect?: () => void; status?: string; contentCountKnown?: boolean;
+  versions?: InstalledPack[];
 }) {
   useLocale();
   const library = useCardLibrary();
@@ -23,7 +25,8 @@ export function LibraryPack({ pack, snapshot, onOpened, onBrowse, onInspect, sta
   const definition = { ...pack.definition, name: t(pack.definition.name), description: t(pack.definition.description) };
   const plugin = snapshot.plugins[definition.plugin_id];
   const available = snapshot.available_pack_ids.includes(definition.id);
-  const canOpen = !library.busy && phase === "idle" && available && pack.owned && !pack.opened;
+  const issue = packIssue(pack, snapshot, versions);
+  const canOpen = !issue && !library.busy && phase === "idle" && available && pack.owned && !pack.opened;
   const artwork = definition.artwork_url && definition.artwork_url !== failedArtwork ? definition.artwork_url : null;
   const presetCount = Object.values(snapshot.preset_pack_ids ?? {}).filter(ids => ids.includes(definition.id)).length;
   const revealSnapshot = phase === "revealing" ? revealedSnapshot : null;
@@ -50,12 +53,12 @@ export function LibraryPack({ pack, snapshot, onOpened, onBrowse, onInspect, sta
       onOpened(definition.id);
     } else setPhase("idle");
   };
-  const unavailable = !plugin?.installed ? t("Pack uninstalled") : !plugin.enabled ? t("Pack disabled") : !available ? t("Pack unavailable") : !pack.owned ? t("Not owned") : "";
-  return <article aria-label={definition.name} data-pack-id={definition.id} className={`library-pack ${pack.opened || revealSnapshot ? "is-opened" : ""} is-${phase}`} style={{ "--pack-color": color } as CSSProperties}>
-    <button className="pack-touch-area" {...tilt} aria-label={onInspect ? t('View pack {name}', { name: definition.name }) : `${pack.opened || !available ? t("View cards in") : t("Tear open")} ${definition.name}`}
+  const unavailable = issue ? t(issue.label) : !plugin?.installed ? t("Pack uninstalled") : !plugin.enabled ? t("Pack disabled") : !available ? t("Pack unavailable") : !pack.owned ? t("Not owned") : "";
+  return <article aria-label={definition.name} data-pack-id={definition.id} data-pack-issue={issue?.kind} className={`library-pack ${pack.opened || revealSnapshot ? "is-opened" : ""} is-${phase}`} style={{ "--pack-color": color } as CSSProperties}>
+    <button className="pack-touch-area" {...tilt} aria-label={onInspect ? t('View pack {name}', { name: definition.name }) : `${pack.opened || !available || issue ? t("View cards in") : t("Tear open")} ${definition.name}`}
       title={onInspect ? t('View pack {name}', { name: definition.name }) : phase === "pending" ? t("Opening…") : pack.opened ? t("View {v0} cards", { v0: String(definition.name) }) : unavailable || t("Open {v0}", { v0: String(definition.name) })}
       aria-busy={phase === "pending"} disabled={phase !== "idle" || (!pack.opened && (library.busy || !pack.owned))}
-      onClick={() => onInspect ? onInspect() : pack.opened || !available ? onBrowse(definition.id) : void openPack()}>
+      onClick={() => onInspect ? onInspect() : pack.opened || !available || issue ? onBrowse(definition.id) : void openPack()}>
       <span className="pack-shadow" aria-hidden="true" />
       <span className="pack-object" aria-hidden="true" onAnimationEnd={event => { if (event.target === event.currentTarget && event.animationName === "packDeflate") setPhase("idle"); }}>
         <span className="pack-back" />
@@ -71,9 +74,9 @@ export function LibraryPack({ pack, snapshot, onOpened, onBrowse, onInspect, sta
         <span className="pack-facet pack-facet-bottom" />
         <span className="pack-wrapper">
           <span className="pack-print">
-            {artwork ? <img className="pack-artwork" src={artwork} alt="" draggable={false} onError={() => setFailedArtwork(artwork)} /> : <span className="pack-guilloche" />}
+            {!issue && (artwork ? <img className="pack-artwork" src={artwork} alt="" draggable={false} onError={() => setFailedArtwork(artwork)} /> : <span className="pack-guilloche" />)}
             <span className="pack-edition">{t(plugin?.descriptor.name ?? definition.plugin_id)}</span>
-            <span className="pack-emblem"><CatalogIcon definition={cards[0]} size={38} /></span>
+            <span className="pack-emblem">{issue ? <strong className="pack-issue-mark">{issue.kind === 'missing' ? 'MISSING' : 'ERROR'}</strong> : <CatalogIcon definition={cards[0]} size={38} />}</span>
             <span className="pack-title">{definition.name}</span>
             <span className="pack-subtitle">{definition.description || t("A collection of possibilities.")}</span>
             <span className="pack-print-footer"><b>{contentCountKnown ? String(definition.cards.length + presetCount).padStart(2, "0") : '—'} <small>{t("CARDS")}</small></b><span>{t("OPEN AGENT")}<br />{t("WORLD")}</span></span>
@@ -81,9 +84,9 @@ export function LibraryPack({ pack, snapshot, onOpened, onBrowse, onInspect, sta
           <span className="pack-foil" />
         </span>
         <span className="pack-bottom-seal" />
-        <span className="pack-top-seal"><span>{t(onInspect ? 'VIEW PACK' : 'TEAR TO OPEN')}</span><ChevronRight size={10} /></span>
+        <span className="pack-top-seal"><span>{t(onInspect || issue || !available ? 'VIEW PACK' : 'TEAR TO OPEN')}</span><ChevronRight size={10} /></span>
       </span>
     </button>
-    {status && <span className="pack-inventory-status">{t(status)}</span>}
+    {(issue || status) && <span className="pack-inventory-status">{t(issue?.label ?? status!)}</span>}
   </article>;
 }

@@ -14,7 +14,7 @@ export function BlueprintChooser() {
   const [presets, setPresets] = useState<LegionSummary[]>([]);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
-  const [selected, setSelected] = useState('assistant');
+  const [selected, setSelected] = useState<string[]>([]);
   const legions = useWorldStore(s => s.legions);
   const saved = legions.filter(item => !item.preset);
   const offline = useWorldStore(s => s.syncState === 'offline');
@@ -22,31 +22,40 @@ export function BlueprintChooser() {
   useEffect(() => {
     let active = true;
     setError('');
-    worldApi.getBlueprintPresets().then(items => { if (active) setPresets(items.filter(item => item.starter)); })
+    worldApi.getBlueprintPresets().then(items => { if (active) setPresets(items); })
       .catch(e => { if (active) setError(apiErrorMessage(e)); });
     return () => { active = false; };
   }, [retry]);
-  const deploy = (blueprint: LegionSummary, preset: boolean) => void tutorial.fromBlueprint(blueprint, preset);
-  const chosen = presets.find(item => item.id === selected && item.compatible);
+  const choices = [...presets, ...saved];
+  const chosen = choices.filter(item => selected.includes(`${item.preset ? 'preset' : 'saved'}:${item.id}`) && item.compatible);
+  const toggle = (item: LegionSummary) => {
+    const key = `${item.preset ? 'preset' : 'saved'}:${item.id}`;
+    setSelected(previous => previous.includes(key) ? previous.filter(id => id !== key) : [...previous, key]);
+  };
+  const deploy = async () => {
+    const completed = await tutorial.fromBlueprints(chosen);
+    setSelected(previous => previous.filter(key => !completed.includes(key)));
+  };
   return <div className="blueprint-chooser">
     <h2>{t('Choose a workspace')}</h2>
-    <form className="blueprint-form" onSubmit={event => { event.preventDefault(); if (chosen && !busy && !offline) deploy(chosen, true); }}>
+    <p>{t('Select one or more workspaces to place on your canvas.')}</p>
+    <form className="blueprint-form" onSubmit={event => { event.preventDefault(); if (chosen.length && !busy && !offline) void deploy(); }}>
     <div className="blueprint-grid">
       {presets.map(item => {
         const Icon = icons[item.id as keyof typeof icons] ?? Layers3;
-        return <button type="button" key={item.id} className="blueprint-option" aria-pressed={selected === item.id} disabled={busy || offline || !item.compatible}
-          title={item.compatible ? undefined : item.issues.join(' ')} onClick={() => setSelected(item.id)}>
+        return <button type="button" key={item.id} className="blueprint-option" aria-pressed={selected.includes(`preset:${item.id}`)} disabled={busy || offline || !item.compatible}
+          title={item.compatible ? undefined : item.issues.join(' ')} onClick={() => toggle(item)}>
           <Icon size={21} /><strong>{t(item.name)}</strong><span>{t(descriptions[item.id as keyof typeof descriptions] ?? item.description ?? '')}</span>
         </button>;
       })}
     </div>
-    <button className="primary-button blueprint-start" type="submit" disabled={!chosen || busy || offline}>{t(busy ? 'Preparing workspace…' : 'Open workspace')}</button>
+    <button className="primary-button blueprint-start" type="submit" disabled={!chosen.length || busy || offline}>{t(busy ? 'Preparing workspace…' : 'Place workspaces')}{chosen.length > 0 && ` (${chosen.length})`}</button>
     </form>
     {!presets.length && !error && <p role="status">{t('Loading blueprints…')}</p>}
     {error && <p className="onboarding-error" role="alert">{error} <button className="onboarding-text-button" onClick={() => setRetry(v => v + 1)}>{t('Retry')}</button></p>}
     {saved.length > 0 && <details className="blueprint-saved"><summary>{t('Use a saved Legion as a blueprint')}</summary>
       {saved.map(item => <button key={item.id} className="secondary-button" disabled={busy || offline || !item.compatible}
-        title={item.issues.join(' ')} onClick={() => deploy(item, false)}><Layers3 size={14} />{item.name}</button>)}
+        title={item.issues.join(' ')} aria-pressed={selected.includes(`saved:${item.id}`)} onClick={() => toggle(item)}><Layers3 size={14} />{item.name}</button>)}
     </details>}
   </div>;
 }

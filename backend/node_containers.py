@@ -12,7 +12,7 @@ def touch_parent(services, parent_id):
     if parent_id is None:
         return
     parent = services.world.maybe_get_card(parent_id)
-    if parent is None:
+    if parent is None or parent.missing_plugin:
         return
     spec = services.plugins.node_type(parent.type).container
     if spec is None or spec.document_field is None:
@@ -68,6 +68,8 @@ def sync_members(services, node_id, entries):
 def migrate_collections(services):
     from backend.node_documents import write_document
     for node in services.world.list_cards():
+        if node.missing_plugin:
+            continue
         spec = services.plugins.node_type(node.type).container
         if spec is None or spec.document_field is None:
             continue

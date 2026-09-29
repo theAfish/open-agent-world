@@ -49,12 +49,12 @@ def check(site=Path(".tmp/docs-site")):
     search = json.loads((site / "search/search_index.json").read_text(encoding="utf-8"))
     locations = {entry["location"].split("#")[0] for entry in search["docs"]}
     for location in locations:
-        if location not in {"", "README.zh-CN/", "install/"} and not location.startswith(("user-guide/", "developers/")):
+        if location not in {"", "README.zh-CN/", "install/", "install.zh-CN/"} and not location.startswith(("user-guide/", "developers/", "contributing/")):
             errors.append(f"Internal reference leaked into general search: {location}")
-    for required in ("user-guide/first-team/", "developers/first-plugin/", "user-guide/index.zh-CN/"):
+    for required in ("user-guide/first-team/", "developers/first-plugin/", "user-guide/index.zh-CN/", "install.zh-CN/", "contributing/docs-checklist/"):
         if required not in locations:
             errors.append(f"Missing guide from search: {required}")
-    for excluded in ("SHADOW_COLLECTION", "SHADOW_GAS_BOUNDARY", "READER_TRANSITION", "matcreator-demo-plan"):
+    for excluded in ("internal",):
         if (site / excluded).exists():
             errors.append(f"Design draft was published: {excluded}")
     if errors:

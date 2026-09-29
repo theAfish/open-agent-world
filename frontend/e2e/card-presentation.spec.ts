@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test('shared collection faces and portrait canvas previews', async ({ page, request }) => {
   await page.goto('/');
-  const start = page.getByRole('button', { name: 'Start Empty', exact: true });
+  const start = page.getByRole('button', { name: 'Start blank', exact: true });
   await expect(start).toBeVisible();
   await start.click();
   await expect(start).not.toBeVisible();

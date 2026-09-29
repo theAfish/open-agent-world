@@ -8,7 +8,7 @@
 
 从 [中文使用入门](user-guide/index.zh-CN.md) 开始：安装应用、配置模型、收集卡片，再让智能体读一份文档。无需了解内部架构或编写代码。
 
-- [下载与安装](install.md)
+- [下载与安装](install.zh-CN.md)
 - [第一支团队（英文）](user-guide/first-team.md)
 - [模型与设置（英文）](user-guide/models.md)
 - [插件与卡包（英文）](user-guide/plugins.md)
@@ -29,3 +29,8 @@
 站点以英文文档为主，中文页面保留独立入口；尚未翻译的内容明确标注为英文。
 
 [技术参考（英文）](reference/index.md) 面向开发者，包含 API、运行时和架构说明。[从源码运行](getting-started.zh-CN.md)、[交互教程与实现](tutorial.zh-CN.md)、[工作区部署](deployment.zh-CN.md) 保留中文版本。
+
+## 参与维护
+
+修改宿主或准备发布时，从[贡献者指南（英文）](contributing/index.md)进入。
+新增或整理文档请遵循[文档编写规范](contributing/docs-checklist.zh-CN.md)：按读者归类、分离中英文正文，并在提交前运行与 CI 相同的检查。

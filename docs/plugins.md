@@ -216,7 +216,10 @@ Plugin API 1.18 adds `registration.register_legion_preset(LegionPresetDefinition
 Import `LegionPresetDefinition`, `PresetNode` and `PresetEdge` from
 `open_agent_world.plugin_api`. Preset IDs must use the plugin namespace. Declare
 portable node keys, types, configuration, positions, presentation levels,
-optional initial documents/template payloads and internal relationships. Include
+optional initial documents/template payloads and internal relationships. An omitted
+`PresetNode.presentation` follows the node type's current `presentation.initial`;
+an explicit level remains an authored override. Update preset spacing when a node's
+default surface changes. Include
 a `legion` node with `parent_key=None`; member references and workspace section
 owners use template keys. The host resolves contribution owners, validates the
 formation before registration commits, and deploys through the existing Legion

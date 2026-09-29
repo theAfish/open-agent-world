@@ -2,8 +2,8 @@ import { useStore, useStoreApi } from '@xyflow/react';
 import { memo, useLayoutEffect } from 'react';
 import './canvasCardLayers.css';
 
-/** Reuse small card surfaces during overview pan, without retaining large
- * inspector/workspace textures or rendering React on every viewport change.
+/** Reuse small cards and static thumbnail surfaces during overview pan, without
+ * caching full workspace trees or rendering React on every viewport change.
  */
 export const CanvasCardLayers = memo(function CanvasCardLayers() {
   const root = useStore(state => state.domNode);

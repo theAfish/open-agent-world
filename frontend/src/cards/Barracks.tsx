@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
+import { surfaceDraftKey, useSurfaceDraft } from '../state/nodeSurfaces';
+import { useHydrationLease } from '../canvas/useCardRendering';
 import type { WorldCard } from "../types/world";
 import { AddSelectedMembers, ContainerActions, ContainerFrame } from "./ContainerFrame";
 import type { CanvasNode } from "./types";
@@ -40,6 +42,7 @@ export function BarracksContainerNode({ data, selected }: NodeProps<CanvasNode>)
   useLocale();
   const card = data.card;
   const [editing, setEditing] = useState(false);
+  useHydrationLease(card.id, 'barracks-dialog', editing);
   return <ContainerFrame card={card} selected={selected} className="skill-container barracks-container" label={t("{v0} barracks", { v0: String(card.name) })} header={<>
     <Bot size={24} /><div><span>{t("AGENT BARRACKS · OPEN SPACE")}</span><strong>{card.name}</strong></div>
     <button className="secondary-button nodrag nopan" onClick={() => setEditing(true)}>{t("Open barracks")}</button>
@@ -59,9 +62,10 @@ export function BarracksBody({ card, workspace = false }: { card: WorldCard; wor
   const selectCards = useWorldStore((state) => state.selectCards);
   const refreshWorld = useWorldStore((state) => state.refreshWorld);
   const [busy, setBusy] = useState(false);
-  const [task, setTask] = useState("");
-  const [target, setTarget] = useState("");
-  const [settings, setSettings] = useState<{ value: Record<string, unknown>; revision: number }>();
+  const [task, setTask] = useSurfaceDraft(surfaceDraftKey(card.id, 'barracks-task'), '');
+  const [target, setTarget] = useSurfaceDraft(surfaceDraftKey(card.id, 'barracks-target'), '');
+  const [settings, setSettings] = useSurfaceDraft<{ value: Record<string, unknown>; revision: number } | undefined>(surfaceDraftKey(card.id, 'barracks-settings'), undefined);
+  useHydrationLease(card.id, 'barracks-edit', busy || !!settings);
   const mutate = async (operation: () => Promise<unknown>) => {
     setBusy(true); setError("");
     try { await operation(); await reload(); await refreshWorld(); }

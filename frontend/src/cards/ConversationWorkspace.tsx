@@ -20,6 +20,7 @@ import {
 import { useWorldStore } from "../state/worldStore";
 import { useConversationView } from "../state/conversationView";
 import { surfaceDraftKey, useSurfaceDraft } from '../state/nodeSurfaces';
+import { useHydrationLease } from '../canvas/useCardRendering';
 import { useOpenFiles } from "../state/openFiles";
 import type { ContextStatus, ConversationAgent, ConversationAttachment, ConversationMessage, ConversationSession, WorldCard } from "../types/world";
 import { reportInteraction } from '../state/interactions';
@@ -78,7 +79,6 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   useEffect(() => {
     if (!useConversationView.getState().activeConversationId) activateConversation();
   }, [activateConversation]);
-  useEffect(() => () => useOpenFiles.getState().clear(card.id), [card.id, activeSessionId]);
 
   const [draft, setDraft] = useSurfaceDraft(surfaceDraftKey(card.id, 'composer', activeSessionId), '');
   const [attachments, setAttachments] = useSurfaceDraft(surfaceDraftKey(card.id, 'attachments', activeSessionId), NO_ATTACHMENTS);
@@ -87,20 +87,22 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const [outgoing, setOutgoing] = useSurfaceDraft(surfaceDraftKey(card.id, 'outgoing'), NO_OUTGOING);
   const [stoppingRuns, setStoppingRuns] = useState<Set<string>>(() => new Set());
   const revealOutgoing = useRef(false);
-  const [selectedAgentId, setSelectedAgentId] = useState<string>();
-  const [creatingGroup, setCreatingGroup] = useState(false);
-  const [groupTitle, setGroupTitle] = useState("");
-  const [groupAgentIds, setGroupAgentIds] = useState<string[]>([]);
+  const key = (field: string) => surfaceDraftKey(card.id, `conversation-${field}`, activeSessionId);
+  const [selectedAgentId, setSelectedAgentId] = useSurfaceDraft<string | undefined>(key('agent'), undefined);
+  const [creatingGroup, setCreatingGroup] = useSurfaceDraft(key('creating-group'), false);
+  const [groupTitle, setGroupTitle] = useSurfaceDraft(key('group-title'), '');
+  const [groupAgentIds, setGroupAgentIds] = useSurfaceDraft<string[]>(key('group-agents'), []);
   const groupRow = useRef<HTMLFormElement>(null);
   const groupNameInput = useRef<HTMLInputElement>(null);
   const groupPicker = useRef<HTMLDivElement>(null);
   const [sessionRegion, setSessionRegion] = useState<HTMLDivElement | null>(null);
   const newGroupButton = useRef<HTMLButtonElement>(null);
-  const [addingParticipants, setAddingParticipants] = useState(false);
-  const [participantAgentIds, setParticipantAgentIds] = useState<string[]>([]);
+  const [addingParticipants, setAddingParticipants] = useSurfaceDraft(key('adding-participants'), false);
+  const [participantAgentIds, setParticipantAgentIds] = useSurfaceDraft<string[]>(key('participants'), []);
   const [mentionCaret, setMentionCaret] = useState<number>();
   const [mentionIndex, setMentionIndex] = useState(0);
   const [busy, setBusy] = useState(false);
+  useHydrationLease(card.id, 'conversation-operation', busy || uploading || stoppingRuns.size > 0 || creatingGroup || addingParticipants);
   const [error, setError] = useState<string>();
   const transcript = useRef<HTMLDivElement>(null);
 
@@ -168,10 +170,11 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const activeGroupId = activeSession?.group_id ?? activeSession?.id;
   const groups = [...new Map(sessions.map((session) => [session.group_id ?? session.id, session])).values()];
   const groupSessions = sessions.filter((session) => (session.group_id ?? session.id) === activeGroupId);
-  const [renaming, setRenaming] = useState<string>();
-  const [sessionTitle, setSessionTitle] = useState("");
-  const [renamingGroup, setRenamingGroup] = useState<string>();
-  const [renamedGroupTitle, setRenamedGroupTitle] = useState("");
+  const [renaming, setRenaming] = useSurfaceDraft<string | undefined>(key('renaming'), undefined);
+  const [sessionTitle, setSessionTitle] = useSurfaceDraft(key('session-title'), '');
+  const [renamingGroup, setRenamingGroup] = useSurfaceDraft<string | undefined>(key('renaming-group'), undefined);
+  const [renamedGroupTitle, setRenamedGroupTitle] = useSurfaceDraft(key('renamed-group-title'), '');
+  useHydrationLease(card.id, 'conversation-rename', !!renaming || !!renamingGroup);
   const availableAgents = connectedAgents.filter((agent) => (
     !activeSession?.participant_ids.includes(agent.id)
   ));

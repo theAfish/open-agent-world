@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="940" viewBox="0 0 600 940">
+  <!-- Shared fixed engraving. Opaque discs in the luminance mask occlude
+       earlier rings, leaving overlapping circular patches of fine grooves. -->
+  <defs>
+    <g id="rings">
+      <circle r="63" fill="#000"/>
+      <g fill="none" stroke="#fff" stroke-width="1.35"><circle r="2"/><circle r="6"/><circle r="10"/><circle r="14"/><circle r="18"/><circle r="22"/><circle r="26"/><circle r="30"/><circle r="34"/><circle r="38"/><circle r="42"/><circle r="46"/><circle r="50"/><circle r="54"/><circle r="58"/><circle r="62"/></g>
+    </g>
+    <mask id="etch" maskUnits="userSpaceOnUse" x="0" y="0" width="600" height="940" style="mask-type:luminance">
+    <use href="#rings" transform="translate(-40.0 -10.0) scale(0.98)"/>
+    <use href="#rings" transform="translate(69.1 -14.7) scale(1.04)"/>
+    <use href="#rings" transform="translate(167.7 -24.5) scale(0.99)"/>
+    <use href="#rings" transform="translate(257.4 -30.0) scale(1.05)"/>
+    <use href="#rings" transform="translate(350.2 -26.0) scale(1.00)"/>
+    <use href="#rings" transform="translate(454.2 -16.4) scale(1.06)"/>
+    <use href="#rings" transform="translate(565.0 -10.2) scale(1.01)"/>
+    <use href="#rings" transform="translate(670.0 -13.3) scale(1.07)"/>
+    <use href="#rings" transform="translate(13.5 68.2) scale(1.02)"/>
+    <use href="#rings" transform="translate(103.0 61.4) scale(1.08)"/>
+    <use href="#rings" transform="translate(200.6 63.6) scale(1.03)"/>
+    <use href="#rings" transform="translate(309.0 72.9) scale(0.98)"/>
+    <use href="#rings" transform="translate(418.6 80.3) scale(1.04)"/>
+    <use href="#rings" transform="translate(518.3 78.9) scale(0.99)"/>
+    <use href="#rings" transform="translate(608.4 70.0) scale(1.05)"/>
+    <use href="#rings" transform="translate(700.4 62.0) scale(1.00)"/>
+    <use href="#rings" transform="translate(-46.5 153.5) scale(1.06)"/>
+    <use href="#rings" transform="translate(64.1 162.1) scale(1.01)"/>
+    <use href="#rings" transform="translate(170.0 170.5) scale(1.07)"/>
+    <use href="#rings" transform="translate(264.4 170.9) scale(1.02)"/>
+    <use href="#rings" transform="translate(353.7 162.8) scale(1.08)"/>
+    <use href="#rings" transform="translate(450.3 154.0) scale(1.03)"/>
+    <use href="#rings" transform="translate(558.1 152.7) scale(0.98)"/>
+    <use href="#rings" transform="translate(668.1 160.3) scale(1.04)"/>
+    <use href="#rings" transform="translate(18.8 260.5) scale(0.99)"/>
+    <use href="#rings" transform="translate(109.3 262.6) scale(1.05)"/>
+    <use href="#rings" transform="translate(200.7 255.6) scale(1.00)"/>
+    <use href="#rings" transform="translate(302.8 246.2) scale(1.06)"/>
+    <use href="#rings" transform="translate(413.2 243.2) scale(1.01)"/>
+    <use href="#rings" transform="translate(519.9 249.5) scale(1.07)"/>
+    <use href="#rings" transform="translate(615.2 259.1) scale(1.02)"/>
+    <use href="#rings" transform="translate(704.5 262.9) scale(1.08)"/>
+    <use href="#rings" transform="translate(-49.9 348.3) scale(1.03)"/>
+    <use href="#rings" transform="translate(57.1 338.6) scale(0.98)"/>
+    <use href="#rings" transform="translate(167.5 334.0) scale(1.04)"/>
+    <use href="#rings" transform="translate(269.2 338.9) scale(0.99)"/>
+    <use href="#rings" transform="translate(360.3 348.6) scale(1.05)"/>
+    <use href="#rings" transform="translate(451.1 354.0) scale(1.00)"/>
+    <use href="#rings" transform="translate(552.1 349.9) scale(1.06)"/>
+    <use href="#rings" transform="translate(662.3 340.2) scale(1.01)"/>
+    <use href="#rings" transform="translate(19.8 425.1) scale(1.07)"/>
+    <use href="#rings" transform="translate(116.0 428.4) scale(1.02)"/>
+    <use href="#rings" transform="translate(205.3 437.9) scale(1.08)"/>
+    <use href="#rings" transform="translate(300.0 444.7) scale(1.03)"/>
+    <use href="#rings" transform="translate(406.2 442.3) scale(0.98)"/>
+    <use href="#rings" transform="translate(516.8 433.0) scale(1.04)"/>
+    <use href="#rings" transform="translate(619.5 425.6) scale(0.99)"/>
+    <use href="#rings" transform="translate(711.3 427.1) scale(1.05)"/>
+    <use href="#rings" transform="translate(-48.5 527.1) scale(1.00)"/>
+    <use href="#rings" transform="translate(51.6 535.0) scale(1.06)"/>
+    <use href="#rings" transform="translate(161.3 534.4) scale(1.01)"/>
+    <use href="#rings" transform="translate(269.5 525.8) scale(1.07)"/>
+    <use href="#rings" transform="translate(366.8 517.4) scale(1.02)"/>
+    <use href="#rings" transform="translate(456.2 517.1) scale(1.08)"/>
+    <use href="#rings" transform="translate(550.0 525.3) scale(1.03)"/>
+    <use href="#rings" transform="translate(655.4 534.1) scale(0.98)"/>
+    <use href="#rings" transform="translate(16.1 626.2) scale(1.04)"/>
+    <use href="#rings" transform="translate(119.8 618.6) scale(0.99)"/>
+    <use href="#rings" transform="translate(212.2 609.4) scale(1.05)"/>
+    <use href="#rings" transform="translate(302.1 607.5) scale(1.00)"/>
+    <use href="#rings" transform="translate(401.1 614.5) scale(1.06)"/>
+    <use href="#rings" transform="translate(510.4 623.9) scale(1.01)"/>
+    <use href="#rings" transform="translate(619.2 626.8) scale(1.07)"/>
+    <use href="#rings" transform="translate(717.4 620.4) scale(1.02)"/>
+    <use href="#rings" transform="translate(-42.9 701.8) scale(1.08)"/>
+    <use href="#rings" transform="translate(50.1 698.1) scale(1.03)"/>
+    <use href="#rings" transform="translate(154.5 703.8) scale(0.98)"/>
+    <use href="#rings" transform="translate(265.3 713.5) scale(1.04)"/>
+    <use href="#rings" transform="translate(369.9 718.0) scale(0.99)"/>
+    <use href="#rings" transform="translate(463.1 713.0) scale(1.05)"/>
+    <use href="#rings" transform="translate(552.7 703.3) scale(1.00)"/>
+    <use href="#rings" transform="translate(650.7 698.0) scale(1.06)"/>
+    <use href="#rings" transform="translate(9.4 793.2) scale(1.01)"/>
+    <use href="#rings" transform="translate(118.8 802.9) scale(1.07)"/>
+    <use href="#rings" transform="translate(218.0 808.9) scale(1.02)"/>
+    <use href="#rings" transform="translate(308.0 805.5) scale(1.08)"/>
+    <use href="#rings" transform="translate(400.3 796.0) scale(1.03)"/>
+    <use href="#rings" transform="translate(503.7 789.3) scale(0.98)"/>
+    <use href="#rings" transform="translate(614.4 791.8) scale(1.04)"/>
+    <use href="#rings" transform="translate(720.0 801.2) scale(0.99)"/>
+    <use href="#rings" transform="translate(-36.0 899.4) scale(1.05)"/>
+    <use href="#rings" transform="translate(53.4 897.8) scale(1.00)"/>
+    <use href="#rings" transform="translate(150.4 888.7) scale(1.06)"/>
+    <use href="#rings" transform="translate(258.4 880.9) scale(1.01)"/>
+    <use href="#rings" transform="translate(368.3 881.7) scale(1.07)"/>
+    <use href="#rings" transform="translate(468.6 890.4) scale(1.02)"/>
+    <use href="#rings" transform="translate(559.0 898.7) scale(1.08)"/>
+    <use href="#rings" transform="translate(650.6 898.8) scale(1.03)"/>
+    <use href="#rings" transform="translate(3.0 981.6) scale(0.98)"/>
+    <use href="#rings" transform="translate(113.5 972.8) scale(1.04)"/>
+    <use href="#rings" transform="translate(220.0 971.8) scale(0.99)"/>
+    <use href="#rings" transform="translate(314.9 979.5) scale(1.05)"/>
+    <use href="#rings" transform="translate(404.2 988.6) scale(1.00)"/>
+    <use href="#rings" transform="translate(500.2 990.5) scale(1.06)"/>
+    <use href="#rings" transform="translate(607.5 983.4) scale(1.01)"/>
+    <use href="#rings" transform="translate(717.7 974.0) scale(1.07)"/>
+    </mask>
+  </defs>
+  <path d="M0 0h600v940H0z" fill="#fff" mask="url(#etch)"/>
+</svg>

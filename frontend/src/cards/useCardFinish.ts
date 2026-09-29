@@ -63,13 +63,15 @@ export function useCardFinish(finish?: CardFinish, quality: CardFinishQuality = 
       // A fixed studio light: only the broad reflection changes with orientation.
       style.setProperty("--finish-light-x", "32%");
       style.setProperty("--finish-light-y", "24%");
-      style.setProperty("--finish-shift-x", `${(50 - x * 12).toFixed(2)}%`);
-      style.setProperty("--finish-shift-y", `${(50 - y * 12).toFixed(2)}%`);
+      // Etched diffraction film has a stronger angular response than plain foil.
+      const travel = normalizeCardFinish(finish) === "laser" ? 38 : 12;
+      style.setProperty("--finish-shift-x", `${(50 - x * travel).toFixed(2)}%`);
+      style.setProperty("--finish-shift-y", `${(50 - y * travel).toFixed(2)}%`);
       style.setProperty("--finish-angle", `${(124 + x * 8 + y * 4).toFixed(2)}deg`);
       style.setProperty("--finish-active", "1");
       current.node.setAttribute("data-finish-active", "true");
     });
-  }, [quality, reset, tilt]);
+  }, [finish, quality, reset, tilt]);
 
   const enter = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     reset();

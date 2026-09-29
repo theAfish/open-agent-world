@@ -52,9 +52,9 @@ class SandboxEventType(_StringEnum):
 class SandboxLimits:
     """Requested command-tree limits; unsupported custom values must fail closed."""
 
-    memory_bytes: int = 512 * 1024 * 1024
+    memory_bytes: int = 2048 * 1024 * 1024
     active_process_limit: int = 64
-    default_timeout_seconds: float = 3600.0
+    default_timeout_seconds: float = 6000.0
 
     def __post_init__(self) -> None:
         if self.memory_bytes < 16 * 1024 * 1024:

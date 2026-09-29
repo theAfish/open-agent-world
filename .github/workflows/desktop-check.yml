@@ -1,0 +1,51 @@
+name: Desktop native checks
+
+on:
+  pull_request:
+    paths: ['desktop/**', 'backend/desktop_backup.py', 'backend/tests/test_desktop_*.py', 'scripts/*desktop*', '.github/workflows/desktop-*.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Native tests (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            platform: windows-x64
+          - runner: macos-14
+            platform: macos-arm64
+          - runner: macos-15-intel
+            platform: macos-x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt
+      - name: Select Rust
+        run: rustup default stable
+      - name: Prepare resource directory for compile checks
+        shell: python
+        run: |
+          from pathlib import Path
+          payload = Path('.open-agent-world/desktop-payload')
+          payload.mkdir(parents=True)
+          (payload / 'compile-check.txt').write_text('Compile check only; not an application payload.')
+      - name: Check Rust formatting
+        working-directory: desktop/src-tauri
+        run: cargo fmt --all -- --check
+      - name: Test native shell
+        working-directory: desktop/src-tauri
+        run: cargo test --locked --all-targets

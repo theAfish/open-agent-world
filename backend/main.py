@@ -8,6 +8,8 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException
 
 from backend import __version__
 from backend.api import api_router
@@ -28,7 +30,7 @@ from backend.agents import (
     AgentRuntimeError,
     AgentStateError,
 )
-from backend.request_context import REQUEST_ID_HEADER, RequestContextMiddleware
+from backend.request_context import REQUEST_ID_HEADER
 from backend.sandbox import (
     SandboxError,
     SandboxNotFoundError,
@@ -39,6 +41,8 @@ from backend.sandbox import (
 from backend.services import ApplicationServices, create_services
 from backend.sandbox.models import SandboxNetworkError
 from backend.application import router as application_router
+from backend.health import router as health_router
+from backend.http_context import RequestIdMiddleware, error_response, request_id
 
 
 def create_app(
@@ -72,8 +76,10 @@ def create_app(
                     if versions != deployment["plugin_versions"]:
                         raise RuntimeError("Deployment plugin versions changed. Rebuild and republish with matching plugins.")
                     active_services.world.structure_locked = True
+                application.state.ready = True
                 yield
             finally:
+                application.state.ready = False
                 try:
                     await active_services.shutdown()
                     if development is not None and development.pending and active_services.sandbox_backend:
@@ -125,7 +131,9 @@ def create_app(
             response.headers["X-Content-Type-Options"] = "nosniff"
             response.headers["Referrer-Policy"] = "no-referrer"
             return response
-    application.add_middleware(RequestContextMiddleware)
+    application.add_middleware(RequestIdMiddleware)
+    application.include_router(health_router)
+    application.state.ready = False
     application.state.clean_shutdown = False
     if development is not None and deployment is None:
         if selected_settings.application_mode != "development":
@@ -134,7 +142,6 @@ def create_app(
 
     @application.exception_handler(DomainError)
     async def handle_domain_error(request: Request, exc: DomainError) -> JSONResponse:
-        del request
         status_code = 422
         if isinstance(exc, NotFoundError):
             status_code = 404
@@ -146,16 +153,18 @@ def create_app(
             status_code = 503
         if deployment:
             logging.getLogger(__name__).warning("Deployment operation failed: %s", exc)
-        return JSONResponse(
+        return error_response(
+            request,
             status_code=status_code,
-            content={"error": {"code": exc.code, "message": "Operation unavailable. Refresh and retry; contact the operator if it persists." if deployment else exc.message}},
+            code=exc.code,
+            message="Operation unavailable. Refresh and retry; contact the operator if it persists." if deployment else exc.message,
+            retryable=False,
         )
 
     @application.exception_handler(AgentRuntimeError)
     async def handle_agent_runtime_error(
         request: Request, exc: AgentRuntimeError
     ) -> JSONResponse:
-        del request
         status_code = 500
         code = "agent_runtime_error"
         if isinstance(exc, AgentNotFoundError):
@@ -168,24 +177,27 @@ def create_app(
             status_code, code = 503, "agent_dependency_error"
         if deployment:
             logging.getLogger(__name__).warning("Deployment agent failed: %s", exc)
-        return JSONResponse(
+        return error_response(
+            request,
             status_code=status_code,
-            content={"error": {"code": code, "message": "Agent unavailable. Contact the operator." if deployment else str(exc)}},
+            code=code,
+            message="Agent unavailable. Contact the operator." if deployment else str(exc),
         )
 
     @application.exception_handler(SandboxError)
     async def handle_sandbox_error(
         request: Request, exc: SandboxError
     ) -> JSONResponse:
-        del request
         status_code = 500
         code = "sandbox_error"
         from backend.sandbox.models import SandboxOperationError
         if deployment:
             logging.getLogger(__name__).warning("Deployment Sandbox failed: %s", exc)
-            return JSONResponse(status_code=409, content={"error": {"code": "sandbox_unavailable", "message": "Workspace unavailable. Contact the operator."}})
+            return error_response(request, status_code=409, code="sandbox_unavailable", message="Workspace unavailable. Contact the operator.")
         if isinstance(exc, SandboxOperationError):
-            return JSONResponse(status_code=409 if exc.retryable else 503, content=exc.feedback())
+            feedback = exc.feedback()
+            feedback["error"]["request_id"] = request_id(request.scope)
+            return JSONResponse(status_code=409 if exc.retryable else 503, content=feedback)
         if isinstance(exc, SandboxNotFoundError):
             status_code, code = 404, "sandbox_not_found"
         elif isinstance(exc, SandboxStateError):
@@ -196,9 +208,38 @@ def create_app(
             status_code, code = 503, "network_setup_failed"
         elif isinstance(exc, SandboxSecurityError):
             status_code, code = 503, "sandbox_security_error"
-        return JSONResponse(
+        return error_response(
+            request,
             status_code=status_code,
-            content={"error": {"code": code, "message": str(exc)}},
+            code=code, message=str(exc),
+        )
+
+    @application.exception_handler(HTTPException)
+    async def handle_http_error(request: Request, exc: HTTPException) -> JSONResponse:
+        return error_response(
+            request, status_code=exc.status_code, code="http_error",
+            message=str(exc.detail), extra={"detail": exc.detail}, headers=exc.headers,
+        )
+
+    @application.exception_handler(RequestValidationError)
+    async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        # Pydantic's raw errors include input, which may contain secrets.
+        details = [{"type": error["type"], "loc": error["loc"], "msg": error["msg"]}
+                   for error in exc.errors()]
+        return error_response(
+            request, status_code=422, code="invalid_request",
+            message="Request validation failed.", extra={"detail": details},
+        )
+
+    @application.exception_handler(Exception)
+    async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+        logging.getLogger(__name__).error(
+            "Unhandled request failure request_id=%s", request_id(request.scope),
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        return error_response(
+            request, status_code=500, code="internal_error",
+            message="An unexpected error occurred. Contact the operator with the request ID.",
         )
 
     if frontend_directory is not None:

@@ -3,6 +3,11 @@ import { resetTutorialProfile } from './tutorial-profile';
 import { prepareTutorialDeck } from './tutorial-deck';
 
 async function prepareDeck(page: Page, request: APIRequestContext) {
+  const profile = await (await request.get('/api/application')).json();
+  expect((await request.patch('/api/application/preferences', { data: {
+    profile_id: profile.profile_id, generation: profile.generation,
+    changes: { 'oaw.locale': 'en', 'oaw-onboarding-v1': JSON.stringify({ version: 1, state: { status: 'skipped' } }) },
+  } })).ok()).toBe(true);
   let library = await (await request.get('/api/card-library')).json();
   for (const id of library.available_pack_ids) library = await (await request.post('/api/card-library/actions', {
     data: { action: 'open_pack', id, expected_revision: library.revision },
@@ -133,7 +138,7 @@ test('Deck pointer drag cancels cleanly and preserves deck transfer and discard'
   await request.post('/api/card-library/actions', { data: { action: 'activate_deck', id: sourceId, expected_revision: library.revision } });
   await page.reload();
   await beginDrag(page);
-  const target = page.locator(`[data-deck-destination="${targetId}"]`);
+  const target = page.locator(`[role="tab"][data-deck-destination="${targetId}"]`);
   const box = (await target.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await expect(target).toHaveClass(/is-drop-target/);

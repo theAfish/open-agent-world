@@ -1,4 +1,5 @@
 import { CardFace, CardStock } from "../components/CardFace";
+import { useMotionPresence } from './useMotionPresence';
 import { finishLabel } from "../cards/cardFinish";
 import { t, useLocale } from "../i18n";
 import { useEffect, useRef, useState } from "react";
@@ -11,7 +12,7 @@ import { collectedLibraryCards, collectedLibraryLegions, compareLibraryCards, di
 import { LibraryPack } from "./LibraryPack";
 import { PackInstaller } from "./PackInstaller";
 import { InstalledPackDetails } from "./InstalledPackDetails";
-import { installedPackStatus, packInventory } from "./installedPacks";
+import { installedPackStatus, packInventory, packIssue } from "./installedPacks";
 import { usePackInstallations } from "../state/packInstallations";
 import type { PackInstallations } from "../types/packs";
 import { PackStore } from "./PackStore";
@@ -27,6 +28,7 @@ const same = (a: DeckEntry, b: DeckEntry) => a.kind === b.kind && a.id === b.id;
 export function CardLibrary() {
   useLocale();
   const library = useCardLibrary();
+  const presence = useMotionPresence(library.open);
   const legions = useWorldStore(state => state.legions);
   const deleteLegion = useWorldStore(state => state.deleteLegion);
   const modal = useRef<HTMLDialogElement>(null);
@@ -152,8 +154,8 @@ export function CardLibrary() {
     </PhysicalLibraryCard>;
   };
 
-  return <><div className="library-backdrop" hidden={!library.open} onClick={library.close} aria-hidden="true" />
-    <dialog ref={modal} open={library.open} className="card-library-modal" aria-labelledby="card-library-title">
+  return <><div className="library-backdrop" hidden={!presence.present} data-motion={presence.closing ? 'closing' : 'open'} onClick={library.close} aria-hidden="true" />
+    <dialog ref={modal} open={presence.present} data-motion={presence.closing ? 'closing' : 'open'} aria-hidden={!library.open} {...(!library.open ? { inert: '' } : {})} className="card-library-modal" aria-labelledby="card-library-title">
     <header className="library-header"><div className="dialog-icon"><LibraryBig size={22} /></div><div><span>{t("Your collection")}</span><h2 id="card-library-title">{t("Pack & Card Library")}</h2></div>
       <button className="top-icon-button" aria-label={t("Close Library")} onClick={library.close}><X size={18} /></button></header>
     <div className="library-tab-row"><nav className="library-tabs" aria-label={t("Library sections")}>{([
@@ -175,8 +177,8 @@ export function CardLibrary() {
             <label className="library-search"><Search size={15} /><input aria-label={t("Search packs")} placeholder={t("Search packs")} value={query} onChange={event => setQuery(event.target.value)} /></label></div>
           <div className="pack-grid">{inventory.filter(({ pack }) => `${pack.definition.name} ${pack.definition.description} ${t(pack.definition.name)} ${t(pack.definition.description)} ${pack.definition.plugin_id}`.toLowerCase().includes(query.toLowerCase())).map(({ pack, versions, registered }) =>
             <LibraryPack key={pack.definition.id} pack={pack} snapshot={snapshot} onOpened={setReveal} onBrowse={browsePack}
-              onInspect={versions.length && (pack.opened || !snapshot.available_pack_ids.includes(pack.definition.id)) ? () => setInspectedPack(pack.definition.id) : undefined}
-              status={versions.length ? installedPackStatus(versions) : undefined} contentCountKnown={registered} />
+              onInspect={versions.length && (pack.opened || packIssue(pack, snapshot, versions) || !snapshot.available_pack_ids.includes(pack.definition.id)) ? () => setInspectedPack(pack.definition.id) : undefined}
+              versions={versions} status={versions.length ? installedPackStatus(versions) : undefined} contentCountKnown={registered} />
           )}</div>
           {reveal && snapshot.packs[reveal] ? <span className="library-announcement" role="status">{t(snapshot.packs[reveal].definition.name)} {t("opened. Click its empty wrapper to view cards.")}</span> : null}
           </>}

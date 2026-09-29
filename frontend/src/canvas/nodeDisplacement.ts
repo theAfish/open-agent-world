@@ -22,6 +22,20 @@ function surfaceSize(level: NodeSurfaceLevel) {
   return NODE_SURFACE_SIZE[level];
 }
 
+/** Metadata and camera changes must not replay world geometry calculations. */
+export function createDisplacementCache() {
+  let signature = '';
+  let result = new Map<string, DisplacedPosition>();
+  return (cards: readonly WorldCard[], obstacles: readonly SurfaceObstacle[], levels: ReadonlyMap<string, NodeSurfaceLevel>) => {
+    const next = JSON.stringify([
+      cards.map(c => [c.id, c.position.x, c.position.y, levels.get(c.id)]),
+      obstacles.map(o => [o.card.id, o.card.position.x, o.card.position.y, o.level, o.clearance, o.size?.width, o.size?.height]),
+    ]);
+    if (next !== signature) { result = displacedPositions(cards, obstacles, levels); signature = next; }
+    return result;
+  };
+}
+
 export function positionSurfaceAtNodeCenter(
   position: WorldPosition,
   level: NodeSurfaceLevel,

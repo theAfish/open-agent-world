@@ -1,0 +1,48 @@
+:root { --motion-ease: cubic-bezier(.22, 1, .36, 1); }
+
+/* Individual translate leaves each HUD's positioning transform intact. */
+.top-bar { --entry-x: -32px; --entry-y: -12px; }
+.component-palette { --entry-y: 36px; }
+.map-tools, .world-controls, .world-minimap { --entry-x: 32px; --entry-y: 12px; }
+:is(.top-bar, .component-palette, .map-tools, .world-controls, .world-minimap) {
+  transition: opacity 320ms ease, translate 420ms var(--motion-ease), visibility 0s,
+    width 180ms ease, box-shadow 220ms ease;
+}
+.onboarding-layer.is-leaving { pointer-events: none; }
+.is-leaving .onboarding-logo-ring, .is-leaving .tutorial-guide.is-logo .tutorial-mascot {
+  animation: welcome-logo-out 360ms var(--motion-ease) both;
+}
+.is-leaving .onboarding-welcome > h1, .is-leaving .onboarding-welcome > p {
+  animation: welcome-title-out 300ms ease both;
+}
+.is-leaving .welcome-action { animation: welcome-action-out 320ms var(--motion-ease) both; }
+.is-leaving .welcome-action:nth-child(2) { --leave-x: -56px; --leave-y: 24px; }
+.is-leaving .welcome-action:nth-child(3) { --leave-x: 56px; --leave-y: 24px; }
+.is-leaving .onboarding-workspaces { animation: welcome-action-out 320ms var(--motion-ease) both; }
+@keyframes welcome-logo-out { to { opacity: 0; translate: 0 -64px; } }
+@keyframes welcome-title-out { to { opacity: 0; translate: 0 -20px; } }
+@keyframes welcome-action-out { to { opacity: 0; translate: var(--leave-x, 0px) var(--leave-y, 48px); } }
+
+.settings-backdrop, .library-backdrop:not([hidden]) { animation: surface-shade-in 280ms ease both; }
+.settings-dialog, .card-library-modal[open] { animation: surface-in 320ms var(--motion-ease) both; }
+.settings-backdrop[data-motion='closing'], .library-backdrop[data-motion='closing'] {
+  animation: surface-shade-out 220ms ease both; pointer-events: none;
+}
+.settings-backdrop[data-motion='closing'] .settings-dialog, .card-library-modal[data-motion='closing'] {
+  animation: surface-out 220ms ease both; pointer-events: none;
+}
+@keyframes surface-shade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes surface-shade-out { to { opacity: 0; } }
+@keyframes surface-in { from { opacity: 0; translate: 0 28px; } to { opacity: 1; translate: 0 0; } }
+@keyframes surface-out { to { opacity: 0; translate: 0 18px; } }
+
+/* Clip against the shrinking tray, with headroom for lifted cards above it. */
+.deck-stage { clip-path: inset(-100px -100px 0); }
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.top-bar, .component-palette, .map-tools, .world-controls, .world-minimap, .deck-stage) { transition: none; }
+  .settings-backdrop, .settings-dialog, .library-backdrop, .card-library-modal,
+  .is-leaving .onboarding-logo-ring, .is-leaving .tutorial-mascot,
+  .is-leaving .onboarding-welcome > h1, .is-leaving .onboarding-welcome > p,
+  .is-leaving .welcome-action, .is-leaving .onboarding-workspaces { animation: none !important; }
+}

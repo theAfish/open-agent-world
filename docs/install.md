@@ -1,4 +1,6 @@
-# Download and install / 下载与安装
+# Download and install
+
+**English** | [简体中文](install.zh-CN.md)
 
 Open [GitHub Releases](https://github.com/theAfish/open-agent-world/releases), select a published version, and expand **Assets**. If there are no published releases yet, installers are not publicly available yet.
 
@@ -9,8 +11,6 @@ Open [GitHub Releases](https://github.com/theAfish/open-agent-world/releases), s
 | Intel Mac | `Open-Agent-World-<version>-macos-x86_64.dmg` |
 
 Choose an installer above, rather than **Source code (zip / tar.gz)**. On a Mac, check **About This Mac** for your chip type. A `.sha256` file is optional checksum information, not an installer.
-
-中文：请选择安装包，不要下载 Source code。Mac 可在“关于本机”查看芯片类型；`.sha256` 是校验信息。
 
 ## Windows
 
@@ -37,20 +37,20 @@ bash scripts/start.sh
 
 Setup installs application dependencies and builds the frontend. Later launches only need `bash scripts/start.sh`; stop with Ctrl+C. For WSL2, run these commands inside your Linux distribution. Local Sandbox execution also requires the isolation prerequisites described in [Sandbox workspace](sandbox-workspace.md).
 
-中文：Linux / WSL2 可使用以上脚本安装并在浏览器中运行；后续只需执行 `bash scripts/start.sh`，按 Ctrl+C 退出。前置工具须安装在运行脚本的 Linux 环境中，详见[入门指南](getting-started.zh-CN.md)。
-
 ## First use
 
 1. In **Settings → Models**, add your connection, credentials, and model; choose a default.
 2. Follow the first-use tutorial on the canvas, or replay it from **Help (?) → Tutorial**.
 3. Open **Pack & Card Library**, collect cards, add them to your active deck, then place them on the canvas.
 
-Continue with [Your first team](user-guide/first-team.md), or [中文使用入门](user-guide/index.zh-CN.md).
+Continue with [Your first team](user-guide/first-team.md).
 
 You can explore the canvas before configuring a model. Model calls require your configured service; some plugins and Sandbox environments download dependencies on first use.
 
 ## Updates and troubleshooting
 
-Download and install the next release manually; automatic updates are not configured. User data is stored separately and retained across upgrades and uninstall. See [Troubleshooting](user-guide/troubleshooting.md) for common problems.
+Builds without automatic updates require downloading and installing the next
+release manually. User data is stored separately and retained across upgrades and
+uninstall. See [Troubleshooting](user-guide/troubleshooting.md) for common problems.
 
 When reporting a problem, include your OS, CPU architecture, release version and the error shown. Remove credentials from any logs you share.

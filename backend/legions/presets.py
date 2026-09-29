@@ -28,15 +28,16 @@ def preset_record(preset_id: str, registry: PluginRegistry) -> LegionRecord:
     def node(key, type_id, label, x, y, *, config=None):
         definition = registry.node_type(type_id)
         handler = definition.template_handler
+        initial = definition.resolved_presentation().initial
         nodes.append(LegionTemplateNode(
             key=key, parent_key=None if key == "group" else "group",
             type=type_id, plugin_id=registry.node_type_owner_id(type_id), name=label,
             position={"x": x, "y": y}, size={"width": definition.default_size[0], "height": definition.default_size[1]},
-            expanded=False, status=definition.template_status or definition.default_status,
+            expanded=initial in ("inspector", "workspace"), status=definition.template_status or definition.default_status,
             config=registry.validate_config(type_id, config or {}),
             payload_version=handler.payload_version if handler else None,
             payload={} if handler else None,
-            presentation={"level": "preview", "base_level": "preview"},
+            presentation={"level": initial, "base_level": "preview"},
         ))
 
     def edge(source, target, relationship, direction="forward"):
@@ -48,22 +49,22 @@ def preset_record(preset_id: str, registry: PluginRegistry) -> LegionRecord:
     node("group", "legion", name, 0, 0, config={"mode": "group", "description": description})
     if preset_id == "team":
         for key, label, x, instruction in (
-            ("planner", "Planner", 190, "Clarify the goal and coordinate a concrete plan with the Builder and Reviewer."),
-            ("builder", "Builder", 510, "Implement the plan and report results to the Planner and Reviewer."),
-            ("reviewer", "Reviewer", 830, "Review the proposed work, identify problems and verify the result."),
+            ("planner", "Planner", 600, "Clarify the goal and coordinate a concrete plan with the Builder and Reviewer."),
+            ("builder", "Builder", 1740, "Implement the plan and report results to the Planner and Reviewer."),
+            ("reviewer", "Reviewer", 2880, "Review the proposed work, identify problems and verify the result."),
         ):
-            node(key, "agent", label, x, 280, config={"system_instruction": instruction})
+            node(key, "agent", label, x, 450, config={"system_instruction": instruction})
             edge(key, "conversation", "participate")
-        node("conversation", "conversation", "Team conversation", 510, 700)
+        node("conversation", "conversation", "Team conversation", 1740, 1300)
         edge("planner", "builder", "communicate", "bidirectional")
         edge("builder", "reviewer", "communicate", "bidirectional")
         edge("planner", "reviewer", "communicate", "bidirectional")
     else:
-        node("agent", "agent", "Coding assistant" if preset_id == "coding" else "Assistant", 190, 280)
-        node("conversation", "conversation", "Conversation", 550, 280)
+        node("agent", "agent", "Coding assistant" if preset_id == "coding" else "Assistant", 600, 450)
+        node("conversation", "conversation", "Conversation", 1740, 450)
         edge("agent", "conversation", "participate")
         if preset_id == "coding":
-            node("sandbox", "sandbox", "Sandbox", 910, 280)
+            node("sandbox", "sandbox", "Sandbox", 2880, 450)
             edge("agent", "sandbox", "execute")
 
     # Layout references use the same portable keys as the formation itself.
@@ -101,7 +102,8 @@ def plugin_preset_record(preset: LegionPresetDefinition | LegionBlueprintPreset,
             raise ValueError(f"Preset node type {item.type!r} must be templateable")
         handler = definition.template_handler
         config = registry.validate_config(item.type, item.config)
-        if item.presentation not in definition.resolved_presentation().states:
+        presentation = item.presentation or definition.resolved_presentation().initial
+        if presentation not in definition.resolved_presentation().states:
             raise ValueError(f"Unsupported preset presentation for {item.type!r}")
         dependencies = []
         if handler:
@@ -120,11 +122,11 @@ def plugin_preset_record(preset: LegionPresetDefinition | LegionBlueprintPreset,
             plugin_id=registry.node_type_owner_id(item.type), name=item.name,
             position={"x": item.x, "y": item.y},
             size={"width": definition.default_size[0], "height": definition.default_size[1]},
-            expanded=False, status=definition.template_status or definition.default_status,
+            expanded=presentation in ("inspector", "workspace"), status=definition.template_status or definition.default_status,
             config=config, initial_document=item.initial_document,
             payload_version=handler.payload_version if handler else None,
             payload=item.payload if handler else None, dependencies=dependencies,
-            presentation={"level": item.presentation,
+            presentation={"level": presentation,
                           "base_level": "node"},
         ))
     edges = [LegionTemplateEdge(key=f"edge-{index}", source=item.source, target=item.target,

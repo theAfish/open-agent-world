@@ -180,40 +180,19 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .world-canvas .react-flow__pane:active { cursor: grabbing; }
 
 /* Terrain */
-.contour-layer, .contour-canvas-experiment { display: contents; }
-.contour-chunk {
+.terrain-webgl-background {
   position: absolute;
-  width: 2048px;
-  height: 2048px;
-  z-index: -1;
-  opacity: 0.84;
-  overflow: visible;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
   pointer-events: none;
-  shape-rendering: geometricPrecision;
-  /* Overview tiles are small enough to cache without large high-zoom textures. */
-  will-change: var(--contour-promotion, auto);
 }
-
-svg.contour-chunk[data-canvas-ready="true"] { visibility: hidden; }
-
 .world-canvas .react-flow__viewport-portal {
-  /* Terrain stays behind cards; interactive portal children choose their own layer. */
+  /* Interactive portal children choose their own layer. */
   z-index: auto;
   pointer-events: none;
 }
-
-.contour {
-  fill: none;
-  stroke: var(--contour);
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-/* Even all 13 elevation layers together remain lighter than a minor line. */
-.contour-fill { fill: var(--contour-fill); stroke: none; }
-
-.contour-minor { stroke-width: calc(1.15px * var(--contour-stroke-scale, 1)); opacity: 0.72; }
-.contour-major { stroke-width: calc(1.65px * var(--contour-stroke-scale, 1)); opacity: 1; }
 
 /* Global controls */
 .icon-button,
@@ -2460,3 +2439,5 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
 .react-flow__handle.connection-drop-surface.valid {
   box-shadow: inset 0 0 0 2px var(--accent, #69aa96);
 }
+
+.settings-dialog > footer .settings-save-status { margin-right: auto; color: var(--accent-strong); font-size: 12px; }

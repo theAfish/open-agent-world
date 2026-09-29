@@ -1,19 +1,23 @@
 import { tutorialAllowsCanvasTarget } from '../onboarding/interactionGuard';
+import { useSmoothWheelZoom, MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM } from './useSmoothWheelZoom';
+import { CanvasControls } from './CanvasControls';
+import { CardRenderingContext, useCardRendering, useCardRenderLOD } from './useCardRendering';
+import { CardLODView } from '../cards/CardLODView';
 import { t, useLocale } from "../i18n";
 import { ResizeLayer } from "./ResizeLayer";
 import { GlueLayer } from "./GlueLayer";
 import { reportInteraction } from "../state/interactions";
 import { findGlue, glueGroup, reflowGlueSurfaces, refreshGlue, beginGlueEdit, cancelGlueRefresh, persistGlue, useGlueStore, type GlueBox, type GlueCandidate } from "../state/glue";
 import { MapAtlas } from "./MapAtlas";
-import { WorldBackground } from './WorldBackground';
+import { TerrainBackground } from './TerrainBackground';
 import { CanvasCardLayers } from './CanvasCardLayers';
 import { LegionDeploymentLayer } from './LegionDeploymentLayer';
 import { stableNode, stableNodeList } from './stableNodes';
 import { cardIndex } from '../state/cardIndex';
 import {
   ConnectionMode,
-  Controls,
   MarkerType,
+  Position,
   ReactFlow,
   useNodesState,
   useReactFlow,
@@ -23,6 +27,7 @@ import {
   type OnMove,
   type OnSelectionChangeParams,
   type Viewport,
+  type NodeProps,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { sessionVisibleCards, useConversationView } from '../state/conversationView';
@@ -45,7 +50,6 @@ import type { CanvasNode, CanvasNodeData } from "../cards/types";
 import { EdgeInspector } from "../edges/EdgeInspector";
 import { RelationshipConnectionLine } from "../edges/RelationshipConnectionLine";
 import { SemanticEdge, type CanvasEdge } from "../edges/SemanticEdge";
-import { filterCardsToChunks } from "../state/chunks";
 import { getNodeType } from "../state/catalog";
 import { buildCardDraft } from "../state/helpers";
 import { hasPaletteDrag, readPaletteDrag, type PaletteDragPayload } from "../palette/dragPayload";
@@ -53,17 +57,27 @@ import { usePaletteDropTarget, type PalettePointerLocation } from "../palette/po
 import { getConnectionOptions, validateConnection } from "../state/relationships";
 import { useWorldStore } from "../state/worldStore";
 import { NODE_SURFACE_SIZE, surfaceSizeFor, surfaceLevelForNode, useNodeSurfaceStore, type NodeSurfaceLevel, type SurfaceSize } from "../state/nodeSurfaces";
-import { ContourLayer } from "./ContourLayer";
 import { LocalMiniMap } from "./LocalMiniMap";
 import { GenerationLayer } from "../effects/GenerationLayer";
 import {
-  displacedPositions,
+  createDisplacementCache,
   nodePositionFromSurfacePosition,
   positionSurfaceAtNodeCenter,
   type SurfaceObstacle,
 } from "./nodeDisplacement";
 
-const nodeTypes = { worldCard: WorldCardNode, container: ContainerCardNode, equipment: EquipmentCardNode, equipmentPanel: EquipmentPanelNode };
+function VirtualContainerCard(props: NodeProps<CanvasNode>) {
+  const lod = useCardRenderLOD(props.id, props.data.renderLOD);
+  if (lod === 'offscreen') return null;
+  return lod !== 'full' && props.data.card.type !== 'core.shadow-collection'
+    ? <CardLODView {...props} data={{ ...props.data, renderLOD: lod }} /> : <ContainerCardNode {...props} />;
+}
+const nodeTypes = {
+  worldCard: WorldCardNode,
+  container: VirtualContainerCard,
+  equipment: (props: NodeProps<CanvasNode>) => props.data.renderLOD === 'offscreen' ? null : <EquipmentCardNode {...props} />,
+  equipmentPanel: (props: NodeProps<CanvasNode>) => props.data.renderLOD === 'offscreen' ? null : <EquipmentPanelNode {...props} />,
+};
 const edgeTypes = { semantic: SemanticEdge };
 
 function isScrollableArea(target: EventTarget | null, boundary: HTMLElement): boolean {
@@ -92,6 +106,14 @@ function nodeFromCard(
     position: positionSurfaceAtNodeCenter(position, surfaceLevel),
     data: { card, surfaceLevel, displaced },
     width: size.width, height: size.height,
+    // Keep edges routable before a virtualized view first mounts.
+    handles: card.ephemeral ? [] : [
+      { id: 'boundary-top', type: 'source', position: Position.Top, x: size.width / 2, y: 0 },
+      { id: 'boundary-right', type: 'source', position: Position.Right, x: size.width, y: size.height / 2 },
+      { id: 'boundary-bottom', type: 'source', position: Position.Bottom, x: size.width / 2, y: size.height },
+      { id: 'boundary-left', type: 'source', position: Position.Left, x: 0, y: size.height / 2 },
+      { id: 'surface-drop', type: 'target', position: Position.Top, x: 0, y: 0, width: size.width, height: size.height },
+    ],
     className: (surfaceLevel === 'node' || surfaceLevel === 'preview') && size.width <= 360 && size.height <= 420
       ? 'can-cache-card' : undefined,
     style: { width: size.width, height: size.height },
@@ -134,7 +156,6 @@ export function WorldCanvas() {
   const stressCards = useWorldStore((state) => state.stressCards);
   const edges = useWorldStore((state) => state.edges);
   const legions = useWorldStore((state) => state.legions);
-  const activeChunkKeys = useWorldStore((state) => state.activeChunkKeys);
   const viewport = useWorldStore((state) => state.viewport);
   const selectedEdgeId = useWorldStore((state) => state.selectedEdgeId);
   const selectedCardIds = useWorldStore((state) => state.selectedCardIds);
@@ -181,11 +202,12 @@ export function WorldCanvas() {
 
   const renderCards = useMemo(
     () => {
-      const visible = filterCardsToChunks([...cards, ...stressCards].filter((c) => !integratedInputs.has(c.id) && !displayOwners.has(c.id) && !equipmentOwner(c, cards)), activeChunkKeys, catalog);
+      // Camera coverage controls data fetching, never world geometry/reflow.
+      const visible = [...cards, ...stressCards].filter((c) => !integratedInputs.has(c.id) && !displayOwners.has(c.id) && !equipmentOwner(c, cards));
       const ids = new Set(visible.map((c) => c.id));
       return [...visible, ...cards.filter((c) => { const owner = equipmentOwner(c, cards); return !displayOwners.has(c.id) && owner && ids.has(owner.id); })];
     },
-    [activeChunkKeys, cards, stressCards, catalog, displayOwners, integratedInputs],
+    [cards, stressCards, displayOwners, integratedInputs],
   );
   const surfaceLevels = useMemo(() => new Map(renderCards.map((card) => [
     card.id,
@@ -206,8 +228,9 @@ export function WorldCanvas() {
     const level = surfaceLevels.get(card.id);
     return level === "inspector" || level === "workspace" ? [{ card, level, size: surfaceSizeFor(card.id, level, surfaceSizes) }] : [];
   }), [renderCards, surfaceLevels, catalog, surfaceSizes]);
+  const [displacementCache] = useState(createDisplacementCache);
   const displacedById = useMemo(
-    () => displacedPositions(renderCards.filter((c) => !isContainer(c, catalog) && !c.parent_id && !c.equipment), surfaceObstacles, surfaceLevels),
+    () => displacementCache(renderCards.filter((c) => !isContainer(c, catalog) && !c.parent_id && !c.equipment), surfaceObstacles, surfaceLevels),
     [renderCards, surfaceLevels, surfaceObstacles, catalog],
   );
   const equipmentPanels = useEquipmentPanel((state) => state.openIds);
@@ -269,6 +292,12 @@ export function WorldCanvas() {
     });
   }, [displacedById, renderCards, surfaceLevels, surfaceLevelsByNodeId, catalog, cards, equipmentPanels, equipmentPositions, surfaceSizes, glueBoxes]);
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(mappedNodes);
+  const { model: renderingModel, renderedNodes } = useCardRendering(nodes);
+  useEffect(() => {
+    if (!connectingNodeId) return;
+    renderingModel.pin(connectingNodeId, 'connection', true);
+    return () => renderingModel.pin(connectingNodeId, 'connection', false);
+  }, [renderingModel, connectingNodeId]);
   const nodesRef = useRef(nodes);
   const positionAnimation = useRef<number>();
   const activeDragIds = useRef(new Set<string>());
@@ -432,7 +461,7 @@ export function WorldCanvas() {
         source: displayEndpoint(edge.source),
         target: displayEndpoint(edge.target),
         type: "semantic",
-        data: { relationship: edge.relationship, direction: edge.direction, sourceCardId: edge.source, targetCardId: edge.target },
+        data: { missing_plugin: edge.missing_plugin, relationship: edge.relationship, direction: edge.direction, sourceCardId: edge.source, targetCardId: edge.target },
         selected: edge.id === selectedEdgeId,
         markerEnd: {
           type: MarkerType.ArrowClosed,
@@ -461,10 +490,15 @@ export function WorldCanvas() {
     setViewportState({ ...next, ...size });
   }, [dimensions, setViewportState]);
 
+  const consumeWheelMoveEnd = useSmoothWheelZoom(wrapper, isScrollableArea, next => {
+    commitViewport(next);
+    reportInteraction({ type: 'viewport', ...next });
+  });
   const onMoveEnd: OnMove = useCallback((event, next) => {
+    if (!event && consumeWheelMoveEnd(next)) return;
     commitViewport(next);
     if (event || document.activeElement?.closest('.world-controls')) reportInteraction({ type: 'viewport', ...next });
-  }, [commitViewport]);
+  }, [commitViewport, consumeWheelMoveEnd]);
   const onInit: OnInit<CanvasNode, CanvasEdge> = useCallback((instance) => {
     commitViewport(instance.getViewport());
   }, [commitViewport]);
@@ -760,7 +794,7 @@ export function WorldCanvas() {
     });
     const sizes = new Map(nodesRef.current.map((item) => [item.id, { width: Number(item.style?.width), height: Number(item.style?.height) }]));
     void updateCardPositions(updates.map((update) => {
-      const member = cards.find((card) => card.id === update.id)!;
+      const member = cards.find((card) => card.id === update.id) ?? moved.find(node => node.id === update.id)!.data.card;
       if (member.ephemeral || containerDefinition(member, catalog)?.parentable === false) return update;
       const owner=cards.find(c=>c.id===member.parent_id);
       if(owner&&isShadow(owner)) {
@@ -922,10 +956,10 @@ export function WorldCanvas() {
       }}
     >
       {importStatus&&<PdfImportIndicator status={importStatus} progress={importProgress} onDismiss={()=>setImportStatus("")} />}
-      <ReactFlow<CanvasNode, CanvasEdge>
+      <CardRenderingContext.Provider value={renderingModel}><ReactFlow<CanvasNode, CanvasEdge>
         id="oaw-world-map"
         ariaLabelConfig={{ 'controls.zoomIn.ariaLabel': t('Zoom in'), 'controls.zoomOut.ariaLabel': t('Zoom out'), 'controls.fitView.ariaLabel': t('Fit view'), 'minimap.ariaLabel': t('Nearby canvas · drag to pan') }}
-        nodes={nodes}
+        nodes={renderedNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
@@ -961,12 +995,12 @@ export function WorldCanvas() {
           selectEdge(undefined);
           selectCards([]);
         }}
-        minZoom={0.12}
-        maxZoom={2.2}
+        minZoom={MIN_CANVAS_ZOOM}
+        maxZoom={MAX_CANVAS_ZOOM}
         defaultViewport={{ x: viewport.x, y: viewport.y, zoom: viewport.zoom }}
         panOnScroll={false}
         selectionOnDrag={false}
-        onlyRenderVisibleElements
+        onlyRenderVisibleElements={false}
         deleteKeyCode={null}
         nodesFocusable
         nodeDragThreshold={5}
@@ -977,23 +1011,17 @@ export function WorldCanvas() {
         aria-label={t("Open Agent World spatial canvas")}
       >
         <CanvasCardLayers />
-        <ContourLayer />
+        <TerrainBackground />
         <GlueLayer nodes={nodes} preview={gluePreview} />
         <ResizeLayer nodes={nodes} setNodes={setNodes} />
         <GenerationLayer />
         <LegionDeploymentLayer />
         {nodes.filter((node) => node.data.equipmentDetail && !node.hidden).map((node) =>
           <SurfaceBridge key={node.id} sourceId={equipmentOriginId(node.id)} targetId={node.id} />)}
-        <WorldBackground />
         <LocalMiniMap />
         <MapAtlas active={pinToolActive} onActiveChange={active => { setPinToolActive(active); if (active) setGlueActive(false); }} glueActive={glueActive} onGlueChange={active => { setGlueActive(active); if (active) setPinToolActive(false); }} />
-        <Controls
-          className="world-controls"
-          position="bottom-right"
-          showInteractive={false}
-          aria-label={t("Canvas zoom controls")}
-        />
-      </ReactFlow>
+        <CanvasControls />
+      </ReactFlow></CardRenderingContext.Provider>
       <EdgeInspector />
     </div>
   );

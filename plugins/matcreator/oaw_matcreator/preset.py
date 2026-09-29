@@ -83,30 +83,31 @@ def definition():
     nodes = [
         PresetNode(key="group", type="legion", name="MatCreator research", parent_key=None, presentation="preview",
                    config={"mode": "group", "description": "Materials research: plan, execute, verify and learn.", "workspace_layout": layout}),
-        PresetNode(key="agent", type="agent", name="MatCreator", x=180, y=220,
+        PresetNode(key="agent", type="agent", name="MatCreator", x=220, y=250,
                    config={"system_instruction": INSTRUCTION}),
         PresetNode(key="summoning", type="oaw.barracks.summoner", name="Summoning", parent_key=None,
                    owner_key="agent", equipment_relationship="oaw.barracks.use", x=0, y=0),
-        PresetNode(key="barracks", type="oaw.barracks", name="Research Executors", x=2020, y=220,
+        PresetNode(key="barracks", type="oaw.barracks", name="Research Executors", x=3200, y=220,
                    initial_document={"name": "Research Executors", "instructions": "Delegate independent research tasks to Executor. Use task_board_execute to track attempts and verify results.",
                                      "policy": {"max_depth": 1, "max_concurrent": 4, "max_instances": 16}}),
         PresetNode(key="executor", type="agent", name="Research Executor", parent_key="barracks", x=80, y=120,
                    config={"system_instruction": EXECUTOR_INSTRUCTION}),
-        PresetNode(key="conversation", type="conversation", name="Research conversation", x=540, y=220),
-        PresetNode(key="sandbox", type="sandbox", name="Research files & compute", x=900, y=220),
-        PresetNode(key="tasks", type="matcreator.tasks", name="Research tasks", x=180, y=720),
-        PresetNode(key="structure", type="science.structure-viewer", name="Structure viewer", x=540, y=720),
-        PresetNode(key="knowledge", type="matcreator.kdg", name="Research knowledge", x=900, y=720,
+        PresetNode(key="conversation", type="conversation", name="Research conversation", x=850, y=450),
+        PresetNode(key="sandbox", type="sandbox", name="Research files & compute", x=1990, y=450,
+                   config={"network_enabled": True}),
+        PresetNode(key="tasks", type="matcreator.tasks", name="Research tasks", x=220, y=1200),
+        PresetNode(key="structure", type="science.structure-viewer", name="Structure viewer", x=600, y=1200),
+        PresetNode(key="knowledge", type="matcreator.kdg", name="Research knowledge", x=1100, y=1200,
                    initial_document=initial_knowledge()),
     ]
     edges = [PresetEdge(source="agent", target=target, relationship=relationship) for target, relationship in (
-        ("conversation", "participate"), ("sandbox", "execute"),
+        ("conversation", "participate"), ("sandbox", "execute_manage"),
         ("tasks", "matcreator.tasks.manage"), ("knowledge", "matcreator.kdg.learn"))]
     edges.append(PresetEdge(source="summoning", target="barracks", relationship="oaw.barracks.summon"))
     edges.extend(PresetEdge(source="executor", target=target, relationship=relationship)
-                 for target, relationship in (("sandbox", "execute"), ("knowledge", "matcreator.kdg.use")))
+                 for target, relationship in (("sandbox", "execute_manage"), ("knowledge", "matcreator.kdg.use")))
     edges.extend(PresetEdge(source="structure", target=target, relationship="core.file-preview")
                  for target in ("conversation", "sandbox"))
-    return LegionPresetDefinition(id="matcreator.research", name="MatCreator research", revision=4,
+    return LegionPresetDefinition(id="matcreator.research", name="MatCreator research", revision=6,
         description="Coordinated materials research with parallel Executors, tracked tasks and verified results.",
         nodes=tuple(nodes), edges=tuple(edges))

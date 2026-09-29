@@ -1,10 +1,11 @@
+import { arrangeWorkspace } from './workspacePlacement';
 import { create as createStore } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { profileStorage } from '../state/profileStorage';
 import { worldApi, apiErrorMessage } from '../api/client';
 import { useWorldStore, mergeCards } from '../state/worldStore';
 import { t } from '../i18n';
-import { hasDefaultModelConfiguration, hasModelConfiguration } from '../state/modelConnections';
+import { hasDefaultModelConfiguration } from '../state/modelConnections';
 import { useCardLibrary } from '../state/cardLibrary';
 import { useLegionWorkspace } from '../state/legionWorkspace';
 import { useConversationView } from '../state/conversationView';
@@ -55,6 +56,7 @@ export const useTutorialStore = createStore<TutorialState>()(persist((): Tutoria
 }));
 
 export interface GuideVisuals {
+  frame?: (bounds: { x: number; y: number; width: number; height: number }) => Promise<void>;
   preparePlace?: (existingId?: string) => () => void;
   findSpace?: (preferred: WorldPosition, size: { width: number; height: number }) => WorldPosition;
   place: (id: string, signal: AbortSignal) => Promise<void>;
@@ -350,7 +352,7 @@ export const tutorial = {
   attach(bridge: GuideVisuals) {
     visuals = bridge;
     const unsubscribers = [useWorldStore.subscribe(() => {
-      if (state().view === 'welcome' && !state().busy && world().cards.length) void tutorial.directly();
+      if (state().view === 'welcome' && !state().busy && !state().error && world().cards.length) void tutorial.directly();
       observe(); void checkWelcome();
     }),
       useNodeSurfaceStore.subscribe(() => observe()), useCardLibrary.subscribe(() => observe()),
@@ -384,24 +386,31 @@ export const tutorial = {
   async directly() {
     useTutorialStore.setState({ status: 'skipped', view: 'hidden', error: undefined });
   },
-  async fromBlueprint(blueprint: LegionSummary, preset: boolean, goal = '') {
-    if (state().busy) return;
+  async fromBlueprints(blueprints: LegionSummary[]) {
+    const completed: string[] = [];
+    if (state().busy || !blueprints.length) return completed;
     useTutorialStore.setState({ busy: true, error: undefined });
+    const placed: { x: number; y: number; width: number; height: number }[] = [];
     try {
-      // Legion containers are built into the world and cannot be drawn from a deck.
-      await prepareDeck((blueprint.required_card_ids ?? blueprint.node_types).filter(type => type !== 'legion'));
-      const instance = await world().instantiateLegion(blueprint.id, undefined, { blueprint, preset, unwrap: false });
-      if (!instance) throw new Error('The blueprint could not be placed. Check the notification and retry.');
-      const agent = instance.nodes.find(card => card.type === 'agent');
-      const conversation = instance.nodes.find(card => card.type === 'conversation');
-      const legion = instance.nodes.find(card => card.type === 'legion' && !card.parent_id);
-      useTutorialStore.setState({ status: 'skipped', view: 'hidden',
-        quickStart: agent && conversation ? { agentId: agent.id, conversationId: conversation.id, legionId: legion?.id, goal } : undefined });
-      if (agent && !hasModelConfiguration(world().modelCatalog, agent.config.model)) useWorldStore.setState({ settingsOpen: true });
-      else if (agent && conversation) await tutorial.openQuickStart();
-      else if (legion) useLegionWorkspace.getState().open(legion.id);
+      await prepareDeck([...new Set(blueprints.flatMap(item => item.required_card_ids ?? item.node_types))].filter(type => type !== 'legion'));
+      for (const blueprint of blueprints) {
+        const instance = await world().instantiateLegion(blueprint.id, undefined, { blueprint, preset: blueprint.preset, silentSuccess: true });
+        if (!instance) throw new Error('The blueprint could not be placed. Check the notification and retry.');
+        // Record the successful creation before layout so retries never duplicate it.
+        completed.push(`${blueprint.preset ? 'preset' : 'saved'}:${blueprint.id}`);
+        const bounds = await arrangeWorkspace(instance.nodes.map(card => card.id), !!blueprint.preset);
+        if (bounds) placed.push(bounds);
+      }
+      useWorldStore.setState({ selectedCardIds: [] });
+      if (placed.length) {
+        const x = Math.min(...placed.map(box => box.x)), y = Math.min(...placed.map(box => box.y));
+        await visuals?.frame?.({ x, y, width: Math.max(...placed.map(box => box.x + box.width)) - x,
+          height: Math.max(...placed.map(box => box.y + box.height)) - y });
+      }
+      useTutorialStore.setState({ status: 'skipped', view: 'hidden', quickStart: undefined });
     } catch (error) { useTutorialStore.setState({ error: apiErrorMessage(error) }); }
     finally { useTutorialStore.setState({ busy: false }); }
+    return completed;
   },
   async openQuickStart() {
     const setup = state().quickStart;

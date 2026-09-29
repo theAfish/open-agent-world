@@ -2,29 +2,64 @@
 
 The site uses Material for MkDocs and GitHub Pages. Markdown in `docs/` remains the source of truth; plugin-specific guides stay beside their packages. There is no second Wiki to synchronize.
 
+Start with the [writing checklist](../contributing/docs-checklist.md) to choose a
+reader, location, language, and page structure. This page covers the build workflow.
+
 ## Preview locally
 
 From the repository root, install the documentation tools in a separate environment:
 
 ```sh
-uv venv .tmp/docs-venv
+uv venv --python 3.12 .tmp/docs-venv
 ```
 
 Windows:
 
 ```powershell
 uv pip install --python .tmp/docs-venv/Scripts/python.exe -r scripts/docs-requirements.txt
-./.tmp/docs-venv/Scripts/python.exe -m mkdocs serve
+./.tmp/docs-venv/Scripts/python.exe scripts/docs.py serve
 ```
 
 Linux/macOS:
 
 ```sh
 uv pip install --python .tmp/docs-venv/bin/python -r scripts/docs-requirements.txt
-.tmp/docs-venv/bin/python -m mkdocs serve
+.tmp/docs-venv/bin/python scripts/docs.py serve
 ```
 
-The preview prints its local URL. To build with link and navigation validation, replace `serve` with `build --strict`. Output goes to `.tmp/docs-site` and is not committed. Run `scripts/docs_tests.py` and `scripts/docs_check_site.py` with the same environment's Python for source-link tests and a full generated-link/search check.
+The preview prints its local URL. Replace `serve` with `check` to run the same
+validation as CI, using the same environment's Python:
+
+```powershell
+# Windows, from the repository root
+./.tmp/docs-venv/Scripts/python.exe scripts/docs.py check
+```
+
+```sh
+# Linux/macOS, from the repository root
+.tmp/docs-venv/bin/python scripts/docs.py check
+```
+
+This checks source inventory, headings and language separation, runs publishing
+tests, builds with `--strict`, then checks generated links, anchors, assets, and
+search boundaries. Output goes to `.tmp/docs-site` and is not committed. The
+documentation environment does not require the backend, frontend, or model access.
+
+## Diagnose a failed check
+
+| Failure | Repair |
+| --- | --- |
+| Page missing from navigation | Add it under the correct audience in `mkdocs.yml`; move historical records to `internal/` |
+| Chinese prose in an English page | Create or update the adjacent `.zh-CN.md` page and add language links |
+| Title count or heading level | Use one `#` title and consecutive section levels; examples belong in fenced code |
+| Missing repository link | Correct the relative path or commit the intended source/asset |
+| Ignored target or incorrect case | Match the checkout's exact filename; do not link local build/test artifacts |
+| Missing generated anchor or asset | Update the link and its target together, then rebuild |
+| Tutorial examples fail | Inspect the separate tutorial job; reproduce with the commands in [Test and distribute](testing.md) |
+
+Keep strict warnings enabled. An exclusion is a content decision, not a workaround
+for a broken public page. Filename checks also run on Windows so mistakes are found
+before the Linux build.
 
 ## Theme
 
@@ -39,13 +74,25 @@ Keep header surface colors separate from link and button colors. Check both them
 | Everyday users | `docs/user-guide/` | Actions, visible results, and recovery; no implementation walkthroughs |
 | New plugin authors | `docs/developers/` | Ordered lessons with runnable examples and expected results |
 | Experienced developers | Technical reference navigation | Contracts, lifecycle, architecture, and detailed behavior |
-| Maintainers planning future work | Repository-only design notes | Label as proposals; exclude from the site |
+| Host contributors | `docs/contributing/` | Host development, documentation, and release workflows |
+| Maintainers recording evidence or future work | `docs/internal/` | Date and label proposals, investigations, and validation records; exclude from the site |
 
-Keep English as the primary language. Link Chinese entry pages explicitly and label English-only destinations. Avoid sending a new user from an ordinary task straight into an API contract.
+Keep English as the primary language in `topic.md`, with Chinese prose in a
+separate `topic.zh-CN.md`. Link translations explicitly and label English-only
+destinations on Chinese pages. Avoid sending a new user from an ordinary task
+straight into an API contract. Existing root-level reference pages keep their
+URLs; new reference pages go in `docs/reference/`.
 
-Add published pages to `mkdocs.yml`. Unlisted pages and broken local links fail the strict build. Excluded planning notes stay out of generated HTML and search. General search covers landing pages, installation, user guides, and guided developer pages; detailed contracts remain accessible through Technical reference and the extension-point directory. This keeps implementation details out of ordinary search results.
+Add published pages to `mkdocs.yml`. Unlisted pages and broken local links fail
+validation. `internal/` stays out of generated HTML, search, and the bundled manual.
+General search covers landing pages, installation, user/developer guides, and
+contribution guides; detailed contracts remain accessible through Technical reference.
 
-`scripts/docs_hooks.py` converts repository source links and excluded-note links to GitHub while leaving normal documentation links for MkDocs to validate. The GitHub target must exist in the checkout or the build fails.
+`scripts/docs_hooks.py` converts repository source links and excluded-record links
+to GitHub while leaving normal documentation links for MkDocs to validate. Targets
+must exist with exact filename case and be tracked or eligible for Git. Ignored
+local outputs cannot become broken GitHub links. Commit new targets with the page;
+CI validates again in a clean checkout.
 
 ## In-app offline manual
 
@@ -55,10 +102,10 @@ frontend build, so desktop packaging needs no docs server or internet connection
 Internal page links and section anchors navigate within the reader. Source-code
 and other external links are explicitly marked as online resources.
 
-`frontend/src/shell/documentation.ts` defines the introductory topic order and
-excludes repository-only notes. Other included pages appear under Technical
-reference. Keep exclusions aligned with `mkdocs.yml`; corresponding `.zh-CN.md`
-pages are selected for Chinese UI. `DocumentationPanel` renders standard Markdown
+`frontend/src/shell/documentation.ts` defines the audience groups and excludes
+`internal/` and assets' Markdown. Other included pages appear under Technical
+reference. Its inventory test requires exact agreement with `mkdocs.yml` navigation;
+corresponding `.zh-CN.md` pages are selected for Chinese UI. `DocumentationPanel` renders standard Markdown
 and GFM tables, strips the home page's MkDocs layout wrappers and does not execute
 HTML. Use relative Markdown image and page links for offline content.
 
@@ -70,7 +117,13 @@ from `frontend`, then `npm run build` to verify that assets are packaged.
 
 This site tracks **`dev`**. It describes development behavior, which may be newer than an installer from Releases. The source/edit links and setup guide use that same branch. To switch publishing branches, update the workflow branch filters/conditions, `edit_uri`, the hook's source branch, and the setup guide together.
 
-Enable **Settings → Pages → Build and deployment → Source → GitHub Actions** in the repository. The [Documentation workflow](../../.github/workflows/docs.yml) validates pull requests and builds/publishes documentation changes pushed to `dev`. It also tests the tutorial plugin packages. Manual dispatch becomes available once the workflow exists on the repository's default branch; it only deploys when run on `dev`.
+Enable **Settings → Pages → Build and deployment → Source → GitHub Actions** in the
+repository. The [Documentation workflow](../../.github/workflows/docs.yml) checks
+PRs to `dev`/`main` and pushes to `dev`, including code-only changes that could break
+source links. The `build` job runs `scripts/docs.py check`. A separate tutorial job
+installs locked backend test dependencies and the example entry points, then runs
+the tutorial integration tests. Deployment requires both jobs to pass and only
+runs on `dev` outside pull requests. Manual dispatch follows the same rule.
 
 In **Settings → Environments → github-pages → Deployment branches and tags**, allow the `dev` branch. GitHub may initially allow only the default branch (`main`); in that case the build succeeds but the deployment is rejected before its steps run. Keep the environment policy aligned with the workflow's publishing branch.
 

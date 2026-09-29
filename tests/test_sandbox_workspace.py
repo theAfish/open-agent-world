@@ -166,16 +166,26 @@ class WindowsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
             await self.backend.execute("workspace", ["cmd.exe"])
         self.assertEqual(self.native.runs, [])
 
-    async def test_cancellation_waits_for_process_tree_then_revokes(self):
+    async def test_command_cancellation_drains_tree_and_stop_revokes_workspace(self):
         self.native.block_run = True
         await self.bind()
         await self.backend.start("workspace")
         task = asyncio.create_task(self.backend.execute("workspace", ["cmd.exe"]))
         self.assertTrue(await asyncio.to_thread(self.native.job_opened.wait, 1))
+        owner = self.backend._records["workspace"]
+        execution = next(iter(owner.executions.values()))
+        self.assertEqual(execution.active_job, 73)
         task.cancel()
         with self.assertRaises(asyncio.CancelledError):
             await task
-        self.assertIsNone(self.backend._records["workspace"].active_job)
+        self.assertIsNone(execution.active_job)
+        self.assertTrue(execution.finished.is_set())
+        self.assertEqual(owner.executions, {})
+        self.assertEqual((await self.backend.get("workspace")).state, SandboxState.READY)
+        # Cancelling one command leaves the shared Sandbox ready for other work.
+        # Its workspace grant is revoked at the Sandbox stop boundary.
+        self.assertNotIn((self.project, 4242), self.native.workspace_revokes)
+        await self.backend.terminate("workspace")
         self.assertEqual((await self.backend.get("workspace")).state, SandboxState.STOPPED)
         self.assertIn((self.project, 4242), self.native.workspace_revokes)
 

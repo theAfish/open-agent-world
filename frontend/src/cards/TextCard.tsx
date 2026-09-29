@@ -2,6 +2,7 @@ import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
 import { t, useLocale } from "../i18n";
 import { Check, FileClock, Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useHydrationLease } from '../canvas/useCardRendering';
 import { useWorldStore } from "../state/worldStore";
 import type { ModificationRecord, WorldCard } from "../types/world";
 import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
@@ -17,6 +18,7 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
   const [storedDraft, setStoredDraft] = useSurfaceDraft<{ content: string; revision?: number; saving?: boolean } | undefined>(draftKey, undefined);
   const [content, setContent] = useState(storedDraft?.content ?? '');
   const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving">(storedDraft ? 'dirty' : 'saved');
+  useHydrationLease(card.id, 'text-edit', saveState !== 'saved');
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState<number | undefined>(storedDraft?.revision);

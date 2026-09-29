@@ -83,7 +83,7 @@ class MockAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_default_model_and_lifecycle_events(self) -> None:
         created = await self.runtime.create_agent(self.config)
-        self.assertEqual(created.config.model, "gemini-3.7-flash")
+        self.assertEqual(created.config.model, "oaw:default")
         context = self._context("run-1")
         events = [
             event async for event in self.runtime.execute(
@@ -243,14 +243,15 @@ class GoogleAdkBoundaryTests(unittest.IsolatedAsyncioTestCase):
             types=SimpleNamespace(Content=FakeContent, Part=FakePart),
         )
         runtime = GoogleAdkAgentRuntime(provider, adk_bindings=bindings)
-        await runtime.create_agent(AgentConfig("agent-a", "Agent"))
+        config = AgentConfig("agent-a", "Agent", model="gemini-test")
+        await runtime.create_agent(config)
         context = InvocationContext(
             run_id="run-adk", agent_id="agent-a", parent_run_id=None,
             root_run_id="run-adk", caller=InvocationCaller("test"),
             context_id=None, task_id=None, runtime_provider_id="google.adk",
         )
         events = [event async for event in runtime.execute(
-            AgentConfig("agent-a", "Agent"), context, RuntimeInput("do it")
+            config, context, RuntimeInput("do it")
         )]
         types = [event.type for event in events]
         self.assertIn(AgentEventType.TOOL_STARTED, types)
@@ -263,7 +264,7 @@ class GoogleAdkBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(texts, ["Answer"])
         runner = FakeRunner.instances[-1]
         self.assertIsInstance(runner.app, FakeApp)
-        self.assertEqual(runner.app.root_agent.model, "gemini-3.7-flash")
+        self.assertEqual(runner.app.root_agent.model, "gemini-test")
         self.assertEqual(len(runner.app.root_agent.tools), 1)
 
 

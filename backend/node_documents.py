@@ -27,6 +27,7 @@ def validation_message(error):
 
 def definition(services, node_id):
     node = services.world.get_card(node_id)
+    services.world.require_available_card(node)
     result = services.plugins.node_type(node.type).document
     if result is None:
         raise ResourceValidationError("This node does not provide a document")

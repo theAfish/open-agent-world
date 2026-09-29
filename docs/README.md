@@ -40,6 +40,12 @@ Connect agents, files, and tools. Give each agent a role and a place to work tog
 
     [Technical reference →](reference/index.md)
 
+- **Contribute to OAW**
+
+    Change the host, maintain documentation, or prepare a release with the right checks.
+
+    [Contributor guide →](contributing/index.md)
+
 </div>
 
 ## Pick your next step
@@ -51,6 +57,7 @@ Connect agents, files, and tools. Give each agent a role and a place to work tog
 | Add a model connection | [Models and settings](user-guide/models.md) |
 | Find a card or plugin | [Plugins and packs](user-guide/plugins.md) |
 | Create a new kind of card | [Your first plugin](developers/first-plugin.md) |
-| Run or contribute to OAW itself | [Development setup](developers/setup.md) |
+| Run or contribute to OAW itself | [Contributor guide](contributing/index.md) |
+| Write or reorganize documentation | [Documentation checklist](contributing/docs-checklist.md) |
 
 OAW is experimental. See [GitHub Releases](https://github.com/theAfish/open-agent-world/releases) for available downloads and [report a problem](https://github.com/theAfish/open-agent-world/issues) with your app version and the steps to reproduce it.

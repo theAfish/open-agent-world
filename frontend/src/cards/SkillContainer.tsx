@@ -2,6 +2,7 @@ import { t, useLocale } from "../i18n";
 import { type NodeProps } from "@xyflow/react";
 import { Boxes, ExternalLink, X } from "lucide-react";
 import { useState } from "react";
+import { useHydrationLease } from '../canvas/useCardRendering';
 import { createPortal } from "react-dom";
 import { useWorldStore } from "../state/worldStore";
 import { AddSelectedMembers, ContainerActions, ContainerFrame } from "./ContainerFrame";
@@ -13,6 +14,7 @@ export function SkillContainerNode({ data, selected }: NodeProps<CanvasNode>) {
   const card = data.card;
   const cards = useWorldStore((state) => state.cards);
   const [editing, setEditing] = useState(false);
+  useHydrationLease(card.id, 'toolbox-dialog', editing);
   const members = cards.filter((member) => member.parent_id === card.id);
   return <ContainerFrame card={card} selected={selected} className="skill-container" label={t("{v0} skill space", { v0: String(card.name) })} header={<>
     <Boxes size={24} /><div><span>{t("SKILL TOOLBOX · OPEN SPACE")}</span><strong>{card.name}</strong></div>

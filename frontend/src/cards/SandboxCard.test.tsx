@@ -152,7 +152,7 @@ describe("sandbox configuration UI", () => {
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Stopped"));
     expect(screen.getByText("Managed workspace")).toBeTruthy();
     expect(screen.getByText("Configuration").parentElement?.hasAttribute("open")).toBe(false);
-    expect(screen.getByText("Environment variables")).toBeTruthy();
+    expect(screen.queryByText("Environment variables")).toBeNull();
     expect(screen.queryByLabelText("Command")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     expect(useNodeSurfaceStore.getState().surfaceLevels[sandbox.id]).toBe("workspace");
@@ -195,8 +195,8 @@ describe("sandbox configuration UI", () => {
       return inspector ? <SandboxCardBody card={card} level="inspector" /> : <SandboxSettings card={card} />;
     }
     const { rerender } = render(<Surface inspector />);
-    await waitFor(() => expect((screen.getByLabelText("Working folder") as HTMLInputElement).disabled).toBe(false));
     fireEvent.click(screen.getByText("Configuration"));
+    await waitFor(() => expect((screen.getByLabelText("Working folder") as HTMLInputElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Working folder"), { target: { value: "D:\\shared" } });
     rerender(<Surface inspector={false} />);
     expect((screen.getByLabelText("Working folder") as HTMLInputElement).value).toBe("D:\\shared");
@@ -229,8 +229,8 @@ describe("sandbox configuration UI", () => {
 
   it("keeps an unsaved environment draft and its revision across surfaces", async () => {
     const { rerender } = render(<SandboxCardBody card={sandbox} level="inspector" />);
-    await waitFor(() => expect((screen.getByRole("button", { name: "Save environment", hidden: true }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByText("Configuration"));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Save environment", hidden: true }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByText("Environment variables"));
     fireEvent.click(screen.getByRole("button", { name: "Add variable" }));
     fireEvent.change(screen.getByLabelText("Environment variable 1 name"), { target: { value: "REGION" } });

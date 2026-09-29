@@ -97,6 +97,8 @@ async def serve(settings, listener, *, frontend=None, desktop=False, open_browse
         if not development or not development.pending or parent_closed.is_set():
             if not server.started and not parent_closed.is_set():
                 raise RuntimeError("Backend startup failed. See launcher.log.")
+            if desktop and not getattr(app.state, 'clean_shutdown', False):
+                raise RuntimeError("Backend did not shut down cleanly. See launcher.log.")
             return
         if not app.state.clean_shutdown:
             raise RuntimeError("Backend shutdown failed; the development profile was not reset. See launcher.log.")

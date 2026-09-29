@@ -5,10 +5,11 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import { useOpenFiles } from "../state/openFiles";
-import { useNodeSurfaceStore } from "../state/nodeSurfaces";
+import { useNodeSurfaceStore, useSurfaceDraft, surfaceDraftKey } from "../state/nodeSurfaces";
+import { useHydrationLease } from '../canvas/useCardRendering';
 import type { WorldCard } from "../types/world";
 import { IconButton } from "../components/IconButton";
-import { SandboxRuntimeControls, SandboxSettings } from "./SandboxCard";
+import { SandboxRuntimeControls, SandboxSettings, sandboxSettingsDirty } from "./SandboxCard";
 import { PublishFiles } from "./Artifacts";
 import { WorkspaceSection, useWorkspaceSections } from "../workspace/WorkspaceSection";
 import "./sandboxWorkspace.css";
@@ -48,11 +49,14 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const busy = useWorldStore(s => s.sandboxBusy[card.id]);
   const runtimeError = useWorldStore(s => s.sandboxErrors[card.id]);
   const socket = useWorldStore(s => s.socketState);
+  const draftKey = (name: string) => surfaceDraftKey(card.id, `sandbox-${name}`, card.config.runtime, card.config.workspace_path, card.config.workspace_access, deployed);
   const cards = useWorldStore(s => s.cards);
   const loadRuntimes = useWorldStore(s => s.loadSandboxRuntimes);
   const tab = useNodeSurfaceStore(s => !deployed && s.drafts[`sandbox-tab:${card.id}`] === "settings" ? "settings" : "workspace");
   const setTab = (value: string) => useNodeSurfaceStore.getState().setDraft(`sandbox-tab:${card.id}`, value);
-  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [settingsInteraction, setSettingsDirty] = useState(false);
+  const draftDirty = useNodeSurfaceStore(s => sandboxSettingsDirty(card, s.drafts[`sandbox-settings:${card.id}`]));
+  const settingsDirty = settingsInteraction || draftDirty;
   const draft = useNodeSurfaceStore(s => s.drafts[`sandbox:${card.id}`] ?? "");
   const setDraft = (value: string) => useNodeSurfaceStore.getState().setDraft(`sandbox:${card.id}`, value);
   const [sidebarWidth, setSidebarWidth] = useState(() => boundedSize(Number(useNodeSurfaceStore.getState().drafts[`sandbox-sidebar:${card.id}`] ?? 224), 180, 420, 224));
@@ -73,7 +77,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   };
   const [roots, setRoots] = useState<Root[]>([]);
   const [tree, setTree] = useState<Record<string, Files>>({});
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [expanded, setExpanded] = useSurfaceDraft<Record<string, boolean>>(draftKey('expanded'), {});
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
   const [loading, setLoading] = useState<Record<string, boolean>>({});
@@ -83,15 +87,24 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const submitting = useRef(false);
   const recalled = useRef(-1);
   const savedDraft = useRef("");
-  const [commands, setCommands] = useState<string[]>([]);
+  const [commands, setCommands] = useSurfaceDraft<string[]>(draftKey('commands'), []);
   const [managedPython, setManagedPython] = useState(false);
-  const [terminalTab, setTerminalTab] = useState("terminal");
-  const [selection, setSelection] = useState<{ root: string; path: string; label: string }>();
+  const [terminalTab, setTerminalTab] = useSurfaceDraft(draftKey('terminal-tab'), 'terminal');
+  const [selection, setSelection] = useSurfaceDraft<{ root: string; path: string; label: string } | undefined>(draftKey('selection'), undefined);
   const [preview, setPreview] = useState<Files>();
+  const staticPreviewKey = draftKey('static-preview');
+  useEffect(() => {
+    if (!selection || typeof preview?.text !== 'string') return;
+    // A bounded read-only projection for semantic zoom, not the file/editor
+    // model. Scoped to this runtime binding and never persisted to preferences.
+    useNodeSurfaceStore.getState().setDraft(staticPreviewKey, JSON.stringify({
+      root: selection.root, path: selection.path, text: preview.text.slice(0, 1600),
+    }));
+  }, [staticPreviewKey, selection, preview]);
   const [history, setHistory] = useState<Receipt[]>([]);
   const [error, setError] = useState("");
   const [filesError, setFilesError] = useState("");
-  const [publishPaths, setPublishPaths] = useState<string[]>([]);
+  const [publishPaths, setPublishPaths] = useSurfaceDraft<string[]>(draftKey('publish-paths'), []);
   const binding = JSON.stringify([card.id, card.config.runtime, card.config.workspace_path, card.config.workspace_access,
     info?.runtime_id, info?.workspace_path, info?.workspace_access, info?.workspace]);
   const fileContext = useRef({ binding, live: true, generation: 0, requests: new Map<string, number>() });
@@ -106,15 +119,16 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     context.requests.set(key, sequence);
     return () => context.live && context.generation === generation && fileContext.current === context && context.requests.get(key) === sequence;
   }
-  const [notice, setNotice] = useState("");
-  const [destination, setDestination] = useState("");
+  const [notice, setNotice] = useSurfaceDraft(draftKey('notice'), '');
+  const [destination, setDestination] = useSurfaceDraft(draftKey('destination'), '');
   const [diagnosticBusy, setDiagnosticBusy] = useState(false);
-  const [presetName, setPresetName] = useState("");
-  const [skill, setSkill] = useState("");
+  const [presetName, setPresetName] = useSurfaceDraft(draftKey('preset-name'), '');
+  const [skill, setSkill] = useSurfaceDraft(draftKey('skill'), '');
   const [bundle, setBundle] = useState<Bundle>();
-  const [resource, setResource] = useState("");
-  const [copyPath, setCopyPath] = useState("");
-  const [overwrite, setOverwrite] = useState(false);
+  const [resource, setResource] = useSurfaceDraft(draftKey('resource'), '');
+  const [copyPath, setCopyPath] = useSurfaceDraft(draftKey('copy-path'), '');
+  const [overwrite, setOverwrite] = useSurfaceDraft(draftKey('overwrite'), false);
+  useHydrationLease(card.id, 'sandbox-operation', diagnosticBusy || !!busy);
   const fileQuery = (operation: string, root: string, path: string) => `files?${new URLSearchParams({ operation, root, path })}`;
   const activeCommands = history.filter(h => h.state === "running");
   const running = activeCommands.length === 1 ? activeCommands[0] : undefined;
@@ -124,11 +138,14 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     ? card.config.output.map(String).slice(-250).join("\n")
     : history.map(h => [`$ ${h.argv.at(-1) ?? h.argv.join(" ")}`, h.stdout, h.stderr, h.error].filter(Boolean).join("\n")).join("\n");
   useEffect(() => {
+    // An empty terminal starts at the top already. Reading scrollHeight while
+    // many workspaces mount during canvas culling forces layout for each one.
+    if (!output && !draft) return;
     if (followOutput.current && terminalScroll.current) terminalScroll.current.scrollTop = terminalScroll.current.scrollHeight;
   }, [output, draft, terminalTab, tab]);
-  async function refreshHistory() { if (!terminalAllowed) return; setHistory(await worldApi.sandboxWorkspace<Receipt[]>(card.id, "history")); }
+  async function refreshHistory() { if (card.ephemeral || !terminalAllowed) return; setHistory(await worldApi.sandboxWorkspace<Receipt[]>(card.id, "history")); }
   async function refreshFiles() {
-    if (!filesAllowed) return;
+    if (card.ephemeral || !filesAllowed) return;
     const current = fileRequest("roots");
     setLoading(s => ({ ...s, roots: true }));
     try {
@@ -151,12 +168,18 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   useEffect(() => {
     context.live = true;
     setRoots([]); setTree({}); setLoading({}); setFilesError("");
-    setSelection(undefined); setPreview(undefined); expandedRef.current = {}; setExpanded({});
-    setPublishPaths([]);
+    setPreview(undefined);
     void refreshFiles();
-    return () => { context.live = false; context.generation++; context.requests.clear(); useOpenFiles.getState().clear(card.id); };
+    if (selection) void select(selection.root, selection.path, selection.label);
+    return () => { context.live = false; context.generation++; context.requests.clear(); };
   }, [context]);
-  useEffect(() => { if (!deployed) void loadRuntimes(); void refreshSandbox(card.id); void refreshHistory().catch(e => setError(apiErrorMessage(e))); }, [card.id, socket]);
+  useEffect(() => {
+    // Stress cards have no backend runtime. Culling must not launch requests for
+    // synthetic IDs every time their workspace enters the viewport.
+    if (card.ephemeral) return;
+    if (!deployed) void loadRuntimes();
+    void refreshSandbox(card.id); void refreshHistory().catch(e => setError(apiErrorMessage(e)));
+  }, [card.id, card.ephemeral, socket]);
   const previousStatus = useRef(card.status);
   useEffect(() => {
     const becameReady = previousStatus.current !== "ready" && card.status === "ready";
@@ -166,10 +189,10 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   useEffect(() => { void refreshHistory().catch(e => setError(apiErrorMessage(e))); }, [card.status, busy]);
   // Poll receipts only while a command is active, never the file tree.
   useEffect(() => {
-    if (!running && card.status !== "running") return;
+    if (card.ephemeral || (!running && card.status !== "running")) return;
     const timer = window.setInterval(() => { void refreshHistory().catch(() => {}); void refreshSandbox(card.id); }, 2000);
     return () => window.clearInterval(timer);
-  }, [!!running, card.status, card.id]);
+  }, [!!running, card.status, card.id, card.ephemeral]);
   async function expand(root: string, path: string) {
     const key = `${root}:${path}`;
     if (expanded[key]) { setExpanded(s => ({ ...s, [key]: false })); return; }
@@ -277,7 +300,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     setPresetName("");
   }
   useEffect(() => {
-    setBundle(undefined); setResource("");
+    setBundle(undefined);
     if (skill) { let live = true; void worldApi.sandboxWorkspace<Bundle>(card.id, `skills/${encodeURIComponent(skill)}`).then(b => { if (live) setBundle(b); }).catch(e => setError(apiErrorMessage(e))); return () => { live = false; }; }
   }, [skill, card.id, history.length]);
   return <div className="sandbox-workspace nodrag nopan nowheel">
@@ -293,7 +316,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
       <SandboxRuntimeControls card={card} disabled={settingsDirty || diagnosticBusy} />
     </header>
     {(error || (tab === "workspace" && runtimeError)) && <p className="sandbox-workspace-error" role="alert">{error || runtimeError}</p>}
-    <div className="sandbox-workbench" role="tabpanel" id={`${card.id}-workspace-panel`} aria-labelledby={`${card.id}-workspace-tab`} hidden={tab !== "workspace"}>
+    {tab === 'workspace' && <div className="sandbox-workbench" role="tabpanel" id={`${card.id}-workspace-panel`} aria-labelledby={`${card.id}-workspace-tab`}>
       <WorkspaceSection id="files" title={t("Files")} className={`sandbox-files-section${hasWorkArea ? "" : " is-only-section"}`} style={{ width: hasWorkArea ? sidebarWidth : "100%" }}>
       <aside ref={sidebarElement} className="sandbox-files nodrag nopan nowheel" aria-label={t("Sandbox files")}>
         <header className="sandbox-pane-heading"><span><FolderOpen size={13} /> {t("Files")}</span>
@@ -413,8 +436,8 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
         </section>
         </WorkspaceSection>
       </main>
-    </div>
-    {!deployed && <div className="sandbox-settings-window" role="tabpanel" id={`${card.id}-settings-panel`} aria-labelledby={`${card.id}-settings-tab`} hidden={tab !== "settings"}>
+    </div>}
+    {!deployed && tab === 'settings' && <div className="sandbox-settings-window" role="tabpanel" id={`${card.id}-settings-panel`} aria-labelledby={`${card.id}-settings-tab`}>
       <div className="sandbox-settings-content">
         <SandboxSettings card={card} onDirtyChange={setSettingsDirty} />
         <details className="sandbox-settings"><summary>{t("Command presets")}</summary><div className="sandbox-config-form">

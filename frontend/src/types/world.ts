@@ -116,6 +116,7 @@ export interface CardConfig extends Record<string, unknown> {
 }
 
 export interface WorldCard {
+  missing_plugin?: { plugin_id: string; reason: string } | null;
   /** Missing on old snapshots; rendered as normal. Set once by the backend. */
   finish?: import('../cards/cardFinish').CardFinish;
   state_scope?: "shared" | "session" | null;
@@ -140,6 +141,7 @@ export interface WorldCard {
 }
 
 export interface WorldEdge {
+  missing_plugin?: { plugin_id: string; reason: string } | null;
   id: string;
   revision?: number;
   source: string;

@@ -23,7 +23,7 @@ test('profile sustained panning with populated canvas', async ({ page, request }
     })), ids);
     await page.goto('/');
     await expect(page.locator(`[data-card-id="${ids[0]}"]`).first()).toBeVisible();
-    await expect(page.locator('.contour-chunk').first()).toBeAttached();
+    await expect(page.locator('.terrain-webgl-background')).toHaveAttribute('data-terrain-status', 'ready');
     await page.waitForTimeout(1500);
     if (process.env.OAW_PAN_CSS) await page.addStyleTag({ content: process.env.OAW_PAN_CSS });
     const cdp = await page.context().newCDPSession(page);

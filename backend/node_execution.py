@@ -35,6 +35,7 @@ class NodeExecutionService(NodeDelegationMixin):
 
     def spec(self, node_id):
         node = self.services.world.get_card(node_id)
+        self.services.world.require_available_card(node)
         spec = self.services.plugins.node_type(node.type).execution
         if spec is None:
             raise ResourceValidationError("This plugin does not provide execution")
@@ -58,7 +59,7 @@ class NodeExecutionService(NodeDelegationMixin):
 
     def active(self, node_id):
         node = self.services.world.get_card(node_id)
-        if self.services.plugins.node_type(node.type).execution is None:
+        if node.missing_plugin or self.services.plugins.node_type(node.type).execution is None:
             return False
         if self.worker_key(node_id) in self.workers:
             return True
@@ -95,6 +96,8 @@ class NodeExecutionService(NodeDelegationMixin):
 
     def assert_editable(self, node_id, *, allow_delegated=False, all_states=False):
         node = self.services.world.get_card(node_id)
+        if node.missing_plugin:
+            return
         spec = self.services.plugins.node_type(node.type).execution
         if spec is None:
             return
@@ -318,6 +321,8 @@ class NodeExecutionService(NodeDelegationMixin):
 
     async def startup(self):
         for node in self.services.world.list_cards():
+            if node.missing_plugin:
+                continue
             if self.services.plugins.node_type(node.type).execution is None:
                 continue
             namespaces = self.services.card_state.existing(node.id)

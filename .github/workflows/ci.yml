@@ -14,6 +14,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PYTHONUTF8: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+
 jobs:
   backend:
     name: Backend tests
@@ -32,7 +36,7 @@ jobs:
             plugins/*/pyproject.toml
       - name: Sync locked backend dependencies
         working-directory: backend
-        run: uv sync --frozen --all-extras --group dev
+        run: uv sync --locked --all-extras --group dev
       - name: Install repository plugins
         working-directory: backend
         shell: bash
@@ -49,9 +53,16 @@ jobs:
             install_args+=(--editable "$plugin_root")
           done
           uv pip install --python .venv/bin/python "${install_args[@]}"
-      - name: Run backend and plugin test suite
-        working-directory: backend
-        run: .venv/bin/python -m pytest
+      - name: Run backend and public SDK test suites
+        run: backend/.venv/bin/python .github/run-backend-tests.py tests backend/tests --junitxml=.tmp/backend-linux.xml
+      - name: Upload backend results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-linux-results
+          path: .tmp/backend-linux.xml
+          include-hidden-files: true
+          retention-days: 7
 
   frontend:
     name: Frontend tests and build
@@ -67,9 +78,67 @@ jobs:
       - name: Install locked dependencies
         working-directory: frontend
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+      - name: Install locked deployment backend
+        run: uv sync --project backend --locked --dev --python 3.12
       - name: Run frontend tests
         working-directory: frontend
         run: npm test
       - name: Type-check and build frontend
         working-directory: frontend
         run: npm run build
+      - name: Install deployment browser
+        working-directory: frontend
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Run deployment acceptance against production frontend
+        working-directory: frontend
+        run: npm run test:e2e:deployment
+      - name: Upload deployment failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-browser-failure
+          path: |
+            .tmp/deployment-playwright/
+            .tmp/deployment-desktop.png
+            .tmp/deployment-mobile.png
+          include-hidden-files: true
+          retention-days: 7
+
+  windows-smoke:
+    name: Core smoke (Windows)
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+      - name: Install locked backend dependencies
+        run: uv sync --project backend --locked --dev --python 3.12
+      - name: Check startup, access boundaries, deployment, persistence and migration
+        run: >-
+          backend/.venv/Scripts/python.exe .github/run-backend-tests.py
+          backend/tests/test_application_launch.py
+          backend/tests/test_control_plane.py
+          backend/tests/test_http_foundations.py
+          backend/tests/test_request_context.py
+          backend/tests/test_idempotency.py
+          backend/tests/test_deployments.py
+          backend/tests/test_persistence_and_events.py
+          backend/tests/test_lifecycle_migration.py
+          backend/tests/test_storage_location.py
+          backend/tests/test_windows_acceptance_helpers.py
+          --junitxml=.tmp/windows-smoke.xml
+      - name: Upload Windows results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke-results
+          path: .tmp/windows-smoke.xml
+          include-hidden-files: true
+          retention-days: 7

@@ -14,7 +14,7 @@ export function canReleaseMember(enabled:boolean,point:{x:number;y:number},rect:
   const points=shadowPoints(rect.width,rect.height,rect.rects);
   return points.some(p=>Math.hypot(point.x-rect.x-p.x,point.y-rect.y-p.y)<28);
 }
-export const isShadow = (card?:WorldCard) => card?.type===SHADOW.type;
+export const isShadow = (card?:WorldCard) => !card?.missing_plugin && card?.type===SHADOW.type;
 export const collectionState = (card:WorldCard):CollectionState => card.config.display_state==="expanded"?"expanded":card.config.display_state==="stacked"?"stacked":"minimal";
 export const useCollectionHover = create<{members:Record<string,string|undefined>;set:(id:string,member?:string)=>void}>(set=>({members:{},set:(id,member)=>set(s=>{const members={...s.members};if(member)members[id]=member;else delete members[id];return {members};})}));
 export const useCollectionDrag=create<{positions:Record<string,{x:number;y:number}>;set:(id?:string,position?:{x:number;y:number})=>void}>(set=>({positions:{},set:(id,position)=>set({positions:id&&position?{[id]:position}:{}})}));

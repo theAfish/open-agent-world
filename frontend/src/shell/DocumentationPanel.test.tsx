@@ -47,6 +47,10 @@ it('switches an open topic to Chinese and labels English-only topics', () => {
   render(<DocumentationPanel />);
   act(() => useLocale.setState({ locale: 'zh-CN' }));
   expect(screen.getByRole('heading', { name: '使用入门', level: 1 })).toBeTruthy();
+  fireEvent.click(screen.getByRole('link', { name: '下载与安装' }));
+  expect(screen.getByRole('heading', { name: '下载与安装', level: 1 })).toBeTruthy();
+  expect(screen.queryByText('此主题目前提供英文文档。')).toBeNull();
+  expect(screen.getByRole('heading', { name: '参与维护', level: 3 })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Models and settings' }));
   expect(screen.getByText('此主题目前提供英文文档。')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Models and settings' }).getAttribute('aria-current')).toBe('page');

@@ -21,7 +21,7 @@ def main():
     except ValueError:
         pass
     if not valid:
-        raise SystemExit('Official Marketplace is unbound: deploy, run production smoke, then set backend/official_marketplace.py before a release.')
+        raise SystemExit('Marketplace required but official URL is unconfigured or invalid: deploy, run production smoke, then set backend/official_marketplace.py, or disable OAW_REQUIRE_MARKETPLACE.')
     print('Official Marketplace origin configured: ' + OFFICIAL_MARKETPLACE_URL)
 
 

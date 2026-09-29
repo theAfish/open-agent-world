@@ -109,3 +109,26 @@ it("reveals the saved finish after the face emerges even when parent props are s
   act(() => vi.advanceTimersByTime(1380));
   expect(container.querySelector(".card-finish-layer")).toBeNull();
 });
+
+it.each(['missing', 'error'] as const)('marks a %s pack and keeps inspection available, then restores its artwork after recovery', kind => {
+  const state = fixture();
+  const pluginId = state.packs.tools.definition.plugin_id;
+  state.packs.tools.definition.artwork_url = '/cover.png';
+  const versions = [{ id: pluginId, name: 'Tools', version: '1.0.0', selected: true, loaded: true,
+    environment: { state: kind === 'error' ? 'environment_failed' : 'environment_ready', error: null } }];
+  if (kind === 'missing') state.plugins[pluginId].installed = false;
+  const inspect = vi.fn();
+  const props = { pack: state.packs.tools, snapshot: state, versions, onOpened: opened, onBrowse: browse, onInspect: inspect };
+  const { container, rerender } = render(<LibraryPack {...props} />);
+  expect(container.querySelector('article')?.dataset.packIssue).toBe(kind);
+  expect(screen.getByText(kind === 'missing' ? 'MISSING' : 'ERROR')).toBeTruthy();
+  expect(container.querySelector('.pack-artwork')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'View pack Tools' }));
+  expect(inspect).toHaveBeenCalledOnce();
+  expect(opened).not.toHaveBeenCalled();
+  state.plugins[pluginId].installed = true;
+  versions[0].environment.state = 'environment_ready';
+  rerender(<LibraryPack {...props} />);
+  expect(container.querySelector('article')?.hasAttribute('data-pack-issue')).toBe(false);
+  expect(container.querySelector('.pack-artwork')).toBeTruthy();
+});

@@ -4,7 +4,7 @@ import { surfaceSizeFor, type NodeSurfaceLevel, type SurfaceSizes } from "./node
 import { nodePositionFromSurfacePosition, positionSurfaceAtNodeCenter } from "../canvas/nodeDisplacement";
 import { isShadow, shadowLayout, insideShadow } from "./shadowCollection";
 
-export const containerDefinition = (card: WorldCard, catalog: PluginCatalog) => catalog.node_types.find((type) => type.id === card.type)?.container;
+export const containerDefinition = (card: WorldCard, catalog: PluginCatalog) => card.missing_plugin ? undefined : catalog.node_types.find((type) => type.id === card.type)?.container;
 export const isContainer = (card: WorldCard, catalog: PluginCatalog) => containerDefinition(card, catalog) != null;
 
 export function containerShowsWorkspace(card: WorldCard, catalog: PluginCatalog, level?: NodeSurfaceLevel) {

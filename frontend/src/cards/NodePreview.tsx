@@ -1,3 +1,4 @@
+import { isMissingCard, MissingPlugin } from "./MissingPlugin";
 import { t, useLocale } from "../i18n";
 import { Bot, FileText, Image as ImageIcon, MessagesSquare, ShieldCheck } from "lucide-react";
 import { TaskBoardPreview } from "./TaskBoard";
@@ -16,6 +17,8 @@ function compactText(value: unknown, fallback: string): string {
 
 export function NodePreview({ card }: { card: WorldCard }) {
   useLocale();
+  const catalog = useWorldStore(state => state.catalog);
+  if (isMissingCard(card, catalog)) return <MissingPlugin card={card} compact />;
   return <PluginSurface card={card} slot="preview" level="preview"><DefaultNodePreview card={card} /></PluginSurface>;
 }
 

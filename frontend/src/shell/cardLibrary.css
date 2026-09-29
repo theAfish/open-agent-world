@@ -105,8 +105,8 @@
 .library-backdrop { position: fixed; inset: 0; z-index: 70; background: rgba(31,30,27,.36); backdrop-filter: blur(5px); }
 .library-backdrop[hidden] { display: none; }
 .card-library-modal { position: fixed; z-index: 71; top: 16px; bottom: var(--library-deck-space, 240px); margin: 0 auto; height: auto; max-height: none; }
-.component-palette.is-library-open { z-index: 72; transition: box-shadow 220ms ease; }
-.component-palette.is-library-open .deck-stage { min-height: var(--deck-open-height); max-height: var(--deck-open-height); margin-top: 5px; padding: 8px 14px 8px 12px; visibility: visible; opacity: 1; border-width: 1px; pointer-events: auto; transform: none; transition: none; }
+.component-palette.is-library-open { z-index: 72; }
+.component-palette.is-library-open .deck-stage { min-height: var(--deck-open-height); max-height: var(--deck-open-height); margin-top: 5px; padding: 8px 14px 8px 12px; visibility: visible; opacity: 1; border-width: 1px; pointer-events: auto; transform: none; transition-delay: 0s; }
 .deck-stage.is-drop-target { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
 .library-current-deck { font-size: 12px; color: var(--ink-soft); }
 @media (max-width: 760px) {

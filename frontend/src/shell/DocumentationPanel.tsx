@@ -78,7 +78,7 @@ export function DocumentationPanel({ initialPage = 'user-guide/index.md' }: { in
         <span aria-live="polite">{entry.title}</span>
       </div>
       <article ref={article} className="docs-article" tabIndex={0} aria-label={entry.title}>
-        {locale === 'zh-CN' && !page.endsWith('.zh-CN.md') && page !== 'install.md' && <p className="docs-language-note">{t('This topic is currently available in English.')}</p>}
+        {locale === 'zh-CN' && !page.endsWith('.zh-CN.md') && <p className="docs-language-note">{t('This topic is currently available in English.')}</p>}
         <ReactMarkdown remarkPlugins={[remarkGfm, remarkDocumentationHeadings]} skipHtml components={components}>{entry.markdown}</ReactMarkdown>
       </article>
     </section>

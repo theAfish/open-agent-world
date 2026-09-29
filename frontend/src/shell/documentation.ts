@@ -5,9 +5,7 @@ import { DOCS_URL } from './helpChecks';
 // use without internet. Keep repository-only notes out of the reader and search.
 const sources = import.meta.glob<string>([
   '../../../docs/**/*.md', '!../../../docs/assets/**',
-  '!../../../docs/SHADOW_COLLECTION.md', '!../../../docs/SHADOW_GAS_BOUNDARY.md',
-  '!../../../docs/READER_TRANSITION.md', '!../../../docs/matcreator-demo-plan.md',
-  '!../../../docs/marketplace-production.md', '!../../../docs/pack-store-acceptance.md',
+  '!../../../docs/internal/**',
 ], { query: '?raw', import: 'default', eager: true });
 const assets = import.meta.glob<string>('../../../docs/assets/**/*.{png,gif,jpg,jpeg,svg,webp}',
   { query: '?url', import: 'default', eager: true });
@@ -29,11 +27,15 @@ export const documentationAssets = Object.fromEntries(Object.entries(assets)
   .map(([path, url]) => [path.replace('../../../docs/', ''), url]));
 
 const userPages = ['README.md', 'user-guide/index.md', 'install.md', 'user-guide/first-team.md',
+  'product-first-use.md',
   'user-guide/models.md', 'user-guide/canvas.md', 'user-guide/plugins.md', 'creator-packs.md',
   'user-guide/troubleshooting.md', 'user-guide/matcreator-example.zh-CN.md'];
 const developerPages = ['developers/index.md', 'developers/setup.md', 'developers/first-plugin.md',
   'developers/agent-tools.md', 'developers/frontend.md', 'developers/testing.md',
-  'pack-distribution.md', 'pack-store.md', 'developers/extension-points.md', 'developers/documentation.md'];
+  'pack-distribution.md', 'pack-store.md', 'developers/extension-points.md'];
+const contributorPages = ['contributing/index.md', 'getting-started.md', 'architecture.md',
+  'enterprise-foundations.md', 'tutorial.md', 'desktop.md', 'deployment.md', 'releasing.md',
+  'release-notes.md', 'developers/documentation.md', 'contributing/docs-checklist.md'];
 const canonicalPage = (path: string) => path.replace(/\.zh-CN\.md$/, '.md');
 
 export function localizedPage(path: string, locale: Locale): string {
@@ -43,7 +45,7 @@ export function localizedPage(path: string, locale: Locale): string {
 }
 
 export function documentationGroups(locale: Locale) {
-  const seen = new Set([...userPages, ...developerPages].map(canonicalPage));
+  const seen = new Set([...userPages, ...developerPages, ...contributorPages].map(canonicalPage));
   const referencePages = Object.keys(documentation).filter(path => {
     const key = canonicalPage(path);
     if (seen.has(key)) return false;
@@ -53,6 +55,7 @@ export function documentationGroups(locale: Locale) {
     { title: 'User guide', pages: userPages },
     { title: 'Build plugins', pages: developerPages },
     { title: 'Technical reference', pages: referencePages },
+    { title: 'Contribute to OAW', pages: contributorPages },
   ].map(group => ({ ...group, pages: group.pages.map(path => localizedPage(path, locale)) }));
 }
 

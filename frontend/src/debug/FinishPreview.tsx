@@ -11,7 +11,7 @@ const descriptions: Record<CardFinish, string> = {
   foil: 'Silver facets, fine grain and a broad metallic reflection.',
   rainbow: 'A continuous spectrum beneath a clear iridescent coat.',
   starlight: 'Embedded flakes catch the light on a smoked base.',
-  laser: 'Holographic facets and engraved security rosettes.',
+  laser: 'Iridescent foil with fine circular grooves that catch the light.',
 };
 
 function PreviewCard({ finish, compact = false, reveal = false }: { finish: CardFinish; compact?: boolean; reveal?: boolean }) {

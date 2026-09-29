@@ -58,3 +58,5 @@ To try a natural-language request, start with your configured model runtime and 
 Define the input schema, return a bounded result, and keep tool handlers behind live host authorization. Add transactional lifecycle handling only when your plugin owns resources that must be created, restored, or cleaned up. File-backed resources should use host-managed storage.
 
 For the exact contracts, see [relationships and capabilities](../plugins.md#relationships-traits-and-capabilities), [lifecycle transactions](../plugins.md#lifecycle-transactions), and [native resources](../plugins.md#native-file-resources).
+
+Continue with [Add a custom interface](frontend.md), or [Test and distribute](testing.md) for a Python-only plugin.

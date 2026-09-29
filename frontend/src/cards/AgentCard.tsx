@@ -5,7 +5,7 @@ import { PluginSurface } from "../plugins/PluginSurface";
 import { worldApi, apiErrorMessage } from "../api/client";
 import { CircleStop, Play, Radio, RotateCcw, LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useNodeSurfaceStore } from "../state/nodeSurfaces";
+import { useNodeSurfaceStore, useSurfaceDraft, surfaceDraftKey } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard, WorldEdge } from "../types/world";
 import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
@@ -32,12 +32,11 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
   const updateCard = useWorldStore((state) => state.updateCard);
   const runAgent = useWorldStore((state) => state.runAgent);
   const stopAgent = useWorldStore((state) => state.stopAgent);
-  const [instruction, setInstruction] = useState(String(card.config.system_instruction ?? ""));
+  const [instruction, setInstruction] = useSurfaceDraft(surfaceDraftKey(card.id, 'agent-instruction', card.config.system_instruction), String(card.config.system_instruction ?? ""));
   const [model, setModel] = useState(String(card.config.model ?? "oaw:default"));
   const prompt = useNodeSurfaceStore((state) => state.drafts[card.id] ?? String(card.config.prompt ?? ""));
   const setDraft = useNodeSurfaceStore((state) => state.setDraft);
 
-  useEffect(() => setInstruction(String(card.config.system_instruction ?? "")), [card.config.system_instruction]);
   useEffect(() => setModel(String(card.config.model ?? "oaw:default")), [card.config.model]);
 
   const [capabilities, setCapabilities] = useState<{ id: string; target_name: string; description: string; kind: string }[]>([]);

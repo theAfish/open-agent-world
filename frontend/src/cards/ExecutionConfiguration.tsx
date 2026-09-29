@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { Plus, Upload, X } from "lucide-react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
+import { surfaceDraftKey, useSurfaceDraft, useNodeSurfaceStore } from '../state/nodeSurfaces';
+import { useHydrationLease } from '../canvas/useCardRendering';
 import type { WorldCard } from "../types/world";
 import { settingsFromValue, settingsToValue, SkillDefaultsEditor, type SettingRow } from "./SkillDefaultsEditor";
 import "./executionConfiguration.css";
@@ -10,6 +12,7 @@ import "./executionConfiguration.css";
 type EnvironmentVariableKind = "value" | "secret";
 export interface EnvironmentVariableRow { id: number; name: string; kind: EnvironmentVariableKind; value: string }
 let environmentRowId = 0;
+const NO_SECRETS: Record<string, string> = {};
 const newEnvironmentVariable = (): EnvironmentVariableRow => ({ id: ++environmentRowId, name: "", kind: "value", value: "" });
 
 function objectValue(value: unknown, label: string): Record<string, unknown> {
@@ -85,13 +88,17 @@ export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, 
 
 export async function saveEnvironmentRows(id: string, rows: EnvironmentVariableRow[], secrets: Record<string, string>, bindings: Record<string, boolean>, revision: number) {
   const value = environmentVariablesToValue(rows);
+  return worldApi.saveEnvironment(id, value, environmentSecretUpdates(rows, secrets, bindings), revision);
+}
+
+export function environmentSecretUpdates(rows: EnvironmentVariableRow[], secrets: Record<string, string>, bindings: Record<string, boolean>) {
   const updates: Record<string, string> = {};
   for (const row of rows) {
     if (row.kind !== "secret") continue;
     if (secrets[row.value]) updates[row.value] = secrets[row.value];
     else if (!bindings[row.value]) throw new Error(t("Enter a secret for {v0}, or remove the unused variable.", { v0: String(row.name) }));
   }
-  return worldApi.saveEnvironment(id, value, updates, revision);
+  return updates;
 }
 
 /** The same document editor also supports plugin-declared structured target fields. */
@@ -99,16 +106,20 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
   useLocale();
   const definition = useWorldStore((state) => state.catalog.node_types.find((item) => item.id === card.type));
   const environment = definition?.traits.includes("core.environment") ?? false;
-  const [document, setDocument] = useState<Awaited<ReturnType<typeof worldApi.getNodeDocument>>>();
-  const [environmentRows, setEnvironmentRows] = useState<EnvironmentVariableRow[]>([]);
-  const [targetName, setTargetName] = useState("");
-  const [providerId, setProviderId] = useState("");
-  const [targetRows, setTargetRows] = useState<SettingRow[]>([]);
+  const key = (field: string) => surfaceDraftKey(card.id, `execution-${field}`);
+  const [document, setDocument] = useSurfaceDraft<Awaited<ReturnType<typeof worldApi.getNodeDocument>> | undefined>(key('document'), undefined);
+  const [environmentRows, setEnvironmentRows] = useSurfaceDraft<EnvironmentVariableRow[]>(key('environment'), []);
+  const [targetName, setTargetName] = useSurfaceDraft(key('name'), '');
+  const [providerId, setProviderId] = useSurfaceDraft(key('provider'), '');
+  const [targetRows, setTargetRows] = useSurfaceDraft<SettingRow[]>(key('settings'), []);
+  const [dirty, setDirty] = useSurfaceDraft(key('dirty'), false);
   const [bindings, setBindings] = useState<Record<string, boolean>>({});
-  const [secrets, setSecrets] = useState<Record<string, string>>({});
+  const secrets = useNodeSurfaceStore(s => s.privateDrafts[card.id]) ?? NO_SECRETS;
+  const setSecrets = (value: Record<string, string>) => useNodeSurfaceStore.getState().setPrivateDraft(card.id, value);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  useHydrationLease(card.id, 'configuration-operation', busy || dirty);
   const importInput = useRef<HTMLInputElement>(null);
 
   function applyValue(value: unknown) {
@@ -132,18 +143,19 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
     setBusy(true);
     try {
       const next = await worldApi.getNodeDocument(card.id);
-      applyValue(next.value); setDocument(next);
+      applyValue(next.value); setDocument(next); setDirty(false);
       await refreshBindings(); setError(""); setNotice("");
     } catch (reason) { setError(apiErrorMessage(reason)); }
     finally { setBusy(false); }
   }
-  useEffect(() => { void reload(); }, [card.id]);
+  useEffect(() => { if (!dirty) void reload(); else void refreshBindings(); }, [card.id]);
 
   async function importJson(file: File | undefined) {
     if (!file) return;
     setError(""); setNotice("");
     try {
       applyValue(JSON.parse(await file.text()));
+      setDirty(true);
       setNotice(t("Imported {v0}. Save to apply.", { v0: String(file.name) }));
     } catch (reason) { setError(apiErrorMessage(reason)); }
     finally { if (importInput.current) importInput.current.value = ""; }
@@ -160,7 +172,7 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
         ? await saveEnvironmentRows(card.id, environmentRows, secrets, bindings, document.revision)
         : await worldApi.nodeDocumentAction(card.id, "replace", value, document.revision);
       setSecrets({});
-      applyValue(next.value); setDocument(next); await refreshBindings(); setNotice(t("Configuration saved."));
+      applyValue(next.value); setDocument(next); setDirty(false); await refreshBindings(); setNotice(t("Configuration saved."));
     } catch (reason) { setError(apiErrorMessage(reason)); }
     finally { setBusy(false); }
   }
@@ -174,18 +186,18 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
           aria-label={t("Import execution configuration JSON")} onChange={(event) => void importJson(event.target.files?.[0])} />
       </div>
       {environment ? <>
-        <EnvironmentVariablesEditor rows={environmentRows} onChange={setEnvironmentRows} disabled={busy || !document}
-          secrets={secrets} onSecretsChange={setSecrets} bindings={bindings} />
+        <EnvironmentVariablesEditor rows={environmentRows} onChange={rows => { setEnvironmentRows(rows); setDirty(true); }} disabled={busy || !document}
+          secrets={secrets} onSecretsChange={value => { setSecrets(value); setDirty(true); }} bindings={bindings} />
       </> : <>
         <div className="execution-target-fields">
           <label className="field-label"><span>{t("Name")}</span><input value={targetName} disabled={busy || !document} placeholder={t("Display name")}
-            onChange={(event) => setTargetName(event.target.value)} /></label>
+            onChange={(event) => { setTargetName(event.target.value); setDirty(true); }} /></label>
           <label className="field-label"><span>{t("Provider ID")}</span><input value={providerId} disabled={busy || !document} placeholder={t("Provider identifier")}
-            onChange={(event) => setProviderId(event.target.value)} /></label>
+            onChange={(event) => { setProviderId(event.target.value); setDirty(true); }} /></label>
         </div>
         <fieldset className="execution-target-settings" disabled={busy || !document}>
           <legend>{t("Provider settings")}</legend>
-          <SkillDefaultsEditor rows={targetRows} onChange={setTargetRows} />
+          <SkillDefaultsEditor rows={targetRows} onChange={rows => { setTargetRows(rows); setDirty(true); }} />
         </fieldset>
       </>}
       <details className="execution-config-help">

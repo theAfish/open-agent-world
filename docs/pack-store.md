@@ -1,6 +1,6 @@
 # Pack Store Client V0
 
-Verified implementation and platform boundaries: [acceptance report](pack-store-acceptance.md).
+Verified implementation and platform boundaries: [acceptance report](internal/validation/pack-store.md).
 
 Open **Pack & Card Library → Store**, search for a Pack, open its details and
 choose **Get**. Installation selects the version for the next OAW startup.
@@ -18,7 +18,7 @@ wins; an explicit empty override disables Store for development/offline checks.
 All URL validation and networking remain lazy, so startup does not need internet.
 Tagged Desktop releases require a confirmed default. The default stays unset
 until the service is deployed and verified; no guessed address is shipped.
-See [production readiness and remaining operator steps](marketplace-production.md).
+See [production readiness and remaining operator steps](internal/plans/marketplace-production.md).
 
 ## Ownership and HTTP
 

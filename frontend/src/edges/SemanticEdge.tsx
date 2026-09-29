@@ -1,3 +1,5 @@
+import { useId } from "react";
+import "../cards/missingPlugin.css";
 import { t, useLocale } from '../i18n';
 import {
   BaseEdge,
@@ -16,6 +18,7 @@ import {isShadow,shadowPresentation,shadowPoints,useCollectionDrag} from "../sta
 import {useNodeSurfaceStore,surfaceLevelForNode} from "../state/nodeSurfaces";
 
 export interface SemanticEdgeData extends Record<string, unknown> {
+  missing_plugin?: { plugin_id: string; reason: string } | null;
   relationship: Relationship;
   direction: EdgeDirection;
   sourceCardId?: string;
@@ -70,16 +73,21 @@ export function SemanticEdge({
   const relationship = data?.relationship ?? "read";
   const bidirectional = data?.direction === "bidirectional";
   const option = getRelationshipOption(catalog, relationship);
+  const patternId = `missing-${useId().replace(/:/g, "")}`;
+  const missing = Boolean(data?.missing_plugin) || !catalog.relationships.some(item => item.id === relationship);
   const generated = catalog.relationships.find((item) => item.id === relationship)?.generated;
 
   return (
     <>
+      {missing && <defs><pattern id={patternId} width="12" height="12" patternUnits="userSpaceOnUse"><rect width="12" height="12" fill="#17131c" /><path d="M0 0h6v6H0zM6 6h6v6H6z" fill="#dc22ff" /></pattern></defs>}
       <BaseEdge
         id={id}
+        style={missing ? { stroke: `url(#${patternId})` } : undefined}
+        data-missing={missing || undefined}
         path={bidirectional ? geometry.bidirectionalMarkerPath : geometry.markerPath}
         markerEnd={markerEnd}
         markerStart={markerStart}
-        className={`semantic-edge-path ${generated ? "is-generated" : ""} ${selected ? "is-selected" : ""}`}
+        className={`semantic-edge-path ${missing ? "is-missing" : ""} ${generated ? "is-generated" : ""} ${selected ? "is-selected" : ""}`}
         data-edge-id={id}
         data-source-id={data?.sourceCardId ?? source}
         data-target-id={data?.targetCardId ?? target}
@@ -108,12 +116,12 @@ export function SemanticEdge({
       />
       <EdgeLabelRenderer>
         <div
-          className={`semantic-edge-label ${selected ? "is-selected" : ""}`}
+          className={`semantic-edge-label ${missing ? "is-missing" : ""} ${selected ? "is-selected" : ""}`}
           style={{ transform: `translate(-50%, -50%) translate(${geometry.labelX}px, ${geometry.labelY}px)`,opacity:data?.fading?0:1,transition:"opacity 400ms ease",pointerEvents:data?.fading?"none":undefined }}
-          title={t(option.description)}
+          title={missing ? `${relationship} · ${data?.missing_plugin?.plugin_id ?? t("Card implementation unavailable")}` : t(option.description)}
         >
           <span aria-hidden="true" />
-          {t(option.shortLabel)}
+          {missing ? `MISSING · ${relationship}` : t(option.shortLabel)}
         </div>
       </EdgeLabelRenderer>
     </>

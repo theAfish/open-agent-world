@@ -5,6 +5,15 @@ if [[ "$(uname -s)" != Darwin ]]; then
   echo "Build the macOS installer on a Mac (or the macOS GitHub Actions runner)." >&2
   exit 1
 fi
+# GitHub expands unset secrets/variables to empty strings. Tauri distinguishes
+# an absent credential from an empty one, so do not request certificate import
+# or notarization for a credential-free preview. Keep an empty P12 password:
+# it is valid when an actual certificate is supplied.
+for credential in APPLE_CERTIFICATE APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+  if [[ -z "${!credential:-}" ]]; then
+    unset "$credential"
+  fi
+done
 for tool in uv npm cargo python3; do
   command -v "$tool" >/dev/null || { echo "Missing build prerequisite: $tool" >&2; exit 1; }
 done

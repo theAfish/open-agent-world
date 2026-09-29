@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from backend.api.dependencies import get_services
 from backend.services import ApplicationServices
 from backend.runs import RunRecord
-from backend.sandbox.settings import SandboxSettings, SandboxSettingsStatus, SandboxSettingsStore
+from backend.sandbox.settings import SandboxSettingsUpdate, SandboxSettingsStatus, SandboxSettingsStore
 from backend.sandbox.manager import SandboxManager
 from backend.sandbox.models import SandboxValidationError
 
@@ -293,9 +293,13 @@ async def get_sandbox_settings(
 
 @router.put("/settings/sandbox", response_model=SandboxSettingsStatus)
 async def save_sandbox_settings(
-    request: SandboxSettings,
+    request: Request,
     services: ApplicationServices = Depends(get_services),
 ) -> SandboxSettingsStatus:
+    try:
+        request = SandboxSettingsUpdate.model_validate(await request.json())
+    except (ValueError, ValidationError):
+        raise HTTPException(status_code=422, detail="Invalid Sandbox settings") from None
     if request.runtime != "auto":
         backend = services.sandbox_backend
         if not isinstance(backend, SandboxManager) or request.runtime not in {

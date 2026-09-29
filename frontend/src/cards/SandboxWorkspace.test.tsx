@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { worldApi } from "../api/client";
 import { buildCardDraft } from "../state/helpers";
-import { useNodeSurfaceStore } from "../state/nodeSurfaces";
+import { surfaceDraftKey, useNodeSurfaceStore } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
 import { useOpenFiles } from "../state/openFiles";
 import type { SandboxInfo, WorldCard } from "../types/world";
@@ -60,6 +60,38 @@ describe("Sandbox workspace interaction", () => {
     });
   });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  it('restores draft and file intent after virtualized unmount, without mounting unopened settings', async () => {
+    const view = render(<Workspace />);
+    expect(screen.queryByLabelText('Working folder')).toBeNull();
+    expect(worldApi.getNodeDocument).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Command' }), { target: { value: 'echo retained' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'first.txt' }));
+    await screen.findByText('Contents of first.txt');
+    view.unmount();
+    const projectionKey = surfaceDraftKey(card.id, 'sandbox-static-preview', card.config.runtime, card.config.workspace_path, card.config.workspace_access, false);
+    expect(JSON.parse(useNodeSurfaceStore.getState().drafts[projectionKey])).toMatchObject({ path: 'first.txt', text: 'Contents of first.txt' });
+    expect(useOpenFiles.getState().sources[card.id]?.reference).toMatchObject({ path: 'first.txt' });
+    render(<Workspace />);
+    expect((screen.getByRole('textbox', { name: 'Command' }) as HTMLTextAreaElement).value).toBe('echo retained');
+    expect(await screen.findByText('Contents of first.txt')).toBeTruthy();
+  });
+
+  it("keeps synthetic workspaces rendered without requesting nonexistent backend resources", async () => {
+    const synthetic = { ...card, id: "stress-3", ephemeral: true };
+    const view = render(<SandboxWorkspace card={synthetic} />);
+    expect(screen.getByRole("textbox", { name: "Command" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh files" }));
+    await act(async () => useWorldStore.setState({ socketState: "live" }));
+    view.unmount();
+    render(<SandboxWorkspace card={synthetic} />);
+    await act(async () => {});
+    expect(worldApi.getSandbox).not.toHaveBeenCalled();
+    expect(worldApi.getSandboxRuntimes).not.toHaveBeenCalled();
+    expect(worldApi.sandboxWorkspace).not.toHaveBeenCalled();
+    expect(worldApi.getNodeDocument).not.toHaveBeenCalled();
+    expect(worldApi.getCredentialBindings).not.toHaveBeenCalled();
+  });
 
   it("keeps command drafts and file selection connected when their sections move out and back", async () => {
     const hosts = new Map<string, HTMLDivElement>();

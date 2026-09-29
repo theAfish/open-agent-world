@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { worldApi, apiErrorMessage } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import { useNodeSurfaceStore } from "../state/nodeSurfaces";
+import { useHydrationLease } from '../canvas/useCardRendering';
 import type { WorldCard } from "../types/world";
 import { EnvironmentVariablesEditor, environmentVariablesFromValue, saveEnvironmentRows, type EnvironmentVariableRow } from "./ExecutionConfiguration";
 
@@ -10,6 +11,7 @@ export interface EffectiveEnvironment {
   profile_id: string | null; ready: boolean;
   variables: { name: string; value: string | null; secret: boolean; configured: boolean; source: string; owner: string }[];
 }
+const EMPTY_SECRETS: Record<string, string> = {};
 
 export function SandboxEnvironment({ card }: { card: WorldCard }) {
   useLocale();
@@ -27,26 +29,30 @@ export function SandboxEnvironment({ card }: { card: WorldCard }) {
   const rows = draft?.rows ?? savedRows;
   const setRows = (rows: EnvironmentVariableRow[]) => useNodeSurfaceStore.getState().setDraft(draftKey, JSON.stringify({ rows, revision: draft?.revision ?? revision }));
   const [bindings, setBindings] = useState<Record<string, boolean>>({});
-  // Secret input stays in this mounted editor, never in shared surface drafts.
-  const [secrets, setSecrets] = useState<Record<string, string>>({});
+  // Private host memory survives view hydration; never persisted or exposed as a plugin draft.
+  const secrets = useNodeSurfaceStore(s => s.privateDrafts[card.id]) ?? EMPTY_SECRETS;
+  const setSecrets = (value: Record<string, string>) => useNodeSurfaceStore.getState().setPrivateDraft(card.id, value);
   const [effective, setEffective] = useState<EffectiveEnvironment>();
   const [busy, setBusy] = useState(false);
+  useHydrationLease(card.id, 'sandbox-environment-edit', busy || !!draft || Object.keys(secrets).length > 0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   async function refresh() {
+    if (card.ephemeral) return;
     const [status, resolved] = await Promise.all([worldApi.getCredentialBindings(card.id), worldApi.sandboxWorkspace<EffectiveEnvironment>(card.id, "configuration")]);
     setBindings(status); setEffective(resolved);
   }
-  async function reload() {
-    setSecrets({});
+  async function reload(reset = true) {
+    if (card.ephemeral) return;
+    if (reset) setSecrets({});
     try {
       const doc = await worldApi.getNodeDocument(card.id);
       setSavedRows(environmentVariablesFromValue(doc.value)); setRevision(doc.revision);
       await refresh(); setError("");
     } catch (e) { setError(apiErrorMessage(e)); }
   }
-  useEffect(() => { void reload(); }, [card.id]);
-  useEffect(() => { void refresh().catch(e => setError(apiErrorMessage(e))); }, [link?.source, configurationEvent]);
+  useEffect(() => { void reload(false); }, [card.id, card.ephemeral]);
+  useEffect(() => { void refresh().catch(e => setError(apiErrorMessage(e))); }, [card.id, card.ephemeral, link?.source, configurationEvent]);
   async function save() {
     setBusy(true); setError("");
     try {

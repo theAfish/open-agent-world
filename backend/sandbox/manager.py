@@ -298,7 +298,7 @@ class SandboxManager(SandboxBackend):
                 "This Sandbox runtime cannot omit its managed Python environment")
         if binding.policy and backend.supports_execution_policy:
             options["execution_policy"] = dict(binding.policy)
-        elif any(binding.policy.get(k, v) != v for k, v in {"network_enabled": False, "memory_bytes": 536870912, "active_process_limit": 64}.items()):
+        elif any(binding.policy.get(k, v) != v for k, v in {"network_enabled": False, "memory_bytes": 2147483648, "active_process_limit": 64}.items()):
             raise SandboxValidationError("This runtime does not support configurable execution policy")
         if invocation_env is not None:
             if not backend.supports_invocation_environment:

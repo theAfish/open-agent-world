@@ -1,7 +1,8 @@
 import { t, useLocale } from "../i18n";
+import { useMotionPresence } from '../shell/useMotionPresence';
 import { createPortal } from 'react-dom';
 import { getNodesBounds, getViewportForBounds, useReactFlow } from '@xyflow/react';
-import { ArrowRight, ChevronDown, Compass, Pause, RotateCcw, X } from 'lucide-react';
+import { ArrowRight, ArrowUp, BookOpen, FilePlus2, Layers3, ChevronDown, Compass, Pause, RotateCcw, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { useCardLibrary } from '../state/cardLibrary';
 import { useWorldStore } from '../state/worldStore';
@@ -78,6 +79,12 @@ export function Onboarding() {
     return () => { workspaceHost.classList.remove('has-tutorial-guide'); workspaceHost.style.removeProperty('--tutorial-guide-height'); };
   }, [workspaceHost, s.view]);
   const flow = useReactFlow<CanvasNode>();
+  const chooseButton = useRef<HTMLButtonElement>(null);
+  const [choosingWorkspace, setChoosingWorkspace] = useState(false);
+  const backToWelcome = () => {
+    setChoosingWorkspace(false);
+    requestAnimationFrame(() => chooseButton.current?.focus());
+  };
   const [compact, setCompact] = useState(false);
   const [rightGuide, setRightGuide] = useState(false);
   const [position, setPosition] = useState({ x: window.innerWidth / 2 - 80, y: window.innerHeight <= 700 ? 16 : Math.min(72, window.innerHeight * .09) });
@@ -90,7 +97,8 @@ export function Onboarding() {
   const arrowId = useId();
   const flightLayer = useRef<HTMLDivElement>(null);
   const focusSequence = useRef(0);
-  const welcome = s.view === 'welcome';
+  const welcomePresence = useMotionPresence(s.view === 'welcome', 360);
+  const welcome = welcomePresence.present;
   const active = s.view === 'active';
   const step = STEPS.find(item => item.id === s.session?.step) ?? STEPS[0];
   const reviewing = s.session?.completedDemo === step.id;
@@ -168,6 +176,11 @@ export function Onboarding() {
     let revealPlacement: (() => void) | undefined;
     const bridge: GuideVisuals = {
       focus: focusSubjects,
+      async frame(bounds) {
+        const { width, height } = useWorldStore.getState().viewport;
+        const viewport = getViewportForBounds(bounds, width - 48, Math.max(280, height - 160), .12, .85, .12);
+        await flow.setViewport({ ...viewport, x: viewport.x + 24, y: viewport.y + 40 }, { duration: reducedMotion() ? 0 : 650 });
+      },
       preparePlace(existingId) {
         // Subscribe before creation so the rule exists before React paints the
         // new node, including while its name is saved and the camera settles.
@@ -508,7 +521,7 @@ export function Onboarding() {
     return () => { cancelAnimationFrame(frame); highlighted.forEach(element => element.removeAttribute('data-tutorial-highlight')); };
   }, [welcome, libraryOpen, workspaceHost, s.view, target, step.id, step.participants, targetElement, flow, connectionGeometry, cards.length]);
 
-  if (s.view === 'hidden') return <QuickStartGuide />;
+  if (s.view === 'hidden' && !welcome) return <QuickStartGuide />;
   const motion: GuideMotion = welcome || s.view === 'paused' ? 'idle' : s.busy ? 'think' : step.id === 'enter' ? 'enter' : step.expects ? 'indicate' : 'speak';
   const role = step.role;
   const settingsStep = step.target.startsWith('model-');
@@ -522,7 +535,7 @@ export function Onboarding() {
     : needsModelsTab ? 'Click Models here.'
     : needsConnection ? 'Add or select a connection first.' : reviewing ? step.result!.dialogue : step.dialogue;
   const missing = role && step.expects !== 'place' && step.expects !== 'delete' && !cards.some(card => card.id === s.session?.refs[role]);
-  return createPortal(<div hidden={welcome && libraryOpen} className={`onboarding-layer ${welcome ? 'is-welcome' : 'is-tutorial'} ${settingsStep ? 'is-settings-guide' : ''} ${libraryOpen && !welcome ? 'is-library-guide' : ''} ${step.participants ? 'is-interaction-guide' : ''}`}>
+  return createPortal(<div hidden={welcome && libraryOpen} aria-hidden={welcomePresence.closing || undefined} {...(welcomePresence.closing ? { inert: '' } : {})} className={`onboarding-layer ${welcome ? 'is-welcome' : 'is-tutorial'} ${welcomePresence.closing ? 'is-leaving' : ''} ${welcome && choosingWorkspace ? 'is-choosing-workspace' : ''} ${settingsStep ? 'is-settings-guide' : ''} ${libraryOpen && !welcome ? 'is-library-guide' : ''} ${step.participants ? 'is-interaction-guide' : ''}`}>
     <Spotlight ref={spotlight} />
     <div ref={placementArrow} className="tutorial-placement-arrow" aria-hidden="true" style={{ display: 'none' }}>
       <svg viewBox="0 0 52 72"><path d="M 18 4 H 34 V 40 H 47 L 26 65 L 5 40 H 18 Z" /></svg>
@@ -532,13 +545,19 @@ export function Onboarding() {
       <path ref={deckArrow} className="tutorial-deck-arrow-path" markerEnd={`url(#${arrowId})`} style={{ display: 'none' }} />
     </svg>
     <div className={`onboarding-logo-ring ${welcome ? '' : 'has-entered'}`}><OawGuide ringOnly /></div>
-    {welcome && <section className="onboarding-welcome" aria-label={t("Welcome to Open Agent World")}>
+    {welcome && <section className="onboarding-welcome" {...(choosingWorkspace ? { inert: '' } : {})} aria-hidden={choosingWorkspace} aria-label={t("Welcome to Open Agent World")}>
       <h1>{t("Open Agent World")}</h1>
-      <BlueprintChooser />
+      <p>{t("A canvas for working with AI agents.")}</p>
       <div className="onboarding-actions">
-        <button className="onboarding-text-button" disabled={s.busy || sync === 'offline'} onClick={() => void tutorial.start()}>{t("Start Tutorial")}</button>
-        <button className="onboarding-text-button" disabled={s.busy} onClick={() => void tutorial.directly()}>{t("Start Empty")}</button>
+        <button className="welcome-action welcome-action--primary" disabled={s.busy || sync === 'offline'} onClick={() => void tutorial.start()}><BookOpen size={22} aria-hidden="true" /><span className="welcome-action-label">{t("Start Tutorial")}</span><ArrowRight size={20} aria-hidden="true" /></button>
+        <button ref={chooseButton} className="welcome-action welcome-action--secondary" disabled={s.busy} onClick={() => setChoosingWorkspace(true)}><Layers3 size={18} aria-hidden="true" /><span className="welcome-action-label">{t("Choose a workspace")}</span></button>
+        <button className="welcome-action welcome-action--secondary" disabled={s.busy} onClick={() => void tutorial.directly()}><FilePlus2 size={18} aria-hidden="true" /><span className="welcome-action-label">{t("Start blank")}</span></button>
       </div>
+      {s.error && <p className="onboarding-error" role="alert">{s.error}</p>}
+    </section>}
+    {welcome && choosingWorkspace && <section className="onboarding-workspaces" onKeyDown={event => { if (event.key === 'Escape' && !s.busy) { event.preventDefault(); backToWelcome(); } }} aria-label={t('Choose a workspace')}>
+      <button autoFocus className="workspace-back" disabled={s.busy} aria-label={t('Back to welcome')} title={t('Back to welcome')} onClick={backToWelcome}><ArrowUp size={22} /></button>
+      <BlueprintChooser />
       {s.error && <p className="onboarding-error" role="alert">{s.error}</p>}
     </section>}
     <div ref={flightLayer} className="tutorial-flight-layer" aria-hidden="true" />

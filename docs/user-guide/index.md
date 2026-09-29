@@ -1,5 +1,7 @@
 # Use Open Agent World
 
+**English** | [简体中文](index.zh-CN.md)
+
 OAW is a canvas for working with AI agents. Put an Agent next to a document, connect them, and ask it to help. Add conversations, tools, and teammates as your work grows.
 
 ## Start here

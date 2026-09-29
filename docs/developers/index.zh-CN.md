@@ -1,5 +1,7 @@
 # 插件开发路线
 
+[English](index.md) | **简体中文**
+
 插件是向 OAW 注册卡片、关系、工具或界面的 Python 包。先用 Python 做一张带配置字段的卡片；需要自定义界面时再加入 React / TypeScript。
 
 ## 从零开始

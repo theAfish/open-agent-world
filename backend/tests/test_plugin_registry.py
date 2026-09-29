@@ -301,8 +301,38 @@ def test_plugin_registration_drives_catalog_storage_edges_and_tools(tmp_path: Pa
     finally:
         services.close()
 
-    with pytest.raises(
-        PluginUnavailableError,
-        match="requires unavailable plugin 'example.dataset'",
-    ):
-        create_services(settings, plugins=create_builtin_registry())
+    missing_services = create_services(settings, plugins=create_builtin_registry())
+    try:
+        with TestClient(create_app(settings, services=missing_services)) as client:
+            snapshot = client.get("/api/world")
+            assert snapshot.status_code == 200, snapshot.text
+            missing = missing_services.world.get_card(dataset["id"])
+            assert missing.missing_plugin.plugin_id == "example.dataset"
+            assert missing.config["plugin_value"] == 7
+            assert missing_services.capabilities.derive(agent["id"]).capabilities == []
+            response = client.patch(f"/api/nodes/{dataset['id']}", json={"name": "Retained dataset", "position": {"x": 123, "y": 456}})
+            assert response.status_code == 200, response.text
+            assert response.json()["missing_plugin"]["reason"] == "plugin_missing"
+            response = client.patch(f"/api/nodes/{dataset['id']}", json={"config": {"plugin_value": 9}})
+            assert response.status_code == 422, response.text
+    finally:
+        missing_services.close()
+    restored = create_services(settings, plugins=registry)
+    try:
+        with TestClient(create_app(settings, services=restored)):
+            card = restored.world.get_card(dataset["id"])
+            assert card.missing_plugin is None
+            assert card.name == "Retained dataset"
+            assert card.config["plugin_value"] == 7
+            assert card.position.x == 123
+            assert len(restored.capabilities.derive(agent["id"]).capabilities) == 1
+    finally:
+        restored.close()
+    missing_services = create_services(settings, plugins=create_builtin_registry())
+    try:
+        with TestClient(create_app(settings, services=missing_services)) as client:
+            response = client.delete(f"/api/nodes/{dataset['id']}")
+            assert response.status_code == 200, response.text
+            assert missing_services.world.list_edges() == []
+    finally:
+        missing_services.close()

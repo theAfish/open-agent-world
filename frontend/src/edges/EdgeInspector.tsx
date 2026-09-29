@@ -17,6 +17,7 @@ export const EdgeInspector = memo(function EdgeInspector() {
   const deleteSelectedEdge = useWorldStore((state) => state.deleteSelectedEdge);
 
   if (!edge || !source || !target) return null;
+  const missing = Boolean(edge.missing_plugin) || !catalog.relationships.some(item => item.id === edge.relationship);
   const options = getRelationshipOptions(catalog, source.type, target.type);
   const activeOption = getRelationshipOption(catalog, edge.relationship);
   const generated = catalog.relationships.find((item) => item.id === edge.relationship)?.generated;
@@ -28,7 +29,7 @@ export const EdgeInspector = memo(function EdgeInspector() {
         <ArrowRight size={14} aria-hidden="true" />
         <span title={target.name}>{target.name}</span>
       </div>
-      {!generated && options.length > 1 ? (
+      {!missing && !generated && options.length > 1 ? (
         <label>
           <span className="sr-only">{t("Permission")}</span>
           <select
@@ -48,9 +49,9 @@ export const EdgeInspector = memo(function EdgeInspector() {
           </select>
         </label>
       ) : (
-        <span className="edge-inspector-permission">{t(activeOption.label)}</span>
+        <span className="edge-inspector-permission">{missing ? `MISSING: ${edge.relationship}` : t(activeOption.label)}</span>
       )}
-      {activeOption.directions.includes("bidirectional") && (
+      {!missing && activeOption.directions.includes("bidirectional") && (
         <label className="edge-direction-control">
           {edge.direction === "bidirectional"
             ? <ArrowLeftRight size={13} aria-hidden="true" />

@@ -89,7 +89,8 @@
 .world-card[data-minister] { border-color: var(--minister-frame, #739580); box-shadow: 0 0 0 2px #72998235, var(--card-shadow, 0 5px 18px #203a2912); }
 :root[data-theme="dark"] .world-card[data-minister] { --minister-frame: #8eb59b; }
 .world-card[data-minister-eligible] { outline: 2px dashed #729982; outline-offset: 6px; }
-.react-flow__node[data-transformation-hint]:has([data-minister-eligible]) > .world-card { outline: 3px solid #93b67c; outline-offset: 8px; box-shadow: 0 0 32px #72998260; }
+.react-flow__node[data-transformation-hint]:has([data-minister-eligible]) > .world-card,
+.react-flow__node[data-transformation-hint]:has([data-minister-eligible]) > .card-render-boundary > .world-card { outline: 3px solid #93b67c; outline-offset: 8px; box-shadow: 0 0 32px #72998260; }
 .world-card[data-card-type="core.minister-role"] { border-color: #739580; background: radial-gradient(ellipse at 50% 5%, #72998228, transparent 75%), var(--card-surface); }
 .world-card[data-card-type="core.minister-role"] .node-preview-hint { display: none; }
 .minister-role-card-copy { display: grid; gap: 10px; }

@@ -34,7 +34,7 @@ async def copy_skill(services, sandbox_id, skill_id, source, destination, overwr
             raise ResourceValidationError("Skill resource is missing")
         data = content.data_base64 if isinstance(content, SkillAsset) else base64.b64encode(content.encode()).decode()
         return await services._require_sandbox_backend().file_operation(sandbox_id, "write", root="workspace",
-            path=destination, data=data, overwrite=overwrite)
+            path=destination, data=data, overwrite=overwrite, create_parents=True)
 
 
 async def diagnostics(services, sandbox_id, destination=None):

@@ -9,7 +9,7 @@ async function dismissOnboarding(page: import('@playwright/test').Page) {
   const status = saved ? JSON.parse(saved).state?.status : 'new';
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Open Pack and Card Library' })).toBeVisible();
-  const skip = page.getByRole('button', { name: 'Start Empty', exact: true });
+  const skip = page.getByRole('button', { name: 'Start blank', exact: true });
   if (status === 'new') {
     await expect(skip).toBeVisible();
     await skip.click();

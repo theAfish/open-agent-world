@@ -1,3 +1,6 @@
+import { isMissingCard, MissingPlugin } from "./MissingPlugin";
+import { CardLODView } from './CardLODView';
+import { useCardRenderLOD } from '../canvas/useCardRendering';
 import { ConnectionDropSurface } from "./ConnectionDropSurface";
 import { t, useLocale } from "../i18n";
 import { MinisterRoleSettings } from './MinisterRoleCard';
@@ -79,6 +82,7 @@ export function CardContent({ card, level }: BodyProps) {
   const catalog = useWorldStore((s) => s.catalog);
   const definition = catalog.node_types.find((t) => t.id === card.type);
   const ministerTab = useMinisterRole(s => s.settingsCardId === card.id);
+  if (isMissingCard(card, catalog)) return <MissingPlugin card={card} />;
   const Body = definition?.traits.includes("ui.agent-barracks.v1") ? BarracksBody : definition?.traits.includes("ui.skill.v1") ? SkillNodeBody : definition?.traits.includes("ui.skill-package.v1") ? SkillToolboxBody : definition?.traits.includes("ui.task-board.v1") ? TaskBoardBody : definition?.traits.includes("core.agent") ? AgentCardBody : BODIES[card.type] ?? GenericCardBody;
   return <>{card.minister && <nav className="agent-window-tabs nodrag nopan" role="tablist" aria-label={t('Agent card')}>
     <button type="button" role="tab" aria-selected={!ministerTab} onClick={() => useMinisterRole.setState({ settingsCardId: undefined })}>{t('Settings')}</button>
@@ -99,7 +103,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
   const activity = useNodeActivity(card);
   const generation = useNodeGeneration(card.id);
   const generationPhase = generation?.targetId === card.id ? generation.phase : undefined;
-  const displayStatus = activity.phase === "idle" ? card.status : activity.phase;
+  const displayStatus = card.missing_plugin ? "unavailable" : activity.phase === "idle" ? card.status : activity.phase;
   const catalog = useWorldStore((state) => state.catalog);
   const level = useNodeSurfaceStore((state) => surfaceLevelForNode(card.id, state.surfaceLevels));
   const showPreview = useNodeSurfaceStore((state) => state.showPreview);
@@ -160,12 +164,14 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
       className={`world-card node-surface card-finish-surface world-card--${card.type} is-${visualLevel} ${selected ? "is-selected" : ""} ${card.status === "running" ? "is-running" : ""} ${card.status === "error" ? "is-error" : ""} ${card.ephemeral ? "is-ephemeral" : ""}`}
       style={{ "--card-kind": definition?.color, borderRadius: NODE_SURFACE_RADIUS[visualLevel] } as CSSProperties}
       aria-label={`${label} ${card.name}`}
+      data-missing={isMissingCard(card, catalog) || undefined}
       data-card-id={card.id}
       data-card-revision={card.revision}
       data-card-type={card.type}
       data-finish={normalizeCardFinish(card.finish)}
       data-card-expanded={visualLevel === "inspector" || visualLevel === "workspace" ? "true" : "false"}
       data-surface-level={level}
+      data-render-lod="full"
       data-activity={activity.phase}
       data-equipment-detail={data.equipmentDetail || undefined}
       data-generation={generationPhase}
@@ -220,7 +226,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
         <header className={`card-header node-surface-header node-drag-region ${visualLevel === "inspector" ? "card-finish-surface" : ""}`}>
           <div className="card-kind-icon" aria-hidden="true"><CatalogIcon definition={definition} size={18} /></div>
           <div className="card-title-group">
-            <span className="card-eyebrow">{label}</span>
+            <span className="card-eyebrow">{isMissingCard(card, catalog) ? `MISSING · ${card.type}` : label}</span>
             <CardName key={`${card.id}:${visualLevel}`} card={card} label={label} editable={visualLevel !== "node"} />
           </div>
           <div className="card-status" data-status={displayStatus} title={`${t('Status')}: ${t(statusLabel(displayStatus))}`}>
@@ -260,7 +266,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
           <div className="card-footer-actions">
             {!card.ephemeral ? <IconButton icon={Trash2} danger
               onClick={() => { dismissSurface(card.id); void deleteCard(card.id); }} label={t("Remove {v0}", { v0: String(card.name) })}
-              title={t("Remove object (Ctrl+Z to undo)")} /> : null}
+              title={card.missing_plugin ? t("Remove") : t("Remove object (Ctrl+Z to undo)")} /> : null}
             {support.workspace ? (
               <button type="button" className="card-expand-button" aria-label={definition?.traits.includes("library.readable") ? t("打开阅读器") : t("Open workspace")} title={definition?.traits.includes("library.readable") ? t("打开阅读器") : t("Open workspace")} onClick={() => {
                 if (definition?.traits.includes("library.readable")) cardRef.current?.dispatchEvent(new Event("oaw:expand-reader"));
@@ -274,7 +280,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
       </>}
       {(visualLevel === "node" || visualLevel === "preview") && <CardFinishLayer finish={card.finish} quality={finishQuality} />}
     </article>
-    {card.minister && <MinisterAgent card={card} nodeHovered={ministerNodeHovered && level === 'node'} />}
+    {card.minister && !isMissingCard(card, catalog) && <MinisterAgent card={card} nodeHovered={ministerNodeHovered && level === 'node'} />}
   </>);
 });
 
@@ -295,4 +301,53 @@ function CollectionAwareCard(props: NodeProps<CanvasNode>) {
   return props.data.collectionOwner ? <StackedCard {...props} />
     : <WorldCardNodeComponent data={props.data} selected={props.selected} dragging={props.dragging} />;
 }
-export const WorldCardNode = memo(CollectionAwareCard);
+export const WorldCardNode = memo(function WorldCardNode(props: NodeProps<CanvasNode>) {
+  const lod = useCardRenderLOD(props.id, props.data.renderLOD);
+  const start = useRef<{ x: number; y: number; level: NodeSurfaceLevel; light: boolean; moved: boolean }>();
+  const activated = useRef(false);
+  if (lod === 'offscreen') return null;
+  const light = lod !== 'full' && !props.data.collectionOwner;
+  // Keep the common click ancestor mounted when selection on mouse-down
+  // replaces the proxy. Hydration is immediate, including during a held press.
+  return <div className="card-render-boundary"
+    data-static-workspace={light && lod === 'mid' && props.data.card.type === 'sandbox'
+      && (props.data.surfaceLevel === 'workspace' || props.data.surfaceLevel === 'inspector') || undefined}
+    onPointerDownCapture={event => {
+      activated.current = false;
+      const ownsPress = light && event.button === 0 && !(event.target as Element).closest(NON_DRAG_SELECTOR);
+      start.current = { x: event.clientX, y: event.clientY, level: props.data.surfaceLevel, light: ownsPress, moved: false };
+      // Native click is otherwise cancelled when its pointer-down target is
+      // removed. Capture on the stable boundary, never on the replaceable view.
+      if (ownsPress) event.currentTarget.setPointerCapture(event.pointerId);
+    }}
+    onPointerMoveCapture={event => { if (start.current && event.buttons && Math.hypot(event.clientX - start.current.x, event.clientY - start.current.y) >= DRAG_THRESHOLD_PX) start.current.moved = true; }}
+    onPointerCancel={() => { start.current = undefined; }}
+    onLostPointerCapture={() => { start.current = undefined; }}
+    onPointerUp={event => {
+      const press = start.current;
+      // The browser may cancel the compatibility click when its original DOM
+      // target was replaced. Finish only this owned, unmoved primary press.
+      if (!press?.light || press.moved || event.button !== 0
+        || Math.hypot(event.clientX - press.x, event.clientY - press.y) >= DRAG_THRESHOLD_PX
+        || props.dragging || useNodeSurfaceStore.getState().dragging) { start.current = undefined; return; }
+      // Deliver the one cancelled compatibility click through the original
+      // React Flow ancestor as well, preserving selection and modifier keys.
+      event.currentTarget.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window,
+        detail: 1, clientX: event.clientX, clientY: event.clientY,
+        shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey }));
+      activated.current = true; start.current = undefined;
+    }}
+    onClick={event => {
+      const press = start.current;
+      if (event.target !== event.currentTarget || !press?.light || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
+      const surfaces = useNodeSurfaceStore.getState();
+      if (!surfaces.connectingNodeId && !surfaces.dragging && (press.level === 'node' || press.level === 'preview')) {
+        surfaces.openPrimary(props.id);
+      }
+    }}
+    onClickCapture={event => {
+      if (activated.current && event.detail !== 0) { activated.current = false; event.preventDefault(); event.stopPropagation(); }
+    }}>
+    {light ? <CardLODView {...props} data={{ ...props.data, renderLOD: lod }} /> : <CollectionAwareCard {...props} />}
+  </div>;
+});

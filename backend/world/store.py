@@ -31,11 +31,16 @@ from backend.world.models import (
     EdgeDirection,
     EdgePatch,
     MinisterRole,
+    MissingPlugin,
     Size,
 )
 
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$")
+_EDGE_SELECT = """SELECT e.*, source.type AS source_type, source.plugin_id AS source_plugin_id,
+    target.type AS target_type, target.plugin_id AS target_plugin_id
+    FROM edges e JOIN cards source ON source.id = e.source_id
+    JOIN cards target ON target.id = e.target_id"""
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
@@ -94,54 +99,31 @@ class WorldStore:
             **request.minister.model_dump(exclude_unset=True),
         })
 
-    def assert_plugin_availability(self) -> None:
-        """Fail startup with ownership-aware diagnostics for persisted objects."""
+    def missing_plugin(self, kind: str, identifier: str, plugin_id: str) -> MissingPlugin | None:
+        if not self.registry.has_plugin(plugin_id):
+            reason = "plugin_missing"
+        elif not self.registry.is_enabled(plugin_id):
+            reason = "plugin_disabled"
+        else:
+            try:
+                owner = self.registry.owner_id(kind, identifier)
+            except ValueError:
+                reason = "type_missing"
+            else:
+                if owner == plugin_id:
+                    return None
+                reason = "owner_mismatch"
+        return MissingPlugin(plugin_id=plugin_id, reason=reason)
 
-        with self.database.locked() as connection:
-            cards = connection.execute(
-                "SELECT id, type, plugin_id FROM cards ORDER BY id"
-            ).fetchall()
-            edges = connection.execute(
-                "SELECT id, relationship, plugin_id FROM edges ORDER BY id"
-            ).fetchall()
-        for row in cards:
-            plugin_id = str(row["plugin_id"])
-            if not self.registry.has_plugin(plugin_id):
-                raise PluginUnavailableError(
-                    f"node {row['id']!r} requires unavailable plugin {plugin_id!r} "
-                    f"for node type {row['type']!r}"
-                )
-            try:
-                actual = self.registry.node_type_owner_id(str(row["type"]))
-            except ValueError as exc:
-                raise PluginUnavailableError(
-                    f"plugin {plugin_id!r} does not provide persisted node type "
-                    f"{row['type']!r} required by node {row['id']!r}"
-                ) from exc
-            if actual != plugin_id:
-                raise PluginUnavailableError(
-                    f"node {row['id']!r} records plugin {plugin_id!r}, but node type "
-                    f"{row['type']!r} is owned by {actual!r}"
-                )
-        for row in edges:
-            plugin_id = str(row["plugin_id"])
-            if not self.registry.has_plugin(plugin_id):
-                raise PluginUnavailableError(
-                    f"edge {row['id']!r} requires unavailable plugin {plugin_id!r} "
-                    f"for relationship {row['relationship']!r}"
-                )
-            try:
-                actual = self.registry.relationship_owner_id(str(row["relationship"]))
-            except ValueError as exc:
-                raise PluginUnavailableError(
-                    f"plugin {plugin_id!r} does not provide persisted relationship "
-                    f"{row['relationship']!r} required by edge {row['id']!r}"
-                ) from exc
-            if actual != plugin_id:
-                raise PluginUnavailableError(
-                    f"edge {row['id']!r} records plugin {plugin_id!r}, but relationship "
-                    f"{row['relationship']!r} is owned by {actual!r}"
-                )
+    def card_definition(self, card: Card):
+        """Only the recorded owner may interpret a persisted card."""
+        return None if card.missing_plugin else self.registry.node_type(card.type)
+
+    def require_available_card(self, card: Card) -> None:
+        if card.missing_plugin:
+            raise PluginUnavailableError(
+                f"node {card.id!r} requires unavailable plugin {card.missing_plugin.plugin_id!r}"
+            )
 
     def _chunk(self, coordinate: float) -> int:
         return math.floor(coordinate / self.chunk_size)
@@ -163,6 +145,7 @@ class WorldStore:
         if parent_id == card_id or (member_type.container and not member_type.container.parentable):
             raise GraphValidationError("This node cannot be nested in that container")
         parent = self.get_card(parent_id)
+        self.require_available_card(parent)
         container = self.registry.node_type(parent.type).container
         if container is None:
             raise GraphValidationError("A card parent must be a container")
@@ -181,6 +164,7 @@ class WorldStore:
         if binding is None:
             return
         owner = self.get_card(binding.owner_id)
+        self.require_available_card(owner)
         if parent_id or owner.id == card_id or "core.agent" not in self.registry.node_type(owner.type).traits:
             raise GraphValidationError("Equipment must belong to an Agent and cannot also be a container member")
         options = self.registry.relationship_options(owner.type, card_type)
@@ -194,6 +178,13 @@ class WorldStore:
     def equipment_edge(self, card: Card) -> Edge | None:
         if card.equipment is None:
             return None
+        if card.missing_plugin or self.get_card(card.equipment.owner_id).missing_plugin:
+            return None
+        if card.equipment.relationship:
+            try:
+                self.registry.relationship(card.equipment.relationship)
+            except (GraphValidationError, PluginUnavailableError):
+                return None
         self.validate_equipment(card.id, card.type, card.parent_id, card.equipment)
         owner = self.get_card(card.equipment.owner_id)
         options = self.registry.relationship_options(owner.type, card.type)
@@ -207,11 +198,11 @@ class WorldStore:
     def connections_from(self, node_id: str) -> list[Edge]:
         """Resolve world connections and owned bindings through one contract."""
         bindings = [self.equipment_edge(card) for card in [self.get_card(node_id), *self.equipment_for(node_id)]]
-        return [*self.list_edges_from(node_id), *[edge for edge in bindings if edge and edge.source == node_id]]
+        return [*[edge for edge in self.list_edges_from(node_id) if not edge.missing_plugin], *[edge for edge in bindings if edge and edge.source == node_id]]
 
     def connections_to(self, node_id: str) -> list[Edge]:
         bindings = [self.equipment_edge(card) for card in [self.get_card(node_id), *self.equipment_for(node_id)]]
-        return [*self.list_edges_to(node_id), *[edge for edge in bindings if edge and edge.target == node_id]]
+        return [*[edge for edge in self.list_edges_to(node_id) if not edge.missing_plugin], *[edge for edge in bindings if edge and edge.target == node_id]]
 
     def equipment_for(self, owner_id):
         with self.database.locked() as connection:
@@ -230,7 +221,8 @@ class WorldStore:
         return [self._card_from_row(row) for row in rows]
 
     def is_container(self, card: Card) -> bool:
-        return self.registry.node_type(card.type).container is not None
+        definition = self.card_definition(card)
+        return definition.container is not None if definition else bool(self.list_members(card.id))
 
     def ancestors(self, card: Card) -> list[Card]:
         result = []
@@ -378,6 +370,8 @@ class WorldStore:
         self._require_structure_edit(request)
         current = self.get_card(card_id)
         self.check_revision(current, request.expected_revision)
+        if current.missing_plugin:
+            return self.update_cards([CardBatchPatch(node_id=card_id, patch=request)])[0]
         if "state_scope" in request.model_fields_set:
             validate_override(self.registry.node_type(current.type).state, request.state_scope)
         changes = request.model_dump(exclude_unset=True, exclude={"expected_revision"})
@@ -385,11 +379,13 @@ class WorldStore:
             return current
 
         parent_id = changes.get("parent_id", current.parent_id)
-        self.validate_parent(card_id, current.type, parent_id)
+        if parent_id != current.parent_id:
+            self.validate_parent(card_id, current.type, parent_id)
         equipment = request.equipment if "equipment" in request.model_fields_set else current.equipment
         minister = self._patched_minister(current, request)
         self.validate_minister(current.type, minister)
-        self.validate_equipment(card_id, current.type, parent_id, equipment)
+        if equipment != current.equipment or parent_id != current.parent_id:
+            self.validate_equipment(card_id, current.type, parent_id, equipment)
         name = changes.get("name") or current.name
         position = request.position or current.position
         size = self._container_size(current.type, request.size or current.size)
@@ -469,7 +465,7 @@ class WorldStore:
                             preview.size.width,
                             preview.size.height,
                             int(preview.expanded),
-                            _json({**preview.config, "status": preview.status}),
+                            _json(preview.config if preview.missing_plugin else {**preview.config, "status": preview.status}),
                             preview.chunk[0],
                             preview.chunk[1],
                             preview.updated_at.isoformat(),
@@ -485,9 +481,13 @@ class WorldStore:
                         self.get_card(item.node_id)
                         raise RevisionConflictError("Card changed; read it again before editing")
                 # Validate the resulting membership graph, including cycles across a batch.
-                for _, preview in changed:
-                    self.validate_parent(preview.id, preview.type, preview.parent_id)
-                    self.validate_equipment(preview.id, preview.type, preview.parent_id, preview.equipment)
+                for item, preview in changed:
+                    if preview.missing_plugin:
+                        continue
+                    if "parent_id" in item.patch.model_fields_set:
+                        self.validate_parent(preview.id, preview.type, preview.parent_id)
+                    if item.patch.model_fields_set & {"equipment", "parent_id"}:
+                        self.validate_equipment(preview.id, preview.type, preview.parent_id, preview.equipment)
         return [self.get_card(item.node_id) for item in items]
 
     def preview_update_card(self, card_id: str, request: CardPatch) -> Card:
@@ -496,17 +496,38 @@ class WorldStore:
 
         current = self.get_card(card_id)
         self.check_revision(current, request.expected_revision)
+        if current.missing_plugin:
+            allowed = {"name", "position", "size", "expanded", "parent_id", "equipment", "expected_revision"}
+            if request.model_fields_set - allowed or (
+                "parent_id" in request.model_fields_set and request.parent_id != current.parent_id and request.parent_id is not None
+            ) or ("equipment" in request.model_fields_set and request.equipment != current.equipment and request.equipment is not None):
+                self.require_available_card(current)
+            changes = request.model_dump(exclude_unset=True, exclude={"expected_revision"})
+            if not changes:
+                return current
+            position = request.position or current.position
+            return current.model_copy(update={
+                "name": request.name or current.name, "position": position,
+                "size": request.size or current.size,
+                "expanded": current.expanded if request.expanded is None else request.expanded,
+                "parent_id": request.parent_id if "parent_id" in changes else current.parent_id,
+                "equipment": request.equipment if "equipment" in changes else current.equipment,
+                "chunk": (self._chunk(position.x), self._chunk(position.y)),
+                "updated_at": utc_now(), "revision": current.revision + 1,
+            })
         if "state_scope" in request.model_fields_set:
             validate_override(self.registry.node_type(current.type).state, request.state_scope)
         changes = request.model_dump(exclude_unset=True, exclude={"expected_revision"})
         if not changes:
             return current
         parent_id = changes.get("parent_id", current.parent_id)
-        self.validate_parent(card_id, current.type, parent_id)
+        if parent_id != current.parent_id:
+            self.validate_parent(card_id, current.type, parent_id)
         equipment = request.equipment if "equipment" in request.model_fields_set else current.equipment
         minister = self._patched_minister(current, request)
         self.validate_minister(current.type, minister)
-        self.validate_equipment(card_id, current.type, parent_id, equipment)
+        if equipment != current.equipment or parent_id != current.parent_id:
+            self.validate_equipment(card_id, current.type, parent_id, equipment)
         name = changes.get("name") or current.name
         position = request.position or current.position
         size = self._container_size(current.type, request.size or current.size)
@@ -622,7 +643,7 @@ class WorldStore:
 
     def get_edge(self, edge_id: str) -> Edge:
         with self.database.locked() as connection:
-            row = connection.execute("SELECT * FROM edges WHERE id = ?", (edge_id,)).fetchone()
+            row = connection.execute(_EDGE_SELECT + " WHERE e.id = ?", (edge_id,)).fetchone()
         if row is None:
             raise NotFoundError(f"edge {edge_id!r} does not exist")
         return self._edge_from_row(row)
@@ -630,7 +651,7 @@ class WorldStore:
     def find_edge(self, source_id: str, target_id: str) -> Edge | None:
         with self.database.locked() as connection:
             row = connection.execute(
-                "SELECT * FROM edges WHERE source_id = ? AND target_id = ?",
+                _EDGE_SELECT + " WHERE e.source_id = ? AND e.target_id = ?",
                 (source_id, target_id),
             ).fetchone()
         return None if row is None else self._edge_from_row(row)
@@ -639,7 +660,7 @@ class WorldStore:
         ids = list(dict.fromkeys(card_ids)) if card_ids is not None else None
         if ids == []:
             return []
-        sql = "SELECT * FROM edges"
+        sql = _EDGE_SELECT
         parameters: list[str] = []
         if ids is not None:
             placeholders = ",".join("?" for _ in ids)
@@ -651,7 +672,7 @@ class WorldStore:
             )
             parameters.extend(ids)
             parameters.extend(ids)
-        sql += " ORDER BY created_at, id"
+        sql += " ORDER BY e.created_at, e.id"
         with self.database.locked() as connection:
             rows = connection.execute(sql, parameters).fetchall()
         return [self._edge_from_row(row) for row in rows]
@@ -670,10 +691,10 @@ class WorldStore:
         with self.database.locked() as connection:
             rows = connection.execute(
                 f"""
-                SELECT * FROM edges
+                {_EDGE_SELECT}
                 WHERE source_id IN ({placeholders})
                    OR target_id IN ({placeholders})
-                ORDER BY created_at, id
+                ORDER BY e.created_at, e.id
                 """,
                 [*ids, *ids],
             ).fetchall()
@@ -682,7 +703,7 @@ class WorldStore:
     def list_edges_from(self, source_id: str) -> list[Edge]:
         with self.database.locked() as connection:
             rows = connection.execute(
-                "SELECT * FROM edges WHERE source_id = ? ORDER BY created_at, id",
+                _EDGE_SELECT + " WHERE e.source_id = ? ORDER BY e.created_at, e.id",
                 (source_id,),
             ).fetchall()
         return [self._edge_from_row(row) for row in rows]
@@ -690,7 +711,7 @@ class WorldStore:
     def list_edges_to(self, target_id: str) -> list[Edge]:
         with self.database.locked() as connection:
             rows = connection.execute(
-                "SELECT * FROM edges WHERE target_id = ? ORDER BY created_at, id",
+                _EDGE_SELECT + " WHERE e.target_id = ? ORDER BY e.created_at, e.id",
                 (target_id,),
             ).fetchall()
         return [self._edge_from_row(row) for row in rows]
@@ -700,18 +721,15 @@ class WorldStore:
         now = utc_now().isoformat()
         with self.database.transaction(immediate=True) as connection:
             row = connection.execute(
-                """
-                SELECT e.*, source.type AS source_type, target.type AS target_type
-                FROM edges e
-                JOIN cards source ON source.id = e.source_id
-                JOIN cards target ON target.id = e.target_id
-                WHERE e.id = ?
-                """,
+                _EDGE_SELECT + " WHERE e.id = ?",
                 (edge_id,),
             ).fetchone()
             if row is None:
                 raise NotFoundError(f"edge {edge_id!r} does not exist")
-            self.check_revision(self._edge_from_row(row), request.expected_revision)
+            current = self._edge_from_row(row)
+            self.check_revision(current, request.expected_revision)
+            if current.missing_plugin:
+                raise PluginUnavailableError("Restore the missing plugin before editing this connection")
             relationship = request.relationship or str(row["relationship"])
             direction = request.direction or EdgeDirection(row["direction"])
             self._assert_valid_relationship(
@@ -764,6 +782,8 @@ class WorldStore:
     def normalize_edge_request(self, request: EdgeCreate) -> EdgeCreate:
         source = self.get_card(request.source)
         target = self.get_card(request.target)
+        self.require_available_card(source)
+        self.require_available_card(target)
         if self.is_equipment_connection(source.id, target.id):
             raise GraphValidationError("Equipment already belongs to this Agent. Unequip it before adding a world connection.")
         _definition, reversed_endpoints = self.registry.resolve_relationship(
@@ -798,26 +818,17 @@ class WorldStore:
     def _card_from_row(self, row: sqlite3.Row) -> Card:
         card_type = str(row["type"])
         plugin_id = str(row["plugin_id"])
-        if not self.registry.has_plugin(plugin_id):
-            raise PluginUnavailableError(
-                f"node {row['id']!r} requires unavailable plugin {plugin_id!r} "
-                f"for node type {card_type!r}"
-            )
-        definition = self.registry.node_type(card_type)
-        owner_id = self.registry.node_type_owner_id(card_type)
-        if owner_id != plugin_id:
-            raise PluginUnavailableError(
-                f"node {row['id']!r} records plugin {plugin_id!r}, but node type "
-                f"{card_type!r} is owned by {owner_id!r}"
-            )
+        missing = self.missing_plugin("node_type", card_type, plugin_id)
+        definition = None if missing else self.registry.node_type(card_type)
         config = json.loads(row["config_json"])
-        status = str(config.get("status", definition.default_status))
+        status = str(config.get("status", definition.default_status if definition else "unavailable"))
         # The existing storage format keeps status in config_json. Expose it as
         # host metadata unless the plugin accepts the legacy config status field.
-        if not self._config_accepts_status(card_type):
+        if definition and not self._config_accepts_status(card_type):
             config.pop("status", None)
         return Card(
-            state_scope=effective_scope(definition.state, row["state_scope"]),
+            missing_plugin=missing,
+            state_scope=effective_scope(definition.state, row["state_scope"]) if definition else row["state_scope"],
             state_scope_override=row["state_scope"],
             id=row["id"],
             parent_id=row["parent_id"],
@@ -840,18 +851,15 @@ class WorldStore:
     def _edge_from_row(self, row: sqlite3.Row) -> Edge:
         relationship = str(row["relationship"])
         plugin_id = str(row["plugin_id"])
-        if not self.registry.has_plugin(plugin_id):
-            raise PluginUnavailableError(
-                f"edge {row['id']!r} requires unavailable plugin {plugin_id!r} "
-                f"for relationship {relationship!r}"
-            )
-        owner_id = self.registry.relationship_owner_id(relationship)
-        if owner_id != plugin_id:
-            raise PluginUnavailableError(
-                f"edge {row['id']!r} records plugin {plugin_id!r}, but relationship "
-                f"{relationship!r} is owned by {owner_id!r}"
-            )
+        missing = self.missing_plugin("relationship", relationship, plugin_id)
+        if missing is None:
+            for endpoint in ("source", "target"):
+                unavailable = self.missing_plugin("node_type", row[f"{endpoint}_type"], row[f"{endpoint}_plugin_id"])
+                if unavailable:
+                    missing = MissingPlugin(plugin_id=unavailable.plugin_id, reason="endpoint_missing")
+                    break
         return Edge(
+            missing_plugin=missing,
             id=row["id"],
             source=row["source_id"],
             target=row["target_id"],

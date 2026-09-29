@@ -3,6 +3,28 @@
 @property --pack-depth { syntax: "<number>"; inherits: true; initial-value: 26; }
 .pack-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 22px; align-items: start; }
 .library-pack { min-width: 0; }
+/* The missing material follows the existing bag planes, including opened bags. */
+.library-pack[data-pack-issue] .pack-wrapper,
+.library-pack[data-pack-issue] .pack-print,
+.library-pack[data-pack-issue] .pack-facet,
+.library-pack[data-pack-issue] .pack-back,
+.installed-pack-detail[data-pack-issue] .installed-pack-icon {
+  background: conic-gradient(#ba00e6 25%, #17131c 0 50%, #ba00e6 0 75%, #17131c 0) 0 0 / 24px 24px;
+  border-color: #d34ff1;
+}
+.library-pack[data-pack-issue] .pack-print { color: #f9eaff; }
+.installed-pack-detail[data-pack-issue] .installed-pack-icon { color: #f9eaff; }
+.library-pack[data-pack-issue] .pack-edition,
+.library-pack[data-pack-issue] .pack-title,
+.library-pack[data-pack-issue] .pack-subtitle,
+.library-pack[data-pack-issue] .pack-print-footer { background: #17131ce8; text-shadow: none; }
+.library-pack[data-pack-issue] .pack-emblem {
+  width: 100%; color: #f9eaff; background: #17131c; border-color: #d34ff1; border-radius: 3px; box-shadow: none;
+}
+.pack-issue-mark { font-size: 14px; letter-spacing: .12em; }
+.library-pack[data-pack-issue] .pack-foil,
+.library-pack[data-pack-issue] .pack-wrapper::after { display: none; }
+.library-pack[data-pack-issue] .pack-inventory-status { color: #9b22b8; }
 .pack-touch-area { position: relative; width: 100%; height: 294px; padding: 30px 8px 18px; border: 0; background: transparent; perspective: 760px; transition: height 280ms ease, padding-top 280ms ease; -webkit-tap-highlight-color: transparent; }
 .card-library-modal .pack-touch-area:disabled { opacity: 1; }
 .pack-touch-area:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 5px; }

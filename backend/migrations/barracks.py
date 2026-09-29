@@ -148,7 +148,6 @@ async def migrate(source: Path, destination: Path):
                 record['agent_id'] = record.pop('template_id')
             services.summoning.save(record)
         (destination / 'legacy-barracks-archive.json').write_text(json.dumps(entries, ensure_ascii=False), encoding='utf-8')
-        services.world.assert_plugin_availability()
         marker.unlink()
     finally:
         services.close()

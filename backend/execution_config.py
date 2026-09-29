@@ -142,9 +142,13 @@ def effective_variables(services, sandbox_id, environment_id=None):
 def resolve_sandbox_configuration(services, sandbox_id, environment_id=None, target_id=None):
     _, variables = effective_variables(services, sandbox_id, environment_id)
     environment, secrets = {}, []
-    for name, value, owner, _ in variables:
+    for name, value, owner, source in variables:
         if isinstance(value, SecretRequirement):
-            value = resolve_environment_secret(services, owner, name, value.secret_ref)
+            if source == "global":
+                from backend.security.execution_credentials import GlobalExecutionCredentialStore
+                value = GlobalExecutionCredentialStore(services.database, services.settings.data_root).resolve(None, value.secret_ref)
+            else:
+                value = resolve_environment_secret(services, owner, name, value.secret_ref)
             secrets.append(value)
         environment[name] = value
     if target_id:
@@ -156,10 +160,12 @@ def resolve_sandbox_configuration(services, sandbox_id, environment_id=None, tar
 
 def configuration_summary(services, sandbox_id):
     profile_id, variables = effective_variables(services, sandbox_id)
+    from backend.security.execution_credentials import GlobalExecutionCredentialStore
+    global_credentials = GlobalExecutionCredentialStore(services.database, services.settings.data_root)
     result = []
     for name, value, owner, source in variables:
         secret = isinstance(value, SecretRequirement)
         result.append({"name": name, "source": source, "owner": owner, "secret": secret,
             "value": None if secret else value,
-            "configured": services.execution_credentials.configured(owner, value.secret_ref) if secret else True})
+            "configured": (global_credentials if source == "global" else services.execution_credentials).configured(owner, value.secret_ref) if secret else True})
     return {"profile_id": profile_id, "variables": result, "ready": all(v["configured"] for v in result)}

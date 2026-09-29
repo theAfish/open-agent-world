@@ -1,4 +1,5 @@
-import { getTerrainChunk, parseChunkKey, type TerrainChunkGeometry } from './terrain';
+import { parseChunkKey } from './terrain';
+import { getTerrainScalarTile, type TerrainScalarTile } from './terrainScalar';
 
 export interface TerrainRequest {
   id: number;
@@ -9,7 +10,7 @@ export interface TerrainRequest {
 
 export interface TerrainResponse {
   id: number;
-  chunk: TerrainChunkGeometry;
+  tile: TerrainScalarTile;
 }
 
 let pending: TerrainRequest | undefined;
@@ -22,8 +23,10 @@ function pump() {
   if (key === undefined) return;
   const coordinates = parseChunkKey(key);
   if (coordinates) {
-    const chunk = getTerrainChunk(coordinates.x, coordinates.y, pending.resolution, pending.seed);
-    postMessage({ id: pending.id, chunk } satisfies TerrainResponse);
+    const cached = getTerrainScalarTile(coordinates.x, coordinates.y, pending.resolution, pending.seed);
+    // Transfer a copy: the bounded worker cache must retain its own samples.
+    const tile = { ...cached, values: cached.values.slice() };
+    postMessage({ id: pending.id, tile } satisfies TerrainResponse, { transfer: [tile.values.buffer] });
   }
   // Yield between chunks so a newer viewport can replace obsolete queued work.
   if (pending.keys.length) timer = setTimeout(pump, 0);

@@ -144,23 +144,32 @@ async function dragCardBy(
   return { before, after: await cardBox(card, "Settled card drag result") };
 }
 
-test("procedural terrain streams deterministic chunks across distant canvas coordinates", async ({ page }) => {
+test("WebGL streams tiles across distant canvas coordinates", async ({ page, request }) => {
+  const profile = await (await request.get('/api/application')).json();
+  await request.patch('/api/application/preferences', { data: {
+    profile_id: profile.profile_id, generation: profile.generation, changes: {
+      'oaw-onboarding-v1': JSON.stringify({ version: 1, state: { status: 'skipped' } }),
+      'oaw-canvas-viewport-v1': null,
+    },
+  } });
   await page.goto("/");
-  const chunks = page.locator("svg.contour-chunk");
-  await expect(chunks).toHaveCount(9);
-  await expect(page.locator('svg.contour-chunk[data-chunk="0:0"] path.contour')).not.toHaveCount(0);
-
+  const background = page.locator('.terrain-webgl-background');
+  const stats = () => background.evaluate(el => (el as any).terrainStats);
+  const covered = async () => {
+    await expect(background).toHaveAttribute('data-terrain-status', 'ready');
+    await expect.poll(async () => { const s = await stats();
+      return s.visibleTiles > 0 && s.coveredTiles === s.visibleTiles && s.pendingTiles === 0;
+    }).toBe(true);
+  };
+  await covered();
+  const initial = await stats();
   await panCanvas(page, "left", 5);
-  await expect.poll(async () => chunks.evaluateAll((elements) => elements.map((element) => (
-    Number(element.getAttribute("data-chunk")?.split(":")[0])
-  )).some((x) => x >= 2))).toBe(true);
-  await expect(chunks.locator("path.contour").first()).toHaveAttribute("d", /M/);
-
+  await covered();
+  expect((await stats()).requestedTiles).toBeGreaterThan(initial.requestedTiles);
+  const right = await stats();
   await panCanvas(page, "right", 10);
-  await expect.poll(async () => chunks.evaluateAll((elements) => elements.map((element) => (
-    Number(element.getAttribute("data-chunk")?.split(":")[0])
-  )).some((x) => x <= -2))).toBe(true);
-  await expect(chunks.locator("path.contour").first()).toHaveAttribute("d", /M/);
+  await covered();
+  expect((await stats()).requestedTiles).toBeGreaterThan(right.requestedTiles);
 });
 
 for (const destination of ["boundary", "body"] as const) {

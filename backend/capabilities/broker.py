@@ -106,6 +106,8 @@ class CapabilityBroker:
                 if self.forwards_connection(edge, target_id, child)]
 
     def forwards_connection(self, edge: Edge, target_id: str, child: Edge) -> bool:
+        if edge.missing_plugin or child.missing_plugin:
+            return False
         relationship = self.plugins.relationship(edge.relationship)
         if relationship.generated or child.source != target_id:
             return False
@@ -202,12 +204,14 @@ class CapabilityBroker:
 
     def _require_agent(self, card_id: str) -> Card:
         card = self.world.get_card(card_id)
+        self.world.require_available_card(card)
         if not self.plugins.has_trait(card.type, "core.agent"):
             raise ResourceValidationError(f"card {card_id!r} is not an Agent")
         return card
 
     def _require_type(self, card_id: str, expected: str) -> Card:
         card = self.world.get_card(card_id)
+        self.world.require_available_card(card)
         if card.type != expected:
             raise ResourceValidationError(
                 f"card {card_id!r} is {card.type!r}, expected {expected!r}"

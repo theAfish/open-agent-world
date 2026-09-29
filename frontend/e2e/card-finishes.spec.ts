@@ -1,5 +1,44 @@
 import { expect, test } from '@playwright/test';
 
+test('laser engraving stays attached while its reflected spectrum and groove lighting move', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 820, height: 900 });
+  await page.goto('/?card-finishes');
+  const laser = page.locator('[data-preview-finish="laser"]');
+  await laser.scrollIntoViewIfNeeded();
+  const pattern = laser.locator('.card-finish-pattern');
+  const reflection = laser.locator('.card-finish-base');
+  const grooveLight = laser.locator('.card-finish-sheen');
+  const plate = await pattern.evaluate(element => {
+    const style = getComputedStyle(element);
+    return { image: style.maskImage, position: style.maskPosition, size: style.maskSize };
+  });
+  // A computed URL alone does not prove the shared engraving asset loaded.
+  expect(await page.evaluate(async mask => {
+    const image = new Image();
+    image.src = mask.slice(5, -2);
+    await image.decode();
+    return image.naturalWidth > 0;
+  }, plate.image)).toBe(true);
+  await laser.screenshot({ path: testInfo.outputPath('laser-rest.png') });
+  await laser.hover({ position: { x: 55, y: 75 } });
+  await expect(laser).toHaveAttribute('data-finish-active', 'true');
+  const firstReflection = await reflection.evaluate(element => getComputedStyle(element).backgroundPosition);
+  const firstGrooveLight = await grooveLight.evaluate(element => getComputedStyle(element, '::before').backgroundPosition);
+  await laser.screenshot({ path: testInfo.outputPath('laser-left.png') });
+  const box = (await laser.boundingBox())!;
+  await page.mouse.move(box.x + box.width * .8, box.y + box.height * .8);
+  await expect.poll(() => reflection.evaluate(element => getComputedStyle(element).backgroundPosition)).not.toBe(firstReflection);
+  await expect.poll(() => grooveLight.evaluate(element => getComputedStyle(element, '::before').backgroundPosition)).not.toBe(firstGrooveLight);
+  expect(await pattern.evaluate(element => {
+    const style = getComputedStyle(element);
+    return { image: style.maskImage, position: style.maskPosition, size: style.maskSize };
+  })).toEqual(plate);
+  await laser.screenshot({ path: testInfo.outputPath('laser-right.png') });
+  await page.mouse.move(1, 1);
+  await expect(laser).not.toHaveAttribute('data-finish-active');
+  await expect(laser.getByText('Research Agent')).toBeVisible();
+});
+
 test('cards tilt beneath a fixed light and retain readable ink in both themes', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));

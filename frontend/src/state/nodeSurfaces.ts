@@ -87,6 +87,9 @@ interface NodeSurfaceState {
   setDragging: (dragging: boolean) => void;
   baseLevels: Record<string, NodeSurfaceLevel>;
   drafts: Record<string, string>;
+  /** Host-only transient inputs; excluded from persistence and plugin draft APIs. */
+  privateDrafts: Record<string, Record<string, string>>;
+  setPrivateDraft: (nodeId: string, value: Record<string, string>) => void;
   maximizedWorkspaces: Record<string, boolean>;
   showPreview: (nodeId: string) => void;
   hidePreview: (nodeId: string) => void;
@@ -175,6 +178,12 @@ export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set, get)
   }),
   surfaceLevels: {},
   drafts: {},
+  privateDrafts: {},
+  setPrivateDraft: (nodeId, value) => set(state => {
+    const privateDrafts = { ...state.privateDrafts };
+    if (Object.keys(value).length) privateDrafts[nodeId] = value; else delete privateDrafts[nodeId];
+    return { privateDrafts };
+  }),
   maximizedWorkspaces: {},
 
   dragging: false,
@@ -243,7 +252,8 @@ export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set, get)
       const owner = key.startsWith('card:') ? decodeURIComponent(key.split(':')[1]) : key.slice(key.lastIndexOf(':') + 1);
       return !ids.has(owner);
     }));
-    return Object.keys(drafts).length === Object.keys(state.drafts).length ? state : { drafts };
+    const privateDrafts = Object.fromEntries(Object.entries(state.privateDrafts).filter(([id]) => !ids.has(id)));
+    return Object.keys(drafts).length === Object.keys(state.drafts).length && Object.keys(privateDrafts).length === Object.keys(state.privateDrafts).length ? state : { drafts, privateDrafts };
   }),
 
   toggleWorkspaceMaximized: (nodeId) => set((state) => ({

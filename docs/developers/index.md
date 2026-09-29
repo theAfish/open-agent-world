@@ -1,5 +1,7 @@
 # Build a plugin
 
+**English** | [简体中文](index.zh-CN.md)
+
 A plugin is a Python package that registers cards and other contributions with OAW. You can start with a card and an editable field; add Agent tools or React views when your idea needs them.
 
 ## Follow the learning path

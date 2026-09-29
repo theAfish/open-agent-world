@@ -57,15 +57,8 @@ hooks:
 extra_css:
   - stylesheets/extra.css
 exclude_docs: |
-  /SHADOW_COLLECTION.md
-  /SHADOW_GAS_BOUNDARY.md
-  /READER_TRANSITION.md
-  /matcreator-demo-plan.md
+  /internal/**
   /assets/demos/README.md
-  /marketplace-production.md
-  /pack-store-acceptance.md
-  /legion-performance-diagnosis.md
-  /panzoom-performance.md
 validation:
   nav:
     omitted_files: warn
@@ -119,24 +112,35 @@ nav:
           - Networking: sandbox-networking.md
           - Shared Python: shared-python-runtime.md
           - Security: security.md
-      - Host development:
-          - Run from source: getting-started.md
-          - Architecture: architecture.md
+      - Canvas and rendering:
           - Canvas control: canvas-control.md
           - Canvas placement: layout.md
           - Canvas performance: canvas-performance.md
+          - Terrain renderer: terrain-webgl.md
           - Card finishes: developers/card-finishes.md
+  - Contribute to OAW:
+      - contributing/index.md
+      - Host development:
+          - Run from source: getting-started.md
+          - Architecture: architecture.md
+          - Enterprise foundations: enterprise-foundations.md
           - Tutorial implementation: tutorial.md
           - Desktop development: desktop.md
           - Workspace deployment: deployment.md
+      - Maintenance:
           - Releases: releasing.md
-          - Release notes: release-notes.md
+          - Release notes template: release-notes.md
           - Maintain this site: developers/documentation.md
+          - Writing checklist: contributing/docs-checklist.md
   - 简体中文:
       - README.zh-CN.md
+      - 下载与安装: install.zh-CN.md
       - 使用入门: user-guide/index.zh-CN.md
       - MatCreator 预设 Legion 示例: user-guide/matcreator-example.zh-CN.md
       - 插件开发路线: developers/index.zh-CN.md
       - 从源码运行: getting-started.zh-CN.md
       - 交互教程与实现: tutorial.zh-CN.md
       - 工作区部署: deployment.zh-CN.md
+      - 插件部署接入: plugin-deployment.zh-CN.md
+      - 发布说明模板: release-notes.zh-CN.md
+      - 文档编写规范: contributing/docs-checklist.zh-CN.md

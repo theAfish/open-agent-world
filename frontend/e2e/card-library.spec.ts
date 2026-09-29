@@ -223,7 +223,7 @@ test("compact Library cards keep actions outside their single surface", async ({
   expect(opened.ok()).toBe(true);
   snapshot = await opened.json();
   await page.goto("/");
-  const startEmpty = page.getByRole("button", { name: "Start Empty", exact: true });
+  const startEmpty = page.getByRole("button", { name: "Start blank", exact: true });
   // A cold Vite import of the full workspace is slower than the interaction budget.
   await expect(startEmpty).toBeVisible({ timeout: 60000 });
   await startEmpty.click();

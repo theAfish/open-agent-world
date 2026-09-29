@@ -1,9 +1,16 @@
 import { expect, test } from '@playwright/test';
 
-test('pan across uncached terrain and zoom without losing terrain coverage', async ({ page }) => {
+test('pan across uncached terrain and zoom without losing terrain coverage', async ({ page, request }) => {
   test.setTimeout(90_000);
+  const profile = await (await request.get('/api/application')).json();
+  await request.patch('/api/application/preferences', { data: {
+    profile_id: profile.profile_id, generation: profile.generation, changes: {
+      'oaw-onboarding-v1': JSON.stringify({ version: 1, state: { status: 'skipped' } }),
+      'oaw-canvas-viewport-v1': null,
+    },
+  } });
   await page.goto('/');
-  await expect(page.locator('.contour-chunk').first()).toBeAttached();
+  await expect(page.locator('.terrain-webgl-background')).toHaveAttribute('data-terrain-status', 'ready');
   await page.waitForTimeout(1500);
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
@@ -38,20 +45,12 @@ test('pan across uncached terrain and zoom without losing terrain coverage', asy
   });
   console.log('VIEWPORT_PERFORMANCE', JSON.stringify(report));
   const checkCoverage = () => page.evaluate(() => {
-    const world = document.querySelector('#oaw-world-map')!;
-    const matrix = new DOMMatrix(getComputedStyle(world.querySelector('.react-flow__viewport')!).transform);
-    const keys = new Set(Array.from(world.querySelectorAll('.contour-chunk')).map(el => el.getAttribute('data-chunk')));
-    for (let y = Math.floor(-matrix.f / matrix.a / 2048); y <= Math.floor((world.clientHeight - matrix.f) / matrix.a / 2048); y++) {
-      for (let x = Math.floor(-matrix.e / matrix.a / 2048); x <= Math.floor((world.clientWidth - matrix.e) / matrix.a / 2048); x++) {
-        if (!keys.has(`${x}:${y}`)) return false;
-      }
-    }
-    return true;
+    const s = (document.querySelector('.terrain-webgl-background') as any).terrainStats;
+    return s.visibleTiles > 0 && s.coveredTiles === s.visibleTiles && s.pendingTiles === 0;
   });
   await expect.poll(checkCoverage).toBe(true);
   await page.mouse.move(700, 400);
   for (let step = 0; step < 4; step++) await page.locator('.world-controls .react-flow__controls-zoomin').click();
-  await expect.poll(async () => Number(await page.locator('.contour-chunk').first().getAttribute('data-resolution'))).toBe(80);
   await expect.poll(checkCoverage).toBe(true);
   await page.screenshot({ path: '../.outputs/viewport-performance.png' });
 });

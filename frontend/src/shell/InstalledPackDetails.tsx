@@ -5,7 +5,7 @@ import { t } from '../i18n';
 import { useCardLibrary, type LibrarySnapshot } from '../state/cardLibrary';
 import type { PackInstallations } from '../types/packs';
 import { PackGuide } from './PackCreator';
-import { installedPackStatus, type InstalledPack } from './installedPacks';
+import { installedPackStatus, packIssue, type InstalledPack } from './installedPacks';
 
 export function InstalledPackDetails({ pack, versions, registered, snapshot, onBack, onBrowse, onChanged }: {
   pack: LibrarySnapshot['packs'][string]; versions: InstalledPack[]; registered: boolean; snapshot: LibrarySnapshot;
@@ -18,7 +18,8 @@ export function InstalledPackDetails({ pack, versions, registered, snapshot, onB
   const selected = versions.find(item => item.selected);
   const item = selected ?? versions.find(row => row.loaded) ?? versions[0];
   const loaded = versions.find(row => row.loaded);
-  const status = installedPackStatus(versions);
+  const issue = packIssue(pack, snapshot, versions);
+  const status = issue?.label ?? installedPackStatus(versions);
   const mutate = async (path: string, method: string, body?: unknown) => {
     setBusy(true); setError('');
     try { onChanged(await worldApi.managePack(path, method, body)); setConfirmRemoval(false); }
@@ -29,7 +30,7 @@ export function InstalledPackDetails({ pack, versions, registered, snapshot, onB
     const result = await library.edit({ action: 'open_pack', id: pack.definition.id });
     if (result?.packs[pack.definition.id]?.opened) onBrowse(pack.definition.id);
   };
-  return <section className="installed-pack-detail" aria-label={t('Pack details')}>
+  return <section className="installed-pack-detail" data-pack-issue={issue?.kind} aria-label={t('Pack details')}>
     <button className="library-text-button pack-back-button" onClick={onBack}><ArrowLeft size={15} />{t('Back to packs')}</button>
     <header className="installed-pack-heading"><div className="installed-pack-icon"><Archive size={28} /></div>
       <div><h3>{pack.definition.name}</h3><span>{item?.version} · {t(status)}</span></div></header>
@@ -37,7 +38,7 @@ export function InstalledPackDetails({ pack, versions, registered, snapshot, onB
     {(status === 'Restart required' || status === 'Uninstall pending restart') && <p className="pack-restart-note">{t('Restart OAW to activate Pack changes.')}</p>}
     <div className="pack-detail-actions">
       {registered && pack.opened && <button className="secondary-button" onClick={() => onBrowse(pack.definition.id)}>{t('View cards')}</button>}
-      {registered && !pack.opened && snapshot.available_pack_ids.includes(pack.definition.id) && <button className="secondary-button" disabled={busy || library.busy} onClick={() => void open()}>{t('Open pack')}</button>}
+      {!issue && registered && !pack.opened && snapshot.available_pack_ids.includes(pack.definition.id) && <button className="secondary-button" disabled={busy || library.busy} onClick={() => void open()}>{t('Open pack')}</button>}
       {selected && !confirmRemoval && <button className="library-text-button pack-uninstall-button" disabled={busy} onClick={() => setConfirmRemoval(true)}><Trash2 size={14} />{t('Uninstall Pack')}</button>}
     </div>
     {confirmRemoval && selected && <div className="pack-uninstall-confirm">

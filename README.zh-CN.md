@@ -60,7 +60,7 @@
 
 ## 开始使用
 
-1. [下载桌面应用](https://github.com/theAfish/open-agent-world/releases)，按[安装指南](docs/install.md)完成安装。
+1. [下载桌面应用](https://github.com/theAfish/open-agent-world/releases)，按[安装指南](docs/install.zh-CN.md)完成安装。
 2. 在 **设置 → 模型** 中添加你的模型连接。
 3. 跟随画布教程连接第一组卡片、组建 Legion，并布置它的工作区。
 

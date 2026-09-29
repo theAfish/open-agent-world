@@ -11,8 +11,9 @@ test('nested knowledge backgrounds never change world pixels or share SVG resour
     }
     await page.goto('/');
     const world = page.locator('.world-canvas > .react-flow');
-    await expect(world.locator(':scope > .react-flow__background')).toBeVisible();
+    await expect(world.locator(':scope > .terrain-webgl-background')).toBeVisible();
     await expect(page.locator(`[data-card-id="${created[0]}"]`)).toBeVisible();
+    await expect.poll(() => world.locator(':scope > .terrain-webgl-background').evaluate(el => (el as any).terrainStats?.pendingTiles)).toBe(0);
     const clip = { x: 2800, y: 200, width: 150, height: 150 };
     const baseline = await page.screenshot({ clip, path: '../.outputs/kdg-background-before.png' });
     const checkBackground = async () => {
@@ -25,8 +26,8 @@ test('nested knowledge backgrounds never change world pixels or share SVG resour
       expect(unchanged).toBe(true);
       expect(references.every(reference => reference.ownReference)).toBe(true);
       expect(new Set(references.map(reference => reference.id)).size).toBe(references.length);
-      await expect(page.locator('.kdg-canvas .contour-chunk')).toHaveCount(0);
-      expect(await page.locator('.contour-chunk').evaluateAll(chunks => chunks.length > 0 && chunks.every(chunk => chunk.closest('.react-flow')?.id === 'oaw-world-map'))).toBe(true);
+      await expect(page.locator('.kdg-canvas .terrain-webgl-background, .contour-chunk')).toHaveCount(0);
+      await expect(world.locator(':scope > .terrain-webgl-background')).toHaveCount(1);
     };
     await expect(page.getByRole('region', { name: 'Background isolation check workspace' }).first().locator('.react-flow__background')).toBeVisible();
     await expect(page.getByRole('region', { name: 'Background isolation check workspace' }).last().locator('.react-flow__background')).toBeVisible();

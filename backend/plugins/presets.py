@@ -14,7 +14,8 @@ class PresetNode(BaseModel):
     parent_key: str | None = "group"
     owner_key: str | None = None
     equipment_relationship: str | None = None
-    presentation: Literal["node", "preview", "inspector", "workspace"] = "node"
+    # Omitted presentation follows the current node type default.
+    presentation: Literal["node", "preview", "inspector", "workspace"] | None = None
     config: dict[str, Any] = Field(default_factory=dict)
     initial_document: dict[str, Any] | None = None
     payload: dict[str, Any] = Field(default_factory=dict)

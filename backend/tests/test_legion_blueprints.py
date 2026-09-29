@@ -100,6 +100,8 @@ def test_starter_presets_share_legion_deployment_without_a_wrapper(client, prese
     assert len(instance["edges"]) == edges
     assert all(n["type"] != "legion" and n["parent_id"] is None for n in instance["nodes"])
     assert len(instance["presentation"]) == nodes
+    defaults = {item["id"]: item["presentation"]["initial"] for item in client.get("/api/catalog").json()["node_types"]}
+    assert all(instance["presentation"][node["id"]]["level"] == defaults[node["type"]] for node in instance["nodes"])
     assert all(n["config"]["model"] == "oaw:default" for n in instance["nodes"] if n["type"] == "agent")
     assert client.get("/api/legions").json() == []
     assert client.post(f"/api/legions/presets/{preset}/instances", json={"unwrap": True, "as_group": True}).status_code == 422
@@ -146,3 +148,21 @@ async def test_legacy_team_template_still_deploys(tmp_path: Path):
         assert instance.presentation == {}
     finally:
         await services.shutdown()
+
+
+def test_plugin_preset_uses_current_default_unless_explicitly_authored():
+    from backend.legions.presets import plugin_preset_record
+    from backend.plugins.loader import load_plugin_registry
+    from backend.plugins.presets import LegionPresetDefinition, PresetNode
+
+    registry = load_plugin_registry()
+    preset = LegionPresetDefinition(id="test.defaults", name="Defaults", nodes=(
+        PresetNode(key="conversation", type="conversation", name="Chat", parent_key=None),
+        PresetNode(key="sandbox", type="sandbox", name="Compact sandbox", parent_key=None, presentation="node"),
+    ))
+    record = plugin_preset_record(preset, registry)
+    conversation, sandbox = record.blueprint.nodes
+    assert conversation.presentation.level == "workspace"
+    assert conversation.expanded
+    assert sandbox.presentation.level == "node"
+    assert not sandbox.expanded

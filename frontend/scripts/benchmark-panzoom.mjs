@@ -1,5 +1,5 @@
 /** Reproducible real-card pan/zoom investigation (dev only; no production hooks).
- * node scripts/benchmark-panzoom.mjs --label after [--frontend-root path] [--canvas]
+ * node scripts/benchmark-panzoom.mjs --label after [--frontend-root path]
  * Isolated data is retained with the report; never reads or resets a user's profile.
  */
 import { spawn } from 'node:child_process';
@@ -13,6 +13,7 @@ import { chromium } from '@playwright/test';
 const frontend = fileURLToPath(new URL('../', import.meta.url));
 const project = path.resolve(frontend, '..');
 const args = process.argv.slice(2);
+if (args.includes('--canvas')) throw new Error('The Canvas2D experiment was removed; this benchmark uses WebGL2.');
 const option = (name, fallback) => args.includes(name) ? args[args.indexOf(name) + 1] : fallback;
 const label = option('--label', 'current');
 const selectedFrontend = path.resolve(option('--frontend-root', frontend));
@@ -151,7 +152,7 @@ async function measure(browser, scenario, variant, repeat) {
     void writeFile(path.join(output, 'startup-pending.json'), JSON.stringify(state, null, 2));
   }, 15000);
   try {
-    await page.goto(origin + (variant.canvas ? '/?terrainRenderer=canvas' : '/'), { waitUntil: 'domcontentloaded', timeout: 90000 });
+    await page.goto(origin + '/', { waitUntil: 'domcontentloaded', timeout: 90000 });
     await page.locator('.world-card').first().waitFor({ timeout: 30000 });
   } catch (error) {
     await writeFile(path.join(output, 'startup-pending.json'), JSON.stringify({ error: String(error), pending: [...pendingRequests], requests, errors }, null, 2));
@@ -164,7 +165,7 @@ async function measure(browser, scenario, variant, repeat) {
   } finally { clearInterval(heartbeat); }
   const firstCardMs = Date.now() - started;
   await page.waitForTimeout(2000);
-  if (variant.hidden) await page.addStyleTag({ content: '.contour-chunk, .contour-layer { visibility:hidden !important; }' });
+  if (variant.hidden) await page.addStyleTag({ content: '.terrain-webgl-background { visibility:hidden !important; }' });
   // Exercise the real inspector lifecycle before measuring hidden visited content.
   if (scenario === 'mixed' && !variant.shell) {
     const visit = ['oaw.tasks', 'xrd.spectrum-canvas', 'conversation', 'text'].flatMap(type => cards.filter(card => card.type === type).slice(0, 1).map(card => card.id));
@@ -189,7 +190,7 @@ async function measure(browser, scenario, variant, repeat) {
         surfaceCounts: [...document.querySelectorAll('.world-card')].reduce((counts, card) => { const level = card.getAttribute('data-surface-level'); counts[level] = (counts[level] ?? 0) + 1; return counts; }, {}),
         loadingChunks: state.loadingChunkKeys.length, syncState: state.syncState,
         allActiveChunksLoaded: state.activeChunkKeys.every(key => state.loadedChunkKeys.includes(key)),
-        terrainTiles: document.querySelectorAll('svg.contour-chunk').length,
+        terrainTiles: document.querySelector('.terrain-webgl-background')?.terrainStats?.tiles ?? 0,
         viewport: { x: transform.e, y: transform.f, zoom: transform.a } };
     });
     const pendingData = [...pendingRequests].some(url => /\/api\/(world(?:\?|$)|nodes\/[^/]+\/document|resources\/)/.test(url));
@@ -201,9 +202,9 @@ async function measure(browser, scenario, variant, repeat) {
   if (Date.now() - stableSince < 1000) throw new Error(`Initial canvas did not settle: ${JSON.stringify(initialCoverage)}`);
   if (Math.abs(initialCoverage.viewport.x - 40) > 1 || Math.abs(initialCoverage.viewport.y - 40) > 1 || Math.abs(initialCoverage.viewport.zoom - .35) > .001) throw new Error(`Initial viewport drifted: ${JSON.stringify(initialCoverage)}`);
   console.log('WARMUP_SETTLED', scenario, variant.name, JSON.stringify(initialCoverage));
-  if (variant.canvas) await page.waitForFunction(() => {
-    const host = document.querySelector('.contour-canvas-experiment');
-    return host && (host.dataset.fallback || (host.dataset.rasterPending === '0' && Number(host.dataset.activeTiles) > 0));
+  await page.waitForFunction(() => {
+    const s = document.querySelector('.terrain-webgl-background')?.terrainStats;
+    return s && s.pendingTiles === 0 && s.coveredTiles === s.visibleTiles;
   }, undefined, { timeout: 15000 });
   await cdp.send('Emulation.setCPUThrottlingRate', { rate });
   const beforeCards = await page.locator('.world-card').count();
@@ -271,10 +272,10 @@ async function measure(browser, scenario, variant, repeat) {
   const frames = measuredEnd.frames.slice(1).sort((a, b) => a - b);
   const percentile = p => frames[Math.min(frames.length - 1, Math.floor(frames.length * p))] ?? 0;
   const duplicates = Object.entries(requests.filter(request => request.method === 'GET' && /\/document/.test(request.url)).reduce((counts, request) => { const key = request.url; counts[key] = (counts[key] ?? 0) + 1; return counts; }, {})).filter(([, count]) => count > 1);
-  const coverage = await page.evaluate(() => ({ cards: document.querySelectorAll('.world-card').length, terrainTiles: document.querySelectorAll('svg.contour-chunk').length,
+  const coverage = await page.evaluate(() => ({ cards: document.querySelectorAll('.world-card').length, terrainTiles: document.querySelector('.terrain-webgl-background')?.terrainStats?.tiles ?? 0,
     surfaceCounts: [...document.querySelectorAll('.world-card')].reduce((counts, card) => { const level = card.getAttribute('data-surface-level'); counts[level] = (counts[level] ?? 0) + 1; return counts; }, {}),
-    transform: document.querySelector('#oaw-world-map .react-flow__viewport')?.getAttribute('style'), terrainCanvas: document.querySelectorAll('.contour-layer canvas').length,
-    canvasState: { ...document.querySelector('.contour-canvas-experiment')?.dataset } }));
+    transform: document.querySelector('#oaw-world-map .react-flow__viewport')?.getAttribute('style'), terrainCanvas: document.querySelectorAll('.terrain-webgl-background').length,
+    terrainStats: document.querySelector('.terrain-webgl-background')?.terrainStats }));
   const phaseFrames = values => { const sorted = values.slice(1).sort((a, b) => a - b); return { count: sorted.length, p95: sorted[Math.floor(sorted.length * .95)], max: sorted.at(-1) }; };
   const result = { scenario, variant, repeat, tracing, cards: cards.length, beforeCards, firstCardMs, cpuThrottle: rate,
     initialCoverage,
@@ -348,7 +349,7 @@ try {
   if (!args.includes('--skip-light')) results.push(await measure(browser, 'light-100', { name: 'svg-real' }, 0));
   const seedPage = await browser.newPage(); await seedMixed(seedPage); await seedPage.close();
   console.log(`Seeded ${cards.length} real cards`);
-  const variants = [{ name: 'svg-real' }, { name: 'hidden-real', hidden: true }, { name: 'svg-shell', shell: true }, { name: 'hidden-shell', hidden: true, shell: true }, ...(args.includes('--canvas') ? [{ name: 'canvas-real', canvas: true }] : [])];
+  const variants = [{ name: 'webgl-real' }, { name: 'hidden-real', hidden: true }, { name: 'webgl-shell', shell: true }, { name: 'hidden-shell', hidden: true, shell: true }];
   const selectedVariants = option('--variants', '').split(',').filter(Boolean);
   variantsLoop: for (let repeat = 0; repeat < repeats; repeat++) for (const variant of (repeat % 2 ? [...variants].reverse() : variants).filter(variant => !selectedVariants.length || selectedVariants.includes(variant.name))) {
     if (stopRequested || existsSync(path.join(output, 'STOP_AFTER_CURRENT'))) { stopRequested = true; break variantsLoop; }

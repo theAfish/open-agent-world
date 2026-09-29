@@ -851,7 +851,8 @@ class PluginRegistry:
         self._assert_enabled("runtime_provider", provider_id)
 
     def has_trait(self, type_id: str, trait: str) -> bool:
-        return trait in self.node_type(type_id).traits
+        definition = self._nodes.get(type_id)
+        return bool(definition and self.is_enabled(self.node_type_owner_id(type_id)) and trait in definition.traits)
 
     def legion_presets(self) -> tuple[LegionPresetDefinition | LegionBlueprintPreset, ...]:
         return tuple(value.model_copy(deep=True) for key, value in self._legion_presets.items()

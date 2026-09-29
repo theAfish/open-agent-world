@@ -88,7 +88,7 @@ describe('Help menu', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Versions and updates' }));
     fireEvent.click(screen.getByRole('button', { name: 'Installation guide' }));
     expect(screen.getByRole('dialog', { name: 'Documentation' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Download and install / 下载与安装', level: 1 })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Download and install', level: 1 })).toBeTruthy();
   });
 
   it('explains manual updates without claiming an automatic updater or a version comparison', () => {

@@ -8,12 +8,23 @@ import { useEquipmentPanel } from '../state/equipment';
 import { useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { useWorldStore } from '../state/worldStore';
 import type { WorldCard } from '../types/world';
-import { WorldCardNode } from './CardFrame';
+import { CardContent, WorldCardNode } from './CardFrame';
 
 vi.mock('./AgentCard', () => ({ AgentCardBody: () => <div>Agent settings</div> }));
 vi.mock('./NodeWorkspace', () => ({ WorkspaceSurface: () => <div>Agent workspace</div> }));
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); useEquipmentPanel.setState({ openIds: [] }); });
+
+it('shows a missing placeholder instead of dispatching a same-named installed implementation', () => {
+  const card: WorldCard = { id: 'lost', type: 'agent', name: 'Old agent', status: 'idle', config: {},
+    position: { x: 0, y: 0 }, size: { width: 300, height: 190 }, expanded: false,
+    missing_plugin: { plugin_id: 'removed.pack', reason: 'owner_mismatch' } };
+  useWorldStore.setState({ cards: [card], catalog: TEST_CATALOG });
+  render(<CardContent card={card} level="inspector" />);
+  expect(screen.getByText('MISSING')).toBeTruthy();
+  expect(screen.getByText('removed.pack')).toBeTruthy();
+  expect(screen.queryByText('Agent settings')).toBeNull();
+});
 
 it('keeps one working backpack across surfaces and mounts inspector actions only while open', () => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });

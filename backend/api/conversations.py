@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, status
 from fastapi.responses import StreamingResponse
 from urllib.parse import quote
 
-from backend.api.dependencies import get_services
+from backend.api.dependencies import get_request_context, get_services
 from backend.conversations import (
     ConversationMessage,
     ConversationParticipantsAdd,
@@ -17,6 +17,7 @@ from backend.conversations import (
     ConversationSummary,
 )
 from backend.services import ApplicationServices
+from backend.request_context import RequestContext
 from backend.conversations.models import ConversationMessagePage, ConversationSessionRename
 
 
@@ -76,8 +77,12 @@ async def create_conversation_session(
     conversation_id: str,
     request: ConversationSessionCreate,
     services: ApplicationServices = Depends(get_services),
+    context: RequestContext = Depends(get_request_context),
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> ConversationSession:
-    return await services.create_conversation_session(conversation_id, request)
+    return await services.create_conversation_session(
+        conversation_id, request, idempotency_key=idempotency_key, request_context=context,
+    )
 
 
 @router.post(

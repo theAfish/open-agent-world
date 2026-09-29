@@ -3,9 +3,8 @@ name: Documentation
 on:
   push:
     branches: [dev]
-    paths: ['docs/**', 'mkdocs.yml', 'scripts/docs*', 'scripts/docs_theme/**', 'examples/plugins/**', 'plugins/**', '.github/workflows/docs.yml']
   pull_request:
-    paths: ['docs/**', 'mkdocs.yml', 'scripts/docs*', 'scripts/docs_theme/**', 'examples/plugins/**', 'plugins/**', '.github/workflows/docs.yml']
+    branches: [dev, main]
   workflow_dispatch:
 
 permissions:
@@ -15,23 +14,24 @@ concurrency:
   group: docs-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: scripts/docs-requirements.txt
       - run: python -m pip install -r scripts/docs-requirements.txt
-      - run: python scripts/docs_tests.py
-      - run: python -m mkdocs build --strict
-      - run: python scripts/docs_check_site.py
-      - uses: astral-sh/setup-uv@v6
-      - name: Verify tutorial plugin packages
-        run: uv run --project backend --with-editable ./examples/plugins/hello_world --with-editable ./examples/plugins/greeter python -m pytest -p no:cacheprovider examples/plugins/hello_world/tests examples/plugins/greeter/tests
+      - name: Validate sources, build strictly, and check generated site
+        run: python scripts/docs.py check
       - name: Configure Pages
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
         uses: actions/configure-pages@v5
@@ -41,9 +41,26 @@ jobs:
         with:
           path: .tmp/docs-site
 
+  tutorial-examples:
+    name: Documentation tutorial examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+      - name: Install locked test dependencies
+        run: uv sync --project backend --locked --dev --python 3.12
+      - name: Install tutorial entry points
+        run: uv pip install --python backend/.venv/bin/python --no-deps -e ./examples/plugins/hello_world -e ./examples/plugins/greeter
+      - name: Verify tutorial plugin packages
+        run: backend/.venv/bin/python -m pytest -p no:cacheprovider examples/plugins/hello_world/tests examples/plugins/greeter/tests
+
   deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
-    needs: build
+    needs: [build, tutorial-examples]
     runs-on: ubuntu-latest
     permissions:
       pages: write

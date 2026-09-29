@@ -10,7 +10,7 @@ test("a conversation workspace entering the screen during a pan does not scroll 
       }, version: 3 }));
     }, id);
     await page.goto("/");
-    await expect(page.locator(".contour-chunk").first()).toBeVisible();
+    await expect(page.locator(".terrain-webgl-background")).toBeVisible();
     await page.evaluate(() => {
       (window as any).__canvasScrolls = [];
       document.addEventListener("scroll", (event) => {
@@ -41,7 +41,7 @@ test("horizontal movement across terrain seams after panning up does not scroll 
     } }, version: 0 }));
   });
   await page.goto("/");
-  await expect(page.locator(".contour-chunk").first()).toBeVisible();
+  await expect(page.locator(".terrain-webgl-background")).toBeVisible();
   await page.evaluate(() => {
     (window as any).__canvasScrolls = [];
     document.addEventListener("scroll", (event) => {

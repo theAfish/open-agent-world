@@ -1,3 +1,5 @@
+"""Trusted caller metadata within one profile, not database tenant isolation."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -8,8 +10,9 @@ from enum import Enum
 import re
 from uuid import uuid4
 
-from starlette.datastructures import Headers, MutableHeaders
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette.types import Scope
+
+from backend.errors import PermissionDeniedError
 
 REQUEST_ID_HEADER = "X-Request-ID"
 _REQUEST_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
@@ -22,6 +25,9 @@ class ActorKind(str, Enum):
     SERVICE_ACCOUNT = "service_account"
     AGENT = "agent"
     SYSTEM = "system"
+    HOST_CREDENTIAL = "host_credential"
+    DEPLOYMENT_SESSION = "deployment_session"
+    ANONYMOUS = "anonymous"
 
 
 @dataclass(frozen=True)
@@ -110,36 +116,28 @@ def require_request_context() -> RequestContext:
 
     context = current_request_context()
     if context is None:
-        raise RuntimeError("No OAW request context is bound")
+        raise PermissionDeniedError("A trusted request context is required")
     return context
 
 
-class RequestContextMiddleware:
-    """Bind the implicit desktop principal and a safe request ID to ASGI requests."""
+def establish_request_context(scope: Scope, actor: ActorRef, *, auth_method: str) -> RequestContext:
+    """Called only by server authentication boundaries, after their checks.
 
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
+    Request IDs are provided by the outer observability middleware. Generate
+    one for standalone router/middleware use without interpreting any headers.
+    """
+    state = scope.setdefault("state", {})
+    request_id = state.get("request_id")
+    if not isinstance(request_id, str) or not request_id:
+        request_id = resolve_request_id(None)
+        state["request_id"] = request_id
+    context = RequestContext(request_id, actor, LOCAL_TENANT, auth_method)
+    state["request_context"] = context
+    return context
 
-    async def __call__(
-        self,
-        scope: Scope,
-        receive: Receive,
-        send: Send,
-    ) -> None:
-        if scope["type"] not in {"http", "websocket"}:
-            await self.app(scope, receive, send)
-            return
 
-        request_ids = Headers(scope=scope).getlist(REQUEST_ID_HEADER)
-        supplied_request_id = request_ids[0] if len(request_ids) == 1 else None
-        context = create_local_request_context(supplied_request_id)
-        scope.setdefault("state", {})["request_context"] = context
-
-        async def send_with_request_id(message: Message) -> None:
-            if message["type"] == "http.response.start":
-                MutableHeaders(scope=message)[REQUEST_ID_HEADER] = context.request_id
-            await send(message)
-
-        effective_send = send_with_request_id if scope["type"] == "http" else send
-        with bind_request_context(context):
-            await self.app(scope, receive, effective_send)
+def context_from_scope(scope: Scope) -> RequestContext:
+    context = scope.get("state", {}).get("request_context")
+    if not isinstance(context, RequestContext):
+        raise PermissionDeniedError("A trusted request context is required")
+    return context
