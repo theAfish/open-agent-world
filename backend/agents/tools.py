@@ -9,10 +9,9 @@ import re
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from backend.errors import DomainError
-
 from .base import AgentCapabilityProvider
 from .models import AgentConfigurationError, ScopedToolDefinition
+from .tool_execution import execute_tool
 
 
 _TOOL_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
@@ -118,21 +117,13 @@ def _build_callable(
     definition: ScopedToolDefinition,
 ) -> Callable[..., Any]:
     async def scoped_tool(**arguments: Any) -> Any:
-        try:
-            result = await provider.invoke_tool(
-                agent_id, definition.capability_id, dict(arguments)
-            )
-            from .media import adk_tool_result
-            return adk_tool_result(result)
-        except DomainError as exc:
-            return {
-                "ok": False,
-                "error": {
-                    "code": exc.code,
-                    "type": type(exc).__name__,
-                    "message": exc.message,
-                },
-            }
+        from .media import adk_tool_result
+
+        outcome = await execute_tool(
+            lambda: provider.invoke_tool(agent_id, definition.capability_id, dict(arguments)),
+            serialize=adk_tool_result,
+        )
+        return outcome.response
 
     scoped_tool.__name__ = definition.name
     scoped_tool.__qualname__ = definition.name

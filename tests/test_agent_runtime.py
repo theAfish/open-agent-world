@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import unittest
 from types import SimpleNamespace
@@ -57,8 +58,10 @@ class ScopedToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(inspect.signature(tool).parameters), ["line"])
         self.assertEqual(await tool(line=2), {"text": "notes"})
         provider.allowed = False
-        with self.assertRaises(PermissionError):
-            await tool(line=3)
+        feedback = await tool(line=3)
+        self.assertFalse(feedback["ok"])
+        self.assertEqual(feedback["error"]["code"], "tool_execution_error")
+        self.assertEqual(len(provider.invocations), 1)
 
     async def test_invalid_or_duplicate_tools_fail_explicitly(self) -> None:
         provider = CapabilityProvider()
@@ -266,6 +269,54 @@ class GoogleAdkBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(runner.app, FakeApp)
         self.assertEqual(runner.app.root_agent.model, "gemini-test")
         self.assertEqual(len(runner.app.root_agent.tools), 1)
+
+
+    async def test_tool_failure_reaches_model_and_next_tool_still_runs(self) -> None:
+        class RecoveringRunner(FakeRunner):
+            async def run_async(self, **kwargs):
+                tool = self.app.root_agent.tools[0]
+                for number in (1, 2):
+                    call_id = f"call-{number}"
+                    yield FakeEvent([FakePart(function_call=SimpleNamespace(
+                        name=tool.__name__, id=call_id, args={"line": number},
+                    ))])
+                    response = await tool(line=number)
+                    yield FakeEvent([FakePart(function_response=SimpleNamespace(
+                        name=tool.__name__, id=call_id, response=response,
+                    ))])
+                yield FakeEvent([FakePart(text="Recovered answer")], final=True)
+
+        for failure in (TypeError("plugin bug"), TimeoutError(), asyncio.CancelledError(), object()):
+            with self.subTest(failure=type(failure).__name__):
+                class FailingOnce(CapabilityProvider):
+                    async def invoke_tool(self, agent_id, capability_id, arguments):
+                        if arguments["line"] == 1:
+                            if isinstance(failure, BaseException):
+                                raise failure
+                            return failure  # invalid plugin output
+                        return await super().invoke_tool(agent_id, capability_id, arguments)
+
+                runtime = GoogleAdkAgentRuntime(FailingOnce(), adk_bindings=_AdkBindings(
+                    Agent=FakeAgent, App=FakeApp, Runner=RecoveringRunner,
+                    InMemorySessionService=FakeSessionService,
+                    types=SimpleNamespace(Content=FakeContent, Part=FakePart),
+                ))
+                config = AgentConfig("agent-a", "Agent", model="gemini-test")
+                await runtime.create_agent(config)
+                context = InvocationContext(
+                    run_id="run-recover", agent_id="agent-a", parent_run_id=None,
+                    root_run_id="run-recover", caller=InvocationCaller("test"),
+                    context_id=None, task_id=None, runtime_provider_id="google.adk",
+                )
+                events = [event async for event in runtime.execute(config, context, RuntimeInput("recover"))]
+                starts = [e for e in events if e.type == AgentEventType.TOOL_STARTED]
+                results = [e for e in events if e.type == AgentEventType.TOOL_COMPLETED]
+                self.assertEqual([e.payload["call_id"] for e in starts], ["call-1", "call-2"])
+                self.assertEqual([e.payload["call_id"] for e in results], ["call-1", "call-2"])
+                self.assertFalse(results[0].payload["response"]["ok"])
+                self.assertEqual(results[1].payload["response"], {"text": "notes"})
+                self.assertEqual(events[-1].run_status, "succeeded")
+                self.assertEqual(events[-1].payload["text"], "Recovered answer")
 
 
 if __name__ == "__main__":
