@@ -278,7 +278,7 @@ class _CapabilityContext:
             "recent_commands": recent_summaries(self.services, sandbox_id),
             "shared_python": python_status,
             "console_mode": "non-interactive; each command starts in the configured workspace; cd/export/activation do not persist",
-            "command_timeout": self.services.world.get_card(sandbox_id).config.get("command_timeout", 600),
+            "command_timeout": self.services.world.get_card(sandbox_id).config.get("command_timeout", 6000),
             "installation": "Use install_python_packages for the shared read-only Python environment. On Linux/WSL, HOME=/sandbox/home persists; use $HOME/.local/bin or $HOME/bin for local CLI tools, or create a private venv in HOME/workspace and invoke its interpreter explicitly. npm -g defaults to $HOME/.local, with bins on PATH. /tmp is ephemeral.",
             "attachments": [
                 {"resource_id": item.resource_id,
@@ -349,11 +349,17 @@ class WorldAgentCapabilityProvider:
                 from backend.capabilities.projection import authorize_invocation
                 capability = authorize_invocation(self.services, agent_id, capability_id, arguments)
         handler = self.services.plugins.capability_handler(capability.kind)
-        from backend.sandbox.models import SandboxValidationError, SandboxStateError, SandboxOperationError
+        from backend.sandbox.models import SandboxValidationError, SandboxStateError, SandboxOperationError, SandboxSecurityError, SandboxNotFoundError
         try:
             return await handler(_CapabilityContext(self.services, capability), capability, dict(arguments))
         except SandboxOperationError as exc:
             return exc.feedback()
+        except SandboxSecurityError as exc:
+            from backend.errors import PermissionDeniedError
+            raise PermissionDeniedError(str(exc)) from exc
+        except SandboxNotFoundError as exc:
+            from backend.errors import NotFoundError
+            raise NotFoundError(str(exc)) from exc
         except SandboxValidationError as exc:
             # All Agent runtimes already return domain errors as tool feedback.
             # Validation can also fail during bundle construction/materialization,

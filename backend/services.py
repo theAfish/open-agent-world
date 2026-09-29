@@ -3077,7 +3077,7 @@ class ApplicationServices:
                     await self._emit_sandbox_event(SandboxEvent(sandbox_id, SandboxEventType.COMMAND_STARTED,
                         {"command_id": command_id, "argv": receipt["argv"], "concurrent_commands": peers}))
                     result = await backend.execute(
-                        sandbox_id, execution_argv, timeout_seconds=timeout_seconds or self.world.get_card(sandbox_id).config.get("command_timeout", 600), **options
+                        sandbox_id, execution_argv, timeout_seconds=timeout_seconds or self.world.get_card(sandbox_id).config.get("command_timeout", 6000), **options
                     )
                     if self._execution_secrets.get():
                         from backend.security.redaction import redact

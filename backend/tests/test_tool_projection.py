@@ -103,6 +103,39 @@ def test_exposed_callable_and_modified_schema_cannot_bypass_live_revocation(clie
         client.portal.call(provider.invoke_tool, agent["id"], f"text.read:{note['id']}", {})
 
 
+@pytest.mark.parametrize("failure,code", [("security", "permission_denied"), ("missing", "not_found"),
+                                         ("cancel", None), ("unexpected", None)])
+def test_sandbox_tool_failure_boundary(client, monkeypatch, failure, code):
+    import asyncio
+    from backend.sandbox.models import SandboxSecurityError, SandboxNotFoundError
+
+    agent = create_node(client, "agent")
+    note = create_node(client, "text", name="Notes", content="unchanged")
+    connect(client, agent, note, "read")
+    provider, definitions = tools(client, agent)
+    errors = {"security": SandboxSecurityError("Access blocked"),
+              "missing": SandboxNotFoundError("Sandbox missing"),
+              "cancel": asyncio.CancelledError(), "unexpected": RuntimeError("Unexpected bug")}
+    error = errors[failure]
+
+    async def handler(*args):
+        raise error
+
+    monkeypatch.setattr(client.app.state.services.plugins, "capability_handler", lambda kind: handler)
+    tool = build_scoped_tool_callables(provider, agent["id"], [definitions["read_text"]])[0]
+
+    async def check():
+        if code is None:
+            with pytest.raises(type(error)):
+                await tool(target="notes")
+        else:
+            result = await tool(target="notes")
+            assert result["ok"] is False
+            assert result["error"]["code"] == code
+
+    client.portal.call(check)
+
+
 @pytest.mark.parametrize("equipment,toolbox", [(False, False), (True, True)])
 def test_composite_tool_has_independent_selectors_without_cartesian_names(runtime_client, equipment, toolbox):
     client, _, native = runtime_client

@@ -34,6 +34,12 @@ def test_research_preset_deploys_complete_independent_workspaces_and_can_be_save
     assert nodes[a['executor']]['parent_id'] == a['barracks']
     assert nodes[a['summoning']]['equipment']['owner_id'] == a['agent']
     assert nodes[a['sandbox']]['status'] == 'stopped'
+    assert nodes[a['sandbox']]['config']['network_enabled'] is True
+    assert nodes[a['sandbox']]['config']['command_timeout'] == 6000
+    assert nodes[a['sandbox']]['config']['memory_bytes'] == 2048 * 1024 * 1024
+    assert {(edge['source'], edge['relationship']) for edge in first['edges']
+            if edge['target'] == a['sandbox'] and edge['source'] in {a['agent'], a['executor']}} == {
+        (a['agent'], 'execute_manage'), (a['executor'], 'execute_manage')}
     assert nodes[a['agent']]['config']['model'] == 'oaw:default'
     assert 'task board' in nodes[a['agent']]['config']['system_instruction']
     layout = nodes[a['group']]['config']['workspace_layout']

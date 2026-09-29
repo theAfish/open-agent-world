@@ -93,20 +93,21 @@ def definition():
         PresetNode(key="executor", type="agent", name="Research Executor", parent_key="barracks", x=80, y=120,
                    config={"system_instruction": EXECUTOR_INSTRUCTION}),
         PresetNode(key="conversation", type="conversation", name="Research conversation", x=850, y=450),
-        PresetNode(key="sandbox", type="sandbox", name="Research files & compute", x=1990, y=450),
+        PresetNode(key="sandbox", type="sandbox", name="Research files & compute", x=1990, y=450,
+                   config={"network_enabled": True}),
         PresetNode(key="tasks", type="matcreator.tasks", name="Research tasks", x=220, y=1200),
         PresetNode(key="structure", type="science.structure-viewer", name="Structure viewer", x=600, y=1200),
         PresetNode(key="knowledge", type="matcreator.kdg", name="Research knowledge", x=1100, y=1200,
                    initial_document=initial_knowledge()),
     ]
     edges = [PresetEdge(source="agent", target=target, relationship=relationship) for target, relationship in (
-        ("conversation", "participate"), ("sandbox", "execute"),
+        ("conversation", "participate"), ("sandbox", "execute_manage"),
         ("tasks", "matcreator.tasks.manage"), ("knowledge", "matcreator.kdg.learn"))]
     edges.append(PresetEdge(source="summoning", target="barracks", relationship="oaw.barracks.summon"))
     edges.extend(PresetEdge(source="executor", target=target, relationship=relationship)
-                 for target, relationship in (("sandbox", "execute"), ("knowledge", "matcreator.kdg.use")))
+                 for target, relationship in (("sandbox", "execute_manage"), ("knowledge", "matcreator.kdg.use")))
     edges.extend(PresetEdge(source="structure", target=target, relationship="core.file-preview")
                  for target in ("conversation", "sandbox"))
-    return LegionPresetDefinition(id="matcreator.research", name="MatCreator research", revision=5,
+    return LegionPresetDefinition(id="matcreator.research", name="MatCreator research", revision=6,
         description="Coordinated materials research with parallel Executors, tracked tasks and verified results.",
         nodes=tuple(nodes), edges=tuple(edges))
