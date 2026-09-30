@@ -4,6 +4,7 @@ import json
 
 import pytest
 from google.adk.models.lite_llm import LiteLLMClient
+from google.adk.models.lite_llm import LiteLlm
 from google.adk.models.llm_request import LlmRequest
 from google.genai import types
 from litellm import ModelResponse
@@ -59,6 +60,76 @@ async def test_does_not_retry_transport_or_cancellation(monkeypatch, failure):
     monkeypatch.setattr(LiteLLMClient, "acompletion", complete)
     with pytest.raises(type(failure)):
         _ = [event async for event in ResilientLiteLlm("openai/test").generate_content_async(LlmRequest())]
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_retries_connection_once_before_any_chunk_is_published(monkeypatch):
+    class APIConnectionError(Exception):
+        pass
+
+    calls = 0
+    async def complete(self, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise APIConnectionError("connection reset")
+        return response('{"content":"ready"}')
+    monkeypatch.setattr(LiteLLMClient, "acompletion", complete)
+    request = LlmRequest(contents=[types.Content(role="user", parts=[types.Part.from_text(text="write")])])
+    events = [event async for event in ResilientLiteLlm("openai/test").generate_content_async(request)]
+    assert calls == 2
+    assert events[0].content.parts[0].function_call.args == {"content": "ready"}
+
+
+@pytest.mark.asyncio
+async def test_retries_two_transient_failures_before_any_chunk(monkeypatch):
+    class ServiceUnavailable(Exception):
+        status_code = 503
+
+    calls = 0
+    async def complete(self, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise ServiceUnavailable("temporary")
+        return response('{"content":"ready"}')
+    monkeypatch.setattr(LiteLLMClient, "acompletion", complete)
+    events = [event async for event in ResilientLiteLlm("openai/test").generate_content_async(LlmRequest())]
+    assert calls == 3
+    assert events[0].content.parts[0].function_call.args == {"content": "ready"}
+
+
+@pytest.mark.asyncio
+async def test_does_not_retry_permanent_provider_status(monkeypatch):
+    class Unauthorized(Exception):
+        status_code = 401
+
+    calls = 0
+    async def complete(self, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise Unauthorized("bad credentials")
+    monkeypatch.setattr(LiteLLMClient, "acompletion", complete)
+    with pytest.raises(Unauthorized):
+        _ = [event async for event in ResilientLiteLlm("openai/test").generate_content_async(LlmRequest())]
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_never_retries_after_publishing_partial_content(monkeypatch):
+    calls = 0
+    async def streamed(self, request, stream=False):
+        nonlocal calls
+        calls += 1
+        yield object()
+        raise ConnectionResetError("stream dropped")
+    monkeypatch.setattr(LiteLlm, "generate_content_async", streamed)
+    events = []
+    with pytest.raises(ConnectionResetError):
+        async for event in ResilientLiteLlm("openai/test").generate_content_async(LlmRequest(), stream=True):
+            events.append(event)
+    assert len(events) == 1
     assert calls == 1
 
 
