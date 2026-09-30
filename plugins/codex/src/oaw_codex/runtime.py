@@ -17,9 +17,11 @@ from pydantic import TypeAdapter
 from open_agent_world.plugin_api import (
     AgentCapabilityProvider, AgentConfig, AgentConfigurationError, AgentEvent,
     AgentEventType, AgentInfo, AgentNotFoundError, AgentRuntimeError, AgentStateError, AgentStatus,
-    InvocationContext, RuntimeInput, RuntimeProvider,
+    InvocationContext, RuntimeInput, RuntimeProvider, ResourceValidationError,
     codex_tool_content,
 )
+
+from open_agent_world.plugin_api.tool_execution import execute_tool
 
 from .transport import AppServer
 from .discovery import discover
@@ -154,6 +156,8 @@ class CodexRuntime(RuntimeProvider):
         return [connection["executable"], "app-server", "--listen", "stdio://"]
 
     async def _tool(self, agent_id: str, name: str, arguments: dict) -> Any:
+        if not isinstance(arguments, dict):
+            raise ResourceValidationError("Tool arguments must be an object")
         if name == "oaw_list_tools":
             definitions = await self.capabilities.list_tools(agent_id)
             return [{
@@ -169,9 +173,9 @@ class CodexRuntime(RuntimeProvider):
         if name == "oaw_invoke_tool":
             capability_id, values = arguments.get("capability_id"), arguments.get("arguments")
             if not isinstance(capability_id, str) or not isinstance(values, dict):
-                raise ValueError("capability_id must be a string and arguments an object")
+                raise ResourceValidationError("capability_id must be a string and arguments an object")
             return await self.capabilities.invoke_tool(agent_id, capability_id, values)
-        raise ValueError(f"Unknown OAW tool: {name}")
+        raise ResourceValidationError(f"Unknown OAW tool: {name}")
 
     async def execute(self, config: AgentConfig, context: InvocationContext,
                       runtime_input: RuntimeInput) -> AsyncIterator[AgentEvent]:
@@ -202,14 +206,12 @@ class CodexRuntime(RuntimeProvider):
             await server.events.put({"oaw_event": event(AgentEventType.TOOL_STARTED, {
                 "name": name, "call_id": call_id, "arguments": arguments,
             })})
-            try:
-                result = await self._tool(agent_id, name, arguments)
-                content = codex_tool_content(result)
-                text = content[0]["text"]
-                success = True
-            except Exception as exc:
-                text, success = str(exc), False
-                content = [{"type": "inputText", "text": text}]
+            outcome = await execute_tool(
+                lambda: self._tool(agent_id, name, arguments),
+                serialize=codex_tool_content,
+            )
+            content = outcome.response
+            text, success = content[0]["text"], outcome.ok
             await server.events.put({"oaw_event": event(AgentEventType.TOOL_COMPLETED, {
                 "name": name, "call_id": call_id, "response": text[:16000], "success": success,
             })})

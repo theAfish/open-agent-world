@@ -165,7 +165,7 @@ async def test_scoped_tool_rechecks_provider_after_revocation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_scoped_tool_preserves_domain_errors_but_not_cancellation() -> None:
+async def test_scoped_tool_preserves_domain_errors_and_contains_local_cancellation() -> None:
     provider = MutableCapabilityProvider()
     tool = build_scoped_tool_callables(
         provider, "agent-1", (provider.definition,)
@@ -182,20 +182,26 @@ async def test_scoped_tool_preserves_domain_errors_but_not_cancellation() -> Non
     }
 
     provider.failure = asyncio.CancelledError()
-    with pytest.raises(asyncio.CancelledError):
-        await tool(content="cancelled")
+    result = await tool(content="cancelled")
+    assert result["ok"] is False
+    assert result["error"]["code"] == "tool_cancelled"
+    assert asyncio.current_task().cancelling() == 0
 
 
 @pytest.mark.asyncio
-async def test_scoped_tool_propagates_unexpected_exceptions() -> None:
+async def test_scoped_tool_contains_unexpected_exceptions_and_can_continue() -> None:
     provider = MutableCapabilityProvider()
     tool = build_scoped_tool_callables(
         provider, "agent-1", (provider.definition,)
     )[0]
 
     provider.failure = TypeError("plugin implementation bug")
-    with pytest.raises(TypeError, match="plugin implementation bug"):
-        await tool(content="must fail the run")
+    result = await tool(content="must not fail the run")
+    assert result["ok"] is False
+    assert result["error"]["code"] == "tool_execution_error"
+    assert "plugin implementation bug" not in str(result)
+    provider.failure = None
+    assert await tool(content="recovered") == {"content": "recovered"}
 
 
 @pytest.mark.asyncio
