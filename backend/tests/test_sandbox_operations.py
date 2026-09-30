@@ -125,6 +125,71 @@ def test_cancelling_wait_preserves_workers_and_targeted_cancel_stops_only_one(ru
     client.portal.call(scenario)
 
 
+def test_cancel_cleanup_timeout_returns_conflict_and_keeps_the_run_alive(runtime_client, monkeypatch):
+    client, backend, _ = runtime_client
+    agent, sandbox, *_ = setup_skill(client)
+    services = client.app.state.services
+    tools = toolset(client, agent)
+    release = asyncio.Event()
+
+    async def execute(sandbox_id, argv, **kwargs):
+        await release.wait()
+        return CommandResult(sandbox_id, tuple(argv), 0, 'done', '', .01)
+
+    async def cleanup_deadline(operation, *, timeout_seconds):
+        raise TimeoutError('plugin lifecycle cleanup exceeded its deadline')
+
+    monkeypatch.setattr(backend, 'execute', execute)
+    monkeypatch.setattr(type(services), '_run_bounded_lifecycle_cleanup', cleanup_deadline)
+
+    async def scenario():
+        pending = await tools['execute_command'](sandbox=sandbox['id'], argv=['work'], wait_seconds=0)
+        # A cleanup that outlives its 5-second budget must surface as a
+        # retryable tool conflict, never as an exception that ends the Run.
+        result = await tools['cancel_command'](sandbox=sandbox['id'], command_id=pending['command_id'])
+        assert result['ok'] is False
+        assert result['error']['code'] == 'conflict'
+        assert 'draining' in result['error']['message']
+        receipt = next(item for item in history.read(services, sandbox['id'])
+                       if item['id'] == pending['operation_id'])
+        assert receipt['cleanup'] == 'pending'
+        release.set()
+        await tools['wait_sandbox_operation'](sandbox=sandbox['id'], operation_id=pending['operation_id'], wait_seconds=1)
+    client.portal.call(scenario)
+
+
+def test_start_and_stop_sandbox_tools_are_registered(runtime_client):
+    client, _, _ = runtime_client
+    services = client.app.state.services
+    assert callable(services.plugins.capability_handler('sandbox.start'))
+    assert callable(services.plugins.capability_handler('sandbox.stop'))
+
+
+def test_inspect_reports_the_command_gate_and_error_recovery(runtime_client, monkeypatch):
+    from dataclasses import replace
+
+    from backend.sandbox.models import SandboxState
+
+    client, _, _ = runtime_client
+    agent, sandbox, *_ = setup_skill(client)
+    services = client.app.state.services
+    real = services.get_sandbox
+
+    async def errored(sandbox_id):
+        return replace(await real(sandbox_id), state=SandboxState.ERROR)
+
+    monkeypatch.setattr(type(services), 'get_sandbox', errored)
+    tools = toolset(client, agent)
+
+    async def scenario():
+        inspected = await tools['inspect_sandbox'](sandbox=sandbox['id'])
+        assert inspected['state'] == 'error'
+        assert inspected['commands_accepted'] is False
+        assert 'start_sandbox' in inspected['state_guidance']
+        assert 'Execute + Start/Stop' in inspected['state_guidance']
+    client.portal.call(scenario)
+
+
 def test_wait_rechecks_live_authority_after_sleep(runtime_client):
     client, _, _ = runtime_client
     agent, sandbox, _, _, edges = setup_skill(client)
