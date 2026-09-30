@@ -621,11 +621,17 @@ class LinuxSandboxBackend(SandboxBackend):
             failure = exc
             if process is not None and process.returncode is None:
                 process.kill()
-            try:
-                await asyncio.shield(self.kill_unit(unit))
-            except BaseException:
-                cleanup_confirmed = False
-                raise
+            if process is None:
+                # No process was ever spawned (shared-Python preparation,
+                # validation): no systemd scope exists, there is nothing to
+                # clean up, and the sandbox itself remains usable.
+                cleanup_confirmed = True
+            else:
+                try:
+                    await asyncio.shield(self.kill_unit(unit))
+                except BaseException:
+                    cleanup_confirmed = False
+                    raise
             raise
         finally:
             if process is not None and process.returncode is None:
@@ -636,7 +642,7 @@ class LinuxSandboxBackend(SandboxBackend):
                     task.cancel()
             await asyncio.gather(*waiters, *streams, return_exceptions=True)
             async with record.lock:
-                record.state = (SandboxState.ERROR if failure is not None
+                record.state = (SandboxState.ERROR if failure is not None and process is not None
                     else SandboxState.STOPPED if record.stop_requested else SandboxState.READY)
                 record.active_command = None
                 if cleanup_confirmed:

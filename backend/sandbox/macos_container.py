@@ -502,7 +502,11 @@ class MacosContainerSandboxBackend(SandboxBackend):
                 owner.executions.pop(command_id, None)
                 owner.state = (SandboxState.RUNNING if owner.executions else
                     SandboxState.STOPPED if owner.stop_requested else SandboxState.READY)
-                if failed and not owner.executions:
+                # ERROR is a sandbox fault, not a request fault: failures before
+                # any container or process existed (busy shared Python,
+                # validation) leave the sandbox usable.
+                if (failed and not owner.executions
+                        and (execution.process is not None or execution.container_id is not None)):
                     owner.state = SandboxState.ERROR
             execution.finished.set()
             execution_command_id.reset(token)
