@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from pathlib import Path, PurePath
+from pathlib import Path, PurePath, PureWindowsPath
 from typing import Any, Mapping
 from contextvars import ContextVar
 
@@ -35,6 +35,31 @@ class SandboxState(_StringEnum):
 class ResourceAccess(_StringEnum):
     READ_ONLY = "read_only"
     READ_WRITE = "read_write"
+
+
+@dataclass(frozen=True, slots=True)
+class FolderMount:
+    """Host-authorized, command-scoped path. Never an Agent tool argument."""
+    name: str
+    source: str
+    access: ResourceAccess = ResourceAccess.READ_ONLY
+    kind: str = "folder"
+
+    def __post_init__(self):
+        import re
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", self.name):
+            raise ValueError("Invalid folder variable name")
+        object.__setattr__(self, "access", ResourceAccess(self.access))
+        if self.kind not in ("folder", "file"):
+            raise ValueError("Invalid environment path type")
+
+    @property
+    def linux_path(self):
+        if self.kind == "file":
+            # Keep the original filename/extension for model loaders.
+            source = PureWindowsPath(self.source) if PureWindowsPath(self.source).drive else Path(self.source)
+            return f"/sandbox/files/{self.name.upper()}/{source.name}"
+        return f"/sandbox/folders/{self.name.upper()}"
 
 
 class SandboxEventType(_StringEnum):

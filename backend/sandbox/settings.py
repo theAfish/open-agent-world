@@ -12,6 +12,7 @@ from .registry import SandboxRuntimeRegistry
 from backend.execution_config import EnvironmentProfile, SecretRequirement
 from backend.security.execution_credentials import GlobalExecutionCredentialStore
 from backend.errors import ResourceValidationError
+from backend.security.execution_folders import FolderRequirement, FileRequirement, PathRequirement, FolderBinding, GlobalExecutionFolderStore
 
 
 class SandboxSettings(BaseModel):
@@ -19,11 +20,11 @@ class SandboxSettings(BaseModel):
 
     workspace_root: str | None = Field(default=None, max_length=4096)
     runtime: str = Field(default="auto", min_length=1, max_length=200)
-    environment_variables: dict[str, StrictStr | SecretRequirement] = Field(default_factory=dict)
+    environment_variables: dict[str, StrictStr | SecretRequirement | FolderRequirement | FileRequirement | PathRequirement] = Field(default_factory=dict)
 
     @field_validator("environment_variables")
     @classmethod
-    def validate_environment(cls, value: dict[str, str | SecretRequirement]) -> dict[str, str | SecretRequirement]:
+    def validate_environment(cls, value: dict[str, str | SecretRequirement | FolderRequirement | FileRequirement | PathRequirement]) -> dict[str, str | SecretRequirement | FolderRequirement | FileRequirement | PathRequirement]:
         return EnvironmentProfile(variables=value).variables
 
     @field_validator("workspace_root", "runtime")
@@ -36,6 +37,7 @@ class SandboxSettings(BaseModel):
 
 class SandboxSettingsUpdate(SandboxSettings):
     secrets: dict[str, StrictStr] = Field(default_factory=dict, exclude=True)
+    folders: dict[str, FolderBinding] = Field(default_factory=dict, exclude=True)
 
     @field_validator("secrets")
     @classmethod
@@ -47,6 +49,7 @@ class SandboxSettingsUpdate(SandboxSettings):
 
 class SandboxSettingsStatus(SandboxSettings):
     secret_bindings: dict[str, bool] = Field(default_factory=dict)
+    folder_bindings: dict[str, FolderBinding] = Field(default_factory=dict)
     backup_paths: list[str] = Field(default_factory=list)
 
 
@@ -54,6 +57,7 @@ class SandboxSettingsStore:
     def __init__(self, database: Database, data_root: Path) -> None:
         self.database = database
         self.credentials = GlobalExecutionCredentialStore(database, data_root)
+        self.folders = GlobalExecutionFolderStore(database, data_root)
         self.validator = SandboxManager(data_root, SandboxRuntimeRegistry())
 
     def read(self) -> SandboxSettings:
@@ -79,6 +83,7 @@ class SandboxSettingsStore:
             bindings = {v.secret_ref: self.credentials.configured(None, v.secret_ref)
                         for v in settings.environment_variables.values() if isinstance(v, SecretRequirement)}
             return SandboxSettingsStatus(**settings.model_dump(), secret_bindings=bindings,
+                                         folder_bindings=self.folders.public(None, settings.environment_variables),
                                          backup_paths=json.loads(row["value_json"]) if row else [])
 
     def record_backups(self, paths: list[str]) -> None:
@@ -91,6 +96,7 @@ class SandboxSettingsStore:
             )
 
     def validate_bindings(self, settings):
+        self.folders.prepare(None, settings.environment_variables, getattr(settings, "folders", {}), self.validator)
         secrets = getattr(settings, "secrets", {})
         references = {v.secret_ref for v in settings.environment_variables.values() if isinstance(v, SecretRequirement)}
         if set(secrets) - references:
@@ -102,10 +108,12 @@ class SandboxSettingsStore:
 
     def save(self, settings: SandboxSettings) -> SandboxSettings:
         references = self.validate_bindings(settings)
+        folders = self.folders.prepare(None, settings.environment_variables, getattr(settings, "folders", {}), self.validator)
         root = self.validator.validate_workspace(settings.workspace_root)
         settings = settings.model_copy(update={"workspace_root": root})
         with self.database.transaction(immediate=True) as connection:
             old = self.read()
+            self.folders.save_bindings(None, settings.environment_variables, old.environment_variables, folders)
             connection.execute(
                 "INSERT INTO application_settings (key, value_json) VALUES ('sandbox', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",

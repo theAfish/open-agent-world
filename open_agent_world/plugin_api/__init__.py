@@ -1,6 +1,7 @@
 """Stable contracts for trusted Open Agent World Python plugins."""
 from backend.agents.media import ToolImage, VisualToolResult, codex_tool_content
 from backend.execution_config import ComputeTarget, EnvironmentProfile, SecretRequirement
+from backend.security.execution_folders import FolderRequirement, FileRequirement, PathRequirement
 from backend.resources.artifact_models import ArtifactPublish, ArtifactMaterialize
 
 from backend.plugins.builtin import AgentNodeBehavior, AgentNodeTemplateHandler
@@ -94,7 +95,7 @@ __all__ = [
     "NodeDocumentTransformation",
     "ArtifactPublish",
     "ArtifactMaterialize",
-    "ComputeTarget", "EnvironmentProfile", "SecretRequirement",
+    "ComputeTarget", "EnvironmentProfile", "SecretRequirement", "FolderRequirement", "FileRequirement", "PathRequirement",
     "PluginAsset",
     "AgentNodeBehavior", "AgentNodeTemplateHandler",
     "NodeSummoningDefinition", "SummoningAction", "SummoningPolicy",

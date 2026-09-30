@@ -8,9 +8,11 @@ import { useHydrationLease } from '../canvas/useCardRendering';
 import type { WorldCard } from "../types/world";
 import { settingsFromValue, settingsToValue, SkillDefaultsEditor, type SettingRow } from "./SkillDefaultsEditor";
 import "./executionConfiguration.css";
+import { FolderPathInput } from "../shell/FolderPathInput";
+import type { EnvironmentFolderBinding } from "../api/client";
 
-type EnvironmentVariableKind = "value" | "secret";
-export interface EnvironmentVariableRow { id: number; name: string; kind: EnvironmentVariableKind; value: string }
+type EnvironmentVariableKind = "value" | "secret" | "path";
+export interface EnvironmentVariableRow { id: number; name: string; kind: EnvironmentVariableKind; value: string; folderPath?: string; access?: "read_only" | "read_write" }
 let environmentRowId = 0;
 const NO_SECRETS: Record<string, string> = {};
 const newEnvironmentVariable = (): EnvironmentVariableRow => ({ id: ++environmentRowId, name: "", kind: "value", value: "" });
@@ -25,11 +27,19 @@ function requireOnlyKeys(value: Record<string, unknown>, allowed: string[], labe
   if (extra.length) throw new Error(t("{v0} contains unsupported field{v1}: {v2}.", { v0: String(label), v1: String(extra.length === 1 ? "" : "s"), v2: String(extra.join(", ")) }));
 }
 
-export function environmentVariablesFromValue(value: unknown): EnvironmentVariableRow[] {
+export function environmentVariablesFromValue(value: unknown, folders: Record<string, EnvironmentFolderBinding> = {}): EnvironmentVariableRow[] {
   const root = objectValue(value, t("Configuration"));
   requireOnlyKeys(root, ["variables"], t("Configuration"));
   const variables = objectValue(root.variables ?? {}, "variables");
   return Object.entries(variables).map(([name, item]) => {
+    const object = item && !Array.isArray(item) && typeof item === "object" ? item as Record<string, unknown> : undefined;
+    const pathKind = typeof object?.path_ref === "string" ? "path" : typeof object?.folder_ref === "string" ? "folder" : typeof object?.file_ref === "string" ? "file" : undefined;
+    if (pathKind) {
+      requireOnlyKeys(object!, [`${pathKind}_ref`], t("Path (file or folder)"));
+      const reference = String(object![`${pathKind}_ref`]);
+      return { id: ++environmentRowId, name, kind: "path", value: reference,
+        folderPath: folders[reference]?.path ?? "", access: folders[reference]?.access ?? "read_only" };
+    }
     const secret = item && !Array.isArray(item) && typeof item === "object" && typeof (item as Record<string, unknown>).secret_ref === "string";
     if (typeof item !== "string" && !secret) throw new Error(t("Variable “{v0}” must be a text value or secret reference.", { v0: String(name) }));
     if (secret) requireOnlyKeys(item as Record<string, unknown>, ["secret_ref"], t("Secret reference “{v0}”", { v0: String(name) }));
@@ -42,13 +52,39 @@ export function environmentVariablesToValue(rows: EnvironmentVariableRow[]): Rec
   const variables = Object.fromEntries(rows.map((row) => {
     const name = row.name.trim();
     if (!name) throw new Error(t("Give each environment variable a name, or remove the empty row."));
-    if (names.has(name)) throw new Error(t("The environment variable “{v0}” appears twice.", { v0: String(name) }));
-    names.add(name);
+    if (names.has(name.toUpperCase())) throw new Error(t("The environment variable “{v0}” appears twice.", { v0: String(name) }));
+    names.add(name.toUpperCase());
     const value = row.value.trim();
     if (row.kind === "secret" && !value) throw new Error(t("Give “{v0}” a secret reference name.", { v0: String(name) }));
-    return [name, row.kind === "secret" ? { secret_ref: value } : row.value];
+    return [name, row.kind === "path" ? { [`${row.kind}_ref`]: value } : row.kind === "secret" ? { secret_ref: value } : row.value];
   }));
   return { variables };
+}
+
+function EnvironmentPathInput({ value, onChange, disabled, label, access }: {
+  value: string; onChange(value: string): void; disabled: boolean; label: string; access: "read_only" | "read_write";
+}) {
+  const [inspection, setInspection] = useState<{ source: string; kind?: "folder" | "file"; error?: string }>();
+  useEffect(() => {
+    if (!value.trim()) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void worldApi.inspectEnvironmentPath(value.trim(), controller.signal).then(
+        result => { if (!controller.signal.aborted) setInspection({ source: value, kind: result.kind }); },
+        error => { if (!controller.signal.aborted) setInspection({ source: value, error: apiErrorMessage(error) }); },
+      );
+    }, 250);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [value]);
+  const current = inspection?.source === value ? inspection : undefined;
+  return <>
+    <FolderPathInput kind="path" value={value} disabled={disabled} onChange={onChange} label={label} placeholder={t("Choose a file or folder on this host")} />
+    {value.trim() && current?.error && <small role="alert" className="sandbox-error">{current.error}</small>}
+    <small>{access === "read_only" ? t("Read only allows reading and copying into the working folder. Source files cannot be changed.")
+      : current?.kind === "file" ? t("Commands can read and change this file's contents. To rename or replace files, choose their folder.")
+      : current?.kind === "folder" ? t("Commands can create, change and delete files in this folder.")
+      : t("Read and write applies to the selected file or folder.")} {t("Paths are converted automatically for the Sandbox runtime.")}</small>
+  </>;
 }
 
 export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, onSecretsChange, bindings, allowSecrets = true }: {
@@ -57,7 +93,14 @@ export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, 
   allowSecrets?: boolean;
 }) {
   useLocale();
-  const patch = (id: number, change: Partial<EnvironmentVariableRow>) => onChange(rows.map((row) => row.id === id ? { ...row, ...change } : row));
+  const latestRows = useRef(rows);
+  const latestOnChange = useRef(onChange);
+  latestRows.current = rows;
+  latestOnChange.current = onChange;
+  const patch = (id: number, change: Partial<EnvironmentVariableRow>) => {
+    if (!latestRows.current.some(row => row.id === id)) return;
+    latestOnChange.current(latestRows.current.map((row) => row.id === id ? { ...row, ...change } : row));
+  };
   return <fieldset className="environment-variables-editor" disabled={disabled}>
     {rows.length === 0 && <p className="variables-empty">{t("No variables.")}</p>}
     {rows.map((row, index) => <div className="environment-variable-row" key={row.id}>
@@ -68,18 +111,26 @@ export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, 
           onClick={() => onChange(rows.filter((item) => item.id !== row.id))}><X size={14} /></button>
       </div>
       <div className="variable-value-row">
-        {allowSecrets && <select aria-label={t("Environment variable {v0} type", { v0: String(index + 1) })} value={row.kind}
+        <select aria-label={t("Environment variable {v0} type", { v0: String(index + 1) })} value={row.kind}
           onChange={(event) => patch(row.id, { kind: event.target.value as EnvironmentVariableKind,
-            value: event.target.value === "secret" ? crypto.randomUUID() : "" })}>
-          <option value="value">{t("Value")}</option><option value="secret">{t("Secret")}</option>
-        </select>}
-        <input aria-label={t("Environment variable {v0} value", { v0: String(index + 1) })} value={row.kind === "secret" ? secrets[row.value] ?? "" : row.value}
+            value: event.target.value === "value" ? "" : crypto.randomUUID(),
+            folderPath: event.target.value === "path" && row.kind === "value" ? row.value : "", access: "read_only" })}>
+          <option value="value">{t("Value")}</option>{allowSecrets && <option value="secret">{t("Secret")}</option>}<option value="path">{t("Path")}</option>
+        </select>
+        {row.kind === "path" ? <select className="variable-folder-access" aria-label={t("Environment variable {v0} access", { v0: String(index + 1) })}
+          value={row.access ?? "read_only"} onChange={event => patch(row.id, { access: event.target.value as EnvironmentVariableRow["access"] })}>
+          <option value="read_only">{t("Read only")}</option><option value="read_write">{t("Read and write")}</option>
+        </select> : <input aria-label={t("Environment variable {v0} value", { v0: String(index + 1) })} value={row.kind === "secret" ? secrets[row.value] ?? "" : row.value}
           type={row.kind === "secret" ? "password" : "text"} autoComplete="off"
           placeholder={row.kind === "secret" ? (bindings[row.value] ? t("Configured — enter to replace") : t("Enter secret")) : t("Value")}
           onChange={(event) => row.kind === "secret"
             ? onSecretsChange({ ...secrets, [row.value]: event.target.value })
-            : patch(row.id, { value: event.target.value })} />
+            : patch(row.id, { value: event.target.value })} />}
       </div>
+      {(row.kind === "path") && <>
+        <EnvironmentPathInput key={row.value} value={row.folderPath ?? ""} disabled={disabled} onChange={folderPath => patch(row.id, { folderPath })}
+          label={t("Environment variable {v0} path", { v0: String(index + 1) })} access={row.access ?? "read_only"} />
+      </>}
       {row.kind === "secret" && <small>{secrets[row.value] ? t("Will be saved securely") : bindings[row.value] ? t("Configured") : t("Enter a secret before saving")}</small>}
     </div>)}
     <button type="button" className="secondary-button" onClick={() => onChange([...rows, newEnvironmentVariable()])}><Plus size={13} /> {t("Add variable")}</button>
@@ -88,7 +139,17 @@ export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, 
 
 export async function saveEnvironmentRows(id: string, rows: EnvironmentVariableRow[], secrets: Record<string, string>, bindings: Record<string, boolean>, revision: number) {
   const value = environmentVariablesToValue(rows);
-  return worldApi.saveEnvironment(id, value, environmentSecretUpdates(rows, secrets, bindings), revision);
+  const folders = environmentFolderUpdates(rows);
+  return Object.keys(folders).length
+    ? worldApi.saveEnvironment(id, value, environmentSecretUpdates(rows, secrets, bindings), revision, folders)
+    : worldApi.saveEnvironment(id, value, environmentSecretUpdates(rows, secrets, bindings), revision);
+}
+
+export function environmentFolderUpdates(rows: EnvironmentVariableRow[]): Record<string, EnvironmentFolderBinding> {
+  return Object.fromEntries(rows.filter(row => row.kind === "path").map(row => {
+    if (!row.folderPath?.trim()) throw new Error(t("Choose a file or folder for {v0}, or remove the unused variable.", { v0: row.name }));
+    return [row.value, { path: row.folderPath.trim(), access: row.access ?? "read_only" }];
+  }));
 }
 
 export function environmentSecretUpdates(rows: EnvironmentVariableRow[], secrets: Record<string, string>, bindings: Record<string, boolean>) {
@@ -122,10 +183,10 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
   useHydrationLease(card.id, 'configuration-operation', busy || dirty);
   const importInput = useRef<HTMLInputElement>(null);
 
-  function applyValue(value: unknown) {
+  function applyValue(value: unknown, folders: Record<string, EnvironmentFolderBinding> = {}) {
     const root = objectValue(value, t("Configuration"));
     if (environment) {
-      setEnvironmentRows(environmentVariablesFromValue(root));
+      setEnvironmentRows(environmentVariablesFromValue(root, folders));
       return;
     }
     requireOnlyKeys(root, ["name", "provider_id", "config"], t("Configuration"));
@@ -143,7 +204,8 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
     setBusy(true);
     try {
       const next = await worldApi.getNodeDocument(card.id);
-      applyValue(next.value); setDocument(next); setDirty(false);
+      const folders = environment && environmentVariablesFromValue(next.value).some(row => row.kind === "path") ? await worldApi.getEnvironmentFolderBindings(card.id) : {};
+      applyValue(next.value, folders); setDocument(next); setDirty(false);
       await refreshBindings(); setError(""); setNotice("");
     } catch (reason) { setError(apiErrorMessage(reason)); }
     finally { setBusy(false); }
@@ -172,7 +234,7 @@ export function ExecutionConfigurationBody({ card }: { card: WorldCard }) {
         ? await saveEnvironmentRows(card.id, environmentRows, secrets, bindings, document.revision)
         : await worldApi.nodeDocumentAction(card.id, "replace", value, document.revision);
       setSecrets({});
-      applyValue(next.value); setDocument(next); setDirty(false); await refreshBindings(); setNotice(t("Configuration saved."));
+      applyValue(next.value, environment ? environmentFolderUpdates(environmentRows) : {}); setDocument(next); setDirty(false); await refreshBindings(); setNotice(t("Configuration saved."));
     } catch (reason) { setError(apiErrorMessage(reason)); }
     finally { setBusy(false); }
   }

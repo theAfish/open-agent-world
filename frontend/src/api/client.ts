@@ -362,15 +362,24 @@ export const worldApi = {
       method: "POST", body: JSON.stringify({ initial_path: initialPath }),
     });
   },
+  pickFile(initialPath: string | null): Promise<{ path: string | null }> {
+    return request<{ path: string | null }>("/desktop/pick-file", {
+      method: "POST", body: JSON.stringify({ initial_path: initialPath }),
+    });
+  },
+  inspectEnvironmentPath(path: string, signal?: AbortSignal): Promise<{ path: string; kind: "folder" | "file" }> {
+    return request("/desktop/inspect-path", { method: "POST", body: JSON.stringify({ path }), signal });
+  },
   getSandboxSettings(): Promise<SandboxSettings> {
     return request<SandboxSettings>("/settings/sandbox");
   },
 
-  saveSandboxSettings(settings: SandboxSettings & { secrets?: Record<string, string> }): Promise<SandboxSettings> {
+  saveSandboxSettings(settings: SandboxSettings & { secrets?: Record<string, string>; folders?: Record<string, EnvironmentFolderBinding> }): Promise<SandboxSettings> {
     return request<SandboxSettings>("/settings/sandbox", {
       method: "PUT", body: JSON.stringify({
         workspace_root: settings.workspace_root, runtime: settings.runtime,
         environment_variables: settings.environment_variables, secrets: settings.secrets,
+        folders: settings.folders,
       }),
     });
   },
@@ -709,9 +718,13 @@ export const worldApi = {
     });
   },
 
-  async saveEnvironment(id: string, value: Record<string, unknown>, secrets: Record<string, string>, expectedRevision: number): Promise<{ value: Record<string, unknown>; revision: number; summary: Record<string, unknown> }> {
+  async getEnvironmentFolderBindings(id: string): Promise<Record<string, EnvironmentFolderBinding>> {
+    return request(`/nodes/${encodeURIComponent(id)}/environment-folders`);
+  },
+
+  async saveEnvironment(id: string, value: Record<string, unknown>, secrets: Record<string, string>, expectedRevision: number, folders?: Record<string, EnvironmentFolderBinding>): Promise<{ value: Record<string, unknown>; revision: number; summary: Record<string, unknown> }> {
     return request(`/nodes/${encodeURIComponent(id)}/environment`, {
-      method: "PUT", body: JSON.stringify({ value, secrets, expected_revision: expectedRevision }),
+      method: "PUT", body: JSON.stringify({ value, secrets, expected_revision: expectedRevision, folders }),
     });
   },
 
@@ -922,11 +935,14 @@ export const worldApi = {
   },
 };
 
+export interface EnvironmentFolderBinding { path: string; access: "read_only" | "read_write"; kind?: "folder" | "file" }
+
 export interface SandboxSettings {
   workspace_root: string | null;
   runtime: string;
-  environment_variables?: Record<string, string | { secret_ref: string }>;
+  environment_variables?: Record<string, string | { secret_ref: string } | { folder_ref: string } | { file_ref: string } | { path_ref: string }>;
   secret_bindings?: Record<string, boolean>;
+  folder_bindings?: Record<string, EnvironmentFolderBinding>;
   backup_paths?: string[];
 }
 

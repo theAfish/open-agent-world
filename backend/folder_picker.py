@@ -15,11 +15,21 @@ _dialog_lock = threading.Lock()
 
 
 async def pick_folder(initial_path: str | None) -> str | None:
+    return await _pick_path(initial_path, kind="folder")
+
+
+async def pick_file(initial_path: str | None) -> str | None:
+    return await _pick_path(initial_path, kind="file")
+
+
+async def _pick_path(initial_path: str | None, *, kind: str) -> str | None:
     if not _dialog_lock.acquire(blocking=False):
-        raise ConflictError("A folder selection window is already open. Finish or cancel it first.")
+        raise ConflictError("A path selection window is already open. Finish or cancel it first.")
     process = None
     try:
         initial = Path(initial_path) if initial_path else Path.home()
+        if kind == "file" and initial.is_file():
+            initial = initial.parent
         if not initial.is_absolute() or not initial.is_dir():
             initial = Path.home()
         if os.name == "nt":
@@ -37,20 +47,20 @@ async def pick_folder(initial_path: str | None) -> str | None:
         )
         # Paths are data, never interpolated into shell commands.
         output, _ = await asyncio.wait_for(process.communicate(
-            json.dumps({"initial_path": str(initial)}).encode("utf-8")
+            json.dumps({"initial_path": str(initial), **({"kind": "file"} if kind == "file" else {})}).encode("utf-8")
         ), timeout=300)
         if process.returncode:
-            raise RuntimeUnavailableError("Could not open the folder picker on the backend desktop. Enter the folder path manually.")
+            raise RuntimeUnavailableError(f"Could not open the {kind} picker on the backend desktop. Enter the path manually.")
         selected = json.loads(output.decode("utf-8-sig"))
         if selected is None:
             return None
-        if not isinstance(selected, str) or not Path(selected).is_absolute() or not Path(selected).is_dir():
-            raise RuntimeUnavailableError("The folder picker did not return an existing absolute folder.")
+        if not isinstance(selected, str) or not Path(selected).is_absolute() or not (Path(selected).is_file() if kind == "file" else Path(selected).is_dir()):
+            raise RuntimeUnavailableError(f"The picker did not return an existing absolute {kind}.")
         return str(Path(selected))
     except TimeoutError as exc:
-        raise RuntimeUnavailableError("Folder selection timed out. Click Browse to try again.") from exc
+        raise RuntimeUnavailableError("Path selection timed out. Click Browse to try again.") from exc
     except (OSError, ValueError) as exc:
-        raise RuntimeUnavailableError("Folder selection is unavailable on this desktop. Enter the folder path manually.") from exc
+        raise RuntimeUnavailableError("Path selection is unavailable on this desktop. Enter the path manually.") from exc
     finally:
         try:
             if process is not None and process.returncode is None:

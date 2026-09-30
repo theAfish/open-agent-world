@@ -71,4 +71,42 @@ describe.each(["sandbox", "environment"])("%s secret save", (type) => {
     await screen.findByText("Enter a secret for API_TOKEN, or remove the unused variable.");
     expect(worldApi.saveEnvironment).not.toHaveBeenCalled();
   });
+
+  it.each(["folder", "file"] as const)("loads and saves a host %s through the shared editor without putting authority in the document", async (kind) => {
+    const bindingKind = kind === "file" ? { kind } : {};
+    vi.mocked(worldApi.getNodeDocument).mockResolvedValue({ value: { variables: { MODELS: { [`${kind}_ref`]: "models" } } }, revision: 3, summary: {} });
+    vi.spyOn(worldApi, "getEnvironmentFolderBindings").mockResolvedValue({ models: { path: "D:\\Models", access: "read_only", ...bindingKind } });
+    vi.spyOn(worldApi, "inspectEnvironmentPath").mockResolvedValue({ path: "D:\\Models", kind });
+    await openEditor();
+    expect((screen.getByLabelText("Environment variable 1 path") as HTMLInputElement).value).toBe("D:\\Models");
+    fireEvent.change(screen.getByLabelText("Environment variable 1 access"), { target: { value: "read_write" } });
+    fireEvent.click(screen.getByRole("button", { name: saveLabel }));
+    await waitFor(() => expect(worldApi.saveEnvironment).toHaveBeenCalledWith(card.id,
+      { variables: { MODELS: { path_ref: "models" } } }, {}, 3,
+      { models: { path: "D:\\Models", access: "read_write" } }));
+    await waitFor(() => expect((screen.getByRole("button", { name: saveLabel }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(screen.getByLabelText("Environment variable 1 type"), { target: { value: "value" } });
+    expect(screen.queryByLabelText("Environment variable 1 path")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Environment variable 1 value"), { target: { value: "plain" } });
+    fireEvent.click(screen.getByRole("button", { name: saveLabel }));
+    await waitFor(() => expect(worldApi.saveEnvironment).toHaveBeenLastCalledWith(card.id,
+      { variables: { MODELS: "plain" } }, {}, 4));
+  });
+
+  it("ignores a late path inspection after the user changes the input", async () => {
+    vi.mocked(worldApi.getNodeDocument).mockResolvedValue({ value: { variables: { DATA: { path_ref: "data" } } }, revision: 3, summary: {} });
+    vi.spyOn(worldApi, "getEnvironmentFolderBindings").mockResolvedValue({ data: { path: "/old/model.pt", access: "read_only", kind: "file" } });
+    let finish!: (result: { path: string; kind: "file" | "folder" }) => void;
+    const inspect = vi.spyOn(worldApi, "inspectEnvironmentPath")
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+      .mockResolvedValue({ path: "/new/folder", kind: "folder" });
+    await openEditor();
+    await waitFor(() => expect(inspect).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText("Environment variable 1 path"), { target: { value: "/new/folder" } });
+    fireEvent.change(screen.getByLabelText("Environment variable 1 access"), { target: { value: "read_write" } });
+    await screen.findByText(/Commands can create, change and delete files in this folder/);
+    finish({ path: "/old/model.pt", kind: "file" });
+    await waitFor(() => expect(screen.queryByText(/Commands can read and change this file/)).toBeNull());
+    expect((screen.getByLabelText("Environment variable 1 path") as HTMLInputElement).value).toBe("/new/folder");
+  });
 });

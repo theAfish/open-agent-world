@@ -12,18 +12,21 @@ from backend.main import create_app
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancelled", [False, True])
-async def test_picker_transports_paths_as_json_and_preserves_cancel(tmp_path, monkeypatch, cancelled):
+@pytest.mark.parametrize("kind", ["folder", "file"])
+async def test_picker_transports_paths_as_json_and_preserves_cancel(tmp_path, monkeypatch, cancelled, kind):
     folder = tmp_path / "workspace 中文 ' $()"
     folder.mkdir()
-    selected = None if cancelled else str(folder)
+    selected_path = folder / "model.pt" if kind == "file" else folder
+    if kind == "file": selected_path.write_text("model")
+    selected = None if cancelled else str(selected_path)
     process = Mock(returncode=0)
     process.communicate = AsyncMock(return_value=(json.dumps(selected).encode(), b""))
     launch = AsyncMock(return_value=process)
     monkeypatch.setattr(folder_picker.asyncio, "create_subprocess_exec", launch)
-    assert await folder_picker.pick_folder(str(folder)) == selected
-    assert json.loads(process.communicate.call_args.args[0]) == {"initial_path": str(folder)}
+    assert await (folder_picker.pick_file(str(selected_path)) if kind == "file" else folder_picker.pick_folder(str(folder))) == selected
+    assert json.loads(process.communicate.call_args.args[0]) == {"initial_path": str(folder), **({"kind": "file"} if kind == "file" else {})}
     assert str(folder) not in launch.call_args.args
-    assert list(folder.iterdir()) == []
+    assert list(folder.iterdir()) == ([selected_path] if kind == "file" else [])
 
 
 @pytest.mark.asyncio
@@ -69,11 +72,12 @@ async def test_unavailable_desktop_has_manual_path_fallback(monkeypatch):
     ("http://192.168.1.2:5173", "127.0.0.1", 403),
     ("http://localhost:5173", "192.168.1.2", 403),
 ])
-def test_only_local_desktop_requests_can_open_picker(tmp_path, monkeypatch, origin, client_host, expected):
+@pytest.mark.parametrize("kind", ["folder", "file"])
+def test_only_local_desktop_requests_can_open_picker(tmp_path, monkeypatch, origin, client_host, expected, kind):
     pick = AsyncMock(return_value=None)
-    monkeypatch.setattr(folder_picker, "pick_folder", pick)
+    monkeypatch.setattr(folder_picker, f"pick_{kind}", pick)
     client = TestClient(create_app(Settings.for_data_root(tmp_path)), client=(client_host, 1234))
-    response = client.post("/api/desktop/pick-folder", json={"initial_path": None}, headers={"Origin": origin})
+    response = client.post(f"/api/desktop/pick-{kind}", json={"initial_path": None}, headers={"Origin": origin})
     assert response.status_code == expected
     if expected == 200:
         assert response.json() == {"path": None}

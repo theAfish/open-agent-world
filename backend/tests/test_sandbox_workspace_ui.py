@@ -344,7 +344,7 @@ def test_network_enforcement_preserves_other_boundaries(tmp_path):
     for flag in ("--unshare-all", "--cap-drop", "--remount-ro", "--ro-bind"):
         assert flag in offline
     command = service_command(offline, "oaw-sandbox-" + "a" * 32 + ".scope", SandboxLimits(), 60)
-    assert "--property=TasksMax=64" in command and "--property=MemoryMax=536870912" in command
+    assert "--property=TasksMax=64" in command and f"--property=MemoryMax={SandboxLimits().memory_bytes}" in command
     compile(_SERVICE_GUARD, "guard", "exec")
 
 
@@ -551,7 +551,7 @@ def test_parallel_commands_dispatch_without_waiting(runtime_client, monkeypatch)
         write_document(services, sandbox['id'], {'variables': {'REGION': 'queued'}}, document['revision'])
         release.set()
         await asyncio.wait_for(asyncio.gather(first, second), 5)
-        assert calls == [(['cmd.exe', 'first'], 600), (['cmd.exe', 'second'], 3600)]
+        assert calls == [(['cmd.exe', 'first'], sandbox['config']['command_timeout']), (['cmd.exe', 'second'], 3600)]
         assert native.last_environment.get('REGION') != 'queued'
         assert not any(r['sandbox_id'] == sandbox['id'] for r in services._sandbox_commands.values())
 
