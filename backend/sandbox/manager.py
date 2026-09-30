@@ -43,7 +43,63 @@ class SandboxManager(SandboxBackend):
         self._bindings_root = self.root / "sandbox-bindings"
         self._bindings: dict[str, _Binding] = {}
         self._backends: dict[str, SandboxBackend] = {}
+        # Bootstrap and Agent-requested installs share one managed Python per
+        # runtime. Commands wait for those host-owned preparations rather than
+        # racing the cross-process mutation lock and failing after 60 seconds.
+        self._python_preparations: dict[str, set[asyncio.Task]] = {}
+        self._python_preparation_locks: dict[str, asyncio.Lock] = {}
+        self._python_warmups: dict[str, asyncio.Task] = {}
+        self._python_warmup_errors: dict[str, str] = {}
         self.pack_requirements = lambda: {}
+
+    def _warm_python_after_start(self, runtime_id: str | None) -> None:
+        """Begin Seatbelt's interpreter setup while the Agent does other work."""
+        if runtime_id != "darwin":
+            return
+        prior = self._python_warmups.get(runtime_id)
+        if prior is not None and not prior.done():
+            return
+        self._python_warmup_errors.pop(runtime_id, None)
+        task = asyncio.create_task(self._prepare_python_runtime(runtime_id, ()),
+                                   name="sandbox-seatbelt-python-warmup")
+        self._python_warmups[runtime_id] = task
+        # Register synchronously: a command can arrive before the task starts.
+        self._python_preparations.setdefault(runtime_id, set()).add(task)
+
+        def finished(done: asyncio.Task) -> None:
+            if self._python_warmups.get(runtime_id) is not done:
+                return
+            if done.cancelled():
+                self._python_warmup_errors[runtime_id] = "Shared Python preparation was cancelled"
+            elif error := done.exception():
+                self._python_warmup_errors[runtime_id] = str(error)[:2000]
+            else:
+                self._python_warmup_errors.pop(runtime_id, None)
+
+        task.add_done_callback(finished)
+
+    def python_preparation_active(self, runtime_id: str | None) -> bool:
+        return bool(runtime_id and any(not task.done() for task in
+            self._python_preparations.get(runtime_id, ())))
+
+    async def _wait_for_python_preparation(self, runtime_id: str) -> None:
+        while True:
+            pending = tuple(task for task in self._python_preparations.get(runtime_id, ())
+                            if not task.done() and task is not asyncio.current_task())
+            if not pending:
+                return
+            # Cancelling a queued command must not cancel the installer.
+            outcomes = await asyncio.gather(*(asyncio.shield(task) for task in pending),
+                                            return_exceptions=True)
+            for outcome in outcomes:
+                if isinstance(outcome, BaseException):
+                    raise outcome
+
+    async def wait_for_python_preparation(self, sandbox_id: str, argv: Sequence[str],
+                                          python_environment: str = "auto", *, skill: bool = False) -> None:
+        from .commands import needs_managed_python
+        if needs_managed_python(argv, python_environment, skill=skill):
+            await self._wait_for_python_preparation(self._binding(sandbox_id).resolved_runtime or "")
 
     def _manifest(self, sandbox_id: str) -> Path:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", sandbox_id):
@@ -236,6 +292,7 @@ class SandboxManager(SandboxBackend):
             if binding.provisioned:
                 info = await self._backend(binding.resolved_runtime or "").get(sandbox_id)
                 if info.state in {SandboxState.READY, SandboxState.RUNNING}:
+                    self._warm_python_after_start(binding.resolved_runtime)
                     return await self.get(sandbox_id)
             runtime = await self.registry.select(binding.resolved_runtime or (self.preferred if binding.runtime == "auto" else binding.runtime))
             if not runtime.available:
@@ -260,6 +317,7 @@ class SandboxManager(SandboxBackend):
                                               attachment.relative_path, attachment.access)
             info = await backend.start(sandbox_id)
             binding.network_error = None
+            self._warm_python_after_start(runtime.id)
             return replace(info, **self._policy_info(binding, runtime), runtime_id=runtime.id, runtime_locked=True)
 
     @staticmethod
@@ -282,7 +340,7 @@ class SandboxManager(SandboxBackend):
                       env: Mapping[str, str] | None = None,
                       invocation_env: Mapping[str, str] | None = None,
                       runtime_mount: RuntimeMount | None = None,
-                      python_environment: str = "auto") -> CommandResult:
+                      python_environment: str = "auto", on_command_start=None) -> CommandResult:
         binding = self._binding(sandbox_id)
         if not binding.provisioned:
             raise SandboxStateError("Start the Sandbox before executing commands")
@@ -304,6 +362,21 @@ class SandboxManager(SandboxBackend):
             if not backend.supports_invocation_environment:
                 raise SandboxValidationError("This Sandbox runtime does not support invocation configuration")
             options["invocation_env"] = invocation_env
+        if managed_python:
+            await self._wait_for_python_preparation(binding.resolved_runtime or "")
+            warmup_error = self._python_warmup_errors.get(binding.resolved_runtime or "")
+            if warmup_error:
+                from .models import SandboxPreparationError
+                raise SandboxPreparationError(
+                    f"Shared Python warmup failed: {warmup_error}. "
+                    "Run start_sandbox again to retry preparation before this command.")
+            if hasattr(backend, "prepare_python") or getattr(backend, "python_runtime", None) is not None:
+                # Do the potentially long first-time setup under the manager's
+                # tracked preparation, not implicitly inside backend.execute().
+                # The latter can then make its normal fast, idempotent check.
+                await self._prepare_python_runtime(binding.resolved_runtime or "", ())
+        if on_command_start is not None:
+            await on_command_start()
         try:
             result = await backend.execute(
                 sandbox_id, argv, timeout_seconds=(timeout_seconds if timeout_seconds is not None
@@ -324,13 +397,31 @@ class SandboxManager(SandboxBackend):
         from backend.packs.requirements import aggregate_requirements
         # Agent-requested installs must preserve every enabled Pack as well.
         requirements = aggregate_requirements({**self.pack_requirements(), "requested installation": requirements})
-        backend = self._backend(runtime_id)
-        if hasattr(backend, "prepare_python"):
-            return await backend.prepare_python(requirements, bootstrap_key=bootstrap_key)
-        runtime = getattr(backend, "python_runtime", None)
-        if runtime is None:
-            raise SandboxValidationError("This execution platform has no managed Python runtime")
-        return await runtime.prepare(requirements, bootstrap_key=bootstrap_key)
+        return await self._prepare_python_runtime(runtime_id, requirements, bootstrap_key=bootstrap_key)
+
+    async def _prepare_python_runtime(self, runtime_id, requirements, bootstrap_key=None):
+        task = asyncio.current_task()
+        if task is not None:
+            self._python_preparations.setdefault(runtime_id, set()).add(task)
+        try:
+            # A plugin bootstrap and a tool install can arrive together. Both
+            # remain visible as preparations, but only one mutates the shared
+            # environment at a time.
+            async with self._python_preparation_locks.setdefault(runtime_id, asyncio.Lock()):
+                backend = self._backend(runtime_id)
+                if hasattr(backend, "prepare_python"):
+                    return await backend.prepare_python(requirements, bootstrap_key=bootstrap_key)
+                runtime = getattr(backend, "python_runtime", None)
+                if runtime is None:
+                    raise SandboxValidationError("This execution platform has no managed Python runtime")
+                return await runtime.prepare(requirements, bootstrap_key=bootstrap_key)
+        finally:
+            if task is not None:
+                pending = self._python_preparations.get(runtime_id)
+                if pending is not None:
+                    pending.discard(task)
+                    if not pending:
+                        self._python_preparations.pop(runtime_id, None)
 
     async def install_python_packages(self, sandbox_id, requirements):
         binding = self._binding(sandbox_id)
@@ -344,9 +435,22 @@ class SandboxManager(SandboxBackend):
             return None
         backend = self._backend(binding.resolved_runtime)
         if hasattr(backend, "python_status"):
-            return await backend.python_status()
+            status = await backend.python_status()
+            return ({**status, "preparing": self.python_preparation_active(binding.resolved_runtime),
+                     "warmup_error": self._python_warmup_errors.get(binding.resolved_runtime)}
+                    if isinstance(status, dict) else status)
         runtime = getattr(backend, "python_runtime", None)
-        return await asyncio.to_thread(runtime.snapshot) if runtime is not None else None
+        status = await asyncio.to_thread(runtime.snapshot) if runtime is not None else None
+        return ({**status, "preparing": self.python_preparation_active(binding.resolved_runtime),
+                 "warmup_error": self._python_warmup_errors.get(binding.resolved_runtime)}
+                if isinstance(status, dict) else status)
+
+    async def shutdown(self) -> None:
+        tasks = [task for task in self._python_warmups.values() if not task.done()]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def reset_cache(self, sandbox_id):
         binding = self._binding(sandbox_id)
