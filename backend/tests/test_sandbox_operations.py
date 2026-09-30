@@ -82,15 +82,16 @@ def test_delayed_results_and_failures_remain_observable(runtime_client, monkeypa
     async def scenario():
         pending = await tools['execute_command'](sandbox=sandbox['id'], argv=['work'], wait_seconds=0)
         release.set()
+        result = await tools['wait_sandbox_operation'](sandbox=sandbox['id'], operation_id=pending['operation_id'], wait_seconds=1)
         if outcome == 'security':
-            with pytest.raises(SandboxSecurityError):
-                await tools['wait_sandbox_operation'](sandbox=sandbox['id'], operation_id=pending['operation_id'], wait_seconds=1)
-            with pytest.raises(SandboxSecurityError):
-                await tools['wait_sandbox_operation'](sandbox=sandbox['id'], operation_id=pending['operation_id'], wait_seconds=0)
+            # Native isolation still fails closed; the Agent receives the
+            # denial as tool data, including on later reads of the same receipt.
+            assert result['ok'] is False
+            assert result['error']['code'] == 'permission_denied'
+            assert result['error']['message'] == 'isolation unavailable'
         else:
-            result = await tools['wait_sandbox_operation'](sandbox=sandbox['id'], operation_id=pending['operation_id'], wait_seconds=1)
             assert result.get('exit_code') == 7 if outcome != 'preparation' else result['error']['code'] == 'environment_preparation_failed'
-            assert await tools['wait_sandbox_operation'](sandbox=sandbox['id'], operation_id=pending['operation_id'], wait_seconds=0) == result
+        assert await tools['wait_sandbox_operation'](sandbox=sandbox['id'], operation_id=pending['operation_id'], wait_seconds=0) == result
     client.portal.call(scenario)
 
 

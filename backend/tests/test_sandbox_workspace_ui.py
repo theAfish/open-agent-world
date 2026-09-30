@@ -343,7 +343,9 @@ def test_network_enforcement_preserves_other_boundaries(tmp_path):
     assert "--share-net" not in offline
     for flag in ("--unshare-all", "--cap-drop", "--remount-ro", "--ro-bind"):
         assert flag in offline
-    command = service_command(offline, "oaw-sandbox-" + "a" * 32 + ".scope", SandboxLimits(), 60)
+    # Exercise enforcement of explicit limits, independently of evolving defaults.
+    limits = SandboxLimits(memory_bytes=512 * 1024 * 1024, active_process_limit=64)
+    command = service_command(offline, "oaw-sandbox-" + "a" * 32 + ".scope", limits, 60)
     assert "--property=TasksMax=64" in command and "--property=MemoryMax=536870912" in command
     compile(_SERVICE_GUARD, "guard", "exec")
 
@@ -510,9 +512,9 @@ def test_agent_observes_live_output_and_cancels_only_matching_command(runtime_cl
             result = await task
             assert result.cancelled
             from backend.sandbox.history import read
-            receipt = read(services, sandbox["id"])[-1]
-            assert receipt["cancelled"] and not receipt["timed_out"]
-            assert receipt["cancellation_reason"] == "command_cancel"
+            receipt = read(services, sandbox['id'])[-1]
+            assert receipt['cancelled'] and not receipt['timed_out']
+            assert receipt['cancellation_reason'] == 'command_cancel'
         finally:
             release.set()
             await task
@@ -525,6 +527,9 @@ def test_agent_observes_live_output_and_cancels_only_matching_command(runtime_cl
 def test_parallel_commands_dispatch_without_waiting(runtime_client, monkeypatch):
     client, backend, native = runtime_client
     _, sandbox, _, _, _ = setup_skill(client)
+    # Pin the fixture's card timeout; this test checks dispatch and per-call
+    # overrides, not the product's default timeout.
+    assert client.patch(f"/api/nodes/{sandbox['id']}", json={"config": {"command_timeout": 600}}).status_code == 200
     services = client.app.state.services
     original = backend.execute
 
