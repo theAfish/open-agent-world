@@ -179,6 +179,43 @@ CREATE INDEX IF NOT EXISTS runs_agent_idx ON runs (agent_id, created_at);
 CREATE INDEX IF NOT EXISTS runs_parent_idx ON runs (parent_run_id, created_at);
 CREATE INDEX IF NOT EXISTS runs_task_idx ON runs (task_id, created_at);
 
+-- Durable execution receipts. Never store tool arguments or raw outputs here:
+-- the hashes identify a call for reconciliation, while resource-specific
+-- journals and document revisions remain authoritative for its effects.
+CREATE TABLE IF NOT EXISTS run_tool_receipts (
+    receipt_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL,
+    capability_kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    argument_sha256 TEXT NOT NULL,
+    read_only INTEGER NOT NULL CHECK (read_only IN (0, 1)),
+    state TEXT NOT NULL CHECK (state IN ('running', 'finished', 'outcome_unknown')),
+    result_sha256 TEXT,
+    result_hints_json TEXT NOT NULL DEFAULT '{}',
+    error_type TEXT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS run_tool_receipts_run_idx
+    ON run_tool_receipts (run_id, started_at, receipt_id);
+
+-- The latest model request per role and Run. Complete only committed responses;
+-- partial SSE thought/tool fragments are never promoted into this checkpoint.
+CREATE TABLE IF NOT EXISTS run_model_checkpoints (
+    run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    request_id INTEGER NOT NULL,
+    run_attempt INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('started', 'finished', 'interrupted')),
+    contents_json TEXT,
+    input_sha256 TEXT NOT NULL,
+    replayable INTEGER NOT NULL CHECK (replayable IN (0, 1)),
+    started_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, role)
+);
+
 CREATE TABLE IF NOT EXISTS state_scopes (
     scope_id TEXT PRIMARY KEY,
     scope_kind TEXT NOT NULL,
