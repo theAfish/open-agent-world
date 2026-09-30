@@ -7,6 +7,13 @@ entry: scripts/interface_builder.py
 
 # Interface Builder
 
+Read this Skill from a connected OAW Skill card, then run its bundled script
+with `run_skill_script` in an independently authorized Sandbox. The commands
+below illustrate CLI arguments, not a host-side `build_interface` tool. The
+script writes candidate files; use a fresh Atom Structure revision and
+`record_interface_candidates` for a structured candidate workflow. Do not
+import a candidate into the open Structure without an explicit selection.
+
 ```bash
 python3 scripts/interface_builder.py build_interface \
   --structure-1 Fe.extxyz --structure-2 SiO2.extxyz \

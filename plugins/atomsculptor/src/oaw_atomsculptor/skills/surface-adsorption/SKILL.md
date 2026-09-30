@@ -6,10 +6,16 @@ when_to_use: Use when placing a molecule on a slab. Combine with `surface-builde
 
 # Surface Adsorption Instructions
 
+This is instruction-only guidance. No adsorption-site builder is bundled in
+this Toolbox. Use connected OAW resources and user-permitted Sandbox code for
+placement, then verify the output file and import it into Atom Structure only
+through the authorized file bridge with a fresh revision. The numerical
+distances below are starting hypotheses, not universal pass/fail thresholds.
+
 ## Common Workflow
 
 1. **Create substrate surface**
-   - Generate appropriate surface (see surface_creation.md)
+   - Generate an appropriate surface (see the connected `surface-creation` Skill)
    - Determine supercell size based on adsorbate and periodic image requirements
    - Ensure sufficient vacuum (> 10 Å, more for large adsorbates)
    - Optimize layer count for DFT cost (5 layers often sufficient)
@@ -27,7 +33,8 @@ when_to_use: Use when placing a molecule on a slab. Combine with `surface-builde
 
 4. **Verify structure integrity**
    - Check all interatomic distances, especially between adsorbate and surface
-   - Ensure minimum distance > 2.0 Å to avoid steric clashes
+   - Compare shortest contacts with the specific adsorbate/substrate chemistry;
+     no single minimum distance applies to every element pair.
    - Calculate periodic image distances
    - Verify supercell size maintains > 10 Å between periodic images
 
@@ -86,7 +93,7 @@ when_to_use: Use when placing a molecule on a slab. Combine with `surface-builde
 
 | Pitfall | Symptom | Fix |
 |---------|---------|-----|
-| Steric clashes | Adsorbate-surface distances < 2.0 Å | Increase adsorption height; reorient molecule |
+| Steric clashes | Chemically implausible contacts | Increase adsorption height or reorient; recheck element-specific distances |
 | Periodic image interactions | Adsorbate images < 10 Å apart | Increase supercell size (e.g., 2x2 → 3x3 or larger) |
 | Incorrect adsorption geometry | Unexpected binding mode | Adjust molecule orientation; check adsorption site |
 | Too large supercell | Excessive computational cost | Balance accuracy vs. cost; 10 Å is minimum threshold |

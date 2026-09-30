@@ -15,7 +15,6 @@ Use cylinder_filler.py to fill the CNT with atoms or molecules.
 """
 
 import numpy as np
-from ase import Atoms
 from ase.build import nanotube
 from ase.io import write
 
@@ -60,17 +59,22 @@ def build_nanotube(
     outer_radius = r_values.mean()
     inner_radius = outer_radius - 1.7  # Approximate wall thickness
 
-    # Set cell
+    # Keep ASE's translation length for a periodic tube. The occupied atom
+    # span is shorter than the repeat length and cannot define its periodic cell.
+    axial_period = float(cnt.cell[2, 2])
+
+    # A finite tube needs vacuum at both open ends, not just around its wall.
     cell_x = 2 * (outer_radius + vacuum)
     cell_y = 2 * (outer_radius + vacuum)
-    cell_z = tube_length
+    cell_z = axial_period if pbc_z else tube_length + 2 * vacuum
 
     cnt.set_cell([cell_x, cell_y, cell_z])
     cnt.center()
     cnt.set_pbc([False, False, pbc_z])
 
     # Write output
-    write(output_file, cnt)
+    output_path = resolve_output_path(output_file)
+    write(output_path, cnt)
 
     # Determine CNT type
     if n == m:
@@ -81,7 +85,7 @@ def build_nanotube(
         cnt_type = "chiral"
 
     return {
-        "output_file": output_file,
+        "output_file": display_path(output_path),
         "chirality": f"({n},{m})",
         "cnt_type": cnt_type,
         "length_cells": length,
@@ -91,8 +95,11 @@ def build_nanotube(
         "tube_length_angstrom": round(tube_length, 2),
         "cell_dimensions_angstrom": [round(cell_x, 2), round(cell_y, 2), round(cell_z, 2)],
         "n_atoms": len(cnt),
-        "center_xy": [round(x_center, 2), round(y_center, 2)],
-        "z_range": [round(z_min, 2), round(z_max, 2)]
+        "center_xy": [round(float((cnt.positions[:, axis].min() + cnt.positions[:, axis].max()) / 2), 2)
+                      for axis in (0, 1)],
+        "z_range": [round(float(cnt.positions[:, 2].min()), 2),
+                    round(float(cnt.positions[:, 2].max()), 2)],
+        "axial_end_vacuum_angstrom": round(vacuum, 2) if not pbc_z else 0.0,
     }
 
 

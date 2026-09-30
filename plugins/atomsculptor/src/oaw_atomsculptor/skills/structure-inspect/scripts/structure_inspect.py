@@ -171,7 +171,7 @@ def _json_list(value: Any, fallback: list[dict[str, Any]]) -> list[dict[str, Any
     return decoded
 
 
-def to_atomsculptor_document(folder: str, file_name: str) -> dict:
+def to_atomsculptor_document(folder: str, file_name: str, output_name: str | None = None) -> dict:
     """Convert a structure file into the AtomSculptor StructureDocument JSON.
 
     The returned ``document`` value can be passed unchanged as the
@@ -213,7 +213,7 @@ def to_atomsculptor_document(folder: str, file_name: str) -> dict:
 
     cell_array = np.asarray(atoms.cell.array, dtype=float)
     cell = cell_array.tolist() if (atoms.pbc.any() or np.abs(cell_array).max() > 1e-12) else None
-    return {
+    result = {
         "document": {
             "format_version": 1,
             "atoms": entries,
@@ -227,6 +227,14 @@ def to_atomsculptor_document(folder: str, file_name: str) -> dict:
             "source_metadata": {"converted_by": "atomsculptor structure-inspect"},
         }
     }
+    if output_name is not None:
+        if not output_name.lower().endswith(".json"):
+            return {"error": "output_name must end with .json"}
+        output_path = resolve_output_path(output_name)
+        output_path.write_text(_json.dumps(result["document"], ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        return {"output_document_file": display_path(output_path),
+                "atom_count": len(entries), "size_bytes": output_path.stat().st_size}
+    return result
 
 
 def from_atomsculptor_document(document: str, output_name: str = "structure.extxyz") -> dict:

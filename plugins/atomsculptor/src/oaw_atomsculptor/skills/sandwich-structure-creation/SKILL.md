@@ -6,6 +6,15 @@ when_to_use: Use when stacking three or more layers, inserting a molecule betwee
 
 # Sandwich Structure Creation Instructions
 
+This is guidance, not a bundled sandwich-builder script. Use only connected
+OAW Skills and a separately authorized Sandbox. The ZSL interface procedure
+below refers to the `interface-builder` Skill script invoked through
+`run_skill_script`, not a standalone `build_interface` Agent tool. When a
+required construction step has no packaged script, use user-permitted Sandbox
+code and verify its output; do not claim that a missing tool ran. Save the
+result as a file, then use the Structure file bridge and a fresh revision if
+the open Atom Structure should be replaced.
+
 ## Common Workflow
 
 1. **Design sandwich architecture**
@@ -19,7 +28,7 @@ when_to_use: Use when stacking three or more layers, inserting a molecule betwee
    - Create molecule using SMILES or other method with geometry optimization
 
 3. **Build lattice-matched interface**
-   - Use build_interface tool with ZSL algorithm
+   - If appropriate, use the connected `interface-builder` Skill's ZSL script
    - Set gap parameter to accommodate molecule plus margins
    - Example: 15 Å gap for 4.5 Å thick molecule
 
@@ -96,7 +105,7 @@ gaas = surface('GaAs', (0,0,1), 4, vacuum=10.0)
 
 ### Lattice Matching
 - Critical for creating defect-free interface
-- Use ZSL algorithm in build_interface tool
+- Use the ZSL script in the connected `interface-builder` Skill when appropriate
 - Different crystal structures can be matched
 - Some lattice strain may be unavoidable
 - For dissimilar structures, manual stacking may be necessary
@@ -117,7 +126,7 @@ gaas = surface('GaAs', (0,0,1), 4, vacuum=10.0)
 
 | Pitfall | Symptom | Fix |
 |---------|---------|-----|
-| PBC gaps from manual stacking | Gaps across periodic boundaries | Use build_interface tool for lattice matching |
+| PBC gaps from manual stacking | Gaps across periodic boundaries | Check the cell and use an authorized lattice-matching workflow |
 | Cell too small for molecule | Molecule dimension exceeds cell dimension | Build supercell expansion before molecule insertion |
 | Molecule overlaps with substrate | Atom positions overlap after insertion | Increase gap parameter and re-insert molecule |
 | Broken graphene rings | Non-hexagonal ring structure | Use ase.build.graphene() instead of build_interface |
@@ -136,7 +145,7 @@ When build_interface struggles with dissimilar structures:
 4. This maintains structural integrity while achieving correct ordering
 
 ### Lattice Matching Challenges
-- build_interface tool uses ZSL algorithm
+- The packaged `interface-builder` script uses ZSL; it is not an OAW host tool
 - May struggle with very dissimilar structures (e.g., 3D surface slab vs 2D material)
 - Manual stacking avoids forced lattice matching that breaks structure
 

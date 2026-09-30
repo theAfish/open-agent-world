@@ -7,6 +7,12 @@ entry: scripts/surface_builder.py
 
 # Surface Builder
 
+Read this Skill from a connected OAW card and execute its bundled script with
+`run_skill_script` in an independently authorized Sandbox. The CLI below is
+an argument example, not a host command to run against the Skill bundle.
+For a connected Atom Structure, stage its exact document file first; convert
+the generated slab to a document file and import with a fresh revision.
+
 ```bash
 python3 scripts/surface_builder.py build_surface \
   --folder . --file-name Fe.extxyz \
