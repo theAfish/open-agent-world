@@ -30,6 +30,8 @@ def _metadata(instructions: str, fallback: str) -> tuple[str, str]:
 def _files(root, current=None) -> Iterable[tuple[str, object]]:
     current = root if current is None else current
     for entry in current.iterdir():
+        if entry.name == "__pycache__" or entry.name.endswith((".pyc", ".pyo")):
+            continue
         relative = str(entry.relative_to(root)).replace("\\", "/")
         if entry.is_dir():
             yield from _files(root, entry)
@@ -60,14 +62,22 @@ def atomsculptor_skills() -> SkillPackage:
     root = files(__package__).joinpath("skills")
     return SkillPackage(
         package_id="atomsculptor.skills",
-        version="0.1.0",
+        version="0.1.2",
         name="AtomSculptor Skills",
         description="Portable atomistic modelling, inspection, conversion, and Materials Project skills.",
         author="AtomSculptor",
         instructions=(
-            "Use the connected Sandbox explicitly for every runnable skill. "
-            "Provision scientific libraries in the selected OAW environment; "
-            "this package never installs dependencies by itself."
+            "Read only Skills authorized by the live OAW graph. Read a Skill "
+            "with include_file_contents=false first; use file_path only for a "
+            "specific source file needed for debugging. A bundled script "
+            "must run through run_skill_script with an independently authorized "
+            "Sandbox; command examples in a Skill are illustrative CLI argv, "
+            "not permission to execute the read-only bundle from a host shell. "
+            "Provision dependencies through the selected OAW environment and "
+            "never read host secrets or bypass a user's prohibited generators. "
+            "A Sandbox output file does not change an Atom Structure card: use "
+            "the authorized file bridge and a fresh inspected revision to import it. "
+            "Instruction-only Skills do not provide executable tools."
         ),
         skills=[_skill(folder) for folder in sorted(root.iterdir(), key=lambda item: item.name) if folder.is_dir()],
     )

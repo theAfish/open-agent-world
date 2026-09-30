@@ -8,9 +8,14 @@ document contract rather than on the retired AtomSculptor Sandbox APIs.
 from __future__ import annotations
 
 from collections import Counter
+from hashlib import sha256
+import json
 from typing import Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+from backend.errors import RevisionConflictError
+from backend.plugins.registry import CapabilitySelector
 
 from open_agent_world.plugin_api import (
     CapabilityDefinition,
@@ -34,6 +39,14 @@ READ = "atomsculptor.structure.read"
 WRITE = "atomsculptor.structure.write"
 RECORD_CANDIDATES = "atomsculptor.structure.record_interface_candidates"
 OBSERVE = "atomsculptor.structure.observe"
+STAGE_FILE = "atomsculptor.structure.stage_file"
+IMPORT_FILE = "atomsculptor.structure.import_file"
+BUILD_SUPERCELL = "atomsculptor.structure.build_supercell"
+_SANDBOX_SELECTOR = CapabilitySelector(
+    parameter="sandbox", argument="sandbox_id",
+    capability_kinds=frozenset({"sandbox.execute"}),
+    target_traits=frozenset({"core.sandbox"}),
+)
 WRITE_INPUT_SCHEMA = structure.ReplaceStructure.model_json_schema()
 WRITE_INPUT_SCHEMA["properties"]["expected_revision"] = {
     "type": "integer",
@@ -41,6 +54,17 @@ WRITE_INPUT_SCHEMA["properties"]["expected_revision"] = {
     "description": "Revision returned by inspect_atom_structure. Re-inspect after a conflict.",
 }
 WRITE_INPUT_SCHEMA["required"].append("expected_revision")
+BUILD_SUPERCELL_INPUT_SCHEMA = structure.BuildSupercell.model_json_schema()
+BUILD_SUPERCELL_INPUT_SCHEMA["properties"]["repetitions"] = {
+    "type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 100},
+    "minItems": 3, "maxItems": 3,
+    "description": "Cell repetitions along a, b and c.",
+}
+BUILD_SUPERCELL_INPUT_SCHEMA["properties"]["expected_revision"] = {
+    "type": "integer", "minimum": 0,
+    "description": "Revision returned by inspect_atom_structure. Re-inspect after a conflict.",
+}
+BUILD_SUPERCELL_INPUT_SCHEMA.setdefault("required", []).append("expected_revision")
 RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA = structure.RecordInterfaceCandidates.model_json_schema()
 RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA["properties"]["expected_revision"] = {
     "type": "integer",
@@ -101,16 +125,38 @@ class InspectStructure(BaseModel):
 INSPECT_INPUT_SCHEMA = InspectStructure.model_json_schema()
 
 
+class StageStructureFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=0)
+
+
+class ImportStructureFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    file_name: str = Field(min_length=1, max_length=4096)
+    expected_revision: int = Field(ge=0)
+    expected_structure_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+
+def _structure_digest(document: dict) -> str:
+    """Hash persisted modelling state without transient atom/layer selection."""
+    structural = {key: value for key, value in document.items()
+                  if key not in {"selected_atom_ids", "active_layer_ids"}}
+    raw = json.dumps(structural, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return sha256(raw.encode("utf-8")).hexdigest()
+
+
 def _structure_overview(document: dict, *, revision: int, detail: str, offset: int, limit: int) -> dict:
     """Return a model-sized inspection result without mutating its document."""
 
     atoms = document.get("atoms") if isinstance(document.get("atoms"), list) else []
     selected_ids = document.get("selected_atom_ids") if isinstance(document.get("selected_atom_ids"), list) else []
+    selected_set = set(selected_ids)
+    selection_limit = 500
     selected = [
         {key: atom.get(key) for key in ("id", "symbol", "x", "y", "z", "layer_id")}
         for atom in atoms
-        if isinstance(atom, dict) and atom.get("id") in selected_ids
-    ]
+        if isinstance(atom, dict) and atom.get("id") in selected_set
+    ][:selection_limit]
     formula = " ".join(
         f"{symbol}{count if count != 1 else ''}"
         for symbol, count in sorted(Counter(
@@ -126,6 +172,12 @@ def _structure_overview(document: dict, *, revision: int, detail: str, offset: i
         "min": [min(point[index] for point in coordinates) for index in range(3)],
         "max": [max(point[index] for point in coordinates) for index in range(3)],
     }
+    metadata = document.get("source_metadata") if isinstance(document.get("source_metadata"), dict) else {}
+    compact_metadata = {
+        str(key)[:120]: str(item)[:256] if isinstance(item, str) else item
+        for key, item in list(metadata.items())[:20]
+    }
+    layers = document.get("layers") if isinstance(document.get("layers"), list) else []
     value = {
         "format_version": document.get("format_version"),
         "atom_count": len(atoms),
@@ -133,21 +185,28 @@ def _structure_overview(document: dict, *, revision: int, detail: str, offset: i
         "coordinate_bounds": bounds,
         "cell": document.get("cell"),
         "pbc": document.get("pbc"),
-        "layers": document.get("layers", []),
+        "layers": [{**layer, "metadata": str(layer.get("metadata", ""))[:512]}
+                   for layer in layers[:64] if isinstance(layer, dict)],
+        "layer_count": len(layers),
+        "layers_truncated": len(layers) > 64,
         "active_layer_ids": document.get("active_layer_ids", []),
-        "selected_atom_ids": selected_ids,
+        "selected_atom_ids": selected_ids[:selection_limit],
         "selected_atoms": selected,
+        "selected_atom_count": len(selected_ids),
+        "selection_truncated": len(selected_ids) > selection_limit,
         "source_name": document.get("source_name", ""),
-        "source_metadata": document.get("source_metadata", {}),
+        "source_metadata": compact_metadata,
+        "source_metadata_truncated": len(metadata) > 20,
         "interface_candidates": document.get("interface_candidates", []),
     }
     response = {
         "revision": revision,
+        "structure_digest": _structure_digest(document),
         "summary": {
             "atom_count": len(atoms),
             "formula": formula,
-            "layer_count": len(value["layers"]),
-            "selected_atom_count": len(selected),
+            "layer_count": len(layers),
+            "selected_atom_count": len(selected_ids),
             "source_name": value["source_name"],
         },
         "value": value,
@@ -180,9 +239,19 @@ async def _read(context, capability, arguments):
 async def _write(context, capability, arguments):
     payload = dict(arguments)
     expected_revision = payload.pop("expected_revision", None)
-    return await context.node_document_action(
+    updated = await context.node_document_action(
         capability, "replace_structure", payload, expected_revision=expected_revision
     )
+    return {"revision": updated["revision"], "summary": updated["summary"]}
+
+
+async def _build_supercell(context, capability, arguments):
+    payload = dict(arguments)
+    expected_revision = payload.pop("expected_revision", None)
+    updated = await context.node_document_action(
+        capability, "build_supercell", payload, expected_revision=expected_revision,
+    )
+    return {"revision": updated["revision"], "summary": updated["summary"]}
 
 
 async def _observe(context, capability, arguments):
@@ -198,16 +267,64 @@ async def _observe(context, capability, arguments):
 async def _record_interface_candidates(context, capability, arguments):
     payload = dict(arguments)
     expected_revision = payload.pop("expected_revision", None)
-    return await context.node_document_action(
+    updated = await context.node_document_action(
         capability, "record_interface_candidates", payload, expected_revision=expected_revision
     )
+    return {"revision": updated["revision"], "summary": updated["summary"]}
+
+
+async def _stage_structure_file(context, capability, arguments):
+    request = StageStructureFile.model_validate({key: value for key, value in arguments.items() if key != "sandbox_id"})
+    sandbox_id = arguments["sandbox_id"]
+    snapshot = await context.node_document_action(capability, "stage_snapshot", {})
+    if snapshot["revision"] != request.expected_revision:
+        raise RevisionConflictError("Structure changed; inspect it again before staging a Sandbox file")
+    raw = json.dumps(snapshot["value"], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    file_name = f"atomsculptor-{uuid4().hex}.json"
+    await context.write_sandbox_workspace_file(capability, sandbox_id, file_name, raw)
+    return {"file_name": file_name, "sandbox_id": sandbox_id,
+            "revision": snapshot["revision"], "atom_count": len(snapshot["value"].get("atoms", [])),
+            "size_bytes": len(raw), "sha256": sha256(raw).hexdigest(),
+            "structure_digest": _structure_digest(snapshot["value"])}
+
+
+async def _import_structure_file(context, capability, arguments):
+    request = ImportStructureFile.model_validate({key: value for key, value in arguments.items() if key != "sandbox_id"})
+    sandbox_id = arguments["sandbox_id"]
+    raw = await context.read_sandbox_workspace_file(capability, sandbox_id, request.file_name)
+    try:
+        parsed = json.loads(raw)
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("Sandbox file must contain a valid Atom Structure JSON document") from exc
+    current = await context.node_document_action(capability, "import_preflight", {})
+    revision = request.expected_revision
+    if current["revision"] != revision:
+        if not request.expected_structure_digest or _structure_digest(current["value"]) != request.expected_structure_digest:
+            raise RevisionConflictError("Structure changed; inspect it again before importing the Sandbox file")
+        if not isinstance(parsed, dict):
+            raise ValueError("Sandbox file must contain an Atom Structure JSON object")
+        # Only selection changed. Preserve the user's latest UI intent while
+        # retaining optimistic revision checking at the actual write.
+        atom_ids = {atom.get("id") for atom in parsed.get("atoms", []) if isinstance(atom, dict)}
+        parsed["selected_atom_ids"] = [atom_id for atom_id in current["value"].get("selected_atom_ids", [])
+                                       if atom_id in atom_ids]
+        layer_ids = {layer.get("id") for layer in parsed.get("layers", []) if isinstance(layer, dict)}
+        active = [layer_id for layer_id in current["value"].get("active_layer_ids", []) if layer_id in layer_ids]
+        if active:
+            parsed["active_layer_ids"] = active
+        revision = current["revision"]
+    updated = await context.node_document_action(
+        capability, "import_structure_file", {"structure": parsed}, expected_revision=revision,
+    )
+    return {"file_name": request.file_name, "sandbox_id": sandbox_id,
+            "revision": updated["revision"], "summary": updated["summary"]}
 
 
 class AtomSculptorPlugin:
     descriptor = PluginDescriptor(
         id="atomsculptor",
         version="0.1.0",
-        plugin_api_version="1.20",
+        plugin_api_version="1.24",
         name="AtomSculptor",
         description="Agent-assisted atomistic structure modelling.",
         # OAW provisions these as binary wheels in its managed Sandbox Python;
@@ -224,6 +341,7 @@ class AtomSculptorPlugin:
             "atomsculptor.adk-team",
             AtomSculptorRuntime,
             needs_model_connection_resolver=True,
+            needs_context_store=True,
         )
         register_skill_package(
             registration,
@@ -234,6 +352,7 @@ class AtomSculptorPlugin:
             CapabilityDefinition(
                 kind=READ,
                 tool_name="inspect_atom_structure",
+                read_only=True,
                 description="Inspect a structure with a bounded summary, revision and selected atom coordinates. The default never returns every atom. Request detail='atoms' with atom_offset and atom_limit (at most 200) only for a necessary coordinate window.",
                 input_schema=INSPECT_INPUT_SCHEMA,
             ),
@@ -250,6 +369,16 @@ class AtomSculptorPlugin:
         )
         registration.register_capability(
             CapabilityDefinition(
+                kind=BUILD_SUPERCELL,
+                tool_name="build_atom_supercell",
+                description="Expand the current periodic Atom Structure deterministically without relaying its atoms through the model. Inspect first; pass repetitions and the returned revision.",
+                input_schema=BUILD_SUPERCELL_INPUT_SCHEMA,
+                target_capabilities=frozenset({WRITE}),
+            ),
+            _build_supercell,
+        )
+        registration.register_capability(
+            CapabilityDefinition(
                 kind=RECORD_CANDIDATES,
                 tool_name="record_interface_candidates",
                 description="Record structured interface candidates for a current Atom Structure after generating their Sandbox files. Inspect first and pass its revision.",
@@ -261,10 +390,33 @@ class AtomSculptorPlugin:
             CapabilityDefinition(
                 kind=OBSERVE,
                 tool_name="observe_atom_structure",
+                read_only=True,
                 description="Capture an open 3D Atom Structure workspace as a transient image. Set view to current, iso, x, y, or z; fixed views are captured briefly and never alter the researcher\'s camera. Use only when visual geometry or visible selection materially helps; inspect the structure document for exact coordinates.",
                 input_schema=OBSERVE_INPUT_SCHEMA,
             ),
             _observe,
+        )
+        registration.register_capability(
+            CapabilityDefinition(
+                kind=STAGE_FILE,
+                tool_name="stage_atom_structure_file",
+                description="Copy the exact revisioned Atom Structure document into an authorized Sandbox workspace file without sending atom coordinates through the model. Inspect first and pass expected_revision; use the returned file_name with structure-inspect's from_atomsculptor_document.",
+                input_schema=StageStructureFile.model_json_schema(),
+                selectors=(_SANDBOX_SELECTOR,),
+                target_capabilities=frozenset({READ}),
+            ),
+            _stage_structure_file,
+        )
+        registration.register_capability(
+            CapabilityDefinition(
+                kind=IMPORT_FILE,
+                tool_name="import_atom_structure_file",
+                description="Replace the Atom Structure from a validated JSON file in an authorized Sandbox without returning its atoms to the model. Generate that file with structure-inspect's to_atomsculptor_document --output-name; inspect the current Structure and pass expected_revision plus structure_digest. If only UI selection changed, the import preserves its latest stable IDs.",
+                input_schema=ImportStructureFile.model_json_schema(),
+                selectors=(_SANDBOX_SELECTOR,),
+                target_capabilities=frozenset({WRITE}),
+            ),
+            _import_structure_file,
         )
         registration.register_node_type(
             NodeTypeDefinition(
@@ -319,6 +471,10 @@ class AtomSculptorPlugin:
                         "replace_structure": NodeDocumentAction(structure.replace, capability_kind=WRITE),
                         "select_atoms": NodeDocumentAction(structure.select),
                         "select_layers": NodeDocumentAction(structure.select_layers),
+                        "build_supercell": NodeDocumentAction(structure.build_supercell, capability_kind=BUILD_SUPERCELL),
+                        "stage_snapshot": NodeDocumentAction(lambda value, arguments: value, capability_kind=STAGE_FILE, read_only=True),
+                        "import_preflight": NodeDocumentAction(lambda value, arguments: value, capability_kind=IMPORT_FILE, read_only=True),
+                        "import_structure_file": NodeDocumentAction(structure.replace, capability_kind=IMPORT_FILE),
                         "record_interface_candidates": NodeDocumentAction(structure.record_interface_candidates, capability_kind=RECORD_CANDIDATES),
                     },
                     max_size_bytes=16 * 1024 * 1024,
@@ -333,7 +489,7 @@ class AtomSculptorPlugin:
                 description="Allow an Agent to inspect the current structure and stable selected atom IDs, and, for Vision-capable models, observe the currently open 3D view.",
                 source_traits=frozenset({"core.agent"}),
                 target_types=frozenset({"atomsculptor.structure"}),
-                capabilities=(CapabilityGrantDefinition(READ), CapabilityGrantDefinition(OBSERVE)),
+                capabilities=(CapabilityGrantDefinition(READ), CapabilityGrantDefinition(OBSERVE), CapabilityGrantDefinition(STAGE_FILE)),
                 templateable=True,
             )
         )
@@ -345,7 +501,7 @@ class AtomSculptorPlugin:
                 description="Allow an Agent to inspect and atomically replace a validated structure revision, and, for Vision-capable models, observe the currently open 3D view.",
                 source_traits=frozenset({"core.agent"}),
                 target_types=frozenset({"atomsculptor.structure"}),
-                capabilities=(CapabilityGrantDefinition(READ), CapabilityGrantDefinition(WRITE), CapabilityGrantDefinition(RECORD_CANDIDATES), CapabilityGrantDefinition(OBSERVE)),
+                capabilities=(CapabilityGrantDefinition(READ), CapabilityGrantDefinition(WRITE), CapabilityGrantDefinition(BUILD_SUPERCELL), CapabilityGrantDefinition(RECORD_CANDIDATES), CapabilityGrantDefinition(OBSERVE), CapabilityGrantDefinition(STAGE_FILE), CapabilityGrantDefinition(IMPORT_FILE)),
                 templateable=True,
             )
         )
