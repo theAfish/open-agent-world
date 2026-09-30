@@ -20,7 +20,7 @@ from backend.sandbox.darwin_seatbelt import (
 )
 from backend.sandbox.commands import needs_managed_python
 from backend.sandbox.models import (
-    ResourceAccess, ResourceAttachment, SandboxNotFoundError,
+    ResourceAccess, ResourceAttachment, SandboxBusyError, SandboxNotFoundError,
     SandboxState, SandboxStateError, SandboxValidationError,
 )
 
@@ -287,6 +287,42 @@ class TestBackendLifecycle:
         await backend.terminate("lab")
         info = await backend.get("lab")
         assert info.state == SandboxState.STOPPED
+
+    @pytest.mark.asyncio
+    async def test_preflight_failure_leaves_sandbox_ready(self, tmp_path, monkeypatch):
+        backend = make_backend(tmp_path)
+        await backend.create("lab")
+        monkeypatch.setattr("backend.sandbox.darwin_seatbelt.sys.platform", "darwin")
+        monkeypatch.setattr(Path, "is_file", lambda self: True)
+        await backend.start("lab")
+        assert (await backend.get("lab")).state == SandboxState.READY
+
+        # A retryable preflight conflict (busy shared Python) must not brick
+        # the sandbox: the command never started.
+        async def busy(owner, execution, sandbox_id, argv, **options):
+            raise SandboxBusyError("Shared Python is busy installing packages.")
+
+        monkeypatch.setattr(backend, "_execute_record", busy)
+        with pytest.raises(SandboxBusyError):
+            await backend.execute("lab", ["python3", "-c", "print(1)"])
+        assert (await backend.get("lab")).state == SandboxState.READY
+
+    @pytest.mark.asyncio
+    async def test_failure_after_process_spawn_still_marks_error(self, tmp_path, monkeypatch):
+        backend = make_backend(tmp_path)
+        await backend.create("lab")
+        monkeypatch.setattr("backend.sandbox.darwin_seatbelt.sys.platform", "darwin")
+        monkeypatch.setattr(Path, "is_file", lambda self: True)
+        await backend.start("lab")
+
+        async def crash(owner, execution, sandbox_id, argv, **options):
+            execution.process = object()  # a real process existed
+            raise RuntimeError("seatbelt exec failed")
+
+        monkeypatch.setattr(backend, "_execute_record", crash)
+        with pytest.raises(RuntimeError):
+            await backend.execute("lab", ["echo", "hi"])
+        assert (await backend.get("lab")).state == SandboxState.ERROR
 
     @pytest.mark.asyncio
     async def test_destroy_removes_storage(self, tmp_path):
