@@ -744,6 +744,15 @@ async def _execute_sandbox(
     )
 
 
+async def _write_sandbox_text_file(context, capability, values):
+    if (set(values) - {"path", "content", "overwrite"}
+            or not isinstance(values.get("path"), str)
+            or not isinstance(values.get("content"), str)):
+        raise ResourceValidationError("path and UTF-8 content are required")
+    return await context.write_sandbox_text_file(
+        capability, values["path"], values["content"], values.get("overwrite", False))
+
+
 async def _cancel_sandbox_command(context, capability, values):
     command_id = values.get("command_id")
     if set(values) != {"command_id"} or not isinstance(command_id, str) or not command_id:
@@ -771,6 +780,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
     for operation in ("read", "patch"):
         registry.register_capability(CapabilityDefinition(
             kind=f"legion.state.{operation}", tool_name=f"{operation}_legion_state", target_parameter="legion",
+            read_only=operation == "read",
             description=("Read shared team state and revision." if operation == "read" else
                          "Merge top-level keys into shared team state. Read first and supply the revision; refresh on conflict."),
             input_schema={"type": "object", "properties": {} if operation == "read" else {
@@ -905,6 +915,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
             }), _request_conversation_turn)
     registry.register_capability(CapabilityDefinition(
         kind='text.read', tool_name='read_text', target_parameter='target',
+        read_only=True,
         description='Read the selected managed text resource.',
         input_schema={"type": "object", "properties": {}, "additionalProperties": False}), _read_text)
     registry.register_capability(CapabilityDefinition(
@@ -913,25 +924,36 @@ def _register_builtin(registry: PluginRegistration) -> None:
         input_schema={"type": "object", "properties": {"content": {"type": "string", "description": "Complete replacement text for this resource."}}, "required": ["content"], "additionalProperties": False}), _edit_text)
     registry.register_capability(CapabilityDefinition(
         kind='image.view', tool_name='view_image', target_parameter='target',
+        read_only=True,
         description='Inspect the selected managed image.',
         input_schema={"type": "object", "properties": {}, "additionalProperties": False}), _view_image)
     for operation, handler in (("start", _start_sandbox), ("stop", _stop_sandbox)):
         registry.register_capability(CapabilityDefinition(
             kind=f"sandbox.{operation}", tool_name=f"{operation}_sandbox", target_parameter="sandbox",
-            description=("Start the selected Sandbox using its saved runtime, workspace and network settings. Inspect it before executing commands."
+            description=("Start the selected Sandbox using its saved runtime, workspace and network settings. On macOS Seatbelt, Start begins shared Python warmup in the background; check shared_python.ready/preparing through inspect_sandbox before Python commands. If warmup fails, inspect shared_python.warmup_error and call start_sandbox again to retry. A start also recovers a sandbox whose state is \"error\" once its commands have finished: if commands were rejected with 'sandbox must be ready', start it and retry once."
                          if operation == "start" else "Stop the selected Sandbox, terminating any active command and waiting for cleanup. This affects every agent sharing this Sandbox."),
             input_schema={"type": "object", "properties": {}, "additionalProperties": False}), handler)
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.execute', tool_name='execute_command', target_parameter='sandbox',
         selectors=EXECUTION_SELECTORS,
-        description='Execute an argv command in the selected sandbox. Long operations return status=running and an operation_id after wait_seconds (default 1). Use wait_sandbox_operation to collect the result or do independent work; never resubmit running work. Commands run concurrently in the shared workspace and HOME. Inspect active_commands to coordinate with other Agents; avoid overwriting their edits. Cancellation and timeout affect only the selected command. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES. Calls use fresh non-interactive processes: cd/export/venv activation do not carry over. On macOS Seatbelt, direct python/python3 commands automatically prepare managed Python; other commands do not. Set python_environment=managed for shell commands or entry points that invoke Python indirectly. Skill scripts retain managed Python by default. For installations set timeout_seconds explicitly and keep progress visible; do not pipe installers to tail. Shell pipelines report the final command status: use bash -o pipefail or download with curl -f to a file and only execute it after success. Use install_python_packages for shared Python dependencies.',
+        description='Execute an argv command in the selected sandbox. Long operations return status=running and an operation_id after wait_seconds (default 1). Use wait_sandbox_operation to collect the result or do independent work; never resubmit running work. Commands run concurrently in the shared workspace and HOME. Inspect active_commands to coordinate with other Agents; avoid overwriting their edits. Cancellation and timeout affect only the selected command. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES. Calls use fresh non-interactive processes: cd/export/venv activation do not carry over. Use direct python3 -c only for short probes; save longer programs with write_sandbox_text_file and then execute the saved file with direct argv. On macOS Seatbelt, direct python/python3 commands automatically prepare managed Python; shell-wrapped Python does not. Set python_environment=managed for shell commands or entry points that invoke Python indirectly. Skill scripts retain managed Python by default. For installations set timeout_seconds explicitly and keep progress visible; do not pipe installers to tail. Shell pipelines and compound commands can hide earlier failures: check stderr and every expected file as well as exit_code. Use install_python_packages for shared Python dependencies.',
         input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}, "python_environment": {"type": "string", "enum": ["auto", "managed", "none"], "description": "macOS Seatbelt Python preparation: auto for direct python commands, managed for commands that invoke Python indirectly, none for system-only commands. Other runtimes always use their managed Python."}, "wait_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 1, "description": "Host observation budget; returns operation_id if still running. Use wait_sandbox_operation later, not a duplicate submission."}, "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 36000, "description": "Command wall-clock budget in seconds. Omit to use Sandbox settings; set explicitly for slow installs."}}, "required": ["argv"], "additionalProperties": False}), _execute_sandbox)
+    registry.register_capability(CapabilityDefinition(
+        kind='sandbox.write_text_file', tool_name='write_sandbox_text_file',
+        target_parameter='sandbox', target_capabilities=frozenset({'sandbox.execute'}),
+        description='Save a UTF-8 text file in the authorized Sandbox workspace without a shell or heredoc. Use for Python modelling/analysis scripts, then execute the saved .py with a separate direct python3 argv command. Existing files require overwrite=true. Returns the byte count and SHA-256; only report success after running and checking the script.',
+        input_schema={"type": "object", "properties": {
+            "path": {"type": "string", "minLength": 1, "description": "Workspace-relative path using forward slashes; no traversal."},
+            "content": {"type": "string", "minLength": 1, "description": "Complete UTF-8 file contents (at most 256 KiB)."},
+            "overwrite": {"type": "boolean", "default": False}},
+            "required": ["path", "content"], "additionalProperties": False}), _write_sandbox_text_file)
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.cancel_command', tool_name='cancel_command', target_parameter='sandbox',
         description='Cancel one command and wait for its process cleanup. Inspect active_commands and supply its id as command_id. Agents may cancel their own commands; cancelling another Agent requires sandbox.stop authority. A stale ID cannot cancel a newer command.',
         input_schema={"type": "object", "properties": {"command_id": {"type": "string", "minLength": 1}}, "required": ["command_id"], "additionalProperties": False}), _cancel_sandbox_command)
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.wait', tool_name='wait_sandbox_operation', target_parameter='sandbox',
+        read_only=True,
         target_capabilities=frozenset({'sandbox.execute'}),
         description='Wait for an existing command, Skill script, or Python installation without launching any process. Use operation_id from a running result or id from inspect_sandbox. wait_seconds=0 inspects immediately; 1-60 waits on the host. A wait timeout returns running and never cancels or resubmits work. Omit operation_id for a cancellable host timer when waiting for an external resource; elapsed time does not prove readiness. Check the final result before claiming success; do independent work between waits.',
         input_schema={"type": "object", "properties": {"operation_id": {"type": "string", "minLength": 1}, "wait_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 30}}, "additionalProperties": False}), _wait_sandbox_operation)
@@ -945,6 +967,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         input_schema=skill_script_schema(), selectors=(SKILL_SELECTOR, *EXECUTION_SELECTORS), target_capabilities=frozenset({"sandbox.execute"})), _run_skill_script)
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.inspect', tool_name='inspect_sandbox', target_parameter='sandbox',
+        read_only=True,
         description='Inspect the selected sandbox before executing: returns its operating system, shell argv prefix, cwd, read/write access, resource directory and availability.',
         input_schema={"type": "object", "properties": {}, "additionalProperties": False}), _inspect_sandbox)
     registry.register_node_type(NodeTypeDefinition(
@@ -1083,14 +1106,14 @@ def _register_builtin(registry: PluginRegistration) -> None:
         description="The agent can run commands in this isolated workplace. Starting and stopping require manual control.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.sandbox"}),
         templateable=True,
-        capabilities=(CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.cancel_command'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.wait'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
+        capabilities=(CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.write_text_file'), CapabilityGrantDefinition(kind='sandbox.cancel_command'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.wait'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
     ))
     registry.register_relationship(RelationshipDefinition(
         canvas_requires_confirmation=True, id="execute_manage", label="Execute + Start/Stop", short_label="execute + manage",
         description="The agent can run commands, start this Sandbox and stop it, including active commands.",
         source_traits=frozenset({"core.agent"}), target_traits=frozenset({"core.sandbox"}),
         templateable=True,
-        capabilities=(CapabilityGrantDefinition(kind='sandbox.start'), CapabilityGrantDefinition(kind='sandbox.stop'), CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.cancel_command'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.wait'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
+        capabilities=(CapabilityGrantDefinition(kind='sandbox.start'), CapabilityGrantDefinition(kind='sandbox.stop'), CapabilityGrantDefinition(kind='sandbox.execute'), CapabilityGrantDefinition(kind='sandbox.write_text_file'), CapabilityGrantDefinition(kind='sandbox.cancel_command'), CapabilityGrantDefinition(kind='sandbox.install_python_packages'), CapabilityGrantDefinition(kind='sandbox.run_skill_script'), CapabilityGrantDefinition(kind='sandbox.inspect'), CapabilityGrantDefinition(kind='sandbox.wait'), CapabilityGrantDefinition(kind='sandbox.copy_skill_resource')),
     ))
     registry.register_relationship(RelationshipDefinition(
         id="mount_read_only", label="Mount read-only", short_label="read-only",

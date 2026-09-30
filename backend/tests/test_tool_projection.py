@@ -179,7 +179,7 @@ def test_sandbox_alone_does_not_expose_composite_tool(client):
     agent = create_node(client, "agent")
     sandbox = create_node(client, "sandbox")
     connect(client, agent, sandbox, "execute")
-    assert set(tools(client, agent)[1]) == {"execute_command", "inspect_sandbox", "install_python_packages", "cancel_command", "wait_sandbox_operation"}
+    assert set(tools(client, agent)[1]) == {"execute_command", "write_sandbox_text_file", "inspect_sandbox", "install_python_packages", "cancel_command", "wait_sandbox_operation"}
 
 
 def test_python_install_tool_requires_live_sandbox_authority(client, monkeypatch):

@@ -10,11 +10,39 @@ from backend.tests.test_skill_runtime import runtime_client, setup_skill, run
 from backend.tests.conftest import create_node
 from backend.tests.test_skill_packages import edit
 from backend.capabilities.provider import WorldAgentCapabilityProvider
-from backend.errors import PermissionDeniedError
+from backend.errors import PermissionDeniedError, ResourceValidationError
 from backend.sandbox.files import operate, pinned, PREVIEW_LIMIT, DIRECTORY_LIMIT
 from backend.sandbox.models import SandboxSecurityError, SandboxValidationError
 from backend.sandbox.linux import bubblewrap_command, service_command, _SERVICE_GUARD
 from backend.sandbox.models import ResourceAccess, SandboxLimits
+
+
+def test_direct_command_through_manager_does_not_write_partial_history(runtime_client):
+    client, backend, _ = runtime_client
+    _, sandbox, *_ = setup_skill(client)
+    services = client.app.state.services
+    from backend.sandbox.manager import SandboxManager, _Binding
+    from backend.sandbox.registry import SandboxRuntime, SandboxRuntimeRegistration, SandboxRuntimeRegistry
+
+    async def available():
+        return True, None
+
+    registry = SandboxRuntimeRegistry()
+    registry.register(SandboxRuntimeRegistration(
+        SandboxRuntime("windows", "Windows", "windows", ("cmd.exe", "/d", "/s", "/c")),
+        lambda: backend, available,
+    ))
+    manager = SandboxManager(backend._managed_root, registry)
+    manager._backends["windows"] = backend
+    manager._bindings[sandbox["id"]] = _Binding(
+        sandbox["id"], runtime="windows", resolved_runtime="windows", provisioned=True,
+    )
+    services.sandbox_backend = manager
+
+    response = client.post(f"/api/sandboxes/{sandbox['id']}/execute", json={"command": "echo ready"})
+    assert response.status_code == 200, response.text
+    records = client.get(f"/api/sandboxes/{sandbox['id']}/history").json()
+    assert records and all(isinstance(record.get("argv"), list) for record in records)
 
 
 def local(client, node, variables):
@@ -240,6 +268,41 @@ def test_copy_parent_creation_rejects_invalid_targets(tmp_path, failure):
         assert (root / "new").read_text() == "keep"
     if failure == "missing_root":
         assert not root.exists()
+def test_agent_saves_source_in_authorized_sandbox_workspace(runtime_client):
+    client, backend, native = runtime_client
+    agent, sandbox, _, _, edges = setup_skill(client)
+    provider = WorldAgentCapabilityProvider(client.app.state.services)
+    request = {"sandbox": sandbox["id"], "path": "build.py", "content": "print('ready')\n"}
+    result = client.portal.call(provider.invoke_tool, agent["id"],
+        "operation:write_sandbox_text_file", request)
+    assert result["path"] == "build.py" and result["written"] == len(request["content"])
+    root = backend._sandboxes_root / sandbox["id"] / "workspace"
+    assert (root / "build.py").read_text() == request["content"]
+    result = client.portal.call(provider.invoke_tool, agent["id"],
+        "operation:execute_command", {"sandbox": sandbox["id"],
+                                      "argv": ["python", "build.py"]})
+    assert result["exit_code"] == 0
+    assert native.last_argv == ("python", "build.py")
+    with pytest.raises(OSError):
+        client.portal.call(provider.invoke_tool, agent["id"],
+            "operation:write_sandbox_text_file", request)
+    changed = {**request, "content": "print('updated')\n", "overwrite": True}
+    client.portal.call(provider.invoke_tool, agent["id"],
+        "operation:write_sandbox_text_file", changed)
+    assert (root / "build.py").read_text() == changed["content"]
+    with pytest.raises(SandboxValidationError):
+        client.portal.call(provider.invoke_tool, agent["id"],
+            "operation:write_sandbox_text_file", {**request, "path": "../escape.py"})
+    with pytest.raises(ResourceValidationError):
+        client.portal.call(provider.invoke_tool, agent["id"],
+            "operation:write_sandbox_text_file", {**request, "path": "nul.py", "content": "bad\0code"})
+    with pytest.raises(ResourceValidationError):
+        client.portal.call(provider.invoke_tool, agent["id"],
+            "operation:write_sandbox_text_file", {**request, "path": "large.py", "content": "x" * (256 * 1024 + 1)})
+    client.delete(f"/api/edges/{edges[0]['id']}")
+    with pytest.raises(PermissionDeniedError):
+        client.portal.call(provider.invoke_tool, agent["id"],
+            "operation:write_sandbox_text_file", {**request, "path": "other.py"})
 
 
 def test_receipt_recovery_cancelled_peer_and_configuration_snapshot(runtime_client, monkeypatch):

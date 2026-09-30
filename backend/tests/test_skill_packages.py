@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from backend.capabilities.provider import WorldAgentCapabilityProvider
 from backend.config import Settings
-from backend.errors import PermissionDeniedError
+from backend.errors import PermissionDeniedError, ResourceValidationError
 from backend.main import create_app
 from backend.plugins.loader import load_plugin_registry
 from backend.services import create_services
@@ -42,9 +42,14 @@ def test_toolbox_editing_progressive_read_and_legion_copy(client):
         return client.portal.call(provider.invoke_tool, agent["id"], tool.capability_id, {"toolbox": node["id"], **arguments})
     listing = read({})
     assert listing["instructions"] == "Check the result before handing it over."
-    assert listing["skills"] == [{"id": skill_id, "name": "Review", "description": "Review a patch"}]
+    assert listing["skills"] == [{"id": skill_id, "skill_id": "review", "name": "Review", "description": "Review a patch"}]
     assert read({"skill_id": skill_id})["skill"] == skill
+    compact = read({"skill_id": "review", "include_file_contents": False})["skill"]
+    assert compact["instructions"] == skill["instructions"]
+    assert compact["files"] == {"checklist.md": {"media_type": "text/plain", "size_bytes": len("Check the public API.".encode())}}
     assert read({"skill_id": skill_id, "file_path": "checklist.md"})["file"]["content"] == "Check the public API."
+    with pytest.raises(ResourceValidationError, match="Unknown Skill ID"):
+        read({"skill_id": "review_typo"})
     edit(client, node, "upsert", {**skill, "instructions": "Follow the updated review procedure."})
     assert read({"skill_id": skill_id})["skill"]["instructions"] == "Follow the updated review procedure."
 
@@ -164,6 +169,8 @@ def test_direct_skill_connection_stays_scoped_when_membership_changes(client):
     result = read(tool)
     assert set(result) == {"skill"}
     assert result["skill"]["instructions"] == "Direct content"
+    compact = read(tool, {"include_file_contents": False})["skill"]
+    assert compact["files"] == {"scripts/check.py": {"media_type": "text/plain", "size_bytes": len("print(1)".encode())}}
     assert read(tool, {"file_path": "scripts/check.py"})["file"]["content"] == "print(1)"
     client.post("/api/edges", json={"source": agent["id"], "target": box["id"], "relationship": "oaw.skills.use"})
     whole = next(item for item in client.portal.call(provider.list_tools, agent["id"]) if item.capability_id != tool.capability_id)
