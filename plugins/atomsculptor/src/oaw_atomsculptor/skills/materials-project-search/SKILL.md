@@ -6,6 +6,24 @@ when_to_use: Use when the user asks to fetch a real material from MP, pick a pol
 
 # Materials Project Search Instructions
 
+## OAW execution contract
+
+This Skill ships `scripts/materials_project.py`. Run it only through an
+authorized OAW Sandbox with explicit network access. Install `mp-api` **in that
+Sandbox**, select an Environment Profile containing `MP_API_KEY`, and never put
+the key in a prompt, command argument, card configuration, or Artifact.
+
+```sh
+python3 scripts/materials_project.py search --formula SiO2 --limit 10 --output candidates.json
+python3 scripts/materials_project.py download --material-id mp-13 --output mp-13.cif
+```
+
+Read the JSON result before choosing an ID; a formula can match several
+polymorphs. Import the downloaded CIF through the Atom Structure workspace or
+its explicit conversion workflow. The script does not mutate an OAW document.
+If the Sandbox is offline, report that MP lookup is unavailable rather than
+claiming that a memorized material ID or lattice parameter was fetched live.
+
 ## Common Workflow
 
 1. **Identify target material properties**
@@ -33,8 +51,9 @@ when_to_use: Use when the user asks to fetch a real material from MP, pick a pol
    - Save in desired format (CIF, XYZ, POSCAR)
 
 5. **Handle API failures (if applicable)**
-   - If MP API unavailable, use manual creation with known parameters
-   - Document source of alternative parameters
+   - If MP API is unavailable, report that no live MP result was obtained.
+     A separate manual build needs user authorization and a cited parameter
+     source; it is not a substitute MP search result.
 
 ## Key Considerations
 
@@ -67,7 +86,8 @@ when_to_use: Use when the user asks to fetch a real material from MP, pick a pol
 1. **API connection failure**
    - Symptom: Cannot connect to Materials Project
    - Cause: Network issues, proxy errors, API downtime
-   - Fix: Create structure manually with known parameters
+   - Fix: Report the unavailable lookup; if appropriate, request a separate
+     manual-build workflow with sourced parameters.
    - Example: BCC Fe with a=2.866 Å, space group Im-3m
 
 2. **Non-existent crystal structure**
@@ -109,7 +129,8 @@ when_to_use: Use when the user asks to fetch a real material from MP, pick a pol
 - Check for any unusual atomic positions
 
 ### Manual Structure Creation Parameters
-When MP API is unavailable, use known parameters:
+These are illustrative starting values, **not** live MP results or a license
+to build a different structure when the user asked for a database record:
 - **BCC Fe**: a=2.866 Å, space group Im-3m (229), 2 atoms in conventional cell
 - **FCC Cu**: a=3.615 Å, space group Fm-3m (225), 4 atoms in conventional cell
 - **FCC Pt**: a=3.924 Å, space group Fm-3m (225), 4 atoms in conventional cell

@@ -6,7 +6,35 @@ when_to_use: Use when constructing a single molecule, an organometallic compound
 
 # Molecular Structure Creation Instructions
 
+## OAW SMILES button
+
+For a structured `molecule` request, use the bundled `scripts/smiles_builder.py`
+with the exact `smiles` value. Install this Skill's `requirements.txt` in the
+selected OAW Sandbox first. The script generates a reproducible RDKit conformer
+and writes ExtXYZ. To add the molecule to an existing structure, supply a
+file-backed input created by `structure-inspect`'s
+`from_atomsculptor_document` converter; the script keeps its per-atom stable
+IDs and places the new molecule outside its current X extent. This is an
+initial placement, not a chemically optimized adsorption site.
+Periodic hosts are rejected by this automatic placement path because placing
+outside the cell can wrap onto occupied atoms; use an explicit site workflow.
+
+```sh
+python3 scripts/smiles_builder.py --smiles CCO --output-name ethanol.extxyz
+python3 scripts/smiles_builder.py --smiles CCO --input-name host.extxyz --output-name host_ethanol.extxyz
+```
+
+Convert the output with `to_atomsculptor_document` and write it back only
+with the latest structure revision. If the original structure cannot be
+materialized in the Sandbox, do not claim the molecule was added to it.
+
 ## Common Workflow
+
+The methods below are possible starting approaches, not additional bundled
+OAW executables. Only the `smiles_builder.py` script above is packaged with
+this Skill. A Fibonacci-sphere point set is not by itself a chemically bonded
+fullerene; do not present one as a validated cage without topology and bond
+checks. Use only user-permitted libraries and authorized OAW resources.
 
 1. **Search for existing structure data**
    - Check Materials Project for crystalline molecular compounds

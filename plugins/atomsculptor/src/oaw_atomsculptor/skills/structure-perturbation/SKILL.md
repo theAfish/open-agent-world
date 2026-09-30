@@ -7,6 +7,12 @@ entry: scripts/structure_perturbation.py
 
 # Structure Perturbation
 
+This is a file-based procedure. Read it from a connected Skill card, run its
+script through `run_skill_script` in an independently authorized Sandbox,
+and check the completed operation before using its output. A generated file
+does not change the connected Atom Structure; import it explicitly with a
+freshly inspected revision only when the user requested replacement.
+
 Two CLI sub-commands:
 
 - `perturb_structure` — produce one perturbed copy with stats.

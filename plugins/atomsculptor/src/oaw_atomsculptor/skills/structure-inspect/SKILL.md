@@ -25,6 +25,7 @@ python3 scripts/structure_inspect.py read_structure --folder . --file-name Fe_bc
 python3 scripts/structure_inspect.py calculate_distance --folder . --file-name slab.extxyz --index1 0 --index2 5
 python3 scripts/structure_inspect.py check_close_atoms --folder . --file-name slab.extxyz --tolerance -0.3
 python3 scripts/structure_inspect.py to_atomsculptor_document --folder . --file-name slab.extxyz
+python3 scripts/structure_inspect.py to_atomsculptor_document --folder . --file-name slab.extxyz --output-name slab.document.json
 python3 scripts/structure_inspect.py from_atomsculptor_document --document structure.json --output-name bulk.extxyz
 ```
 
@@ -32,7 +33,15 @@ python3 scripts/structure_inspect.py from_atomsculptor_document --document struc
 parsed via `pymatgen.io.cif.CifParser` to avoid ASE's slow path.
 
 Use the two converters whenever a structure must move between an OAW Atom
-Structure card and a Sandbox file. Never retype or summarize atom lists: pass
-the `document` JSON from `to_atomsculptor_document` unchanged to
-`replace_atom_structure`, and give `from_atomsculptor_document` the inspected
-document so generated files keep stable atom identities.
+Structure card and a Sandbox file. Never retype or summarize atom lists. For
+small manual workflows, the inline `document` form is supported, but the
+file-backed bridge below is the default for Agent workflows.
+
+For large structures, use `stage_atom_structure_file` to copy the exact
+revisioned document into the authorized Sandbox without sending it through
+the model. Run `from_atomsculptor_document` against that returned JSON path.
+After a modelling script, run `to_atomsculptor_document` with `--output-name`
+to write a canonical JSON file in the Sandbox, then call
+`import_atom_structure_file` with that path and a freshly inspected Structure
+revision and `structure_digest`. These two OAW tools check both Structure and Sandbox permissions and
+return only file metadata and document summary to the model.
