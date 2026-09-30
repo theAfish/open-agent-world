@@ -24,6 +24,30 @@ describe("Application settings", () => {
   });
   afterEach(cleanup);
 
+  it.each(["folder", "file"] as const)("uses the shared %s picker and saves global permissions", async (kind) => {
+    vi.mocked(worldApi.getSandboxSettings).mockResolvedValue({ workspace_root: null, runtime: "auto", environment_variables: {} });
+    vi.spyOn(worldApi, kind === "file" ? "pickFile" : "pickFolder").mockResolvedValue({ path: "D:\\Models" });
+    vi.spyOn(worldApi, "inspectEnvironmentPath").mockResolvedValue({ path: "D:\\Models", kind });
+    const save = vi.spyOn(worldApi, "saveSandboxSettings").mockImplementation(async body => ({ ...body, folder_bindings: body.folders }));
+    render(<SettingsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Sandbox" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Add variable" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Add variable" }));
+    fireEvent.change(screen.getByLabelText("Environment variable 1 name"), { target: { value: "MODELS" } });
+    fireEvent.change(screen.getByLabelText("Environment variable 1 type"), { target: { value: "path" } });
+    expect((screen.getByLabelText("Environment variable 1 access") as HTMLSelectElement).value).toBe("read_only");
+    fireEvent.click(screen.getByLabelText("Browse for Environment variable 1 path"));
+    fireEvent.click(screen.getByRole("button", { name: kind === "file" ? "Choose file" : "Choose folder" }));
+    await screen.findByDisplayValue("D:\\Models");
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    const request = save.mock.calls[0][0];
+    const reference = (request.environment_variables!.MODELS as Record<string, string>)["path_ref"];
+    expect(request.folders).toEqual({ [reference]: { path: "D:\\Models", access: "read_only" } });
+    await screen.findByText("Settings saved");
+    expect((screen.getByLabelText("Environment variable 1 path") as HTMLInputElement).value).toBe("D:\\Models");
+  });
+
   it("edits global environment values and removes inherited defaults", async () => {
     vi.spyOn(worldApi, "getSandboxSettings").mockResolvedValue({ workspace_root: null, runtime: "auto", environment_variables: { OLD: "remove", REGION: "before" } });
     const save = vi.spyOn(worldApi, "saveSandboxSettings").mockResolvedValue({ workspace_root: null, runtime: "auto", environment_variables: { REGION: " after=change " } });

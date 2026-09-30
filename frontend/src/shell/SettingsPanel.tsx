@@ -15,7 +15,7 @@ import type { SandboxSettings, StorageSettings } from "../api/client";
 import type { SandboxRuntime } from "../types/world";
 import { FolderPathInput } from "./FolderPathInput";
 import { DeepLSettings } from "./DeepLSettings";
-import { EnvironmentVariablesEditor, environmentSecretUpdates, environmentVariablesFromValue, environmentVariablesToValue, type EnvironmentVariableRow } from "../cards/ExecutionConfiguration";
+import { EnvironmentVariablesEditor, environmentSecretUpdates, environmentFolderUpdates, environmentVariablesFromValue, environmentVariablesToValue, type EnvironmentVariableRow } from "../cards/ExecutionConfiguration";
 
 export function SettingsPanel() {
   const { locale, setLocale } = useLocale();
@@ -92,7 +92,7 @@ export function SettingsPanel() {
         if (!active) return;
         setSandbox(value);
         setEnvironmentSecrets({});
-        setEnvironmentRows(environmentVariablesFromValue({ variables: value.environment_variables ?? {} }));
+        setEnvironmentRows(environmentVariablesFromValue({ variables: value.environment_variables ?? {} }, value.folder_bindings));
         setRuntimes(catalog.runtimes);
         setLoaded(true);
       })
@@ -121,8 +121,10 @@ export function SettingsPanel() {
       } else if (section === "sandbox") {
         const variables = environmentVariablesToValue(environmentRows).variables as NonNullable<SandboxSettings["environment_variables"]>;
         const secrets = environmentSecretUpdates(environmentRows, environmentSecrets, sandbox.secret_bindings ?? {});
-        const saved = await worldApi.saveSandboxSettings({ ...(Object.keys(secrets).length ? { secrets } : {}), runtime: sandbox.runtime, workspace_root: sandbox.workspace_root?.trim() || null, environment_variables: variables });
+        const folders = environmentFolderUpdates(environmentRows);
+        const saved = await worldApi.saveSandboxSettings({ ...(Object.keys(secrets).length ? { secrets } : {}), ...(Object.keys(folders).length ? { folders } : {}), runtime: sandbox.runtime, workspace_root: sandbox.workspace_root?.trim() || null, environment_variables: variables });
         setSandbox(saved);
+        setEnvironmentRows(environmentVariablesFromValue({ variables: saved.environment_variables ?? {} }, saved.folder_bindings));
         setEnvironmentSecrets({});
         setSandboxSaved(true);
       } else {

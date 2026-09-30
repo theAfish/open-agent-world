@@ -1,4 +1,12 @@
 {
+  "Path": ["Path", "路径"],
+  "Path (file or folder)": ["Path (file or folder)", "路径（文件或文件夹）"],
+  "Environment variable {v0} path": ["Environment variable {v0} path", "环境变量 {v0} 的路径"],
+  "Choose a file or folder on this host": ["Choose a file or folder on this host", "选择此主机上的文件或文件夹"],
+  "Choose a file or folder": ["Choose a file or folder", "选择文件或文件夹"],
+  "Choose file": ["Choose file", "选择文件"],
+  "Choose folder": ["Choose folder", "选择文件夹"],
+  "Read and write applies to the selected file or folder.": ["Read and write applies to the selected file or folder.", "读写权限适用于所选文件或文件夹。"],
   "A canvas for working with AI agents.": ["A canvas for working with AI agents.", "? AI ?????????"],
   "Start blank": ["Start blank", "?????"],
   "Card implementation unavailable": ["Card implementation unavailable", "卡片实现缺失"],
@@ -7239,5 +7247,21 @@
   "Runs application code. Install only from a trusted source.": [
     "Runs application code. Install only from a trusted source.",
     "此卡包会运行程序代码，请确认来源可信。"
-  ]
+  ],
+  "Environment variable {v0} access": ["Environment variable {v0} access", "环境变量 {v0} 的权限"],
+  "Environment variable {v0} folder": ["Environment variable {v0} folder", "环境变量 {v0} 的文件夹"],
+  "Choose a folder on this host": ["Choose a folder on this host", "选择此主机上的文件夹"],
+  "Commands can create, change and delete files in this folder.": ["Commands can create, change and delete files in this folder.", "命令可以新建、修改和删除此文件夹内的文件。"],
+  "Commands can read files in this folder.": ["Commands can read files in this folder.", "命令可以读取此文件夹内的文件。"],
+  "The variable receives its accessible path inside the Sandbox.": ["The variable receives its accessible path inside the Sandbox.", "变量会自动获得沙箱内可访问的路径。"],
+  "Choose a folder for {v0}, or remove the unused variable.": ["Choose a folder for {v0}, or remove the unused variable.", "请为 {v0} 选择文件夹，或移除不用的变量。"],
+  "Unbound folder": ["Unbound folder", "未绑定文件夹"],
+  "Unbound file": ["Unbound file", "未绑定文件"],
+  "Environment variable {v0} file": ["Environment variable {v0} file", "环境变量 {v0} 的文件"],
+  "Choose a file on this host": ["Choose a file on this host", "选择此主机上的文件"],
+  "Choose a file in the system window.": ["Choose a file in the system window.", "请在系统窗口中选择文件。"],
+  "Commands can read and change this file's contents. To rename or replace files, choose their folder.": ["Commands can read and change this file's contents. To rename or replace files, choose their folder.", "命令可以读取和修改此文件的内容。若需重命名或替换文件，请选择其所在文件夹。"],
+  "Read only allows reading and copying into the working folder. Source files cannot be changed.": ["Read only allows reading and copying into the working folder. Source files cannot be changed.", "只读允许读取和复制到工作目录，不允许修改源文件。"],
+  "Paths are converted automatically for the Sandbox runtime.": ["Paths are converted automatically for the Sandbox runtime.", "路径会自动转换为沙箱运行环境中可访问的格式。"],
+  "Choose a file or folder for {v0}, or remove the unused variable.": ["Choose a file or folder for {v0}, or remove the unused variable.", "请为 {v0} 选择文件或文件夹，或移除不用的变量。"]
 }

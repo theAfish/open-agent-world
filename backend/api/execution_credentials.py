@@ -4,6 +4,7 @@ from backend.api.dependencies import get_services
 from backend.errors import ResourceValidationError, RevisionConflictError
 from backend.execution_config import EnvironmentProfile, SecretRequirement
 from backend.node_documents import read_document
+from backend.security.execution_folders import folder_store
 
 router = APIRouter(prefix="/nodes", tags=["execution-credentials"])
 
@@ -16,7 +17,7 @@ async def save_environment(node_id: str, request: Request, services=Depends(get_
         payload = await request.json()
     except ValueError:
         raise ResourceValidationError("Invalid environment request") from None
-    if not isinstance(payload, dict) or set(payload) != {"value", "secrets", "expected_revision"}:
+    if not isinstance(payload, dict) or set(payload) - {"value", "secrets", "expected_revision", "folders"} or not {"value", "secrets", "expected_revision"} <= set(payload):
         raise ResourceValidationError("Supply value, secrets and expected_revision")
     secrets = payload["secrets"]
     if not isinstance(secrets, dict) or any(
@@ -38,14 +39,32 @@ async def save_environment(node_id: str, request: Request, services=Depends(get_
         services.node_execution.assert_editable(node_id)
         if snapshot["revision"] != payload["expected_revision"]:
             raise RevisionConflictError("Environment changed; reload before saving")
+        from backend.sandbox.settings import SandboxSettingsStore
+        store = folder_store(services)
+        updates = payload.get("folders", {})
+        if not isinstance(updates, dict):
+            raise ResourceValidationError("folders must be an object")
+        try:
+            prepared = store.prepare(node_id, profile.variables, updates,
+                SandboxSettingsStore(services.database, services.settings.data_root).validator)
+        except ValueError as error:
+            raise ResourceValidationError("Invalid folder configuration") from error
         for name, value in profile.variables.items():
             if (isinstance(value, SecretRequirement) and value.secret_ref not in secrets
                     and not services.execution_credentials.configured(node_id, value.secret_ref)):
                 raise ResourceValidationError(f"Enter a secret for {name}, or remove the unused variable")
         with services.execution_credentials.database.transaction(immediate=True):
+            store.save_bindings(node_id, profile.variables, EnvironmentProfile.model_validate(snapshot["value"]).variables, prepared)
             for reference, value in secrets.items():
                 services.execution_credentials.bind(node_id, reference, value)
             return write_document(services, node_id, profile.model_dump(mode="json"), snapshot["revision"])
+
+
+@router.get("/{node_id}/environment-folders")
+async def folder_bindings(node_id: str, services=Depends(get_services)):
+    async with services._node_mutation(read_only=True):
+        snapshot, _ = requirements(services, node_id)
+        return folder_store(services).public(node_id, EnvironmentProfile.model_validate(snapshot["value"]).variables)
 
 
 def requirements(services, node_id):

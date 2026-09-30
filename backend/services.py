@@ -3049,7 +3049,12 @@ class ApplicationServices:
                         _, pending_variables = effective_variables(self, sandbox_id, environment_id)
                         if (pending_variables or target_id or environment_id) and not backend.supports_invocation_environment:
                             raise SandboxValidationError("This Sandbox backend does not support invocation configuration")
-                        injected, secrets = resolve_sandbox_configuration(self, sandbox_id, environment_id, target_id)
+                        folder_mounts = []
+                        injected, secrets = resolve_sandbox_configuration(self, sandbox_id, environment_id, target_id, folder_mounts=folder_mounts)
+                        if folder_mounts:
+                            if not backend.supports_folder_mounts:
+                                raise SandboxValidationError("This Sandbox runtime does not support folder variables")
+                            options["folder_mounts"] = tuple(folder_mounts)
                         if injected:
                             if not backend.supports_invocation_environment:
                                 raise SandboxValidationError("This Sandbox backend does not support invocation configuration")

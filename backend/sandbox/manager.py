@@ -11,7 +11,7 @@ from typing import Any, Mapping, Sequence
 from .base import SandboxBackend
 from .materialization import RuntimeMount
 from .models import (
-    CommandResult, ResourceAccess, ResourceAttachment, SandboxInfo,
+    CommandResult, ResourceAccess, ResourceAttachment, SandboxInfo, FolderMount,
     SandboxError, SandboxNotFoundError, SandboxSecurityError, SandboxState,
     SandboxStateError, SandboxValidationError, SandboxNetworkError,
 )
@@ -34,6 +34,7 @@ class _Binding:
 
 class SandboxManager(SandboxBackend):
     supports_invocation_environment = True
+    supports_folder_mounts = True
 
     def __init__(self, root: Path, registry: SandboxRuntimeRegistry, *, preferred: str = "auto") -> None:
         self.root = root.resolve()
@@ -97,13 +98,22 @@ class SandboxManager(SandboxBackend):
     def validate_workspace(self, workspace_path: str | None) -> str | None:
         if workspace_path is None:
             return None
+        return self._validate_host_path(workspace_path, "folder")
+
+    def validate_environment_path(self, raw: str, kind: str = "folder") -> str:
+        from .environment import host_environment_path
+        return self._validate_host_path(host_environment_path(raw), kind)
+
+    def _validate_host_path(self, workspace_path: str, kind: str) -> str:
         path = Path(workspace_path)
         if not path.is_absolute() or "\x00" in workspace_path:
             raise SandboxValidationError("workspace_path must be an absolute directory on the backend host")
         try:
             resolved = path.resolve(strict=True)
-            if not resolved.is_dir():
-                raise SandboxValidationError("workspace_path must be an existing directory")
+            if kind not in ("folder", "file") or not (resolved.is_file() if kind == "file" else resolved.is_dir()):
+                raise SandboxValidationError(f"path must be an existing {kind}")
+            if kind == "file" and resolved.stat().st_nlink != 1:
+                raise SandboxValidationError("file variables may not expose hard-linked files")
             if resolved == Path(resolved.anchor) or resolved == Path.home().resolve():
                 raise SandboxValidationError("choose a project folder, not a drive root or your home folder")
             if resolved.is_relative_to(self.root) or self.root.is_relative_to(resolved):
@@ -273,12 +283,19 @@ class SandboxManager(SandboxBackend):
     async def execute(self, sandbox_id: str, argv: Sequence[str], *, timeout_seconds: float | None = None,
                       env: Mapping[str, str] | None = None,
                       invocation_env: Mapping[str, str] | None = None,
-                      runtime_mount: RuntimeMount | None = None) -> CommandResult:
+                      runtime_mount: RuntimeMount | None = None,
+                      folder_mounts: Sequence[FolderMount] = ()) -> CommandResult:
         binding = self._binding(sandbox_id)
         if not binding.provisioned:
             raise SandboxStateError("Start the Sandbox before executing commands")
         options = {"runtime_mount": runtime_mount} if runtime_mount is not None else {}
         backend = self._backend(binding.resolved_runtime or "")
+        if folder_mounts:
+            if not backend.supports_folder_mounts:
+                raise SandboxValidationError("This Sandbox runtime does not support folder variables")
+            for folder in folder_mounts:
+                self.validate_environment_path(folder.source, folder.kind)
+            options["folder_mounts"] = folder_mounts
         if binding.policy and backend.supports_execution_policy:
             options["execution_policy"] = dict(binding.policy)
         elif any(binding.policy.get(k, v) != v for k, v in {"network_enabled": False, "memory_bytes": 2147483648, "active_process_limit": 64}.items()):
