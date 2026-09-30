@@ -4,6 +4,10 @@ export interface RunActivityItem {
   id: string;
   type: "agent_message" | "agent_progress" | "tool_started" | "tool_completed";
   timestamp?: string;
+  kind?: string;
+  role?: string;
+  model_request?: number;
+  model_attempt?: number;
   text?: string;
   provider_message_id?: string;
   call_id?: string;
@@ -13,6 +17,9 @@ export interface RunActivityItem {
   error?: unknown;
   success?: boolean;
   truncated?: boolean;
+  streaming?: boolean;
+  interrupted?: boolean;
+  completed_tool_count?: number;
 }
 export interface RunActivityState {
   items: RunActivityItem[];
@@ -64,12 +71,19 @@ export function mergeRunActivity(
     let index = items.findIndex(item => item.id === event.id);
     if (type === "agent_message" || type === "agent_progress") {
       if (type === "agent_progress" && payload.kind !== undefined &&
-        !["status", "plan", "reasoning_summary"].includes(String(payload.kind))) continue;
+        !["status", "plan", "reasoning_summary", "model_reasoning", "model_stream_retry", "model_stream_interrupted"].includes(String(payload.kind))) continue;
       const content = text(payload.text);
       if (!content?.trim()) continue;
       if (providerId) index = items.findIndex(item => item.type === type && item.provider_message_id === providerId);
       const item: RunActivityItem = { id: event.id, type, timestamp: event.timestamp,
-        text: content.slice(0, 100_000), provider_message_id: providerId, truncated: content.length > 100_000 };
+        kind: text(payload.kind), role: text(payload.role),
+        model_request: typeof payload.model_request === "number" ? payload.model_request : undefined,
+        model_attempt: typeof payload.model_attempt === "number" ? payload.model_attempt : undefined,
+        text: content.slice(0, 100_000), provider_message_id: providerId,
+        truncated: Boolean(payload.truncated) || content.length > 100_000,
+        streaming: payload.streaming === true,
+        interrupted: payload.interrupted === true,
+        completed_tool_count: typeof payload.completed_tool_count === "number" ? payload.completed_tool_count : undefined };
       if (index < 0) items.push(item);
       else items[index] = { ...item, id: items[index].id, timestamp: items[index].timestamp };
       continue;

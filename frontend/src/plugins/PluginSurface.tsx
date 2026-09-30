@@ -104,6 +104,7 @@ export function PluginSurface({ card, slot, level, children }: {
     stopAnalysis: async () => { await worldApi.stopAgent(card.id); await useWorldStore.getState().refreshWorld(); },
     updateConfig: async (config) => { await updateCard(card.id, { config }, { throwOnError: true }); },
     getAgentInfo: (nodeId = card.id) => worldApi.getAgentInfo(nodeId),
+    getAgentCapabilities: async (nodeId) => (await worldApi.getAgentCapabilities(nodeId)).capabilities,
     openLinkedCanvas: async (type, name) => {
       if (!['xrd.spectrum-canvas', 'xrd.structure-canvas'].includes(type)) throw new Error('不支持的画布类型');
       const state = useWorldStore.getState();

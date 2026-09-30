@@ -233,6 +233,21 @@ describe("Sandbox workspace interaction", () => {
     expect((command as HTMLTextAreaElement).value).toBe("unfinished");
   });
 
+  it("renders incomplete historical receipts without blanking the workspace", async () => {
+    vi.mocked(worldApi.sandboxWorkspace).mockImplementation(async <T,>(_id: string, action: string): Promise<T> => {
+      if (action === "history") return [{ id: "failed-command", caller: "user", state: "error",
+        error: "Command failed before dispatch" }] as T;
+      if (action === "files") return [] as T;
+      if (action === "configuration") return { ready: true, variables: [] } as T;
+      return { entries: [] } as T;
+    });
+    render(<Workspace />);
+    await waitFor(() => expect(screen.getByRole("log").textContent).toContain("Command failed before dispatch"));
+    fireEvent.click(screen.getByRole("tab", { name: "History" }));
+    expect(screen.getAllByText("Command failed before dispatch").length).toBeGreaterThan(0);
+    expect(screen.getByRole("textbox", { name: "Command" })).toBeTruthy();
+  });
+
   it("lets Seatbelt terminal commands opt into managed Python", async () => {
     const darwinInfo = { ...info, runtime_id: "darwin", platform: "macos", shell: ["/bin/zsh", "-c"] };
     useWorldStore.setState({ sandboxInfo: { [card.id]: darwinInfo } });

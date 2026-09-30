@@ -48,8 +48,34 @@ const ToolActivity = memo(function ToolActivity({ item, active }: { item: RunAct
   </details>;
 });
 
+function reasoningForDisplay(text: string, streaming?: boolean): string {
+  if (streaming) return text;
+  // Older AtomSculptor runs saved token-sized thought parts with an added blank
+  // line between every part. Repair only that distinctive pattern on display;
+  // leave genuine multi-paragraph reasoning and the stored event untouched.
+  const fragments = text.split(/\r?\n\r?\n/);
+  if (fragments.length < 8) return text;
+  const short = fragments.filter(fragment => fragment.trim().length <= 24).length;
+  const spaced = fragments.slice(1).filter((fragment, index) =>
+    /^\s/.test(fragment) || /\s$/.test(fragments[index])).length;
+  return short / fragments.length >= 0.75 && spaced / (fragments.length - 1) >= 0.4
+    ? fragments.join("") : text;
+}
+
+const ReasoningActivity = memo(function ReasoningActivity({ item, active }: { item: RunActivityItem; active: boolean }) {
+  useLocale();
+  const [open, setOpen] = useState(active && item.streaming);
+  return <details className="run-model-reasoning" open={open}
+    onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary>{t("Model thinking")}{item.role ? ` · ${item.role.replaceAll("_", " ")}` : ""}{item.model_request ? ` #${item.model_request}` : ""}{item.model_attempt ? ` · ${t("Model attempt")} ${item.model_attempt}` : ""}{item.streaming ? ` · ${t("Live")}` : item.interrupted ? ` · ${t("Incomplete preview")}` : ""}</summary>
+    <pre>{reasoningForDisplay(item.text ?? "", item.streaming)}</pre>
+    {item.truncated ? <small>{t("Thinking text truncated")}</small> : null}
+  </details>;
+});
+
 const ActivityRow = memo(function ActivityRow({ item, active }: { item: RunActivityItem; active: boolean }) {
   if (item.type === "tool_started" || item.type === "tool_completed") return <ToolActivity item={item} active={active} />;
+  if (item.kind === "model_reasoning") return <ReasoningActivity item={item} active={active} />;
   return <div className={item.type === "agent_progress" ? "run-activity-progress" : "run-activity-text"}>
     {item.type === "agent_message" ? <MarkdownMessage content={item.text ?? ""} /> : <p>{item.text}</p>}
   </div>;

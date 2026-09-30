@@ -14,6 +14,64 @@ const activity: RunActivityState = { seen: [], truncated: false, items: [
 ] };
 
 describe("Run activity surface", () => {
+  it("keeps provider thinking separate from the final answer", () => {
+    useLocale.setState({ locale: "en" });
+    const thinking: RunActivityState = { seen: [], truncated: false, items: [
+      { id: "thought", type: "agent_progress", kind: "model_reasoning", role: "atom_sculptor",
+        model_request: 1, text: "Provider reasoning", truncated: false },
+      { id: "answer", type: "agent_message", text: "Final answer" },
+    ] };
+    const view = render(<RunActivityStream activity={thinking} />);
+    const details = view.container.querySelector(".run-model-reasoning") as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(within(details).getByText("Model thinking · atom sculptor #1")).toBeTruthy();
+    expect(within(details).getByText("Provider reasoning")).toBeTruthy();
+    expect(screen.getByText("Final answer")).toBeTruthy();
+  });
+
+  it("opens live thinking automatically and keeps it open after completion", () => {
+    useLocale.setState({ locale: "en" });
+    const item = { id: "thought", type: "agent_progress" as const, kind: "model_reasoning",
+      role: "planner", model_request: 1, text: "First", streaming: true };
+    const view = render(<RunActivityStream active activity={{ seen: [], truncated: false, items: [item] }} />);
+    const details = view.container.querySelector(".run-model-reasoning") as HTMLDetailsElement;
+    expect(details.open).toBe(true);
+    view.rerender(<RunActivityStream activity={{ seen: [], truncated: false,
+      items: [{ ...item, text: "First second", streaming: false }] }} />);
+    expect(details.open).toBe(true);
+    expect(within(details).getByText("First second")).toBeTruthy();
+  });
+
+  it("labels interrupted reasoning as an incomplete preview", () => {
+    useLocale.setState({ locale: "en" });
+    render(<RunActivityStream activity={{ seen: [], truncated: false, items: [
+      { id: "thought", type: "agent_progress", kind: "model_reasoning",
+        role: "structure_builder", model_request: 3, text: "Partial", streaming: false, interrupted: true },
+    ] }} />);
+    expect(screen.getByText("Model thinking · structure builder #3 · Incomplete preview")).toBeTruthy();
+  });
+
+  it("repairs legacy token-by-token line breaks only in saved thinking", () => {
+    useLocale.setState({ locale: "en" });
+    const oldText = "Let\n\n me\n\n plan\n\n the\n\n request.\n\n Then\n\n delegate\n\n the\n\n task.";
+    const item = { id: "thought", type: "agent_progress" as const, kind: "model_reasoning",
+      role: "planner", text: oldText, streaming: false };
+    const view = render(<RunActivityStream activity={{ seen: [], truncated: false, items: [item] }} />);
+    expect(view.container.querySelector(".run-model-reasoning pre")?.textContent)
+      .toBe("Let me plan the request. Then delegate the task.");
+    view.rerender(<RunActivityStream activity={{ seen: [], truncated: false,
+      items: [{ ...item, streaming: true }] }} />);
+    expect(view.container.querySelector(".run-model-reasoning pre")?.textContent).toBe(oldText);
+  });
+
+  it("preserves genuine paragraph breaks in saved thinking", () => {
+    const text = "First complete paragraph.\n\nSecond complete paragraph.";
+    const view = render(<RunActivityStream activity={{ seen: [], truncated: false, items: [
+      { id: "thought", type: "agent_progress", kind: "model_reasoning", text, streaming: false },
+    ] }} />);
+    expect(view.container.querySelector(".run-model-reasoning pre")?.textContent).toBe(text);
+  });
+
   it("puts Stop below the ordered stream without a large running heading", () => {
     useLocale.setState({ locale: "en" });
     const stop = vi.fn();

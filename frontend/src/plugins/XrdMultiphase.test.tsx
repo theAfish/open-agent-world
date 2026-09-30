@@ -36,8 +36,11 @@ function mount(initial: XrdMultiphaseState = { status: 'idle' }, overrides: Part
     startMultiphase: vi.fn(async () => { state = { status: 'running', run_id: 'multi-1', source_match_run_id: 'search-42', trials: [] }; }),
     stopMultiphase: vi.fn(async () => { state = { ...state, status: 'cancelled' }; }),
     updateConfig: vi.fn().mockResolvedValue(undefined),
-    listCards: vi.fn(), readDocument: vi.fn(), documentAction: vi.fn(), documentDownloadUrl: vi.fn(), transform: vi.fn(), readFile: vi.fn(), openFile: vi.fn(), clearOpenedFile: vi.fn(), ...overrides,
+    listCards: vi.fn(), readDocument: vi.fn(), documentAction: vi.fn(), documentDownloadUrl: vi.fn(), transform: vi.fn(), readFile: vi.fn(), openFile: vi.fn(), clearOpenedFile: vi.fn(),
+    openWorkspace: vi.fn(), runAgent: vi.fn().mockResolvedValue(undefined),
+    onDocumentChange: vi.fn(() => () => {}), registerVisualCapture: vi.fn(() => () => {}),
   };
+  Object.assign(host, overrides);
   render(<PipelineWorkflow host={host} level="workspace" definition={TEST_CATALOG.node_types[0]} renderResult={() => <div>单候选结果</div>} renderParameters={() => null} card={{ id: 'match-42', type: 'xrd.match', name: 'Match', status: 'idle', expanded: true, position: { x: 0, y: 0 }, size: { width: 1000, height: 800 }, config: { mode: 'match', workflow_match_run_id: 'search-42', selected_candidate_ids: ['cod:0', 'cod:1', 'cod:2'] } } as PluginViewProps['card']}/>);
   return host;
 }
