@@ -160,6 +160,88 @@ class _CapabilityContext:
         return await invoke_document_action(self.services, capability.target_id, action,
             _validate_tool_request(DocumentActionRequest, dict(arguments=arguments, expected_revision=expected_revision)), capability=capability)
 
+    async def write_sandbox_workspace_file(self, capability, sandbox_id: str, path: str, data: bytes) -> dict[str, Any]:
+        """Write trusted plugin bytes through the pinned Sandbox file boundary.
+
+        The plugin's Structure capability and the Agent's independent Sandbox
+        execute grant must both remain live at the actual transfer point.
+        """
+        import base64
+        from backend.errors import PermissionDeniedError
+        from backend.sandbox.files import DOWNLOAD_LIMIT
+        if not isinstance(data, bytes) or len(data) > DOWNLOAD_LIMIT:
+            raise ResourceValidationError("Sandbox transfer must be bytes of at most 16 MiB")
+        async with self.services._node_mutation():
+            live = self.services.capabilities.capability_for_id(capability.agent_id, capability.id)
+            if live.kind != capability.kind or live.target_id != capability.target_id:
+                raise PermissionDeniedError("Source capability was revoked")
+            for kind in self.services.plugins.capability_definition(live.kind).target_capabilities:
+                self.services.capabilities.capability_for_id(capability.agent_id, f"{kind}:{live.target_id}")
+            self.services.capabilities.require_sandbox_execute(capability.agent_id, sandbox_id)
+            self.services._require_card_type(sandbox_id, "sandbox")
+            return await self.services._require_sandbox_backend().file_operation(
+                sandbox_id, "write", root="workspace", path=path,
+                data=base64.b64encode(data).decode("ascii"), overwrite=False,
+            )
+
+    async def write_sandbox_text_file(self, capability, path: str, content: str,
+                                      overwrite: bool = False) -> dict[str, Any]:
+        """Persist bounded UTF-8 source through the pinned Sandbox file boundary."""
+        import base64
+        import hashlib
+        from backend.errors import PermissionDeniedError
+        if not isinstance(content, str) or "\0" in content:
+            raise ResourceValidationError("Sandbox text must be UTF-8 text without NUL bytes")
+        try:
+            raw = content.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise ResourceValidationError("Sandbox text must be valid UTF-8") from exc
+        if not raw or len(raw) > 256 * 1024:
+            raise ResourceValidationError("Sandbox text must be between 1 byte and 256 KiB")
+        if not isinstance(overwrite, bool):
+            raise ResourceValidationError("overwrite must be a boolean")
+        async with self.services._node_mutation():
+            live = self.services.capabilities.capability_for_id(capability.agent_id, capability.id)
+            if live.kind != "sandbox.write_text_file" or live.target_id != capability.target_id:
+                raise PermissionDeniedError("Sandbox file-write capability was revoked")
+            self.services.capabilities.require_sandbox_execute(capability.agent_id, live.target_id)
+            self.services._require_card_type(live.target_id, "sandbox")
+            result = await self.services._require_sandbox_backend().file_operation(
+                live.target_id, "write", root="workspace", path=path,
+                data=base64.b64encode(raw).decode("ascii"), overwrite=overwrite,
+            )
+        return {"path": path, "written": result["written"],
+                "sha256": hashlib.sha256(raw).hexdigest()}
+
+    async def read_sandbox_workspace_file(self, capability, sandbox_id: str, path: str) -> bytes:
+        """Read one bounded Sandbox file without echoing its body to the LLM."""
+        import base64
+        from backend.errors import PermissionDeniedError
+        from backend.sandbox.files import DOWNLOAD_LIMIT
+        async with self.services._node_mutation(read_only=True):
+            live = self.services.capabilities.capability_for_id(capability.agent_id, capability.id)
+            if live.kind != capability.kind or live.target_id != capability.target_id:
+                raise PermissionDeniedError("Destination capability was revoked")
+            for kind in self.services.plugins.capability_definition(live.kind).target_capabilities:
+                self.services.capabilities.capability_for_id(capability.agent_id, f"{kind}:{live.target_id}")
+            self.services.capabilities.require_sandbox_execute(capability.agent_id, sandbox_id)
+            self.services._require_card_type(sandbox_id, "sandbox")
+            result = await self.services._require_sandbox_backend().file_operation(
+                sandbox_id, "download", root="workspace", path=path,
+            )
+        if result.get("state") != "ready":
+            raise ResourceValidationError("Sandbox file is unavailable or exceeds the 16 MiB transfer limit")
+        encoded = result.get("data")
+        if not isinstance(encoded, str) or len(encoded) > ((DOWNLOAD_LIMIT + 2) // 3) * 4:
+            raise ResourceValidationError("Sandbox file exceeds the 16 MiB transfer limit")
+        try:
+            data = base64.b64decode(encoded, validate=True)
+        except (ValueError, base64.binascii.Error) as exc:
+            raise ResourceValidationError("Sandbox returned invalid file data") from exc
+        if len(data) > DOWNLOAD_LIMIT:
+            raise ResourceValidationError("Sandbox file exceeds the 16 MiB transfer limit")
+        return data
+
     async def communicate(
         self, source_agent_id: str, target_agent_id: str, message: str
     ) -> Any:
@@ -252,7 +334,11 @@ class _CapabilityContext:
 
     async def start_sandbox(self, agent_id: str, sandbox_id: str) -> dict[str, Any]:
         info = await self.services.start_sandbox(sandbox_id, agent_id=agent_id)
-        return {"sandbox_id": sandbox_id, "state": info.state.value}
+        from backend.sandbox.manager import SandboxManager
+        backend = self.services.sandbox_backend
+        python_status = await backend.python_status(sandbox_id) if isinstance(backend, SandboxManager) else None
+        return {"sandbox_id": sandbox_id, "state": info.state.value,
+                "shared_python": python_status}
 
     async def stop_sandbox(self, agent_id: str, sandbox_id: str) -> dict[str, Any]:
         info = await self.services.stop_sandbox(sandbox_id, agent_id=agent_id)
@@ -269,8 +355,23 @@ class _CapabilityContext:
         active = [dict(r) for r in self.services._sandbox_commands.values() if r["sandbox_id"] == sandbox_id]
         current = active[0] if len(active) == 1 else None
         from backend.sandbox.history import recent_summaries
+        # ``state`` gates commands; ``available`` only reports platform support
+        # and ``configuration.ready`` only reports configured variables. Make
+        # the command gate explicit so an errored sandbox is not mistaken for
+        # a usable one.
+        commands_accepted = info.state.value in {"ready", "running"}
+        state_guidance = None
+        if info.state.value == "error":
+            state_guidance = ("Commands are rejected while state is \"error\". One start_sandbox "
+                              "call recovers it once active commands finish; it requires an "
+                              "Execute + Start/Stop connection, otherwise restart the Sandbox "
+                              "from its card.")
+        elif info.state.value == "stopped":
+            state_guidance = ("The Sandbox is stopped: start it (start_sandbox with an Execute "
+                              "+ Start/Stop connection, or its card) before executing commands.")
         return {
             "sandbox_id": sandbox_id, "state": info.state.value,
+            "commands_accepted": commands_accepted, "state_guidance": state_guidance,
             "runtime_id": info.runtime_id, "platform": info.platform,
             "shell": list(info.shell), "workspace": str(info.workspace),
             "workspace_access": info.workspace_access.value,
@@ -282,7 +383,7 @@ class _CapabilityContext:
             "resource_limits_available": info.resource_limits_available,
             "resource_limit_reason": info.resource_limit_reason,
             "configuration": configuration_summary(self.services, sandbox_id),
-            "active_commands": [{key: item.get(key) for key in ("id", "operation_kind", "requirements", "caller", "run_id", "argv", "started_at")} for item in active],
+            "active_commands": [{key: item.get(key) for key in ("id", "operation_kind", "phase", "requirements", "caller", "run_id", "argv", "started_at")} for item in active],
             "current_caller": current["caller"] if current else None,
             "current_command_id": current["id"] if current else None,
             "recent_commands": recent_summaries(self.services, sandbox_id),
@@ -359,25 +460,54 @@ class WorldAgentCapabilityProvider:
                 from backend.capabilities.projection import authorize_invocation
                 capability = authorize_invocation(self.services, agent_id, capability_id, arguments)
         handler = self.services.plugins.capability_handler(capability.kind)
+        invocation = self.services.run_manager.current_context
+        receipt_id = None
+        receipts = None
+        if invocation is not None:
+            from backend.runs.tool_receipts import RunToolReceipts
+            receipts = RunToolReceipts(self.services.database)
+            definition = self.services.plugins.capability_definition(capability.kind)
+            receipt_id = receipts.begin(
+                run_id=invocation.run_id, agent_id=agent_id,
+                capability_kind=capability.kind, target_id=capability.target_id,
+                arguments=arguments, read_only=definition.read_only,
+            )
         from backend.sandbox.models import SandboxValidationError, SandboxStateError, SandboxOperationError, SandboxSecurityError, SandboxNotFoundError
         try:
-            return await handler(_CapabilityContext(self.services, capability), capability, dict(arguments))
+            from backend.runs.tool_receipts import bind_tool_receipt
+            with bind_tool_receipt(receipt_id):
+                result = await handler(_CapabilityContext(self.services, capability), capability, dict(arguments))
         except SandboxOperationError as exc:
-            return exc.feedback()
+            result = exc.feedback()
         except SandboxSecurityError as exc:
             from backend.errors import PermissionDeniedError
+            if receipts is not None and receipt_id is not None:
+                receipts.uncertain(receipt_id, exc)
             raise PermissionDeniedError(str(exc)) from exc
         except SandboxNotFoundError as exc:
             from backend.errors import NotFoundError
+            if receipts is not None and receipt_id is not None:
+                receipts.uncertain(receipt_id, exc)
             raise NotFoundError(str(exc)) from exc
         except SandboxValidationError as exc:
             # All Agent runtimes already return domain errors as tool feedback.
             # Validation can also fail during bundle construction/materialization,
             # after the handler has validated the initial request model.
+            if receipts is not None and receipt_id is not None:
+                receipts.uncertain(receipt_id, exc)
             raise ResourceValidationError(str(exc)) from exc
         except SandboxStateError as exc:
             from backend.errors import ConflictError
+            if receipts is not None and receipt_id is not None:
+                receipts.uncertain(receipt_id, exc)
             raise ConflictError(f"{exc}. Inspect the Sandbox activity and retry when the conflicting operation finishes.") from exc
+        except BaseException as exc:
+            if receipts is not None and receipt_id is not None:
+                receipts.uncertain(receipt_id, exc)
+            raise
+        if receipts is not None and receipt_id is not None:
+            receipts.finish(receipt_id, result)
+        return result
 
 
 def _python_type(schema_type: object) -> type[Any]:

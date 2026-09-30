@@ -428,6 +428,25 @@ async def test_http_error_body_is_not_exposed():
 
 
 @pytest.mark.asyncio
+async def test_retryable_jev_http_failure_retries_decision_only(monkeypatch):
+    attempts = 0
+
+    async def no_sleep(_seconds):
+        return None
+
+    def respond(_request):
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(503) if attempts < 3 else httpx.Response(200, json=response_body())
+
+    monkeypatch.setattr("backend.agents.typesafe.asyncio.sleep", no_sleep)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        audit = await request_choice(client, MODEL, CONFIG.system_instruction, FakeHarness().decision())
+    assert attempts == 3
+    assert audit["choice"] == "add:A"
+
+
+@pytest.mark.asyncio
 async def test_oversized_context_never_sent():
     decision = FakeHarness().decision()
     decision["state"]["large"] = "a" * (512 * 1024)

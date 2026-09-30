@@ -753,6 +753,8 @@ class ApplicationServices:
             await self.plugin_bootstrap.shutdown()
         await self.node_execution.shutdown()
         await self.sandbox_operations.shutdown()
+        if isinstance(self.sandbox_backend, SandboxManager):
+            await self.sandbox_backend.shutdown()
         context = self._node_lifecycle_context()
         for card in self.world.list_cards():
             lifecycle = self.plugins.node_type(card.type).lifecycle if not card.missing_plugin else None
@@ -2950,6 +2952,8 @@ class ApplicationServices:
         info = await backend.get(sandbox_id)
         if info.state in {SandboxState.READY, SandboxState.RUNNING}:
             # Start means ensure-running, not reconfigure/rebind a shared environment.
+            if isinstance(backend, SandboxManager):
+                await backend.start(sandbox_id)
             return info
         for edge in self.world.list_edges_to(sandbox_id):
             if edge.relationship in {
@@ -3010,7 +3014,7 @@ class ApplicationServices:
             backend = self._require_sandbox_backend()
             if (argv is None) == (command is None):
                 raise SandboxValidationError("provide exactly one of command or argv")
-            from backend.sandbox.commands import require_noninteractive
+            from backend.sandbox.commands import needs_managed_python, require_noninteractive
             require_noninteractive(argv if _skill_request is None else None, command)
             if command is not None:
                 info = await backend.get(sandbox_id)
@@ -3051,7 +3055,6 @@ class ApplicationServices:
                             if isinstance(backend, SandboxManager):
                                 options["python_environment"] = python_environment
                             else:
-                                from backend.sandbox.commands import needs_managed_python
                                 options["managed_python"] = needs_managed_python(execution_argv,
                                     python_environment, skill=_skill_request is not None)
                         elif python_environment == "none":
@@ -3075,21 +3078,61 @@ class ApplicationServices:
                         self._require_card_type(sandbox_id, CardType.SANDBOX)
                         from backend.sandbox.history import save, key as command_history_key
                         from backend.security.redaction import redact
-                        receipt = self._sandbox_commands.get(command_id, {}) if _operation_id else {}
-                        receipt.update({"id": command_id, "caller": agent_id or "user", "state": "running",
+                        # Build the complete journal entry before exposing it.
+                        # A validation error here must not persist a half-filled
+                        # receipt that later crashes Sandbox history rendering.
+                        receipt_data = {"id": command_id, "caller": agent_id or "user", "state": "running",
                             "sandbox_id": sandbox_id,
                             "python_environment": python_environment,
                             "history_key": command_history_key(self, sandbox_id),
                             "run_id": self.run_manager.current_context.run_id if self.run_manager.current_context else None,
                             "started_at": datetime.now(UTC).isoformat(), "argv": redact(list(execution_argv), secrets),
-                            "skill_id": _skill_request.skill_id if _skill_request else None})
+                            "phase": "preparing_python" if isinstance(backend, SandboxManager)
+                                and needs_managed_python(execution_argv, python_environment,
+                                                         skill=_skill_request is not None)
+                                else "dispatching",
+                            "skill_id": _skill_request.skill_id if _skill_request else None}
+                        receipt = self._sandbox_commands.get(command_id, {}) if _operation_id else {}
+                        receipt.update(receipt_data)
                         peers = tuple({key: item.get(key) for key in ("id", "caller", "run_id", "argv", "started_at")}
                             for item in self._sandbox_commands.values() if item["sandbox_id"] == sandbox_id and item["id"] != command_id)
                         self._sandbox_commands[command_id] = receipt
                         self._sandbox_tasks[command_id] = asyncio.current_task()
                         save(self, sandbox_id, receipt)
-                    await self._emit_sandbox_event(SandboxEvent(sandbox_id, SandboxEventType.COMMAND_STARTED,
-                        {"command_id": command_id, "argv": receipt["argv"], "concurrent_commands": peers}))
+                    if isinstance(backend, SandboxManager):
+                        # Plugin bootstrap and explicit package installs mutate
+                        # the same shared interpreter. Keep this command's
+                        # receipt alive while it queues behind that preparation.
+                        await backend.wait_for_python_preparation(
+                            sandbox_id, execution_argv, python_environment,
+                            skill=_skill_request is not None,
+                        )
+                        # The graph may have changed during the wait. Never
+                        # dispatch a queued command using stale authority.
+                        async with self._node_mutation(read_only=True):
+                            self._require_card_type(sandbox_id, CardType.SANDBOX)
+                            if agent_id is not None:
+                                from backend.capabilities.projection import authorize_invocation
+                                values = {key: value for key, value in {
+                                    "environment_id": environment_id, "target_id": target_id,
+                                    "skill_id": _skill_request.skill_id if _skill_request else None,
+                                }.items() if value is not None}
+                                kind = "sandbox.run_skill_script" if _skill_request else "sandbox.execute"
+                                authorize_invocation(self, agent_id, f"{kind}:{sandbox_id}", values)
+                            self.resources.artifacts.assert_source_idle(sandbox_id)
+                            self.summoning.assert_admission(sandbox_id)
+                            if sandbox_id in self._sandbox_stopping:
+                                raise SandboxStateError('Sandbox admission is closed while termination cleanup is pending')
+                    async def mark_command_started() -> None:
+                        receipt["phase"] = "executing"
+                        from backend.sandbox.history import save
+                        save(self, sandbox_id, receipt)
+                        await self._emit_sandbox_event(SandboxEvent(sandbox_id, SandboxEventType.COMMAND_STARTED,
+                            {"command_id": command_id, "argv": receipt["argv"], "concurrent_commands": peers}))
+                    if isinstance(backend, SandboxManager):
+                        options["on_command_start"] = mark_command_started
+                    else:
+                        await mark_command_started()
                     result = await backend.execute(
                         sandbox_id, execution_argv, timeout_seconds=timeout_seconds or self.world.get_card(sandbox_id).config.get("command_timeout", 6000), **options
                     )
@@ -3865,6 +3908,7 @@ def create_services(
             },
         },
         model_connection_resolver=model_connections,
+        context_store=contexts,
         inactivity_timeout_seconds=settings.run_inactivity_timeout_seconds,
         execution_deadline_seconds=settings.run_execution_deadline_seconds,
         cleanup_timeout_seconds=settings.run_cleanup_timeout_seconds,

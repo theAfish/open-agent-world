@@ -463,6 +463,13 @@ class ConversationStore:
             finished_at=datetime.fromisoformat(str(row["finished_at"])) if row["finished_at"] else None,
             awaiting=lifecycle.get("awaiting") if isinstance(lifecycle.get("awaiting"), str) else None,
             progress=lifecycle.get("progress") if isinstance(lifecycle.get("progress"), str) else None,
+            recovery_kind=lifecycle.get("recovery_kind") if isinstance(lifecycle.get("recovery_kind"), str) else None,
+            recovery_classification=(lifecycle.get("recovery_classification")
+                                     if isinstance(lifecycle.get("recovery_classification"), str) else None),
+            recovery_receipts=(lifecycle.get("recovery_receipts")[-20:]
+                               if isinstance(lifecycle.get("recovery_receipts"), list) else []),
+            confirmed_tool_count=(lifecycle.get("confirmed_tool_count")
+                                  if isinstance(lifecycle.get("confirmed_tool_count"), int) else None),
             tool_count=int(lifecycle.get("tool_count") or len(trace)),
             tool_trace=trace[-50:],
         )

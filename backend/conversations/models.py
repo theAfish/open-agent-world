@@ -122,6 +122,10 @@ class ConversationRunSummary(BaseModel):
     finished_at: datetime | None = None
     awaiting: str | None = None
     progress: str | None = None
+    recovery_kind: str | None = None
+    recovery_classification: str | None = None
+    recovery_receipts: list[dict[str, Any]] = Field(default_factory=list)
+    confirmed_tool_count: int | None = None
     tool_count: int = 0
     tool_trace: list[dict[str, Any]] = Field(default_factory=list)
 

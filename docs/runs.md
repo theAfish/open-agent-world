@@ -97,6 +97,40 @@ window, so long multi-step runs are unaffected as long as they keep reporting
 activity through the normalized event stream. Active tool execution and
 explicitly suspended Runs are exempt from the inactivity window.
 
+## Model streams and recovery
+
+The built-in ADK runtime and ADK-based plugins can use OAW's shared model
+observation layer. It emits model-request status and, only when the provider
+actually supplies them, bounded live `model_reasoning` previews. An interrupted
+preview is marked incomplete, not presented as a final answer. OAW does not
+expose reasoning that the model provider keeps private.
+
+ADK model requests retry a transient failure once inside the same role and
+delegation, with the same prepared input and tool results. Partial responses go
+only to the preview; ADK receives the aggregated response after clean stream EOF.
+Thus a failed attempt cannot dispatch its tool calls. Previously completed tools
+are not re-executed, even when earlier requests wrote files. This regenerates the
+current response; it does not resume provider-hidden thinking or restart the
+coordinator. The LiteLLM adapter's additional transport retries are disabled
+under this boundary so budgets do not multiply. Output token settings are unchanged.
+
+The idle watchdog allows 300 seconds before first content, or 90 seconds since
+the last real content (empty keepalives do not count). This is not a total thinking
+deadline. Recovery events expose role, request, attempt, exception type, HTTP status
+when available, local-watchdog versus provider origin, content count and idle time,
+without logging arbitrary exception bodies or credentials. A second failure stops
+instead of restarting the entire Agent. Manual Stop cancels the active request.
+
+For errors outside that request boundary, the conservative capability-receipt
+reconciliation remains: unknown or completed writes are never blindly replayed.
+Sandbox command IDs, workspace hashes and document revisions provide evidence
+for a user-reviewed continuation, not permission to repeat side effects. Persisted
+checkpoints are diagnostic context, not process-restart recovery of an active stream.
+
+The TypeSafe Jev adapter is a non-streaming, structured decision API. Its
+decision-only HTTP request gets bounded transient retries, but it does not
+produce model-reasoning events or use the ADK stream restart path.
+
 ## Conversation outcomes
 
 Every Run started from a conversation ends with a durable transcript entry.
