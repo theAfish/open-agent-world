@@ -50,6 +50,11 @@
 .run-activity-items { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .run-activity-progress { color: var(--ink-soft); font-size: var(--conversation-font-size, 12px); }
 .run-activity-progress > p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+.run-model-reasoning { min-width: 0; border: 1px solid var(--line); border-radius: 6px; color: var(--ink-soft); }
+.run-model-reasoning > summary { padding: 6px 9px; cursor: pointer; font-size: 11px; }
+.run-model-reasoning > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.run-model-reasoning > pre { margin: 0; padding: 8px 10px; max-height: 320px; overflow: auto; border-top: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 11px; }
+.run-model-reasoning > small { display: block; padding: 0 10px 8px; color: var(--ink-faint); }
 .run-activity-text { min-width: 0; }
 .run-activity-footer { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .run-activity-footer > span { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-faint); font-size: 11px; }

@@ -118,6 +118,10 @@ export function activeConversationRuns(
       finished_at: durable?.finished_at ?? existing?.finished_at,
       awaiting: durable?.awaiting ?? existing?.awaiting,
       progress: durable?.progress ?? existing?.progress,
+      recovery_kind: durable?.recovery_kind ?? existing?.recovery_kind,
+      recovery_classification: durable?.recovery_classification ?? existing?.recovery_classification,
+      recovery_receipts: durable?.recovery_receipts ?? existing?.recovery_receipts,
+      confirmed_tool_count: durable?.confirmed_tool_count ?? existing?.confirmed_tool_count,
       tool_count: durable?.tool_count ?? existing?.tool_count ?? 0,
       tool_trace: [...(durable?.tool_trace ?? existing?.tool_trace ?? [])],
       live_text: existing?.live_text,
@@ -127,8 +131,18 @@ export function activeConversationRuns(
     if (type === "agent_message" && typeof event.payload.text === "string") {
       current.live_text = event.payload.text;
       current.progress = undefined;
-    } else if (type === "agent_progress" && typeof event.payload.text === "string") {
+    } else if (type === "agent_progress" && event.payload.kind !== "model_reasoning"
+      && typeof event.payload.text === "string") {
       current.progress = event.payload.text;
+      if (event.payload.kind === "model_stream_interrupted") {
+        current.recovery_kind = "model_stream_interrupted";
+        current.recovery_classification = typeof event.payload.recovery_classification === "string"
+          ? event.payload.recovery_classification : undefined;
+        current.recovery_receipts = Array.isArray(event.payload.recovery_receipts)
+          ? event.payload.recovery_receipts as ConversationRunSummary["recovery_receipts"] : undefined;
+        current.confirmed_tool_count = typeof event.payload.completed_tool_count === "number"
+          ? event.payload.completed_tool_count : undefined;
+      }
     } else if (type === "tool_started") {
       const name = typeof event.payload.name === "string" ? event.payload.name : "tool";
       current.awaiting = name;

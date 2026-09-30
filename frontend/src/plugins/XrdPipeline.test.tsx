@@ -20,8 +20,11 @@ function mount({ workflow = { match_run_id: 'match-1' }, config = {}, status = '
     delegationAction: vi.fn(), resourceAction: vi.fn(),
     runAnalysis: vi.fn().mockResolvedValue(undefined), stopAnalysis: vi.fn().mockResolvedValue(undefined), updateConfig: vi.fn().mockResolvedValue(undefined),
     getAgentInfo: vi.fn().mockResolvedValue({ session_id: '', details: { result: matchResult, workflow, last_run: last, progress } }),
-    listCards: vi.fn().mockResolvedValue([]), readDocument: vi.fn(), documentAction: vi.fn(), documentDownloadUrl: vi.fn(), transform: vi.fn(), readFile: vi.fn(), openFile: vi.fn(), clearOpenedFile: vi.fn(), openInputNode: vi.fn().mockResolvedValue(undefined), ...overrides,
+    listCards: vi.fn().mockResolvedValue([]), readDocument: vi.fn(), documentAction: vi.fn(), documentDownloadUrl: vi.fn(), transform: vi.fn(), readFile: vi.fn(), openFile: vi.fn(), clearOpenedFile: vi.fn(), openInputNode: vi.fn().mockResolvedValue(undefined),
+    openWorkspace: vi.fn(), runAgent: vi.fn().mockResolvedValue(undefined),
+    onDocumentChange: vi.fn(() => () => {}), registerVisualCapture: vi.fn(() => () => {}),
   };
+  Object.assign(host, overrides);
   const Settings = xrd.views.settings;
   render(<Settings host={host} level="workspace" definition={TEST_CATALOG.node_types[0]} card={{ id: 'match', type: 'xrd.match', name: 'Match', status, expanded: true, position: { x: 0, y: 0 }, size: { width: 1000, height: 800 }, config: { mode: 'match', wavelength: 1.540593, tolerance_deg: .3, prominence_fraction: .03, reference_min_intensity: 5, smoothing_deg: .03, min_peak_distance: .1, ...config } } as PluginViewProps['card']}/>);
   return host;

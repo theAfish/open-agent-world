@@ -167,6 +167,8 @@ export interface PluginViewProps {
     openResultsConversation?(): Promise<unknown>;
     updateConfig(patch: Record<string, unknown>): Promise<void>;
     getAgentInfo(nodeId?: string): Promise<{ session_id: string; details?: Record<string, unknown> }>;
+    /** Live graph-derived grants; card config hints never authorize a tool. */
+    getAgentCapabilities?(nodeId: string): Promise<{ kind: string; target_id?: string }[]>;
     openLinkedCanvas?(type: string, name: string): Promise<void>;
     documentAction(action: string, arguments_: Record<string, unknown>, expectedRevision?: number, nodeId?:string): Promise<{ value: unknown; revision: number }>;
     delegationAction(action: 'collect' | 'wait' | 'stop', arguments_: Record<string, unknown>): Promise<Record<string, unknown>>;

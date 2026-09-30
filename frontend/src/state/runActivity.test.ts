@@ -10,6 +10,29 @@ function event(id: number, type: string, payload: Record<string, unknown> = {}):
 }
 
 describe("ordered Run activity", () => {
+  it("keeps interrupted and recovered model attempts separate in recorded events", () => {
+    const snapshots = [
+      event(1, "agent_progress", { kind: "model_reasoning", role: "structure_builder", model_request: 2,
+        model_attempt: 1, provider_message_id: "model-reasoning:structure_builder:2",
+        text: "incomplete", interrupted: true }),
+      event(2, "agent_progress", { kind: "model_reasoning", role: "structure_builder", model_request: 2,
+        model_attempt: 2, provider_message_id: "model-reasoning:structure_builder:2:attempt2",
+        text: "recovered", streaming: false }),
+    ];
+    const activity = mergeRunActivity(undefined, run, snapshots);
+    expect(activity.items).toHaveLength(2);
+    expect(activity.items[0]).toMatchObject({ model_attempt: 1, interrupted: true });
+    expect(activity.items[1]).toMatchObject({ model_attempt: 2, interrupted: false });
+    expect(activity.items[0].provider_message_id).not.toBe(activity.items[1].provider_message_id);
+  });
+
+  it("shows a model recovery status with its attempt number", () => {
+    const activity = mergeRunActivity(undefined, run, [event(1, "agent_progress", {
+      kind: "status", phase: "model_recovery", role: "structure_builder",
+      model_request: 2, model_attempt: 1, text: "request interrupted; retrying",
+    })]);
+    expect(activity.items[0]).toMatchObject({ kind: "status", model_attempt: 1 });
+  });
   it("interleaves public progress and tools, updating completion in place", () => {
     const state = mergeRunActivity(undefined, run, [
       event(5, "agent_message", { text: "Answer" }),
@@ -89,6 +112,45 @@ describe("ordered Run activity", () => {
       { ...event(2, "agent_message", { text: "other" }), run_id: "other" },
     ]);
     expect(state.items).toHaveLength(0);
+  });
+
+  it("shows only explicitly labelled AtomSculptor model reasoning", () => {
+    const state = mergeRunActivity(undefined, run, [
+      event(2, "agent_progress", { kind: "model_reasoning", role: "atom_sculptor",
+        model_request: 1, text: "Provider reasoning", truncated: true }),
+      event(1, "agent_progress", { kind: "raw_reasoning", text: "not public" }),
+    ]);
+    expect(state.items).toMatchObject([{ kind: "model_reasoning", role: "atom_sculptor",
+      model_request: 1, text: "Provider reasoning", truncated: true }]);
+  });
+
+  it("updates one live thinking entry instead of adding a row per chunk", () => {
+    const first = mergeRunActivity(undefined, run, [event(1, "agent_progress", {
+      kind: "model_reasoning", provider_message_id: "model-reasoning:planner:1",
+      text: "First", streaming: true,
+    })]);
+    const second = mergeRunActivity(first, run, [event(2, "agent_progress", {
+      kind: "model_reasoning", provider_message_id: "model-reasoning:planner:1",
+      text: "First second", streaming: false,
+    })]);
+    expect(second.items).toHaveLength(1);
+    expect(second.items[0]).toMatchObject({ text: "First second", streaming: false });
+  });
+
+  it("closes an interrupted thinking preview without treating it as final", () => {
+    const first = mergeRunActivity(undefined, run, [event(1, "agent_progress", {
+      kind: "model_reasoning", provider_message_id: "model-reasoning:planner:1",
+      text: "Partial thought", streaming: true,
+    })]);
+    const second = mergeRunActivity(first, run, [event(2, "agent_progress", {
+      kind: "model_reasoning", provider_message_id: "model-reasoning:planner:1",
+      text: "Partial thought", streaming: false, interrupted: true,
+    }), event(3, "agent_progress", {
+      kind: "model_stream_interrupted", text: "Stream interrupted", completed_tool_count: 1,
+    })]);
+    expect(second.items).toHaveLength(2);
+    expect(second.items[0]).toMatchObject({ streaming: false, interrupted: true });
+    expect(second.items[1]).toMatchObject({ kind: "model_stream_interrupted", completed_tool_count: 1 });
   });
 
   it("bounds activity and reports truncation", () => {

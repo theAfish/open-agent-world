@@ -413,6 +413,11 @@ export interface ConversationRunSummary {
   finished_at?: string | null;
   awaiting?: string | null;
   progress?: string | null;
+  recovery_kind?: string | null;
+  recovery_classification?: string | null;
+  recovery_receipts?: { capability_kind: string; target_id: string; state: string;
+    read_only: boolean; result_hints?: Record<string, unknown> }[];
+  confirmed_tool_count?: number | null;
   tool_count: number;
   tool_trace: ConversationToolTrace[];
   live_text?: string;

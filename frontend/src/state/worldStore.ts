@@ -1831,7 +1831,14 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       }
     }
     set((state) => ({
-      events: [event, ...state.events].slice(0, 160),
+      // Each live reasoning update is a cumulative snapshot. Keep only its
+      // newest event so token streaming cannot evict operational history.
+      events: [event, ...state.events.filter((previous) =>
+        event.payload.kind !== "model_reasoning" ||
+        previous.payload.kind !== "model_reasoning" ||
+        previous.run_id !== event.run_id ||
+        previous.payload.provider_message_id !== event.payload.provider_message_id,
+      )].slice(0, 160),
       cards: nodeId
         ? state.cards.map((card) => {
             if (card.id !== nodeId) return card;
