@@ -95,6 +95,7 @@ nav:
           - Card state: card-state.md
           - Lifecycle and artifacts: lifecycle-artifacts.md
           - Work-source execution: execution.md
+          - Tool execution boundary: tool-execution.md
           - Node effects: node-effects.md
           - Plugin deployment: plugin-deployment.md
       - Application behavior:
