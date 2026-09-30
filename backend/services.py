@@ -685,11 +685,12 @@ class ApplicationServices:
         manager.admission_check = self.summoning.assert_admission
         await manager.startup()
         for run in manager.list_runs():
+            conversation_id, session_id = manager._conversation_scope(run)
             if (
-                run.caller_kind != "conversation"
+                (run.caller_kind != "conversation" and not run.lifecycle.get("work_continuation"))
                 or run.status not in TERMINAL_RUN_STATUSES
-                or not run.caller_id
-                or not run.context_id
+                or not conversation_id
+                or not session_id
             ):
                 continue
             with self.database.locked() as db:
@@ -697,19 +698,19 @@ class ApplicationServices:
                     """SELECT 1 FROM conversation_messages
                     WHERE run_id=? AND session_id=? AND is_final=1
                     AND sender_kind IN ('agent','system') LIMIT 1""",
-                    (run.run_id, run.context_id),
+                    (run.run_id, session_id),
                 ).fetchone()
             if already_visible is not None:
                 continue
             if run.status is RunStatus.SUCCEEDED:
                 final_text = manager.final_text(run.run_id)
                 if final_text and self._can_agent_post_to_conversation_session(
-                    run.agent_id, run.caller_id, run.context_id
+                    run.agent_id, conversation_id, session_id
                 ):
                     agent = self.world.get_card(run.agent_id)
                     message = self._conversation_final_message(
-                        run.caller_id,
-                        run.context_id,
+                        conversation_id,
+                        session_id,
                         sender_id=agent.id,
                         sender_name=agent.name,
                         content=final_text,
@@ -728,7 +729,7 @@ class ApplicationServices:
             else:
                 notice = f"{self._conversation_agent_name(run.agent_id)}'s response was interrupted by a backend restart."
             await self._persist_conversation_outcome_notice(
-                run.run_id, run.caller_id, run.context_id, notice
+                run.run_id, conversation_id, session_id, notice
             )
         self.deliveries.recover_after_restart()
         for agent_id in self.deliveries.all_queued_agents():
@@ -745,10 +746,16 @@ class ApplicationServices:
         from backend.sandbox.history import recover as recover_commands
         await recover_commands(self)
 
+        self.node_execution.continuation_closed = False
+        self.node_execution.signal_continuations()
+
         if self.plugin_bootstrap is not None:
             self.plugin_bootstrap.enqueue()
 
     async def shutdown(self) -> None:
+        # Lifecycle shutdown drains providers without cancelling scheduled checks
+        # whose originating turns already finished successfully.
+        self._require_run_manager().shutting_down = True
         if self.plugin_bootstrap is not None:
             await self.plugin_bootstrap.shutdown()
         await self.node_execution.shutdown()
@@ -759,6 +766,8 @@ class ApplicationServices:
             if lifecycle is not None:
                 await lifecycle.on_shutdown(context, card)
         await self._require_run_manager().shutdown()
+        if self.node_execution.continuation_outputs:
+            await asyncio.gather(*tuple(self.node_execution.continuation_outputs), return_exceptions=True)
 
     def enrich_card(self, card: Card) -> Card:
         if card.missing_plugin:
@@ -3839,6 +3848,7 @@ def create_services(
         capability_provider=provider,
         state=state,
         cleanup_execution=services.sandbox_operations.cancel_run,
+        execution_settled=services.node_execution.signal_continuations,
         default_runtime_provider_id=(
             default_runtime_provider_id
             if default_runtime_provider_id is not None

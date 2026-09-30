@@ -183,6 +183,7 @@ def configuration_summary(services, sandbox_id):
         shown = value
         folder_access = None
         folder_error = None
+        available = None
         if folder:
             store = GlobalExecutionFolderStore(services.database, services.settings.data_root) if source == "global" else folder_store(services)
             configured = store.configured(owner, value.reference)
@@ -195,11 +196,15 @@ def configuration_summary(services, sandbox_id):
                     if value.kind != "path" and binding.kind != value.kind:
                         raise SandboxValidationError("Path type changed; choose the file or folder again and save")
                     SandboxSettingsStore(services.database, services.settings.data_root).validator.validate_environment_path(binding.path, binding.kind)
+                    available = True
                 except (ValueError, OSError, SandboxValidationError) as error:
-                    configured = False
+                    available = False
                     folder_error = str(error)
         result.append({"name": name, "source": source, "owner": owner, "secret": secret,
             "folder": folder, "kind": binding.kind if folder and binding else None, "value": None if secret else shown,
-            **({"access": folder_access, "error": folder_error} if folder else {}),
+            **({"access": folder_access, "error": folder_error, "available": available,
+                "status": "unconfigured" if not configured else "path_unavailable" if available is False else "configured",
+                "validation_scope": "host_path"} if folder else {}),
             "configured": (global_credentials if source == "global" else services.execution_credentials).configured(owner, value.secret_ref) if secret else configured})
-    return {"profile_id": profile_id, "variables": result, "ready": all(v["configured"] for v in result)}
+    return {"profile_id": profile_id, "variables": result,
+            "ready": all(v["configured"] and v.get("available") is not False for v in result)}

@@ -89,6 +89,9 @@ def test_missing_folder_is_visible_and_binding_can_be_removed(client, tmp_path):
     assert response.status_code == 200, response.text
     summary = response.json()
     assert summary['ready'] is False and summary['variables'][0]['error']
+    assert summary['variables'][0]['configured'] is True
+    assert summary['variables'][0]['available'] is False
+    assert summary['variables'][0]['status'] == 'path_unavailable'
     assert summary['variables'][0]['value'] == str(path)
 
 

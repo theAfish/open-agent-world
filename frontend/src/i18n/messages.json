@@ -233,6 +233,8 @@
   "Executor report": ["Executor report", "执行报告"],
   "Execution references": ["Execution references", "运行引用"],
   "Stop task": ["Stop task", "停止任务"],
+  "Scheduled checks": ["Scheduled checks", "定时检查"],
+  "Cancel check": ["Cancel check", "取消检查"],
   "Executor finished. Verify the outputs and record evidence before marking this task done.": ["Executor finished. Verify the outputs and record evidence before marking this task done.", "执行已结束。请检查产物并记录验证依据，然后将任务标记为完成。"],
   "Task ID": ["Task ID", "任务 ID"],
   "‹ Tasks": ["‹ Tasks", "‹ 任务"],

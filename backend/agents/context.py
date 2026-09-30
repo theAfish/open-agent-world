@@ -275,6 +275,10 @@ class ManagedContext:
                 context_id,
                 max_sequence=int(limit) if isinstance(limit, int) else None,
             ))
+            # A host work notification has no user message in the conversation
+            # ledger. Include that invocation input as well as the normal delta.
+            if lifecycle.get("work_continuation"):
+                self.checkpoint.contents.append(text_content(prompt))
         else:
             self.checkpoint.contents.append(text_content(prompt))
         self.checkpoint.initialized = True

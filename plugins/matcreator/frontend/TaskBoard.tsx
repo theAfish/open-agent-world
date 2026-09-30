@@ -6,8 +6,11 @@ type Status = 'pending' | 'running' | 'review' | 'blocked' | 'done';
 type Task = { id: string; title: string; description: string; acceptance?: string; depends_on: string[]; status: Status; result: string; outputs: string[] };
 type Plan = { id: string; title: string; goal: string; tasks: Task[] };
 type Snapshot = { value: { plans: Plan[] }; revision: number };
-type Attempt = { item_id: string; instance_id: string | null; agent_id: string | null; run_id: string | null; status: string; error?: string; text?: string; output_directory: string; reconciliation_error?: string };
-type Execution = { items: { id: string; metadata: { plan_id: string; task_id: string } }[]; attempts: Attempt[] };
+type Attempt = { item_id: string; instance_id: string | null; agent_id: string | null; run_id: string | null; status: string; error?: string; text?: string; output_directory: string; reconciliation_error?: string;
+  auto_continue?: boolean; observed_by_run?: string; notification_run_id?: string; notification_suppressed?: boolean; notification_error?: string;
+  report?: { outcome: string; summary: string; evidence: string; next_step: string; external_jobs: string[] } };
+type Wakeup = { request_id: string; due_at: number; reason: string; notification_suppressed?: boolean; notification_run_id?: string; notification_error?: string };
+type Execution = { items: { id: string; metadata: { plan_id: string; task_id: string } }[]; attempts: Attempt[]; wakeups?: Wakeup[] };
 type Collected = { document: Snapshot; execution: Execution };
 type Editor = { task: Task; planId: string; revision: number; fresh: boolean };
 type Draft = { selected?: string; creating?: boolean; title?: string; goal?: string; editor?: Editor; taskId?: string;
@@ -227,6 +230,20 @@ export function TaskBoard({ host, level = 'workspace' }: PluginViewProps) {
       {!inTask && plan && <progress aria-label={t('Research progress')} value={done} max={plan.tasks.length || 1} />}
     </header>
     {(error || draft.error || readError) && <p className="mc-task-error" role="alert">{error || draft.error || readError}</p>}
+    {!!execution?.wakeups?.some(check => (!check.notification_suppressed || check.notification_error) && !check.notification_run_id) &&
+      <section className="mc-task-checks" aria-label={t('Scheduled checks')}>
+        <strong>{t('Scheduled checks')}</strong>
+        {execution.wakeups.filter(check => (!check.notification_suppressed || check.notification_error) && !check.notification_run_id).map(check =>
+          <div key={check.request_id} className="mc-task-check">
+            <span title={check.notification_error || check.reason}>{check.reason}<small>{check.notification_error || new Date(check.due_at * 1000).toLocaleString()}</small></span>
+            {!check.notification_suppressed && <button disabled={busy} onClick={async () => {
+              setBusy(true); setError('');
+              try { await host.delegationAction('cancel_defer', { request_id: check.request_id }); await refresh(); }
+              catch (reason) { setError(message(reason)); }
+              finally { setBusy(false); }
+            }}>{t('Cancel check')}</button>}
+          </div>)}
+      </section>}
     {!snapshot && !readError && <p role="status">{t('Loading research tasks…')}</p>}
     {creating && <form className="mc-task-editor" onSubmit={async event => {
       event.preventDefault();
@@ -302,9 +319,15 @@ export function TaskBoard({ host, level = 'workspace' }: PluginViewProps) {
               <strong>{t('Attempt')} {index + 1} · {t(attempt.status)}</strong>
               <p>{t('Output directory')}: <code>{attempt.output_directory}</code></p>
               {(attempt.error || attempt.reconciliation_error) && <p role="alert">{attempt.error || attempt.reconciliation_error}</p>}
-              {attempt.text && <details><summary>{t('Executor report')}</summary><p>{attempt.text}</p></details>}
+              {attempt.notification_error && <p role="alert">{attempt.notification_error}</p>}
+              {attempt.report && <details><summary>{t('Executor report')} · {t(attempt.report.outcome)}</summary>
+                <p>{attempt.report.summary}</p><p>{attempt.report.evidence}</p><p>{attempt.report.next_step}</p>
+                {!!attempt.report.external_jobs.length && <p>{attempt.report.external_jobs.join('\n')}</p>}
+              </details>}
+              {!attempt.report && attempt.text && <details><summary>{t('Executor report')}</summary><p>{attempt.text}</p></details>}
               <details><summary>{t('Execution references')}</summary><p>Agent: {attempt.agent_id}<br />Run: {attempt.run_id}<br />Instance: {attempt.instance_id}</p></details>
-              {attempt.instance_id && ['created', 'running', 'waiting'].includes(attempt.status) && <button disabled={busy} onClick={async () => {
+              {attempt.instance_id && (['created', 'running', 'waiting'].includes(attempt.status) ||
+                (attempt.auto_continue && !attempt.observed_by_run && !attempt.notification_run_id && !attempt.notification_suppressed)) && <button disabled={busy} onClick={async () => {
                 setBusy(true); setError('');
                 try { await host.delegationAction('stop', { instance_id: attempt.instance_id }); await refresh(); }
                 catch (reason) { setError(message(reason)); }

@@ -39,7 +39,7 @@ def test_research_preset_deploys_complete_independent_workspaces_and_can_be_save
     assert nodes[a['sandbox']]['config']['memory_bytes'] == 2048 * 1024 * 1024
     assert {(edge['source'], edge['relationship']) for edge in first['edges']
             if edge['target'] == a['sandbox'] and edge['source'] in {a['agent'], a['executor']}} == {
-        (a['agent'], 'execute_manage'), (a['executor'], 'execute_manage')}
+        (a['agent'], 'execute_manage'), (a['executor'], 'execute')}
     assert nodes[a['agent']]['config']['model'] == 'oaw:default'
     assert 'task board' in nodes[a['agent']]['config']['system_instruction']
     layout = nodes[a['group']]['config']['workspace_layout']
@@ -54,7 +54,7 @@ def test_research_preset_deploys_complete_independent_workspaces_and_can_be_save
     assert {(edge['source'], edge['target'], edge['relationship']) for edge in first['edges']
             if edge['source'] == a['structure']} == {
         (a['structure'], a[target], 'core.file-preview') for target in ('conversation', 'sandbox')}
-    assert len(first['edges']) == 9
+    assert len(first['edges']) == 11
     assert not {'core', 'simulation', 'ai', 'research'} & a.keys()
     graph = document(client, a['knowledge'])['value']
     assert len(graph['snapshots']) == 4

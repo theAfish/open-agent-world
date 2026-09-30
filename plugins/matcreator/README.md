@@ -6,7 +6,9 @@ board, four portable Toolsets and an evolving Know-Do Graph.
 ## Research workspace preset
 
 Restart the OAW backend and rebuild/reload the frontend after updating. Open the
-bottom **Legions** deck and place **MatCreator research**. Open **Workspace mode**
+MatCreator Pack in the Library and add **MatCreator research** to a deck, then
+place it from that deck. Confirm opening any remaining owned dependency Packs.
+Open **Workspace mode**
 in its header. The preset is available without running a demo script or adding
 cards to the current world beforehand.
 
@@ -37,11 +39,12 @@ orchestrator](https://github.com/AI4MS/MatCreator/blob/75c705c3c2bae7f2392c2d4bc
 plan dependent steps, execute, verify results, revise blocked work and record
 experience. OAW owns model calls, tools, Runs, cancellation, conversations and
 files. This preset uses a scientific system instruction on the existing Agent;
-it does not launch the upstream ADK server. Revision 4 includes equipped Summoning,
+it does not launch the upstream ADK server. Revision 7 includes equipped Summoning,
 a Research Executors Barracks and an Executor blueprint sharing the research
 Sandbox and Know-Do Graph, which owns all skills from the four scientific packages. OAW supplies asynchronous Run
 dispatch and collection; the coordinator chooses tasks and verifies results.
-Remote-job reconciliation remains outside this workflow.
+Remote-job status checks run through the coordinator's authorized tools when a
+scheduled continuation wakes it; OAW does not infer external job completion.
 
 ### Research tasks
 
@@ -76,41 +79,70 @@ Ordinary reloads and backend restarts preserve the live board's progress.
 
 ### Delegating research
 
-The coordinator discovers Executor IDs using Summoning `list`, then uses
-`task_board_execute` with `action=collect` to read runnable work IDs and attempts.
-`delegate` takes `item_id`, `library_id`, `agent_id`, `expected_revision` and a
-unique `request_id`. Admission persists a stable attempt and supplies the Executor
-with task inputs, verified dependency results, acceptance criteria and its own
-`research/<board>/<task>/<attempt>/` output folder. Repeat the same request ID
-only to recover an uncertain dispatch response; a deliberate retry gets a new ID.
+The coordinator first inspects and starts the shared Sandbox. `task_board_execute`
+with `action=collect` returns `document.revision`, runnable item IDs and authorized
+Executor targets including `library_id` and `agent_id`. `delegate` requires
+`item_id`, `expected_revision` and a unique `request_id`. Target IDs or unambiguous
+names are optional when exactly one authorized Executor is available.
 
-Launch independent tasks, then use `wait` with `instance_ids`, `wait_mode=any|all`
-and a bounded `timeout_seconds` (0–60). A timeout leaves work running. Continue
-waiting or doing useful independent work until the results arrive. `collect`
-reconciles terminal Runs and retains failures. Success enters **Awaiting review**;
-the coordinator must inspect actual files, record evidence/output paths and mark
-**Done**. Return inadequate results to **Blocked** before retrying. The task detail
-shows each attempt, report, output directory and a targeted **Stop task** button.
-Stopping the coordinator propagates through dependent child Runs. Collection
-never restarts cancelled work. Restart recovery reconciles existing attempts,
-including admissions interrupted before their handles reached the board.
+Tool responses default to summaries. Pass `since` with the last returned `cursor`
+to omit unchanged state, use `inspect` with an `instance_id` for one complete
+report, and request `detail=full` only when the whole board is needed. The human
+board API retains its full document response.
 
-Each summoned Executor has a private retained context. It does not join the main
-Conversation or receive its whole history; supply necessary scientific details in
-the task. Its shared connections retain normal live graph authorization. Bare
-Executor snapshots do not wait for unrelated shared Sandbox commands to finish.
+Delegation persists its attempt before admission and supplies verified upstream
+inputs, acceptance criteria and a separate `research/<board>/<task>/<attempt>/`
+output directory. These directories share one Sandbox; they are not filesystem
+isolation. Reuse a request ID only to recover the same invocation. A deliberate
+retry needs a new request ID.
 
-Restart the backend/frontend and place **MatCreator research** from the Legions
-deck to use revision 3. Existing placed Legions retain their configured Agents and
-layout; they are not silently replaced. The updated task tools also work on old
-boards when their coordinator has Summoning connected to a suitable Barracks and
-uses the new coordination instructions.
+Executors call `report_delegated_task` before ending, with `outcome` set to
+`complete`, `partial`, `blocked` or `waiting`, a summary, evidence, output paths
+and the next action. Complete is an executor claim, not acceptance. The coordinator
+verifies files and scientific assumptions before marking **Done**. Partial or
+blocked reports return the task to **Blocked**. Runs with no structured report
+still enter **Awaiting review** and never imply scientific completion.
 
-This release keeps the coordinator active through explicit bounded waits. It does
-not yet inject messages into running providers or automatically reopen a finished
-coordinator turn. Remote calculations must still be checked through their actual
-job tools. Suggested acceptance request: “Build 2×2×2 and 3×3×3 copper supercells,
-verify the atom counts independently, then compare the results.”
+Short waits use `wait` with instance IDs and a timeout of 0-60 seconds. When the
+coordinator finishes its turn with unobserved child results, OAW reconciles those
+results and starts a continuation in the original context/session. UI polling
+does not consume notifications. Explicit coordinator collection does. Continuations
+retain the original Run lineage and summon budget, recheck live board/Barracks and
+conversation permissions, yield to active/user-queued turns, and never restart
+stopped, failed or interrupted parents. Each root permits at most 64 automatic
+continuation turns; reaching the limit requires explicit continuation.
+
+For external jobs, an Executor's `waiting` report must include `external_jobs`
+and `check_after_seconds` (1-86400). This schedules a coordinator check. A coordinator
+can also use `defer` with `request_id`, `delay_seconds`, `reason` and optional
+`external_jobs`, then finish its turn. Check the real remote job at wake-up;
+never infer completion from elapsed time or resubmit an existing job. Pending
+checks appear on the task board and can be cancelled there or with `cancel_defer`.
+Stopping a task/board/coordinator suppresses its pending continuations. Checks
+from successfully finished turns survive ordinary restart; admitted continuations
+are deduplicated and interrupted provider executions are not automatically replayed.
+
+Executors retain private contexts and do not join the main Conversation. Revision 7
+adds a shared **Research artifacts** collection with publish access for Executors
+and manage access for the coordinator. The coordinator can attach published file
+versions to the main conversation. Executors have command execution access, while
+the coordinator owns shared Sandbox start/stop. Normal graph revocation still applies.
+
+Restart the backend/frontend and deploy **MatCreator research** revision 7 for the
+new instructions, artifact connections and Executor permissions. Existing placed
+Legions retain their configured Agents, graph and knowledge snapshots; they are not
+silently replaced. Existing boards gain the new tools after a backend restart, and
+new delegations can auto-continue. Historical attempts are reconciled without
+retroactively enabling automatic execution.
+
+Maintained compatibility notes accompany the affected scientific packages (0.1.1).
+They preserve upstream provenance, record the OAW adaptation revision, correct the
+Bohrium npm installation and project-list examples, document workflow-specific
+image/machine variables with explicit common fallbacks, and require installed CLI
+help and model-format probes. See the [official installation guide](https://bohrium-doc.dp.tech/docs/bohrctl/install/).
+Documentation review is not scientific runtime verification. Existing imported
+Know-Do Graph snapshots remain immutable; deploy or explicitly assimilate the new
+package to use the updated notes.
 
 Host integration tests: `backend/tests/test_matcreator_workspace.py`;
 delegation tests: `plugins/matcreator/tests/test_delegation.py`;
