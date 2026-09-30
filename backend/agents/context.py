@@ -114,6 +114,7 @@ class Checkpoint:
     measured_tokens: int | None = None
     measured_estimate: int = 0
     pending_messages: dict[str, str] = field(default_factory=dict)
+    input_run_id: str | None = None
 
 
 class ContextStore:
@@ -223,6 +224,24 @@ def text_content(text: str) -> dict:
     return {"role": "user", "parts": [{"text": text}]}
 
 
+def replayable_contents(contents: list[dict]) -> list[dict]:
+    """Keep model-visible history without replaying unsigned reasoning text.
+
+    Signed thought parts may be required by a provider to validate a later
+    tool call, so preserve those and all ordinary text/tool parts unchanged.
+    """
+    replayable = []
+    for content in contents:
+        parts = [part for part in content.get("parts", [])
+                 if not (part.get("thought") is True
+                         and not part.get("thought_signature")
+                         and not part.get("function_call")
+                         and not part.get("function_response"))]
+        if parts:
+            replayable.append({**content, "parts": parts})
+    return replayable
+
+
 def consume_response(pending: list[dict], response: dict) -> None:
     for index, call in enumerate(pending):
         call_id, response_id = call.get("id"), response.get("id")
@@ -252,6 +271,12 @@ class ManagedContext:
         self.store, self.agent_id, self.context_id = store, agent_id, context_id
         self.run_id, self.model, self.prompt = run_id, model, prompt
         self.checkpoint = store.load(agent_id, context_id)
+        retained = replayable_contents(self.checkpoint.contents)
+        if retained != self.checkpoint.contents:
+            # Existing checkpoints may contain reasoning from older Runs.
+            # Their measured token count referred to the unfiltered history.
+            self.checkpoint.contents = retained
+            self.checkpoint.measured_tokens = None
         self.budget = budget or ContextBudget.for_model(model.model)
         self.overhead = 0
         self.status = ContextStatus(compaction_count=self.checkpoint.compaction_count)
@@ -275,8 +300,11 @@ class ManagedContext:
                 context_id,
                 max_sequence=int(limit) if isinstance(limit, int) else None,
             ))
-        else:
+        elif not run_id or self.checkpoint.input_run_id != run_id:
             self.checkpoint.contents.append(text_content(prompt))
+        # Retries of one invocation are not new user turns. Do not deduplicate
+        # by text: the user may deliberately send the same task in a later Run.
+        self.checkpoint.input_run_id = run_id
         self.checkpoint.initialized = True
         self._input_estimate = estimate(self.rendered())
 
@@ -369,7 +397,7 @@ class ManagedContext:
 
     def _ingest(self, contents: list[dict], *, snapshot: bool) -> None:
         counts: Counter[str] = Counter() if snapshot else self._event_parts.copy()
-        for content in contents:
+        for content in replayable_contents(contents):
             new_parts = []
             for part in content.get("parts", []):
                 # Some adapters remove ADK-generated IDs when rendering. Keep

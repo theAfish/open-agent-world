@@ -86,6 +86,7 @@ class RunManager:
     default_runtime_provider_id: str | None = None
     provider_options: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     model_connection_resolver: ModelConnectionResolver | None = None
+    context_store: Any = None
     inactivity_timeout_seconds: float | None = DEFAULT_INACTIVITY_TIMEOUT_SECONDS
     _providers: dict[str, RuntimeProvider] = field(default_factory=dict)
     _agent_provider_ids: dict[str, str] = field(default_factory=dict)
@@ -169,9 +170,21 @@ class RunManager:
 
     async def startup(self) -> None:
         for record in self.store.interrupt_incomplete():
+            from .model_checkpoints import RunModelCheckpoints
+            from .tool_receipts import RunToolReceipts
+            RunModelCheckpoints(self.store.database, record.run_id).interrupt_run()
+            receipts = RunToolReceipts(self.store.database)
+            receipts.interrupt_run(record.run_id)
+            recovery_receipts = receipts.list_run(record.run_id)
+            visible_receipts = [{key: item[key] for key in (
+                'capability_kind', 'target_id', 'state', 'read_only', 'result_hints',
+            )} for item in recovery_receipts[-20:]]
             record = self.store.update_lifecycle(record.run_id, execution='interrupted',
                 holds_capacity=False, cleanup='uncertain', session_lost=True,
-                cleanup_reason='Backend restarted; provider execution cannot be reattached or external termination verified')
+                cleanup_reason='Backend restarted; provider execution cannot be reattached or external termination verified',
+                recovery_kind='backend_restart',
+                recovery_classification=receipts.recovery_classification(record.run_id),
+                recovery_receipts=visible_receipts)
             self._terminal_done.setdefault(record.run_id, asyncio.Event()).set()
             await self._publish_run(record, EventType.RUN_INTERRUPTED)
         for record in self.list_runs():
@@ -737,11 +750,20 @@ class RunManager:
                         # SQLite until the provider turn reaches a terminal result.
                         self._live_output[record.run_id] = text
                     elif event_kind == "agent_progress":
-                        progress = text if isinstance(text, str) else event.payload.get("status")
-                        if isinstance(progress, str) and progress.strip():
-                            self.store.update_lifecycle(
-                                record.run_id, progress=progress.strip(), last_signal=event_kind
-                            )
+                        # Model-provided reasoning is a transient, user-visible
+                        # event; never persist it as the Run's status string.
+                        if event.payload.get("kind") != "model_reasoning":
+                            progress = text if isinstance(text, str) else event.payload.get("status")
+                            if isinstance(progress, str) and progress.strip():
+                                recovery = (
+                                    {"recovery_kind": "model_stream_interrupted",
+                                     "confirmed_tool_count": event.payload.get("completed_tool_count"),
+                                     "recovery_classification": event.payload.get("recovery_classification"),
+                                     "recovery_receipts": event.payload.get("recovery_receipts")}
+                                    if event.payload.get("kind") == "model_stream_interrupted" else {}
+                                )
+                                self.store.update_lifecycle(record.run_id, progress=progress.strip(),
+                                                            last_signal=event_kind, **recovery)
                     elif event_kind in {"tool_started", "tool_completed"}:
                         if event_kind == "tool_started":
                             active_tools += 1
@@ -883,6 +905,7 @@ class RunManager:
         provider = self.plugins.create_runtime_provider(
             provider_id, self.capability_provider,
             model_connection_resolver=self.model_connection_resolver,
+            managed_context_store=self.context_store,
             **options,
         )
         self._providers[provider_id] = provider

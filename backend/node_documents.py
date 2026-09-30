@@ -81,6 +81,8 @@ def _authorize_action(services, node_id, action, capability):
         services.node_execution.assert_editable(node_id, allow_delegated=True)
     if capability is not None:
         live = services.capabilities.capability_for_id(capability.agent_id, capability.id)
+        for kind in services.plugins.capability_definition(live.kind).target_capabilities:
+            services.capabilities.capability_for_id(capability.agent_id, f"{kind}:{live.target_id}")
         if live.target_id != node_id or handler is None or handler.capability_kind != live.kind:
             raise PermissionDeniedError("This connection does not allow that document action")
     return handler

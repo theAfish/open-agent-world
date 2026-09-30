@@ -1,5 +1,6 @@
 from pathlib import Path
 import asyncio
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,10 +9,27 @@ from backend.agents.models import AgentEventType
 from backend.capabilities.provider import WorldAgentCapabilityProvider
 from backend.config import Settings
 from backend.conversations import ConversationSessionCreate, ConversationPost
+from backend.conversations.store import ConversationStore
 from backend.main import create_app
 from backend.services import create_services
 from backend.world.models import CardCreate, EdgeCreate
 from backend.tests.test_conversations import _create
+
+
+def test_interrupted_stream_recovery_metadata_survives_timeline_summary():
+    row = {
+        "run_id": "run-1", "agent_id": "agent-1", "status": "failed",
+        "started_at": None, "finished_at": None,
+        "lifecycle_json": json.dumps({
+            "progress": "provider stream interrupted",
+            "recovery_kind": "model_stream_interrupted",
+            "confirmed_tool_count": 2,
+        }),
+    }
+    summary = ConversationStore._run_summary(row)
+    assert summary.recovery_kind == "model_stream_interrupted"
+    assert summary.confirmed_tool_count == 2
+    assert summary.progress == "provider stream interrupted"
 
 
 def test_groups_sessions_naming_and_bidirectional_pages_survive_restart(data_root: Path):
@@ -62,6 +80,10 @@ class TranscriptRuntime(MockAgentRuntime):
         ]:
             yield AgentEvent(context.agent_id, context.run_id, kind, payload)
         if self.fail:
+            yield AgentEvent(context.agent_id, context.run_id, AgentEventType.PROGRESS, {
+                "kind": "model_stream_interrupted", "text": "model connection interrupted",
+                "completed_tool_count": 1,
+            })
             raise RuntimeError("test endpoint failed after output")
         yield AgentEvent(context.agent_id, context.run_id, AgentEventType.COMPLETED, run_status="succeeded")
 
@@ -94,6 +116,9 @@ async def test_provider_stream_is_live_only_and_terminal_history_is_durable(data
         assert history[-1].id == timeline[-1].id
         if fail:
             assert timeline[-1].sender_kind == 'system' and 'could not respond' in timeline[-1].content
+            summary = page.run_summaries[timeline[-1].run_id]
+            assert summary.recovery_kind == 'model_stream_interrupted'
+            assert summary.confirmed_tool_count == 1
         else:
             assert timeline[-1].sender_kind == 'agent' and timeline[-1].content == 'Done'
             summary = page.run_summaries[timeline[-1].run_id]
