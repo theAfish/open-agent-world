@@ -55,8 +55,10 @@ class SandboxOperations:
             if sandbox_id in self.services._sandbox_stopping:
                 raise SandboxStateError("Sandbox cleanup is pending")
             operation_id = uuid4().hex
+            from backend.runs.tool_receipts import current_tool_receipt_id
             context = self.services.run_manager.current_context
             receipt = {"id": operation_id, "sandbox_id": sandbox_id,
+                "tool_receipt_id": current_tool_receipt_id(),
                 "history_key": history.key(self.services, sandbox_id),
                 "caller": agent_id or "user", "run_id": context.run_id if context else None,
                 "operation_kind": kind, "state": "running", "argv": [],
@@ -188,17 +190,36 @@ class SandboxOperations:
                 "duration_seconds", "timed_out", "cancelled")} | {"command_id": operation_id}
         if receipt["state"] == "running":
             progress = {}
-            if receipt.get("operation_kind") == "python_install":
+            from .commands import needs_managed_python
+            if receipt.get("operation_kind") == "python_install" or (
+                receipt.get("operation_kind") in {"command", "skill_script"}
+                and needs_managed_python(receipt.get("argv") or (),
+                    receipt.get("python_environment", "auto"),
+                    skill=receipt.get("operation_kind") == "skill_script")
+            ):
                 from .manager import SandboxManager
                 backend = self.services.sandbox_backend
                 if isinstance(backend, SandboxManager):
-                    progress["shared_python"] = await backend.python_status(sandbox_id)
+                    python_status = await backend.python_status(sandbox_id)
+                    if receipt.get("operation_kind") == "python_install" or (
+                        isinstance(python_status, dict) and python_status.get("preparing")
+                    ):
+                        progress["shared_python"] = python_status
+                        if receipt.get("operation_kind") != "python_install":
+                            progress["waiting_for_shared_python"] = True
                     self.authorize(agent_id, sandbox_id)
+            phase = receipt.get("phase") or ("preparing_python" if progress.get("waiting_for_shared_python") else "executing")
+            if phase == "preparing_python":
+                progress["waiting_for_shared_python"] = True
             return {"ok": True, "status": "running", "operation_id": operation_id,
                 "command_id": operation_id, "operation_kind": receipt.get("operation_kind", "command"),
+                "phase": phase, "command_started": phase == "executing",
                 "started_at": receipt["started_at"],
                 "stdout": receipt.get("stdout", "")[-8192:], "stderr": receipt.get("stderr", "")[-8192:],
-                "next_step": "Use wait_sandbox_operation with this operation_id, or do independent work. Do not resubmit this operation.", **progress}
+                "next_step": ("Shared Python preparation is still running; wait on this command's operation_id. Do not resubmit it."
+                             if phase == "preparing_python" else
+                             "Use wait_sandbox_operation with this operation_id, or do independent work. Do not resubmit this operation."),
+                **progress}
         return {"ok": False, "status": receipt["state"], "operation_id": operation_id,
             "error": {"code": f"operation_{receipt['state']}", "message": receipt.get("error", "Inspect the command receipt before retrying"), "retryable": False}}
 
