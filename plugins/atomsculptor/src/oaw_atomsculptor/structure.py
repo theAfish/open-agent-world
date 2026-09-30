@@ -131,6 +131,17 @@ class RecordInterfaceCandidates(BaseModel):
     candidates: list[InterfaceCandidate] = Field(default_factory=list, max_length=100)
 
 
+class BuildSupercell(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    repetitions: tuple[int, int, int]
+
+    @model_validator(mode="after")
+    def validate_repetitions(self) -> "BuildSupercell":
+        if any(value < 1 or value > 100 for value in self.repetitions):
+            raise ValueError("supercell repetitions must be between 1 and 100")
+        return self
+
+
 def replace(value: dict, arguments: dict) -> dict:
     request = ReplaceStructure.model_validate(arguments)
     return request.structure.model_dump(mode="json")
@@ -161,6 +172,49 @@ def record_interface_candidates(value: dict, arguments: dict) -> dict:
     if len(ids) != len(set(ids)):
         raise ValueError("interface candidate ids must be unique")
     return document.model_copy(update={"interface_candidates": request.candidates}).model_dump(mode="json")
+
+
+def build_supercell(value: dict, arguments: dict) -> dict:
+    """Expand a diagonal supercell without an LLM or Sandbox round trip."""
+    request = BuildSupercell.model_validate(arguments)
+    document = StructureDocument.model_validate(value)
+    if document.cell is None:
+        raise ValueError("supercell requires a 3×3 unit cell")
+    nx, ny, nz = request.repetitions
+    copies = nx * ny * nz
+    if not document.atoms:
+        raise ValueError("supercell requires at least one atom")
+    if copies > 20_000:
+        raise ValueError("supercell repetition count is too large")
+    if len(document.atoms) * copies > 20_000 or len(document.bonds) * copies > 100_000:
+        raise ValueError("supercell exceeds Atom Structure document limits")
+    old_atoms = document.atoms
+    next_id = max((atom.id for atom in old_atoms), default=-1) + 1
+    atoms: list[Atom] = []
+    bonds: list[Bond] = []
+    for i in range(nx):
+        for j in range(ny):
+            for k in range(nz):
+                offset = [sum(multiplier * document.cell[axis][coordinate]
+                              for axis, multiplier in enumerate((i, j, k))) for coordinate in range(3)]
+                ids = {atom.id: atom.id if (i, j, k) == (0, 0, 0) else next_id + index
+                       for index, atom in enumerate(old_atoms)}
+                if (i, j, k) != (0, 0, 0):
+                    next_id += len(old_atoms)
+                atoms.extend(atom.model_copy(update={"id": ids[atom.id], "x": atom.x + offset[0],
+                                              "y": atom.y + offset[1], "z": atom.z + offset[2]})
+                             for atom in old_atoms)
+                bonds.extend(bond.model_copy(update={"first_atom_id": ids[bond.first_atom_id],
+                                              "second_atom_id": ids[bond.second_atom_id]})
+                             for bond in document.bonds)
+    repeats = request.repetitions
+    cell = [[component * repeats[axis] for component in row] for axis, row in enumerate(document.cell)]
+    layers = [layer.model_copy(update={"cell": [[component * repeats[axis] for component in row]
+                                                    for axis, row in enumerate(layer.cell)]})
+              if layer.cell is not None else layer for layer in document.layers]
+    expanded = document.model_copy(update={"atoms": atoms, "bonds": bonds, "cell": cell,
+                                           "layers": layers, "interface_candidates": []})
+    return StructureDocument.model_validate(expanded.model_dump(mode="json")).model_dump(mode="json")
 
 
 def summary(value: dict) -> dict:
