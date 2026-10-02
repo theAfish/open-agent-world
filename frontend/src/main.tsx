@@ -2,6 +2,8 @@ import ReactDOM from "react-dom/client";
 import "@xyflow/react/dist/style.css";
 import "./theme.css";
 import "./startup.css";
+import "./components/controls.css";
+import { SelectMenuLayer } from './components/SelectMenuLayer';
 import { initializeProfile } from "./state/profileStorage";
 import { fetchWithRetry } from './api/fetchWithRetry';
 
@@ -9,7 +11,7 @@ async function start() {
   const root = document.getElementById("root")!;
   if (import.meta.env.DEV && new URLSearchParams(location.search).has('card-finishes')) {
     const { FinishPreview } = await import('./debug/FinishPreview');
-    ReactDOM.createRoot(root).render(<FinishPreview />);
+    ReactDOM.createRoot(root).render(<><SelectMenuLayer /><FinishPreview /></>);
     return;
   }
   root.classList.add("application-startup");
@@ -22,13 +24,13 @@ async function start() {
     if (mode.mode === 'runtime') {
       const { RuntimeApp } = await import('./deployment/RuntimeApp');
       root.classList.remove('application-startup');
-      ReactDOM.createRoot(root).render(<RuntimeApp name={mode.name} />);
+      ReactDOM.createRoot(root).render(<><SelectMenuLayer /><RuntimeApp name={mode.name} /></>);
       return;
     }
     await initializeProfile();
     const { App } = await import("./App");
     root.classList.remove("application-startup");
-    ReactDOM.createRoot(root).render(<App />);
+    ReactDOM.createRoot(root).render(<><SelectMenuLayer /><App /></>);
   } catch {
     root.textContent = "工作区暂未就绪，请检查启动日志。 / The workspace is not ready. Check the launcher log. ";
     const retry = document.createElement("button");

@@ -111,6 +111,36 @@ The build retains previous payloads under `.open-agent-world/desktop-previous-*`
 cache while still enforcing the locked wheel hashes. See [Store acceptance](pack-store.md#acceptance)
 for testing remote Pack installation with the packaged interpreter and frontend.
 
+## Shared interface across platforms
+
+Windows, macOS and source/browser launches use the same React frontend, layout,
+theme and control behavior. Buttons and fields use application styling, and
+single-value select menus use a shared popup instead of an OS menu. This also
+covers controls loaded by Packs while keeping their native form values and
+`onChange` handlers. Keyboard navigation, disabled options and focus are retained.
+
+Tauri uses WebView2 on Windows and the system WKWebView on macOS; Linux source
+launches use the selected browser. The build adds WebKit prefixes for backdrop
+blur, masks and related styles. The CSS compatibility baseline is Chromium 109,
+Firefox 115 and Safari/WebKit 16.4. On older macOS installations, keep Safari
+updated: runtime color mixing depends on WebKit support and cannot be converted
+at build time when it uses theme variables. Font metrics can still vary by OS.
+
+Production UI acceptance runs the same settings, theme and dynamic-control
+checks in Chromium and WebKit:
+
+```sh
+npm --prefix frontend run build
+cd frontend
+npx --no-install playwright install chromium webkit
+npm run test:e2e:ui
+```
+
+The tests use an isolated preview profile and save screenshots and failure traces
+under `.tmp/ui-playwright`. Run the installed `.app` on macOS as part of release
+verification; Playwright WebKit is a compatibility check, not the installed
+WKWebView itself.
+
 ## Verification
 
 ```powershell

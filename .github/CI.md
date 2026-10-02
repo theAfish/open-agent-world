@@ -8,7 +8,8 @@ rules remain stable; there are no path filters, blanket skips, or
 - `Backend tests`: all tests in `tests` and `backend/tests`, including public
   SDK contracts, migrations, recovery, authorization, and run lifecycle tests.
 - `Frontend tests and build`: Vitest, TypeScript, Vite production build, and
-  the deployment Playwright scenario against that build.
+  the deployment Playwright scenario plus shared-control, theme and popup
+  acceptance in Chromium and WebKit against that build.
 - `Core smoke (Windows)`: startup, authentication, deployment, request
   context/correlation/health, idempotency, persistence, migration and storage.
 
@@ -29,9 +30,12 @@ backend/.venv/bin/python .github/run-backend-tests.py tests backend/tests
 
 On Windows use `backend/.venv/Scripts/python.exe`. The frontend commands are
 `npm --prefix frontend test`, `npm --prefix frontend run build`, and
-`npm --prefix frontend run test:e2e:deployment` after installing Playwright's
-browser. The deployment configuration starts its own isolated mock runtime
+`npm --prefix frontend run test:e2e:deployment` and
+`npm --prefix frontend run test:e2e:ui` after installing Playwright's Chromium
+and WebKit browsers. The deployment configuration starts its own isolated mock runtime
 and uses `frontend/dist`; `OAW_TEST_PYTHON` can select an existing interpreter.
+UI acceptance starts a separate preview profile with Sandbox execution disabled.
+WebKit checks do not replace verification of the installed macOS WKWebView.
 
 Backend JUnit reports and failed browser traces/screenshots are retained for
 seven days. Existing platform, native isolation and external science tests
