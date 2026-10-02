@@ -2,7 +2,9 @@
   "name": "open-agent-world-frontend",
   "private": true,
   "overrides": {
-    "matterviz": { "svelte-widgets": "1.6.1" }
+    "matterviz": {
+      "svelte-widgets": "1.6.1"
+    }
   },
   "version": "0.1.0",
   "type": "module",
@@ -28,6 +30,7 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "svelte": "5.57.0",
+    "three": "0.185.1",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
@@ -37,6 +40,7 @@
     "@testing-library/react": "^16.1.0",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
+    "@types/three": "0.185.4",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "10.4.21",
     "jsdom": "^25.0.1",

@@ -218,10 +218,13 @@ export interface RelationshipCatalogItem {
   templateable: boolean;
 }
 
+export type PackPackaging = 'standard' | 'premium' | 'paper' | 'collector';
+
 export interface PackDefinition {
   source?: 'bundled' | 'installed';
   id: string; plugin_id: string; name: string; description: string; cards: string[];
   artwork_asset?: string | null; artwork_url?: string | null; accent_color?: string | null;
+  packaging?: PackPackaging;
 }
 
 export interface RuntimeFrontendModule { version: string; api_version: number; url: string }

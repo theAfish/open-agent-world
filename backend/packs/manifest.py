@@ -112,6 +112,7 @@ class CreatorMetadata(Model):
     example: str = Field(default="", max_length=2000)
     expected_result: str = Field(default="", max_length=2000)
     accent_color: str = Field(default="#617b72", pattern=r"^#[0-9a-fA-F]{6}$")
+    packaging: Literal["standard", "premium", "paper", "collector"] = "standard"
 
 
 class PackManifest(Model):

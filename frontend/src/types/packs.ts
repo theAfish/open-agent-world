@@ -1,5 +1,6 @@
 export interface CreatorMetadata {
   description: string; author: string; preparation: string; example: string; expected_result: string; accent_color: string;
+  packaging?: import('./world').PackPackaging;
 }
 export interface CreatorRequest {
   legion_id: string; id: string; name: string; version: string; creator: CreatorMetadata; include_state_nodes: string[];

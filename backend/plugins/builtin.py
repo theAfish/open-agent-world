@@ -1122,7 +1122,7 @@ class CorePlugin:
         from backend.file_preview import register_file_preview
         register_file_preview(registration)
         registration.register_pack(PackDefinition(id='open-agent-world.core.default', name='Core essentials',
-            description='Agents, resources and workspaces for your world.', cards=tuple(registration.nodes)))
+            description='Agents, resources and workspaces for your world.', cards=tuple(registration.nodes), packaging='collector'))
 
 
 def create_builtin_registry() -> PluginRegistry:

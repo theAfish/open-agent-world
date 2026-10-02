@@ -29,7 +29,7 @@ from backend.plugins.deployment import NodeDeploymentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.24"
+PLUGIN_API_VERSION = "1.25"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -69,6 +69,7 @@ class PackDefinition(BaseModel):
     cards: tuple[str, ...] = ()
     artwork_asset: str | None = Field(default=None, min_length=1, max_length=128)
     accent_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    packaging: Literal["standard", "premium", "paper", "collector"] = "standard"
 
 
 class PackCatalogItem(PackDefinition):

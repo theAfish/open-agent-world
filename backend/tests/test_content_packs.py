@@ -17,17 +17,18 @@ HEADERS = {"X-OAW-Pack-Install": "1", "Content-Type": "application/vnd.oaw.pack"
 CREATOR_HEADERS = {"X-OAW-Pack-Install": "1"}
 
 
-def creation(registry=None):
+def creation(registry=None, packaging="standard"):
     registry = registry or create_builtin_registry()
     record = preset_record("coding", registry)
-    request = CreatorRequest(legion_id=record.id, id="local.research", name="Research assistant")
+    request = CreatorRequest(legion_id=record.id, id="local.research", name="Research assistant", creator={"packaging": packaging})
     result, files = prepare_export(record, request, registry)
     assert result["can_export"], result
     return registry, files
 
 
-def test_content_pack_install_load_and_immutable_versions(tmp_path):
-    registry, files = creation()
+@pytest.mark.parametrize("packaging", ["standard", "premium", "paper", "collector"])
+def test_content_pack_install_load_and_immutable_versions(tmp_path, packaging):
+    registry, files = creation(packaging=packaging)
     artifact = export_archive(files)
     pack = inspect_archive(artifact)
     assert pack.backend_entry is None
@@ -41,6 +42,7 @@ def test_content_pack_install_load_and_immutable_versions(tmp_path):
     assert fresh.has_plugin("local.research")
     assert "local.research" not in fresh.frontend_modules
     assert fresh.catalog().packs[-1].cards == ()
+    assert fresh.catalog().packs[-1].packaging == packaging
     assert preset_record("local.research.legion", fresh).blueprint == preset_record("coding", registry).blueprint
     with pytest.raises(ValueError, match="immutable"):
         manager.install(artifact)

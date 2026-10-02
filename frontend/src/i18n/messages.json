@@ -7264,6 +7264,11 @@
   "Choose a file in the system window.": ["Choose a file in the system window.", "请在系统窗口中选择文件。"],
   "Commands can read and change this file's contents. To rename or replace files, choose their folder.": ["Commands can read and change this file's contents. To rename or replace files, choose their folder.", "命令可以读取和修改此文件的内容。若需重命名或替换文件，请选择其所在文件夹。"],
   "Read only allows reading and copying into the working folder. Source files cannot be changed.": ["Read only allows reading and copying into the working folder. Source files cannot be changed.", "只读允许读取和复制到工作目录，不允许修改源文件。"],
+  "Pack packaging": ["Pack packaging", "卡包形式"],
+  "Standard Pack": ["Standard Pack", "标准卡包"],
+  "Premium Pack": ["Premium Pack", "高级烫印卡包"],
+  "Paper Sleeve": ["Paper Sleeve", "环保纸质卡包"],
+  "Collector Box": ["Collector Box", "收藏版卡盒"],
   "Paths are converted automatically for the Sandbox runtime.": ["Paths are converted automatically for the Sandbox runtime.", "路径会自动转换为沙箱运行环境中可访问的格式。"],
   "Choose a file or folder for {v0}, or remove the unused variable.": ["Choose a file or folder for {v0}, or remove the unused variable.", "请为 {v0} 选择文件或文件夹，或移除不用的变量。"]
 }
