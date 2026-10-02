@@ -1,6 +1,6 @@
 # 发布与部署锁定应用
 
-想先体验成品？运行 `python examples/deployed-workspace/run.py`，浏览器会打开无需 API Key 的本地部署示例。密码为 `oaw-demo-2026`，详见[示例说明](../examples/deployed-workspace/README.md)。
+想先体验成品？运行 `python examples/deployed-workspace/run.py`，浏览器会打开无需 API Key 的本地部署示例。密码为 `oaw-demo-2026`，详见[示例说明](../examples/deployed-workspace/README.md)。若想体验真正调用模型的已发布 Legion，见 [Knowledge research 部署示例](../examples/knowledge-legion-deploy/README.md)（英文）。
 
 [文档目录](README.zh-CN.md) · [English](deployment.md)
 

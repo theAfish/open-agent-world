@@ -9,7 +9,8 @@ try {
     $uvArguments = @(
         "sync", "--project", "backend", "--dev",
         "--extra", "adk",
-        "--extra", "litellm"
+        "--extra", "litellm",
+        "--extra", "knowledge"
     )
     & uv @uvArguments
     if ($LASTEXITCODE -ne 0) { throw "Python environment setup failed." }
