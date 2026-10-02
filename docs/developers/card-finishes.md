@@ -25,7 +25,7 @@ Expanded containers, equipped cards and shadow collections also use the shared l
 
 Thumbnail materials omit grain. Idle cards have no JavaScript animation loop or permanent GPU promotion; only the hovered collectible queues a paint. Shared SVG print plates are generated once at module initialization. Higher quality materials activate their stronger reflection only during interaction. Pack illumination mounts after the face emerges and runs once. Touch input and reduced motion retain a static material and static revealed faces. Blend/mask fallbacks reduce decoration while retaining readable artwork.
 
-The shared collectible face uses an engraved crest, a framed emblem, double printed borders and a separate paper title plaque. Library collection and detail panes scroll independently inside the bounded dialog. The showcase card scales to available pane height; narrow screens place the selected detail above the collection.
+The shared collectible face uses five minimal layouts, muted colours and a clear title sheet. See [Card design language](card-design.md) for presets, artwork and plugin integration. Library collection and detail panes scroll independently inside the bounded dialog. The showcase card scales to available pane height; narrow screens place the selected detail above the collection.
 
 ## Development preview
 

@@ -9,6 +9,11 @@ import { fetchWithRetry } from './api/fetchWithRetry';
 
 async function start() {
   const root = document.getElementById("root")!;
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has('card-design')) {
+    const { CardDesignPreview } = await import('./debug/CardDesignPreview');
+    ReactDOM.createRoot(root).render(<CardDesignPreview />);
+    return;
+  }
   if (import.meta.env.DEV && new URLSearchParams(location.search).has('card-finishes')) {
     const { FinishPreview } = await import('./debug/FinishPreview');
     ReactDOM.createRoot(root).render(<><SelectMenuLayer /><FinishPreview /></>);

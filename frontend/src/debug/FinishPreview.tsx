@@ -1,9 +1,7 @@
 import { useState, type CSSProperties } from 'react';
 import { Bot, RotateCcw } from 'lucide-react';
-import { CardFinishLayer } from '../cards/CardFinishLayer';
-import { useCardFinish } from '../cards/useCardFinish';
 import { CARD_FINISHES, finishLabel, type CardFinish } from '../cards/cardFinish';
-import { CardFace } from '../components/CardFace';
+import { CardFace, CardStock } from '../components/CardFace';
 import './finishPreview.css';
 
 const descriptions: Record<CardFinish, string> = {
@@ -16,12 +14,10 @@ const descriptions: Record<CardFinish, string> = {
 
 function PreviewCard({ finish, compact = false, reveal = false }: { finish: CardFinish; compact?: boolean; reveal?: boolean }) {
   const quality = compact ? 'thumbnail' : 'showcase';
-  const pointer = useCardFinish(finish, quality, true);
-  return <article className={`finish-preview-card card-stock card-finish-surface ${compact ? 'is-compact' : ''}`}
-    data-preview-finish={finish} style={{ '--collection-color': '#628e80' } as CSSProperties} {...pointer}>
-    <CardFace icon={<Bot />} label="Research Agent" description="Explore ideas. Connect knowledge. Make something new." />
-    <CardFinishLayer finish={finish} quality={quality} reveal={reveal} />
-  </article>;
+  return <CardStock className={`finish-preview-card ${compact ? 'is-compact' : ''}`} size={compact ? 'compact' : 'standard'}
+    data-preview-finish={finish} style={{ '--collection-color': '#628e80' } as CSSProperties} finish={finish} quality={quality} reveal={reveal}>
+    <CardFace icon={<Bot />} tone="sage" label="Research Agent" description="Explore ideas. Connect knowledge. Make something new." />
+  </CardStock>;
 }
 
 /** Loaded only in development; never writes a finish or changes probability. */
@@ -41,6 +37,7 @@ export function FinishPreview({ embedded = false }: { embedded?: boolean }) {
       {!embedded && <label><input type="checkbox" checked={dense} onChange={event => setDense(event.target.checked)} /> 200 thumbnails</label>}
       <button type="button" onClick={() => setReveal(value => value + 1)}><RotateCcw size={13} /> Replay light</button>
       {embedded && <a href="/?card-finishes" target="_blank" rel="noreferrer">Open material gallery</a>}
+      <a href="/?card-design" target="_blank" rel="noreferrer">Card design system</a>
     </div>
     <div className={`finish-preview-grid ${dense ? 'is-dense' : ''}`} key={reveal}>
       {(dense ? Array.from({ length: 200 }, (_, index) => CARD_FINISHES[index % CARD_FINISHES.length]) : embedded ? [finish] : CARD_FINISHES).map((value, index) =>

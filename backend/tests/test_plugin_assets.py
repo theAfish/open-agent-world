@@ -9,6 +9,7 @@ from backend.api.dependencies import get_services
 from backend.api.plugin_assets import router
 from backend.plugins.builtin import create_builtin_registry
 from open_agent_world.plugin_api import PackDefinition, PluginAsset, PluginDefinition, PluginDescriptor
+from open_agent_world.plugin_api import CardFaceSpec
 
 
 def plugin(identifier, configure):
@@ -56,6 +57,42 @@ def test_catalog_carries_owned_resource_and_frontend_references():
     card = next(c for c in registry.catalog().node_types if c.id == "example.card")
     assert card.icon_url == "/api/plugins/example.views/assets/logo"
     assert card.frontend == {"body": "editor"}
+
+
+def test_card_face_publishes_owned_artwork_and_round_trips_in_library(tmp_path):
+    from backend.card_library import CardLibraryStore, LibraryEdit
+    from backend.persistence.database import Database
+
+    registry = create_builtin_registry()
+    def configure(registration):
+        registration.register_asset(PluginAsset("cover", b"<svg/>", "image/svg+xml"))
+        registration.register_node_type(replace(registry.node_type("text"), id="example.card",
+            card_face=CardFaceSpec(variant="image", tone="sky", image_asset="cover")))
+        registration.register_pack(PackDefinition(id="example.faces", name="Faces", cards=("example.card",)))
+    registry.install(plugin("example.faces", configure))
+    card = next(c for c in registry.catalog().node_types if c.id == "example.card")
+    assert card.card_face.model_dump() == {"variant": "image", "tone": "sky", "image_url": "/api/plugins/example.faces/assets/cover"}
+    db = Database(tmp_path / "faces.db")
+    try:
+        store = CardLibraryStore(db, registry)
+        store.edit(LibraryEdit(action="open_pack", id="example.faces", expected_revision=store.read().revision))
+        assert CardLibraryStore(db, registry).read().card_definitions[card.id].card_face == card.card_face
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("face", [
+    {"variant": "unknown"}, {"tone": "neon"}, {"image_asset": "missing"}, {"image_asset": "document"},
+    {"image_asset": "/api/plugins/another/assets/cover"},
+])
+def test_invalid_card_face_is_rejected_before_plugin_install(face):
+    registry = create_builtin_registry()
+    def configure(registration):
+        registration.register_asset(PluginAsset("document", b"example", "text/plain"))
+        registration.register_node_type(replace(registry.node_type("text"), id="example.card", card_face=face))
+    with pytest.raises(ValueError):
+        registry.install(plugin("example.invalid", configure))
+    assert not registry.has_plugin("example.invalid")
 
 
 def test_pack_artwork_is_published_and_survives_collection_reload(tmp_path):

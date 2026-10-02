@@ -11,8 +11,8 @@ export function LibraryCard({ selected, included, color, children }: { selected:
 
 /** A single large material surface; the collection grid stays lightweight. */
 export function LibraryCardPreview({ card }: { card: CollectedCard }) {
-  return <CardStock className="library-card-preview" quality="showcase" finish={card.finish}
+  return <CardStock className="library-card-preview" size="standard" quality="showcase" finish={card.finish}
     style={{ "--collection-color": card.definition?.color ?? "#78967b" } as CSSProperties}>
-    <CardFace icon={<CatalogIcon definition={card.definition} />} label={card.label} description={card.description} />
+    <CardFace definition={card.definition} icon={<CatalogIcon definition={card.definition} />} label={card.label} description={card.description} />
   </CardStock>;
 }

@@ -160,6 +160,8 @@ export interface WorldSnapshot {
 }
 
 export interface NodeTypeCatalogItem {
+  /** Layout and colour are independent of the owned card's material finish. */
+  card_face?: import('../components/cardFaceDesign').CardFaceDesign | null;
   state?: PluginStateSpec;
   has_scoped_state?: boolean;
   icon_url?: string | null;
