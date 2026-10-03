@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { normalizeCardFinish, type CardFinish } from "./cardFinish";
 import type { CardFinishQuality } from "./CardFinishLayer";
+import { MATERIAL_LIGHT_EVENT } from './cardMaterialRenderer';
 
 const LIGHT_PROPERTIES = [
   "--pointer-x", "--pointer-y", "--card-angle-x", "--card-angle-y",
@@ -26,6 +27,7 @@ export function useCardFinish(finish?: CardFinish, quality: CardFinishQuality = 
       LIGHT_PROPERTIES.forEach(property => current.node!.style.removeProperty(property));
       current.node.removeAttribute("data-finish-active");
       current.node.removeAttribute("data-card-tilting");
+      current.node.dispatchEvent(new CustomEvent(MATERIAL_LIGHT_EVENT, { detail: { x: 0, y: 0 } }));
     }
     current.motion?.removeEventListener?.("change", reset);
     window.removeEventListener("scroll", reset, true);
@@ -70,6 +72,7 @@ export function useCardFinish(finish?: CardFinish, quality: CardFinishQuality = 
       style.setProperty("--finish-angle", `${(124 + x * 8 + y * 4).toFixed(2)}deg`);
       style.setProperty("--finish-active", "1");
       current.node.setAttribute("data-finish-active", "true");
+      current.node.dispatchEvent(new CustomEvent(MATERIAL_LIGHT_EVENT, { detail: { x, y } }));
     });
   }, [finish, quality, reset, tilt]);
 

@@ -7,7 +7,7 @@
 .finish-preview-controls label { display: flex; align-items: center; gap: 7px; }
 .finish-preview-controls button, .finish-preview-controls select { display: inline-flex; align-items: center; gap: 7px; background: transparent; color: inherit; font: inherit; padding: 8px 12px; border: 1px solid #83978a70; border-radius: 6px; cursor: pointer; }
 .finish-preview-controls a { color: inherit; }
-.finish-preview-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 26px; max-width: 1400px; }
+.finish-preview-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 30px; max-width: 1840px; }
 .finish-preview-grid figure { margin: 0; min-width: 0; }
 .finish-preview-card { width: 100%; aspect-ratio: 0.8; }
 .finish-preview-card .card-face { height: auto; }

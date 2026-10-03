@@ -247,7 +247,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
           ) : null}
           {visualLevel === 'inspector' && canCollapseInspector && <IconButton icon={X} size="sm" quiet className="node-surface-close"
             onClick={() => closeInspector(card.id)} label={t("Close {v0} inspector", { v0: String(card.name) })} />}
-          {visualLevel === 'inspector' && <CardFinishLayer finish={card.finish} quality="thumbnail" />}
+          {visualLevel === 'inspector' && <CardFinishLayer finish={card.finish} quality="thumbnail" surface="chrome" />}
         </header>
 
         <div className="node-preview-content" aria-hidden={visualLevel !== "preview"}>

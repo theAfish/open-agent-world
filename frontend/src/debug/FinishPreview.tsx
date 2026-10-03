@@ -6,9 +6,9 @@ import './finishPreview.css';
 
 const descriptions: Record<CardFinish, string> = {
   normal: 'Uncoated stock. Original ink and artwork.',
-  foil: 'Silver facets, fine grain and a broad metallic reflection.',
-  rainbow: 'A continuous spectrum beneath a clear iridescent coat.',
-  starlight: 'Embedded flakes catch the light on a smoked base.',
+  foil: 'Brushed silver with directional highlights and a polished edge.',
+  rainbow: 'Prismatic facets with individual normals and shifting spectral reflections.',
+  starlight: 'Luminous flakes and starbursts embedded beneath a smoked clear coat.',
   laser: 'Iridescent foil with fine circular grooves that catch the light.',
 };
 
@@ -23,7 +23,7 @@ function PreviewCard({ finish, compact = false, reveal = false }: { finish: Card
 /** Loaded only in development; never writes a finish or changes probability. */
 export function FinishPreview({ embedded = false }: { embedded?: boolean }) {
   const [finish, setFinish] = useState<CardFinish>('foil');
-  const [dark, setDark] = useState(false);
+  const [dark, setDark] = useState(true);
   const [dense, setDense] = useState(false);
   const [reveal, setReveal] = useState(0);
   return <section className={`finish-preview ${embedded ? 'is-embedded' : ''}`} data-theme={dark ? 'dark' : 'light'}>
@@ -42,7 +42,7 @@ export function FinishPreview({ embedded = false }: { embedded?: boolean }) {
     <div className={`finish-preview-grid ${dense ? 'is-dense' : ''}`} key={reveal}>
       {(dense ? Array.from({ length: 200 }, (_, index) => CARD_FINISHES[index % CARD_FINISHES.length]) : embedded ? [finish] : CARD_FINISHES).map((value, index) =>
         <figure key={`${value}:${index}`}><PreviewCard finish={value} compact={dense} reveal={reveal > 0 && !dense} />
-          <figcaption><strong>{finishLabel(value)}</strong>{!dense && <span>{descriptions[value]}</span>}</figcaption></figure>)}
+          <figcaption><strong>{value === 'rainbow' ? 'Holo' : finishLabel(value)}</strong>{!dense && <span>{descriptions[value]}</span>}</figcaption></figure>)}
     </div>
     {!embedded && <p className="finish-preview-note">Development preview · No collection changes · Use your browser's reduced-motion setting to inspect the static material.</p>}
   </section>;
