@@ -14,6 +14,7 @@ from .models import (
     SandboxEvent,
     SandboxInfo,
     SandboxValidationError,
+    FolderMount,
 )
 from .materialization import RuntimeMount
 
@@ -30,6 +31,7 @@ class SandboxBackend(ABC):
 
     supports_invocation_environment: bool = False
     supports_execution_policy: bool = False
+    supports_folder_mounts: bool = False
 
     async def managed_workspace(self, sandbox_id: str) -> Path:
         """Host path of this runtime's internal workspace, even when overridden."""
@@ -64,6 +66,7 @@ class SandboxBackend(ABC):
         invocation_env: Mapping[str, str] | None = None,
         runtime_mount: RuntimeMount | None = None,
         execution_policy: Mapping[str, object] | None = None,
+        folder_mounts: Sequence[FolderMount] = (),
     ) -> CommandResult:
         """Run argv with an optional command-scoped, read-only runtime bundle.
 
@@ -76,6 +79,9 @@ class SandboxBackend(ABC):
         execution_policy is host-owned configuration captured at admission;
         backends advertise support before it is passed. It is never an Agent
         tool parameter and never changes process-global defaults.
+        folder_mounts contains host-authorized directories captured at admission.
+        Backends enforce access and rewrite their environment values to accessible
+        paths. Grants last only for this command and must be cleaned up on failure.
 
         Independent commands may overlap in the same workspace. Cancelling the
         execute task must join cleanup of only that command's process tree.

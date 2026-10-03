@@ -2,6 +2,7 @@
 .world-card.card-lod-view { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; padding: 0; overflow: hidden; contain: layout paint; transition: none; box-shadow: 0 4px 10px var(--shadow); background: var(--card-surface); }
 .card-lod-view .card-lod-heading { flex: 0 0 auto; min-width: 0; color: var(--ink); transition: none; }
 .card-lod-title { min-width: 0; }
+.card-lod-heading > :not(.card-finish-layer) { position: relative; z-index: 2; }
 .card-lod-title strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; }
 .card-lod-kind { display: grid; place-items: center; flex: 0 0 auto; width: 38px; height: 38px; color: var(--card-kind, var(--accent)); border: 1px solid color-mix(in srgb, var(--card-kind, var(--accent)) 22%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--card-kind, var(--accent)) 10%, var(--card-surface)); }
 .card-lod-status { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--ink-faint); }

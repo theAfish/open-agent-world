@@ -28,27 +28,30 @@ afterEach(() => {
   useCardLibrary.setState({ snapshot: null, busy: false, error: "", refresh: originalRefresh });
 });
 
-it("keeps a failed or pending open sealed, then reveals only an authoritative successful retry", async () => {
+it.each(['standard', 'premium', 'paper', 'collector'] as const)("keeps a pending or failed %s pack sealed, then reveals only a successful retry", async packaging => {
   vi.useFakeTimers();
   const state = fixture();
+  state.packs.tools.definition.packaging = packaging;
+  const openLabel = packaging === 'paper' || packaging === 'collector' ? 'Open Tools' : 'Tear open Tools';
   useCardLibrary.setState({ snapshot: state, refresh: async () => {} });
   let reject!: (reason: Error) => void;
   const edit = vi.spyOn(worldApi, "editCardLibrary").mockReturnValueOnce(new Promise((_, fail) => { reject = fail; }));
   const { container } = render(<Harness />);
-  fireEvent.click(screen.getByRole("button", { name: "Tear open Tools" }));
-  expect(screen.getByRole("button", { name: "Tear open Tools" }).hasAttribute("disabled")).toBe(true);
+  expect(container.querySelector('article')?.dataset.packaging).toBe(packaging);
+  fireEvent.click(screen.getByRole("button", { name: openLabel }));
+  expect(screen.getByRole("button", { name: openLabel }).hasAttribute("disabled")).toBe(true);
   expect(container.querySelector(".is-opened")).toBeNull();
   expect(opened).not.toHaveBeenCalled();
   await act(async () => { reject(new Error("Please retry")); });
   expect(container.querySelector(".is-revealing")).toBeNull();
-  expect(screen.getByRole("button", { name: "Tear open Tools" }).hasAttribute("disabled")).toBe(false);
+  expect(screen.getByRole("button", { name: openLabel }).hasAttribute("disabled")).toBe(false);
   const saved = structuredClone(state);
   saved.revision = 2;
   saved.packs.tools.opened = true;
   const id = saved.packs.tools.definition.cards[0];
   saved.collection[id] = { card_id: id, plugin_id: saved.packs.tools.definition.plugin_id, source_pack_ids: ["tools"], unlocked: true, unlocked_at: "2026-09-10T00:00:00Z" };
   edit.mockResolvedValueOnce(saved);
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Tear open Tools" })); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: openLabel })); });
   expect(edit).toHaveBeenCalledTimes(2);
   expect(container.querySelector(".is-opened.is-revealing")).toBeTruthy();
   expect(opened).toHaveBeenCalledWith("tools");

@@ -16,6 +16,7 @@ it('keeps the saved finish on workspace chrome without overlaying working conten
   const { container, rerender } = render(<WorkspaceSurface card={card} />);
   expect(container.querySelector('.workspace-titlebar .card-finish-layer')?.getAttribute('data-finish')).toBe('laser');
   expect(container.querySelector('.workspace-titlebar .card-finish-layer')?.getAttribute('data-quality')).toBe('thumbnail');
+  expect(container.querySelector('.workspace-titlebar .card-finish-layer')?.getAttribute('data-material-surface')).toBe('chrome');
   expect(container.querySelector('.workspace-content .card-finish-layer')).toBeNull();
   rerender(<WorkspaceSurface card={{ ...card }} />);
   expect(container.querySelector('.workspace-titlebar')?.getAttribute('data-finish')).toBe('laser');

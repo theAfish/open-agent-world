@@ -4,6 +4,20 @@
 :where(.card-finish-surface) { position: relative; isolation: isolate; }
 .card-finish-surface .card-face-copy { position: relative; z-index: 2; }
 .card-finish-surface .card-face-corner { z-index: 2; }
+.world-card.card-finish-surface > .node-preview-content,
+.world-card.card-finish-surface > .card-static-preview { z-index: 2; }
+/* World card copy is printed on matte stock just like collection copy. Its title
+   starts earlier, so the shader uses the real layout rather than painting over it. */
+.world-card.card-finish-surface > .card-finish-layer:not([data-material-ready]) {
+  -webkit-mask-image: linear-gradient(#000 0 var(--finish-copy-start, 35%), #0001 var(--finish-copy-start, 35%));
+  mask-image: linear-gradient(#000 0 var(--finish-copy-start, 35%), #0001 var(--finish-copy-start, 35%));
+}
+.world-card[data-finish]:not([data-finish="normal"]) .card-kind-icon {
+  color: #f1f5ef;
+  background: linear-gradient(135deg, #ebf4f72e, #c1d3dd12 46%, #ffffff08);
+  border: 1px solid #edf8ee65;
+  box-shadow: inset 0 1px 1px #ffffff80, inset -1px -1px 1px #9fbec454, 0 3px 5px #0003;
+}
 .card-finish-layer {
   position: absolute;
   inset: 0;
@@ -17,11 +31,36 @@
   --finish-intensity: 1;
 }
 .card-finish-layer > span,
+.card-finish-layer > canvas,
 .card-finish-layer::after {
   position: absolute;
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
+}
+.card-material-canvas { width: 100%; height: 100%; opacity: 0; }
+.card-finish-layer[data-material-ready] .card-material-canvas { opacity: 1; }
+.card-finish-layer[data-material-ready] > .card-finish-base,
+.card-finish-layer[data-material-ready] > .card-finish-pattern,
+.card-finish-layer[data-material-ready] > .card-finish-grain,
+.card-finish-layer[data-material-ready] > .card-finish-sheen { visibility: hidden; }
+/* The perimeter is its own polished material. It remains visible over the matte copy. */
+.card-finish-layer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: linear-gradient(var(--finish-angle, 124deg), #ffffeac9, #9dafb650 24%, #ffffffbd 42%, #55657260 62%, #d4e9f1c2 82%, #fff8dc);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+.card-finish-layer--rainbow::before,
+.card-finish-layer--laser::before {
+  background: linear-gradient(var(--finish-angle, 124deg), #fff4bd, #82d3df 21%, #c2a4f1 38%, #ffffff 47%, #77b6c0 65%, #e9a7e9 83%, #c7edcc);
 }
 .card-finish-base {
   /* Normal compositing retains both dark and coloured facets on white stock. */
@@ -62,7 +101,7 @@
 
 /* Foil: steel shadows and broad silver highlights with fine stock grain. */
 .card-finish-layer--foil .card-finish-pattern {
-  background-image: linear-gradient(var(--finish-angle, 124deg), #30405e66 8%, #e4eff04d 21%, #96c4c440 33%, #e2edf673 40%, #3e52798f 51%, #a6bac14d 61%, #d2ba794d 77%, #47547370 91%);
+  background-image: repeating-linear-gradient(128deg, #f5fcff18 0 .5px, #182b3710 .5px 1.5px, transparent 1.5px 3px), linear-gradient(var(--finish-angle, 124deg), #30405e99 8%, #e4eff0aa 21%, #96a4aa66 33%, #e2edf6aa 40%, #3e5279aa 51%, #a6bac166 61%, #d2c6a577 77%, #475473aa 91%);
   background-size: 175% 175%;
   opacity: calc((.56 + var(--finish-active, 0) * .12) * var(--finish-intensity));
 }
@@ -75,9 +114,10 @@
 }
 .card-finish-layer--rainbow .card-finish-pattern {
   background-image:
-    conic-gradient(from 140deg at 52% 38%, #159dce, #5846d9 16%, #d945ad 33%, #f1ba4e 48%, #88c961 62%, #22cabc 78%, #298bdf 92%, #159dce);
-  background-size: 115% 115%;
-  opacity: calc((.46 + var(--finish-active, 0) * .1) * var(--finish-intensity));
+    var(--finish-facet-plate);
+  background-size: 100% 100%;
+  background-position: center;
+  opacity: calc(.85 * var(--finish-intensity));
 }
 .card-finish-layer--rainbow .card-finish-sheen {
   background-image:
@@ -153,6 +193,19 @@
 .card-finish-layer--laser .card-finish-grain { opacity: .09; }
 
 /* Smaller faces use just three passive plates. */
+.card-finish-layer[data-material-surface="chrome"][data-quality] { --finish-intensity: .3; }
+.card-finish-layer[data-material-surface="chrome"] .card-finish-pattern {
+  background-size: 320px 400px;
+  background-position: left 15%;
+  background-repeat: repeat;
+}
+.card-finish-layer[data-material-surface="chrome"]::before { opacity: .45; padding: 1px; }
+.card-finish-layer[data-material-ready][data-material-surface="chrome"] .card-material-canvas {
+  opacity: .38;
+  /* Keep the app name quiet while leaving a little more foil visible along the right edge. */
+  -webkit-mask-image: linear-gradient(90deg, #0009, #0005 32%, #000c 75%, #0009);
+  mask-image: linear-gradient(90deg, #0009, #0005 32%, #000c 75%, #0009);
+}
 .card-finish-layer[data-quality="thumbnail"] { --finish-intensity: .94; }
 .card-finish-layer[data-quality="thumbnail"] .card-finish-pattern,
 .card-finish-layer[data-quality="thumbnail"] .card-finish-sheen { transition: none; }
@@ -179,6 +232,7 @@
 
 /* If blend or mask support is absent the printed face still remains readable. */
 @supports not ((mask-image: linear-gradient(#000, transparent)) or (-webkit-mask-image: linear-gradient(#000, transparent))) {
+  .card-finish-layer::before { padding: 0; background: none; border: 1px solid #b6c7cf90; }
   .card-finish-layer .card-finish-base { opacity: .32; }
   .card-finish-layer .card-finish-pattern { opacity: .3; }
   .card-finish-layer--starlight .card-finish-pattern { opacity: .65; }

@@ -707,9 +707,10 @@ async def _legion_state(context, capability, arguments):
 async def _inspect_sandbox(
     context: CapabilityContext, capability: Any, values: dict[str, Any]
 ) -> Any:
-    if values:
-        raise ResourceValidationError("sandbox inspect takes no arguments")
-    return await context.inspect_sandbox(capability.agent_id, capability.target_id)
+    from backend.sandbox.history import SandboxInspection
+    from backend.capabilities.provider import _validate_tool_request
+    options = _validate_tool_request(SandboxInspection, values)
+    return await context.inspect_sandbox(capability.agent_id, capability.target_id, **options.model_dump())
 
 
 async def _start_sandbox(context, capability, values):
@@ -924,8 +925,8 @@ def _register_builtin(registry: PluginRegistration) -> None:
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.execute', tool_name='execute_command', target_parameter='sandbox',
         selectors=EXECUTION_SELECTORS,
-        description='Execute an argv command in the selected sandbox. Long operations return status=running and an operation_id after wait_seconds (default 1). Use wait_sandbox_operation to collect the result or do independent work; never resubmit running work. Commands run concurrently in the shared workspace and HOME. Inspect active_commands to coordinate with other Agents; avoid overwriting their edits. Cancellation and timeout affect only the selected command. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES. Calls use fresh non-interactive processes: cd/export/venv activation do not carry over. For installations set timeout_seconds explicitly and keep progress visible; do not pipe installers to tail. Shell pipelines report the final command status: use bash -o pipefail or download with curl -f to a file and only execute it after success. Use install_python_packages for shared Python dependencies.',
-        input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}, "wait_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 1, "description": "Host observation budget; returns operation_id if still running. Use wait_sandbox_operation later, not a duplicate submission."}, "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 3600, "description": "Command wall-clock budget in seconds. Omit to use Sandbox settings; set explicitly for slow installs."}}, "required": ["argv"], "additionalProperties": False}), _execute_sandbox)
+        description='Execute an argv command in the selected sandbox. Long operations return status=running and an operation_id after wait_seconds (default 1). Use wait_sandbox_operation to collect the result or do independent work; never resubmit running work. Commands run concurrently in the shared workspace and HOME. Inspect active_commands to coordinate with other Agents; avoid overwriting their edits. Cancellation and timeout affect only the selected command and do not roll back completed writes; inspect effects before retrying. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES. Calls use fresh non-interactive processes: cd/export/venv activation do not carry over. For installations set timeout_seconds explicitly and keep progress visible; do not pipe installers to tail. Shell pipelines report the final command status: use bash -o pipefail or download with curl -f to a file and only execute it after success. Use install_python_packages for shared Python dependencies.',
+        input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}, "wait_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 1, "description": "Host observation budget; returns operation_id if still running. Use wait_sandbox_operation later, not a duplicate submission."}, "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 36000, "description": "Command wall-clock budget in seconds. Omit to use Sandbox settings; set explicitly for slow installs."}}, "required": ["argv"], "additionalProperties": False}), _execute_sandbox)
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.cancel_command', tool_name='cancel_command', target_parameter='sandbox',
         description='Cancel one command and wait for its process cleanup. Inspect active_commands and supply its id as command_id. Agents may cancel their own commands; cancelling another Agent requires sandbox.stop authority. A stale ID cannot cancel a newer command.',
@@ -943,10 +944,11 @@ def _register_builtin(registry: PluginRegistration) -> None:
         kind='sandbox.run_skill_script', tool_name='run_skill_script', target_parameter='sandbox',
         description='Run a file from the selected Skill in the selected sandbox. Both resources require independent live authorization. The current bundle is mounted read-only outside the workspace; cwd and generated outputs use the sandbox workspace.',
         input_schema=skill_script_schema(), selectors=(SKILL_SELECTOR, *EXECUTION_SELECTORS), target_capabilities=frozenset({"sandbox.execute"})), _run_skill_script)
+    from backend.sandbox.history import SandboxInspection
     registry.register_capability(CapabilityDefinition(
         kind='sandbox.inspect', tool_name='inspect_sandbox', target_parameter='sandbox',
-        description='Inspect the selected sandbox before executing: returns its operating system, shell argv prefix, cwd, read/write access, resource directory and availability.',
-        input_schema={"type": "object", "properties": {}, "additionalProperties": False}), _inspect_sandbox)
+        description='Inspect the selected sandbox before executing. History defaults to this caller without output; use history_scope=run/all, include_output=true or include_shared_python=true only when needed: returns its operating system, shell argv prefix, cwd, read/write access, resource directory and availability.',
+        input_schema=SandboxInspection.model_json_schema()), _inspect_sandbox)
     registry.register_node_type(NodeTypeDefinition(
         canvas_create_requires_confirmation=False, id="agent", label="Agent", description="Reasoning worker", icon="bot",
         color="#75736c", deck_id="agents", deck_label="Agents", deck_icon="bot",
@@ -1075,7 +1077,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         capabilities=(CapabilityGrantDefinition(kind='image.view'),),
     ))
     registry.register_capability(CapabilityDefinition(kind="sandbox.copy_skill_resource", tool_name="copy_skill_resource",
-        description="Explicitly copy an authorized Skill resource to the writable workspace. Existing files require overwrite=true.",
+        description="Explicitly copy an authorized Skill resource to a workspace-relative destination. Missing parent directories are created automatically. Existing files require overwrite=true.",
         target_parameter="sandbox", selectors=(SKILL_SELECTOR,), target_capabilities=frozenset({"sandbox.execute"}),
         input_schema={"type": "object", "properties": {"source": {"type": "string"}, "destination": {"type": "string"}, "overwrite": {"type": "boolean", "default": False}}, "required": ["source", "destination"], "additionalProperties": False}), _copy_skill_resource)
     registry.register_relationship(RelationshipDefinition(
@@ -1120,7 +1122,7 @@ class CorePlugin:
         from backend.file_preview import register_file_preview
         register_file_preview(registration)
         registration.register_pack(PackDefinition(id='open-agent-world.core.default', name='Core essentials',
-            description='Agents, resources and workspaces for your world.', cards=tuple(registration.nodes)))
+            description='Agents, resources and workspaces for your world.', cards=tuple(registration.nodes), packaging='collector'))
 
 
 def create_builtin_registry() -> PluginRegistry:

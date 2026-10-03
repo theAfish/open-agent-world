@@ -92,6 +92,7 @@ export default function DevelopmentPanel() {
         <header><div><small>OPEN AGENT WORLD · DEVELOPMENT</small><h2 id="development-title">{tr("开发调试", "Development tools")}</h2></div><button ref={close} disabled={busy} onClick={() => setOpen(false)} aria-label={tr("关闭调试面板", "Close development tools")}><X size={20} /></button></header>
         <p>{tr("选择需要初始化的内容。操作仅作用于当前开发档案，重置前会保留恢复备份。", "Choose what to initialize in this development profile. A recovery backup is kept before reset.")}</p>
         <details><summary>Card finish preview</summary><FinishPreview embedded /></details>
+        <p><a href="/?pack-design" target="_blank" rel="noreferrer">{tr("卡包设计预设 · Concept C", "Pack design presets · Concept C")}</a></p>
         <div className="development-presets">
           <button disabled={busy} onClick={() => choose(["workspace", "decks", "packs", "interface"])}>{tr("测试首次启动", "Test first launch")}</button>
           <button disabled={busy} onClick={() => choose(["packs", "decks"])}>{tr("测试开包", "Test pack opening")}</button>

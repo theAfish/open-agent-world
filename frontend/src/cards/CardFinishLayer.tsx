@@ -1,9 +1,11 @@
 import type { CSSProperties } from "react";
 import { normalizeCardFinish, type CardFinish } from "./cardFinish";
 import laserEtch from "./assets/laser-etch.svg";
+import { CardMaterialCanvas } from './CardMaterialCanvas';
 import "./cardFinish.css";
 
 export type CardFinishQuality = "thumbnail" | "standard" | "showcase";
+export type CardFinishSurface = "card" | "chrome";
 
 /** Fixed, non-tiling print plates. These are shared by every instance, never rolled at render time. */
 const starPoints = [
@@ -31,6 +33,16 @@ const grainPlate = `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="
 const grainStyle = {
   "--finish-grain-plate": `url("data:image/svg+xml,${encodeURIComponent(grainPlate)}")`,
 } as CSSProperties;
+// A shared faceted print for small cards and browsers without WebGL.
+const vertex = (x: number, y: number) => [x * 120 + Math.sin(x * 12.7 + y * 31.1) * 44, y * 134 + Math.sin(x * 43.3 + y * 17.9) * 48];
+const facetPlate = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 940">${Array.from({ length: 63 }, (_, index) => {
+  const x = index % 7 - 1, y = Math.floor(index / 7) - 1;
+  const a = vertex(x,y), b = vertex(x+1,y), c = vertex(x,y+1), d = vertex(x+1,y+1);
+  const colors = ['#537986','#776491','#b1af82','#527c89','#556183','#aa869a','#72b2ab'];
+  return `<path d="M${a}L${b}L${c}Z" fill="${colors[(index*3)%7]}"/><path d="M${b}L${d}L${c}Z" fill="${colors[(index*5+2)%7]}"/>`;
+}).join('')}</svg>`;
+const facetStyle = { '--finish-facet-plate': `url("data:image/svg+xml,${encodeURIComponent(facetPlate)}")` } as CSSProperties;
+const holoStyle = { ...grainStyle, ...facetStyle };
 const starStyle = {
   "--finish-star-plate": `url("data:image/svg+xml,${encodeURIComponent(starPlate)}")`,
 } as CSSProperties;
@@ -41,20 +53,23 @@ const laserStyle = {
 const engravedStyle = { ...grainStyle, ...laserStyle };
 
 /** Pure decoration: all persistent finish decisions belong to the card instance. */
-export function CardFinishLayer({ finish, quality = "standard", reveal = false }: {
+export function CardFinishLayer({ finish, quality = "standard", reveal = false, surface = "card" }: {
   finish?: CardFinish;
   quality?: CardFinishQuality;
   reveal?: boolean;
+  surface?: CardFinishSurface;
 }) {
   const material = normalizeCardFinish(finish);
   if (material === "normal") return null;
   const plateStyle = material === "starlight" ? (quality === "thumbnail" ? starStyle : starlightStyle)
     : material === "laser" ? (quality === "thumbnail" ? laserStyle : engravedStyle)
+    : material === "rainbow" ? (quality === "thumbnail" ? facetStyle : holoStyle)
     : quality === "thumbnail" ? undefined : grainStyle;
   return <span
     className={`card-finish-layer card-finish-layer--${material}`}
     data-finish={material}
     data-quality={quality}
+    data-material-surface={surface}
     data-reveal={reveal || undefined}
     style={plateStyle}
     aria-hidden="true"
@@ -63,5 +78,6 @@ export function CardFinishLayer({ finish, quality = "standard", reveal = false }
     <span className="card-finish-pattern" />
     {quality !== "thumbnail" && <span className="card-finish-grain" />}
     <span className="card-finish-sheen" />
+    <CardMaterialCanvas finish={material} quality={quality} surface={surface} />
   </span>;
 }

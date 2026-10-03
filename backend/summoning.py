@@ -252,7 +252,7 @@ class SummoningService:
     def snapshot(self, node_id, capability=None):
         self.authorize(node_id, capability)
         value = read_document(self.services, node_id)["value"]
-        return {"instructions": value.get("instructions", ""), "policy": value.get("policy", {}),
+        return {"library_id": node_id, "instructions": value.get("instructions", ""), "policy": value.get("policy", {}),
                 "agents": [self.describe(item) for item in self.agents(node_id)],
                 "instances": [self.view(r) for r in self.records() if r["library_id"] == node_id
                               and (capability is None or r["caller_agent_id"] == capability.agent_id)]}
@@ -273,7 +273,7 @@ class SummoningService:
             raise ConflictError("This root task reached its concurrent summon limit")
         return policy
 
-    async def action(self, node_id, request, *, capability=None, dispatch_id=None, task_id=None, _capture_held=False):
+    async def action(self, node_id, request, *, capability=None, dispatch_id=None, task_id=None, _capture_held=False, _work_context=None):
         services = self.services
         manager = services.run_manager
         if request.action == "list":
@@ -385,7 +385,8 @@ class SummoningService:
                     raise RuntimeUnavailableError("The calling Run ended before summon admission")
                 run = await manager.start_run(record["entry_agent_id"], request.prompt, caller_kind="summon",
                                               caller_id=capability.agent_id if capability else None,
-                                              context_id=record.get("context_id"), task_id=task_id)
+                                              context_id=record.get("context_id"), task_id=task_id,
+                                              initial_lifecycle={"delegation_context": _work_context} if _work_context else None)
             except RuntimeUnavailableError as error:
                 record["admission_error"] = str(error)
                 self.save(record)

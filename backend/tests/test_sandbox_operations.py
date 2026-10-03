@@ -19,6 +19,25 @@ def toolset(client, agent):
     return {tool.__name__: tool for tool in build_scoped_tool_callables(provider, agent['id'], definitions)}
 
 
+def test_inspection_defaults_to_caller_metadata_and_output_is_explicit(runtime_client):
+    client, _, _ = runtime_client
+    agent, sandbox, *_ = setup_skill(client)
+    services = client.app.state.services
+    for key, caller, output in [('mine', agent['id'], 'my lengthy output'), ('peer', 'another-agent', 'peer output')]:
+        history.save(services, sandbox['id'], {'id': key, 'caller': caller, 'state': 'finished',
+            'argv': ['example'], 'stdout': output, 'stderr': '', 'run_id': key})
+    tools = toolset(client, agent)
+    async def scenario():
+        summary = await tools['inspect_sandbox'](sandbox=sandbox['id'])
+        assert [r['id'] for r in summary['recent_commands']] == ['mine']
+        assert 'stdout' not in summary['recent_commands'][0]
+        assert summary['shared_python'] is None
+        detailed = await tools['inspect_sandbox'](sandbox=sandbox['id'], history_scope='all', include_output=True)
+        assert [r['stdout'] for r in detailed['recent_commands']] == ['my lengthy output', 'peer output']
+        assert (await tools['inspect_sandbox'](sandbox=sandbox['id'], history_limit=0))['recent_commands'] == []
+    client.portal.call(scenario)
+
+
 def test_real_lock_busy_preserves_type_across_prepare_and_transport(tmp_path, monkeypatch):
     runtime = python_runtime.SharedPythonRuntime(tmp_path)
     with python_runtime.mutation_lock(runtime.root):
@@ -82,15 +101,16 @@ def test_delayed_results_and_failures_remain_observable(runtime_client, monkeypa
     async def scenario():
         pending = await tools['execute_command'](sandbox=sandbox['id'], argv=['work'], wait_seconds=0)
         release.set()
+        result = await tools['wait_sandbox_operation'](sandbox=sandbox['id'], operation_id=pending['operation_id'], wait_seconds=1)
         if outcome == 'security':
-            with pytest.raises(SandboxSecurityError):
-                await tools['wait_sandbox_operation'](sandbox=sandbox['id'], operation_id=pending['operation_id'], wait_seconds=1)
-            with pytest.raises(SandboxSecurityError):
-                await tools['wait_sandbox_operation'](sandbox=sandbox['id'], operation_id=pending['operation_id'], wait_seconds=0)
+            # Native isolation still fails closed; the Agent receives the
+            # denial as tool data, including on later reads of the same receipt.
+            assert result['ok'] is False
+            assert result['error']['code'] == 'permission_denied'
+            assert result['error']['message'] == 'isolation unavailable'
         else:
-            result = await tools['wait_sandbox_operation'](sandbox=sandbox['id'], operation_id=pending['operation_id'], wait_seconds=1)
             assert result.get('exit_code') == 7 if outcome != 'preparation' else result['error']['code'] == 'environment_preparation_failed'
-            assert await tools['wait_sandbox_operation'](sandbox=sandbox['id'], operation_id=pending['operation_id'], wait_seconds=0) == result
+        assert await tools['wait_sandbox_operation'](sandbox=sandbox['id'], operation_id=pending['operation_id'], wait_seconds=0) == result
     client.portal.call(scenario)
 
 

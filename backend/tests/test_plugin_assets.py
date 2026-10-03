@@ -9,6 +9,7 @@ from backend.api.dependencies import get_services
 from backend.api.plugin_assets import router
 from backend.plugins.builtin import create_builtin_registry
 from open_agent_world.plugin_api import PackDefinition, PluginAsset, PluginDefinition, PluginDescriptor
+from open_agent_world.plugin_api import CardFaceSpec
 
 
 def plugin(identifier, configure):
@@ -58,7 +59,44 @@ def test_catalog_carries_owned_resource_and_frontend_references():
     assert card.frontend == {"body": "editor"}
 
 
-def test_pack_artwork_is_published_and_survives_collection_reload(tmp_path):
+def test_card_face_publishes_owned_artwork_and_round_trips_in_library(tmp_path):
+    from backend.card_library import CardLibraryStore, LibraryEdit
+    from backend.persistence.database import Database
+
+    registry = create_builtin_registry()
+    def configure(registration):
+        registration.register_asset(PluginAsset("cover", b"<svg/>", "image/svg+xml"))
+        registration.register_node_type(replace(registry.node_type("text"), id="example.card",
+            card_face=CardFaceSpec(variant="image", tone="sky", image_asset="cover")))
+        registration.register_pack(PackDefinition(id="example.faces", name="Faces", cards=("example.card",)))
+    registry.install(plugin("example.faces", configure))
+    card = next(c for c in registry.catalog().node_types if c.id == "example.card")
+    assert card.card_face.model_dump() == {"variant": "image", "tone": "sky", "image_url": "/api/plugins/example.faces/assets/cover"}
+    db = Database(tmp_path / "faces.db")
+    try:
+        store = CardLibraryStore(db, registry)
+        store.edit(LibraryEdit(action="open_pack", id="example.faces", expected_revision=store.read().revision))
+        assert CardLibraryStore(db, registry).read().card_definitions[card.id].card_face == card.card_face
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("face", [
+    {"variant": "unknown"}, {"tone": "neon"}, {"image_asset": "missing"}, {"image_asset": "document"},
+    {"image_asset": "/api/plugins/another/assets/cover"},
+])
+def test_invalid_card_face_is_rejected_before_plugin_install(face):
+    registry = create_builtin_registry()
+    def configure(registration):
+        registration.register_asset(PluginAsset("document", b"example", "text/plain"))
+        registration.register_node_type(replace(registry.node_type("text"), id="example.card", card_face=face))
+    with pytest.raises(ValueError):
+        registry.install(plugin("example.invalid", configure))
+    assert not registry.has_plugin("example.invalid")
+
+
+@pytest.mark.parametrize("packaging", ["standard", "premium", "paper", "collector"])
+def test_pack_artwork_is_published_and_survives_collection_reload(tmp_path, packaging):
     from backend.card_library import CardLibraryStore, LibraryEdit
     from backend.persistence.database import Database
 
@@ -67,11 +105,12 @@ def test_pack_artwork_is_published_and_survives_collection_reload(tmp_path):
         registration.register_asset(PluginAsset("cover", b"<svg/>", "image/svg+xml"))
         registration.register_node_type(replace(registry.node_type("text"), id="example.card"))
         registration.register_pack(PackDefinition(id="example.pack", name="Tools", cards=("example.card",),
-            artwork_asset="cover", accent_color="#527b70"))
+            artwork_asset="cover", accent_color="#527b70", packaging=packaging))
     registry.install(PluginDefinition(PluginDescriptor(id="example.art", version="1", plugin_api_version="1.15"), configure))
     pack = next(p for p in registry.catalog().packs if p.id == "example.pack")
     assert pack.artwork_url == "/api/plugins/example.art/assets/cover"
     assert pack.accent_color == "#527b70"
+    assert pack.packaging == packaging
     db = Database(tmp_path / "world.db")
     try:
         store = CardLibraryStore(db, registry)
@@ -82,6 +121,12 @@ def test_pack_artwork_is_published_and_survives_collection_reload(tmp_path):
         assert reloaded.definition == pack
     finally:
         db.close()
+
+
+def test_pack_packaging_defaults_and_rejects_unknown_presets():
+    assert PackDefinition(id="example.pack", name="Tools").packaging == "standard"
+    with pytest.raises(ValueError):
+        PackDefinition(id="example.pack", name="Tools", packaging="unknown")
 
 
 @pytest.mark.parametrize("artwork", ["missing", "/api/plugins/example.owner/assets/cover"])

@@ -64,13 +64,8 @@
 .library-card-detail p { color: var(--ink-soft); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
 .library-card-detail small { font-size: 10px; color: var(--ink-faint); }
 .library-card-detail .library-unavailable { color: var(--warning); }
-.library-card-preview.card-stock { width: min(100%, clamp(112px, 52cqh, 184px)); height: auto; aspect-ratio: 41 / 50; align-self: center; padding: 6px; margin: 5px 0 8px; border-radius: 12px; }
-.library-card-preview .card-face { padding: 4px; gap: 0; }
-.library-card-preview .card-face-art > .catalog-asset-icon { --catalog-icon-size: 34px; }
-.library-card-preview .card-face-art > svg, .library-card-preview .card-face-art > img { width: 34px; height: 34px; }
-.library-card-preview .card-face-copy { gap: 5px; }
-.library-card-preview .card-face-copy strong { font-size: 14px; }
-.library-card-preview .card-face-copy small { font-size: 10px; -webkit-line-clamp: 2; }
+.library-card-preview.card-stock { width: min(100%, clamp(112px, 52cqh, 184px)); height: auto; aspect-ratio: 41 / 50; align-self: center; padding: 0; margin: 5px 0 8px; border-radius: 14px; }
+.library-card-preview .card-face { height: auto; min-height: 100%; }
 .library-dependencies { min-width: 0; width: 100%; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .library-dependencies h4 { margin: 0; }
 .library-dependencies ul { padding-left: 18px; }
@@ -119,11 +114,10 @@
   .library-card-layout.has-card-detail .library-card-sidebar { grid-row: 1; }
   .library-card-layout.has-card-detail .library-card-collection { grid-row: 2; }
   .library-card-preview.card-stock { width: min(100%, clamp(80px, 50cqh, 120px)); margin-bottom: 4px; }
-  .library-card-preview .card-face { padding: 3px; }
+  .library-card-preview .card-face { --face-pad: 8px; }
   .library-card-preview .card-face-copy strong { font-size: 11px; }
   .library-card-preview .card-face-copy small { font-size: 8px; -webkit-line-clamp: 1; }
-  .library-card-preview .card-face-art > .catalog-asset-icon { --catalog-icon-size: 32px; }
-  .library-card-preview .card-face-art > svg, .library-card-preview .card-face-art > img { width: 32px; height: 32px; }
+  .library-card-preview .card-face-symbol { width: 32px; --face-symbol: 20px; }
 }
 @media (max-height: 700px) {
   .library-header { padding-block: 12px 10px; }

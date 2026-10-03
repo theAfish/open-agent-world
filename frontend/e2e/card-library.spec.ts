@@ -6,6 +6,11 @@ test("packs, collection and active decks persist and recover from plugin disable
   test.setTimeout(90000);
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
+  const profile = await (await request.get('/api/application')).json();
+  expect((await request.patch('/api/application/preferences', { data: {
+    profile_id: profile.profile_id, generation: profile.generation,
+    changes: { 'oaw.locale': 'en', 'oaw-onboarding-v1': JSON.stringify({ version: 1, state: { status: 'skipped' } }) },
+  } })).ok()).toBe(true);
   await page.goto("/");
   const controls = page.getByRole("complementary", { name: "World status and controls" });
   await expect(controls.getByRole("button", { name: "Open Pack and Card Library" })).toBeVisible();
@@ -23,8 +28,7 @@ test("packs, collection and active decks persist and recover from plugin disable
   await expect(pack).not.toHaveClass(/is-opened/);
   await expect(pack.getByRole("button")).toHaveCount(1);
   await expect(pack.locator("details")).toHaveCount(0);
-  await expect(pack.locator(".pack-object")).toHaveCSS("transform-style", "preserve-3d");
-  await expect(pack.locator(".pack-object")).toHaveCSS("--pack-depth", "26");
+  await expect(pack).toHaveAttribute("data-renderer", "webgl");
   const wrapper = pack.locator(".pack-touch-area");
   const hitArea = (await wrapper.boundingBox())!;
   expect(hitArea.width).toBeLessThan(220);
@@ -48,11 +52,9 @@ test("packs, collection and active decks persist and recover from plugin disable
   await expect(pack).toHaveClass(/is-opened/);
   const collected: LibrarySnapshot = await (await request.get("/api/card-library")).json();
   const savedFinish = normalizeCardFinish(collected.collection.text?.finish);
-  await pack.evaluate(element => element.getAnimations({ subtree: true }).forEach(animation => { animation.pause(); animation.currentTime = 1220; }));
-  const openingTop = await pack.locator(".pack-drawn-cards").evaluate(element => Math.min(...[...element.children].map(card => card.getBoundingClientRect().top)));
-  expect(openingTop).toBeGreaterThan((await library.locator(".library-section-heading").boundingBox())!.y + 45);
+  await expect.poll(async () => Number(await pack.locator("canvas").getAttribute("data-opening"))).toBeGreaterThan(.2);
   await page.screenshot({ path: "../.tmp/library-foil-opening.png" });
-  await pack.evaluate(element => element.getAnimations({ subtree: true }).forEach(animation => animation.finish()));
+  await expect(pack.getByRole("button")).toBeEnabled();
   await pack.getByRole("button", { name: "View cards in Core essentials" }).click();
   await library.getByLabel("Search cards", { exact: true }).fill("Text file");
   await library.getByRole("button", { name: "Inspect Text file" }).click();
@@ -81,9 +83,8 @@ test("packs, collection and active decks persist and recover from plugin disable
   await expect(tray.getByRole("button", { name: "Place Text file", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Open Pack and Card Library" }).click();
   await expect(pack).toHaveClass(/is-opened/);
-  await expect(pack.locator(".pack-top-seal")).toHaveCSS("opacity", "0");
-  await expect(pack.locator(".pack-object")).toHaveCSS("--pack-depth", "1");
-  await expect(pack.locator(".pack-card-pocket")).toHaveCSS("visibility", "hidden");
+  await expect(pack).toHaveAttribute("data-renderer", "webgl");
+  await expect(pack.locator("canvas")).toHaveAttribute("data-opening", "1.000");
   await page.screenshot({ path: "../.tmp/library-foil-empty.png" });
   await library.getByRole("button", { name: /^Cards/ }).click();
   await library.getByLabel("Source pack", { exact: true }).selectOption({ label: "Core essentials" });
@@ -104,18 +105,20 @@ test("packs, collection and active decks persist and recover from plugin disable
   await expect(sourceControls).toContainText("Pack disabled");
   await library.getByRole("button", { name: "Close Library" }).click();
   await tray.hover();
-  await expect(tray.getByRole("button", { name: "Task Board unavailable" })).toBeDisabled();
+  await expect(tray.getByRole("button", { name: "Task Board unavailable" })).toHaveAttribute('data-unavailable', 'true');
+  await expect(tray.getByRole("button", { name: "Task Board unavailable" })).toHaveAttribute('draggable', 'false');
   await expect(tray.getByRole("button", { name: "Place Text file", exact: true })).toHaveCount(0);
   await page.reload();
   await tray.hover();
   await expect(tray.getByRole("tab", { name: /Research kit/ })).toHaveAttribute("aria-selected", "true");
-  await expect(tray.getByRole("button", { name: "Task Board unavailable" })).toBeDisabled();
+  await expect(tray.getByRole("button", { name: "Task Board unavailable" })).toHaveAttribute('data-unavailable', 'true');
+  await expect(tray.getByRole("button", { name: "Task Board unavailable" })).toHaveAttribute('draggable', 'false');
   await page.getByRole("button", { name: "Open Pack and Card Library" }).click();
   await taskPack.getByRole("button", { name: "View cards in Task Board", exact: true }).click();
   await sourceControls.getByRole("button", { name: "Enable Pack" }).click();
   await expect(sourceControls).toContainText("Installed · Enabled");
   await library.getByRole("button", { name: /^Store/ }).click();
-  await expect(library.getByText("Coming later", { exact: true })).toBeVisible();
+  await expect(library.getByRole('region', { name: 'Pack Store' }).getByRole('textbox', { name: 'Search packs' })).toBeVisible();
   await page.screenshot({ path: "../.tmp/library-store.png" });
   await library.getByRole("button", { name: /^Packs/ }).click();
   await page.screenshot({ path: "../.tmp/library-packs.png" });

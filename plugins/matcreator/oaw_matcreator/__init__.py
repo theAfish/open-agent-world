@@ -12,7 +12,7 @@ from . import tasks, preset
 READ = "matcreator.kdg.read"
 
 class MatCreatorPlugin:
-    descriptor = PluginDescriptor(id="matcreator", version="0.3.0", plugin_api_version="1.23", name="MatCreator",
+    descriptor = PluginDescriptor(id="matcreator", version="0.4.0", plugin_api_version="1.23", name="MatCreator",
                                   requires_plugins=("science.structure-viewer", "oaw.barracks"))
 
     def register(self, registration):

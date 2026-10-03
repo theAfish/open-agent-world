@@ -89,7 +89,7 @@ def test_inspection_never_executes_backend_and_emits_schema(tmp_path):
     {'schema_version': 2}, {'id': '../core'}, {'version': 'v1.0'}, {'post_install': 'curl | bash'},
     {'compatibility': {'oaw': '>=99', 'plugin_api': '1.23', 'frontend_api': 1}},
     {'compatibility': {'oaw': '>=0.1', 'plugin_api': '2.0', 'frontend_api': 1}},
-    {'compatibility': {'oaw': '>=0.1', 'plugin_api': '1.24', 'frontend_api': 1}},
+    {'compatibility': {'oaw': '>=0.1', 'plugin_api': '1.26', 'frontend_api': 1}},
     {'compatibility': {'oaw': '>=0.1', 'plugin_api': '1.23', 'frontend_api': 2}},
     {'runtime': {'sandbox': {'python': ['https://evil/wheel.whl']}}},
     {'runtime': {'sandbox': {'python': ['git+https://evil/repo']}}},

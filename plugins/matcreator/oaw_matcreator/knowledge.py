@@ -264,7 +264,8 @@ def assimilate(value, source, provenance):
             tags=metadata.get("tags", []), owner="publisher", refinement="published",
             resources=[{"skill_id": key, "path": "SKILL.md"}],
             provenance={**provenance, "snapshot": digest, "package_id": package.package_id, "version": package.version,
-                        "upstream": skill.defaults.get("upstream", {}), "requirements": skill.defaults.get("runtime")}).model_dump(mode="json")
+                        "upstream": skill.defaults.get("upstream", {}), "requirements": skill.defaults.get("runtime"),
+                        "compatibility": skill.defaults.get("compatibility", {})}).model_dump(mode="json")
         result["entries"].append(entry)
         index[skill.defaults.get("upstream", {}).get("path", skill.id)] = key
         index[skill.name] = key

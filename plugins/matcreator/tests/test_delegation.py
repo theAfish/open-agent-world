@@ -67,7 +67,7 @@ async def research(tmp_path):
             {"id": "compare", "title": "Compare", "depends_on": ["a", "b"]}]}))
     provider = WorldAgentCapabilityProvider(services)
     async def execute(action, **args):
-        return await provider.invoke_tool(ids["agent"], "operation:task_board_execute", {"board": ids["tasks"], "action": action, **args})
+        return await provider.invoke_tool(ids["agent"], "operation:task_board_execute", {"board": ids["tasks"], "action": action, "detail": "full", **args})
     yield services, ids, runtime, execute
     await services.shutdown()
 

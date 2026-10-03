@@ -39,6 +39,24 @@ def test_collection_accepts_palette_status_on_create_and_update(client):
     assert response.json()['config']['status'] == 'available'
 
 
+def test_collection_template_starts_empty_and_preserves_original_versions(runtime_client):
+    client, _, agent, sandbox, collection, workspace, _ = setup(runtime_client)
+    (workspace / 'result.txt').write_text('retained result', encoding='utf-8')
+    published = publish(client, sandbox, collection, ['result.txt'])
+    assert published.status_code == 200, published.text
+    version_id = published.json()['version_id']
+    captured = client.post('/api/legions', json={'name': 'Reusable collection', 'node_ids': [agent['id'], collection['id']]})
+    assert captured.status_code == 201, captured.text
+    deployed = client.post(f"/api/legions/{captured.json()['id']}/instances", json={'position': {'x': 100, 'y': 100}})
+    assert deployed.status_code == 201, deployed.text
+    clone = next(n['id'] for n in deployed.json()['nodes'] if n['type'] == 'core.artifact-collection')
+    assert client.get(f'/api/artifact-collections/{clone}/versions').json() == []
+    assert client.get(f'/api/artifact-collections/{clone}/versions/{version_id}/preview',
+        params={'path': 'result.txt'}).status_code == 403
+    assert client.get(f"/api/artifact-collections/{collection['id']}/versions/{version_id}/content",
+        params={'path': 'result.txt'}).content == b'retained result'
+
+
 def test_agent_publish_invalid_arguments_returns_feedback_then_accepts_correction(runtime_client):
     from backend.agents.tools import build_scoped_tool_callables
 

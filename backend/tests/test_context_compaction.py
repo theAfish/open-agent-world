@@ -87,6 +87,19 @@ def invocation(agent_id, session_id, run_id="run-1"):
 
 
 @pytest.mark.asyncio
+async def test_host_continuation_input_reaches_managed_conversation_model(services, monkeypatch):
+    agent, _, room, session, model, runtime, config = await setup_context(services, monkeypatch)
+    add_history(services, room, session, count=2)
+    run = services.run_manager.store.create(agent_id=agent.id, runtime_provider_id="google.adk",
+        caller_kind="delegation", caller_id="board", context_id=session.id)
+    services.run_manager.store.update_lifecycle(run.run_id, work_continuation=True)
+    result = [event async for event in runtime.execute(config, invocation(agent.id, session.id, run.run_id),
+        RuntimeInput("OAW notification: inspect completed probe 456 before relaxation"))]
+    assert result and "completed probe 456" in model._requests[-1]
+    assert "cobalt-731" in model._requests[-1]
+
+
+@pytest.mark.asyncio
 async def test_private_delegation_context_does_not_replay_parent_conversation(services, monkeypatch):
     agent, _, room, session, model, runtime, config = await setup_context(services, monkeypatch)
     add_history(services, room, session, count=2)

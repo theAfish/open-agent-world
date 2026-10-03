@@ -54,6 +54,7 @@ def _copy_workspace(source: Path, target: Path) -> None:
 async def save_settings(services, request):
     async with services._node_mutation():
         store = SandboxSettingsStore(services.database, services.settings.data_root)
+        store.validate_bindings(request)
         root = store.validator.validate_workspace(request.workspace_root)
         request = request.model_copy(update={"workspace_root": root})
         old = store.read()

@@ -51,7 +51,7 @@ export function packInventory(snapshot: LibrarySnapshot, installations?: PackIns
     const item = versions.find(row => row.selected);
     if (!item) continue;
     packs.push({ definition: { id: `installed:${id}`, plugin_id: id, name: item.name,
-      description: item.creator?.description ?? '', accent_color: item.creator?.accent_color || undefined, cards: [] },
+      description: item.creator?.description ?? '', accent_color: item.creator?.accent_color || undefined, packaging: item.creator?.packaging, cards: [] },
       owned: true, opened: false, opened_at: null });
   }
   return packs.map(pack => ({ pack, versions: byPlugin.get(pack.definition.plugin_id) ?? [],

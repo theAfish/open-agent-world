@@ -29,7 +29,7 @@ from backend.plugins.deployment import NodeDeploymentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.23"
+PLUGIN_API_VERSION = "1.25"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -69,6 +69,7 @@ class PackDefinition(BaseModel):
     cards: tuple[str, ...] = ()
     artwork_asset: str | None = Field(default=None, min_length=1, max_length=128)
     accent_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    packaging: Literal["standard", "premium", "paper", "collector"] = "standard"
 
 
 class PackCatalogItem(PackDefinition):
@@ -124,6 +125,23 @@ class NodePresentation(BaseModel):
         return self
 
 
+class CardFaceDesign(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    variant: Literal["icon", "image", "text", "compact", "dark"] = "icon"
+    tone: Literal["midnight", "sage", "sand", "sky", "rose", "stone"] = "sage"
+
+
+class CardFaceSpec(CardFaceDesign):
+    """Optional print layout; artwork references this plugin's registered assets."""
+
+    image_asset: str | None = None
+
+
+class CardFaceCatalog(CardFaceDesign):
+    image_url: str | None = None
+
+
 class NodeTypeCatalogItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -133,6 +151,7 @@ class NodeTypeCatalogItem(BaseModel):
     description: str
     icon: str
     icon_url: str | None = None
+    card_face: CardFaceCatalog | None = None
     frontend: dict[str, str] = Field(default_factory=dict)
     color: str
     deck_id: str
@@ -283,6 +302,7 @@ class NodeTypeDefinition:
     canvas_create_requires_confirmation: bool = False
     deployment: NodeDeploymentDefinition | None = None
     state: PluginStateSpec | None = None
+    card_face: CardFaceSpec | Mapping[str, str] | None = None
 
     def resolved_presentation(self) -> NodePresentation:
         if self.presentation is not None:
@@ -292,6 +312,7 @@ class NodeTypeDefinition:
     def catalog_item(self, plugin_id: str) -> NodeTypeCatalogItem:
         default_config = self.config_model().model_dump(mode="json")
         presentation = self.resolved_presentation()
+        face = CardFaceSpec.model_validate(self.card_face) if self.card_face is not None else None
         return NodeTypeCatalogItem(
             id=self.id,
             plugin_id=plugin_id,
@@ -299,6 +320,8 @@ class NodeTypeDefinition:
             description=self.description,
             icon=self.icon,
             icon_url=f"/api/plugins/{plugin_id}/assets/{self.icon_asset}" if self.icon_asset else None,
+            card_face=CardFaceCatalog(variant=face.variant, tone=face.tone,
+                image_url=f"/api/plugins/{plugin_id}/assets/{face.image_asset}" if face.image_asset else None) if face else None,
             frontend=dict(self.frontend),
             color=self.color,
             deck_id=self.deck_id,
@@ -640,6 +663,12 @@ class PluginRegistry:
 
         for definition in staged.nodes.values():
             definition.resolved_presentation()
+            if definition.card_face is not None:
+                face = CardFaceSpec.model_validate(definition.card_face)
+                if face.image_asset is not None:
+                    asset = staged.assets.get(face.image_asset)
+                    if asset is None or not asset.media_type.startswith("image/"):
+                        raise ValueError("card face image must reference an image asset registered by the same plugin")
             if definition.icon_asset is not None and definition.icon_asset not in staged.assets:
                 raise ValueError("node icon must reference an asset registered by the same plugin")
             for slot, reference in definition.frontend.items():

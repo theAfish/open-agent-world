@@ -80,7 +80,7 @@ def content_plugin(manifest: PackManifest, files: dict[str, bytes], registry):
 
     def register(registration):
         registration.register_pack(PackDefinition(id=manifest.id, name=manifest.name,
-            description=creator.description, cards=(), accent_color=creator.accent_color))
+            description=creator.description, cards=(), accent_color=creator.accent_color, packaging=creator.packaging))
         for preset in presets:
             registration.register_legion_preset(preset)
 

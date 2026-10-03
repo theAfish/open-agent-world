@@ -40,3 +40,14 @@ class ExecutionCredentialStore:
             return self.settings_store._fernet(create=False).decrypt(json.loads(row["value_json"]).encode()).decode()
         except (InvalidToken, ValueError, OSError):
             raise ResourceValidationError("Execution credential cannot be decrypted on this host; explicitly rebind it") from None
+
+
+class GlobalExecutionCredentialStore(ExecutionCredentialStore):
+    """Host-wide bindings in a namespace separate from live node credentials."""
+
+    def __init__(self, database, data_root):
+        from backend.security.llm_settings import LlmSettingsStore
+        super().__init__(LlmSettingsStore(database, data_root), None)
+
+    def _key(self, node_id, reference):
+        return "global_execution_credential:" + json.dumps(reference)

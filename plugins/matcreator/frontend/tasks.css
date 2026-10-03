@@ -89,4 +89,9 @@
 .mc-task-preview { padding: 12px; }.mc-task-preview strong, .mc-task-preview small { display: block; }.mc-task-preview strong { margin-top: 8px; font-size: 22px; }
 .mc-task-attempt { margin-block: 10px; padding: 10px; border: 1px solid var(--border-color, #7775); border-radius: 8px; overflow-wrap: anywhere; }
 .mc-task-attempt p { white-space: pre-wrap; }
+.mc-task-checks { margin: 8px 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+.mc-task-check { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.mc-task-check > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-task-check small { display: block; color: var(--ink-faint); }
+.mc-task-check button { flex-shrink: 0; }
 .mc-task-section.is-review, .mc-task-detail-title.is-review { color: #bd913c; }

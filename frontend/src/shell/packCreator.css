@@ -2,7 +2,7 @@
 .pack-creator form, .pack-creator fieldset { display: grid; gap: 12px; min-width: 0; }
 .pack-creator fieldset { border: 0; padding: 0; margin: 0; }
 .pack-creator label { display: grid; gap: 5px; font-size: 12px; }
-.pack-creator input, .pack-creator textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 7px; color: inherit; background: var(--surface-solid); font: inherit; }
+.pack-creator input, .pack-creator textarea, .pack-creator select { box-sizing: border-box; width: 100%; min-width: 0; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 7px; color: inherit; background: var(--surface-solid); font: inherit; }
 .pack-creator textarea { resize: vertical; }
 .pack-creator-row { display: grid; grid-template-columns: 1fr 80px; gap: 10px; }
 .pack-creator input[type="color"] { padding: 2px; height: 32px; }

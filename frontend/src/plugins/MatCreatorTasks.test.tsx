@@ -176,6 +176,21 @@ it('shows executor evidence and sends a targeted stop without silently accepting
   expect(documentAction).not.toHaveBeenCalled();
 });
 
+it('shows a scheduled remote check and cancels it without changing task acceptance', async () => {
+  const state = board(1);
+  const collect = { document: state, execution: { items: [], attempts: [], wakeups: [
+    { request_id: 'probe-check', due_at: 1800000000, reason: 'Check probe job 456' },
+  ] } };
+  const delegationAction = vi.fn().mockResolvedValue(collect);
+  const documentAction = vi.fn();
+  render(<TaskBoard {...{ host: { delegationAction, documentAction } } as unknown as PluginViewProps} />);
+  expect(await screen.findByLabelText('Scheduled checks')).toBeTruthy();
+  expect(screen.getByText('Check probe job 456')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel check' }));
+  await waitFor(() => expect(delegationAction).toHaveBeenCalledWith('cancel_defer', { request_id: 'probe-check' }));
+  expect(documentAction).not.toHaveBeenCalled();
+});
+
 it('retains an editor draft when the agent updates the board and reloads explicitly', async () => {
   const read = vi.fn().mockResolvedValue(board(1));
   const action = vi.fn();
