@@ -14,6 +14,7 @@ import { ViewportPortal } from './FlowPortal';
 import { nodePositionFromSurfacePosition } from './nodeDisplacement';
 import { freeCorners, resizeFromCorner, type ResizeBox, type ResizeConstraints, type ResizeCorner } from './resizeGeometry';
 import './resize.css';
+import { cardStudio } from '../factory/faceDesign';
 
 /** Resolve nested React Flow positions once, in the viewport portal's coordinates. */
 function surfaceBoxes(nodes: CanvasNode[]): Record<string, GlueBox> {
@@ -174,6 +175,8 @@ export function ResizeLayer({ nodes, setNodes }: { nodes: CanvasNode[]; setNodes
   };
 
   return <ViewportPortal>{nodes.filter(node => node.selected && !node.hidden && node.selectable !== false && !node.data.card.ephemeral && !isShadow(node.data.card)
+    // Authored faces keep their per-mode dimensions; edit geometry in the factory.
+    && !cardStudio(node.data.card, catalog)
     && (node.type === 'container' || node.type === 'worldCard' && (node.data.surfaceLevel === 'inspector' || node.data.surfaceLevel === 'workspace' || gluedBoxes[node.id])))
     .flatMap(node => {
       const corners = freeCorners(node.id, { ...gluedBoxes, ...live }, bonds);

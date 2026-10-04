@@ -91,17 +91,28 @@ class Entrypoints(Model):
 
 
 class Content(Model):
-    legions: tuple[str, ...] = Field(min_length=1, max_length=50)
+    legions: tuple[str, ...] = Field(default=(), max_length=50)
+    cards: tuple[str, ...] = Field(default=(), max_length=50)
 
-    @field_validator("legions")
+    @property
+    def paths(self) -> tuple[str, ...]:
+        return self.legions + self.cards
+
+    @model_validator(mode="after")
+    def entries(self):
+        if not self.paths or len(set(self.paths)) != len(self.paths):
+            raise ValueError("Content requires unique card or Legion paths")
+        return self
+
+    @field_validator("legions", "cards")
     @classmethod
-    def paths(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+    def validate_paths(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         if len(set(values)) != len(values):
             raise ValueError("Content paths must be unique")
         for value in values:
             safe_path(value)
             if not value.startswith("content/") or not value.endswith(".json"):
-                raise ValueError("Legions must be JSON files under content/")
+                raise ValueError("Content must be JSON files under content/")
         return values
 
 

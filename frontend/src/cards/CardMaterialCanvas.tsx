@@ -14,8 +14,9 @@ function layoutOrigin(element: HTMLElement) {
   return { x, y };
 }
 
-export function CardMaterialCanvas({ finish, quality, surface }: {
+export function CardMaterialCanvas({ finish, quality, surface, restrained = false, roughness }: {
   finish: Exclude<CardFinish, 'normal'>; quality: CardFinishQuality; surface: CardFinishSurface;
+  restrained?: boolean; roughness?: number;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -31,7 +32,7 @@ export function CardMaterialCanvas({ finish, quality, surface }: {
     const paint = () => {
       pending = null;
       if (!visible || width < 1 || height < 1) return;
-      const ready = drawCardMaterial(canvas, { finish,width,height,...light,artEnd,glass,print });
+      const ready = drawCardMaterial(canvas, { finish,width,height,...light,artEnd,glass,print,restrained,roughness });
       layer.toggleAttribute('data-material-ready',ready);
     };
     const queue = () => { if (visible && pending === null) pending = requestAnimationFrame(paint); };
@@ -85,6 +86,6 @@ export function CardMaterialCanvas({ finish, quality, surface }: {
       layer.removeAttribute('data-material-ready');
       layer.style.removeProperty('--finish-copy-start');
     };
-  }, [finish, quality, surface]);
+  }, [finish, quality, surface, restrained, roughness]);
   return <canvas ref={ref} className="card-material-canvas" aria-hidden="true" />;
 }

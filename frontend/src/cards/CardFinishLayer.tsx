@@ -53,11 +53,13 @@ const laserStyle = {
 const engravedStyle = { ...grainStyle, ...laserStyle };
 
 /** Pure decoration: all persistent finish decisions belong to the card instance. */
-export function CardFinishLayer({ finish, quality = "standard", reveal = false, surface = "card" }: {
+export function CardFinishLayer({ finish, quality = "standard", reveal = false, surface = "card", restrained = false, roughness }: {
   finish?: CardFinish;
   quality?: CardFinishQuality;
   reveal?: boolean;
   surface?: CardFinishSurface;
+  restrained?: boolean;
+  roughness?: number;
 }) {
   const material = normalizeCardFinish(finish);
   if (material === "normal") return null;
@@ -78,6 +80,6 @@ export function CardFinishLayer({ finish, quality = "standard", reveal = false, 
     <span className="card-finish-pattern" />
     {quality !== "thumbnail" && <span className="card-finish-grain" />}
     <span className="card-finish-sheen" />
-    <CardMaterialCanvas finish={material} quality={quality} surface={surface} />
+    <CardMaterialCanvas finish={material} quality={quality} surface={surface} restrained={restrained} roughness={roughness} />
   </span>;
 }

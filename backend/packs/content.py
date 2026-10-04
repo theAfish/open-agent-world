@@ -34,8 +34,8 @@ def read_presets(manifest: PackManifest, files: dict[str, bytes]) -> list[Legion
         preset = LegionBlueprintPreset.model_validate(json_object(files[path]))
         if not preset.id.startswith(manifest.id + "."):
             raise ValueError("Content Legion IDs must use their Pack namespace")
-        if preset.blueprint.format_version != 1 or not 2 <= len(preset.blueprint.nodes) <= 101:
-            raise ValueError("Content Legions require format 1 and 2–101 nodes")
+        if preset.blueprint.format_version != 1 or not 1 <= len(preset.blueprint.nodes) <= 101:
+            raise ValueError("Content templates require format 1 and 1–101 nodes")
         if len(preset.blueprint.edges) > 10000:
             raise ValueError("Content Legion has too many connections")
         presets.append(preset)
@@ -47,7 +47,9 @@ def read_presets(manifest: PackManifest, files: dict[str, bytes]) -> list[Legion
 def content_plugin(manifest: PackManifest, files: dict[str, bytes], registry):
     """Validate against loaded dependencies; never load executable content."""
     from backend.legions.presets import plugin_preset_record
+    from backend.packs.factory_cards import read_recipes, recipe_definition
     presets = read_presets(manifest, files)
+    recipes = read_recipes(manifest, files)
     owners = set()
     descriptors = {p.id: p for p in registry.plugins()}
     for dependency in manifest.dependencies.packs:
@@ -79,8 +81,10 @@ def content_plugin(manifest: PackManifest, files: dict[str, bytes], registry):
     assert creator is not None
 
     def register(registration):
+        for recipe in recipes:
+            registration.register_node_type(recipe_definition(recipe))
         registration.register_pack(PackDefinition(id=manifest.id, name=manifest.name,
-            description=creator.description, cards=(), accent_color=creator.accent_color, packaging=creator.packaging))
+            description=creator.description, cards=tuple(recipe.id for recipe in recipes), accent_color=creator.accent_color, packaging=creator.packaging))
         for preset in presets:
             registration.register_legion_preset(preset)
 

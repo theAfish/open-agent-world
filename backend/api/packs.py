@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 
 from backend.api.dependencies import get_services
 from backend.api.card_library import plugin_usage
+from backend.api.pack_factory import router as factory_router
 from backend.card_library import LibraryEdit
 from backend.errors import ConflictError, ResourceValidationError
 from backend.events.models import EventType, RuntimeEvent
@@ -25,6 +26,9 @@ async def mutation_request(request: Request):
     # script requests need the existing host CORS/control-plane authorization.
     if request.headers.get("x-oaw-pack-install") != "1":
         raise HTTPException(403, "Pack management requires an explicit host request")
+
+
+router.include_router(factory_router, dependencies=[Depends(mutation_request)])
 
 
 async def archive_body(request: Request) -> bytes:

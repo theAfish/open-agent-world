@@ -11,6 +11,8 @@ export const CARD_MATERIALS: Record<Exclude<CardFinish, 'normal'>, { art: Channe
   laser: { art: [.92, .24, 0, 0], glass: [.2, .1, .64, 0], ior: 1.54 },
 };
 export interface MaterialFrame {
+  restrained?: boolean;
+  roughness?: number;
   finish: Exclude<CardFinish, 'normal'>;
   width: number;
   height: number;
@@ -63,7 +65,7 @@ function createRenderer() {
   const position = gl.getAttribLocation(program, 'position');
   gl.enableVertexAttribArray(position);
   gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
-  const uniforms = Object.fromEntries(['resolution','tilt','finish','artEnd','glassRect','artMaterial','glassMaterial','ior','printTransform']
+  const uniforms = Object.fromEntries(['resolution','tilt','finish','artEnd','glassRect','artMaterial','glassMaterial','ior','printTransform','restrained']
     .map(name => [name, gl.getUniformLocation(program, name)]));
   // Rest poses are reused; bounded both by entry count and per-entry raster dimensions.
   const cache = new Map<string, HTMLCanvasElement>();
@@ -74,8 +76,8 @@ function createRenderer() {
       if (lost || gl.isContextLost()) return false;
       const ctx = target.getContext('2d');
       if (!ctx) return false;
-      const { width, height, finish, x, y, artEnd, glass, print } = frame;
-      const key = x === 0 && y === 0 ? JSON.stringify([finish,width,height,artEnd,glass,print]) : '';
+      const { width, height, finish, x, y, artEnd, glass, print, restrained = false, roughness } = frame;
+      const key = x === 0 && y === 0 ? JSON.stringify([finish,width,height,artEnd,glass,print,restrained,roughness]) : '';
       let raster = key ? cache.get(key) : undefined;
       if (!raster) {
         source.width = width; source.height = height;
@@ -86,7 +88,9 @@ function createRenderer() {
         gl.uniform1f(uniforms.artEnd,artEnd);
         gl.uniform4f(uniforms.glassRect,...glass);
         gl.uniform4f(uniforms.printTransform,...print);
-        gl.uniform4f(uniforms.artMaterial,...CARD_MATERIALS[finish].art);
+        const material = CARD_MATERIALS[finish].art;
+        gl.uniform4f(uniforms.artMaterial, material[0], roughness ?? material[1], material[2], material[3]);
+        gl.uniform1f(uniforms.restrained, restrained ? 1 : 0);
         gl.uniform4f(uniforms.glassMaterial,...CARD_MATERIALS[finish].glass);
         gl.uniform1f(uniforms.ior,CARD_MATERIALS[finish].ior);
         gl.drawArrays(gl.TRIANGLES,0,6);

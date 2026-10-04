@@ -178,7 +178,7 @@ class PackInstallationManager:
             if manifest.kind == "content":
                 from backend.packs.content import content_plugin
                 path = self.version_path(pack_id, version)
-                content_plugin(manifest, {name: (path / name).read_bytes() for name in manifest.content.legions}, self.registry)
+                content_plugin(manifest, {name: (path / name).read_bytes() for name in manifest.content.paths}, self.registry)
             db.execute("INSERT INTO selections VALUES (?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version", (pack_id, version))
         return self.status()
 
@@ -240,9 +240,12 @@ class PackInstallationManager:
         manifest.check_compatibility()
         if manifest.kind == "content":
             from backend.packs.content import read_presets
-            if not set(manifest.content.legions) <= checksums.keys():
+            if not set(manifest.content.paths) <= checksums.keys():
                 raise ValueError("Content templates are missing installed checksums")
-            read_presets(manifest, {name: (path / name).read_bytes() for name in manifest.content.legions})
+            from backend.packs.factory_cards import read_recipes
+            content_files = {name: (path / name).read_bytes() for name in manifest.content.paths}
+            read_presets(manifest, content_files)
+            read_recipes(manifest, content_files)
             return None
         return inspect_wheel((path / manifest.entrypoints.backend).read_bytes(), manifest)
 

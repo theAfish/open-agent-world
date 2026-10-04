@@ -1,4 +1,5 @@
 import { tutorialAllowsCanvasTarget } from '../onboarding/interactionGuard';
+import { factoryDropTarget, dropFactoryItems } from '../factory/drop';
 import { useSmoothWheelZoom, MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM } from './useSmoothWheelZoom';
 import { CanvasControls } from './CanvasControls';
 import { CardRenderingContext, useCardRendering, useCardRenderLOD } from './useCardRendering';
@@ -724,6 +725,15 @@ export function WorldCanvas() {
     cancelPositionAnimation();
     clearTransformationHints();
     const gluing = glueDrag.current;
+    const factoryItems = draggedNodes.length ? draggedNodes : [node];
+    const packerId = factoryDropTarget(_event, factoryItems.map(item => item.id));
+    if (packerId && tutorialAllowsCanvasTarget(packerId, 'transform') && !gluing) {
+      useEquipmentDrag.getState().set();
+      void dropFactoryItems(packerId, factoryItems.map(item => ({ kind: 'node', id: item.id, name: item.data.card.name }))).finally(() => {
+        activeDragIds.current.clear(); setDragging(false); setNodes(mappedNodes);
+      });
+      return;
+    }
     if (gluing) {
       const candidate = gluing.candidate;
       const layout = Object.fromEntries(Object.entries(gluing.latest).map(([id, b]) => [id, { ...b, x: b.x + (candidate?.dx ?? 0), y: b.y + (candidate?.dy ?? 0) }]));
@@ -838,6 +848,12 @@ export function WorldCanvas() {
   const placePaletteCard = useCallback((payload: PaletteDragPayload, event: Pick<MouseEvent, "clientX" | "clientY">) => {
     clearTransformationHints();
     const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    const packerId = factoryDropTarget(event);
+    if (packerId && tutorialAllowsCanvasTarget(packerId, 'transform') && payload.kind === 'legion') {
+      const legion = legions.find(item => item.id === payload.id);
+      if (legion && legion.revision === payload.revision) void dropFactoryItems(packerId, [{ kind: legion.preset ? 'preset' : 'legion', id: legion.id, name: legion.name }]);
+      return;
+    }
     if (payload.kind === "node") {
       const definition = getNodeType(catalog, payload.type);
       if (!definition) return;

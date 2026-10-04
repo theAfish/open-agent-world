@@ -11,6 +11,8 @@ import { CardFinishLayer } from './CardFinishLayer';
 import { normalizeCardFinish } from './cardFinish';
 import type { CanvasNode } from './types';
 import './cardLOD.css';
+import { FaceArtwork } from '../factory/FaceArtwork';
+import type { PrintedDesign } from '../factory/types';
 
 /** Card model projection: no plugin bodies, editors, file requests or workspaces. */
 export const CardLODView = memo(function CardLODView({ data, selected, type, isConnectable, width, height }: NodeProps<CanvasNode>) {
@@ -22,7 +24,9 @@ export const CardLODView = memo(function CardLODView({ data, selected, type, isC
   const pointer = useRef<{ x: number; y: number; moved: boolean }>();
   const mid = data.renderLOD === 'mid';
   const workspace = level === 'workspace' || level === 'inspector';
-  return <article className={`world-card node-surface card-finish-surface card-lod-view world-card--${card.type} is-${level} ${selected ? 'is-selected' : ''} ${container ? 'container-frame' : ''}`}
+  const design = definition?.traits.includes('ui.factory-card.v1') ? card.config as unknown as PrintedDesign : undefined;
+  const surface = design?.face.studio?.modes[level];
+  return <article className={`world-card node-surface card-finish-surface card-lod-view world-card--${card.type} is-${level} ${surface ? 'factory-custom-surface' : ''} ${selected ? 'is-selected' : ''} ${container ? 'container-frame' : ''}`}
     style={{ '--card-kind': definition?.color, borderRadius: NODE_SURFACE_RADIUS[level] } as CSSProperties}
     data-card-id={card.id} data-card-type={card.type} data-surface-level={level}
     data-finish={normalizeCardFinish(card.finish)}
@@ -42,7 +46,7 @@ export const CardLODView = memo(function CardLODView({ data, selected, type, isC
       <Handle key={side} id={`boundary-${side}`} type="source" position={side}
         className={`semantic-handle semantic-handle--${side}`} data-connection-side={side}
         aria-label={t('Start a relationship from the {v0} edge of {v1}', { v0: side, v1: card.name })} />)}
-    <header data-status={card.status} title={t(card.status)} className={`card-lod-heading node-drag-region ${mid ? workspace ? 'workspace-titlebar' : 'card-header node-surface-header' : 'card-lod-symbol'} ${container ? 'container-header container-drag-region' : ''} ${workspace || container ? 'card-finish-surface' : ''}`}>
+    {surface && design ? <FaceArtwork face={design.face} surface={surface} /> : <><header data-status={card.status} title={t(card.status)} className={`card-lod-heading node-drag-region ${mid ? workspace ? 'workspace-titlebar' : 'card-header node-surface-header' : 'card-lod-symbol'} ${container ? 'container-header container-drag-region' : ''} ${workspace || container ? 'card-finish-surface' : ''}`}>
       {isConnectable && container && <ConnectionDropSurface nodeId={card.id} />}
       {mid ? <><span className="card-lod-kind" aria-hidden="true"><CatalogIcon definition={definition} size={24} /></span>
       <div className="card-lod-title"><span className="card-eyebrow">{t(definition?.label ?? card.type)}</span><strong>{card.name}</strong></div>
@@ -51,6 +55,6 @@ export const CardLODView = memo(function CardLODView({ data, selected, type, isC
       {(workspace || container) && <CardFinishLayer finish={card.finish} quality="thumbnail" surface="chrome" />}
     </header>
     {mid && level !== 'node' && !container && <CardStaticPreview card={card} definition={definition} workspace={workspace} width={width} height={height} />}
-    {!workspace && !container && <CardFinishLayer finish={card.finish} quality="thumbnail" />}
+    {!workspace && !container && <CardFinishLayer finish={card.finish} quality="thumbnail" />}</>}
   </article>;
 });

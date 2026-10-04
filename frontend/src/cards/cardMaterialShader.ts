@@ -19,6 +19,7 @@ uniform vec4 printTransform;
 uniform vec4 artMaterial;
 uniform vec4 glassMaterial;
 uniform float ior;
+uniform float restrained;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
 vec3 spectrum(float t) { return .52 + .48 * cos(6.2831853 * (t + vec3(0., .33, .67))); }
@@ -101,7 +102,7 @@ void main() {
     float distanceToStar = length(local-offset*.7);
     float seed = hash(cell);
     float lit = .25 + .75*pow(.5+.5*sin(seed*68. + v.x*15. + v.y*11.),6.);
-    sparkle = (1.-smoothstep(.025,.12,distanceToStar))*step(.42,seed)*lit;
+    sparkle = (1.-smoothstep(.025,.12,distanceToStar))*step(mix(.42,.94,restrained),seed)*lit;
     emission = mix(vec3(.4,.75,1.),vec3(1.,.73,.33),hash(cell+11.))*sparkle*2.2;
     vec2 bigGrid = metric*9.;
     vec2 bigCell = floor(bigGrid), q = fract(bigGrid)-.5;
@@ -110,7 +111,7 @@ void main() {
     float flare = exp(-length(q)*28.) + exp(-abs(q.x)*50.-abs(q.y)*7.)
       + exp(-abs(q.y)*50.-abs(q.x)*7.);
     float flareLight = .35+.65*pow(.5+.5*sin(bigSeed*32.+v.x*9.-v.y*8.),4.);
-    emission += mix(vec3(.28,.68,1.),vec3(1.,.7,.28),bigSeed)*flare*step(.8,bigSeed)*flareLight*3.2;
+    emission += mix(vec3(.28,.68,1.),vec3(1.,.7,.28),bigSeed)*flare*step(.8,bigSeed)*flareLight*3.2*(1.-restrained);
   } else {
     // A continuous warped groove field: its normal drives the diffraction, not the cursor position.
     vec2 q = metric - vec2(1.03,.43);
@@ -160,6 +161,15 @@ void main() {
   color += (grain-.5)*.025;
   color = pow(max(color,vec3(0.)),vec3(.82));
   float alpha = mix(.88,.57,material.z*glass);
+  if (restrained > .5) {
+    color = mix(vec3(dot(color,vec3(.2126,.7152,.0722))),color,.55);
+    alpha *= .65;
+    if (finish > 2.5 && finish < 3.5) {
+      // Sparse embedded flecks catch light without turning the paper into a starfield.
+      color = vec3(.8,.85,.78) + emission;
+      alpha = .025 + sparkle*.95;
+    }
+  }
   // Copy is uncoated paper; its boundary is measured from the actual DOM layout.
   alpha *= mix(1.,.055,step(artEnd,p.y));
   gl_FragColor = vec4(color,alpha);

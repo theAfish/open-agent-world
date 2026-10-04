@@ -295,6 +295,12 @@ function unwrap<T>(input: unknown, key: string): T {
 }
 
 export const worldApi = {
+  factory<T>(nodeId: string, action: string, body?: unknown): Promise<T> {
+    return request(`/packs/factory/${encodeURIComponent(nodeId)}/${action}`, {
+      method: action === 'context' ? 'GET' : 'POST', headers: { 'X-OAW-Pack-Install': '1' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  },
   getDiagnostics(signal?: AbortSignal): Promise<import('../shell/helpChecks').HelpDiagnostics> {
     return request('/diagnostics', { signal });
   },
