@@ -54,8 +54,7 @@ it('keeps one working backpack across surfaces and mounts inspector actions only
   expect(useEquipmentPanel.getState().openIds).toEqual([card.id]);
   act(() => useNodeSurfaceStore.getState().openInspector(card.id));
   expect(surface.querySelector(':scope > .card-finish-layer')).toBeNull();
-  expect(surface.querySelector('.card-header .card-finish-layer')?.getAttribute('data-finish')).toBe('starlight');
-  expect(surface.querySelector('.card-header .card-finish-layer')?.getAttribute('data-material-surface')).toBe('chrome');
+  expect(surface.querySelector('.card-header .card-finish-layer')).toBeNull();
   expect(screen.getByText('Finish: Starlight')).toBeTruthy();
   expect(backpack()).toHaveLength(1);
   expect(surface.querySelector('.node-inspector-footer .equipment-toggle')).toBe(backpack()[0]);

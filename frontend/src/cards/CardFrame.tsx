@@ -121,7 +121,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
   const pointerStart = useRef<{ x: number; y: number; moved: boolean }>();
   const visualLevel = level;
   const finishQuality = visualLevel === "preview" ? "standard" : "thumbnail";
-  const material = useCardFinish(card.finish, finishQuality);
+  const material = useCardFinish(visualLevel === "node" || visualLevel === "preview" ? card.finish : "normal", finishQuality);
   // Preview cards do not need editors, plugin bodies or their subscriptions.
   // Unknown plugin bodies may still own local drafts. Host editors retain drafts
   // outside their mounts, so their hidden DOM and subscriptions can be released.

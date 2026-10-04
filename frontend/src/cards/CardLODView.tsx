@@ -8,6 +8,7 @@ import { CatalogIcon } from '../components/CatalogIcon';
 import { NODE_SURFACE_RADIUS } from '../state/nodeSurfaces';
 import { CardStaticPreview } from './CardStaticPreview';
 import { CardFinishLayer } from './CardFinishLayer';
+import { useCardFinish } from './useCardFinish';
 import { normalizeCardFinish } from './cardFinish';
 import type { CanvasNode } from './types';
 import './cardLOD.css';
@@ -26,14 +27,16 @@ export const CardLODView = memo(function CardLODView({ data, selected, type, isC
   const workspace = level === 'workspace' || level === 'inspector';
   const design = definition?.traits.includes('ui.factory-card.v1') ? card.config as unknown as PrintedDesign : undefined;
   const surface = design?.face.studio?.modes[level];
+  const lighting = useCardFinish(!workspace && !container && !surface ? card.finish : 'normal', 'thumbnail');
   return <article className={`world-card node-surface card-finish-surface card-lod-view world-card--${card.type} is-${level} ${surface ? 'factory-custom-surface' : ''} ${selected ? 'is-selected' : ''} ${container ? 'container-frame' : ''}`}
     style={{ '--card-kind': definition?.color, borderRadius: NODE_SURFACE_RADIUS[level] } as CSSProperties}
     data-card-id={card.id} data-card-type={card.type} data-surface-level={level}
     data-finish={normalizeCardFinish(card.finish)}
     data-card-expanded={level === 'workspace' || level === 'inspector' ? 'true' : 'false'}
     data-render-lod={data.renderLOD} aria-label={`${t(definition?.label ?? card.type)} ${card.name}`}
+    {...lighting}
     onPointerDown={event => { pointer.current = { x: event.clientX, y: event.clientY, moved: false }; }}
-    onPointerMove={event => { if (pointer.current && Math.hypot(event.clientX - pointer.current.x, event.clientY - pointer.current.y) > 5) pointer.current.moved = true; }}
+    onPointerMove={event => { lighting.onPointerMove?.(event); if (pointer.current && Math.hypot(event.clientX - pointer.current.x, event.clientY - pointer.current.y) > 5) pointer.current.moved = true; }}
     onClick={event => {
       if (event.detail !== 0 && pointer.current?.moved) return;
       if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;

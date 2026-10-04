@@ -1,27 +1,18 @@
 import type { CardFinish } from './cardFinish';
 import { materialFragment, materialVertex } from './cardMaterialShader';
+import { drawMaterialFallback } from './cardMaterialFallback';
+import { CARD_MATERIALS, MATERIAL_REGIONS } from './cardMaterial';
+export { CARD_MATERIALS } from './cardMaterial';
 
 export const MATERIAL_LIGHT_EVENT = 'card-material-light';
-export type MaterialLight = { x: number; y: number };
-type Channels = readonly [metalness: number, roughness: number, transmission: number, emission: number];
-export const CARD_MATERIALS: Record<Exclude<CardFinish, 'normal'>, { art: Channels; glass: Channels; ior: number }> = {
-  foil: { art: [.94, .3, 0, 0], glass: [.12, .13, .72, 0], ior: 1.46 },
-  rainbow: { art: [.86, .26, 0, .7], glass: [.16, .12, .68, .15], ior: 1.52 },
-  starlight: { art: [.3, .32, 0, 1], glass: [.08, .1, .82, .2], ior: 1.5 },
-  laser: { art: [.92, .24, 0, 0], glass: [.2, .1, .64, 0], ior: 1.54 },
-};
-export interface MaterialFrame {
+export type MaterialLight = { x: number; y: number; active: boolean; immediate?: boolean };
+export interface MaterialFrame extends MaterialLight {
   restrained?: boolean;
   roughness?: number;
   finish: Exclude<CardFinish, 'normal'>;
   width: number;
   height: number;
-  x: number;
-  y: number;
-  artEnd: number;
-  glass: [number, number, number, number];
-  /** Scale and offset of the canonical print. Chrome crops it at a fixed physical scale. */
-  print: [number, number, number, number];
+  mask: HTMLCanvasElement;
 }
 
 /** One offscreen GPU context for the whole application, never one WebGL context per card.
@@ -65,60 +56,67 @@ function createRenderer() {
   const position = gl.getAttribLocation(program, 'position');
   gl.enableVertexAttribArray(position);
   gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
-  const uniforms = Object.fromEntries(['resolution','tilt','finish','artEnd','glassRect','artMaterial','glassMaterial','ior','printTransform','restrained']
+  const uniforms = Object.fromEntries(['resolution','macroResponse','mesoscopic','tilt','channels','detailChannels','structure','regions','roughness','restrained','regionMask']
     .map(name => [name, gl.getUniformLocation(program, name)]));
-  // Rest poses are reused; bounded both by entry count and per-entry raster dimensions.
-  const cache = new Map<string, HTMLCanvasElement>();
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  let uploadedMask: HTMLCanvasElement | undefined;
   let lost = false;
-  source.addEventListener('webglcontextlost', event => { event.preventDefault(); lost = true; cache.clear(); });
+  source.addEventListener('webglcontextlost', event => { event.preventDefault(); lost = true; uploadedMask = undefined; });
+  source.addEventListener('webglcontextrestored', () => { renderer?.dispose(); renderer = undefined; });
   return {
     draw(target: HTMLCanvasElement, frame: MaterialFrame) {
       if (lost || gl.isContextLost()) return false;
       const ctx = target.getContext('2d');
       if (!ctx) return false;
-      const { width, height, finish, x, y, artEnd, glass, print, restrained = false, roughness } = frame;
-      const key = x === 0 && y === 0 ? JSON.stringify([finish,width,height,artEnd,glass,print,restrained,roughness]) : '';
-      let raster = key ? cache.get(key) : undefined;
-      if (!raster) {
-        source.width = width; source.height = height;
-        gl.viewport(0,0,width,height);
-        gl.uniform2f(uniforms.resolution,width,height);
-        gl.uniform2f(uniforms.tilt,x,y);
-        gl.uniform1f(uniforms.finish, ['foil','rainbow','starlight','laser'].indexOf(finish)+1);
-        gl.uniform1f(uniforms.artEnd,artEnd);
-        gl.uniform4f(uniforms.glassRect,...glass);
-        gl.uniform4f(uniforms.printTransform,...print);
-        const material = CARD_MATERIALS[finish].art;
-        gl.uniform4f(uniforms.artMaterial, material[0], roughness ?? material[1], material[2], material[3]);
-        gl.uniform1f(uniforms.restrained, restrained ? 1 : 0);
-        gl.uniform4f(uniforms.glassMaterial,...CARD_MATERIALS[finish].glass);
-        gl.uniform1f(uniforms.ior,CARD_MATERIALS[finish].ior);
-        gl.drawArrays(gl.TRIANGLES,0,6);
-        if (key) {
-          raster = document.createElement('canvas');
-          raster.width = width; raster.height = height;
-          raster.getContext('2d')?.drawImage(source,0,0);
-          if (cache.size >= 20) cache.delete(cache.keys().next().value!);
-          cache.set(key,raster);
-        }
+      const { width, height, finish, x, y, mask, restrained = false, roughness } = frame;
+      if (source.width !== width) source.width = width;
+      if (source.height !== height) source.height = height;
+      gl.viewport(0,0,width,height);
+      gl.uniform2f(uniforms.tilt,x,y);
+      gl.uniform2f(uniforms.resolution,width,height);
+      const material = CARD_MATERIALS[finish];
+      gl.uniform4f(uniforms.channels,material.specular,material.iridescence,material.diffraction,material.edgeFoil);
+      gl.uniform3f(uniforms.detailChannels,material.spotGloss,material.sparkle,material.emissive);
+      gl.uniform4f(uniforms.structure,...material.structure);
+      gl.uniform3f(uniforms.macroResponse,...material.macro);
+      gl.uniform1f(uniforms.mesoscopic,material.mesoscopic);
+      gl.uniform4f(uniforms.regions,MATERIAL_REGIONS.artwork,MATERIAL_REGIONS.frame,MATERIAL_REGIONS.icon,MATERIAL_REGIONS.accents);
+      gl.uniform1f(uniforms.roughness,Math.max(.05,Math.min(1,roughness ?? material.roughness)));
+      gl.uniform1f(uniforms.restrained,restrained ? 1 : 0);
+      if (mask !== uploadedMask) {
+        gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,mask);
+        uploadedMask = mask;
       }
-      if (target.width !== width) target.width = width;
-      if (target.height !== height) target.height = height;
-      ctx.clearRect(0,0,width,height);
-      ctx.drawImage(raster || source,0,0);
+      gl.uniform1i(uniforms.regionMask,0);
+      gl.drawArrays(gl.TRIANGLES,0,6);
+      ctx.drawImage(source,0,0);
       return true;
     },
     dispose() {
-      cache.clear(); gl.deleteBuffer(buffer); gl.deleteProgram(program);
+      gl.deleteTexture(texture); gl.deleteBuffer(buffer); gl.deleteProgram(program);
       gl.getExtension('WEBGL_lose_context')?.loseContext();
     },
   };
 }
 let renderer: ReturnType<typeof createRenderer> | undefined;
-export function drawCardMaterial(target: HTMLCanvasElement, frame: MaterialFrame) {
+export function drawCardMaterial(target: HTMLCanvasElement, frame: MaterialFrame): 'webgl' | 'fallback' | false {
+  const ctx = target.getContext('2d');
+  if (!ctx) return false;
+  if (target.width !== frame.width) target.width = frame.width;
+  if (target.height !== frame.height) target.height = frame.height;
+  ctx.clearRect(0,0,frame.width,frame.height);
+  // A stationary laminate still reflects the studio. Rest is a cached neutral
+  // view, not transparent stock; no work is scheduled once the view settles.
   try {
     if (renderer === undefined) renderer = createRenderer();
-    return renderer?.draw(target, frame) ?? false;
-  } catch { return false; } // CSS plates remain visible on restricted/unsupported GPUs.
+    if (renderer?.draw(target,frame)) return 'webgl';
+  } catch { /* Keep the printed face intact if the GPU becomes unavailable. */ }
+  drawMaterialFallback(target,frame);
+  return 'fallback';
 }
 if (import.meta.hot) import.meta.hot.dispose(() => { renderer?.dispose(); renderer = undefined; });

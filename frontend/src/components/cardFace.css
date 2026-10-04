@@ -40,7 +40,7 @@
 .card-face[data-tone="sky"] { --face-accent: #5d8198; --face-paper: #dfeaf0; --face-ink: #2b3b48; --face-muted: #586d7c; }
 .card-face[data-tone="rose"] { --face-accent: #a66d77; --face-paper: #ecd6d7; --face-ink: #4c343b; --face-muted: #785660; }
 .card-face[data-tone="stone"] { --face-accent: #777b78; --face-paper: #efefea; --face-ink: #323a39; --face-muted: #676d69; }
-.card-face-art { display: flex; align-items: flex-start; flex: 1 1 0; min-height: 0; padding: var(--face-pad); padding-bottom: 0; }
+.card-face-art { position: relative; display: flex; align-items: flex-start; flex: 1 1 0; min-height: 0; padding: var(--face-pad); padding-bottom: 0; }
 .card-face-symbol {
   position: relative;
   z-index: 2;
@@ -70,31 +70,6 @@
 .card-face--image .card-face-copy { margin-top: -10px; border-radius: 12px 12px 0 0; background: var(--card-surface, #f8f7f3); color: var(--ink, #28342e); }
 .card-face--image .card-face-copy small { color: var(--ink-soft, #60695f); }
 .card-face--image .card-face-detail { display: none; }
-
-/* A clear coat should enrich the printed colour and keep image content visible. */
-.card-stock .card-finish-layer[data-quality] { --finish-intensity: .88; }
-.card-stock:has(.card-face--image) .card-finish-layer[data-quality] { --finish-intensity: .38; }
-.card-stock:has(.card-face--image) .card-material-canvas { opacity: .42; }
-/* Separate printed paper, clear resin badge, and polished edge responses. */
-.card-stock[data-finish]:not([data-finish="normal"]) .card-face-copy {
-  background: linear-gradient(125deg, #ffffff08, #9cc8d00b 70%, #b792c414), var(--face-paper);
-  border-top: 1px solid #aebfc43d;
-  box-shadow: inset 0 1px 0 #ffffff0c;
-}
-.card-stock[data-finish]:not([data-finish="normal"]) .card-face-symbol {
-  background: linear-gradient(135deg, #ebf4f72e, #c1d3dd12 46%, #ffffff08);
-  border: 1px solid #edf8ee65;
-  box-shadow: inset 0 1px 1px #ffffff80, inset -1px -1px 1px #9fbec454, 0 3px 5px #0003;
-}
-.card-stock[data-finish]:not([data-finish="normal"]) .card-face-symbol::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(var(--finish-angle,124deg), #ffffff2e, transparent 35%, transparent 70%, #e3f6ff3d);
-  pointer-events: none;
-}
-.card-stock[data-finish]:not([data-finish="normal"]) .card-face-symbol { color: #f1f5ef; }
 
 /* Text: a small editorial mark, with room for a short excerpt. */
 .card-face--text .card-face-symbol { width: clamp(30px, 25cqi, 64px); --face-symbol: clamp(18px, 12cqi, 32px); }

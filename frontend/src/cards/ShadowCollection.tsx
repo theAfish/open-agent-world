@@ -62,7 +62,7 @@ function ShadowCollectionComponent({data,selected}:NodeProps<CanvasNode>) {
       onPointerDown={e=>{pointer.current={x:e.clientX,y:e.clientY};}}
       onClick={e=>{if(state!=="expanded"&&pointer.current&&Math.hypot(e.clientX-pointer.current.x,e.clientY-pointer.current.y)<5)advance();}}
       onKeyDown={e=>{if((e.key==="Enter"||e.key===" ")&&state!=="expanded"){e.preventDefault();advance();}}}>
-      <CardFinishLayer finish={card.finish} quality="thumbnail" />
+      <CardFinishLayer finish={card.finish} quality="thumbnail" surface="chrome" />
       <span title={t("PDF")}><FileText size={17}/>{counts.pdf}</span>
       {state!=="minimal"&&<span title={t("Other objects")}><Box size={17}/>{counts.object}</span>}
       <span title={t("Agents")}><Bot size={17}/>{counts.agent}</span>

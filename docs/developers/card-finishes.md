@@ -12,36 +12,62 @@ Placement through `/card-library/nodes` copies the owned finish to the new `Card
 
 ## Material rendering
 
-`frontend/src/cards/CardFinishLayer.tsx` is a pointer-transparent, self-clipped decorative layer. A normal card creates no material DOM. The artwork stays in the existing renderer. Shared `CardStock` integrates Library and deck faces; workspace surfaces use the same layer. Library inspection enables the showcase material, while text-heavy inspectors and legion workspaces restrict decoration to their headers/tabs.
+`CardFinishLayer` renders a view-dependent laminate over designated artwork. Holo is visible at its neutral resting angle and changes continuously with viewing direction. The persisted `rainbow` ID still names Holo; collection metadata and finish probabilities are unchanged. Normal cards mount no material DOM.
 
-Expanded containers, equipped cards and shadow collections also use the shared layer on their existing chrome. The fallback positioning selector has zero specificity so it cannot override absolute headers or custom drag geometry.
+### Explicit print stack
 
-- **Foil:** silver response, fine grain and a broad reflection with weak spectral color.
-- **Rainbow:** a saturated cyan, violet and magenta spectrum, a clear reflection and microtexture.
-- **Starlight:** a smoked base and a fixed, non-tiling flake plate beneath a clear coat.
-- **Laser:** an engraved holographic relief and a directional diffraction highlight.
+1. **Substrate:** the existing stock colour and card silhouette.
+2. **Printed artwork:** the image, illustration or hero colour field (`data-material-layer="artwork"`).
+3. **Laminate:** a pointer-transparent, region-masked canvas at z-index 3. The shader supplies the colour travel, interference contours and fine surface response.
+4. **Protected top print:** the complete title/body sheet, icons, badges, labels and dividers at z-index 4. These elements are also excluded from the coating map, so their ink and backing retain their original contrast.
+5. **Clearcoat:** a small achromatic specular contribution within the laminate shader. It shares the coating mask and does not tint protected copy.
 
-### Regional physical shading
+`CardFace` marks its layers explicitly. World card/LOD layouts retain their geometry and use semantic selectors for protected content. Factory illustrations remain below their laminate, with other factory elements above it. No blend mode is applied to the whole card. Workspace, inspector and container chrome stay matte; `surface="chrome"` remains a compatibility guard.
 
-Every special finish uses `CardMaterialCanvas`, including collection showcases, hand thumbnails, placed world cards and their semantic zoom projections. A single shared offscreen WebGL renderer draws procedural material maps, then copies each result to a passive 2D canvas. The shader uses GGX direct specular, Schlick Fresnel and an analytic studio environment. Artwork, resin badges, matte copy and polished borders have separate responses. `CARD_MATERIALS` in `cardMaterialRenderer.ts` defines metalness, roughness, transmission, emission and IOR by finish and region; badge bounds and the copy boundary are measured from the actual face layout rather than assumed percentages. Measurements use untransformed layout coordinates, and all hosts share a canonical print aspect, so deck rotation and canvas zoom cannot change the print. World cards mask the material before the title and keep preview content above decoration.
+### Optical model and material identities
 
-Foil has a brushed normal field and silver strip reflections. Holo (the persisted `rainbow` value) uses irregular triangular facets with separate normals and optical film thickness. Starlight combines fine embedded flakes with angle-dependent emissive starbursts. Laser uses a continuous engraved normal field and directional spectral reflection. All patterns stay fixed in card UV space. Transmission approximates the procedural studio environment; it does **not** refract HTML text, external artwork or the page behind the card. Image faces use a lighter material overlay to preserve their artwork.
+`cards/cardMaterial.ts` holds composable optical properties and the persisted-finish presets. `cardMaterialShader.ts` uses a fixed white studio source, a normalized view/half vector and a Fresnel-like response. It has no time uniform.
 
-GPU work is event-driven: visible entry, measured layout changes and the existing coalesced pointer callback. Offscreen faces do not draw; rest rasters use a bounded 20-entry cache. Standard/showcase rasters are capped at 640 × 800 and 1.5× device scale; thumbnails use the same shader with up to 2× sampling capped at 256 × 320. There is no animation loop and quality changes never substitute a different illustration. Text-heavy expanded world surfaces restrict the finish to their headers. Shared CSS/SVG plates remain a fallback for missing WebGL or shader initialization failure. Observers and pending callbacks are released on unmount; development hot replacement also releases GPU resources.
+- **Macro:** a low-frequency warped film-thickness field produces broad aurora regions. The view vector changes the optical path, phase and warp curvature together. Bands bend and reorganize rather than linearly translating a fixed texture.
+- **Meso:** nested interference contours derive from that same film field. Their directional ridges brighten and fade without replacing the broad colour structure.
+- **Micro:** fine, fixed laminate variation supplies subtle specular breakup. Its contrast fades with raster resolution to avoid thumbnail noise.
 
-Workspace, inspector, container and Legion titlebars/tabs explicitly select `surface="chrome"`. This crops the same procedural stock at a fixed 320 × 400 layout-pixel scale instead of squeezing the entire portrait into a shallow bar. The shader print transform is independent of the badge and text masks, and belongs to the rest-raster cache key. Chrome has a separate 1536 × 160 raster cap (up to 1.5× device scale), avoiding the few blurry scanlines produced by a 256-pixel thumbnail cap on a wide window. Its reflection, rim and CSS fallback are subdued around the title; ordinary card and hand rendering retain their existing intensity and projection.
+The wavelength lobes and secondary diffraction order are a physically inspired approximation, not a calibrated spectral simulation.
 
-The regional controls follow the same separation as [physical material channels](https://threejs.org/docs/pages/MeshPhysicalMaterial.html), but this lightweight compositor is an approximation for DOM cards, not a full 3D scene renderer.
+- **Normal:** unchanged printed stock, with no laminate.
+- **Foil:** broad neutral silver reflections of light and dark studio shapes, with fine directional brushing.
+- **Holo:** the strongest chromatic response, with flowing cyan, pink, gold, green, violet and blue regions. Artwork remains visible beneath the film.
+- **Starlight:** a small fixed population of independently angle-lit prismatic flakes, short cross flares and gentle neutral gloss.
+- **Laser:** engraved radial/parallel grooves in fixed print coordinates, dispersed through a directional Bragg-angle gate. The engraving extinguishes away from its viewing window.
 
-`useCardFinish` measures once on pointer entry, normalizes local coordinates and coalesces CSS-variable updates into one requested frame. The studio light stays fixed at the upper left; surface orientation changes the broad reflection. Collectible `CardStock` faces opt into gentle perspective rotation, including ordinary and thumbnail cards. Canvas nodes keep their existing geometry. The hook never updates React state on pointer movement or writes the host transform, and cancels pending work on leave, scroll, resize, drag, finish change and unmount. Existing pack and deck movement is preserved.
+### Region masks
 
-Thumbnail fallback plates omit the extra grain element. Idle cards have no JavaScript animation loop or permanent GPU promotion; only interaction or layout/visibility changes queue a paint. Shared SVG fallback print plates are generated once at module initialization. Pack illumination mounts after the face emerges and runs once. Touch input and reduced motion retain a static material and static revealed faces. Blend/mask fallbacks reduce decoration while retaining readable artwork.
+`cardMaterialMask.ts` measures untransformed DOM layout to build an RGB coating map: red artwork, green frame, blue icon rim and yellow accents. Black is uncoated stock or protected content. Artwork is strongly coated; the frame has a separate response and icon rims receive only a small neutral reflection. Exclusions are applied last with padding to protect antialiased ink.
 
-The shared collectible face uses five minimal layouts, muted colours and a clear title sheet. See [Card design language](card-design.md) for presets, artwork and plugin integration. Library collection and detail panes scroll independently inside the bounded dialog. The showcase card scales to available pane height; narrow screens place the selected detail above the collection.
+Custom surfaces can use `data-material-region="artwork"`, `"accent"`, `"icon"`, `"background"` or `"text"`. Use `data-material-layer="protected"` for top print and retain the component's normal positioning. The entire text sheet is protected, including its backing and dividers, rather than only individual glyph rectangles. Region resize, child/content changes and explicit region-role changes rebuild the mask. Tilt, fan transforms and canvas zoom do not move the coating relative to the print.
+
+At title/copy boundaries, a full-width feather dissolves the coating into the stock before the protected text begins. This avoids rectangular blank cutouts around labels. Finished world-card icons use a soft radial exclusion and transparent backing so the symbol reads as printed ink rather than a separate white tile; the same treatment applies to compact and preview layouts.
+
+### Input, rendering and fallback
+
+`useCardFinish` coalesces pointer input without React state updates. Only collectible `CardStock` faces opt into geometric perspective tilt; canvas card geometry remains unchanged. `CardMaterialCanvas` smoothly approaches the target view with a short, finite interpolation and returns to the neutral laminate on leave. Once settled, it schedules no more frames. Touch and reduced-motion cards retain a static finish.
+
+A single offscreen WebGL context serves all visible card canvases. Rasters are capped at 640 x 800 for standard/showcase and 256 x 320 for thumbnails. Offscreen work is stopped, and observers/listeners/pending frames are released on unmount. HMR disposes the shared GPU resources.
+
+If WebGL is unavailable or lost, `cardMaterialFallback.ts` evaluates the same broad optical field on a CPU raster capped at 256 x 320. The full-resolution coating mask is applied **after** upsampling so protected text cannot pick up filtered colour. The fallback approximates the material identities with reduced micro detail.
 
 ## Development preview
 
-Run the frontend dev server and open `/?card-finishes`, or open **DEV · F3 → Card finish preview** in a development profile. The standalone gallery works without a backend. It includes every finish, dark/bright stock, a one-shot reveal and a 200-thumbnail mode. It changes no collection data or probabilities. The route and tools are excluded from production builds.
+Start Vite and open `/?card-finishes`, or use **DEV / F3 / Card finish preview**. The gallery works without a backend and changes no collection data.
+
+- **Pointer / tilt:** direct interaction, smoothly returning to visible neutral material at rest.
+- **Representative angles:** fixed characteristic views for comparing all five finishes.
+- **Slow light sweep:** a development-only view sweep, capped at 24 updates per second, paused when hidden/offscreen or under reduced motion. Production cards have no autonomous sweep.
+- **Printed test pattern:** four printed colour/value patches, curves and fine linework beneath the laminate.
+- **Layer comparison:** original print, isolated masked Holo, and the completed card. All three share the same angle; the isolated film exposes protected cutouts. Pointer poses are synchronized between specimens.
+- **200 thumbnails:** passive rendering/performance inspection, with sweep disabled.
+
+Dark/light stock and responsive layouts allow contrast and mask inspection across sizes. The shared collectible face retains its five layouts; see [Card design language](card-design.md).
 
 ## Validation
 
@@ -49,9 +75,8 @@ Run the frontend dev server and open `/?card-finishes`, or open **DEV · F3 → 
 - `frontend/src/cards/cardFinish.test.ts`, `CardFinishLayer.test.tsx`: compatibility, stable rendering, pointer coalescing, cleanup, interaction pass-through, reduced motion and 200 passive materials.
 - `frontend/src/api/client.test.ts`: API load/create/restore preservation.
 - Library, pack, world card and `NodeWorkspace.finish.test.tsx` component tests cover stored finish propagation, stale parent snapshots, reveal timing and legacy cards.
-- `ContainerFinishes.test.tsx` covers expanded containers, equipment and shadow collections. The Library browser scenario checks placement, undo/redo and reload against the saved finish, plus three viewport sizes.
-- `frontend/e2e/card-finishes.spec.ts`: real browser light/dark inspection, actual shader pixel response and rest restoration, regional alpha, a single shared GPU context, WebGL fallback, reduced motion and idle performance for 200 cards. Holo pixel samples are compared across the showcase, rotated hand thumbnail and production React Flow world card; dragging and semantic zoom retain the finish. Screenshots are diagnostic artifacts, not pixel assertions.
-- The same browser suite mounts real workspace and inspector surfaces to check chrome raster resolution, two-axis texture detail, title readability in both themes, and narrow-window resizing.
+- `ContainerFinishes.test.tsx` verifies matte container/collection chrome and retained equipped-card finishes. The Library browser scenario checks placement, undo/redo and reload against the saved finish, plus three viewport sizes.
+- `frontend/e2e/card-finishes.spec.ts`: broad chromatic coverage at rest and across angles, continuous/reversible colour travel, neutral silver and sparse flakes, directional engraving, zero material alpha over protected content, pixel-stable top-print interiors, synchronized layer comparison, resize/mobile masks, WebGL fallback, one shared GPU context, reduced motion and no idle animation callbacks for 200 cards. Hand/world dragging, semantic zoom and matte chrome checks remain covered. Screenshots and numeric measurements are diagnostic artifacts.
 - `frontend/e2e/library-preview-layout.spec.ts`: showcase/thumbnail tilt, full preview visibility and independent scrolling at desktop, narrow and mobile sizes, including long descriptions and a full collection.
 
 Run `npm.cmd test -- --maxWorkers=2 --minWorkers=1` and `npm.cmd run build` in `frontend`, and `backend/.venv/Scripts/python.exe -m pytest backend/tests/test_card_finishes.py` from the repository root. The repository currently has no configured formatter; retain surrounding conventions and check whitespace with `git diff --check`.

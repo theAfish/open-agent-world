@@ -105,7 +105,6 @@
 .pack-drawn-card > strong { font-size: 9px; text-align: center; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .pack-drawn-card > small { font-size: 5px; letter-spacing: .12em; margin-top: auto; }
 .pack-drawn-card > strong, .pack-drawn-card > small { position: relative; z-index: 2; }
-.pack-drawn-card .card-finish-layer[data-reveal="true"]::after { animation-duration: 650ms; animation-delay: 80ms; }
 .library-pack.is-opened .pack-object { --pack-depth: 1; }
 .library-pack.is-opened .pack-shadow { opacity: .55; filter: blur(5px); }
 .library-pack.is-opened .pack-wrapper { clip-path: polygon(0 3px, 7% 0, 13% 5px, 21% 1px, 28% 4px, 34% 0, 43% 4px, 51% 1px, 59% 5px, 67% 0, 75% 4px, 82% 1px, 90% 5px, 96% 0, 100% 3px, 100% 100%, 0 100%); }

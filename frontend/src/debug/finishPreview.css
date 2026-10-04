@@ -22,3 +22,23 @@
 .finish-preview.is-embedded .finish-preview-controls { margin-bottom: 20px; }
 @media (max-width: 850px) { .finish-preview { padding: 24px; } .finish-preview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (prefers-reduced-motion: reduce) { .finish-preview-card { transform: none; } }
+
+/* These swatches are printed test art, scoped to the development gallery. */
+.finish-study-pattern {
+  --study-slate: #758184; --study-sand: #c5b79b; --study-sage: #93a18b; --study-rose: #aa9390; --study-line: #e7e5d8;
+  position: absolute; inset: 0;
+  pointer-events: none; overflow: hidden; border-radius: 3px;
+}
+.finish-preview[data-theme="dark"] .finish-study-pattern {
+  --study-slate: #3c4c51; --study-sand: #857b64; --study-sage: #53644f; --study-rose: #72585a; --study-line: #bac5b3;
+}
+.finish-study-pattern svg { display: block; width: 100%; height: 100%; }
+.finish-study-status { min-height: 18px; margin: -17px 0 22px; font-size: 11px; opacity: .7; }
+.finish-preview-grid[data-study-mode="sweep"] .card-stock { transition: none; }
+.finish-preview-grid.is-comparison { grid-template-columns: repeat(3, minmax(0, 320px)); gap: 44px; }
+.finish-preview-card[data-study-layer="laminate"] { background: #141a22; }
+.finish-preview-card[data-study-layer="laminate"] .card-face { background: transparent; }
+.finish-preview-card[data-study-layer="laminate"] :is(.card-face-art, .card-face-copy, .card-face-badge) { visibility: hidden; }
+.finish-preview.is-embedded .finish-preview-grid.is-comparison { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 850px) { .finish-preview-grid.is-comparison { gap: 16px; } }
+@media (max-width: 620px) { .finish-preview-grid.is-comparison { grid-template-columns: minmax(0, 320px); } }

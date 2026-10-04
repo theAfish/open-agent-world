@@ -1,42 +1,75 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 
-test('laser engraving stays attached while its reflected spectrum and groove lighting move', async ({ page }, testInfo) => {
-  await page.setViewportSize({ width: 820, height: 900 });
-  await page.goto('/?card-finishes');
-  const laser = page.locator('[data-preview-finish="laser"]');
-  await laser.scrollIntoViewIfNeeded();
-  const pattern = laser.locator('.card-finish-pattern');
-  const reflection = laser.locator('.card-finish-base');
-  const grooveLight = laser.locator('.card-finish-sheen');
-  const plate = await pattern.evaluate(element => {
-    const style = getComputedStyle(element);
-    return { image: style.maskImage, position: style.maskPosition, size: style.maskSize };
+async function materialPixels(card: Locator) {
+  return card.locator('canvas').evaluate(async element => {
+    await document.fonts.ready;
+    // Initial ResizeObserver delivery and its queued mask rebuild precede the sample.
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const canvas = element as HTMLCanvasElement, ctx = canvas.getContext('2d')!;
+    const pixels = ctx.getImageData(0,0,canvas.width,canvas.height).data;
+    let hash = 2166136261, covered = 0, peak = 0, bright = 0, weak = 0, middle = 0, chromatic = 0;
+    for (let i=0; i<pixels.length; i+=4) {
+      const alpha = pixels[i+3];
+      // Canvas GPU/CPU readback can round RGB by one level on the first read.
+      // Alpha is exact; spectral travel is measured separately below.
+      hash = Math.imul(hash ^ alpha,16777619);
+      covered += alpha > 2 ? 1 : 0; bright += alpha > 128 ? 1 : 0;
+      weak += alpha > 0 && alpha <= 16 ? 1 : 0; middle += alpha > 16 ? 1 : 0;
+      peak = Math.max(peak,alpha);
+      chromatic += alpha > 64 && Math.max(pixels[i],pixels[i+1],pixels[i+2])-Math.min(pixels[i],pixels[i+1],pixels[i+2]) > 65 ? 1 : 0;
+    }
+    // Sample the interior of every actual text rectangle, rather than one arbitrary copy pixel.
+    const origin = (node: HTMLElement) => {
+      let x = 0, y = 0;
+      for (let current: HTMLElement | null = node; current; current = current.offsetParent as HTMLElement | null) {
+        x += current.offsetLeft; y += current.offsetTop;
+      }
+      return { x,y };
+    };
+    const host = canvas.closest('.card-finish-surface')!, start = origin(canvas);
+    let textPeak = 0, iconPeak = 0;
+    for (const node of host.querySelectorAll<HTMLElement>('.card-face-copy strong, .card-face-copy small, .card-title-group, .card-face-symbol > svg')) {
+      const pos = origin(node), scaleX = canvas.width/canvas.offsetWidth, scaleY = canvas.height/canvas.offsetHeight;
+      // SVGs have no offset layout; test the badge interior separately below.
+      if (node instanceof SVGElement) continue;
+      for (let y=Math.max(0,Math.ceil((pos.y-start.y+2)*scaleY)); y<Math.min(canvas.height,(pos.y-start.y+node.offsetHeight-2)*scaleY); y++) {
+        for (let x=Math.max(0,Math.ceil((pos.x-start.x+2)*scaleX)); x<Math.min(canvas.width,(pos.x-start.x+node.offsetWidth-2)*scaleX); x++) {
+          textPeak = Math.max(textPeak,pixels[(y*canvas.width+x)*4+3]);
+        }
+      }
+    }
+    const badge = host.querySelector<HTMLElement>('.card-face-symbol');
+    if (badge) {
+      const pos = origin(badge);
+      for (let y=.25; y<.75; y+=.1) for (let x=.25; x<.75; x+=.1) {
+        const px = Math.floor((pos.x-start.x+badge.offsetWidth*x)*canvas.width/canvas.offsetWidth);
+        const py = Math.floor((pos.y-start.y+badge.offsetHeight*y)*canvas.height/canvas.offsetHeight);
+        iconPeak = Math.max(iconPeak,pixels[(py*canvas.width+px)*4+3]);
+      }
+    }
+    return { hash, coverage: covered/(pixels.length/4), chromatic: chromatic/(pixels.length/4), bright: bright/(pixels.length/4), weak: weak/(pixels.length/4), middle: middle/(pixels.length/4), peak, textPeak, iconPeak,
+      width: canvas.width, height: canvas.height, renderer: canvas.parentElement!.dataset.materialRenderer };
   });
-  // A computed URL alone does not prove the shared engraving asset loaded.
-  expect(await page.evaluate(async mask => {
-    const image = new Image();
-    image.src = mask.slice(5, -2);
-    await image.decode();
-    return image.naturalWidth > 0;
-  }, plate.image)).toBe(true);
-  await laser.screenshot({ path: testInfo.outputPath('laser-rest.png') });
-  await laser.hover({ position: { x: 55, y: 75 } });
-  await expect(laser).toHaveAttribute('data-finish-active', 'true');
-  const firstReflection = await reflection.evaluate(element => getComputedStyle(element).backgroundPosition);
-  const firstGrooveLight = await grooveLight.evaluate(element => getComputedStyle(element, '::before').backgroundPosition);
-  await laser.screenshot({ path: testInfo.outputPath('laser-left.png') });
-  const box = (await laser.boundingBox())!;
-  await page.mouse.move(box.x + box.width * .8, box.y + box.height * .8);
-  await expect.poll(() => reflection.evaluate(element => getComputedStyle(element).backgroundPosition)).not.toBe(firstReflection);
-  await expect.poll(() => grooveLight.evaluate(element => getComputedStyle(element, '::before').backgroundPosition)).not.toBe(firstGrooveLight);
-  expect(await pattern.evaluate(element => {
-    const style = getComputedStyle(element);
-    return { image: style.maskImage, position: style.maskPosition, size: style.maskSize };
-  })).toEqual(plate);
-  await laser.screenshot({ path: testInfo.outputPath('laser-right.png') });
-  await page.mouse.move(1, 1);
-  await expect(laser).not.toHaveAttribute('data-finish-active');
-  await expect(laser.getByText('Research Agent')).toBeVisible();
+}
+
+test('engraved diffraction moves with angle, has no trail, and returns to its resting laminate', async ({ page }, info) => {
+  await page.goto('/?card-finishes');
+  const card = page.locator('[data-preview-finish="laser"]');
+  await expect(card.locator('[data-material-ready]')).toHaveCount(1);
+  const rest = await materialPixels(card);
+  const box = (await card.boundingBox())!;
+  await card.hover({ position: { x: box.width*.75,y: box.height*.3 } });
+  await expect.poll(async () => (await materialPixels(card)).peak).toBeGreaterThan(120);
+  await expect(card.locator('[data-material-settled]')).toHaveCount(1);
+  const first = await materialPixels(card);
+  await card.screenshot({ path: info.outputPath('laser-local-reflection.png') });
+  await page.mouse.move(box.x+box.width*.9,box.y+box.height*.8);
+  await expect.poll(async () => (await materialPixels(card)).hash).not.toBe(first.hash);
+  await page.mouse.move(1,1);
+  await expect.poll(async () => (await materialPixels(card)).hash).toBe(rest.hash);
+  // The same angle samples the same microstructure: there is no time-dependent shimmer or trail.
+  await card.hover({ position: { x: box.width*.75,y: box.height*.3 } });
+  await expect.poll(async () => (await materialPixels(card)).hash).toBe(first.hash);
 });
 
 test('cards tilt beneath a fixed light and retain readable ink in both themes', async ({ page }, testInfo) => {
@@ -63,7 +96,7 @@ test('cards tilt beneath a fixed light and retain readable ink in both themes', 
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(rainbow).not.toHaveAttribute('data-card-tilting');
   await expect(rainbow).toHaveCSS('transform', 'none');
-  await page.getByRole('button', { name: 'Replay light' }).click();
+  await page.getByRole('button', { name: 'Reset view' }).click();
   await expect.poll(() => page.evaluate(() => document.getAnimations().filter(animation => animation.playState === 'running').length)).toBe(0);
   for (const card of await cards.all()) await expect(card.getByText('Research Agent')).toBeVisible();
   expect(errors).toEqual([]);
@@ -110,66 +143,147 @@ test('200 passive cards settle without animation callbacks or running animations
   await page.screenshot({ path: testInfo.outputPath('finishes-200.png'), fullPage: true });
 });
 
-test('physical materials share one GPU context, respond to tilt, and leave the copy matte', async ({ page }, testInfo) => {
-  await page.setViewportSize({ width: 1800, height: 900 });
+test('materials share one GPU, give holo broad spectral coverage, and protect ink in both themes', async ({ page }, info) => {
+  await page.setViewportSize({ width: 1800,height: 900 });
   await page.addInitScript(() => {
     const original = HTMLCanvasElement.prototype.getContext;
     const metrics = { contexts: 0 };
-    Object.assign(window, { materialMetrics: metrics });
-    Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', { value: function(type: string, ...args: unknown[]) {
+    Object.assign(window,{ materialMetrics: metrics });
+    Object.defineProperty(HTMLCanvasElement.prototype,'getContext',{ value: function(type: string,...args: unknown[]) {
       if (type === 'webgl') metrics.contexts++;
-      return Reflect.apply(original, this, [type, ...args]);
+      return Reflect.apply(original,this,[type,...args]);
     } });
   });
   await page.goto('/?card-finishes');
   await expect(page.locator('[data-material-ready]')).toHaveCount(4);
-  const signature = (finish: string) => page.locator(`[data-preview-finish="${finish}"] canvas`).evaluate(element => {
-    const canvas = element as HTMLCanvasElement;
-    const ctx = canvas.getContext('2d')!;
-    const bytes = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    let hash = 2166136261;
-    for (let i = 0; i < bytes.length; i += 19) hash = Math.imul(hash ^ bytes[i],16777619);
-    const alpha = (y: number) => ctx.getImageData(Math.floor(canvas.width*.75), Math.floor(canvas.height*y), 1, 1).data[3];
-    const samples = Array.from({ length: Math.floor(bytes.length / 127) }, (_, index) => bytes[index * 127]);
-    return { hash, samples, art: alpha(.35), copy: alpha(.9), width: canvas.width, height: canvas.height };
-  });
-  for (const finish of ['foil','rainbow','starlight','laser']) {
-    const card = page.locator(`[data-preview-finish="${finish}"]`);
-    const rest = await signature(finish);
-    expect(rest.art).toBeGreaterThan(180);
-    expect(rest.copy).toBeLessThan(25);
-    expect(rest.width).toBeLessThanOrEqual(640);
-    expect(rest.height).toBeLessThanOrEqual(800);
-    await card.hover({ position: { x: 50, y: 65 } });
-    await expect.poll(async () => (await signature(finish)).hash).not.toBe(rest.hash);
-    await page.mouse.move(1,1);
-    // Canvas GPU/CPU readback can round premultiplied colour channels differently by one unit.
-    await expect.poll(async () => {
-      const current = await signature(finish);
-      return current.samples.reduce((sum, value, index) => sum + Math.abs(value-rest.samples[index]),0) / rest.samples.length;
-    }, { message: `${finish} restores its rest pose` }).toBeLessThan(1.5);
+  const contexts = () => page.evaluate(() => (window as unknown as { materialMetrics: { contexts: number } }).materialMetrics.contexts);
+  expect(await contexts()).toBe(1);
+  const samples = [];
+  for (const dark of [true,false]) {
+    await page.getByLabel('Dark card stock').setChecked(dark);
+    for (const finish of ['foil','rainbow','starlight','laser']) {
+      const card = page.locator(`[data-preview-finish="${finish}"]`);
+      const rest = await materialPixels(card);
+      if (finish === 'rainbow') {
+        expect(rest.chromatic).toBeGreaterThan(.25);
+        expect(rest.middle).toBeGreaterThan(.35);
+      }
+      expect(rest.width).toBeLessThanOrEqual(640);
+      expect(rest.height).toBeLessThanOrEqual(800);
+      const box = (await card.boundingBox())!;
+      let peak = 0;
+      for (const [x,y] of [[.2,.15],[.75,.3],[.5,.5],[.9,.8]]) {
+        await page.mouse.move(box.x+box.width*x,box.y+box.height*y);
+        await expect(card).toHaveAttribute('data-finish-active','true');
+        await expect.poll(async () => (await materialPixels(card)).renderer).toBe('webgl');
+        // Wait for the coalesced input frame, not for an arbitrary animation duration.
+        await expect.poll(() => card.evaluate(element => element.style.getPropertyValue('--pointer-x')))
+          .toBe((2*x-1).toFixed(3));
+        await expect(card.locator('[data-material-settled]')).toHaveCount(1);
+        const sample = await materialPixels(card);
+        if (finish === 'rainbow') {
+          expect(sample.chromatic).toBeGreaterThan(.22);
+          expect(sample.middle).toBeGreaterThan(.35);
+        }
+        if (finish === 'foil') expect(sample.chromatic).toBeLessThan(.005);
+        if (finish === 'starlight') expect(sample.bright).toBeLessThan(.01);
+        expect(sample.coverage).toBeLessThan(.72);
+        expect(sample.textPeak).toBe(0);
+        expect(sample.iconPeak).toBe(0);
+        peak = Math.max(peak,sample.peak);
+        samples.push({ dark,finish,x,y,...sample });
+      }
+      expect(peak).toBeGreaterThan(finish === 'starlight' ? 60 : 120);
+      await card.screenshot({ path: info.outputPath(`${finish}-${dark ? 'dark' : 'light'}-active.png`) });
+      await page.mouse.move(1,1);
+      await expect.poll(async () => (await materialPixels(card)).hash).toBe(rest.hash);
+    }
   }
-  expect(await page.evaluate(() => (window as unknown as { materialMetrics: { contexts: number } }).materialMetrics.contexts)).toBe(1);
-  await page.screenshot({ path: testInfo.outputPath('physical-materials-dark.png'), fullPage: true, animations: 'disabled' });
+  expect(await contexts()).toBe(1);
+  await info.attach('material-pixel-coverage',{ body: JSON.stringify(samples,null,2),contentType: 'application/json' });
 });
 
-test('unavailable WebGL falls back to readable, interactive print plates', async ({ page }) => {
+test('unavailable WebGL retains the material shape and protected print', async ({ page }) => {
   await page.addInitScript(() => {
     const original = HTMLCanvasElement.prototype.getContext;
-    Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', { value: function(type: string, ...args: unknown[]) {
-      return type === 'webgl' ? null : Reflect.apply(original, this, [type, ...args]);
+    Object.defineProperty(HTMLCanvasElement.prototype,'getContext',{ value: function(type: string,...args: unknown[]) {
+      return type === 'webgl' ? null : Reflect.apply(original,this,[type,...args]);
     } });
   });
   await page.goto('/?card-finishes');
-  await expect(page.locator('[data-material-ready]')).toHaveCount(0);
   const card = page.locator('[data-preview-finish="rainbow"]');
-  await expect(card.locator('.card-finish-pattern')).toBeVisible();
+  await expect(card.locator('[data-material-ready]')).toHaveCount(1);
+  const rest = await materialPixels(card);
+  expect(rest.chromatic).toBeGreaterThan(.2);
+  const box = (await card.boundingBox())!;
+  await card.hover({ position: { x: box.width*.75,y: box.height*.3 } });
+  await expect.poll(async () => (await materialPixels(card)).renderer).toBe('fallback');
+  const sample = await materialPixels(card);
+  expect(sample.chromatic).toBeGreaterThan(.2);
+  expect(sample.coverage).toBeLessThan(.72);
+  expect(sample.middle).toBeGreaterThan(.35);
+  expect(sample.textPeak).toBe(0);
+  expect(sample.iconPeak).toBe(0);
   await expect(card.getByText('Research Agent')).toBeVisible();
-  await card.hover();
-  await expect(card).toHaveAttribute('data-card-tilting','true');
+  await page.mouse.move(1,1);
+  await expect.poll(async () => (await materialPixels(card)).hash).toBe(rest.hash);
 });
 
-test('holo uses the same physical print in the showcase, hand and draggable world card', async ({ page }, testInfo) => {
+test('fallback representative poses retain separate material identities', async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype,'getContext',{ value: function(type: string,...args: unknown[]) {
+      return type === 'webgl' ? null : Reflect.apply(original,this,[type,...args]);
+    } });
+  });
+  await page.goto('/?card-finishes');
+  await page.getByLabel('Study lighting').selectOption('representative');
+  await expect(page.locator('[data-material-renderer="fallback"]')).toHaveCount(4);
+  const signatures = new Set<number>();
+  for (const finish of ['foil','rainbow','starlight','laser']) {
+    const sample = await materialPixels(page.locator(`[data-preview-finish="${finish}"]`));
+    expect(sample.coverage).toBeGreaterThan(0);
+    if (finish === 'rainbow') expect(sample.chromatic).toBeGreaterThan(.25);
+    if (finish === 'foil') expect(sample.chromatic).toBeLessThan(.005);
+    if (finish === 'starlight') expect(sample.bright).toBeLessThan(.01);
+    expect(sample.textPeak).toBe(0);
+    expect(sample.iconPeak).toBe(0);
+    signatures.add(sample.hash);
+  }
+  expect(signatures.size).toBe(4);
+  await page.locator('[data-preview-finish="laser"]').evaluate(element =>
+    element.dispatchEvent(new CustomEvent('card-material-light',{ detail: { x: -.7,y: -.7,active: true } })));
+  await expect.poll(async () => (await materialPixels(page.locator('[data-preview-finish="laser"]'))).coverage).toBe(0);
+  await page.getByLabel('Study lighting').selectOption('pointer');
+  for (const finish of ['foil','rainbow','starlight','laser']) {
+    await expect(page.locator(`[data-preview-finish="${finish}"] [data-material-settled]`)).toHaveCount(1);
+    expect((await materialPixels(page.locator(`[data-preview-finish="${finish}"]`))).coverage).toBeGreaterThan(0);
+  }
+});
+
+test('explicit uncoated regions remain protected when their role changes without resizing', async ({ page }) => {
+  await page.goto('/?card-finishes');
+  const card = page.locator('[data-preview-finish="rainbow"]');
+  await expect(card.locator('[data-material-ready]')).toHaveCount(1);
+  const box = (await card.boundingBox())!;
+  await card.hover({ position: { x: box.width*.9,y: box.height*.8 } });
+  await expect.poll(async () => (await materialPixels(card)).peak).toBeGreaterThan(160);
+  const interiorPeak = () => card.locator('canvas').evaluate(element => {
+    const canvas = element as HTMLCanvasElement;
+    const data = canvas.getContext('2d')!.getImageData(Math.floor(canvas.width*.5),Math.floor(canvas.height*.25),
+      Math.floor(canvas.width*.3),Math.floor(canvas.height*.28)).data;
+    let peak = 0;
+    for (let i=3; i<data.length; i+=4) peak = Math.max(peak,data[i]);
+    return peak;
+  });
+  expect(await interiorPeak()).toBeGreaterThan(160);
+  await card.locator('.card-face-art').evaluate(element => element.setAttribute('data-material-region','background'));
+  await expect.poll(interiorPeak).toBe(0);
+  await card.locator('.card-face-art').evaluate(element => element.removeAttribute('data-material-region'));
+  await expect.poll(interiorPeak).toBeGreaterThan(160);
+});
+
+test('holo preserves printed stock across showcase, hand, dragging and semantic zoom', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1600, height: 1100 });
   await page.goto('/?card-finishes');
   await expect(page.locator('[data-preview-finish="rainbow"] [data-material-ready]')).toHaveCount(1);
@@ -222,11 +336,9 @@ test('holo uses the same physical print in the showcase, hand and draggable worl
       });
     });
   });
-  const expected = await colors('[data-preview-finish="rainbow"]');
-  for (const selector of ['[data-test-hand]', '.world-card[data-card-id="material-world"]']) {
-    const actual = await colors(selector);
-    actual.forEach((value,index) => expect(Math.abs(value-expected[index])).toBeLessThan(18));
-  }
+  // Each layout has its own artwork mask; the title and body stay uncoated.
+  expect((await materialPixels(hand)).chromatic).toBeGreaterThan(.1);
+  expect((await materialPixels(world)).textPeak).toBe(0);
   const rest = await colors('.world-card[data-card-id="material-world"]');
   const before = (await world.boundingBox())!;
   await page.mouse.move(before.x+30,before.y+30);
@@ -260,7 +372,7 @@ test('holo uses the same physical print in the showcase, hand and draggable worl
   }
 });
 
-test('workspace and inspector titlebars crop the foil without squeezing it into pixelated stripes', async ({ page }, testInfo) => {
+test('workspace and inspector chrome stay matte regardless of the saved card finish', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto('/?card-finishes');
   await page.evaluate(async () => {
@@ -301,36 +413,210 @@ test('workspace and inspector titlebars crop the foil without squeezing it into 
   const workspace = comparison.locator('.workspace-titlebar');
   const inspector = comparison.locator('.card-header');
   for (const header of [workspace,inspector]) {
-    await expect(header.locator('[data-material-surface="chrome"][data-material-ready]')).toHaveCount(1);
-    const raster = await header.locator('canvas').evaluate(element => {
-      const canvas = element as HTMLCanvasElement;
-      return { width: canvas.width,height: canvas.height,cssHeight: canvas.offsetHeight,opacity: Number(getComputedStyle(canvas).opacity) };
-    });
-    expect(raster.height).toBeGreaterThanOrEqual(raster.cssHeight-1);
-    expect(raster.width).toBeLessThanOrEqual(1536);
-    expect(raster.opacity).toBeLessThan(.5);
+    await expect(header.locator('.card-finish-layer')).toHaveCount(0);
+    await expect(header.locator('canvas')).toHaveCount(0);
     await expect(header.getByText(/Holo research/)).toBeVisible();
   }
-  // A squeezed portrait has overwhelmingly horizontal edges. An isotropic crop has
-  // comparable horizontal and vertical pixel variation at the titlebar's native resolution.
-  expect(await workspace.locator('canvas').evaluate(element => {
-    const canvas = element as HTMLCanvasElement, w = canvas.width,h = canvas.height;
-    const pixels = canvas.getContext('2d')!.getImageData(0,0,w,h).data;
-    let horizontal = 0,vertical = 0;
-    for (let y=3; y<h-4; y++) for (let x=Math.floor(w*.25); x<w-4; x++) {
-      const index = (y*w+x)*4;
-      for (let c=0; c<3; c++) {
-        horizontal += Math.abs(pixels[index+c]-pixels[index+4+c]);
-        vertical += Math.abs(pixels[index+c]-pixels[index+w*4+c]);
-      }
-    }
-    return vertical/Math.max(1,horizontal);
-  })).toBeLessThan(4);
-  await expect(comparison.locator('.workspace-content .card-finish-layer')).toHaveCount(0);
-  await comparison.screenshot({ path: testInfo.outputPath('holo-workspace-chrome-dark.png'), animations: 'disabled' });
+  await expect(comparison.locator('.card-finish-layer')).toHaveCount(0);
+  await comparison.screenshot({ path: testInfo.outputPath('matte-workspace-dark.png'),animations: 'disabled' });
   await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
-  await comparison.screenshot({ path: testInfo.outputPath('holo-workspace-chrome-light.png'), animations: 'disabled' });
+  await comparison.screenshot({ path: testInfo.outputPath('matte-workspace-light.png'),animations: 'disabled' });
   await page.locator('[data-test-workspace]').evaluate(element => { (element as HTMLElement).style.width = '420px'; });
-  await expect.poll(() => workspace.locator('canvas').evaluate(element => (element as HTMLCanvasElement).width)).toBeLessThan(700);
-  await expect(workspace.getByText('Holo research workspace', { exact: true })).toBeVisible();
+  await expect(workspace.getByText('Holo research workspace',{ exact: true })).toBeVisible();
+  await expect(comparison.locator('.card-finish-layer')).toHaveCount(0);
+});
+
+
+test('representative angles distinguish broad aurora film, silver, flakes and engraved grooves', async ({ page }, info) => {
+  await page.setViewportSize({ width: 1680,height: 1050 });
+  await page.goto('/?card-finishes');
+  await page.getByLabel('Study lighting').selectOption('representative');
+  await expect(page.locator('[data-material-renderer="webgl"]')).toHaveCount(4);
+  await expect(page.locator('[data-preview-finish="normal"] canvas')).toHaveCount(0);
+  const components = (finish: string, threshold: number) => page.locator(`[data-preview-finish="${finish}"] canvas`).evaluate((element,threshold) => {
+    const canvas = element as HTMLCanvasElement, w = canvas.width,h = canvas.height;
+    const bytes = canvas.getContext('2d')!.getImageData(0,0,w,h).data;
+    const seen = new Uint8Array(w*h), groups = [];
+    // Exclude the thin perimeter and the protected title sheet.
+    for (let y=Math.ceil(h*.04); y<h*.55; y++) for (let x=Math.ceil(w*.06); x<w*.94; x++) {
+      const index = y*w+x;
+      if (seen[index] || bytes[index*4+3] <= threshold) continue;
+      const queue = [index]; seen[index] = 1;
+      let minX = x,maxX = x,minY = y,maxY = y,peakIndex = index;
+      for (let i=0; i<queue.length; i++) {
+        const n = queue[i], px = n%w,py = Math.floor(n/w);
+        minX = Math.min(minX,px); maxX = Math.max(maxX,px); minY = Math.min(minY,py); maxY = Math.max(maxY,py);
+        if (bytes[n*4+3] > bytes[peakIndex*4+3]) peakIndex = n;
+        for (const next of [n-1,n+1,n-w,n+w]) {
+          const nx = next%w,ny = Math.floor(next/w);
+          if (nx < w*.06 || nx >= w*.94 || ny < h*.04 || ny >= h*.55 || seen[next] || bytes[next*4+3] <= threshold) continue;
+          seen[next] = 1; queue.push(next);
+        }
+      }
+      groups.push({ pixels: queue.length,width: maxX-minX+1,height: maxY-minY+1,
+        colour: Array.from(bytes.slice(peakIndex*4,peakIndex*4+3)) });
+    }
+    return groups;
+  }, threshold);
+  const report: Record<string,unknown> = {};
+  for (const finish of ['foil','rainbow','starlight','laser']) {
+    const card = page.locator(`[data-preview-finish="${finish}"]`);
+    const sample = await materialPixels(card);
+    expect(sample.textPeak).toBe(0); expect(sample.iconPeak).toBe(0);
+    if (finish === 'starlight') expect(sample.bright).toBeLessThan(.01);
+    if (finish === 'foil') expect(sample.chromatic).toBeLessThan(.005);
+    if (finish === 'rainbow') expect(sample.chromatic).toBeGreaterThan(.25);
+    expect(sample.peak).toBeGreaterThan(finish === 'starlight' ? 60 : 120);
+    report[finish] = { ...sample, components: await components(finish,96) };
+    await card.screenshot({ path: info.outputPath(`representative-${finish}.png`) });
+  }
+  const holo = (await components('rainbow',96)).filter(group => group.pixels >= 5);
+  const holoSize = await materialPixels(page.locator('[data-preview-finish="rainbow"]'));
+  expect(holo.some(group => group.width > holoSize.width*.7 && group.height > holoSize.height*.35)).toBe(true);
+  const flakes = await components('starlight',60);
+  expect(flakes.length).toBeGreaterThan(0); expect(flakes.length).toBeLessThan(9);
+  for (const flake of flakes) expect(Math.max(flake.width,flake.height)).toBeLessThan(9);
+  const grooves = (await components('laser',64)).filter(group => group.pixels >= 5);
+  expect(grooves.length).toBeGreaterThan(4);
+  await info.attach('three-scale-material-measurements',{ body: JSON.stringify(report,null,2),contentType: 'application/json' });
+});
+
+test('study sweep is opt-in, representative poses resist pointer input, and reduced motion stops the loop', async ({ page }) => {
+  await page.addInitScript(() => {
+    const request = window.requestAnimationFrame.bind(window);
+    Object.assign(window,{ studyCallbacks: 0 });
+    window.requestAnimationFrame = callback => request(time => {
+      (window as unknown as { studyCallbacks: number }).studyCallbacks++; callback(time);
+    });
+  });
+  await page.goto('/?card-finishes');
+  const card = page.locator('[data-preview-finish="rainbow"]'), modes = page.getByLabel('Study lighting');
+  await expect(card.locator('[data-material-ready]')).toHaveCount(1);
+  const rest = await materialPixels(card);
+  await modes.selectOption('representative');
+  await expect(card).toHaveAttribute('data-study-angle','0.450,0.150');
+  await expect(card.locator('[data-material-settled]')).toHaveCount(1);
+  const representative = await materialPixels(card);
+  await card.hover();
+  await expect(card).not.toHaveAttribute('data-finish-active');
+  expect((await materialPixels(card)).hash).toBe(representative.hash);
+  await modes.selectOption('sweep');
+  await expect.poll(async () => (await materialPixels(card)).hash).not.toBe(representative.hash);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(page.getByRole('status')).toContainText('paused for reduced motion');
+  await expect(card).toHaveAttribute('data-study-angle','0.450,0.150');
+  const idle = await page.evaluate(async () => {
+    await new Promise(resolve => setTimeout(resolve,100));
+    const before = (window as unknown as { studyCallbacks: number }).studyCallbacks;
+    await new Promise(resolve => setTimeout(resolve,180));
+    return (window as unknown as { studyCallbacks: number }).studyCallbacks-before;
+  });
+  expect(idle).toBe(0);
+  await modes.selectOption('pointer');
+  await expect(card).not.toHaveAttribute('data-study-angle');
+  await expect.poll(async () => (await materialPixels(card)).hash).toBe(rest.hash);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await card.hover();
+  await expect(card).toHaveAttribute('data-finish-active','true');
+  await page.mouse.move(1,1);
+  await expect.poll(async () => (await materialPixels(card)).hash).toBe(rest.hash);
+});
+
+test('laser engraving extinguishes outside its narrow viewing angle', async ({ page }) => {
+  await page.goto('/?card-finishes');
+  await page.getByLabel('Study lighting').selectOption('representative');
+  const card = page.locator('[data-preview-finish="laser"]');
+  await expect.poll(async () => (await materialPixels(card)).peak).toBeGreaterThan(120);
+  await card.evaluate(element => element.dispatchEvent(new CustomEvent('card-material-light',{ detail: { x: -.7,y: -.7,active: true } })));
+  await expect.poll(async () => (await materialPixels(card)).coverage).toBe(0);
+});
+
+test('aurora colour travel is continuous, broad, reversible, and leaves top print pixel-stable', async ({ page }, info) => {
+  await page.setViewportSize({ width: 1680, height: 1050 });
+  await page.goto('/?card-finishes');
+  const card = page.locator('[data-preview-finish="rainbow"]');
+  await expect(card.locator('[data-material-ready]')).toHaveCount(1);
+  await materialPixels(card);
+  const copy = await card.locator('.card-face-copy').screenshot();
+  const badgeInk = async () => {
+    const box = (await card.locator('.card-face-badge').boundingBox())!;
+    // Rounded outer corners deliberately reveal the moving artwork around the label.
+    return page.screenshot({ clip: { x: box.x+9, y: box.y+5, width: box.width-18, height: box.height-10 } });
+  };
+  const badge = await badgeInk();
+  const icon = await card.locator('.card-face-symbol > svg').screenshot();
+  const unchangedPrint = async (before: Buffer, after: Buffer) => {
+    const delta = await page.evaluate(async urls => {
+      const images = await Promise.all(urls.map(async url => {
+        const image = new Image(); image.src = url; await image.decode();
+        const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+        const context = canvas.getContext('2d')!; context.drawImage(image,0,0);
+        return context.getImageData(0,0,canvas.width,canvas.height).data;
+      }));
+      if (images[0].length !== images[1].length) return Infinity;
+      return images[0].reduce((maximum,value,index) => Math.max(maximum,Math.abs(value-images[1][index])),0);
+    }, [before,after].map(buffer => `data:image/png;base64,${buffer.toString('base64')}`));
+    // Canvas readback plus page compositing can round 8-bit channels by two levels.
+    expect(delta).toBeLessThanOrEqual(2);
+  };
+  const render = async (x: number, y: number) => {
+    await card.evaluate((element, pose) => element.dispatchEvent(new CustomEvent('card-material-light',
+      { detail: { ...pose, active: true, immediate: true } })), { x,y });
+    await expect(card.locator('[data-material-settled]')).toHaveCount(1);
+    const metrics = await materialPixels(card);
+    expect(metrics.textPeak).toBe(0); expect(metrics.iconPeak).toBe(0);
+    expect(metrics.chromatic).toBeGreaterThan(.25);
+    return card.locator('canvas').evaluate(element => {
+      const canvas = element as HTMLCanvasElement;
+      return Array.from(canvas.getContext('2d')!.getImageData(0,0,canvas.width,canvas.height).data);
+    });
+  };
+  const origin = await render(0,0), nearby = await render(.01,.01), turned = await render(.7,-.6);
+  const distance = (a: number[], b: number[]) => {
+    let sum = 0, count = 0, changed = 0;
+    for (let i=0; i<a.length; i+=4) if (a[i+3] > 64 && b[i+3] > 64) {
+      const diff = (Math.abs(a[i]-b[i])+Math.abs(a[i+1]-b[i+1])+Math.abs(a[i+2]-b[i+2]))/3;
+      sum += diff; count++; if (diff > 25) changed++;
+    }
+    return { mean: sum/count, changed: changed/count };
+  };
+  const small = distance(origin,nearby), large = distance(origin,turned);
+  expect(small.mean).toBeLessThan(6);
+  expect(large.mean).toBeGreaterThan(35);
+  expect(large.changed).toBeGreaterThan(.6);
+  await unchangedPrint(copy,await card.locator('.card-face-copy').screenshot());
+  await unchangedPrint(badge,await badgeInk());
+  await unchangedPrint(icon,await card.locator('.card-face-symbol > svg').screenshot());
+  const restored = await render(0,0);
+  expect(restored.reduce((maximum,value,index) => Math.max(maximum,Math.abs(value-origin[index])),0)).toBeLessThanOrEqual(1);
+  await info.attach('angular-continuity', { body: JSON.stringify({ small, large }), contentType: 'application/json' });
+});
+
+test('layer comparison synchronizes the mask and composite, preserves masks after resize, and remains readable on mobile', async ({ page }, info) => {
+  await page.setViewportSize({ width: 1500,height: 950 });
+  await page.goto('/?card-finishes');
+  await page.getByLabel('Layer comparison').check();
+  await page.getByLabel('Study lighting').selectOption('representative');
+  const laminate = page.locator('[data-study-layer="laminate"]');
+  const composite = page.locator('[data-study-layer="composite"]');
+  await expect(page.locator('[data-preview-finish]')).toHaveCount(3);
+  expect((await materialPixels(laminate)).hash).toBe((await materialPixels(composite)).hash);
+  await expect(laminate.locator('.card-face-copy')).toBeHidden();
+  await expect(composite.locator('.card-face-copy')).toBeVisible();
+  await page.screenshot({ path: info.outputPath('aurora-layer-comparison.png'), fullPage: true });
+  await page.getByLabel('Study lighting').selectOption('pointer');
+  await composite.hover({ position: { x: 250,y: 70 } });
+  await expect(composite.locator('[data-material-settled]')).toHaveCount(1);
+  await expect(laminate.locator('[data-material-settled]')).toHaveCount(1);
+  expect((await materialPixels(laminate)).hash).toBe((await materialPixels(composite)).hash);
+  await page.mouse.move(1,1);
+  await page.getByLabel('Printed test pattern').uncheck();
+  await page.setViewportSize({ width: 390,height: 844 });
+  await composite.scrollIntoViewIfNeeded();
+  await expect(composite.locator('[data-material-ready]')).toHaveCount(1);
+  const sample = await materialPixels(composite);
+  expect(sample.textPeak).toBe(0); expect(sample.iconPeak).toBe(0);
+  expect(sample.chromatic).toBeGreaterThan(.2);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await composite.screenshot({ path: info.outputPath('aurora-mobile.png') });
 });
