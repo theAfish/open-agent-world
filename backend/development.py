@@ -223,9 +223,10 @@ def reset_profile(settings: Settings, request: ResetRequest) -> Path:
                         write_setting(db, LIBRARY_KEY, library.model_dump(mode="json"))
                     if "tutorial" in scopes:
                         old["values"].pop("oaw-onboarding-v1", None)
+                        old["values"].pop("oaw-progressive-tutorials-v1", None)
                         old["values"].pop("oaw-minister-role-learned", None)
                     if "interface" in scopes:
-                        old["values"] = {k: v for k, v in old["values"].items() if k in {"oaw-onboarding-v1", "oaw-minister-role-learned", "oaw-model-settings"}}
+                        old["values"] = {k: v for k, v in old["values"].items() if k in {"oaw-onboarding-v1", "oaw-progressive-tutorials-v1", "oaw-minister-role-learned", "oaw-model-settings"}}
                     elif "workspace" in scopes:
                         for key in ("oaw-canvas-viewport-v1", "oaw-glue-v1", "oaw-node-surfaces-v1", "oaw-conversation-view-v1", "oaw-active-workspace-v1"):
                             old["values"].pop(key, None)

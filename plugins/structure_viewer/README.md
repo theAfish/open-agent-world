@@ -33,6 +33,20 @@ upstream screen-bound measurements apply React Flow zoom twice. Preserve this
 adapter until upstream supports transformed hosts, and check opening files at
 non-unit zoom as well as zooming and resizing an already mounted viewer.
 
+## Progressive tutorial
+
+On first placement, selection or inspection, the card offers **View your first
+structure**: choose a Sandbox or Conversation, grant **Follow opened files**, open
+a file in its source window, then rotate and zoom the structure. Completing it
+unlocks **Keep the right file in view**, covering following, pinning and reloading.
+Both chapters include an offline reference with supported formats and troubleshooting.
+
+The content is available in English and Simplified Chinese. Users can dismiss it
+or return through **Help → Card tutorials & docs**. Chapters use manual Continue
+buttons; the tutorial never opens files or grants connections on the user's behalf.
+Definitions live in `src/oaw_structure_viewer/tutorials.py` and require Plugin API
+1.26. They use the shared tutorial engine without viewer-specific frontend logic.
+
 The plugin uses `core.file-viewer`, the shared `core.file-preview` relationship,
 the SDK's `useFileViewer` and `host.readFile`. Formats and rendering stay in the
 plugin; source references, UI state and read authorization belong to the host.

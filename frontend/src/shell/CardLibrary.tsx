@@ -1,3 +1,4 @@
+import { reportInteraction } from '../state/interactions';
 import { CardFace, CardStock } from "../components/CardFace";
 import { useMotionPresence } from './useMotionPresence';
 import { finishLabel } from "../cards/cardFinish";
@@ -41,6 +42,9 @@ export function CardLibrary() {
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<DeckEntry | null>(null);
   const detailSidebar = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (library.open && selected?.kind === 'node') reportInteraction({ type: 'card-inspected', cardType: selected.id });
+  }, [library.open, selected]);
   useEffect(() => {
     if (detailSidebar.current) detailSidebar.current.scrollTop = 0;
   }, [selected?.kind, selected?.id]);

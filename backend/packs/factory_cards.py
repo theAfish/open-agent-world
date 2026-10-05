@@ -19,7 +19,7 @@ def recipe_definition(recipe: CardRecipe):
         config_model=model, traits=frozenset({"ui.factory-card.v1"}),
         card_face={"variant": design.face.variant, "tone": design.face.tone}, templateable=True,
         frontend={slot: "factory-card" for slot in ("preview", "body", "settings", "workspace")},
-        presentation=presentation)
+        presentation=presentation, tutorials=recipe.tutorials)
 
 
 def read_recipes(manifest, files):

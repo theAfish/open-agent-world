@@ -30,7 +30,7 @@ To disable a plugin, first remove its world objects, relationships, dependent Ag
 | [Structure viewer](../plugins/structure_viewer/README.md) | Viewing connected structure files |
 | [MatCreator](../plugins/matcreator/README.md) | Materials-oriented graph and workflow tools |
 
-Plugin-specific documentation can remain in its own package or repository. These links are a directory, not a requirement to copy all plugin content into OAW's docs. In-app plugin documentation and tutorial delivery are not implemented; no new manifest or framework is required here.
+Plugin-specific documentation can remain in its own package or repository. These links are a directory, not a requirement to copy all plugin content into OAW's docs. Plugin API 1.26 adds optional [progressive tutorials and offline documents](developers/progressive-tutorials.md) on card and Pack definitions.
 
 ## Developing a plugin
 

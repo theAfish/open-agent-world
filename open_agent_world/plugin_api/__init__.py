@@ -6,6 +6,7 @@ from backend.resources.artifact_models import ArtifactPublish, ArtifactMateriali
 
 from backend.plugins.builtin import AgentNodeBehavior, AgentNodeTemplateHandler
 from backend.plugins.registry import PluginAsset, PackDefinition
+from backend.plugins.tutorials import TutorialDefinition, TutorialStep
 from backend.plugins.presets import LegionPresetDefinition, PresetNode, PresetEdge
 
 from backend.plugins.summoning import NodeSummoningDefinition, SummoningAction, SummoningPolicy
@@ -85,6 +86,7 @@ from backend.runs import InvocationContext, RuntimeInput
 from backend.world.models import Card, CardCreate, CardPatch, Edge
 
 __all__ = [
+    "TutorialDefinition", "TutorialStep",
     "PluginStateSpec", "ScopedStateSpec", "StatelessStateSpec", "CardStateStore",
     "DelegationRequest", "DelegationWait", "DelegationStop",
     "DeploymentSurface", "NodeDeploymentDefinition",

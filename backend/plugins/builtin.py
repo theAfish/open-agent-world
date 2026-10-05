@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from backend.plugins.containers import NodeContainerDefinition
+from backend.plugins.builtin_tutorials import AGENT_TUTORIALS, CONVERSATION_TUTORIALS, TEXT_TUTORIALS, SANDBOX_TUTORIALS
 
 from dataclasses import dataclass
 from contextlib import suppress
@@ -955,6 +956,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         default_name="New Agent", default_size=(300, 190), default_status="idle",
         statuses=frozenset({"idle", "running", "waiting", "error"}),
         config_model=AgentConfig, traits=frozenset({"core.agent"}),
+        tutorials=AGENT_TUTORIALS,
         surfaces={"preview": True, "inspector": True, "workspace": True},
         lifecycle=AgentNodeBehavior(),
         templateable=True, template_status="idle",
@@ -990,6 +992,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         deck_label="Fields", deck_icon="workflow", default_name="New Conversation",
         default_size=(320, 210), default_status="available",
         statuses=frozenset({"available"}), config_model=ConversationConfig,
+        tutorials=CONVERSATION_TUTORIALS,
         traits=frozenset({"core.field", "core.conversation", "core.file-source"}),
         presentation=NodePresentation(states=("node", "preview", "workspace"), initial="workspace", open="workspace"),
         lifecycle=ConversationNodeBehavior(),
@@ -1000,6 +1003,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         color="#7c7267", deck_id="objects", deck_label="Objects", deck_icon="boxes",
         default_name="Untitled Text", default_size=(300, 220), default_status="available",
         statuses=frozenset({"available", "modified"}), config_model=TextConfig,
+        tutorials=TEXT_TUTORIALS,
         traits=frozenset({"core.resource", "core.text"}),
         creation_fields=frozenset({"content"}),
         lifecycle=TextNodeBehavior(),
@@ -1021,6 +1025,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         default_name="New Sandbox", default_size=(340, 220), default_status="stopped",
         statuses=frozenset({"stopped", "ready", "running", "error"}),
         config_model=SandboxConfig, traits=frozenset({"core.sandbox", "core.file-source"}),
+        tutorials=SANDBOX_TUTORIALS,
         document=NodeDocumentDefinition(model=EnvironmentProfile),
         presentation=NodePresentation(states=("node", "preview", "workspace"), initial="workspace", open="workspace"),
         lifecycle=SandboxNodeBehavior(),

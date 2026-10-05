@@ -85,6 +85,7 @@ nav:
       - Your first plugin: developers/first-plugin.md
       - Give an Agent a tool: developers/agent-tools.md
       - Add a custom interface: developers/frontend.md
+      - Progressive card tutorials: developers/progressive-tutorials.md
       - Test and distribute: developers/testing.md
       - Local Pack distribution: pack-distribution.md
       - Pack Store client: pack-store.md
@@ -141,6 +142,7 @@ nav:
       - 使用入门: user-guide/index.zh-CN.md
       - MatCreator 预设 Legion 示例: user-guide/matcreator-example.zh-CN.md
       - 插件开发路线: developers/index.zh-CN.md
+      - 渐进式卡片教程: developers/progressive-tutorials.zh-CN.md
       - 从源码运行: getting-started.zh-CN.md
       - 交互教程与实现: tutorial.zh-CN.md
       - 工作区部署: deployment.zh-CN.md

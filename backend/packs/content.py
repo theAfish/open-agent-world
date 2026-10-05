@@ -84,7 +84,8 @@ def content_plugin(manifest: PackManifest, files: dict[str, bytes], registry):
         for recipe in recipes:
             registration.register_node_type(recipe_definition(recipe))
         registration.register_pack(PackDefinition(id=manifest.id, name=manifest.name,
-            description=creator.description, cards=tuple(recipe.id for recipe in recipes), accent_color=creator.accent_color, packaging=creator.packaging))
+            description=creator.description, cards=tuple(recipe.id for recipe in recipes), accent_color=creator.accent_color, packaging=creator.packaging,
+            tutorials=creator.tutorials))
         for preset in presets:
             registration.register_legion_preset(preset)
 

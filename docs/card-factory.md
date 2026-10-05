@@ -47,7 +47,7 @@
 
 Content Pack 的 schema 2 增加可选 `content.cards`（声明式卡牌 JSON 路径列表）；`content.legions` 可为空，但至少需要一个卡牌或模板。普通单卡快照沿用单节点蓝图。旧的仅 Legion 文件仍然兼容。
 
-卡牌 recipe 只包含命名空间 ID、卡面和功能配置。宿主负责注册节点类型和渲染表单；归档仍不接受 Python wheel、JavaScript、未声明文件或安装钩子。卡包工厂设备也可随 Legion 保存，其中打包器的外部素材引用会清空。
+卡牌 recipe 包含命名空间 ID、卡面和功能配置，还可选填 `tutorials`，定义[渐进式教程与离线文档](developers/progressive-tutorials.zh-CN.md)。宿主负责注册节点类型和渲染表单；归档仍不接受 Python wheel、JavaScript、未声明文件或安装钩子。卡包工厂设备也可随 Legion 保存，其中打包器的外部素材引用会清空。
 
 交互卡面使用可选 `face.studio` v1，包含 `enabled`、`initial`、`open` 和各模式的 `modes`。每个模式可选 `design` 保存版式、风格、意图控制、令牌覆盖与材质设置，编译成原有 `shapes/elements` 几何；元素的 `placement` 区分语义槽位和自由图层，`overrides` 保存局部样式。打开设计器时重新编译语义槽位，并将未修改的旧默认模板接入当前风格；手工编辑过的旧布局与 PNG 不会自动重排，显式选择版式或润色后才采用自动排版。所有卡面材质均使用克制的反射渲染。形状/内容使用受限的数值坐标与枚举，图片只接受校验过的内嵌 PNG。单个 recipe 的上限为 8 MiB。无 `studio` 的旧 recipe 不会在模型序列化时被加入默认字段，保持旧蓝图配置兼容。
 

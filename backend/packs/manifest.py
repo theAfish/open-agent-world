@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from backend import __version__
 from backend.plugins.registry import _supports_plugin_api
+from backend.plugins.tutorials import Tutorials, validate_tutorials
 from backend.sandbox.python_runtime import validate_requirements
 
 PACK_ID = r"^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$"
@@ -117,6 +118,13 @@ class Content(Model):
 
 
 class CreatorMetadata(Model):
+    tutorials: Tutorials = ()
+
+    @model_validator(mode="after")
+    def validate_tutorial_content(self) -> Self:
+        validate_tutorials(self.tutorials)
+        return self
+
     description: str = Field(default="", max_length=500)
     author: str = Field(default="", max_length=120)
     preparation: str = Field(default="", max_length=2000)

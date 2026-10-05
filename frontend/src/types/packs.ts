@@ -1,4 +1,5 @@
 export interface CreatorMetadata {
+  tutorials?: import('../tutorials/types').TutorialDefinition[];
   description: string; author: string; preparation: string; example: string; expected_result: string; accent_color: string;
   packaging?: import('./world').PackPackaging;
 }

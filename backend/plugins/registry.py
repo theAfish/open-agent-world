@@ -14,6 +14,7 @@ from backend.plugins.lifecycle import NodeLifecycleHandler
 from backend.plugins.resources import NodeResourceAction
 from backend.plugins.template import NodeTemplateHandler
 from backend.plugins.presets import LegionPresetDefinition
+from backend.plugins.tutorials import Tutorials, validate_tutorials
 
 if TYPE_CHECKING:
     from backend.legions.models import LegionBlueprintPreset
@@ -29,7 +30,7 @@ from backend.plugins.deployment import NodeDeploymentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.25"
+PLUGIN_API_VERSION = "1.26"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -70,6 +71,12 @@ class PackDefinition(BaseModel):
     artwork_asset: str | None = Field(default=None, min_length=1, max_length=128)
     accent_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     packaging: Literal["standard", "premium", "paper", "collector"] = "standard"
+    tutorials: Tutorials = ()
+
+    @model_validator(mode="after")
+    def validate_tutorial_content(self) -> Self:
+        validate_tutorials(self.tutorials)
+        return self
 
 
 class PackCatalogItem(PackDefinition):
@@ -144,6 +151,8 @@ class CardFaceCatalog(CardFaceDesign):
 
 class NodeTypeCatalogItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    tutorials: Tutorials = ()
 
     id: str
     plugin_id: str
@@ -303,6 +312,7 @@ class NodeTypeDefinition:
     deployment: NodeDeploymentDefinition | None = None
     state: PluginStateSpec | None = None
     card_face: CardFaceSpec | Mapping[str, str] | None = None
+    tutorials: Tutorials = ()
 
     def resolved_presentation(self) -> NodePresentation:
         if self.presentation is not None:
@@ -314,6 +324,7 @@ class NodeTypeDefinition:
         presentation = self.resolved_presentation()
         face = CardFaceSpec.model_validate(self.card_face) if self.card_face is not None else None
         return NodeTypeCatalogItem(
+            tutorials=validate_tutorials(self.tutorials),
             id=self.id,
             plugin_id=plugin_id,
             label=self.label,
@@ -662,6 +673,7 @@ class PluginRegistry:
                 raise ValueError("state schema ids must be namespaced")
 
         for definition in staged.nodes.values():
+            validate_tutorials(definition.tutorials)
             definition.resolved_presentation()
             if definition.card_face is not None:
                 face = CardFaceSpec.model_validate(definition.card_face)

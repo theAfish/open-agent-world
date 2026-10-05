@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, model_validator, model_serializer
 
 from backend.card_finishes import CardFinish
+from backend.plugins.tutorials import Tutorials, validate_tutorials
 from backend.packs.manifest import CreatorMetadata
 from backend.packs.face_design import FaceStudio, Mode
 
@@ -139,6 +140,12 @@ class PrintedCard(Model):
 class CardRecipe(Model):
     id: str = Field(min_length=1, max_length=128)
     design: PrintedCard
+    tutorials: Tutorials = ()
+
+    @model_validator(mode="after")
+    def validate_tutorial_content(self):
+        validate_tutorials(self.tutorials)
+        return self
 
 
 class PackDesign(Model):

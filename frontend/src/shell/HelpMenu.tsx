@@ -9,6 +9,7 @@ import { useCardLibrary } from '../state/cardLibrary';
 import { useWorldStore } from '../state/worldStore';
 import { checkMessage, RELEASES_URL, repairGuide, type HelpCheck, type HelpDiagnostics } from './helpChecks';
 import { DocumentationPanel } from './DocumentationPanel';
+import { useProgressiveTutorials } from '../tutorials/store';
 import './helpMenu.css';
 
 type Panel = 'documentation' | 'diagnostics' | 'updates';
@@ -78,6 +79,7 @@ export function HelpMenu() {
       <button role="menuitem" onClick={() => show('documentation')}><BookOpen size={17} /><span>{t('Documentation')}</span></button>
       <button role="menuitem" onClick={() => show('diagnostics')}><Activity size={17} /><span>{t('Status check')}</span></button>
       <button role="menuitem" onClick={() => show('updates')}><Download size={17} /><span>{t('Versions and updates')}</span></button>
+      <button role="menuitem" onClick={() => { closeMenu(true); if (useTutorialStore.getState().view === 'active') tutorial.pause(); useProgressiveTutorials.getState().showLibrary(); }}><BookOpen size={17} /><span>{t('Card tutorials & docs')}</span></button>
     </div>, document.body)}
     {panel && <HelpDialog panel={panel} onClose={() => { setPanel(undefined); trigger.current?.focus(); }} />}
   </>;
