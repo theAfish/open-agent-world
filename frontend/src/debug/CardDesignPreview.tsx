@@ -13,7 +13,7 @@ const examples: (CardFaceProps & { kind: string })[] = [
   { kind: 'UTILITY / 紧凑', label: 'Everyday tools', description: '小而有用，随手可取。', icon: <Box />, variant: 'compact', tone: 'stone' },
   { kind: 'SKILL / 深色', label: 'Synthesis', description: '连接线索，让思路渐渐清晰。', icon: <Leaf />, variant: 'dark', tone: 'midnight' },
 ];
-const finishes: Record<CardFinish, string> = { normal: '原纸', foil: '银箔', rainbow: '虹彩', starlight: '星光', laser: '镭射' };
+const finishes: Record<CardFinish, string> = { normal: '原纸', foil: '烫箔', rainbow: '虹彩', starlight: '星光', laser: '镭射' };
 const palette = [ ['Midnight', '#303a46'], ['Sage', '#a1b29b'], ['Sand', '#e9d5b7'], ['Sky', '#a9c5d4'], ['Rose', '#d5a3ab'], ['Stone', '#d7d9d2'] ];
 
 /** A live design reference, using the same faces as the Library and hand. */
@@ -25,7 +25,7 @@ export function CardDesignPreview() {
     <header className="design-heading">
       <div><span className="design-overline">O A W <i /> CARD DESIGN SYSTEM</span>
         <h1>更少的形式，<br className="design-mobile-break" />更多的可能。</h1>
-        <p>清晰的内容，温和的色彩。一组可以自由组合的卡面语言。</p></div>
+        <p>先让纸张与印刷成立，再用局部工艺和薄膜赋予触感。</p></div>
       <span className="design-edition">OPEN AGENT WORLD<br />CARD STUDY — 01</span>
     </header>
     <section className="design-controls" aria-label="卡面预览设置">
@@ -46,8 +46,8 @@ export function CardDesignPreview() {
     <section className="design-foundations" aria-label="设计规范">
       <article className="design-palette"><h2>01 <span>自然的色彩</span></h2><div>{palette.map(([name, color]) => <figure key={name}><span style={{ background: color }} /><figcaption>{name}<small>{color.toUpperCase()}</small></figcaption></figure>)}</div></article>
       <article className="design-type"><h2>02 <span>清晰的层级</span></h2><div><b>Aa</b><p><strong>简明，无衬线。</strong><span>一个标题，一段简述。<br />细节适量，留白有度。</span></p></div></article>
-      <article className="design-material"><h2>03 <span>独立的材质</span></h2><p>布局 × 色彩 × 材质</p><span>同一种构图，容纳不同的触感。<br />切换上方材质，查看每种卡面的变化。</span><a href="/?card-finishes">材质实验室 <ArrowUpRight size={14} /></a></article>
+      <article className="design-material"><h2>03 <span>真实的表面工艺</span></h2><p>纸张 → 印刷 → 工艺 → 覆膜</p><span>文字与关键信息始终位于受保护的顶层。<br />在生产编辑器中分别设计底图、烫印与薄膜。</span><a href="/?card-studio">卡牌生产编辑器 <ArrowUpRight size={14} /></a></article>
     </section>
-    <footer className="design-footer"><strong>OAW</strong><span>同一种语言，不同的世界。</span><small>FIVE LAYOUTS. MANY POSSIBILITIES.</small></footer>
+    <footer className="design-footer"><strong>OAW</strong><span>同一种语言，不同的世界。</span><small>PRINT FIRST. FINISH WITH INTENT.</small></footer>
   </main>;
 }

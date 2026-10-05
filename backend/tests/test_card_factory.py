@@ -12,7 +12,7 @@ from backend.main import create_app
 from backend.packs.archive import inspect_archive
 from backend.packs.content import export_archive
 from backend.packs.factory_models import FaceDesign, FunctionDesign
-from backend.packs.face_design import FaceStudio
+from backend.packs.face_design import FaceStudio, CardProduction, SurfaceRecipe
 
 HEADERS = {"X-OAW-Pack-Install": "1"}
 ARCHIVE_HEADERS = {**HEADERS, "Content-Type": "application/vnd.oaw.pack"}
@@ -183,7 +183,13 @@ def test_workshop_preset_is_ready_and_capture_clears_external_basket_references(
     assert response.status_code == 201, response.text
     instance = response.json()
     assert len(instance["nodes"]) == 5
-    assert len(instance["edges"]) == 3
+    assert len(instance["edges"]) == 4
+    function = next(card for card in instance["nodes"] if card["type"] == "oaw.factory.function")
+    response = client.get(f'/api/packs/factory/{function["id"]}/context', headers=HEADERS)
+    assert response.status_code == 200, response.text
+    context = response.json()
+    assert not context['issues']
+    assert context['inputs']['face']['config']['title'] == '我的卡牌'
     printer = next(card for card in instance["nodes"] if card["type"] == "oaw.factory.printer")
     packer = next(card for card in instance["nodes"] if card["type"] == "oaw.factory.packer")
     printed = call(client, printer, 'print', expected=201).json()
@@ -214,12 +220,46 @@ def custom_studio():
         modes={'preview': surface, 'workspace': {**surface, 'width': 740, 'height': 460}}).model_dump()
 
 
-def test_custom_face_survives_print_capture_export_and_clean_install(client, tmp_path):
+@pytest.mark.parametrize('with_production', [False, True, 'layers', 'ink-layers', 'buttons'])
+def test_custom_face_survives_print_capture_export_and_clean_install(client, tmp_path, with_production):
     devices = factory(client)
     studio = custom_studio()
+    if with_production == 'buttons':
+        for surface in studio['modes'].values():
+            surface['elements'].extend([
+                {**surface['elements'][0], 'id': 'switch', 'kind': 'button', 'text': '切换', 'button': {'action': 'surface'}},
+                {**surface['elements'][0], 'id': 'custom', 'kind': 'button', 'text': '生成', 'button': {'action': 'custom', 'background': '#ffffff', 'radius': 12}},
+            ])
+        bindings = [{'mode': 'workspace', 'element_id': 'custom', 'logic_id': 'generate'}]
+        patch(client, devices['function'], {**devices['function']['config'], 'button_bindings': bindings})
+    if with_production:
+        production = CardProduction.model_validate({
+            'stock': {'type': 'cotton', 'grain': .3, 'color': '#dbe3ed'},
+            'finishing': {'foil': .7, 'emboss': .2, 'spotUV': .25, 'edgeFoil': .6},
+            'laminate': {'type': 'aurora', 'strength': .4, 'roughness': .3},
+            **({'layers': [
+                {'id': 'film-first', 'kind': 'laminate', 'film': 'holo', 'mask': {'source': 'all'}},
+                {'id': 'recess-copy', 'kind': 'emboss', 'relief': 'recessed', 'mask': {'source': 'text'}},
+                {'id': 'gold-image', 'kind': 'foil', 'color': '#dfb958', 'mask': {
+                    'source': 'png', 'png': transparent_png(), 'channel': 'alpha', 'invert': True, 'fit': 'contain'}},
+                {'id': 'silver-border', 'kind': 'foil', 'color': '#d8dde2', 'mask': {'source': 'preset', 'preset': 'border'}},
+                {'id': 'uv-copy', 'kind': 'uv', 'mask': {'source': 'elements', 'elementIds': ['title']}},
+            ]} if with_production == 'layers' else {}),
+            **({'print': {'layered': True}, 'layers': [
+                {'id': 'base-print', 'kind': 'ink', 'content': {'source': 'all', 'elementIds': []}},
+                {'id': 'film', 'kind': 'laminate', 'film': 'laser'},
+                {'id': 'top-print', 'kind': 'ink', 'content': {'source': 'elements', 'elementIds': ['title']}, 'blend': 'multiply', 'strength': .8},
+            ]} if with_production == 'ink-layers' else {}),
+        })
+        for surface in studio['modes'].values():
+            surface['design'] = SurfaceRecipe(production=production).model_dump()
+            surface['shapes'][1]['print'] = {'opacity': .45, 'blend': 'multiply'}
+            surface['elements'][0]['print'] = {'opacity': .8, 'blend': 'screen'}
     patch(client, devices['face'], {**devices['face']['config'], 'studio': studio})
     printed = call(client, devices['printer'], 'print', expected=201).json()
     assert printed['config']['face']['studio'] == studio
+    if with_production == 'buttons':
+        assert printed['config']['function']['button_bindings'] == bindings
     text = node(client, 'text')
     saved = client.post('/api/legions', json={'name': 'Custom cards', 'node_ids': [printed['id'], text['id']]}).json()
     restored = client.post(f'/api/legions/{saved["id"]}/instances', json={'position': {'x': 1000, 'y': 0}})
@@ -238,6 +278,8 @@ def test_custom_face_survives_print_capture_export_and_clean_install(client, tmp
     with TestClient(create_app(settings)) as recipient:
         installed = node(recipient, recipe['id'])
         assert installed['config']['face']['studio'] == studio
+        if with_production == 'buttons':
+            assert installed['config']['function']['button_bindings'] == bindings
         assert call(recipient, installed, 'run', {'values': {'name': '形状'}}).json()['result'] == '你好，形状！'
         definition = recipient.app.state.services.plugins.node_type(recipe['id'])
         assert definition.presentation.states == ('preview', 'workspace')
@@ -297,3 +339,43 @@ def test_custom_face_rejects_invalid_or_executable_drawing_data(change):
     change(studio)
     with pytest.raises(ValueError):
         FaceStudio.model_validate(studio)
+
+
+@pytest.mark.parametrize('value', [
+    {'version': 2},
+    {'stock': {'type': 'metallic-url'}},
+    {'stock': {'grain': float('nan')}},
+    {'print': {'density': -1}},
+    {'finishing': {'foil': 1.01}},
+    {'finishing': {'target': 'text'}},
+    {'laminate': {'type': 'foil'}},
+    {'laminate': {'strength': float('inf')}},
+    {'laminate': {'roughness': 0}},
+    {'protection': False},
+])
+def test_production_rejects_invalid_or_unprotected_recipes(value):
+    with pytest.raises(ValueError):
+        CardProduction.model_validate(value)
+
+
+def test_legacy_material_metadata_remains_portable_without_production():
+    recipe = SurfaceRecipe(material={'type': 'holo', 'intensity': .35}).model_dump()
+    assert 'production' not in recipe
+    assert SurfaceRecipe.model_validate(recipe).model_dump() == recipe
+
+
+def test_production_presets_survive_application_profile_restart(tmp_path):
+    settings = Settings.for_data_root(tmp_path / 'production-presets')
+    recipe = SurfaceRecipe(production=CardProduction()).model_dump()
+    saved = json.dumps([{'id': 'ivory-01', 'name': 'Ivory print', 'settings': recipe, 'color': '#667d65'}])
+    with TestClient(create_app(settings)) as app:
+        profile = app.get('/api/application').json()
+        response = app.patch('/api/application/preferences', json={
+            'profile_id': profile['profile_id'], 'generation': profile['generation'],
+            'changes': {'oaw.card-production-presets.v1': saved},
+        })
+        assert response.status_code == 200, response.text
+    with TestClient(create_app(settings)) as app:
+        restored = app.get('/api/application').json()
+        assert restored['profile_id'] == profile['profile_id']
+        assert restored['values']['oaw.card-production-presets.v1'] == saved

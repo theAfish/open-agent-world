@@ -10,7 +10,7 @@ test('design presets stay readable across materials, themes and thumbnail sizes'
   const image = cards.locator('.card-face-image');
   await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await page.screenshot({ path: testInfo.outputPath('card-design-light.png'), fullPage: true });
-  for (const material of ['银箔', '虹彩', '星光', '镭射']) {
+  for (const material of ['烫箔', '虹彩', '星光', '镭射']) {
     await page.getByRole('button', { name: material, exact: true }).click();
     await expect(cards.locator('.card-finish-layer')).toHaveCount(6);
     for (const title of await cards.locator('.card-face-copy strong').all()) await expect(title).toBeVisible();

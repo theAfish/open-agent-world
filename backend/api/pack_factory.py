@@ -16,11 +16,11 @@ router = APIRouter(prefix="/factory", tags=["card-factory"])
 async def context(node_id: str, services=Depends(get_services)):
     node = services.world.get_card(node_id)
     kind = node.type.removeprefix("oaw.factory.")
-    if kind not in {"printer", "packer"}:
-        raise ResourceValidationError("请选择印刷器或打包器")
+    if kind not in {"printer", "packer", "function"}:
+        raise ResourceValidationError("请选择印刷器、打包器或功能设计器")
     factory_node(services, node_id, kind)
     inputs, issues = {}, []
-    for input_kind in (["face", "function"] if kind == "printer" else ["pack"]):
+    for input_kind in {"printer": ["face", "function"], "packer": ["pack"], "function": ["face"]}[kind]:
         try:
             linked = linked_design(services, node_id, input_kind)
             inputs[input_kind] = {"id": linked.id, "name": linked.name, "config": linked.config}

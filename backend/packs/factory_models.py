@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, Stri
 
 from backend.card_finishes import CardFinish
 from backend.packs.manifest import CreatorMetadata
-from backend.packs.face_design import FaceStudio
+from backend.packs.face_design import FaceStudio, Mode
 
 Scalar = StrictStr | StrictBool | StrictInt | StrictFloat
 
@@ -63,7 +63,23 @@ def validate_value(field: InputField, value):
         raise ValueError(f"{field.label}: 请选择开关值")
 
 
+class ButtonBinding(Model):
+    """Reserved routing data; no custom logic is executed by the current runtime."""
+    mode: Mode
+    element_id: str = Field(pattern=r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
+    logic_id: str = Field(pattern=r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
+
+
 class FunctionDesign(Model):
+    button_bindings: list[ButtonBinding] | None = Field(default=None, max_length=128)
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        data = handler(self)
+        if self.button_bindings is None:
+            data.pop("button_bindings", None)
+        return data
+
     fields: list[InputField] = Field(default_factory=lambda: [InputField(key="name", label="名称", default="世界")], max_length=20)
     operation: Literal["template", "sum", "multiply", "join"] = "template"
     template: str = Field(default="你好，{{name}}！", max_length=10000)
@@ -71,6 +87,9 @@ class FunctionDesign(Model):
 
     @model_validator(mode="after")
     def valid_fields(self):
+        targets = [(binding.mode, binding.element_id) for binding in self.button_bindings or []]
+        if len(set(targets)) != len(targets):
+            raise ValueError("同一视图的按钮不能重复挂载逻辑")
         keys = [field.key for field in self.fields]
         if len(keys) != len(set(keys)):
             raise ValueError("字段标识不能重复")

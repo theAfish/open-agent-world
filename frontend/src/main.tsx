@@ -9,6 +9,16 @@ import { fetchWithRetry } from './api/fetchWithRetry';
 
 async function start() {
   const root = document.getElementById("root")!;
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has('card-studio')) {
+    const { CardProductionPreview } = await import('./debug/CardProductionPreview');
+    ReactDOM.createRoot(root).render(<CardProductionPreview />);
+    return;
+  }
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has('card-materials')) {
+    const { CardMaterialLab } = await import('./debug/CardMaterialLab');
+    ReactDOM.createRoot(root).render(<CardMaterialLab />);
+    return;
+  }
   if (import.meta.env.DEV && new URLSearchParams(location.search).has('pack-design')) {
     const { PackDesignPreview } = await import('./debug/PackDesignPreview');
     ReactDOM.createRoot(root).render(<PackDesignPreview />);

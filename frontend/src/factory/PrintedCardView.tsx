@@ -4,11 +4,12 @@ import { CatalogIcon } from '../components/CatalogIcon';
 import { apiErrorMessage, worldApi } from '../api/client';
 import type { PluginViewProps } from '../plugins/sdk';
 import type { FaceDesign, FunctionDesign, InputField, PrintedDesign, Scalar } from './types';
-import { useNodeSurfaceStore } from '../state/nodeSurfaces';
+import { collapsedSurface, useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { useWorldStore } from '../state/worldStore';
 import type { NodeSurfaceLevel, WorldCard } from '../types/world';
 import { FaceArtwork } from './FaceArtwork';
-import { MODE_LABELS } from './faceDesign';
+import { FaceFunctionElement } from './FaceFunctionElements';
+import { buttonAction } from './faceButtons';
 import './factory.css';
 
 export function FacePreview({ face }: { face: FaceDesign }) {
@@ -73,31 +74,32 @@ export function DesignedCard({ card, level, staticView = false }: { card: WorldC
   const [values, setValues] = useState<Record<string, Scalar>>({}), [result, setResult] = useState<Scalar>();
   const [error, setError] = useState(''), [busy, setBusy] = useState(false);
   useEffect(() => { setValues({}); setResult(undefined); setError(''); }, [design]);
+  const base = useNodeSurfaceStore(state => state.baseLevels[card.id]);
+  const collapsed = collapsedSurface({ states: studio.enabled, initial: studio.initial, open: studio.open }, level, base);
   return <div className="factory-designed-card" data-testid="printed-card" data-workspace-node-id={level === 'workspace' ? card.id : undefined}>
-    {!staticView && <nav className="factory-surface-toolbar nodrag nopan" aria-label="卡牌显示模式">
-      <select aria-label="显示模式" value={level} onChange={event => useNodeSurfaceStore.getState().selectSurface(card.id, event.target.value as NodeSurfaceLevel)}>
-        {studio.enabled.map(mode => <option value={mode} key={mode}>{MODE_LABELS[mode]}</option>)}</select>
-      {(level === 'workspace' || level === 'inspector') && <button type="button" aria-label={level === 'workspace' ? 'Close workspace' : '关闭详细视图'} onClick={() => {
-        const store = useNodeSurfaceStore.getState(); if (level === 'workspace') store.closeWorkspace(card.id); else store.closeInspector(card.id);
-      }}>收起</button>}
-      <button type="button" aria-label="删除卡牌" onClick={() => void useWorldStore.getState().deleteCard(card.id)}>删除</button>
-    </nav>}
     <form className="factory-designed-form" onSubmit={event => {
       event.preventDefault(); if (busy || staticView) return; setBusy(true); setError('');
       void worldApi.factory<{ result: Scalar }>(card.id, 'run', { values }).then(response => setResult(response.result))
         .catch(cause => setError(apiErrorMessage(cause))).finally(() => setBusy(false));
     }}>
-      <FaceArtwork face={design.face} surface={surface} render={element => {
-        if (element.kind === 'fields') return <div className="factory-fields nodrag nopan nowheel" data-layout={surface.field_layout}>
-          {design.function.fields.map(field => <FieldInput key={field.key} field={field} value={values[field.key] ?? field.default}
-            onChange={value => setValues(current => ({ ...current, [field.key]: value }))} />)}</div>;
-        if (element.kind === 'action') return <button type="submit" className="factory-run nodrag nopan" disabled={busy || staticView} style={{ background: design.face.color }}>{busy ? '运行中…' : design.face.button_label}</button>;
-        if (element.kind === 'result') return <output className="factory-result nodrag nopan nowheel" aria-live="polite">{result === undefined ? '等待运行' : String(result)}</output>;
-        return undefined;
-      }} />
+      <FaceArtwork face={design.face} surface={surface} functionDesign={design.function} render={element =>
+        ['fields', 'action', 'button', 'result'].includes(element.kind)
+          ? <FaceFunctionElement element={element} face={design.face} surface={surface} fields={design.function.fields}
+            values={values} onChange={(key, value) => setValues(current => ({ ...current, [key]: value }))}
+            busy={busy} level={level} disabled={staticView || (buttonAction(element) === 'collapse' && collapsed === level)
+              || (buttonAction(element) === 'open' && studio.open === level)} result={result}
+            onAction={(button, target) => {
+              if (staticView) return;
+              const action = buttonAction(button), store = useNodeSurfaceStore.getState();
+              if (action === 'open') store.selectSurface(card.id, studio.open);
+              if (action === 'collapse') store.selectSurface(card.id, collapsed);
+              if (action === 'surface' && target && studio.enabled.includes(target)) store.selectSurface(card.id, target);
+              if (action === 'delete') void useWorldStore.getState().deleteCard(card.id).catch(cause => setError(apiErrorMessage(cause)));
+            }} />
+          : undefined} />
     </form>
     {error && <p className="factory-runtime-error nodrag" role="alert">{error}</p>}
-    {result !== undefined && surface.elements.some(element => element.kind === 'action') && !surface.elements.some(element => element.kind === 'result')
+    {result !== undefined && surface.elements.some(element => buttonAction(element) === 'run') && !surface.elements.some(element => element.kind === 'result')
       && <output className="factory-runtime-error factory-runtime-result nodrag">{String(result)}</output>}
   </div>;
 }

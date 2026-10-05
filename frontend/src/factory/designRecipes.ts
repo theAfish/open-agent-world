@@ -1,4 +1,5 @@
 import type { CardFinish } from '../cards/cardFinish';
+import { productionForFinish, resolveStock, type CardProduction } from '../cards/cardProduction';
 import type { DesignTokens, FaceDesign, FaceElement, LayoutRecipe, MaterialType, StyleKit, SurfaceDesign, SurfaceRecipe } from './types';
 
 export const RECIPES: { id: LayoutRecipe; name: string; description: string }[] = [
@@ -39,9 +40,23 @@ const round = (n: number) => Math.round(n * 100) / 100;
 export function recipeSettings(face: FaceDesign, surface?: SurfaceDesign): SurfaceRecipe {
   if (surface?.design) return surface.design;
   const kit: StyleKit = face.tone === 'midnight' ? 'ink' : face.tone === 'rose' ? 'playful' : face.tone === 'sage' ? 'ceramic' : face.tone === 'sky' ? 'industrial' : face.tone === 'stone' ? 'paper' : 'sand';
-  return { recipe: face.variant === 'compact' ? 'compact' : face.variant === 'text' ? 'editorial' : face.variant === 'image' ? 'poster' : 'hero',
+  const production = productionForFinish(face.finish);
+  production.stock.type = kit === 'ink' ? 'ink' : kit === 'paper' ? 'cotton' : kit === 'industrial' ? 'pearl' : 'ivory';
+  return { production, recipe: face.variant === 'compact' ? 'compact' : face.variant === 'text' ? 'editorial' : face.variant === 'image' ? 'poster' : 'hero',
     kit, appearance: kit === 'ink' ? 'dark' : 'light', softness: .6, density: 'medium', emphasis: 'balanced', alignment: 'left', tokens: {},
     material: { type: ({ normal: 'none', foil: 'foil', rainbow: 'holo', starlight: 'starlight', laser: 'iridescent' } as const)[face.finish], intensity: .38, mask: 'visual', roughness: .32 } };
+}
+
+/** Read-only migration: old recipes retain their stored bytes until edited. */
+export function recipeProduction(settings: SurfaceRecipe): CardProduction {
+  if (settings.production) return settings.production;
+  const material = settings.material, production = productionForFinish(MATERIAL_FINISH[material.type]);
+  production.stock.type = settings.kit === 'ink' ? 'ink' : settings.kit === 'paper' ? 'cotton' : settings.kit === 'industrial' ? 'pearl' : 'ivory';
+  if (material.type === 'holo') production.laminate.type = 'holo';
+  if (material.type === 'iridescent') production.laminate.type = 'aurora';
+  production.laminate.strength = material.intensity;
+  production.laminate.roughness = material.roughness;
+  return production;
 }
 
 function mix(a: string, b: string, t: number) {
@@ -59,6 +74,7 @@ export function readableInk(background: string, preferred: string) {
 
 export function designTokens(surface: SurfaceDesign, settings = surface.design!): DesignTokens {
   const kit = STYLE_KITS[settings.kit], small = Math.min(surface.width, surface.height) <= 140;
+  const stock = settings.production ? resolveStock(settings.production) : undefined;
   const unit = bound(Math.min(surface.width / 240, surface.height / 320), .5, 1.9);
   const dark = settings.appearance === 'dark';
   const background = dark ? settings.kit === 'ink' ? kit.background : mix(kit.background, '#1f2828', .92) : settings.kit === 'ink' ? '#e8ecea' : kit.background;
@@ -70,7 +86,10 @@ export function designTokens(surface: SurfaceDesign, settings = surface.design!)
     border: dark ? mix(background, '#ffffff', .17) : kit.border,
     radius: round((8 + settings.softness * 20) * unit), margin: round((small ? 28 : 23) * unit * (settings.density === 'high' ? .88 : 1)),
     gap: round(10 * unit * density), title_size: round((small ? 25 : 26) * unit * (settings.emphasis === 'title' ? 1.15 : 1)),
-    body_size: round(Math.max(small ? 9 : 12, 13 * unit)), ...settings.tokens };
+    body_size: round(Math.max(small ? 9 : 12, 13 * unit)),
+    ...(stock ? { radius: round(7 * unit), background: stock.paper,
+      surface: stock.paper, text: stock.ink, muted: stock.muted, border: stock.edge } : {}),
+    ...settings.tokens };
 }
 
 export function slotText(element: FaceElement, face: FaceDesign) {
@@ -86,6 +105,35 @@ export function newSlot(kind: FaceElement['kind']): FaceElement {
     text: ({ subtitle: '每一天，都有新灵感', metadata: 'OAW · 01', status: '就绪', tags: '灵感, 日常', badge: '精选' } as Partial<Record<FaceElement['kind'], string>>)[kind] ?? '' };
 }
 
+/** Detach one layer or the whole layout without recompiling any artwork. */
+export function freeSurface(surface: SurfaceDesign, elementId?: string): SurfaceDesign {
+  const elements = surface.elements.map(element =>
+    (elementId === undefined || element.id === elementId) && element.placement !== 'free'
+      ? { ...element, placement: 'free' as const }
+      : element);
+  return elements.some((element, index) => element !== surface.elements[index]) ? { ...surface, elements } : surface;
+}
+
+/** Apply paper, ink and explicit type tokens without changing authored boxes. */
+export function restyleSurface(surface: SurfaceDesign, face: FaceDesign, settings = recipeSettings(face, surface)): SurfaceDesign {
+  const previous = designTokens(surface, recipeSettings(face, surface)), next = designTokens(surface, settings);
+  return { ...surface, design: settings,
+    shapes: surface.shapes.map((shape, index) => index === 0 ? { ...shape,
+      ...(next.background !== previous.background ? { fill: next.background } : {}),
+      ...(next.radius !== previous.radius ? { radius: next.radius } : {}) } : shape),
+    elements: surface.elements.map(element => {
+      // Keep individually chosen inks, including legacy designs without overrides.
+      const color = element.overrides?.color ? element.color : element.color === previous.muted ? next.muted : element.color === previous.text ? next.text : element.color;
+      const title = element.kind === 'title', oldSize = title ? previous.title_size : previous.body_size, newSize = title ? next.title_size : next.body_size;
+      const followsType = element.placement === 'slot' || element.font_size === round(oldSize * (element.kind === 'subtitle' ? 1.13 : 1));
+      // Slot text retains the preset's fit ratio; detached/custom type is left
+      // alone unless it still matches the token. Icons follow their own boxes.
+      const font_size = oldSize !== newSize && element.overrides?.font_size === undefined && followsType && !['icon', 'illustration'].includes(element.kind)
+        ? round(bound(element.font_size * newSize / oldSize, 8, 128)) : element.font_size;
+      return color === element.color && font_size === element.font_size ? element : { ...element, color, font_size };
+    }) };
+}
+
 /** Compile semantic intent into v1 geometry. Existing free layers and inline assets survive. */
 export function reflowSurface(surface: SurfaceDesign, face: FaceDesign, settings = recipeSettings(face, surface)): SurfaceDesign {
   const tokens = designTokens(surface, settings), { width: w, height: h } = surface;
@@ -97,7 +145,7 @@ export function reflowSurface(surface: SurfaceDesign, face: FaceDesign, settings
   const introKinds = ['icon', 'illustration', 'title', 'subtitle', 'description', 'metadata', 'status', 'tags', 'badge'];
   const intro = surface.elements.filter(e => e.placement !== 'free' && introKinds.includes(e.kind));
   const work = surface.elements.filter(e => e.placement !== 'free' && !introKinds.includes(e.kind));
-  if (wide && !small && intro.length && work.some(e => ['fields', 'action', 'result'].includes(e.kind))) {
+  if (wide && !small && intro.length && work.some(e => ['fields', 'action', 'button', 'result'].includes(e.kind))) {
     const gutter = Math.max(tokens.gap * 2, innerW * .05), introW = (innerW - gutter) * .36;
     const layoutColumn = (elements: FaceElement[], width: number, x: number, identity: boolean) => {
       const column = reflowSurface({ ...surface, width, height: innerH, elements }, face, { ...settings,
@@ -120,8 +168,8 @@ export function reflowSurface(surface: SurfaceDesign, face: FaceDesign, settings
   const visualW = side ? innerW * .32 : innerW;
   const bodyX = side ? margin + visualW + gap * 1.6 : margin, bodyW = side ? innerW - visualW - gap * 1.6 : innerW;
   const visualSize = Math.min(visualW, innerH * (recipe === 'poster' ? .42 : recipe === 'minimal' ? .12 : .24)) * (settings.emphasis === 'visual' ? 1.2 : 1);
-  const order = recipe === 'editorial' ? ['badge', 'metadata', 'title', 'subtitle', 'description', 'illustration', 'icon', 'status', 'tags', 'help', 'fields', 'action', 'result', 'text']
-    : ['badge', 'illustration', 'icon', 'title', 'subtitle', 'description', 'metadata', 'status', 'tags', 'help', 'fields', 'action', 'result', 'text'];
+  const order = recipe === 'editorial' ? ['badge', 'metadata', 'title', 'subtitle', 'description', 'illustration', 'icon', 'status', 'tags', 'help', 'fields', 'action', 'button', 'result', 'text']
+    : ['badge', 'illustration', 'icon', 'title', 'subtitle', 'description', 'metadata', 'status', 'tags', 'help', 'fields', 'action', 'button', 'result', 'text'];
   const managed = surface.elements.filter(e => e.placement !== 'free').sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
   const flow = managed.filter(e => !((side || inline) && visual.includes(e)));
   const metrics = flow.map(element => {
@@ -137,7 +185,7 @@ export function reflowSurface(surface: SurfaceDesign, face: FaceDesign, settings
     let height = font * 1.4 * lines;
     if (inline && isTitle) height = Math.max(inlineSize, height);
     if (isVisual) height = element.kind === 'illustration' ? Math.min(bodyW * .6, innerH * .35) : Math.min(visualSize, bodyW);
-    if (element.kind === 'action') height = Math.max(24, tokens.body_size * 2.5);
+    if (element.kind === 'action' || element.kind === 'button') height = Math.max(24, tokens.body_size * 2.5);
     if (element.kind === 'fields') height = (fieldLayout === 'columns' ? 1 : 2) * tokens.body_size * 3.5 + (fieldLayout === 'columns' ? 0 : gap);
     if (element.kind === 'result') height = Math.max(tokens.body_size * 4, innerH * .2);
     if (['status', 'tags', 'badge'].includes(element.kind)) height = Math.max(18, font * 2);

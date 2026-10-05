@@ -3,9 +3,23 @@ import type { CardFinish } from './cardFinish';
 import type { CardFinishQuality } from './CardFinishLayer';
 import { drawCardMaterial, MATERIAL_LIGHT_EVENT, type MaterialLight } from './cardMaterialRenderer';
 import { createMaterialMask, MATERIAL_LAYOUT_PARTS } from './cardMaterialMask';
+import type { MaterialMask } from './cardMaterialMask';
+import type { CardMaterial, MaterialEnvironment, MaterialDebugView } from './cardMaterial';
+import type { CardProduction, PrintFinishing, ProductionLayer } from './cardProduction';
+import { createProductionLayerMask } from './productionLayerMask';
 
-export function CardMaterialCanvas({ finish, quality, restrained = false, roughness }: {
-  finish: Exclude<CardFinish, 'normal'>; quality: CardFinishQuality;
+export interface CardMaterialOptions {
+  production?: CardProduction;
+  finishing?: PrintFinishing;
+  material?: CardMaterial;
+  environment?: Partial<MaterialEnvironment>;
+  debugView?: MaterialDebugView;
+  backend?: 'auto' | 'fallback';
+  pose?: { x: number; y: number };
+  processLayer?: ProductionLayer;
+}
+export function CardMaterialCanvas({ finish, quality, restrained = false, roughness, material, finishing, environment, debugView, backend, pose, processLayer }: CardMaterialOptions & {
+  finish: CardFinish; quality: CardFinishQuality;
   restrained?: boolean; roughness?: number;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -14,9 +28,10 @@ export function CardMaterialCanvas({ finish, quality, restrained = false, roughn
     const host = layer?.closest<HTMLElement>('.card-finish-surface');
     if (!canvas || !layer || !host || typeof ResizeObserver === 'undefined' || typeof IntersectionObserver === 'undefined') return;
     let visible = false, pending: number | null = null, dirty = true;
-    let light: MaterialLight = { x: 0, y: 0, active: false };
+    let light: MaterialLight = { x: pose?.x ?? 0, y: pose?.y ?? 0, active: false };
     let target = light, lastPaint = 0;
-    let mask: HTMLCanvasElement | undefined;
+    let mask: MaterialMask | undefined;
+    let maskImage: HTMLImageElement | undefined;
     let width = 0, height = 0;
     const paint = (now = performance.now()) => {
       pending = null;
@@ -31,11 +46,12 @@ export function CardMaterialCanvas({ finish, quality, restrained = false, roughn
         const scale = Math.min(small ? 2 : Math.min(window.devicePixelRatio || 1, 1.5),
           (small ? 256 : 640)/w, (small ? 320 : 800)/h);
         width = Math.max(1, Math.round(w*scale)); height = Math.max(1, Math.round(h*scale));
-        mask = createMaterialMask(host, layer, width, height);
+        mask = processLayer ? createProductionLayerMask(host, layer, width, height, processLayer.mask, maskImage) : createMaterialMask(host, layer, width, height);
         dirty = false;
       }
       if (!mask) return;
-      const renderer = drawCardMaterial(canvas, { finish, width, height, ...light, mask, restrained, roughness });
+      const renderer = drawCardMaterial(canvas, { finish, width, height, ...light, mask, restrained, roughness,
+        material, finishing, environment, debugView, backend, processLayer, aspect: layer.offsetHeight/layer.offsetWidth });
       layer.toggleAttribute('data-material-ready', Boolean(renderer));
       if (renderer) layer.dataset.materialRenderer = renderer;
       const settled = light.x === target.x && light.y === target.y;
@@ -44,7 +60,11 @@ export function CardMaterialCanvas({ finish, quality, restrained = false, roughn
     };
     const queue = () => { if (visible && pending === null) pending = requestAnimationFrame(paint); };
     const measure = () => { dirty = true; layer.removeAttribute('data-material-settled'); queue(); };
+    if (processLayer?.mask.source === 'png' && processLayer.mask.png) {
+      maskImage = new Image(); maskImage.onload = measure; maskImage.onerror = measure; maskImage.src = processLayer.mask.png;
+    }
     const update = (event: Event) => {
+      if (pose) return;
       const detail = (event as CustomEvent<MaterialLight>).detail;
       if (!Number.isFinite(detail.x) || !Number.isFinite(detail.y)) return;
       target = { ...detail, x: Math.max(-1, Math.min(1, detail.x)), y: Math.max(-1, Math.min(1, detail.y)) };
@@ -59,9 +79,12 @@ export function CardMaterialCanvas({ finish, quality, restrained = false, roughn
       host.querySelectorAll(MATERIAL_LAYOUT_PARTS).forEach(element => resize.observe(element));
       measure();
     };
-    const mutation = new MutationObserver(observeLayout);
+    const mutation = new MutationObserver(records => {
+      // Pointer pose writes host CSS variables; those do not change print coordinates.
+      if (records.some(record => record.attributeName !== 'style' || (record.target !== host && !layer.contains(record.target)))) observeLayout();
+    });
     mutation.observe(host, { childList: true, subtree: true, characterData: true,
-      attributes: true, attributeFilter: ['data-material-region'] });
+      attributes: true, attributeFilter: ['data-material-region', 'data-material-layer', 'data-face-shape', 'class', 'hidden', 'style'] });
     const intersection = new IntersectionObserver(entries => {
       visible = entries[0].isIntersecting;
       if (visible) { observeLayout(); queue(); }
@@ -72,15 +95,20 @@ export function CardMaterialCanvas({ finish, quality, restrained = false, roughn
     });
     intersection.observe(layer);
     host.addEventListener(MATERIAL_LIGHT_EVENT, update);
+    host.addEventListener('load', measure, true);
+    document.fonts?.addEventListener('loadingdone', measure);
     observeLayout();
     return () => {
       if (pending !== null) cancelAnimationFrame(pending);
       resize.disconnect(); intersection.disconnect(); mutation.disconnect();
       host.removeEventListener(MATERIAL_LIGHT_EVENT, update);
+      host.removeEventListener('load', measure, true);
+      document.fonts?.removeEventListener('loadingdone', measure);
+      if (maskImage) { maskImage.onload = null; maskImage.onerror = null; }
       layer.removeAttribute('data-material-ready');
       layer.removeAttribute('data-material-renderer');
       layer.removeAttribute('data-material-settled');
     };
-  }, [finish, quality, restrained, roughness]);
+  }, [finish, quality, restrained, roughness, material, finishing, environment, debugView, backend, pose, processLayer]);
   return <canvas ref={ref} className="card-material-canvas" aria-hidden="true" />;
 }

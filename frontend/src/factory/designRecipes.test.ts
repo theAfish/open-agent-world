@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FACE_MODES, faceStudio, presetSurface } from './faceDesign';
-import { RECIPES, SEMANTIC_SLOTS, STYLE_KITS, chooseRecipe, contrast, designTokens, newSlot, polishSurface, recipeSettings, reflowSurface } from './designRecipes';
+import { RECIPES, SEMANTIC_SLOTS, STYLE_KITS, chooseRecipe, contrast, designTokens, freeSurface, newSlot, polishSurface, recipeSettings, reflowSurface, restyleSurface } from './designRecipes';
 import type { FaceDesign, StyleKit } from './types';
 
 const face: FaceDesign = { title: '每日灵感', description: '收集想法，让灵感成为下一次行动。', variant: 'icon', tone: 'sand', color: '#6c8069', icon: 'sparkles', finish: 'normal', layout: 'stack', help_text: '', button_label: '开始' };
@@ -31,6 +31,68 @@ describe('semantic card design', () => {
     expect(changed.background_png).toBe('retained-png');
     const removed = reflowSurface({ ...added, elements: added.elements.filter(e => e.kind !== 'subtitle' && e.id !== 'free') }, face);
     expect(removed.elements).toEqual(surface.elements);
+  });
+  it('detaches individual and complete preset layouts without moving or deforming any layer', () => {
+    for (const mode of FACE_MODES) for (const recipe of RECIPES) {
+      const surface = chooseRecipe(presetSurface(mode, face), face, recipe.id);
+      surface.elements[0].print = { opacity: .6, blend: 'multiply' };
+      const first = surface.elements[0];
+      const detached = freeSurface(surface, first.id);
+      expect(detached.elements[0]).toEqual({ ...first, placement: 'free' });
+      expect(detached.elements.slice(1)).toEqual(surface.elements.slice(1));
+      expect(detached.shapes).toBe(surface.shapes);
+      expect(detached.design).toBe(surface.design);
+      const all = freeSurface(detached);
+      expect(all.elements).toEqual(surface.elements.map(element => ({ ...element, placement: 'free' })));
+      expect(freeSurface(all)).toBe(all);
+      expect(first.placement).toBe('slot');
+    }
+  });
+  it('changes paper and ink without reflowing copy, artwork or detached layers', () => {
+    const surface = chooseRecipe(presetSurface('preview', face), face, 'compact');
+    surface.elements[0] = { ...surface.elements[0], placement: 'free', width: 47, height: 47, image_png: 'artwork', print: { opacity: .8, blend: 'screen' } };
+    surface.elements[1] = { ...surface.elements[1], color: '#ff0055', overrides: { color: '#ff0055' } };
+    const settings = surface.design!;
+    const stock = { ...settings.production!, stock: { ...settings.production!.stock, type: 'ink' as const } };
+    const changed = restyleSurface(surface, face, { ...settings, production: stock });
+    expect(changed.shapes[0].fill).not.toBe(surface.shapes[0].fill);
+    expect(changed.elements[2].color).not.toBe(surface.elements[2].color);
+    expect(changed.elements[1].color).toBe('#ff0055');
+    expect(changed.elements.map(({ color: _color, ...element }) => element)).toEqual(surface.elements.map(({ color: _color, ...element }) => element));
+    changed.shapes[0] = { ...changed.shapes[0], radius: 21, fill: '#bead73' };
+    const finished = restyleSurface(changed, face, { ...changed.design!, production: { ...stock, laminate: { ...stock.laminate, type: 'holo', strength: .9 } } });
+    expect(finished.elements).toEqual(changed.elements);
+    expect(finished.shapes).toEqual(changed.shapes);
+  });
+  it('preserves saved compositions on repeated reads and after text edits', () => {
+    const studio = faceStudio(face), preview = studio.modes.preview!;
+    const authored = freeSurface(preview, 'icon');
+    authored.elements[0] = { ...authored.elements[0], x: 121, y: 202, width: 49, height: 49 };
+    const saved = { ...face, studio: { ...studio, modes: { ...studio.modes, preview: authored } } };
+    const bytes = JSON.stringify(saved.studio);
+    expect(faceStudio(saved)).toBe(saved.studio);
+    expect(faceStudio({ ...saved, title: 'A much longer title that changes the line count', description: 'New copy '.repeat(30) })).toBe(saved.studio);
+    expect(faceStudio({ ...saved, studio: faceStudio(saved) })).toBe(saved.studio);
+    expect(JSON.stringify(saved.studio)).toBe(bytes);
+    expect(faceStudio(saved).modes.preview!.elements.slice(1)).toEqual(preview.elements.slice(1));
+  });
+  it('applies explicit typography tokens without moving boxes or overriding custom type', () => {
+    for (const mode of ['preview', 'workspace'] as const) {
+      const surface = faceStudio(face).modes[mode]!, previous = designTokens(surface);
+      surface.elements = surface.elements.map(element => element.kind === 'description' ? { ...element, font_size: 19, overrides: { font_size: 19 } } : element);
+      surface.elements.push({ ...newSlot('text'), id: 'custom', placement: 'free', font_size: 37 });
+      surface.elements.push({ ...newSlot('text'), id: 'following', placement: 'free', font_size: previous.body_size });
+      const settings = { ...surface.design!, tokens: { ...surface.design!.tokens, title_size: previous.title_size * 1.2, body_size: previous.body_size + 2 } };
+      const changed = restyleSurface(surface, face, settings);
+      const font = (value: typeof surface, id: string) => value.elements.find(element => element.id === id)!.font_size;
+      expect(font(changed, 'title')).toBe(Math.round(font(surface, 'title') * 1.2 * 100) / 100);
+      expect(font(changed, 'description')).toBe(19);
+      expect(font(changed, 'custom')).toBe(37);
+      expect(font(changed, 'following')).toBe(previous.body_size + 2);
+      expect(font(changed, 'icon')).toBe(font(surface, 'icon'));
+      expect(changed.elements.map(({ font_size: _font, ...element }) => element)).toEqual(surface.elements.map(({ font_size: _font, ...element }) => element));
+      expect(restyleSurface(changed, face, settings).elements).toEqual(changed.elements);
+    }
   });
   it('keeps dense, long semantic content inside the safe area', () => {
     const surface = presetSurface('preview', face), longFace = { ...face, title: '一个很长的卡牌标题'.repeat(8), description: '这是一段较长的说明。'.repeat(40) };

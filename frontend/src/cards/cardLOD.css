@@ -10,7 +10,7 @@
 .card-lod-status[data-status="error"] { background: var(--danger); }
 .card-lod-view[data-render-lod="far"] { background: linear-gradient(155deg, color-mix(in srgb, var(--card-kind, var(--accent)) 12%, var(--card-surface)), var(--card-surface) 75%); }
 .card-lod-symbol { position: relative; display: flex; flex: 1; flex-direction: column; justify-content: center; align-items: center; gap: 10px; padding: 12px; text-align: center; }
-.card-lod-symbol > svg, .card-lod-symbol > .catalog-asset-icon { flex: 0 0 auto; color: var(--card-kind, var(--accent)); }
+.card-lod-emblem { display:grid; place-items:center; flex:0 0 auto; color:var(--card-kind,var(--accent)); }
 .card-lod-symbol > strong { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; }
 .card-lod-symbol::after { content: ''; position: absolute; top: 10%; right: 10%; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); }
 .card-lod-symbol[data-status="running"]::after, .card-lod-symbol[data-status="ready"]::after { background: var(--accent); }
@@ -20,7 +20,7 @@
 .card-lod-view.is-node .card-lod-kind svg { width: 22px; height: 22px; }
 .card-lod-view.is-node .card-lod-title strong { font-size: 11px; }
 .card-lod-view.is-node .card-lod-symbol > strong { font-size: 11px; }
-.card-lod-view.is-node .card-lod-symbol > svg { width: 22px; height: 22px; }
+.card-lod-view.is-node .card-lod-emblem > svg { width: 22px; height: 22px; }
 .card-lod-view.is-node .card-eyebrow, .card-lod-view.is-node .card-lod-status { display: none; }
 .card-lod-view.is-preview .card-lod-heading.node-surface-header { position: relative; box-sizing: border-box; }
 .card-lod-view.is-preview .node-surface-header .card-lod-kind { width: 54px; height: 54px; margin: 0 auto; border-radius: 12px; }

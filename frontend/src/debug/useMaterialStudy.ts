@@ -13,9 +13,10 @@ export const STUDY_ANGLES: Record<CardFinish, { x: number; y: number }> = {
 };
 
 export function useMaterialStudy(ref: RefObject<HTMLElement>, mode: StudyMode, revision: string, comparison = false) {
-  const [reduced, setReduced] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const [reduced, setReduced] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? true);
   useEffect(() => {
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const media = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    if (!media) return;
     const update = () => setReduced(media.matches);
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);

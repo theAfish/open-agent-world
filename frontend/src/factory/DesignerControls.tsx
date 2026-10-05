@@ -1,13 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight, Eye, Layers, Plus, Sparkles, X } from 'lucide-react';
+import { Check, Plus } from 'lucide-react';
 import { CatalogIcon } from '../components/CatalogIcon';
 import type { NodeSurfaceLevel } from '../types/world';
 import { FaceArtwork } from './FaceArtwork';
 import { ELEMENT_LABELS, FACE_MODES, MODE_LABELS } from './faceDesign';
-import { MATERIALS, RECIPES, SEMANTIC_SLOTS, STYLE_KITS, chooseRecipe, designTokens, slotText } from './designRecipes';
-import type { DesignTokens, FaceDesign, FaceElement, FaceStudio, LayoutRecipe, StyleKit, SurfaceDesign, SurfaceRecipe } from './types';
+import { RECIPES, STYLE_KITS, chooseRecipe, designTokens, slotText } from './designRecipes';
+import type { DesignTokens, FaceButtonAction, FaceDesign, FaceElement, FaceShape, FaceStudio, LayoutRecipe, StyleKit, SurfaceDesign, SurfaceRecipe } from './types';
+import { CoreButtonWarnings } from './CoreButtonWarnings';
+import { recipeProduction } from './designRecipes';
+import { MAX_PRODUCTION_LAYERS, printingLayers, type CardProduction, type PrintProof } from '../cards/cardProduction';
+import { LayerElementsPanel } from './LayerElementsPanel';
+import { PROCESS_RECIPES, ProcessLayerControls, replaceProcessLayers } from './ProcessLayerControls';
+import { ProductionControls, PROOF_LABELS } from './ProductionControls';
+import { readProductionPresets, saveProductionPreset } from './productionPresets';
 
-export type DesignerSection = 'card' | 'content' | 'material' | 'advanced';
+export type DesignerSection = 'stock' | 'process' | 'preview' | 'preset' | 'advanced';
 export function NumberControl({ label, value, min = 0, max = 2048, step = 1, onChange }: { label: string; value: number; min?: number; max?: number; step?: number; onChange: (value: number) => void }) {
   const [text, setText] = useState(String(Math.round(value * 100) / 100));
   useEffect(() => setText(String(Math.round(value * 100) / 100)), [value]);
@@ -22,35 +29,36 @@ export function Choices<T extends string>({ label, value, options, onChange }: {
     {options.map(([id, name]) => <button type="button" key={id} aria-pressed={value === id} onClick={() => onChange(id)}>{name}</button>)}
   </div></div>;
 }
-function Slider({ label, value, onChange, ends }: { label: string; value: number; onChange: (value: number) => void; ends: [string, string] }) {
-  return <label className="face-slider">{label}<input aria-label={label} type="range" min="0" max="100" value={Math.round(value * 100)} onChange={e => onChange(Number(e.target.value) / 100)} />
-    <span><small>{ends[0]}</small><small>{ends[1]}</small></span></label>;
-}
 function RecipeThumbnail({ face, surface }: { face: FaceDesign; surface: SurfaceDesign }) {
   const scale = Math.min(70 / surface.width, 80 / surface.height);
   return <span className="face-recipe-art" aria-hidden="true"><span style={{ width: surface.width * scale, height: surface.height * scale }}>
     <span style={{ width: surface.width, height: surface.height, transform: `scale(${scale})` }}><FaceArtwork face={face} surface={surface} thumbnail /></span>
   </span></span>;
 }
-type SlotProps = { face: FaceDesign; item: FaceElement; editText: (item: FaceElement, value: string) => void; updateFace: (patch: Partial<FaceDesign>) => void; upload: (file?: File, elementId?: string) => Promise<void>; titleLabel?: string };
+type SlotProps = { face: FaceDesign; item: FaceElement; editText: (item: FaceElement, value: string) => void; updateFace: (patch: Partial<FaceDesign>) => void; upload: (file?: File, elementId?: string, layerId?: string) => Promise<void>; titleLabel?: string };
 export function SlotEditor({ face, item, editText, updateFace, upload, titleLabel }: SlotProps) {
   const icons = ['sparkles', 'file-text', 'calculator', 'bot', 'layers', 'book-open'], names = ['灵感', '文档', '计算', '助手', '集合', '阅读'];
   if (item.kind === 'icon') return <div className="face-icon-picker" role="group" aria-label="卡牌图标">{icons.map((icon, i) =>
     <button type="button" key={icon} aria-label={names[i]} aria-pressed={face.icon === icon} onClick={() => updateFace({ icon })}><CatalogIcon definition={{ icon }} size={19} /></button>)}</div>;
   if (item.kind === 'illustration') return <label className="face-upload">{item.image_png ? '替换插图' : '上传插图'}<input type="file" accept="image/png" onChange={e => { void upload(e.target.files?.[0], item.id); e.target.value = ''; }} /><small>PNG · 最大 1 MiB / 2048 px</small></label>;
   if (['fields', 'result'].includes(item.kind)) return <p className="face-note">{item.kind === 'fields' ? '印刷后自动填入功能设计器中的输入字段。' : '运行结果将在这里显示。'}</p>;
-  return <label>{titleLabel ?? ELEMENT_LABELS[item.kind]}{item.kind === 'title' || item.kind === 'action'
+  return <label>{titleLabel ?? ELEMENT_LABELS[item.kind]}{item.kind === 'title' || item.kind === 'action' || item.kind === 'button'
     ? <input aria-label={titleLabel ?? ELEMENT_LABELS[item.kind]} maxLength={item.kind === 'title' ? 120 : 40} value={slotText(item, face)} onChange={e => editText(item, e.target.value)} />
     : <textarea aria-label={titleLabel ?? ELEMENT_LABELS[item.kind]} rows={item.kind === 'description' ? 3 : 2} maxLength={item.kind === 'description' ? 500 : 1000} value={slotText(item, face)} onChange={e => editText(item, e.target.value)} />}</label>;
 }
 interface PanelProps {
+  processId?: string; selectProcess: (id: string) => void; updateProduction: (value: CardProduction) => void; duplicateProcess: (id: string) => void;
+  proof: PrintProof; compare: boolean; setProof: (value:PrintProof)=>void; setCompare:(value:boolean)=>void;
+  applyPreset: (settings:SurfaceRecipe,color:string)=>void;
   face: FaceDesign; surface: SurfaceDesign; settings: SurfaceRecipe; studio: FaceStudio; mode: NodeSurfaceLevel; section: DesignerSection;
   layerMode: 'elements' | 'shapes'; snapping: boolean; checker: boolean;
   updateSurface: (surface: SurfaceDesign) => void; updateSettings: (patch: Partial<SurfaceRecipe>) => void; updateFace: (patch: Partial<FaceDesign>) => void;
   updateStudio: (patch: Partial<FaceStudio>) => void; enableMode: (mode: NodeSurfaceLevel, enabled: boolean) => void;
   setMode: (mode: NodeSurfaceLevel) => void; setSection: (section: DesignerSection) => void; setLayerMode: (mode: 'elements' | 'shapes') => void;
   setSnapping: (value: boolean) => void; setChecker: (value: boolean) => void;
-  addSlot: (kind: FaceElement['kind']) => void; remove: (id: string) => void; select: (id: string) => void; showPreview: () => void;
+  addShape: (kind: FaceShape['kind'], inkId?: string, full?: boolean) => void; releaseLayout: () => void; blankLayout: () => void;
+  selection: string; selectLayer: (id: string, kind: 'elements' | 'shapes') => void;
+  addSlot: (kind: FaceElement['kind'], inkId?: string, action?: FaceButtonAction) => void; remove: (id: string) => void; select: (id: string) => void; showPreview: () => void;
   resize: (width: number, height: number) => void; applyKit: (kit: StyleKit, appearance: SurfaceRecipe['appearance'], accent: string) => void;
   applyRecipe: (recipe: LayoutRecipe) => void;
   upload: SlotProps['upload']; editText: SlotProps['editText'];
@@ -58,49 +66,47 @@ interface PanelProps {
 
 export function DesignerPanel(p: PanelProps) {
   const { face, surface, settings, studio, mode, section, updateSettings, updateFace, updateSurface, setSection } = p;
-  const [cardTab, setCardTab] = useState<'layout' | 'style'>('layout'), [advancedTab, setAdvancedTab] = useState<'layers' | 'constraints' | 'tokens' | 'effects'>('layers');
+  const [advancedTab, setAdvancedTab] = useState<'layers' | 'constraints' | 'tokens'>('layers');
+  const production=recipeProduction(settings);
+  const [presets,setPresets]=useState(readProductionPresets),[presetName,setPresetName]=useState(''),[presetMessage,setPresetMessage]=useState(''),[savingPreset,setSavingPreset]=useState(false);
   const scroll = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (scroll.current) scroll.current.scrollTop = 0; }, [section, cardTab, advancedTab]);
+  useEffect(() => { if (scroll.current) scroll.current.scrollTop = 0; }, [section, p.processId, advancedTab]);
   const tokens = designTokens(surface, settings);
+  const inkLayers = printingLayers(production);
   const tokenChange = (key: keyof DesignTokens, value: string | number) => updateSettings({ tokens: { ...settings.tokens, [key]: value } });
   return <div ref={scroll} className="face-panel-scroll">
-    {section === 'card' && <><div className="face-panel-title"><h3>版式与风格</h3><p>同步四种视图，自动适配不同尺寸。</p></div>
-      <Choices label="卡片设计" value={cardTab} options={[["layout", "版式"], ["style", "风格"]]} onChange={setCardTab} />
-      {cardTab === 'layout' ? <><div className="face-recipe-grid">{RECIPES.map(recipe => <button type="button" key={recipe.id} aria-label={`应用 ${recipe.name} 版式`} aria-pressed={surface.design?.recipe === recipe.id} onClick={() => { p.applyRecipe(recipe.id); p.select(''); }}>
-        <RecipeThumbnail face={face} surface={chooseRecipe(surface, face, recipe.id)} /><span>{recipe.name}{surface.design?.recipe === recipe.id && <Check size={12} />}</span><small>{recipe.description.split(' · ')[0]}</small>
-      </button>)}</div><div className="face-divider" />
-      <Choices label="信息密度" value={settings.density} options={[["low", "轻盈"], ["medium", "适中"], ["high", "丰富"]]} onChange={density => updateSettings({ density })} />
-      <Choices label="视觉重心" value={settings.emphasis} options={[["balanced", "均衡"], ["title", "标题"], ["visual", "图像"]]} onChange={emphasis => updateSettings({ emphasis })} />
-      <Choices label="内容对齐" value={settings.alignment} options={[["left", "居左"], ["center", "居中"], ["right", "居右"]]} onChange={alignment => updateSettings({ alignment })} />
-      <button type="button" className="face-next" onClick={() => setCardTab('style')}>下一步，选择风格<ChevronRight size={14} /></button></>
-      : <><div className="face-kit-grid">{Object.entries(STYLE_KITS).map(([key, kit]) => <button type="button" key={key} aria-label={`应用 ${kit.name} 风格`} aria-pressed={settings.kit === key} onClick={() => p.applyKit(key as StyleKit, key === 'ink' ? 'dark' : 'light', kit.accent)}>
-        <span className="face-kit-swatch" style={{ background: kit.background, color: kit.text }}><b>Aa</b><i style={{ background: kit.accent }} /></span><span>{kit.name}</span><small>{kit.description}</small></button>)}</div>
-      <label className="face-accent">强调色<span><input type="color" value={face.color} onChange={e => updateFace({ color: e.target.value })} /><small>{face.color.toUpperCase()}</small></span></label>
-      <Choices label="明暗倾向" value={settings.appearance} options={[["light", "明亮"], ["dark", "深邃"]]} onChange={appearance => updateSettings({ appearance })} />
-      <Slider label="轮廓与触感" value={settings.softness} ends={['利落', '柔和']} onChange={softness => updateSettings({ softness })} />
-      <button type="button" className="face-next" onClick={() => setSection('content')}>下一步，填入内容<ChevronRight size={14} /></button></>}
+    {section==='stock'&&<><div className="face-panel-title"><h3>从一张纸开始</h3><p>选择触感，再挑一个底色。</p></div>
+      <ProductionControls stage="stock" production={production} onChange={value=>updateSettings({production:value,appearance:value.stock.type==='ink'?'dark':'light'})} />
     </>}
-    {section === 'content' && <><div className="face-panel-title"><h3>卡片内容</h3><p>为当前视图增删内容，自动整理版式。</p></div>
-      <div className="face-slot-list">{surface.elements.filter(e => e.placement !== 'free').map(item => <div className="face-slot" key={item.id}>
-        <div><button type="button" onClick={() => p.select(item.id)}>{ELEMENT_LABELS[item.kind]}</button><button type="button" aria-label={`移除${ELEMENT_LABELS[item.kind]}`} onClick={() => p.remove(item.id)}><X size={13} /></button></div>
-        <SlotEditor item={item} face={face} editText={p.editText} updateFace={updateFace} upload={p.upload} titleLabel={item.kind === 'title' ? '卡牌名称' : undefined} />
-      </div>)}</div><h4>添加内容</h4><div className="face-slot-add">{SEMANTIC_SLOTS.filter(slot => !surface.elements.some(e => e.kind === slot.kind)).map(slot =>
-        <button type="button" key={slot.kind} title={slot.hint} disabled={surface.elements.length >= 32} onClick={() => p.addSlot(slot.kind)}><Plus size={12} />{slot.label}</button>)}</div>
-      {surface.elements.some(e => e.placement === 'free') && <button type="button" onClick={() => setSection('advanced')}><Layers size={14} />管理自由图层</button>}
-      <button type="button" className="face-next" onClick={() => setSection('material')}>下一步，选择材质<ChevronRight size={14} /></button>
+    {section==='process'&&<ProcessLayerControls production={production} selectedId={p.processId} onSelect={p.selectProcess} onChange={p.updateProduction} onDuplicate={p.duplicateProcess}
+      renderContent={layer => <LayerElementsPanel key={layer.id} {...{ layer, production, surface }} selection={p.selection} onChange={p.updateProduction}
+        addSlot={p.addSlot} addShape={p.addShape} upload={p.upload} select={p.selectLayer} />} />}
+    {section==='preview'&&<><div className="face-panel-title"><h3>检查成品</h3><p>和实际画布共用卡面渲染。</p></div>
+      <CoreButtonWarnings face={face} studio={studio} />
+      <label>查看印刷层<select aria-label="查看印刷层" value={p.proof} onChange={e=>p.setProof(e.target.value as PrintProof)}>{Object.entries(PROOF_LABELS).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
+      <label className="factory-check"><input type="checkbox" checked={p.compare} onChange={e=>p.setCompare(e.target.checked)} />对比未加工卡面</label>
+      <button type="button" className="face-next" onClick={()=>setSection('preset')}>保存为工艺配方<Plus size={14} /></button>
     </>}
-    {section === 'material' && <><div className="face-panel-title"><h3>表面材质</h3><p>同步四种视图，移动鼠标查看反光。</p></div>
-      <div className="face-material-grid">{MATERIALS.map(material => <button type="button" key={material.id} aria-label={`${material.name} 材质`} aria-pressed={settings.material.type === material.id} onClick={() => updateSettings({ material: { ...settings.material, type: material.id } })}>
-        <span className="face-material-swatch" data-material={material.id}><i /></span><span>{material.name}</span><small>{material.description}</small></button>)}</div>
-      {settings.material.type !== 'none' && <Slider label="材质强度" value={settings.material.intensity} ends={['轻柔', '鲜明']} onChange={intensity => updateSettings({ material: { ...settings.material, intensity } })} />}
-      <div className="face-tip"><Sparkles size={17} /><p>在预览上移动鼠标，查看光线变化。文字始终保持清晰。</p></div>
-      <button type="button" className="face-next" onClick={p.showPreview}>查看完成效果<Eye size={14} /></button>
-    </>}
+    {section==='preset'&&<><div className="face-panel-title"><h3>预设</h3><p>选择版式或工艺组合，开始一张新设计。</p></div>
+      <details className="face-preset-section" open><summary>版式</summary>
+        <div className="face-recipe-grid">{RECIPES.map(recipe=><button type="button" key={recipe.id} aria-label={`应用 ${recipe.name} 版式`} aria-pressed={settings.recipe===recipe.id} onClick={()=>{p.applyRecipe(recipe.id);p.select('');}}>
+          <RecipeThumbnail face={face} surface={chooseRecipe(surface,face,recipe.id)} /><span>{({hero:'主视觉',compact:'紧凑',split:'分栏',badge:'徽章',editorial:'刊物',utility:'工具',minimal:'留白',poster:'海报'})[recipe.id]}</span></button>)}</div>
+        <div className="face-layout-actions"><button type="button" onClick={p.blankLayout}>空白版面</button><button type="button" onClick={p.releaseLayout}>全部自由编辑</button></div>
+      </details>
+      <details className="face-preset-section" open><summary>经典组合</summary><div className="process-recipes">{PROCESS_RECIPES.map(recipe=><button type="button" key={recipe.name} disabled={inkLayers.length+3>MAX_PRODUCTION_LAYERS} aria-label={`添加${recipe.name}`} onClick={()=>{const next=recipe.create();p.updateProduction(replaceProcessLayers(production,[...inkLayers,...next]));p.selectProcess(next.at(-1)!.id);}}><strong>{recipe.name}</strong><small>{recipe.hint}</small></button>)}</div></details>
+      <details className="face-preset-section"><summary>字体与配色</summary><label className="face-accent">主题油墨<input type="color" value={face.color} onChange={e=>updateFace({color:e.target.value})} /></label><div className="face-kit-grid">{Object.entries(STYLE_KITS).map(([key,kit])=><button type="button" key={key} aria-label={`应用 ${kit.name} 风格`} aria-pressed={settings.kit===key} onClick={()=>p.applyKit(key as StyleKit,settings.appearance,kit.accent)}>
+        <span className="face-kit-swatch" style={{background:kit.background,color:kit.text}}><b>Aa</b><i style={{background:kit.accent}} /></span><span>{kit.name}</span></button>)}</div></details>
+      <h4>我的配方</h4>
+      <label>配方名称<input aria-label="配方名称" maxLength={60} value={presetName} onChange={e=>setPresetName(e.target.value)} /></label>
+      <button type="button" className="face-next" disabled={savingPreset||!presetName.trim()} onClick={()=>{setSavingPreset(true);setPresetMessage('');void saveProductionPreset(presetName,{...settings,production},face.color).then(value=>{setPresets(value);setPresetMessage('配方已保存');}).catch(error=>setPresetMessage(String(error.message??error))).finally(()=>setSavingPreset(false));}}>保存配方<Check size={14} /></button>
+      {presetMessage&&<p role="status">{presetMessage}</p>}
+      <div className="face-preset-list">{presets.map(preset=><button type="button" key={preset.id} onClick={()=>{p.applyPreset(preset.settings,preset.color);setPresetMessage('已应用配方');}}><strong>{preset.name}</strong></button>)}</div>
+      {!presets.length&&<p className="face-note">保存的工艺配方会出现在这里。</p>}</>}
     {section === 'advanced' && <><div className="face-panel-title"><h3>精细控制</h3><p>仅调整当前视图，保留其他视图的设计。</p></div>
-      <div className="face-advanced-tabs" role="group" aria-label="高级控制">{([['layers', '图层'], ['constraints', '约束'], ['tokens', '样式令牌'], ['effects', '效果']] as const).map(([value, label]) =>
+      <div className="face-advanced-tabs" role="group" aria-label="高级控制">{([['layers', '图层'], ['constraints', '约束'], ['tokens', '样式令牌']] as const).map(([value, label]) =>
         <button type="button" key={value} aria-pressed={advancedTab === value} onClick={() => setAdvancedTab(value)}>{label}</button>)}</div>
       {advancedTab === 'layers' && <><Choices label="编辑对象" value={p.layerMode} options={[["elements", "编辑内容"], ["shapes", "编辑形状"]]} onChange={p.setLayerMode} />
-        <p className="face-note">拖动元素会将它转为自由图层；其他内容继续自动排版。</p>
+        <p className="face-note">拖动只改变选中的元素，其他图层保持原位。</p>
         <details open><summary>显示模式与画布</summary><nav className="face-mode-tabs" aria-label="编辑显示模式">{FACE_MODES.map(value => <button type="button" key={value} aria-pressed={mode === value} onClick={() => p.setMode(value)}>
           {MODE_LABELS[value]}<small>{studio.enabled.includes(value) ? '已启用' : '未启用'}</small></button>)}</nav>
           <label className="factory-check"><input type="checkbox" checked={studio.enabled.includes(mode)} disabled={studio.enabled.length === 1 && studio.enabled.includes(mode)} onChange={e => p.enableMode(mode, e.target.checked)} />允许此显示模式</label>
@@ -114,7 +120,7 @@ export function DesignerPanel(p: PanelProps) {
             <button type="button" onClick={() => updateSurface({ ...surface, background_png: '' })}>移除背景图</button></>}
           <label className="factory-check"><input type="checkbox" checked={p.checker} onChange={e => p.setChecker(e.target.checked)} />显示透明网格</label>
         </details></>}
-      {advancedTab === 'constraints' && <><h4>语义内容 · 自动堆叠</h4><p className="face-note">槽位按版式排序，增删后重新排布。自由图层保留手工位置。</p>
+      {advancedTab === 'constraints' && <><h4>语义内容 · 自动堆叠</h4><p className="face-note">主动调整排版约束时，重新编排预设内容。自由图层保持原位。</p>
         <NumberControl label="堆叠间距" value={tokens.gap} max={128} onChange={gap => tokenChange('gap', gap)} /><NumberControl label="安全边距" value={tokens.margin} max={512} onChange={margin => tokenChange('margin', margin)} />
         <Choices label="堆叠对齐" value={settings.alignment} options={[["left", "居左"], ["center", "居中"], ["right", "居右"]]} onChange={alignment => updateSettings({ alignment })} />
         <label>功能字段布局<select value={surface.field_layout} onChange={e => updateSettings({ field_layout: e.target.value as SurfaceDesign['field_layout'] })}><option value="stack">单列</option><option value="columns">双列</option></select></label>
@@ -124,10 +130,6 @@ export function DesignerPanel(p: PanelProps) {
         {([['background', '卡面底色'], ['surface', '图标表面'], ['text', '主要文字'], ['muted', '次要文字'], ['border', '边框颜色']] as const).map(([key, label]) => <label className="face-token" key={key}>{label}<input type="color" value={tokens[key]} onChange={e => tokenChange(key, e.target.value)} /></label>)}
         {([['title_size', '标题字号'], ['body_size', '正文字号'], ['radius', '圆角']] as const).map(([key, label]) => <NumberControl key={key} label={label} value={tokens[key]} min={key === 'radius' ? 0 : 8} max={key === 'radius' ? 1024 : 128} onChange={value => tokenChange(key, value)} />)}
         <button type="button" onClick={() => updateSettings({ tokens: {} })}>恢复风格默认值</button></>}
-      {advancedTab === 'effects' && <><Choices label="材质响应区域" value={settings.material.mask} options={[["all", "整体"], ["visual", "视觉区"], ["edges", "边缘"]]} onChange={mask => updateSettings({ material: { ...settings.material, mask } })} />
-        <NumberControl label="材质强度（0–1）" min={0} max={1} step={.01} value={settings.material.intensity} onChange={intensity => updateSettings({ material: { ...settings.material, intensity } })} />
-        <NumberControl label="粗糙度（0.08–1）" min={.08} max={1} step={.01} value={settings.material.roughness} onChange={roughness => updateSettings({ material: { ...settings.material, roughness } })} />
-        <p className="face-note">效果被卡面轮廓裁切，文字绘制在材质上方。视觉区蒙版跟随图标和插图的位置。</p></>}
     </>}
   </div>;
 }

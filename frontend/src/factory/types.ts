@@ -2,6 +2,7 @@ import type { CardFaceTone, CardFaceVariant } from '../components/cardFaceDesign
 import type { CardFinish } from '../cards/cardFinish';
 import type { CreatorMetadata, CreatorInspection } from '../types/packs';
 import type { NodeSurfaceLevel } from '../types/world';
+import type { CardProduction } from '../cards/cardProduction';
 
 export type Scalar = string | number | boolean;
 export interface FaceDesign {
@@ -9,11 +10,18 @@ export interface FaceDesign {
   title: string; description: string; variant: CardFaceVariant; tone: CardFaceTone; color: string;
   icon: string; finish: CardFinish; layout: 'stack' | 'columns'; help_text: string; button_label: string;
 }
-export interface FaceBox { id: string; x: number; y: number; width: number; height: number }
+export interface LayerPrint { opacity: number; blend: 'normal' | 'multiply' | 'screen' }
+export interface FaceBox { id: string; x: number; y: number; width: number; height: number; print?: LayerPrint }
 export interface FacePoint { x: number; y: number }
+export type FaceButtonAction = 'open' | 'collapse' | 'surface' | 'delete' | 'run' | 'custom';
+/** Built-in actions are host-owned; custom buttons expose a portable binding point. */
+export interface FaceButton { action: FaceButtonAction; background?: string; radius?: number }
+export interface FaceButtonEvent { mode: NodeSurfaceLevel; element_id: string }
+export interface ButtonBinding extends FaceButtonEvent { logic_id: string }
 export interface FaceShape extends FaceBox { kind: 'rect' | 'ellipse' | 'polygon'; radius: number; fill: string; points: FacePoint[] }
 export interface FaceElement extends FaceBox {
-  kind: 'title' | 'subtitle' | 'description' | 'icon' | 'metadata' | 'status' | 'tags' | 'illustration' | 'badge' | 'help' | 'fields' | 'action' | 'result' | 'text';
+  kind: 'title' | 'subtitle' | 'description' | 'icon' | 'metadata' | 'status' | 'tags' | 'illustration' | 'badge' | 'help' | 'fields' | 'action' | 'button' | 'result' | 'text';
+  button?: FaceButton;
   text: string; font_size: number; color: string; align: 'left' | 'center' | 'right';
   placement?: 'slot' | 'free';
   sizing?: 'fill' | 'hug' | 'fixed';
@@ -30,6 +38,7 @@ export interface DesignTokens {
 }
 /** Optional recipe metadata compiles into the existing portable shapes/elements. */
 export interface SurfaceRecipe {
+  production?: CardProduction;
   field_layout?: 'stack' | 'columns';
   recipe: LayoutRecipe; kit: StyleKit; appearance: 'light' | 'dark'; softness: number;
   density: 'low' | 'medium' | 'high'; emphasis: 'balanced' | 'title' | 'visual'; alignment: 'left' | 'center' | 'right';
@@ -46,7 +55,7 @@ export interface FaceStudio {
   modes: Partial<Record<NodeSurfaceLevel, SurfaceDesign>>;
 }
 export interface InputField { key: string; label: string; type: 'text' | 'number' | 'boolean'; default: Scalar; required: boolean }
-export interface FunctionDesign { fields: InputField[]; operation: 'template' | 'sum' | 'multiply' | 'join'; template: string; separator: string }
+export interface FunctionDesign { fields: InputField[]; operation: 'template' | 'sum' | 'multiply' | 'join'; template: string; separator: string; button_bindings?: ButtonBinding[] }
 export interface PrintedDesign { face: FaceDesign; function: FunctionDesign }
 export interface PackDesign { id: string; name: string; version: string; creator: CreatorMetadata }
 export interface BasketItem { kind: 'node' | 'legion' | 'preset'; id: string; name: string }

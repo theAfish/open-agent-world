@@ -18,24 +18,13 @@
   border-radius: inherit;
   pointer-events: none;
 }
+.card-finish-surface.card-finish-surface [data-material-layer="top-print"] { z-index:4; }
+:where(.card-finish-surface [data-material-layer="top-print"]) { position:relative; }
 .card-finish-surface.card-finish-surface :is([data-material-layer="protected"], [data-material-region="text"], .card-face-copy,
-  .card-face-symbol, .card-face-badge, .card-title-group, .card-status,
-  .card-kind-icon, .card-lod-title, .card-lod-status, .card-lod-kind,
-  .node-preview-content, .card-static-preview) {
+  .card-face-symbol, .card-face-badge) {
   z-index: 4;
 }
 /* Supply positioning only where the surface has none. Absolute node layouts
    and plugin positioning must retain their existing geometry. */
 :where(.card-finish-surface [data-material-layer="protected"],
-  .card-finish-surface [data-material-region="text"],
-  .card-finish-surface .card-title-group, .card-finish-surface .card-status) { position: relative; }
-
-/* Symbols are printed into the finished stock, not mounted on white UI tiles.
-   Their soft exclusion halo is part of the coating map, beneath the ink. */
-.world-card.card-finish-surface:is(.is-node, .is-preview)[data-finish]:not([data-finish="normal"])
-  :is(.card-kind-icon, .card-lod-kind) {
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-  color: var(--ink);
-}
+  .card-finish-surface [data-material-region="text"]) { position: relative; }

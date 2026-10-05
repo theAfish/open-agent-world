@@ -7,7 +7,7 @@ import './finishPreview.css';
 
 const descriptions: Record<CardFinish, string> = {
   normal: 'Uncoated stock. Original ink and artwork.',
-  foil: 'A coherent silver reflection with fine brushing and polished edges.',
+  foil: 'Selective champagne-gold tooling on printed accents and the cut edge.',
   rainbow: 'Aurora laminate. Broad spectral fields bend and travel over the printed artwork.',
   starlight: 'Isolated angle-lit flakes and round spot gloss. No continuous band.',
   laser: 'Fine engraved grooves that appear within a narrow viewing angle.',
@@ -64,11 +64,12 @@ export function FinishPreview({ embedded = false }: { embedded?: boolean }) {
       </select></label>
       <label><input type="checkbox" checked={comparison} onChange={event => { setComparison(event.target.checked); setDense(false); }} /> Layer comparison</label>
       <label><input type="checkbox" checked={pattern} onChange={event => setPattern(event.target.checked)} /> Printed test pattern</label>
-      <label><input type="checkbox" checked={dark} onChange={event => setDark(event.target.checked)} /> Dark card stock</label>
+      <label><input type="checkbox" checked={dark} onChange={event => setDark(event.target.checked)} /> Dark surroundings</label>
       {!embedded && <label><input type="checkbox" checked={dense} onChange={event => { setDense(event.target.checked); setComparison(false); if (event.target.checked && mode === 'sweep') setMode('representative'); }} /> 200 thumbnails</label>}
       <button type="button" onClick={() => setRevision(value => value + 1)}><RotateCcw size={13} /> Reset view</button>
       {embedded && <a href="/?card-finishes" target="_blank" rel="noreferrer">Open material gallery</a>}
       <a href="/?card-design" target="_blank" rel="noreferrer">Card design system</a>
+      <a href="/?card-materials" target="_blank" rel="noreferrer">Surface engine inspector</a>
     </div>
     <p className="finish-study-status" role="status">{mode === 'pointer' ? 'Move the pointer to explore. The laminate remains visible at its neutral resting angle.'
       : mode === 'representative' || reduced ? 'Fixed characteristic angles for comparison.' : 'Slow studio-light sweep. Change to Pointer / tilt to stop.'}
@@ -83,7 +84,7 @@ export function FinishPreview({ embedded = false }: { embedded?: boolean }) {
             <span>{['Original artwork and neutral top print.', 'The film in isolation. Dark cutouts show protected regions.', 'Artwork + aurora film + crisp top print. Move over any card to compare the same angle.'][index]}</span></figcaption></figure>)
         : (dense ? Array.from({ length: 200 }, (_, index) => CARD_FINISHES[index % CARD_FINISHES.length]) : embedded ? [finish] : CARD_FINISHES).map((value, index) =>
         <figure key={`${value}:${index}`}><PreviewCard finish={value} compact={dense} pattern={pattern} />
-          <figcaption><strong>{value === 'rainbow' ? 'Holo' : finishLabel(value)}</strong>{!dense && <span>{descriptions[value]}</span>}</figcaption></figure>)}
+          <figcaption><strong>{value === 'rainbow' ? 'Aurora' : finishLabel(value)}</strong>{!dense && <span>{descriptions[value]}</span>}</figcaption></figure>)}
     </div>
     {!embedded && <p className="finish-preview-note">Development preview · No collection changes · Use your browser's reduced-motion setting to inspect the static material.</p>}
   </section>;

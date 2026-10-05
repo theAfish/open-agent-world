@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CardFinishLayer, type CardFinishQuality } from "./CardFinishLayer";
 import type { CardFinish } from "./cardFinish";
 import { useCardFinish } from "./useCardFinish";
+import { newProductionLayer, productionForFinish } from './cardProduction';
 
 let frames: Map<number, FrameRequestCallback>;
 let nextFrame: number;
@@ -51,6 +52,31 @@ function flush() {
 }
 
 describe("CardFinishLayer", () => {
+  it('composites repeated passes in authored order and explicit empty stacks suppress legacy finishing', () => {
+    const first = { ...newProductionLayer('foil'), id: 'foil-one' };
+    const film = { ...newProductionLayer('laminate'), id: 'film' };
+    const last = { ...newProductionLayer('foil'), id: 'foil-two' };
+    const production = { ...productionForFinish('foil'), layers: [first, film, last] };
+    const { container, rerender } = render(<CardFinishLayer production={production} />);
+    const ids = () => [...container.querySelectorAll('[data-process-layer]')].map(element => element.getAttribute('data-process-layer'));
+    expect(ids()).toEqual(['foil-one', 'film', 'foil-two']);
+    rerender(<CardFinishLayer production={{ ...production, layers: [last, film, first] }} />);
+    expect(ids()).toEqual(['foil-two', 'film', 'foil-one']);
+    rerender(<CardFinishLayer production={{ ...production, layers: [] }} />);
+    expect(container.querySelectorAll('canvas')).toHaveLength(0);
+  });
+
+  it('omits disabled passes and separates finishing and laminate proofs', () => {
+    const production = { ...productionForFinish(), layers: [newProductionLayer('foil'), newProductionLayer('laminate'),
+      { ...newProductionLayer('uv'), enabled: false }] };
+    const { container, rerender } = render(<CardFinishLayer production={production} debugView="finishing" />);
+    expect(container.querySelector('[data-process-kind]')?.getAttribute('data-process-kind')).toBe('foil');
+    expect(container.querySelectorAll('canvas')).toHaveLength(1);
+    rerender(<CardFinishLayer production={production} debugView="laminate" />);
+    expect(container.querySelector('[data-process-kind]')?.getAttribute('data-process-kind')).toBe('laminate');
+    rerender(<CardFinishLayer production={production} debugView="artwork" />);
+    expect(container.querySelectorAll('canvas')).toHaveLength(0);
+  });
   it("adds no overlay for legacy or normal cards and preserves the assigned plate on rerender", () => {
     const { container, rerender } = render(<CardFinishLayer />);
     expect(container.childElementCount).toBe(0);

@@ -34,7 +34,7 @@ def register(registration):
     for key, source, target in [("face", "face", "printer"), ("function", "function", "printer"), ("pack", "pack", "packer")]:
         registration.register_relationship(RelationshipDefinition(id=f"{OWNER}.{key}-input", label="设计输入", short_label="设计",
             description="将已保存的设计提供给工厂设备", source_types=frozenset({f"{OWNER}.{source}"}),
-            target_types=frozenset({f"{OWNER}.{target}"}), templateable=True))
+            target_types=frozenset({f"{OWNER}.{target}", f"{OWNER}.function"} if key == "face" else {f"{OWNER}.{target}"}), templateable=True))
     registration.register_pack(PackDefinition(id=OWNER, name="卡包工厂", description="设计 → 印刷 → 组合打包 → 分享",
         cards=tuple(f"{OWNER}.{key}" for key, *_ in tools) + (f"{OWNER}.card",), packaging="collector", accent_color="#aa7144"))
     registration.register_legion_preset(LegionPresetDefinition(id=f"{OWNER}.workshop", name="卡包工厂工作台",
@@ -44,7 +44,7 @@ def register(registration):
                 ("face", "卡面设计器", 0, 0), ("function", "功能设计器", 0, 650),
                 ("printer", "卡牌印刷器", 700, 300), ("pack", "卡包设计器", 1400, 0), ("packer", "打包器", 1400, 650)]),
         edges=tuple(PresetEdge(source=source, target=target, relationship=f"{OWNER}.{source}-input")
-            for source, target in [("face", "printer"), ("function", "printer"), ("pack", "packer")])))
+            for source, target in [("face", "printer"), ("face", "function"), ("function", "printer"), ("pack", "packer")])))
 
 
 def create_plugin():

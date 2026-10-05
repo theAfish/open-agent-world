@@ -120,6 +120,7 @@ nav:
           - Canvas performance: canvas-performance.md
           - Terrain renderer: terrain-webgl.md
           - Card finishes: developers/card-finishes.md
+          - Card design: developers/card-design.md
   - Contribute to OAW:
       - contributing/index.md
       - Host development:

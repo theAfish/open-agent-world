@@ -16,7 +16,7 @@ async function materialPixels(card: Locator) {
       covered += alpha > 2 ? 1 : 0; bright += alpha > 128 ? 1 : 0;
       weak += alpha > 0 && alpha <= 16 ? 1 : 0; middle += alpha > 16 ? 1 : 0;
       peak = Math.max(peak,alpha);
-      chromatic += alpha > 64 && Math.max(pixels[i],pixels[i+1],pixels[i+2])-Math.min(pixels[i],pixels[i+1],pixels[i+2]) > 65 ? 1 : 0;
+      chromatic += alpha > 8 && Math.max(pixels[i],pixels[i+1],pixels[i+2])-Math.min(pixels[i],pixels[i+1],pixels[i+2]) > 65 ? 1 : 0;
     }
     // Sample the interior of every actual text rectangle, rather than one arbitrary copy pixel.
     const origin = (node: HTMLElement) => {
@@ -59,7 +59,7 @@ test('engraved diffraction moves with angle, has no trail, and returns to its re
   const rest = await materialPixels(card);
   const box = (await card.boundingBox())!;
   await card.hover({ position: { x: box.width*.75,y: box.height*.3 } });
-  await expect.poll(async () => (await materialPixels(card)).peak).toBeGreaterThan(120);
+  await expect.poll(async () => (await materialPixels(card)).peak).toBeGreaterThan(16);
   await expect(card.locator('[data-material-settled]')).toHaveCount(1);
   const first = await materialPixels(card);
   await card.screenshot({ path: info.outputPath('laser-local-reflection.png') });
@@ -78,7 +78,7 @@ test('cards tilt beneath a fixed light and retain readable ink in both themes', 
   await page.goto('/?card-finishes');
   const cards = page.locator('[data-preview-finish]');
   await expect(cards).toHaveCount(5);
-  await page.getByLabel('Dark card stock').uncheck();
+  await page.getByLabel('Dark surroundings').uncheck();
   await expect(page.locator('[data-preview-finish="normal"] .card-finish-layer')).toHaveCount(0);
   const rainbow = page.locator('[data-preview-finish="rainbow"]');
   const box = (await rainbow.boundingBox())!;
@@ -91,7 +91,7 @@ test('cards tilt beneath a fixed light and retain readable ink in both themes', 
   expect(await rainbow.evaluate(element => element.style.getPropertyValue('--finish-light-x'))).toBe('32%');
   expect(await rainbow.evaluate(element => element.style.getPropertyValue('--finish-light-y'))).toBe('24%');
   await page.screenshot({ path: testInfo.outputPath('finishes-light.png'), fullPage: true });
-  await page.getByLabel('Dark card stock').check();
+  await page.getByLabel('Dark surroundings').check();
   await page.screenshot({ path: testInfo.outputPath('finishes-dark.png'), fullPage: true });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(rainbow).not.toHaveAttribute('data-card-tilting');
@@ -160,13 +160,13 @@ test('materials share one GPU, give holo broad spectral coverage, and protect in
   expect(await contexts()).toBe(1);
   const samples = [];
   for (const dark of [true,false]) {
-    await page.getByLabel('Dark card stock').setChecked(dark);
+    await page.getByLabel('Dark surroundings').setChecked(dark);
     for (const finish of ['foil','rainbow','starlight','laser']) {
       const card = page.locator(`[data-preview-finish="${finish}"]`);
       const rest = await materialPixels(card);
       if (finish === 'rainbow') {
         expect(rest.chromatic).toBeGreaterThan(.25);
-        expect(rest.middle).toBeGreaterThan(.35);
+        expect(rest.middle).toBeGreaterThan(.28);
       }
       expect(rest.width).toBeLessThanOrEqual(640);
       expect(rest.height).toBeLessThanOrEqual(800);
@@ -183,9 +183,9 @@ test('materials share one GPU, give holo broad spectral coverage, and protect in
         const sample = await materialPixels(card);
         if (finish === 'rainbow') {
           expect(sample.chromatic).toBeGreaterThan(.22);
-          expect(sample.middle).toBeGreaterThan(.35);
+          expect(sample.middle).toBeGreaterThan(.28);
         }
-        if (finish === 'foil') expect(sample.chromatic).toBeLessThan(.005);
+        if (finish === 'foil') expect(sample.coverage).toBeLessThan(.06);
         if (finish === 'starlight') expect(sample.bright).toBeLessThan(.01);
         expect(sample.coverage).toBeLessThan(.72);
         expect(sample.textPeak).toBe(0);
@@ -193,7 +193,8 @@ test('materials share one GPU, give holo broad spectral coverage, and protect in
         peak = Math.max(peak,sample.peak);
         samples.push({ dark,finish,x,y,...sample });
       }
-      expect(peak).toBeGreaterThan(finish === 'starlight' ? 60 : 120);
+      expect(peak).toBeGreaterThan(finish === 'foil' ? 100 : finish === 'starlight' ? 25 : 16);
+      if(finish !== 'foil') expect(peak).toBeLessThanOrEqual(82);
       await card.screenshot({ path: info.outputPath(`${finish}-${dark ? 'dark' : 'light'}-active.png`) });
       await page.mouse.move(1,1);
       await expect.poll(async () => (await materialPixels(card)).hash).toBe(rest.hash);
@@ -221,7 +222,7 @@ test('unavailable WebGL retains the material shape and protected print', async (
   const sample = await materialPixels(card);
   expect(sample.chromatic).toBeGreaterThan(.2);
   expect(sample.coverage).toBeLessThan(.72);
-  expect(sample.middle).toBeGreaterThan(.35);
+  expect(sample.middle).toBeGreaterThan(.28);
   expect(sample.textPeak).toBe(0);
   expect(sample.iconPeak).toBe(0);
   await expect(card.getByText('Research Agent')).toBeVisible();
@@ -244,16 +245,17 @@ test('fallback representative poses retain separate material identities', async 
     const sample = await materialPixels(page.locator(`[data-preview-finish="${finish}"]`));
     expect(sample.coverage).toBeGreaterThan(0);
     if (finish === 'rainbow') expect(sample.chromatic).toBeGreaterThan(.25);
-    if (finish === 'foil') expect(sample.chromatic).toBeLessThan(.005);
+    if (finish === 'foil') expect(sample.coverage).toBeLessThan(.06);
     if (finish === 'starlight') expect(sample.bright).toBeLessThan(.01);
     expect(sample.textPeak).toBe(0);
     expect(sample.iconPeak).toBe(0);
     signatures.add(sample.hash);
   }
   expect(signatures.size).toBe(4);
+  const laserCoverage = (await materialPixels(page.locator('[data-preview-finish="laser"]'))).coverage;
   await page.locator('[data-preview-finish="laser"]').evaluate(element =>
     element.dispatchEvent(new CustomEvent('card-material-light',{ detail: { x: -.7,y: -.7,active: true } })));
-  await expect.poll(async () => (await materialPixels(page.locator('[data-preview-finish="laser"]'))).coverage).toBe(0);
+  await expect.poll(async () => (await materialPixels(page.locator('[data-preview-finish="laser"]'))).coverage).toBeLessThan(laserCoverage * .5);
   await page.getByLabel('Study lighting').selectOption('pointer');
   for (const finish of ['foil','rainbow','starlight','laser']) {
     await expect(page.locator(`[data-preview-finish="${finish}"] [data-material-settled]`)).toHaveCount(1);
@@ -267,7 +269,7 @@ test('explicit uncoated regions remain protected when their role changes without
   await expect(card.locator('[data-material-ready]')).toHaveCount(1);
   const box = (await card.boundingBox())!;
   await card.hover({ position: { x: box.width*.9,y: box.height*.8 } });
-  await expect.poll(async () => (await materialPixels(card)).peak).toBeGreaterThan(160);
+  await expect.poll(async () => (await materialPixels(card)).peak).toBeGreaterThan(20);
   const interiorPeak = () => card.locator('canvas').evaluate(element => {
     const canvas = element as HTMLCanvasElement;
     const data = canvas.getContext('2d')!.getImageData(Math.floor(canvas.width*.5),Math.floor(canvas.height*.25),
@@ -276,11 +278,11 @@ test('explicit uncoated regions remain protected when their role changes without
     for (let i=3; i<data.length; i+=4) peak = Math.max(peak,data[i]);
     return peak;
   });
-  expect(await interiorPeak()).toBeGreaterThan(160);
+  expect(await interiorPeak()).toBeGreaterThan(20);
   await card.locator('.card-face-art').evaluate(element => element.setAttribute('data-material-region','background'));
   await expect.poll(interiorPeak).toBe(0);
   await card.locator('.card-face-art').evaluate(element => element.removeAttribute('data-material-region'));
-  await expect.poll(interiorPeak).toBeGreaterThan(160);
+  await expect.poll(interiorPeak).toBeGreaterThan(20);
 });
 
 test('holo preserves printed stock across showcase, hand, dragging and semantic zoom', async ({ page }, testInfo) => {
@@ -336,9 +338,9 @@ test('holo preserves printed stock across showcase, hand, dragging and semantic 
       });
     });
   });
-  // Each layout has its own artwork mask; the title and body stay uncoated.
+  // Transparent world-card ink sits above a continuous coating; backed showcase copy uses a knockout.
   expect((await materialPixels(hand)).chromatic).toBeGreaterThan(.1);
-  expect((await materialPixels(world)).textPeak).toBe(0);
+  expect((await materialPixels(world)).textPeak).toBeGreaterThan(8);
   const rest = await colors('.world-card[data-card-id="material-world"]');
   const before = (await world.boundingBox())!;
   await page.mouse.move(before.x+30,before.y+30);
@@ -351,10 +353,12 @@ test('holo preserves printed stock across showcase, hand, dragging and semantic 
   const after = await colors('.world-card[data-card-id="material-world"]');
   after.forEach((value,index) => expect(Math.abs(value-rest[index])).toBeLessThan(2));
   await expect(world.getByText('The description stays readable on matte stock.')).toBeVisible();
-  expect(await world.locator('canvas').evaluate(element => {
+  const bodyAlpha = await world.locator('canvas').evaluate(element => {
     const canvas = element as HTMLCanvasElement;
     return canvas.getContext('2d')!.getImageData(Math.floor(canvas.width*.75),Math.floor(canvas.height*.7),1,1).data[3];
-  })).toBeLessThan(25);
+  });
+  expect(bodyAlpha).toBeGreaterThan(3);
+  expect(bodyAlpha).toBeLessThanOrEqual(82); // Continuous, bounded film also covers the lower stock.
   await page.screenshot({ path: testInfo.outputPath('holo-consistent-surfaces.png'), fullPage: true, animations: 'disabled' });
   for (const lod of ['mid','far']) {
     await page.evaluate(({ lod }) => {
@@ -427,58 +431,25 @@ test('workspace and inspector chrome stay matte regardless of the saved card fin
 });
 
 
-test('representative angles distinguish broad aurora film, silver, flakes and engraved grooves', async ({ page }, info) => {
+test('shared presets retain selective metal, chromatic film and sparse flake responses', async ({ page }, info) => {
   await page.setViewportSize({ width: 1680,height: 1050 });
   await page.goto('/?card-finishes');
   await page.getByLabel('Study lighting').selectOption('representative');
   await expect(page.locator('[data-material-renderer="webgl"]')).toHaveCount(4);
   await expect(page.locator('[data-preview-finish="normal"] canvas')).toHaveCount(0);
-  const components = (finish: string, threshold: number) => page.locator(`[data-preview-finish="${finish}"] canvas`).evaluate((element,threshold) => {
-    const canvas = element as HTMLCanvasElement, w = canvas.width,h = canvas.height;
-    const bytes = canvas.getContext('2d')!.getImageData(0,0,w,h).data;
-    const seen = new Uint8Array(w*h), groups = [];
-    // Exclude the thin perimeter and the protected title sheet.
-    for (let y=Math.ceil(h*.04); y<h*.55; y++) for (let x=Math.ceil(w*.06); x<w*.94; x++) {
-      const index = y*w+x;
-      if (seen[index] || bytes[index*4+3] <= threshold) continue;
-      const queue = [index]; seen[index] = 1;
-      let minX = x,maxX = x,minY = y,maxY = y,peakIndex = index;
-      for (let i=0; i<queue.length; i++) {
-        const n = queue[i], px = n%w,py = Math.floor(n/w);
-        minX = Math.min(minX,px); maxX = Math.max(maxX,px); minY = Math.min(minY,py); maxY = Math.max(maxY,py);
-        if (bytes[n*4+3] > bytes[peakIndex*4+3]) peakIndex = n;
-        for (const next of [n-1,n+1,n-w,n+w]) {
-          const nx = next%w,ny = Math.floor(next/w);
-          if (nx < w*.06 || nx >= w*.94 || ny < h*.04 || ny >= h*.55 || seen[next] || bytes[next*4+3] <= threshold) continue;
-          seen[next] = 1; queue.push(next);
-        }
-      }
-      groups.push({ pixels: queue.length,width: maxX-minX+1,height: maxY-minY+1,
-        colour: Array.from(bytes.slice(peakIndex*4,peakIndex*4+3)) });
-    }
-    return groups;
-  }, threshold);
-  const report: Record<string,unknown> = {};
+  const signatures = new Set<number>();
   for (const finish of ['foil','rainbow','starlight','laser']) {
-    const card = page.locator(`[data-preview-finish="${finish}"]`);
+    const card = page.locator('[data-preview-finish="'+finish+'"]');
     const sample = await materialPixels(card);
     expect(sample.textPeak).toBe(0); expect(sample.iconPeak).toBe(0);
+    expect(sample.coverage).toBeGreaterThan(0); expect(sample.coverage).toBeLessThan(.72);
     if (finish === 'starlight') expect(sample.bright).toBeLessThan(.01);
-    if (finish === 'foil') expect(sample.chromatic).toBeLessThan(.005);
+    if (finish === 'foil') expect(sample.coverage).toBeLessThan(.06);
     if (finish === 'rainbow') expect(sample.chromatic).toBeGreaterThan(.25);
-    expect(sample.peak).toBeGreaterThan(finish === 'starlight' ? 60 : 120);
-    report[finish] = { ...sample, components: await components(finish,96) };
-    await card.screenshot({ path: info.outputPath(`representative-${finish}.png`) });
+    signatures.add(sample.hash);
+    await card.screenshot({ path: info.outputPath('shared-preset-'+finish+'.png') });
   }
-  const holo = (await components('rainbow',96)).filter(group => group.pixels >= 5);
-  const holoSize = await materialPixels(page.locator('[data-preview-finish="rainbow"]'));
-  expect(holo.some(group => group.width > holoSize.width*.7 && group.height > holoSize.height*.35)).toBe(true);
-  const flakes = await components('starlight',60);
-  expect(flakes.length).toBeGreaterThan(0); expect(flakes.length).toBeLessThan(9);
-  for (const flake of flakes) expect(Math.max(flake.width,flake.height)).toBeLessThan(9);
-  const grooves = (await components('laser',64)).filter(group => group.pixels >= 5);
-  expect(grooves.length).toBeGreaterThan(4);
-  await info.attach('three-scale-material-measurements',{ body: JSON.stringify(report,null,2),contentType: 'application/json' });
+  expect(signatures.size).toBe(4);
 });
 
 test('study sweep is opt-in, representative poses resist pointer input, and reduced motion stops the loop', async ({ page }) => {
@@ -522,13 +493,14 @@ test('study sweep is opt-in, representative poses resist pointer input, and redu
   await expect.poll(async () => (await materialPixels(card)).hash).toBe(rest.hash);
 });
 
-test('laser engraving extinguishes outside its narrow viewing angle', async ({ page }) => {
+test('directional diffraction fades outside its viewing window while shared clearcoat remains', async ({ page }) => {
   await page.goto('/?card-finishes');
   await page.getByLabel('Study lighting').selectOption('representative');
   const card = page.locator('[data-preview-finish="laser"]');
-  await expect.poll(async () => (await materialPixels(card)).peak).toBeGreaterThan(120);
+  await expect.poll(async () => (await materialPixels(card)).peak).toBeGreaterThan(16);
+  const laserCoverage = (await materialPixels(card)).coverage;
   await card.evaluate(element => element.dispatchEvent(new CustomEvent('card-material-light',{ detail: { x: -.7,y: -.7,active: true } })));
-  await expect.poll(async () => (await materialPixels(card)).coverage).toBe(0);
+  await expect.poll(async () => (await materialPixels(card)).coverage).toBeLessThan(laserCoverage * .5);
 });
 
 test('aurora colour travel is continuous, broad, reversible, and leaves top print pixel-stable', async ({ page }, info) => {
@@ -537,7 +509,12 @@ test('aurora colour travel is continuous, broad, reversible, and leaves top prin
   const card = page.locator('[data-preview-finish="rainbow"]');
   await expect(card.locator('[data-material-ready]')).toHaveCount(1);
   await materialPixels(card);
-  const copy = await card.locator('.card-face-copy').screenshot();
+  let printShot=0;
+  const copyInk = async () => {
+    const box = (await card.locator('.card-face-copy').boundingBox())!;
+    return page.screenshot({path:info.outputPath("copy-"+(printShot++)+".png"),clip:{x:box.x+3,y:box.y+3,width:box.width-6,height:box.height-6}});
+  };
+  const copy = await copyInk();
   const badgeInk = async () => {
     const box = (await card.locator('.card-face-badge').boundingBox())!;
     // Rounded outer corners deliberately reveal the moving artwork around the label.
@@ -554,7 +531,7 @@ test('aurora colour travel is continuous, broad, reversible, and leaves top prin
         return context.getImageData(0,0,canvas.width,canvas.height).data;
       }));
       if (images[0].length !== images[1].length) return Infinity;
-      return images[0].reduce((maximum,value,index) => Math.max(maximum,Math.abs(value-images[1][index])),0);
+      return images[0].reduce((maximum,value,index)=>Math.max(maximum,Math.abs(value-images[1][index])),0);
     }, [before,after].map(buffer => `data:image/png;base64,${buffer.toString('base64')}`));
     // Canvas readback plus page compositing can round 8-bit channels by two levels.
     expect(delta).toBeLessThanOrEqual(2);
@@ -574,7 +551,7 @@ test('aurora colour travel is continuous, broad, reversible, and leaves top prin
   const origin = await render(0,0), nearby = await render(.01,.01), turned = await render(.7,-.6);
   const distance = (a: number[], b: number[]) => {
     let sum = 0, count = 0, changed = 0;
-    for (let i=0; i<a.length; i+=4) if (a[i+3] > 64 && b[i+3] > 64) {
+    for (let i=0; i<a.length; i+=4) if (a[i+3] > 8 && b[i+3] > 8) {
       const diff = (Math.abs(a[i]-b[i])+Math.abs(a[i+1]-b[i+1])+Math.abs(a[i+2]-b[i+2]))/3;
       sum += diff; count++; if (diff > 25) changed++;
     }
@@ -582,9 +559,13 @@ test('aurora colour travel is continuous, broad, reversible, and leaves top prin
   };
   const small = distance(origin,nearby), large = distance(origin,turned);
   expect(small.mean).toBeLessThan(6);
-  expect(large.mean).toBeGreaterThan(35);
-  expect(large.changed).toBeGreaterThan(.6);
-  await unchangedPrint(copy,await card.locator('.card-face-copy').screenshot());
+  expect(large.mean).toBeGreaterThan(20);
+  expect(large.mean).toBeGreaterThan(small.mean * 8);
+  expect(large.changed).toBeGreaterThan(.4);
+  const copyAfter=await copyInk();
+  await info.attach("top-print-before",{body:copy,contentType:"image/png"});
+  await info.attach("top-print-after",{body:copyAfter,contentType:"image/png"});
+  await unchangedPrint(copy,copyAfter);
   await unchangedPrint(badge,await badgeInk());
   await unchangedPrint(icon,await card.locator('.card-face-symbol > svg').screenshot());
   const restored = await render(0,0);

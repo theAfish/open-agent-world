@@ -3,7 +3,9 @@ import { Download, Package, Plus, Printer as PrinterIcon, RefreshCw, Save, Share
 import { apiErrorMessage, worldApi } from '../api/client';
 import { finishLabel } from '../cards/cardFinish';
 import { FaceDesignerCanvas } from './FaceDesignerCanvas';
-import { faceStudio } from './faceDesign';
+import { faceStudio, MODE_LABELS } from './faceDesign';
+import { faceButtonTargets } from './faceButtons';
+import { CoreButtonWarnings } from './CoreButtonWarnings';
 import { useWorldStore } from '../state/worldStore';
 import { useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { PackSurface } from '../shell/PackSurface';
@@ -101,10 +103,20 @@ export function FaceDesigner(props: PluginViewProps) {
 
 export function FunctionDesigner(props: PluginViewProps) {
   const editor = useEditor<FunctionDesign>(props), task = useTask(), { draft, change } = editor;
+  const inputs = useInputs(props.card.id);
+  const linkedFace = inputs.context?.inputs.face?.config as FaceDesign | undefined;
+  const buttons = linkedFace ? faceButtonTargets(linkedFace) : [];
   const updateField = (index: number, patch: Partial<InputField>) => change({ fields: draft.fields.map((field, i) => i === index ? { ...field, ...patch } : field) });
   if (props.level === 'preview') return <ToolPreview id={props.card.id}><strong>{draft.fields.length} 个输入字段</strong><small>{draft.fields.map(field => field.label).join(' / ')}</small><p>{({ template: '文本模板', sum: '数值求和', multiply: '数值乘积', join: '内容拼接' })[draft.operation]}</p></ToolPreview>;
   return <Frame title="功能设计器" step="03 / 功能" task={task} level={props.level}>
     <p className="factory-hint">添加表单字段，再选择运行方式。模板使用 {'{{字段标识}}'} 插入内容。</p>
+    <section className="factory-button-bindings" aria-label="卡面按钮">
+      <h4>卡面按钮</h4><Inputs {...inputs} />
+      {linkedFace ? buttons.length ? <ul>{buttons.map(button => <li key={`${button.mode}:${button.element_id}`}>
+        <strong>{button.label}</strong> · {MODE_LABELS[button.mode]} · {button.action === 'custom' ? '待挂载逻辑' : '内置操作'}
+      </li>)}</ul> : <p>此卡面尚未添加按钮。</p> : <p>可将卡面设计器连接到这里，读取已保存的卡面按钮。</p>}
+      <p className="factory-hint">自定义按钮的逻辑挂载将在后续开放。当前运行按钮使用下方配置的功能。</p>
+    </section>
     <div className="factory-function-editor"><div className="factory-controls">
       {draft.fields.map((field, index) => <div className="factory-field-editor" key={index}>
         <div className="factory-row"><label>字段标识<input maxLength={40} value={field.key} onChange={event => updateField(index, { key: event.target.value })} /></label>
@@ -138,7 +150,7 @@ function useInputs(cardId: string) {
   useEffect(() => {
     let current = true;
     void worldApi.factory<FactoryContext>(cardId, 'context').then(value => { if (current) { setContext(value); setError(''); } })
-      .catch(cause => { if (current) setError(apiErrorMessage(cause)); });
+      .catch(cause => { if (current) { setContext(undefined); setError(apiErrorMessage(cause)); } });
     return () => { current = false; };
   }, [cardId, signature]);
   return { context, error };
@@ -158,6 +170,7 @@ export function Printer(props: PluginViewProps) {
   return <Frame title="卡牌印刷器" step="04 / 印刷" task={task} level={props.level}>
     <Inputs {...inputs} />
     {inputs.context?.inputs.face && <FacePreview face={inputs.context.inputs.face.config as FaceDesign} />}
+    {inputs.context?.inputs.face && <CoreButtonWarnings face={inputs.context.inputs.face.config as FaceDesign} />}
     <p>印刷会固定当前已保存的卡面和功能。修改设计后可再次印刷。</p>
     <button type="button" disabled={!inputs.context || inputs.context.issues.length > 0} onClick={() => void task.perform(async () => {
       const card = await worldApi.factory<WorldCard>(props.card.id, 'print');

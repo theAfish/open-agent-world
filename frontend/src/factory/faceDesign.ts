@@ -6,7 +6,7 @@ import { recipeSettings, reflowSurface } from './designRecipes';
 export const FACE_MODES: NodeSurfaceLevel[] = ['node', 'preview', 'inspector', 'workspace'];
 export const MODE_LABELS: Record<NodeSurfaceLevel, string> = { node: '节点', preview: '卡片', inspector: '详细', workspace: '工作区' };
 export const ELEMENT_LABELS: Record<FaceElement['kind'], string> = {
-  title: '标题', description: '说明', icon: '图标', help: '操作提示', fields: '输入字段', action: '运行按钮', result: '结果区域', text: '自由文本',
+  title: '标题', description: '说明', icon: '图标', help: '操作提示', fields: '输入字段', action: '运行按钮', button: '按钮', result: '结果区域', text: '自由文本',
   subtitle: '副标题', metadata: '元信息', status: '状态', tags: '标签', illustration: '插图', badge: '徽标',
 };
 export const FACE_PALETTES: Record<CardFaceTone, [string, string]> = {
@@ -51,11 +51,10 @@ export function faceStudio(face: FaceDesign): FaceStudio {
   for (const mode of FACE_MODES) {
     const surface = modes[mode];
     if (!surface) continue;
-    if (surface.design) {
-      const compiled = reflowSurface(surface, face);
-      if (JSON.stringify(compiled) !== JSON.stringify(surface)) { modes[mode] = compiled; changed = true; }
-      continue;
-    }
+    // A recipe records how the surface was created, not a live layout constraint.
+    // Recompiling on read moves siblings as soon as one layer is detached, and
+    // changes the saved artwork when text or production settings are edited.
+    if (surface.design) continue;
     if (surface.background_png) continue;
     const preset = presetSurface(mode, face, surface.preset);
     const sameItems = (items: object[], defaults: object[]) => items.length === defaults.length && items.every((item, i) =>

@@ -14,6 +14,7 @@ import type { CanvasNode } from './types';
 import './cardLOD.css';
 import { FaceArtwork } from '../factory/FaceArtwork';
 import type { PrintedDesign } from '../factory/types';
+import { WorldCardPrint } from './WorldCardPrint';
 
 /** Card model projection: no plugin bodies, editors, file requests or workspaces. */
 export const CardLODView = memo(function CardLODView({ data, selected, type, isConnectable, width, height }: NodeProps<CanvasNode>) {
@@ -32,6 +33,7 @@ export const CardLODView = memo(function CardLODView({ data, selected, type, isC
     style={{ '--card-kind': definition?.color, borderRadius: NODE_SURFACE_RADIUS[level] } as CSSProperties}
     data-card-id={card.id} data-card-type={card.type} data-surface-level={level}
     data-finish={normalizeCardFinish(card.finish)}
+    data-card-print={!workspace && !container && !surface ? 'collectible' : undefined}
     data-card-expanded={level === 'workspace' || level === 'inspector' ? 'true' : 'false'}
     data-render-lod={data.renderLOD} aria-label={`${t(definition?.label ?? card.type)} ${card.name}`}
     {...lighting}
@@ -44,6 +46,7 @@ export const CardLODView = memo(function CardLODView({ data, selected, type, isC
       if ((event.target as Element).closest('.react-flow__handle, button, input, textarea, select, a, [contenteditable="true"]')) return;
       if (!container && (level === 'node' || level === 'preview')) useNodeSurfaceStore.getState().openPrimary(card.id);
     }}>
+    {!workspace && !container && !surface && <WorldCardPrint />}
     {isConnectable && !container && <ConnectionDropSurface nodeId={card.id} />}
     {isConnectable && ([Position.Top, Position.Right, Position.Bottom, Position.Left] as const).map(side =>
       <Handle key={side} id={`boundary-${side}`} type="source" position={side}
@@ -51,10 +54,10 @@ export const CardLODView = memo(function CardLODView({ data, selected, type, isC
         aria-label={t('Start a relationship from the {v0} edge of {v1}', { v0: side, v1: card.name })} />)}
     {surface && design ? <FaceArtwork face={design.face} surface={surface} /> : <><header data-status={card.status} title={t(card.status)} className={`card-lod-heading node-drag-region ${mid ? workspace ? 'workspace-titlebar' : 'card-header node-surface-header' : 'card-lod-symbol'} ${container ? 'container-header container-drag-region' : ''} ${workspace || container ? 'card-finish-surface' : ''}`}>
       {isConnectable && container && <ConnectionDropSurface nodeId={card.id} />}
-      {mid ? <><span className="card-lod-kind" aria-hidden="true"><CatalogIcon definition={definition} size={24} /></span>
-      <div className="card-lod-title"><span className="card-eyebrow">{t(definition?.label ?? card.type)}</span><strong>{card.name}</strong></div>
-      <span className="card-lod-status" data-status={card.status} /></>
-        : <><CatalogIcon definition={definition} size={34} /><strong>{card.name}</strong></>}
+      {mid ? <><span className="card-lod-kind" data-material-layer="top-print" aria-hidden="true"><CatalogIcon definition={definition} size={24} /></span>
+      <div className="card-lod-title" data-material-layer="top-print"><span className="card-eyebrow">{t(definition?.label ?? card.type)}</span><strong>{card.name}</strong></div>
+      <span className="card-lod-status" data-material-layer="top-print" data-status={card.status} /></>
+        : <><span className="card-lod-emblem" data-material-layer="top-print"><CatalogIcon definition={definition} size={34} /></span><strong data-material-layer="top-print">{card.name}</strong></>}
       {(workspace || container) && <CardFinishLayer finish={card.finish} quality="thumbnail" surface="chrome" />}
     </header>
     {mid && level !== 'node' && !container && <CardStaticPreview card={card} definition={definition} workspace={workspace} width={width} height={height} />}

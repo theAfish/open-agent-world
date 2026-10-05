@@ -42,6 +42,7 @@ import { useCollectionHover } from "../state/shadowCollection";
 import { CardFinishLayer } from "./CardFinishLayer";
 import { useCardFinish } from "./useCardFinish";
 import { finishLabel, normalizeCardFinish } from "./cardFinish";
+import { WorldCardPrint } from './WorldCardPrint';
 
 const DRAG_THRESHOLD_PX = 5;
 const NON_DRAG_SELECTOR = "button, input, textarea, select, label, a, summary, [role='button'], [role='separator'], [contenteditable]:not([contenteditable='false']), .nodrag, .react-flow__handle";
@@ -172,6 +173,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
       data-card-revision={card.revision}
       data-card-type={card.type}
       data-finish={normalizeCardFinish(card.finish)}
+      data-card-print={!customFace && (visualLevel === 'node' || visualLevel === 'preview') ? 'collectible' : undefined}
       data-card-expanded={visualLevel === "inspector" || visualLevel === "workspace" ? "true" : "false"}
       data-surface-level={level}
       data-render-lod="full"
@@ -210,6 +212,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
         if (visualLevel === "node" || visualLevel === "preview") openPrimary(card.id);
       }}
     >
+      {!customFace && (visualLevel === 'node' || visualLevel === 'preview') && <WorldCardPrint />}
       {!card.ephemeral && <ConnectionDropSurface nodeId={card.id} />}
       <ActivityGlow phase={activity.phase} />
       {promotion && <div className="minister-promotion-sweep" aria-hidden="true" />}
@@ -227,12 +230,12 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
       {visualLevel !== "inspector" && <EquipmentToggle card={card} />}
       {customFace ? <DesignedCard card={card} level={level} /> : visualLevel === "workspace" ? <WorkspaceSurface card={card} /> : <>
         <header className={`card-header node-surface-header node-drag-region ${visualLevel === "inspector" ? "card-finish-surface" : ""}`}>
-          <div className="card-kind-icon" aria-hidden="true"><CatalogIcon definition={definition} size={18} /></div>
-          <div className="card-title-group">
+          <div className="card-kind-icon" data-material-layer="top-print" aria-hidden="true"><CatalogIcon definition={definition} size={18} /></div>
+          <div className="card-title-group" data-material-layer="top-print">
             <span className="card-eyebrow">{isMissingCard(card, catalog) ? `MISSING · ${card.type}` : label}</span>
             <CardName key={`${card.id}:${visualLevel}`} card={card} label={label} editable={visualLevel !== "node"} />
           </div>
-          <div className="card-status" data-status={displayStatus} title={`${t('Status')}: ${t(statusLabel(displayStatus))}`}>
+          <div className="card-status" data-material-layer="top-print" data-status={displayStatus} title={`${t('Status')}: ${t(statusLabel(displayStatus))}`}>
             <span aria-hidden="true" /><span>{t(statusLabel(displayStatus))}</span>
           </div>
           {(visualLevel === "node" || visualLevel === "preview") && support.node && support.preview ? (
@@ -255,7 +258,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
 
         <div className="node-preview-content" aria-hidden={visualLevel !== "preview"}>
           {visualLevel === 'preview' && <div className="node-preview-body"><NodePreview card={card} /></div>}
-          {presentation.open !== "preview" && <span className="node-preview-hint">{t(presentation.open === "workspace" ? "Open workspace" : "Click for details")}</span>}
+          {presentation.open !== "preview" && <span className="node-preview-hint" data-material-layer="top-print">{t(presentation.open === "workspace" ? "Open workspace" : "Click for details")}</span>}
         </div>
 
         <div className="card-body node-inspector-content nodrag nopan" aria-hidden={visualLevel !== "inspector"}>

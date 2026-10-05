@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { FACE_MODES, presetSurface } from '../src/factory/faceDesign';
 import { chooseRecipe, newSlot } from '../src/factory/designRecipes';
 import type { FaceDesign } from '../src/factory/types';
@@ -15,7 +15,9 @@ test.afterEach(async ({ request }) => {
 async function openDevice(page: Page, id: string) {
   await page.getByRole('button', { name: 'Fit view', exact: true }).click();
   const card = page.locator(`[data-card-id="${id}"]`);
-  await card.click({ position: { x: 80, y: 25 } });
+  const surfaceButton = card.getByRole('combobox', { name: '切换视图', exact: true });
+  if (await surfaceButton.count()) await surfaceButton.selectOption('workspace');
+  else await card.click({ position: { x: 80, y: 25 } });
   const dialog = page.locator(`[data-workspace-node-id="${id}"]`);
   await expect(dialog).toBeVisible();
   await expect(card).toHaveCSS('width', '1020px');
@@ -25,6 +27,46 @@ async function openDevice(page: Page, id: string) {
   await expect.poll(async () => (await dialog.boundingBox())!.width).toBeLessThan(1600);
   await page.waitForTimeout(450); // Wait for camera focus before raw pointer-coordinate gestures.
   return dialog;
+}
+
+async function designStep(editor: Locator, name: string) {
+  await editor.getByRole('navigation', { name: '设计步骤' }).getByRole('button', { name: ['工艺层','版面与印刷'].includes(name) ? '选择油墨第 1 层' : name, exact: true }).click();
+}
+async function baseTools(editor: Locator, name: string) {
+  if (name === '图层') await designStep(editor, '工艺层');
+  else await editor.getByRole('button', { name: '预设', exact: true }).click();
+}
+async function addSurfaceButton(editor: Locator, mode: 'node' | 'preview' | 'inspector' | 'workspace') {
+  const advanced = editor.getByRole('button', { name: '高级设置', exact: true });
+  if (await advanced.getAttribute('aria-pressed') !== 'true') await advanced.click();
+  const label = { node: '节点', preview: '卡片', inspector: '详细', workspace: '工作区' }[mode];
+  await editor.getByRole('button', { name: `${label} 已启用`, exact: true }).click();
+  await designStep(editor, '工艺层');
+  const panel = editor.locator('.process-element-panel').filter({ hasText: '核心操作与自定义逻辑入口' });
+  if (await panel.getAttribute('open') === null) await panel.locator('summary').click();
+  await editor.getByRole('button', { name: '添加切换视图按钮', exact: true }).click();
+  for (const [name, value] of [['位置 X', mode === 'node' ? '24' : '32'], ['位置 Y', mode === 'node' ? '40' : '16'], ['元素宽度', mode === 'node' ? '64' : '140'], ['元素高度', '28']]) {
+    const input = editor.getByRole('spinbutton', { name, exact: true });
+    await input.fill(value); await input.press('Enter');
+  }
+}
+async function addProcess(editor: Locator, name: string) {
+  await editor.locator('.process-add-menu > summary').click();
+  await editor.getByRole('button', { name, exact: true }).click();
+}
+async function applyStyle(editor: Locator, kit: string) {
+  await editor.getByRole('button', { name: '预设', exact: true }).click();
+  const details = editor.locator('.face-preset-section').filter({ hasText: '字体与配色' });
+  if (await details.getAttribute('open') === null) await details.locator('summary').click();
+  await editor.getByRole('button', { name: `应用 ${kit} 风格`, exact: true }).click();
+  await designStep(editor, '工艺层');
+}
+
+async function artworkGeometry(stage: Locator) {
+  return stage.locator('[data-face-element]').evaluateAll(elements => elements.map(element => {
+    const item = element as HTMLElement;
+    return { id: item.dataset.faceElement, left: item.style.left, top: item.style.top, width: item.style.width, height: item.style.height, fontSize: item.style.fontSize };
+  }));
 }
 
 test('design, try, print, pack and download real cards through the factory', async ({ page, request }, testInfo) => {
@@ -44,23 +86,44 @@ test('design, try, print, pack and download real cards through the factory', asy
   const face = await openDevice(page, devices.face);
   await expect(face.locator('.face-properties')).toHaveCount(0);
   await expect(face.getByRole('spinbutton')).toHaveCount(0);
+  await expect(face.getByRole('group', { name: '卡纸材质' })).toBeVisible();
+  await expect(face.getByRole('navigation', { name: '设计步骤' }).locator(':scope > button, .process-layer-select')).toHaveCount(3);
+  await page.screenshot({ path: testInfo.outputPath('face-designer-stock.png') });
+  await designStep(face, '版面与印刷');
   await page.screenshot({ path: testInfo.outputPath('face-designer-layouts.png') });
+  await face.getByRole('button', { name: '预设', exact: true }).click();
   await face.getByRole('button', { name: '应用 Hero 版式', exact: true }).click();
-  await face.getByRole('button', { name: '风格', exact: true }).click();
-  await face.getByRole('button', { name: '应用 Playful 风格', exact: true }).click();
+  await applyStyle(face, 'Playful');
   await page.screenshot({ path: testInfo.outputPath('face-designer-styles.png') });
-  await face.getByRole('button', { name: '内容', exact: true }).click();
-  await face.getByLabel('卡牌名称', { exact: true }).fill('问候卡');
-  await face.getByRole('button', { name: '材质', exact: true }).click();
-  await face.getByRole('button', { name: 'Starlight 材质', exact: true }).click();
+  await face.getByRole('button', { name: '设计标题', exact: true }).click();
+  await face.locator('.face-properties').getByLabel('标题', { exact: true }).fill('问候卡');
+  await designStep(face, '工艺层');
+  await addProcess(face, '添加覆膜');
+  await face.getByLabel('覆膜类型', {exact:true}).selectOption('starlight');
+  await addProcess(face, '添加油墨');
+  await face.locator('.process-element-panel > summary').filter({ hasText: '文本' }).click();
+  await face.getByRole('button', { name: '标题', exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath('face-designer-material.png') });
   await expect(face.locator('.face-edit-stage .factory-artwork')).toHaveAttribute('data-kit', 'playful');
+  await face.getByRole('button', { name: '预设', exact: true }).click();
+  await face.getByRole('textbox', { name: '配方名称' }).fill('Workshop starlight');
+  await face.getByRole('button', { name: '保存配方', exact: true }).click();
+  await expect(face.locator('.face-panel-scroll [role=status]')).toHaveText('配方已保存');
+  const storedProfile = await (await request.get('/api/application')).json();
+  const presets = JSON.parse(storedProfile.values['oaw.card-production-presets.v1']);
+  expect(presets[0]).toMatchObject({name:'Workshop starlight',settings:{production:{layers:expect.arrayContaining([expect.objectContaining({kind:'laminate',film:'starlight'})])}}});
+
+  for (const mode of FACE_MODES) await addSurfaceButton(face, mode);
+  await designStep(face, '成品');
+  await expect(face.locator('.face-edit-stage').getByRole('combobox', { name: '切换视图', exact: true })).toHaveValue('workspace');
+  await expect(face.getByRole('status', { name: '卡面按钮提醒' })).toContainText('仍可保存和印刷');
   await face.getByRole('button', { name: '保存设计', exact: true }).click();
   await expect(face.locator('.factory-message')).toContainText('设计已保存');
   await page.screenshot({ path: testInfo.outputPath('face-designer.png') });
   await face.getByRole('button', { name: 'Close workspace', exact: true }).click();
 
   const func = await openDevice(page, devices.function);
+  await expect(func.getByRole('region', { name: '卡面按钮' })).toContainText('切换视图');
   await func.getByRole('textbox', { name: '输出模板', exact: true }).fill('欢迎 {{name}} 来到卡包工厂');
   await func.locator('.factory-test').getByLabel('名称', { exact: true }).fill('小明');
   await func.getByRole('button', { name: '试运行', exact: true }).click();
@@ -74,7 +137,7 @@ test('design, try, print, pack and download real cards through the factory', asy
   await expect(printer.getByRole('button', { name: '印刷卡牌', exact: true })).toBeEnabled();
   const printing = page.waitForResponse(response => response.url().endsWith(`/factory/${devices.printer}/print`) && response.request().method() === 'POST');
   await printer.getByRole('button', { name: '印刷卡牌', exact: true }).click();
-  await expect(printer.getByRole('status')).toContainText('已印刷');
+  await expect(printer.locator('.factory-message')).toContainText('已印刷');
   const printed = await (await printing).json();
   createdNodes.push(printed.id);
   expect(printed.name).toBe('问候卡');
@@ -84,16 +147,17 @@ test('design, try, print, pack and download real cards through the factory', asy
   await runtime.getByRole('button', { name: '运行', exact: true }).click();
   await expect(runtime.locator('output')).toHaveText('欢迎 世界 来到卡包工厂');
   const authored = page.locator(`[data-card-id="${printed.id}"]`);
-  await authored.getByRole('combobox', { name: '显示模式', exact: true }).selectOption('node');
+  await expect(authored.locator('.factory-surface-toolbar')).toHaveCount(0);
+  await authored.getByRole('combobox', { name: '切换视图', exact: true }).selectOption('node');
   await expect(authored).toHaveCSS('width', '112px');
   await expect(authored.locator('.factory-shapes ellipse')).toHaveCount(1);
   await authored.hover();
-  await authored.getByRole('combobox', { name: '显示模式', exact: true }).selectOption('inspector');
+  await authored.getByRole('combobox', { name: '切换视图', exact: true }).selectOption('inspector');
   await expect(authored).toHaveCSS('width', '438px');
   await expect(page.locator(`[data-resize-node="${printed.id}"]`)).toHaveCount(0);
   await expect(authored.getByLabel('名称', { exact: true })).toBeVisible();
-  await authored.getByRole('combobox', { name: '显示模式', exact: true }).selectOption('workspace');
-  await runtime.getByRole('button', { name: 'Close workspace', exact: true }).click();
+  await authored.getByRole('combobox', { name: '切换视图', exact: true }).selectOption('workspace');
+  await authored.getByRole('combobox', { name: '切换视图', exact: true }).selectOption('preview');
 
   const packer = await openDevice(page, devices.packer);
   await packer.getByRole('combobox', { name: '选择素材', exact: true }).selectOption(`node:${printed.id}`);
@@ -172,14 +236,16 @@ test('interactive face modes, snapping, polygon editing and PNG survive printing
   const devices = Object.fromEntries(workshop.nodes.map((node: { id: string; type: string }) => [node.type.split('.').pop(), node.id]));
   await page.goto('/');
   const editor = await openDevice(page, devices.face);
-  await editor.getByRole('button', { name: '内容', exact: true }).click();
-  await editor.getByLabel('卡牌名称', { exact: true }).fill('自由形状卡');
-  await editor.getByRole('button', { name: '高级', exact: true }).click();
-  await editor.locator('.face-layer-list').getByRole('button', { name: '标题 槽位', exact: true }).click();
+  await designStep(editor, '版面与印刷');
+  await editor.getByRole('button', { name: '设计标题', exact: true }).click();
+  await editor.locator('.face-properties').getByLabel('标题', { exact: true }).fill('自由形状卡');
+  await editor.getByRole('button', { name: '高级设置', exact: true }).click();
+  await editor.getByRole('button', { name: '设计标题', exact: true }).click();
   await editor.getByRole('spinbutton', { name: '位置 X', exact: true }).fill('24');
   await editor.getByRole('spinbutton', { name: '位置 Y', exact: true }).fill('104');
   await editor.getByRole('spinbutton', { name: '位置 Y', exact: true }).press('Enter');
   const stage = editor.getByRole('group', { name: '卡片模式设计画布' });
+  const siblings = (await artworkGeometry(stage)).filter(element => element.id !== 'title');
   const title = stage.locator('[data-edit-element="title"]');
   const bounds = (await title.boundingBox())!, canvas = (await stage.boundingBox())!;
   const scale = canvas.width / 240;
@@ -199,16 +265,20 @@ test('interactive face modes, snapping, polygon editing and PNG survive printing
   await expect(stage.locator('.face-snap-guide.is-x')).toBeVisible(); await page.mouse.up();
   // The new recipe's safe margin is the alignment anchor.
   expect(Number(await editor.getByRole('spinbutton', { name: '位置 X', exact: true }).inputValue())).toBe(23);
+  expect((await artworkGeometry(stage)).filter(element => element.id !== 'title')).toEqual(siblings);
 
-  await editor.getByRole('button', { name: '卡片', exact: true }).click();
+  await designStep(editor, '版面与印刷');
+  await baseTools(editor, '版式');
   await editor.getByRole('button', { name: '应用 Minimal 版式', exact: true }).click();
   await expect(stage.locator('.factory-artwork')).toHaveAttribute('data-recipe', 'minimal');
   await editor.getByRole('button', { name: '撤销', exact: true }).click();
   await expect(stage.locator('.factory-artwork')).toHaveAttribute('data-recipe', 'hero');
-  await editor.getByRole('button', { name: '高级', exact: true }).click();
+  await editor.getByRole('button', { name: '高级设置', exact: true }).click();
   await editor.getByRole('spinbutton', { name: '画布宽度', exact: true }).fill('360');
   await editor.getByRole('spinbutton', { name: '画布高度', exact: true }).fill('240');
+  await editor.getByRole('spinbutton', { name: '画布高度', exact: true }).press('Enter');
   await editor.getByRole('button', { name: '编辑形状', exact: true }).click();
+  await stage.getByRole('button', { name: '选择圆角矩形', exact: true }).click();
   await editor.getByRole('button', { name: '＋多边形', exact: true }).click();
   const vertex = stage.getByRole('button', { name: '顶点 1', exact: true });
   const vertexBounds = (await vertex.boundingBox())!, newScale = (await stage.boundingBox())!.width / 360;
@@ -227,6 +297,8 @@ test('interactive face modes, snapping, polygon editing and PNG survive printing
   });
   await editor.getByLabel('上传 PNG 背景', { exact: true }).setInputFiles({ name: 'oval.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
   await expect(stage.locator('.factory-artwork')).toHaveAttribute('data-image-shape', 'true');
+  await expect(stage.locator('.factory-face-fields')).toHaveCount(0);
+  await expect(stage.locator('.factory-background')).toHaveAttribute('data-material-layer','artwork');
   await editor.getByRole('button', { name: '节点 已启用', exact: true }).click();
   await editor.getByLabel('允许此显示模式', { exact: true }).uncheck();
   await editor.getByRole('button', { name: '详细 已启用', exact: true }).click();
@@ -234,6 +306,9 @@ test('interactive face modes, snapping, polygon editing and PNG survive printing
   await editor.getByRole('button', { name: '工作区 已启用', exact: true }).click();
   await editor.getByRole('spinbutton', { name: '画布宽度', exact: true }).fill('800');
   await editor.getByRole('spinbutton', { name: '画布高度', exact: true }).fill('560');
+  await editor.getByRole('spinbutton', { name: '画布高度', exact: true }).press('Enter');
+  await addSurfaceButton(editor, 'workspace');
+  await editor.getByRole('button', { name: '高级设置', exact: true }).click();
   await editor.getByRole('button', { name: '卡片 已启用', exact: true }).click();
   await expect(editor.getByRole('spinbutton', { name: '画布宽度', exact: true })).toHaveValue('360');
   await editor.getByRole('button', { name: '保存设计', exact: true }).click();
@@ -258,8 +333,8 @@ test('interactive face modes, snapping, polygon editing and PNG survive printing
   await runtime.getByLabel('名称', { exact: true }).fill('自定义卡面');
   await runtime.getByRole('button', { name: '运行', exact: true }).click();
   await expect(runtime.locator('output')).toHaveText('你好，自定义卡面！');
-  expect(await runtime.getByRole('combobox', { name: '显示模式', exact: true }).locator('option').allTextContents()).toEqual(['卡片', '工作区']);
-  await runtime.getByRole('combobox', { name: '显示模式', exact: true }).selectOption('preview');
+  expect(await runtime.getByRole('combobox', { name: '切换视图', exact: true }).locator('option').allTextContents()).toEqual(['卡片', '工作区']);
+  await runtime.getByRole('combobox', { name: '切换视图', exact: true }).selectOption('preview');
   await expect(runtime).toHaveCSS('width', '360px');
   await expect(runtime.locator('.factory-artwork')).toHaveAttribute('data-image-shape', 'true');
   await page.screenshot({ path: testInfo.outputPath('printed-png-card.png') });
@@ -268,7 +343,7 @@ test('interactive face modes, snapping, polygon editing and PNG survive printing
   expect(errors).toEqual([]);
 });
 
-test('semantic designer reflows content, reflects light and restores the saved style', async ({ page, request }, testInfo) => {
+test('designer preserves authored layers, reflects light and restores the saved style', async ({ page, request }, testInfo) => {
   test.setTimeout(60000);
   await page.setViewportSize({ width: 1700, height: 1100 });
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
@@ -282,32 +357,41 @@ test('semantic designer reflows content, reflects light and restores the saved s
   const card = workshop.nodes.find((node: { type: string }) => node.type === 'oaw.factory.face');
   await page.goto('/'); await expect(page.locator(`[data-card-id="${card.id}"]`)).toBeVisible();
   const editor = await openDevice(page, card.id);
+  await designStep(editor, '版面与印刷');
+  await editor.getByRole('button', { name: '预设', exact: true }).click();
   await editor.getByRole('button', { name: '应用 Badge 版式' }).click();
-  await editor.getByRole('button', { name: '风格', exact: true }).click();
-  await editor.getByRole('button', { name: '应用 Sand 风格' }).click();
-  await editor.getByRole('button', { name: '内容', exact: true }).click();
+  await applyStyle(editor, 'Sand');
+  await baseTools(editor, '图层');
   const sidebar = editor.locator('.face-sidebar');
-  await sidebar.getByLabel('卡牌名称', { exact: true }).fill('灵感收藏夹');
-  await sidebar.getByLabel('说明', { exact: true }).fill('收集闪现的念头，让好想法慢慢生长。');
-  await sidebar.locator('.face-slot-add').getByRole('button', { name: '标签', exact: true }).click();
-  await sidebar.getByLabel('标签', { exact: true }).fill('灵感, 日常');
-  await expect(editor.getByRole('spinbutton')).toHaveCount(0);
-  await editor.getByRole('button', { name: '关闭内容检查器' }).click();
+  const stage = editor.locator('.face-edit-stage'), original = await artworkGeometry(stage);
   await editor.getByRole('button', { name: '设计标题', exact: true }).click();
+  await editor.locator('.face-properties').getByLabel('标题', { exact: true }).fill('灵感收藏夹');
+  await editor.getByRole('button', { name: '设计说明', exact: true }).click();
+  await editor.locator('.face-properties').getByLabel('说明', { exact: true }).fill('收集闪现的念头，让好想法慢慢生长。');
+  expect(await artworkGeometry(stage)).toEqual(original);
+  await sidebar.locator('.process-element-panel > summary').filter({ hasText: '文本' }).click();
+  await sidebar.getByRole('button', { name: '标签', exact: true }).click();
+  await editor.locator('.face-properties').getByLabel('标签', { exact: true }).fill('灵感, 日常');
+  expect((await artworkGeometry(stage)).filter(element => element.id !== 'tags')).toEqual(original);
+  await expect(editor.getByRole('spinbutton', { name: '位置 X', exact: true })).toBeVisible();
+  await editor.getByRole('button', { name: '关闭内容检查器' }).click();
+  await expect(editor.getByRole('spinbutton')).toHaveCount(0);
+  await editor.getByRole('button', { name: '设计标题', exact: true }).focus();
   await page.keyboard.press('Delete');
   await expect(editor.locator('.face-edit-stage [data-kind=title]')).toHaveCount(0);
   await editor.getByRole('button', { name: '撤销', exact: true }).click();
   await expect(editor.locator('.face-edit-stage [data-kind=title]')).toHaveText('灵感收藏夹');
   await sidebar.locator('.face-panel-scroll').evaluate(el => el.scrollTop = 0);
   await editor.locator('.factory-face-editor').screenshot({ path: testInfo.outputPath('designer-content.png') });
-  await editor.getByRole('button', { name: '材质', exact: true }).click();
-  await editor.getByRole('button', { name: 'Holo 材质' }).click();
-  await editor.getByRole('slider', { name: '材质强度' }).fill('65');
-  await editor.getByRole('button', { name: '润色', exact: true }).click();
-  await expect(editor.locator('.face-studio-footer')).toContainText('材质强度');
-  await expect(editor.getByRole('slider', { name: '材质强度' })).toHaveValue('55');
+  await designStep(editor, '工艺层');
+  await addProcess(editor, '添加覆膜');
+  await editor.getByLabel('覆膜类型', {exact:true}).selectOption('holo');
+  await editor.getByRole('slider', { name: '工艺强度' }).fill('65');
+  await editor.getByRole('slider', { name: '工艺强度' }).fill('55');
+  await expect(editor.getByRole('slider', { name: '工艺强度' })).toHaveValue('55');
   await editor.getByRole('button', { name: '撤销', exact: true }).click();
-  await expect(editor.getByRole('slider', { name: '材质强度' })).toHaveValue('65');
+  await expect(editor.getByRole('slider', { name: '工艺强度' })).toHaveValue('65');
+  expect((await artworkGeometry(stage)).filter(element => element.id !== 'tags')).toEqual(original);
   await sidebar.locator('.face-panel-scroll').evaluate(el => el.scrollTop = 0);
   await editor.locator('.factory-face-editor').screenshot({ path: testInfo.outputPath('designer-light.png') });
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
@@ -325,16 +409,17 @@ test('semantic designer reflows content, reflects light and restores the saved s
   await editor.getByRole('button', { name: '保存设计', exact: true }).click();
   await expect(editor.locator('.factory-message')).toContainText('设计已保存');
   const saved = (await (await request.get(`/api/nodes/${card.id}`)).json()).config.studio.modes.preview;
-  expect(saved.design).toMatchObject({ recipe: 'badge', kit: 'sand', material: { type: 'holo', intensity: .65 } });
+  expect(saved.design).toMatchObject({ recipe: 'badge', kit: 'sand', production: { layers: expect.arrayContaining([expect.objectContaining({ kind:'laminate', film:'holo', strength:.65 })]) } });
   expect(saved.elements.find((e: { kind: string }) => e.kind === 'tags').text).toBe('灵感, 日常');
   await page.reload();
+  await designStep(editor, '成品');
   await expect(editor.locator('.face-edit-stage .factory-artwork')).toHaveAttribute('data-recipe', 'badge');
   await expect(editor.locator('.face-edit-stage .factory-artwork')).toHaveAttribute('data-kit', 'sand');
   await expect(editor.locator('.face-edit-stage [data-kind=title]')).toHaveText('灵感收藏夹');
   expect(errors).toEqual([]);
 });
 
-test('saved legacy views stay coherent and sample fields fit in all four modes', async ({ page, request }, testInfo) => {
+test('saved legacy views stay coherent and printed fields fit in all four modes', async ({ page, request }, testInfo) => {
   test.setTimeout(60000);
   await page.setViewportSize({ width: 1700, height: 1100 });
   const profile = await (await request.get('/api/application')).json();
@@ -350,6 +435,7 @@ test('saved legacy views stay coherent and sample fields fit in all four modes',
   preview.elements.push(newSlot('fields'), newSlot('action'));
   const badge = chooseRecipe(preview, legacy, 'badge');
   badge.design!.kit = 'ink'; badge.design!.appearance = 'dark';
+  delete badge.design!.production; // Fixture represents the pre-production recipe format.
   legacy.studio = { version: 1, enabled: FACE_MODES, initial: 'preview', open: 'workspace',
     modes: { ...Object.fromEntries(FACE_MODES.map(mode => [mode, presetSurface(mode, legacy)])), preview: badge } };
   const patched = await request.patch(`/api/nodes/${card.id}`, { data: { config: legacy } });
@@ -359,11 +445,14 @@ test('saved legacy views stay coherent and sample fields fit in all four modes',
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await expect(editor.getByRole('heading', { name: '卡面设计器', exact: true })).toHaveCount(0);
   await expect(editor.locator('.face-properties')).toHaveCount(0);
-  const checkFields = async () => {
-    const fields = stage.locator('.factory-sample-fields');
-    if (await fields.count()) {
+  await designStep(editor, '成品');
+  const checkFields = async (mode: typeof FACE_MODES[number]) => {
+    const fields = stage.locator('[data-face-element=fields] .factory-face-fields');
+    await expect(fields).toHaveCount(mode === 'node' ? 0 : 1);
+    if (mode !== 'node') {
       const bounds = (await fields.boundingBox())!;
-      for (const child of await fields.locator('span').all()) {
+      expect(await fields.locator('input').count()).toBeGreaterThan(0);
+      for (const child of await fields.locator('label').all()) {
         const item = (await child.boundingBox())!;
         expect(item.y + item.height).toBeLessThanOrEqual(bounds.y + bounds.height + 1);
         expect(await child.evaluate(el => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1);
@@ -373,28 +462,30 @@ test('saved legacy views stay coherent and sample fields fit in all four modes',
   for (const mode of FACE_MODES) {
     await editor.getByLabel('预览显示模式').selectOption(mode);
     await expect(stage.locator('.factory-artwork')).toHaveAttribute('data-kit', 'ink');
-    await expect(stage.locator('.factory-material')).toHaveAttribute('data-restrained', 'true');
-    await checkFields();
+    await expect(stage.locator('.card-finish-layer')).toHaveAttribute('data-material-id', 'starlight');
+    await checkFields(mode);
     await editor.screenshot({ path: testInfo.outputPath(`legacy-${mode}.png`) });
   }
   await editor.getByLabel('预览显示模式').selectOption('preview');
+  await designStep(editor, '版面与印刷');
+  await editor.getByRole('button', { name: '预设', exact: true }).click();
   await editor.getByRole('button', { name: '应用 Compact 版式' }).click();
-  await editor.getByRole('button', { name: '风格', exact: true }).click();
-  await editor.getByRole('button', { name: '应用 Sand 风格' }).click();
-  await editor.getByRole('button', { name: '材质', exact: true }).click();
-  await editor.getByRole('button', { name: 'Starlight 材质' }).click();
-  await editor.getByRole('button', { name: '高级', exact: true }).click();
+  await applyStyle(editor, 'Sand');
+  await designStep(editor, '工艺层');
+  await addProcess(editor, '添加覆膜');
+  await editor.getByLabel('覆膜类型', {exact:true}).selectOption('starlight');
+  await editor.getByRole('button', { name: '高级设置', exact: true }).click();
   for (const mode of FACE_MODES) {
     await editor.getByLabel('预览显示模式').selectOption(mode);
     await expect(stage.locator('.factory-artwork')).toHaveAttribute('data-kit', 'sand');
     await expect(stage.locator('.factory-artwork')).toHaveAttribute('data-recipe', 'compact');
-    await checkFields();
+    await checkFields(mode);
     await editor.screenshot({ path: testInfo.outputPath(`refined-${mode}.png`) });
   }
   await editor.getByRole('button', { name: '保存设计', exact: true }).click();
   await expect(editor.locator('.factory-message')).toContainText('设计已保存');
   const saved = (await (await request.get(`/api/nodes/${card.id}`)).json()).config;
-  for (const mode of FACE_MODES) expect(saved.studio.modes[mode].design).toMatchObject({ recipe: 'compact', kit: 'sand', material: { type: 'starlight' } });
+  for (const mode of FACE_MODES) expect(saved.studio.modes[mode].design).toMatchObject({ recipe: 'compact', kit: 'sand', production: { layers: expect.arrayContaining([expect.objectContaining({ kind:'laminate', film:'starlight' })]) } });
   await page.reload();
   await editor.getByLabel('预览显示模式').selectOption('workspace');
   await expect(stage.locator('.factory-artwork')).toHaveAttribute('data-kit', 'sand');
