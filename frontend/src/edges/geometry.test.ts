@@ -55,4 +55,37 @@ describe("relationship edge geometry", () => {
     expect(geometry.target).toMatchObject({ normalX: -1, normalY: 0 });
     expect(geometry.bidirectionalMarkerPath).not.toBe(geometry.markerPath);
   });
+
+  it('keeps a self-loop outside the circle with separate boundary endpoints', () => {
+    const circle = {x: 100, y: 100, width: 104, height: 104};
+    const loop = relationshipPath(circle, circle, 52, 52, {selfLoop: true, markerOffset: 7});
+    expect(loop.source.x).toBeGreaterThan(152);
+    expect(loop.target.x).toBeLessThan(152);
+    for (const endpoint of [loop.source, loop.target]) {
+      expect(Math.hypot(endpoint.x - 152, endpoint.y - 152)).toBeCloseTo(52);
+    }
+    expect(loop.labelY).toBeGreaterThan(204);
+    // Sample the actual cubic, not only its bounds: no part may cut the state.
+    const values = loop.path.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/g)!.map(Number);
+    for (let step = 1; step < 20; step++) {
+      const t = step / 20, u = 1 - t;
+      const x = u ** 3 * values[0] + 3 * u ** 2 * t * values[2] + 3 * u * t ** 2 * values[4] + t ** 3 * values[6];
+      const y = u ** 3 * values[1] + 3 * u ** 2 * t * values[3] + 3 * u * t ** 2 * values[5] + t ** 3 * values[7];
+      expect(Math.hypot(x - 152, y - 152)).toBeGreaterThan(52);
+    }
+    expect(relationshipPath(circle, circle, 52, 52, {selfLoop: true, offset: 44}).labelY).toBeGreaterThan(loop.labelY);
+  });
+
+  it('separates reciprocal curves and follows circles after moving them vertically', () => {
+    const a = {x: 100, y: 100, width: 104, height: 104}, b = {...a, x: 400};
+    const forward = relationshipPath(a, b, 52, 52, {offset: 18});
+    const back = relationshipPath(b, a, 52, 52, {offset: 18});
+    expect(forward.labelY).toBeGreaterThan(152);
+    expect(back.labelY).toBeLessThan(152);
+    const vertical = relationshipPath(a, {...b, x: 100, y: 400}, 52);
+    expect(vertical.source.x).toBeCloseTo(152);
+    expect(vertical.source.y).toBeCloseTo(204);
+    expect(vertical.target.x).toBeCloseTo(152);
+    expect(vertical.target.y).toBeCloseTo(400);
+  });
 });

@@ -15,7 +15,26 @@ class ResourceActionRequest(BaseModel):
     confirm: bool = False
 
 
-async def invoke_resource_action(services, node_id, action, request, *, capability=None):
+async def invoke_resource_action(services, node_id, action, request, *, capability=None, request_id=None):
+    async with services._node_mutation(read_only=True):
+        node = services.world.get_card(node_id)
+        operation = services.plugins.node_type(node.type).resource_actions.get(action)
+        if operation is None:
+            raise ResourceValidationError("Unknown resource action")
+        if capability is not None:
+            live = services.capabilities.capability_for_id(capability.agent_id, capability.id)
+            if live.target_id != node_id or live.kind != operation.capability_kind:
+                raise PermissionDeniedError("This connection does not allow that resource action")
+    from backend.capabilities.events import OperationInvocation
+    with OperationInvocation(services, operation_id=f"resource:{node.type}:{action}", target_id=node_id,
+                             caller_id=capability.agent_id if capability else None,
+                             capability=operation.capability_kind, request_id=request_id) as invocation:
+        result = await _invoke_resource_action(services, node_id, action, request, capability=capability)
+        invocation.completed(result)
+        return result
+
+
+async def _invoke_resource_action(services, node_id, action, request, *, capability=None):
     # Hold this lock until the worker has stopped, including cancellation. An
     # edge revocation or deletion can never overtake a running resource write.
     async with services._node_mutation():

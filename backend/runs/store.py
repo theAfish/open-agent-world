@@ -17,8 +17,14 @@ def _now() -> str:
 class RunStore:
     """Durable Run metadata; provider events are never the source of truth."""
 
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, *, event_sink=None) -> None:
         self.database = database
+        self.event_sink = event_sink
+
+    def _emit_status(self, record, *, previous_status=None):
+        if self.event_sink is not None:
+            from backend.capabilities.events import run_lifecycle_event
+            self.event_sink(run_lifecycle_event(record, previous_status=previous_status))
 
     def create(
         self,
@@ -31,6 +37,7 @@ class RunStore:
         parent_run_id: str | None = None,
         task_id: str | None = None,
         context_id: str | None = None,
+        initial_lifecycle: dict | None = None,
     ) -> RunRecord:
         run_id = run_id or str(uuid4())
         root_run_id = run_id
@@ -38,22 +45,31 @@ class RunStore:
             parent = self.get(parent_run_id)
             root_run_id = parent.root_run_id
         now = _now()
+        from backend.operation_associations import active_operation
+        operation = active_operation.get()
+        if operation is not None:
+            operation.associate("run", run_id, object_id=agent_id, produced=True)
+        lifecycle = dict(initial_lifecycle or {})
+        if operation is not None:
+            lifecycle["operation"] = operation.payload()
         with self.database.transaction(immediate=True) as connection:
             connection.execute(
                 """
                 INSERT INTO runs (
                     run_id, agent_id, parent_run_id, root_run_id, task_id,
                     caller_kind, caller_id, context_id, runtime_provider_id,
-                    status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    status, created_at, updated_at, lifecycle_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id, agent_id, parent_run_id, root_run_id, task_id,
                     caller_kind, caller_id, context_id, runtime_provider_id,
-                    RunStatus.CREATED.value, now, now,
+                    RunStatus.CREATED.value, now, now, json.dumps(lifecycle),
                 ),
             )
-        return self.get(run_id)
+            record = self.get(run_id)
+            self._emit_status(record)
+        return record
 
     def get(self, run_id: str) -> RunRecord:
         with self.database.locked() as connection:
@@ -118,7 +134,10 @@ class RunStore:
                     run_id,
                 ),
             )
-        return self.get(run_id)
+            record = self.get(run_id)
+            if status != current.status:
+                self._emit_status(record, previous_status=current.status)
+        return record
 
     def interrupt_incomplete(self) -> list[RunRecord]:
         """Mark attempts left active by an abnormal process stop as interrupted."""
@@ -140,7 +159,10 @@ class RunStore:
                 """,
                 (now, now),
             )
-        return [self.get(str(row["run_id"])) for row in rows]
+            records = [self.get(str(row["run_id"])) for row in rows]
+            for record in records:
+                self._emit_status(record)
+        return records
 
     def update_lifecycle(self, run_id: str, **changes) -> RunRecord:
         with self.database.transaction(immediate=True) as connection:

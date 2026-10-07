@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath, PurePosixPath
 from typing import TYPE_CHECKING, Any, TypeVar
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from backend.spatial import Rectangle
 
@@ -562,6 +562,9 @@ class ApplicationServices:
         default_factory=lambda: ContextVar("execution_secrets", default=()), init=False, repr=False)
     run_manager: RunManager | None = None
     card_state: object = None
+    operation_events: Any = None
+    state_machines: Any = None
+    state_machine_runtime: Any = None
     node_execution: NodeExecutionService | None = None
     sandbox_operations: Any = None
     summoning: SummoningService | None = None
@@ -749,6 +752,8 @@ class ApplicationServices:
         self.node_execution.continuation_closed = False
         self.node_execution.signal_continuations()
 
+        await self.state_machine_runtime.startup()
+
         if self.plugin_bootstrap is not None:
             self.plugin_bootstrap.enqueue()
 
@@ -756,6 +761,7 @@ class ApplicationServices:
         # Lifecycle shutdown drains providers without cancelling scheduled checks
         # whose originating turns already finished successfully.
         self._require_run_manager().shutting_down = True
+        await self.state_machine_runtime.shutdown()
         if self.plugin_bootstrap is not None:
             await self.plugin_bootstrap.shutdown()
         await self.node_execution.shutdown()
@@ -772,6 +778,12 @@ class ApplicationServices:
     def enrich_card(self, card: Card) -> Card:
         if card.missing_plugin:
             return card
+        if self.state_machines is not None:
+            card = card.model_copy(update={"has_state_machine": self.state_machines.has_definition(card),
+                                           "status_label": self.state_machines.node_status_label(card.id),
+                                           **self.state_machines.state_summary(card.id)})
+        if self.run_manager is not None and self.plugins.has_trait(card.type, "core.agent"):
+            card = card.model_copy(update=self.run_manager.agent_execution_counts(card.id))
         record = self.resources.maybe_get_record(card.id)
         if record is None:
             return card
@@ -818,6 +830,11 @@ class ApplicationServices:
         _skip_collection_seed: bool = False,
     ) -> Card:
         async with self._node_mutation():
+            host_machine = request.config.get("state_machine")
+            if "state_machine" in request.config:
+                if host_machine is not None:
+                    self.state_machines.validate_legacy(host_machine)
+                request = request.model_copy(update={"config": {key: value for key, value in request.config.items() if key != "state_machine"}})
             if request.id is not None and self._has_pending_node_deletion(request.id):
                 raise ConflictError(
                     f"node id {request.id!r} is reserved by pending lifecycle cleanup"
@@ -877,7 +894,12 @@ class ApplicationServices:
                         workspace_created = True
                     except OSError as exc:
                         raise ResourceValidationError(f"Cannot create Sandbox workspace: {exc}") from exc
-                card = self.world.create_card(request, card_id=preview.id)
+                with self.database.transaction(immediate=True):
+                    card = self.world.create_card(request, card_id=preview.id)
+                    if host_machine is not None:
+                        self.state_machines.import_legacy(card.id, host_machine)
+                from backend.operation_associations import associate_execution
+                associate_execution("object", card.id, object_id=card.id, produced=True)
                 if definition.document is not None and definition.document.initial_value is not None and definition.state is None:
                     from backend.node_documents import write_document
                     initial = dict(definition.document.initial_value)
@@ -923,6 +945,7 @@ class ApplicationServices:
         )
 
     def _publish_card_created_nowait(self, card: Card) -> None:
+        card = self.enrich_card(card)
         self.events.publish_event_nowait(RuntimeEvent(
             type=EventType.CARD_CREATED,
             node_id=card.id,
@@ -981,6 +1004,12 @@ class ApplicationServices:
             if ((self.world.is_container(current) and request.position is not None)
                     or (request.position is not None or request.size is not None) and card_id in read_glue(self)['boxes']):
                 return (await self.update_cards([CardBatchPatch(node_id=card_id, patch=request)]))[0]
+            has_host_machine = request.config is not None and "state_machine" in request.config
+            host_machine = request.config.get("state_machine") if has_host_machine else None
+            if has_host_machine:
+                if host_machine is not None:
+                    self.state_machines.validate_legacy(host_machine)
+                request = request.model_copy(update={"config": {key: value for key, value in request.config.items() if key != "state_machine"}})
             updated = self.world.preview_update_card(card_id, request)
             self._validate_membership_change(current, updated)
             lifecycle = self.plugins.node_type(current.type).lifecycle if not current.missing_plugin else None
@@ -992,7 +1021,11 @@ class ApplicationServices:
             )
             try:
                 await transaction.commit()
-                card = self.enrich_card(self.world.update_card(card_id, request))
+                with self.database.transaction(immediate=True):
+                    card = self.world.update_card(card_id, request)
+                    if has_host_machine:
+                        self.state_machines.import_legacy(card_id, host_machine)
+                    card = self.enrich_card(card)
             except BaseException as error:
                 rollback_error = await self._rollback_lifecycle(transaction, error)
                 if rollback_error is not None:
@@ -1033,6 +1066,19 @@ class ApplicationServices:
 
     async def update_cards(self, updates: list[CardBatchPatch]) -> list[Card]:
         async with self._node_mutation():
+            host_machines = {}
+            cleaned_updates = []
+            for item in updates:
+                config = item.patch.config
+                if config is not None and "state_machine" in config:
+                    machine = config["state_machine"]
+                    if machine is not None:
+                        self.state_machines.validate_legacy(machine)
+                    host_machines[item.node_id] = machine
+                    patch = item.patch.model_copy(update={"config": {key: value for key, value in config.items() if key != "state_machine"}})
+                    item = item.model_copy(update={"patch": patch})
+                cleaned_updates.append(item)
+            updates = cleaned_updates
             updates = self.expand_card_updates(updates)
             context = self._node_lifecycle_context()
             previous_cards = {item.node_id: self.world.get_card(item.node_id) for item in updates}
@@ -1060,12 +1106,11 @@ class ApplicationServices:
                 for _, transaction in prepared:
                     attempted.append(transaction)
                     await transaction.commit()
-                cards = [
-                    self.enrich_card(card)
-                    for card in self.world.update_cards(
-                        [item for item, _ in prepared]
-                    )
-                ]
+                with self.database.transaction(immediate=True):
+                    cards = self.world.update_cards([item for item, _ in prepared])
+                    for owner_id, machine in host_machines.items():
+                        self.state_machines.import_legacy(owner_id, machine)
+                    cards = [self.enrich_card(card) for card in cards]
             except BaseException as error:
                 for transaction in reversed(attempted):
                     rollback_error = await self._rollback_lifecycle(transaction, error)
@@ -1702,7 +1747,7 @@ class ApplicationServices:
             for member in members:
                 await self.events.publish(EventType.CARD_UPDATED, node_id=member.id,
                                           payload={"node": self.enrich_card(member).model_dump(mode="json")})
-            return [group, *[self.enrich_card(m) for m in members]]
+            return [self.enrich_card(group), *[self.enrich_card(m) for m in members]]
 
     def preview_legion_group(self, name: str, node_ids: list[str], *, content_bounds: Rectangle | None = None) -> CardCreate:
         """Use the same existing group geometry for review and commit."""
@@ -1856,6 +1901,7 @@ class ApplicationServices:
                 expanded=card.expanded,
                 status=status,
                 config=config,
+                state_machine=self.state_machines.capture(card.id, node_keys),
                 presentation=getattr(request, "presentation", {}).get(card.id),
                 dependencies=dependencies,
                 payload_version=payload_version,
@@ -2049,6 +2095,8 @@ class ApplicationServices:
                     _publish_event=False,
                     _skip_collection_seed=node.initial_document is not None,
                 ))
+                if node.state_machine is not None:
+                    self.state_machines.restore(node_ids[node.key], node.state_machine, node_ids)
                 if node.initial_document is not None and definition.state is not None:
                     scoped_document_seeds.append(node)
                 elif node.initial_document is not None:
@@ -2087,6 +2135,17 @@ class ApplicationServices:
                     target=external.id if binding["internal_is_source"] else internal,
                     relationship=binding["relationship"], direction=binding["direction"],
                 ), _publish_event=False))
+            # Resolve after every owner and connection exists. Deployment never
+            # copies runtime state, cursors, receipts or pending action intents.
+            replacements = {node_ids[node.key]: self.state_machines.get_definition(node_ids[node.key])
+                            for node in template_nodes if node.state_machine is not None}
+            for node in template_nodes:
+                if node.state_machine is None:
+                    continue
+                identity = node_ids[node.key]
+                self.state_machines.resolve_preview_definition(self.state_machines.get_definition(identity), replacements=replacements)
+            self.state_machines.activate_restored([node_ids[node.key] for node in template_nodes
+                if node.state_machine is not None and node.state_machine.get("enabled", False)])
         except BaseException as error:
             cleanup_errors = await self._compensate_legion_instance(
                 created_nodes, created_edges, creation_receipts, error
@@ -2100,7 +2159,7 @@ class ApplicationServices:
         return LegionInstance(
             legion_id=record.id,
             node_ids=node_ids,
-            nodes=created_nodes,
+            nodes=[self.enrich_card(node) for node in created_nodes],
             edges=created_edges,
             presentation={node_ids[node.key]: node.presentation for node in template_nodes if node.presentation is not None},
         )
@@ -3768,6 +3827,8 @@ def create_services(
     deliveries = ConversationDeliveryStore(database)
     capabilities = CapabilityBroker(world, resources, plugin_registry)
     events = EventHub(queue_size=settings.event_queue_size)
+    from backend.operation_events import OperationEventJournal
+    operation_events = OperationEventJournal(database)
 
     state_event_types = {
         StateMutationKind.CREATED: EventType.STATE_CREATED,
@@ -3778,6 +3839,8 @@ def create_services(
     services = None
 
     def publish_state_mutation(mutation: StateMutation) -> None:
+        if mutation.scope.owner_id.startswith("state-machine-"):
+            return  # Internal cursor/memory writes are not object state changes.
         with database.locked() as db:
             namespace = db.execute("SELECT card_id, scope_type, scope_id FROM card_state_instances WHERE state_scope_id=?", (mutation.scope.scope_id,)).fetchone()
         event = RuntimeEvent(
@@ -3809,7 +3872,34 @@ def create_services(
                 return
         events.publish_event_nowait(event)
 
-    state = StateStore(database, plugin_registry, event_sink=publish_state_mutation)
+    def persist_state_mutation(mutation: StateMutation) -> None:
+        # This hook runs inside StateStore's business transaction. Include the
+        # committed value so a later write cannot erase a transient observation.
+        if mutation.scope.scope_kind == "state_machine" or mutation.scope.owner_id.startswith("state-machine-"):
+            return  # User-state transitions emit their own precise entered event.
+        with database.locked() as db:
+            namespace = db.execute("SELECT card_id,scope_type,scope_id FROM card_state_instances WHERE state_scope_id=?",
+                                   (mutation.scope.scope_id,)).fetchone()
+            value = db.execute("SELECT value_json FROM state_values WHERE scope_id=? AND key=? AND deleted=0",
+                               (mutation.scope.scope_id, mutation.key)).fetchone()
+        owner = namespace["card_id"] if namespace else mutation.scope.owner_id
+        from backend.operation_associations import active_operation
+        invocation = active_operation.get()
+        operation = invocation.payload() if invocation else {}
+        actor_id = mutation.actor_id or operation.get("caller_object_id")
+        run_id = mutation.run_id or operation.get("run_id")
+        operation_events.record(RuntimeEvent(
+            id=str(uuid5(NAMESPACE_URL, f"state:{mutation.scope.scope_id}:{mutation.key}:{mutation.revision}")),
+            type=state_event_types[mutation.kind], node_id=owner, agent_id=actor_id,
+            run_id=run_id, conversation_id=operation.get("conversation_id"),
+            session_id=namespace["scope_id"] if namespace and namespace["scope_type"] == "session" else operation.get("context_id"),
+            payload={**operation, "event": f"state.{mutation.kind.value}", "scope_kind": mutation.scope.scope_kind,
+                     "scope_id": mutation.scope.scope_id, "key": mutation.key, "revision": mutation.revision,
+                     **({"actor_id": actor_id} if actor_id else {}), **({"run_id": run_id} if run_id else {}),
+                     "value": json.loads(value[0]) if value else None, "target_card_id": owner}))
+
+    state = StateStore(database, plugin_registry, event_sink=publish_state_mutation,
+                       durable_sink=persist_state_mutation)
     contexts = ContextStore(database, events)
     state.ensure_scope("world", "default", schema_id="core.world")
     legions = LegionStore(database)
@@ -3829,11 +3919,21 @@ def create_services(
         llm_settings=LlmSettingsStore(database, settings.data_root),
         card_library=card_library,
         sandbox_backend=sandbox_backend,
+        operation_events=operation_events,
     )
     from backend.capabilities.provider import WorldAgentCapabilityProvider
 
     from backend.card_state import ScopedStateStore
     services.card_state = ScopedStateStore(services)
+    from backend.state_machine_store import StateMachineStore
+    from backend.state_machine_runtime import StateMachineRuntime
+    services.state_machines = StateMachineStore(services)
+    services.state_machines.migrate_legacy()
+    services.state_machine_runtime = StateMachineRuntime(services)
+    world.machine_status = services.state_machines.node_status
+    world.initialize_state_machine = services.state_machines.initialize_node
+    for card in world.list_cards():
+        services.state_machines.initialize_node(card.id)
     provider = WorldAgentCapabilityProvider(services)
     services.node_execution = NodeExecutionService(services)
     from backend.sandbox.operations import SandboxOperations
@@ -3841,13 +3941,14 @@ def create_services(
     services.summoning = SummoningService(services)
     from backend.security.model_connections import ModelConnectionStore
     services.run_manager = RunManager(
-        store=RunStore(database),
+        store=RunStore(database, event_sink=operation_events.record),
         world=world,
         events=events,
         plugins=plugin_registry,
         capability_provider=provider,
         state=state,
         cleanup_execution=services.sandbox_operations.cancel_run,
+        observe_agent=services.state_machine_runtime.observe_agent,
         execution_settled=services.node_execution.signal_continuations,
         default_runtime_provider_id=(
             default_runtime_provider_id

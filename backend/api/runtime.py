@@ -176,6 +176,7 @@ async def get_agent(
     return {
         "config": config,
         "status": info.status,
+        **services.state_machines.state_summary(agent_id),
         "session_id": info.session_id,
         "active_run_id": info.active_run_id,
         "last_error": info.last_error,

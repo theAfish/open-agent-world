@@ -18,7 +18,7 @@ Use this section to look up a contract or investigate host behavior. For a guide
 
 Start with [core concepts](../concepts.md), then look up [configuration](../configuration.md),
 [cards and decks](../card-library.md), [Legions](../legions.md), [runs](../runs.md),
-or [runtime state](../state.md). For execution environments, follow
+[state machine configuration](../state-machines.md), or [runtime state](../state.md). For execution environments, follow
 [Sandbox workspace](../sandbox-workspace.md) → [execution configuration](../execution-configuration.md)
 → [networking](../sandbox-networking.md).
 

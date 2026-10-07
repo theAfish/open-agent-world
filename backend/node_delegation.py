@@ -61,6 +61,10 @@ class NodeDelegationMixin:
 
     def collect_delegations(self, node_id):
         """Reconcile only durable terminal Runs; never infer completion from provider silence."""
+        with self.services.events.committed_batch(), self.services.database.transaction(immediate=True):
+            return self._collect_delegations(node_id)
+
+    def _collect_delegations(self, node_id):
         state = self.state(node_id)
         before = copy.deepcopy(state)
         manager = self.services.run_manager
@@ -93,7 +97,8 @@ class NodeDelegationMixin:
                 self.apply(node_id, WorkOutcome(item_id=entry["item_id"], run_id=entry.get("run_id"),
                     status=status, text=entry["text"], error=entry["error"],
                     report=entry.get("report"),
-                    artifacts=self.services.resources.artifacts.run_references(entry.get("run_id"))))
+                    artifacts=self.services.resources.artifacts.run_references(entry.get("run_id"))),
+                    operation=entry.get("operation"), execution_id=entry["dispatch_id"])
                 entry["applied"] = True
                 entry.pop("reconciliation_error", None)
             except (ValueError, ResourceValidationError) as error:
@@ -154,13 +159,21 @@ class NodeDelegationMixin:
                 library_id=request.library_id, template_agent_id=request.agent_id, caller_agent_id=capability.agent_id,
                 coordinator_run_id=context.run_id, agent_id=None, run_id=None, instance_id=None,
                 status="running", applied=False, error=None, output_directory=folder)
-            entry.update(auto_continue=True, created_at=time.time())
+            from backend.operation_associations import active_operation
+            operation = active_operation.get()
+            if operation is not None and operation.continuation_owner is None:
+                operation.continuation_owner = "legacy"
+            owner = operation.continuation_owner if operation else "legacy"
+            entry.update(auto_continue=owner == "legacy", continuation_owner=owner, created_at=time.time())
+            if operation is not None:
+                entry["operation"] = operation.payload()
             entry["metadata"] = item.metadata
             state["attempts"].append(entry)
             state["status"] = "running"
             self.save(node_id, state)
             self.watch_continuations(node_id)
-            self.apply(node_id, WorkOutcome(item_id=item.id, status="running"))
+            self.apply(node_id, WorkOutcome(item_id=item.id, status="running"),
+                       operation=entry.get("operation"), execution_id=dispatch_id)
             try:
                 result = await services.summoning.action(request.library_id, SummoningAction(
                     action="summon", agent_id=request.agent_id, wait=False, context_mode="task",

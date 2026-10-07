@@ -23,7 +23,9 @@ export function updateConnectionHoverHint(event: ReactPointerEvent<HTMLElement>,
     y: (event.clientY - bounds.top) * scaleY,
   };
   const style = window.getComputedStyle(element);
-  const cornerRadius = Number.parseFloat(style.borderTopLeftRadius) || 0;
+  const radius = Number.parseFloat(style.borderTopLeftRadius) || 0;
+  const cornerRadius = style.borderTopLeftRadius.endsWith('%')
+    ? Math.min(element.offsetWidth, element.offsetHeight) * radius / 100 : radius;
   const boundaryWidth = Number.parseFloat(style.getPropertyValue("--connection-boundary-width"));
   const anchor = roundedRectAnchor(
     { x: 0, y: 0, width: element.offsetWidth, height: element.offsetHeight },

@@ -1,8 +1,23 @@
 import { t, useLocale } from "../i18n";
-import { ArrowLeftRight, ArrowRight, Link2Off } from "lucide-react";
+import { ArrowLeftRight, ArrowRight, GitBranch, Link2Off } from "lucide-react";
 import { getRelationshipOption } from "../state/relationships";
 import { useWorldStore } from "../state/worldStore";
+import { useStateMachineEditor } from "../stateMachines/editorStore";
+import { stateMachineEditorAvailable } from "../stateMachines/model";
+import { useWorkspaceAccess } from "../workspace/WorkspaceAccess";
 import type { WorldCard } from "../types/world";
+
+export function StateMachineButton({ card, compact = false }: { card: WorldCard; compact?: boolean }) {
+  useLocale();
+  const { deployed } = useWorkspaceAccess();
+  const catalog = useWorldStore(state => state.catalog);
+  if (deployed || !stateMachineEditorAvailable(card, catalog)) return null;
+  return <button type="button" className={`${compact ? 'icon-button' : 'secondary-button'} nodrag nopan`}
+    aria-label={t("State machine")} title={t("Edit states and event-driven transitions")}
+    onClick={event => { event.stopPropagation(); useStateMachineEditor.getState().open(card.id); }}>
+    <GitBranch size={14} aria-hidden="true" />{!compact && t("State machine")}
+  </button>;
+}
 
 export function RelationshipList({ card, empty = t("No capabilities connected yet.") }: { card: WorldCard; empty?: string }) {
   useLocale();

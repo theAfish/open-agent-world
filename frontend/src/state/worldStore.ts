@@ -1519,10 +1519,11 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   runAgent: async (id, prompt) => {
     try {
       await worldApi.runAgent(id, prompt);
+      const updated = await worldApi.getNode(id);
       set((state) => ({
         cards: state.cards.map((card) =>
           card.id === id
-            ? mergeCardPatch(card, { status: "running", config: { prompt } })
+            ? mergeCardPatch(card, { ...updated, config: { ...updated.config, prompt } })
             : card,
         ),
         activityOpen: true,
@@ -1535,9 +1536,10 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
   stopAgent: async (id) => {
     try {
       await worldApi.stopAgent(id);
+      const updated = await worldApi.getNode(id);
       set((state) => ({
         cards: state.cards.map((card) =>
-          card.id === id ? mergeCardPatch(card, { status: "idle" }) : card,
+          card.id === id ? mergeCardPatch(card, updated) : card,
         ),
       }));
     } catch (error) {
@@ -1834,12 +1836,10 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
         ? state.cards.map((card) => {
             if (card.id !== nodeId) return card;
             let status = card.status;
-            if (typeof event.payload.status === "string") status = event.payload.status as WorldCard["status"];
-            else if (normalizedType.includes("agent_started")) status = "running";
-            else if (normalizedType.includes("agent_stopped") || normalizedType.includes("agent_completed")) status = "idle";
-            else if (normalizedType.includes("command_started")) status = "running";
-            else if (normalizedType.includes("command_finished") && card.type !== "sandbox") status = "ready";
-            else if (normalizedType.includes("error")) status = "error";
+            if ((normalizedType === "agent_started" || normalizedType === "agent_status_changed" || !card.has_state_machine) && typeof event.payload.status === "string") status = event.payload.status as WorldCard["status"];
+            else if (!card.has_state_machine && normalizedType.includes("command_started")) status = "running";
+            else if (!card.has_state_machine && normalizedType.includes("command_finished") && card.type !== "sandbox") status = "ready";
+            else if (!card.has_state_machine && normalizedType.includes("error")) status = "error";
 
             const shouldAppend =
               normalizedType.includes("stdout") ||
@@ -1855,6 +1855,10 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
               : existing;
             return mergeCardPatch(card, {
               status,
+              ...((normalizedType === 'agent_status_changed' || normalizedType === 'agent_started') && typeof event.payload.active_run_count === 'number' ? {
+                active_run_count: event.payload.active_run_count,
+                occupied_run_count: Number(event.payload.occupied_run_count ?? 0),
+              } : {}),
               config: {
                 output,
                 active_command: Array.isArray(event.payload.active_commands)

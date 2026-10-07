@@ -133,6 +133,7 @@ export function relationshipPath(
   targetRect: NodeRect,
   sourceCornerRadius = 22,
   targetCornerRadius = sourceCornerRadius,
+  options: { offset?: number; selfLoop?: boolean; markerOffset?: number } = {},
 ): RelationshipPath {
   const sourceCenter = {
     x: sourceRect.x + sourceRect.width / 2,
@@ -142,33 +143,45 @@ export function relationshipPath(
     x: targetRect.x + targetRect.width / 2,
     y: targetRect.y + targetRect.height / 2,
   };
-  const source = roundedRectAnchor(sourceRect, targetCenter, sourceCornerRadius);
-  const target = roundedRectAnchor(targetRect, sourceCenter, targetCornerRadius);
+  const offset = options.offset ?? 0;
+  const distance = Math.hypot(targetCenter.x - sourceCenter.x, targetCenter.y - sourceCenter.y) || 1;
+  const bend = { x: -(targetCenter.y - sourceCenter.y) / distance * offset,
+    y: (targetCenter.x - sourceCenter.x) / distance * offset };
+  // Parallel/return edges get distinct boundary anchors. A self-loop leaves and
+  // returns on opposite sides of the lower arc, outside the node's silhouette.
+  const source = roundedRectAnchor(sourceRect, options.selfLoop
+    ? { x: sourceCenter.x + sourceRect.width, y: sourceCenter.y + sourceRect.height }
+    : { x: targetCenter.x + bend.x, y: targetCenter.y + bend.y }, sourceCornerRadius);
+  const target = roundedRectAnchor(targetRect, options.selfLoop
+    ? { x: targetCenter.x - targetRect.width, y: targetCenter.y + targetRect.height }
+    : { x: sourceCenter.x + bend.x, y: sourceCenter.y + bend.y }, targetCornerRadius);
   const endpointDistance = Math.hypot(target.x - source.x, target.y - source.y);
-  const controlDistance = Math.max(42, Math.min(180, endpointDistance * 0.32));
+  const controlDistance = options.selfLoop ? 86 + Math.abs(offset) : Math.max(42, Math.min(180, endpointDistance * 0.32));
+  if (options.selfLoop) { bend.x = 0; bend.y = 0; }
+  const markerOffset = options.markerOffset ?? MARKER_OFFSET;
   const sourceControl = {
-    x: source.x + source.normalX * controlDistance,
-    y: source.y + source.normalY * controlDistance,
+    x: source.x + source.normalX * controlDistance + bend.x,
+    y: source.y + source.normalY * controlDistance + bend.y,
   };
   const targetControl = {
-    x: target.x + target.normalX * controlDistance,
-    y: target.y + target.normalY * controlDistance,
+    x: target.x + target.normalX * controlDistance + bend.x,
+    y: target.y + target.normalY * controlDistance + bend.y,
   };
   const markerTarget = {
-    x: target.x + target.normalX * MARKER_OFFSET,
-    y: target.y + target.normalY * MARKER_OFFSET,
+    x: target.x + target.normalX * markerOffset,
+    y: target.y + target.normalY * markerOffset,
   };
   const markerSource = {
-    x: source.x + source.normalX * MARKER_OFFSET,
-    y: source.y + source.normalY * MARKER_OFFSET,
+    x: source.x + source.normalX * markerOffset,
+    y: source.y + source.normalY * markerOffset,
   };
   const markerSourceControl = {
-    x: markerSource.x + source.normalX * controlDistance,
-    y: markerSource.y + source.normalY * controlDistance,
+    x: markerSource.x + source.normalX * controlDistance + bend.x,
+    y: markerSource.y + source.normalY * controlDistance + bend.y,
   };
   const markerTargetControl = {
-    x: markerTarget.x + target.normalX * controlDistance,
-    y: markerTarget.y + target.normalY * controlDistance,
+    x: markerTarget.x + target.normalX * controlDistance + bend.x,
+    y: markerTarget.y + target.normalY * controlDistance + bend.y,
   };
 
   return {

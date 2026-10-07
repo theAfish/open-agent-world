@@ -193,6 +193,8 @@ export function SelectMenuLayer() {
   }, [id, menu?.active]);
 
   if (!menu) return null;
+  // Modal dialogs make siblings inert, so their menus must share the top layer.
+  const portalRoot = menu.select.closest('dialog[open]') ?? document.body;
   return createPortal(<div ref={popup} id={id} role="listbox" aria-label={menu.label}
     className="ui-select-menu nodrag nopan nowheel" style={{ ...position(menu.select), fontSize: menu.fontSize }}>
     {menu.items.filter(item => !item.hidden).map((item, index, items) => <div key={item.index}>
@@ -203,5 +205,5 @@ export function SelectMenuLayer() {
         <span>{item.label || '\u00a0'}</span><span aria-hidden="true">{item.index === menu.select.selectedIndex ? '✓' : ''}</span>
       </div>
     </div>)}
-  </div>, document.body);
+  </div>, portalRoot);
 }

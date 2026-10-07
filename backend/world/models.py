@@ -34,11 +34,7 @@ class EdgeDirection(StrEnum):
     BIDIRECTIONAL = "bidirectional"
 
 
-class AgentStatus(StrEnum):
-    IDLE = "idle"
-    RUNNING = "running"
-    WAITING = "waiting"
-    ERROR = "error"
+from backend.agent_state_machine import AgentStatus
 
 
 class SandboxStatus(StrEnum):
@@ -67,7 +63,7 @@ class AgentConfig(BaseModel):
 
     system_instruction: str = Field(default="You are a helpful agent in Open Agent World.", json_schema_extra={"agentReadable": True, "agentWritable": True})
     model: str = Field(default="oaw:default", json_schema_extra={"agentReadable": True, "privileged": True})
-    status: AgentStatus = AgentStatus.IDLE
+    status: str = AgentStatus.IDLE
     runtime_provider_id: str | None = Field(default=None, json_schema_extra={"privileged": True})
     max_concurrent_runs: Annotated[int, Field(ge=1, le=64)] = 1
     inherit_legion_model: bool = True
@@ -78,7 +74,7 @@ class LegionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mode: Literal["group", "team"] = "group"
-    status: Literal["available"] = "available"
+    status: str = "available"
     description: str = Field(default="", max_length=2000, json_schema_extra={"agentReadable": True, "agentWritable": True})
     instruction: str = Field(default="", max_length=16000, json_schema_extra={"agentReadable": True, "agentWritable": True})
     model_override: str = Field(default="", max_length=200, json_schema_extra={"privileged": True})
@@ -272,6 +268,13 @@ class Card(BaseModel):
 
     id: str
     missing_plugin: MissingPlugin | None = None
+    has_state_machine: bool = False
+    status_label: str | None = None
+    operational_status: str | None = None
+    primary_state: str | None = None
+    state_groups: dict[str, Any] = Field(default_factory=dict)
+    active_run_count: int = 0
+    occupied_run_count: int = 0
     parent_id: str | None = None
     equipment: EquipmentBinding | None = None
     minister: MinisterRole | None = None

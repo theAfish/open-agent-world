@@ -34,6 +34,18 @@ class _CapabilityContext:
     capability: Any = None
 
     @property
+    def invocation(self):
+        from backend.operation_associations import active_operation
+        context = active_operation.get()
+        return context.payload() if context else None
+
+    def associate_execution(self, kind, reference_id, *, object_id=None, produced=False):
+        """Record a host/plugin execution identity, independently of automation."""
+        from backend.operation_associations import associate_execution
+        reference = associate_execution(kind, reference_id, object_id=object_id, produced=produced)
+        return reference.model_dump(mode="json") if reference else None
+
+    @property
     def state(self):
         def authorize():
             live = self.services.capabilities.capability_for_id(self.capability.agent_id, self.capability.id)
@@ -360,6 +372,7 @@ class WorldAgentCapabilityProvider:
         agent_id: str,
         capability_id: str,
         arguments: Mapping[str, Any],
+        *, request_id: str | None = None,
     ) -> Any:
         if capability_id == "host:report_delegated_task":
             from backend.plugins.execution import ExecutionReport
@@ -374,6 +387,13 @@ class WorldAgentCapabilityProvider:
                 # This route is never advertised as a per-target Agent tool.
                 from backend.capabilities.projection import authorize_invocation
                 capability = authorize_invocation(self.services, agent_id, capability_id, arguments)
+        from backend.capabilities.events import CapabilityInvocation
+        with CapabilityInvocation(self.services, capability, request_id=request_id) as invocation:
+            result = await self._invoke_capability(capability, arguments)
+            invocation.completed(result)
+        return result
+
+    async def _invoke_capability(self, capability, arguments):
         handler = self.services.plugins.capability_handler(capability.kind)
         from backend.sandbox.models import SandboxValidationError, SandboxStateError, SandboxOperationError, SandboxSecurityError, SandboxNotFoundError
         try:

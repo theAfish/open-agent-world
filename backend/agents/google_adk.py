@@ -21,7 +21,6 @@ from .models import (
     AgentInfo,
     AgentNotFoundError,
     AgentStateError,
-    AgentStatus,
 )
 from .tools import build_scoped_tool_callables
 from backend.runs.models import InvocationContext, RunStatus, RuntimeInput
@@ -116,8 +115,6 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
         validate_agent_config(config)
         record = await self._record(config.agent_id)
         async with record.lock:
-            if record.status == AgentStatus.RUNNING:
-                raise AgentStateError("cannot update a running agent")
             record.config = config
             record.last_error = None
             return record.info()

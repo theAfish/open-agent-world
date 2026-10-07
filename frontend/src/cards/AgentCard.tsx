@@ -9,7 +9,7 @@ import { useNodeSurfaceStore, useSurfaceDraft, surfaceDraftKey } from "../state/
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard, WorldEdge } from "../types/world";
 import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
-import { InstrumentOutput } from "./CardUtilities";
+import { InstrumentOutput, StateMachineButton } from "./CardUtilities";
 const NO_CARDS: WorldCard[] = [];
 const NO_EDGES: WorldEdge[] = [];
 
@@ -18,7 +18,8 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
   const definition = useWorldStore((state) => state.catalog.node_types.find((item) => item.id === card.type));
   const schemaSettings = definition?.traits.includes("ui.schema-agent.v1");
   const xrdMatch = card.type === "xrd.match";
-  const activeRun = card.status === "running" || card.status === "waiting";
+  const activeRun = (card.active_run_count ?? 0) > 0;
+  const atCapacity = (card.occupied_run_count ?? 0) >= Number(card.config.max_concurrent_runs ?? 1);
   const [hasResult, setHasResult] = useState(false);
   useEffect(() => {
     if (!xrdMatch) return;
@@ -58,6 +59,7 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
 
   return (
     <div className="expanded-stack">
+      {level === 'workspace' && <div className="action-row"><StateMachineButton card={card} /></div>}
       <PluginSurface card={card} slot="settings" level={level}>
       {schemaSettings ? <AgentSchemaSettings card={card} active={level === 'inspector' || level === 'workspace'} /> : <>
       {level === "workspace" && <><label className="field-label"><span>{t("When to use this Agent")}</span><textarea defaultValue={String(card.config.description ?? "")} maxLength={500}
@@ -82,7 +84,7 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
         </label>
         <div className="live-readout">
           <Radio size={13} aria-hidden="true" />
-          <span title={t("Agent runtime provider")}>{String(card.config.runtime_provider_id ?? "google.adk")} · {card.status}</span>
+          <span title={t("Agent runtime provider")}>{String(card.config.runtime_provider_id ?? "google.adk")} · {card.operational_status ?? card.status}</span>
         </div>
       </div>
 
@@ -143,7 +145,7 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
               useWorldStore.getState().pushToast({ tone: "error", title: "无法启动分析", detail: apiErrorMessage(error) });
             }
           })()}
-          disabled={(!directRun && !prompt.trim()) || card.status === "running" || card.status === "waiting"}
+          disabled={(!directRun && !prompt.trim()) || atCapacity}
         >
           {xrdMatch ? activeRun ? <LoaderCircle size={17} /> : hasResult ? <RotateCcw size={17} /> : <Play size={17} fill="currentColor" /> : <><Play size={14} fill="currentColor" /> {t("Run agent")}</>} </button>
         {(!xrdMatch || activeRun) && <button
@@ -152,7 +154,7 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
           aria-label={xrdMatch ? "停止检索" : undefined}
           title={xrdMatch ? "停止检索" : undefined}
           onClick={() => void stopAgent(card.id)}
-          disabled={card.status !== "running" && card.status !== "waiting"}
+          disabled={!activeRun && !(card.occupied_run_count ?? 0)}
         >
           <CircleStop size={14} /> {!xrdMatch && t("Stop")} </button>}
       </div>}

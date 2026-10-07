@@ -10,7 +10,8 @@ export interface NodePresentation {
   open: NodeSurfaceLevel;
 }
 
-export type AgentStatus = "idle" | "running" | "waiting" | "error";
+// State IDs come from the node state-machine definition.
+export type AgentStatus = string;
 export type SandboxStatus = "stopped" | "ready" | "running" | "error";
 export type SandboxWorkspaceAccess = "read_write" | "read_only";
 
@@ -64,7 +65,7 @@ export interface SandboxInfo {
   network_available?: boolean;
   network_status?: string;
 }
-export type CardStatus = AgentStatus | SandboxStatus | "available" | "modified" | string;
+export type CardStatus = string;
 
 export type Relationship = string;
 
@@ -110,6 +111,14 @@ export interface CardConfig extends Record<string, unknown> {
 }
 
 export interface WorldCard {
+  /** Explicit object definition or a developer-declared node type workflow. */
+  has_state_machine?: boolean;
+  operational_status?: string | null;
+  primary_state?: string | null;
+  state_groups?: Record<string, {label: string; ownership: 'system' | 'user'; state_id: string}>;
+  status_label?: string;
+  active_run_count?: number;
+  occupied_run_count?: number;
   missing_plugin?: { plugin_id: string; reason: string } | null;
   /** Missing on old snapshots; rendered as normal. Set once by the backend. */
   finish?: import('../cards/cardFinish').CardFinish;
@@ -197,6 +206,9 @@ export interface NodeTypeCatalogItem {
   deletion_warning?: string | null;
   transformations?: Record<string, { label: string; source_traits: string[] }>;
   has_execution?: boolean;
+  has_state_machine?: boolean;
+  /** Type-level editor support, independent of a saved workflow definition. */
+  state_machine_editor?: boolean;
   summoning?: Record<string, never> | null;
   container?: ContainerDefinition | null;
   default_config: CardConfig;

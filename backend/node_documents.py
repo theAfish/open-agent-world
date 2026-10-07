@@ -98,19 +98,42 @@ def _action_document(services, node_id, handler, request):
     return current
 
 
-def _apply_action(services, node_id, handler, current, request, capability):
+def _apply_action(services, node_id, handler, current, request, capability, invocation=None):
     try:
         value = handler.handler(current["value"], request.arguments)
     except (ValidationError, ValueError) as exc:
         raise ResourceValidationError(validation_message(exc)) from exc
-    if handler.read_only:
-        return {"value": value, "revision": current["revision"]} if handler.project else current
-    context = services.run_manager.current_context if services.run_manager else None
-    return write_document(services, node_id, value, request.expected_revision,
-        actor_id=capability.agent_id if capability else None, run_id=context.run_id if context else None)
+    with services.events.committed_batch(), services.database.transaction(immediate=True):
+        if handler.read_only:
+            result = {"value": value, "revision": current["revision"]} if handler.project else current
+        else:
+            context = services.run_manager.current_context if services.run_manager else None
+            result = write_document(services, node_id, value, request.expected_revision,
+                actor_id=capability.agent_id if capability else None, run_id=context.run_id if context else None)
+        if invocation:
+            invocation.completed(result)
+        return result
 
 
-async def invoke_document_action(services, node_id, action, request, *, capability=None):
+async def invoke_document_action(services, node_id, action, request, *, capability=None, request_id=None):
+    # Native UI actions and Agent capability adapters use the same registered
+    # callable lifecycle. Plugins do not register a separate automation API.
+    async with services._node_mutation(read_only=True):
+        handler = _authorize_action(services, node_id, action, capability)
+        if handler is None:
+            if action == "replace" and capability is None:
+                return await _invoke_document_action(services, node_id, action, request, capability=capability)
+            raise ResourceValidationError("Unknown document action")
+        node_type = services.world.get_card(node_id).type
+    from backend.capabilities.events import OperationInvocation
+    with OperationInvocation(services, operation_id=f"document:{node_type}:{action}", target_id=node_id,
+                             caller_id=capability.agent_id if capability else None,
+                             capability=handler.capability_kind, request_id=request_id) as invocation:
+        return await _invoke_document_action(services, node_id, action, request,
+                                             capability=capability, invocation=invocation)
+
+
+async def _invoke_document_action(services, node_id, action, request, *, capability=None, invocation=None):
     already_locked = services._node_mutation_owner.get() is asyncio.current_task()
     async with services._node_mutation():
         handler = _authorize_action(services, node_id, action, capability)
@@ -120,7 +143,7 @@ async def invoke_document_action(services, node_id, action, request, *, capabili
             return write_document(services, node_id, request.arguments, request.expected_revision)
         current = _action_document(services, node_id, handler, request)
         if handler.prepare is None:
-            return _apply_action(services, node_id, handler, current, request, capability)
+            return _apply_action(services, node_id, handler, current, request, capability, invocation)
         # A reentrant caller still owns the outer gate after this block exits.
         if already_locked:
             raise ResourceValidationError("Prepared document actions must be invoked outside a node mutation")
@@ -142,4 +165,4 @@ async def invoke_document_action(services, node_id, action, request, *, capabili
         if services.world.get_card(node_id).type != node_type or live_handler is not handler:
             raise RevisionConflictError("The document action changed. Reload and retry your change.")
         current = _action_document(services, node_id, live_handler, prepared_request)
-        return _apply_action(services, node_id, live_handler, current, prepared_request, capability)
+        return _apply_action(services, node_id, live_handler, current, prepared_request, capability, invocation)

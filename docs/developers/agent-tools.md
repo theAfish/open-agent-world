@@ -41,6 +41,16 @@ The user-created connection grants access to a specific Greeter. Multiple connec
 
 The handler returns a result such as `{"text": "Welcome, Ada!", "greeter_id": "..."}`. Invalid input raises `ResourceValidationError`, allowing the Agent to correct its request.
 
+## Automatic event discovery
+
+Registered tools are automatically available in the state-machine event picker through the same live capability projection as the Agent's tool list. There is no separate plugin event API, frontend adapter, or capability-name allowlist to implement. Existing inline `CapabilityGrantDefinition` registrations are normalized and work too. A friendly `CapabilityDefinition.label` is optional; otherwise the host derives a display name from `tool_name`.
+
+The host's authorized invocation boundary emits `capability.started` followed by one of `capability.succeeded`, `capability.failed`, `capability.cancelled`, or `capability.timed_out`. A returned mapping with `ok: false` is a failure. Invocation ID, Agent, actual capability kind, target, Run, and session identify the call; arguments and result contents are excluded. Authorization rejection does not emit a tool-start event. Returning a handle for asynchronous work means the call returned, not that the work finished.
+
+Plugins already using `NodeExecutionDefinition` also expose assigned-work lifecycle events automatically. The host reads `executor_relationship` to discover work-source → Agent bindings independently of Agent → tool permissions, and emits execution outcomes after the work-source document is updated. No Task Board-specific event registration is needed.
+
+The host persists operation events alongside local business mutations where possible. Explicitly enabled, version-bound state-machine instances consume this journal independently of the editor or a provider turn. Rules atomically update user-defined states and queue action intents; dispatch reuses these same capability boundaries and never blindly retries an uncertain external outcome. Saving a definition alone does not enable it, and legacy previews remain disabled. See [State machines](../state-machines.md).
+
 ## Verify it without a model
 
 Run the integration test from the repository root:

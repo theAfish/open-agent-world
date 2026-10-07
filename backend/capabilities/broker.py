@@ -121,6 +121,26 @@ class CapabilityBroker:
         self._require_agent(target_agent_id)
         self.capability_for_id(agent_id, f"agent.communicate:{target_agent_id}")
 
+    def require_run_request(self, caller_id: str, target_id: str) -> None:
+        """Authorize host-authored automation using live Agent or container scope.
+
+        A container's automation is scoped to its actual descendants. An Agent
+        calling another Agent still requires its normal communication grant.
+        This check runs again immediately before RunManager admission.
+        """
+        target = self._require_agent(target_id)
+        if caller_id == target_id:
+            return
+        caller = self.world.get_card(caller_id)
+        if self.world.is_container(caller):
+            parent = target.parent_id
+            while parent:
+                if parent == caller_id:
+                    return
+                parent = self.world.get_card(parent).parent_id
+            raise PermissionDeniedError("Run target is no longer a member of the automation's container")
+        self.require_agent_communicate(caller_id, target_id)
+
     def require_text_read(self, agent_id: str, resource_id: str) -> None:
         self.capability_for_id(agent_id, f"text.read:{resource_id}")
 

@@ -74,6 +74,8 @@ class WorldStore:
             raise ValueError("chunk_size must be positive")
         self.database = database
         self.structure_locked = False
+        self.initialize_state_machine = None
+        self.machine_status = None
         self.registry = registry
         self.chunk_size = chunk_size
         self.terrain_seed = ensure_terrain_seed(database, new_world=new_world)
@@ -131,12 +133,27 @@ class WorldStore:
     def _validate_config(
         self, card_type: str, value: dict[str, Any]
     ) -> dict[str, Any]:
+        definition = self.registry.node_type(card_type)
+        if definition.state_machine and definition.state_machine.status_entity_id:
+            validated = self.registry.validate_config(card_type, {key: item for key, item in value.items() if key != "status"})
+            validated.pop("status", None)
+            return validated
         return self.registry.validate_config(card_type, value)
 
     def _config_accepts_status(self, card_type: str) -> bool:
-        model = self.registry.node_type(card_type).config_model
+        definition = self.registry.node_type(card_type)
+        if definition.state_machine and definition.state_machine.status_entity_id:
+            return False
+        model = definition.config_model
         # Preserve legacy models that stored status as an allowed extra field.
         return "status" in model.model_fields or model.model_config.get("extra") == "allow"
+
+    def _check_machine_status_patch(self, current, request):
+        if self.machine_status is None or self.machine_status(current.id) is None:
+            return
+        requested = request.status if request.status is not None else (request.config or {}).get("status")
+        if requested is not None and requested != current.status:
+            raise GraphValidationError("This node's status is controlled by its state machine; edit its states and transitions")
 
     def validate_parent(self, card_id: str, card_type: str, parent_id: str | None) -> None:
         if parent_id is None:
@@ -331,6 +348,8 @@ class WorldStore:
                     """,
                     values,
                 )
+                if self.initialize_state_machine is not None:
+                    self.initialize_state_machine(card.id)
         except sqlite3.IntegrityError as exc:
             raise ConflictError(f"card {card.id!r} already exists") from exc
         return self.get_card(card.id)
@@ -391,10 +410,12 @@ class WorldStore:
         size = self._container_size(current.type, request.size or current.size)
         expanded = current.expanded if request.expanded is None else request.expanded
         config = current.config
+        self._check_machine_status_patch(current, request)
         if request.config is not None:
             config = {**config, **request.config}
         if request.status is not None:
-            self._assert_valid_status(current.type, request.status)
+            if request.status != current.status:
+                self._assert_valid_status(current.type, request.status)
             if self._config_accepts_status(current.type):
                 config = {**config, "status": request.status}
         config = self._validate_config(current.type, config)
@@ -533,10 +554,12 @@ class WorldStore:
         size = self._container_size(current.type, request.size or current.size)
         expanded = current.expanded if request.expanded is None else request.expanded
         config = current.config
+        self._check_machine_status_patch(current, request)
         if request.config is not None:
             config = {**config, **request.config}
         if request.status is not None:
-            self._assert_valid_status(current.type, request.status)
+            if request.status != current.status:
+                self._assert_valid_status(current.type, request.status)
             if self._config_accepts_status(current.type):
                 config = {**config, "status": request.status}
         config = self._validate_config(current.type, config)
@@ -822,6 +845,12 @@ class WorldStore:
         definition = None if missing else self.registry.node_type(card_type)
         config = json.loads(row["config_json"])
         status = str(config.get("status", definition.default_status if definition else "unavailable"))
+        if self.machine_status is not None:
+            projected = self.machine_status(row["id"])
+            if projected is not None:
+                status = projected
+                if "status" in config:
+                    config["status"] = projected
         # The existing storage format keeps status in config_json. Expose it as
         # host metadata unless the plugin accepts the legacy config status field.
         if definition and not self._config_accepts_status(card_type):

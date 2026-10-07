@@ -37,6 +37,31 @@ describe('shared select menus', () => {
     expect(select.hasAttribute('aria-expanded')).toBe(false);
   });
 
+  it('keeps menus inside their owning dialog and preserves pointer and keyboard selection', () => {
+    const change = vi.fn();
+    render(<><SelectMenuLayer /><dialog open aria-label="Editor">
+      <select aria-label="Event" defaultValue="started" onChange={event => change(event.target.value)}>
+        <option value="started">Started</option><option value="completed">Completed</option>
+      </select>
+    </dialog></>);
+    const dialog = screen.getByRole('dialog');
+    const select = screen.getByRole('combobox', { name: 'Event' }) as HTMLSelectElement;
+    fireEvent.click(select);
+    const menu = screen.getByRole('listbox');
+    expect(menu.parentElement).toBe(dialog);
+    fireEvent.mouseDown(menu.querySelector('[data-select-option="1"]')!);
+    fireEvent.click(menu.querySelector('[data-select-option="1"]')!);
+    expect(select.value).toBe('completed');
+    expect(change).toHaveBeenLastCalledWith('completed');
+    expect(document.activeElement).toBe(select);
+    fireEvent.keyDown(select, { key: 'ArrowUp' });
+    fireEvent.keyDown(select, { key: 'Home' });
+    fireEvent.keyDown(select, { key: 'Enter' });
+    expect(select.value).toBe('started');
+    expect(change).toHaveBeenLastCalledWith('started');
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
   it('navigates past disabled options, searches labels and commits with Enter', () => {
     const change = vi.fn();
     render(<Form change={change} />);

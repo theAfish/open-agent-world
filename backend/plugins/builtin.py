@@ -100,8 +100,6 @@ class AgentNodeBehavior(NodeLifecycleHandler):
     async def on_startup(self, context: NodeLifecycleContext, node: Card) -> None:
         if context.agents is not None:
             await context.agents.create(node)
-        if node.status != "idle":
-            context.nodes.update_status(node.id, "idle")
 
     async def on_shutdown(self, context: NodeLifecycleContext, node: Card) -> None:
         if context.agents is not None:
@@ -919,47 +917,49 @@ def _register_builtin(registry: PluginRegistration) -> None:
         input_schema={"type": "object", "properties": {}, "additionalProperties": False}), _view_image)
     for operation, handler in (("start", _start_sandbox), ("stop", _stop_sandbox)):
         registry.register_capability(CapabilityDefinition(
-            kind=f"sandbox.{operation}", tool_name=f"{operation}_sandbox", target_parameter="sandbox",
+            kind=f"sandbox.{operation}", label="Start Sandbox" if operation == "start" else "Stop Sandbox", tool_name=f"{operation}_sandbox", target_parameter="sandbox",
             description=("Start the selected Sandbox using its saved runtime, workspace and network settings. Inspect it before executing commands."
                          if operation == "start" else "Stop the selected Sandbox, terminating any active command and waiting for cleanup. This affects every agent sharing this Sandbox."),
             input_schema={"type": "object", "properties": {}, "additionalProperties": False}), handler)
     registry.register_capability(CapabilityDefinition(
-        kind='sandbox.execute', tool_name='execute_command', target_parameter='sandbox',
+        kind='sandbox.execute', label="Run a command", tool_name='execute_command', target_parameter='sandbox',
         selectors=EXECUTION_SELECTORS,
         description='Execute an argv command in the selected sandbox. Long operations return status=running and an operation_id after wait_seconds (default 1). Use wait_sandbox_operation to collect the result or do independent work; never resubmit running work. Commands run concurrently in the shared workspace and HOME. Inspect active_commands to coordinate with other Agents; avoid overwriting their edits. Cancellation and timeout affect only the selected command and do not roll back completed writes; inspect effects before retrying. First inspect its runtime shell, cwd and resource paths. The configured working folder is live; edits there change real files. Attached resources are available through SANDBOX_RESOURCES. Calls use fresh non-interactive processes: cd/export/venv activation do not carry over. For installations set timeout_seconds explicitly and keep progress visible; do not pipe installers to tail. Shell pipelines report the final command status: use bash -o pipefail or download with curl -f to a file and only execute it after success. Use install_python_packages for shared Python dependencies.',
         input_schema={"type": "object", "properties": {"argv": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "Executable and arguments as a non-empty string array; argv[0] cannot be a shell built-in."}, "wait_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 1, "description": "Host observation budget; returns operation_id if still running. Use wait_sandbox_operation later, not a duplicate submission."}, "timeout_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 36000, "description": "Command wall-clock budget in seconds. Omit to use Sandbox settings; set explicitly for slow installs."}}, "required": ["argv"], "additionalProperties": False}), _execute_sandbox)
     registry.register_capability(CapabilityDefinition(
-        kind='sandbox.cancel_command', tool_name='cancel_command', target_parameter='sandbox',
+        kind='sandbox.cancel_command', label="Cancel a command", tool_name='cancel_command', target_parameter='sandbox',
         description='Cancel one command and wait for its process cleanup. Inspect active_commands and supply its id as command_id. Agents may cancel their own commands; cancelling another Agent requires sandbox.stop authority. A stale ID cannot cancel a newer command.',
         input_schema={"type": "object", "properties": {"command_id": {"type": "string", "minLength": 1}}, "required": ["command_id"], "additionalProperties": False}), _cancel_sandbox_command)
     registry.register_capability(CapabilityDefinition(
-        kind='sandbox.wait', tool_name='wait_sandbox_operation', target_parameter='sandbox',
+        kind='sandbox.wait', label="Wait for a result", tool_name='wait_sandbox_operation', target_parameter='sandbox',
         target_capabilities=frozenset({'sandbox.execute'}),
         description='Wait for an existing command, Skill script, or Python installation without launching any process. Use operation_id from a running result or id from inspect_sandbox. wait_seconds=0 inspects immediately; 1-60 waits on the host. A wait timeout returns running and never cancels or resubmits work. Omit operation_id for a cancellable host timer when waiting for an external resource; elapsed time does not prove readiness. Check the final result before claiming success; do independent work between waits.',
         input_schema={"type": "object", "properties": {"operation_id": {"type": "string", "minLength": 1}, "wait_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 30}}, "additionalProperties": False}), _wait_sandbox_operation)
     registry.register_capability(CapabilityDefinition(
-        kind='sandbox.install_python_packages', tool_name='install_python_packages', target_parameter='sandbox',
+        kind='sandbox.install_python_packages', label="Install Python packages", tool_name='install_python_packages', target_parameter='sandbox',
         description='Install missing Python packages into the persistent shared sandbox Python environment, then retry execution. Packages become available to all sandboxes on this execution platform. Supply index package names with optional extras/version constraints. Returns status=running and an operation_id after wait_seconds (default 1) if unfinished; use wait_sandbox_operation or do independent work. Confirm the final installation result before using its packages. Installation is serialized by the environment manager; source builds, paths and URLs are unsupported.',
         input_schema={"type": "object", "properties": {"wait_seconds": {"type": "number", "minimum": 0, "maximum": 60, "default": 1}, "requirements": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 100}}, "required": ["requirements"], "additionalProperties": False}), _install_python_packages)
     registry.register_capability(CapabilityDefinition(
-        kind='sandbox.run_skill_script', tool_name='run_skill_script', target_parameter='sandbox',
+        kind='sandbox.run_skill_script', label="Run a skill script", tool_name='run_skill_script', target_parameter='sandbox',
         description='Run a file from the selected Skill in the selected sandbox. Both resources require independent live authorization. The current bundle is mounted read-only outside the workspace; cwd and generated outputs use the sandbox workspace.',
         input_schema=skill_script_schema(), selectors=(SKILL_SELECTOR, *EXECUTION_SELECTORS), target_capabilities=frozenset({"sandbox.execute"})), _run_skill_script)
     from backend.sandbox.history import SandboxInspection
     registry.register_capability(CapabilityDefinition(
-        kind='sandbox.inspect', tool_name='inspect_sandbox', target_parameter='sandbox',
+        kind='sandbox.inspect', label="Inspect Sandbox", tool_name='inspect_sandbox', target_parameter='sandbox',
         description='Inspect the selected sandbox before executing. History defaults to this caller without output; use history_scope=run/all, include_output=true or include_shared_python=true only when needed: returns its operating system, shell argv prefix, cwd, read/write access, resource directory and availability.',
         input_schema=SandboxInspection.model_json_schema()), _inspect_sandbox)
+    from backend.agent_state_machine import agent_state_machine, legion_state_machine
     registry.register_node_type(NodeTypeDefinition(
         canvas_create_requires_confirmation=False, id="agent", label="Agent", description="Reasoning worker", icon="bot",
         color="#75736c", deck_id="agents", deck_label="Agents", deck_icon="bot",
-        default_name="New Agent", default_size=(300, 190), default_status="idle",
-        statuses=frozenset({"idle", "running", "waiting", "error"}),
+        default_name="New Agent", default_size=(300, 190),
         config_model=AgentConfig, traits=frozenset({"core.agent"}),
+        state_machine_editor=True,
+        state_machine=agent_state_machine(),
         tutorials=AGENT_TUTORIALS,
         surfaces={"preview": True, "inspector": True, "workspace": True},
         lifecycle=AgentNodeBehavior(),
-        templateable=True, template_status="idle",
+        templateable=True,
         template_handler=AgentNodeTemplateHandler(),
     ))
     from backend.minister import register as register_minister
@@ -980,8 +980,9 @@ def _register_builtin(registry: PluginRegistration) -> None:
         id="legion", label="Legion", description="Team space with shared context and settings",
         icon="workflow", color="#697c78", deck_id="fields", deck_label="Fields",
         deck_icon="workflow", default_name="New Legion", default_size=(1100, 700),
-        default_status="available", statuses=frozenset({"available"}),
         config_model=LegionConfig, traits=frozenset({"core.legion", "ui.legion.v1"}),
+        state_machine_editor=True,
+        state_machine=legion_state_machine(),
         template_remap_config=remap_workspace_config,
         container=LegionContainerDefinition(),
         user_creatable=False, templateable=True,
@@ -1081,7 +1082,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         templateable=True,
         capabilities=(CapabilityGrantDefinition(kind='image.view'),),
     ))
-    registry.register_capability(CapabilityDefinition(kind="sandbox.copy_skill_resource", tool_name="copy_skill_resource",
+    registry.register_capability(CapabilityDefinition(kind="sandbox.copy_skill_resource", label="Copy a skill resource", tool_name="copy_skill_resource",
         description="Explicitly copy an authorized Skill resource to a workspace-relative destination. Missing parent directories are created automatically. Existing files require overwrite=true.",
         target_parameter="sandbox", selectors=(SKILL_SELECTOR,), target_capabilities=frozenset({"sandbox.execute"}),
         input_schema={"type": "object", "properties": {"source": {"type": "string"}, "destination": {"type": "string"}, "overwrite": {"type": "boolean", "default": False}}, "required": ["source", "destination"], "additionalProperties": False}), _copy_skill_resource)

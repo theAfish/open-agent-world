@@ -55,12 +55,17 @@ class SandboxOperations:
             if sandbox_id in self.services._sandbox_stopping:
                 raise SandboxStateError("Sandbox cleanup is pending")
             operation_id = uuid4().hex
+            from backend.operation_associations import active_operation, associate_execution
+            associate_execution("sandbox_operation", operation_id, object_id=sandbox_id, produced=True)
+            operation = active_operation.get()
             context = self.services.run_manager.current_context
             receipt = {"id": operation_id, "sandbox_id": sandbox_id,
                 "history_key": history.key(self.services, sandbox_id),
                 "caller": agent_id or "user", "run_id": context.run_id if context else None,
                 "operation_kind": kind, "state": "running", "argv": [],
                 "started_at": datetime.now(UTC).isoformat()}
+            if operation is not None:
+                receipt["operation"] = operation.payload()
             self.services._sandbox_commands[operation_id] = receipt
             try:
                 history.save(self.services, sandbox_id, receipt)

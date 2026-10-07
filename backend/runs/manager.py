@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
@@ -14,7 +15,6 @@ from backend.agents import (
     AgentCapabilityProvider,
     AgentEvent,
     AgentNotFoundError,
-    AgentStatus,
     RuntimeProvider,
 )
 from backend.errors import RuntimeUnavailableError
@@ -23,7 +23,7 @@ from backend.events.hub import EventHub
 from backend.events.models import EventType, RuntimeEvent
 from backend.plugins import PluginRegistry
 from backend.state import StateContext, StateScope, StateStore
-from backend.world.models import Card, CardPatch
+from backend.world.models import Card
 from backend.world.store import WorldStore
 
 from .models import (
@@ -103,6 +103,7 @@ class RunManager:
     admission_check: Any = None
     cleanup_execution: Callable[[str], Awaitable[None]] | None = None
     execution_settled: Callable[[], None] | None = None
+    observe_agent: Callable[..., None] | None = None
     shutting_down: bool = False
 
     def __post_init__(self):
@@ -212,6 +213,10 @@ class RunManager:
     def list_child_runs(self, parent_run_id: str) -> list[RunRecord]:
         return self.store.list_children(parent_run_id)
 
+    def agent_execution_counts(self, agent_id: str) -> dict[str, int]:
+        return {"active_run_count": sum(run.status not in TERMINAL_RUN_STATUSES for run in self.list_runs(agent_id=agent_id)),
+                "occupied_run_count": sum(owner == agent_id for owner in self._occupied_runs.values())}
+
     @asynccontextmanager
     async def workspace_maintenance(self, agent_ids: list[str]):
         """Hold admission while workspace files move. Caller holds graph mutation."""
@@ -271,10 +276,7 @@ class RunManager:
                 parent_run_id=parent_run_id,
                 task_id=task_id,
                 context_id=context_id,
-            )
-            record = self.store.update_lifecycle(
-                record.run_id,
-                **{
+                initial_lifecycle={
                     "owner_kind": "agent",
                     "owner_id": agent_id,
                     "cancellation_policy": "independent" if detached or parent_run_id is None else "dependent",
@@ -301,15 +303,15 @@ class RunManager:
             record = await self._transition_run_admitted(
                 record.run_id, RunStatus.RUNNING
             )
-            await self._publish_agent_operational(
-                agent_id, "running", record.run_id, started=True
-            )
             # Register execution before releasing admission. Otherwise deletion
             # can reserve this Agent, cancel the durable Run, and still have this
             # method launch an untracked provider coroutine afterward.
+            from backend.operation_associations import active_operation
+            execution_context = contextvars.copy_context()
+            execution_context.run(active_operation.set, None)
             task = asyncio.create_task(
                 self._execute(record, card, RuntimeInput(prompt=prompt)),
-                name=f"run:{record.run_id}",
+                name=f"run:{record.run_id}", context=execution_context,
             )
             self._runtime_tasks[record.run_id] = task
             task.add_done_callback(
@@ -379,11 +381,7 @@ class RunManager:
         self.store.update_lifecycle(run_id, awaiting=reason.strip(), holds_capacity=not release_agent_slot)
         if release_agent_slot:
             self._release_agent_slot(run_id)
-            await self._publish_agent_operational(
-                current.agent_id,
-                "running" if self._occupied_agent_runs(current.agent_id) else "idle",
-                run_id,
-            )
+            await self._publish_agent_activity(current.agent_id, run_id, observe=False)
         return self.get_run(run_id)
 
     async def transition_run(
@@ -441,14 +439,8 @@ class RunManager:
             self._terminal_done.setdefault(run_id, asyncio.Event()).set()
             record = self.store.update_lifecycle(run_id, holds_capacity=False, awaiting=None)
         await self._publish_run(record, event_type)
-        if current.status is RunStatus.WAITING and target is RunStatus.RUNNING:
-            await self._publish_agent_operational(record.agent_id, "running", run_id)
-        elif target in TERMINAL_RUN_STATUSES:
-            await self._publish_agent_operational(
-                record.agent_id,
-                "running" if self._occupied_agent_runs(record.agent_id) else "idle",
-                run_id,
-            )
+        await self._publish_agent_activity(record.agent_id, run_id,
+                                           started=current.status is RunStatus.CREATED)
         return record
 
     async def cancel_run(self, run_id: str, *, propagate: bool = True) -> RunRecord:
@@ -584,10 +576,14 @@ class RunManager:
         self.state.ensure_scope("agent", card.id, schema_id="core.agent")
         provider_id = self._optional_provider_id(card)
         if provider_id is None:
+            if self.observe_agent:
+                self.observe_agent(card.id, "agent.ready")
             return
         provider = self._provider(provider_id)
         await provider.create_agent(self._agent_config(card))
         self._agent_provider_ids[card.id] = provider_id
+        if self.observe_agent:
+            self.observe_agent(card.id, "agent.ready")
 
     async def update_agent(self, card: Card) -> None:
         previous_id = self._agent_provider_ids.get(card.id)
@@ -638,7 +634,7 @@ class RunManager:
         executing = self._occupied_agent_runs(agent_id)
         return replace(
             info,
-            status=AgentStatus.RUNNING if executing else AgentStatus.IDLE,
+            status=card.status,
             active_run_id=executing[0].run_id if executing else None,
         )
 
@@ -843,11 +839,6 @@ class RunManager:
             execution_done = self._execution_done.get(record.run_id)
             if execution_done is not None:
                 execution_done.set()
-            await self._publish_agent_operational(
-                record.agent_id,
-                "running" if self._occupied_agent_runs(record.agent_id) else "idle",
-                record.run_id,
-            )
 
     def _execution_config(self, card: Card, team: dict | None) -> AgentConfig:
         config = self._agent_config(card)
@@ -1039,20 +1030,11 @@ class RunManager:
         )
 
     async def _publish_run(self, record: RunRecord, event_type: EventType) -> None:
+        from backend.capabilities.events import run_lifecycle_event
         conversation_id, session_id = self._conversation_scope(record)
-        await self.events.publish(
-            event_type,
-            node_id=record.agent_id,
-            agent_id=record.agent_id,
-            run_id=record.run_id,
-            conversation_id=conversation_id,
-            session_id=session_id,
-            payload={
-                "run": record.model_dump(mode="json"),
-                "run_id": record.run_id,
-                **({"error": record.error} if record.error else {}),
-            },
-        )
+        event = run_lifecycle_event(record, previous_status="waiting" if event_type is EventType.RUN_RESUMED else None)
+        await self.events.publish_event(event.model_copy(update={
+            "type": event_type, "conversation_id": conversation_id, "session_id": session_id}))
 
     async def _publish_provider_event(
         self, event: AgentEvent, record: RunRecord
@@ -1063,6 +1045,9 @@ class RunManager:
         payload = (public_tool_payload(event.payload)
                    if event.type.value in {"tool_started", "tool_completed"}
                    else dict(event.payload))
+        if event.type.value in {"agent_started", "agent_status_changed"}:
+            payload.update(status=self.world.get_card(record.agent_id).status,
+                           **self.agent_execution_counts(record.agent_id))
         return await self.events.publish(
             EventType(event.type.value),
             node_id=record.agent_id,
@@ -1073,25 +1058,26 @@ class RunManager:
             payload={**payload, "run_id": record.run_id},
         )
 
-    async def _publish_agent_operational(
+    async def _publish_agent_activity(
         self,
         agent_id: str,
-        status: str,
         run_id: str,
         *,
         started: bool = False,
+        observe: bool = True,
     ) -> None:
-        # This is availability/load only. A normal Run failure never changes an
-        # Agent to error; runtime initialization failures are handled separately.
-        card = self.world.maybe_get_card(agent_id)
-        # Agent availability is also meaningful to the caller that initiated a
-        # Run.  Preserve that scope so generic consumers (including
-        # Conversation) can react immediately, before a provider emits its
-        # first text or tool event.
         record = self.get_run(run_id)
         conversation_id, session_id = self._conversation_scope(record)
-        if card is not None and card.status != status:
-            self.world.update_card(agent_id, CardPatch(status=status))
+        unfinished = [run for run in self.list_runs(agent_id=agent_id) if run.status not in TERMINAL_RUN_STATUSES]
+        fact = ("agent.work_started" if any(run.status is RunStatus.RUNNING for run in unfinished)
+                else "agent.work_waiting" if unfinished
+                else "agent.runtime_failed" if record.status is RunStatus.FAILED
+                else "agent.work_finished")
+        if observe and self.observe_agent:
+            self.observe_agent(agent_id, fact, run_id=run_id, conversation_id=conversation_id, session_id=session_id)
+        card = self.world.maybe_get_card(agent_id)
+        if card is None:
+            return
         event_type = (
             EventType.AGENT_STARTED if started else EventType.AGENT_STATUS_CHANGED
         )
@@ -1102,7 +1088,7 @@ class RunManager:
             run_id=run_id,
             conversation_id=conversation_id,
             session_id=session_id,
-            payload={"status": status, "run_id": run_id},
+            payload={"status": card.status, "run_id": run_id, **self.agent_execution_counts(agent_id)},
         )
 
     def _conversation_scope(self, record: RunRecord) -> tuple[str | None, str | None]:
@@ -1112,6 +1098,10 @@ class RunManager:
         while True:
             if current.caller_kind == "conversation":
                 return current.caller_id, current.context_id
+            operation = current.lifecycle.get("operation") or {}
+            conversation = current.lifecycle.get("conversation_id") or operation.get("conversation_id")
+            if conversation:
+                return conversation, (current.lifecycle.get("session_id") or operation.get("context_id") or current.context_id)
             if current.parent_run_id is None:
                 return None, None
             current = self.get_run(current.parent_run_id)

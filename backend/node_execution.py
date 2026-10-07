@@ -160,10 +160,13 @@ class NodeExecutionService(NodeDelegationMixin, NodeContinuationMixin):
             raise ResourceValidationError("Work sources require unique IDs and at most 1000 items")
         return items
 
-    def apply(self, node_id, outcome):
-        current = read_document(self.services, node_id)
-        value = self.spec(node_id).apply_outcome(current["value"], outcome)
-        write_document(self.services, node_id, value, current["revision"], run_id=outcome.run_id)
+    def apply(self, node_id, outcome, *, operation=None, execution_id=None):
+        from backend.capabilities.events import publish_work_outcome
+        with self.services.events.committed_batch(), self.services.database.transaction(immediate=True):
+            current = read_document(self.services, node_id)
+            value = self.spec(node_id).apply_outcome(current["value"], outcome)
+            write_document(self.services, node_id, value, current["revision"], run_id=outcome.run_id)
+            publish_work_outcome(self.services, node_id, outcome, operation=operation, execution_id=execution_id)
 
     async def start(self, node_id, request, *, capability=None):
         if self.spec(node_id).summoning:
@@ -185,12 +188,20 @@ class NodeExecutionService(NodeDelegationMixin, NodeContinuationMixin):
             if any(item.agent_id not in allowed for item in candidates):
                 raise PermissionDeniedError("Choose an executor connected from this work source using its execution relationship")
             previous = self.state(node_id)
-            self.save(node_id, {"status": "running", "batch_id": str(uuid4()), "error": None,
+            from backend.operation_associations import active_operation, associate_execution
+            batch_id = str(uuid4())
+            operation = active_operation.get()
+            associate_execution("batch", batch_id, object_id=node_id, produced=True)
+            self.save(node_id, {"status": "running", "batch_id": batch_id, "error": None,
+                                "operation": operation.payload() if operation else None,
                                 "attempts": previous["attempts"][-200:]})
             self.stopping.discard(self.worker_key(node_id))
             # Explicit dispatch creates an independent, bounded batch. Never
             # inherit an Agent invocation or a node-mutation context into it.
             batch_context = contextvars.Context()
+            if operation is not None:
+                # The batch ledger retains this identity for restart diagnostics.
+                batch_context.run(active_operation.set, operation)
             # Preserve only the resolved state namespace, never the caller's
             # mutation transaction or Agent invocation. Switching tabs is irrelevant.
             scope_type, scope_id = self.services.card_state.identity(node_id)
@@ -294,22 +305,19 @@ class NodeExecutionService(NodeDelegationMixin, NodeContinuationMixin):
                         break
                 completed, _ = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)
                 async with self.services._node_mutation():
-                    state = self.state(node_id)
-                    for waiter in completed:
-                        entry = active.pop(waiter)
-                        record = waiter.result()
-                        status = record.status.value
-                        failed = failed or status != "succeeded"
-                        for stored in state["attempts"]:
-                            if stored.get("run_id") == record.run_id:
-                                stored.update(status=status, error=record.error)
-                        self.save(node_id, state)
-                        self.apply(node_id, WorkOutcome(item_id=entry["item_id"], run_id=record.run_id,
-                            artifacts=self.services.resources.artifacts.run_references(record.run_id),
-                            status=status, text=manager.final_text(record.run_id), error=record.error))
-                        for stored in state["attempts"]:
-                            if stored.get("run_id") == record.run_id:
-                                stored["applied"] = True
+                    with self.services.events.committed_batch(), self.services.database.transaction(immediate=True):
+                        state = self.state(node_id)
+                        for waiter in completed:
+                            entry = active.pop(waiter)
+                            record = waiter.result()
+                            status = record.status.value
+                            failed = failed or status != "succeeded"
+                            self.apply(node_id, WorkOutcome(item_id=entry["item_id"], run_id=record.run_id,
+                                artifacts=self.services.resources.artifacts.run_references(record.run_id),
+                                status=status, text=manager.final_text(record.run_id), error=record.error))
+                            for stored in state["attempts"]:
+                                if stored.get("run_id") == record.run_id:
+                                    stored.update(status=status, error=record.error, applied=True)
                         self.save(node_id, state)
         except Exception as error:
             logger.exception("Work source execution failed: %s", node_id)
@@ -326,6 +334,10 @@ class NodeExecutionService(NodeDelegationMixin, NodeContinuationMixin):
             self.workers.pop(self.worker_key(node_id), None)
 
     async def reconcile(self, node_id, *, status="interrupted", error=None):
+        with self.services.events.committed_batch(), self.services.database.transaction(immediate=True):
+            self._reconcile(node_id, status=status, error=error)
+
+    def _reconcile(self, node_id, *, status, error):
         state = self.state(node_id)
         for attempt in state["attempts"]:
             if attempt.get("applied"):
@@ -341,7 +353,8 @@ class NodeExecutionService(NodeDelegationMixin, NodeContinuationMixin):
             try:
                 self.apply(node_id, WorkOutcome(item_id=attempt["item_id"], run_id=run_id, status=outcome_status,
                     artifacts=self.services.resources.artifacts.run_references(run_id),
-                    text=self.services.run_manager.final_text(run_id) if run_id else "", error=attempt["error"]))
+                    text=self.services.run_manager.final_text(run_id) if run_id else "", error=attempt["error"]),
+                    operation=state.get("operation"), execution_id=None if run_id else f"{attempt['batch_id']}:{attempt['item_id']}")
                 attempt["applied"] = True
             except Exception as callback_error:
                 # Preserve attempt truth even when a changed plugin cannot

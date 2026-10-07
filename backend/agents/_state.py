@@ -21,14 +21,13 @@ _SAFE_AGENT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 class AgentRecord:
     config: AgentConfig
     session_id: str
-    status: AgentStatus = AgentStatus.IDLE
     last_error: str | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def info(self) -> AgentInfo:
         return AgentInfo(
             config=self.config,
-            status=self.status,
+            status=AgentStatus.IDLE,  # Provider metadata; RunManager projects the node's machine state.
             session_id=self.session_id,
             active_run_id=None,
             last_error=self.last_error,

@@ -15,6 +15,7 @@ from backend.api.legion_groups import router as legion_groups_router
 from backend.api.resources import router as resources_router
 from backend.api.runtime import router as runtime_router
 from backend.api.world import router as world_router
+from backend.api.state_machines import router as state_machines_router
 from backend.api.storage import router as storage_router
 from backend.api.plugin_assets import router as plugin_assets_router
 from backend.api.packs import router as packs_router
@@ -46,6 +47,7 @@ async def plugin_catalog(
 
 
 api_router.include_router(world_router)
+api_router.include_router(state_machines_router)
 api_router.include_router(ministers_router)
 api_router.include_router(file_preview_router)
 api_router.include_router(card_library_router)

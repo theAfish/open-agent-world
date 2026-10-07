@@ -9,11 +9,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 
-class AgentStatus(StrEnum):
-    IDLE = "idle"
-    RUNNING = "running"
-    WAITING = "waiting"
-    ERROR = "error"
+from backend.agent_state_machine import AgentStatus
 
 
 class AgentEventType(StrEnum):
@@ -50,7 +46,7 @@ class AgentConfig:
 @dataclass(frozen=True, slots=True)
 class AgentInfo:
     config: AgentConfig
-    status: AgentStatus
+    status: str
     session_id: str
     active_run_id: str | None = None
     last_error: str | None = None

@@ -20,6 +20,18 @@ class NodeResourceContext:
     confirmed: bool = False  # Desktop only; never accepted from Agent arguments.
     state: CardStateStore | None = None
 
+    @property
+    def invocation(self) -> dict[str, Any] | None:
+        from backend.operation_associations import active_operation
+        context = active_operation.get()
+        return context.payload() if context else None
+
+    def associate_execution(self, kind: str, reference_id: str, *, object_id: str | None = None,
+                            produced: bool = False) -> dict[str, Any] | None:
+        from backend.operation_associations import associate_execution
+        reference = associate_execution(kind, reference_id, object_id=object_id, produced=produced)
+        return reference.model_dump(mode="json") if reference else None
+
 
 @dataclass(frozen=True, slots=True)
 class NodeResourceAction:

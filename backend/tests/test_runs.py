@@ -497,7 +497,7 @@ async def test_transition_authority_and_explicit_suspension(
         assert record.status is RunStatus.WAITING
         assert run.run_id not in manager._runtime_tasks
         assert manager.holds_agent_slot(run.run_id)
-        assert services.get_card(agent.id).status == "running"
+        assert services.get_card(agent.id).status == "waiting"
         assert manager.get_suspension(run.run_id).release_agent_slot is False
         with pytest.raises(RuntimeUnavailableError, match="max_concurrent_runs=1"):
             await manager.start_run(agent.id, "slot is still occupied")
@@ -506,7 +506,7 @@ async def test_transition_authority_and_explicit_suspension(
             run.run_id, reason="external_job", release_agent_slot=True
         )
         assert not manager.holds_agent_slot(run.run_id)
-        assert services.get_card(agent.id).status == "idle"
+        assert services.get_card(agent.id).status == "waiting"
         provider.release_turn = asyncio.Event()
         another = await manager.start_run(agent.id, "another provider turn")
         await manager.suspend_run(another.run_id, reason="second_external_job")
@@ -608,7 +608,7 @@ async def test_failure_is_run_local_and_concurrency_is_explicit(tmp_path: Path) 
         record = await manager.wait_terminal(failed.run_id)
         assert record.status is RunStatus.FAILED
         assert record.error == "provider exploded"
-        assert services.get_card(agent.id).status == "idle"
+        assert services.get_card(agent.id).status == "error"
 
         provider.mode = "block"
         provider.started.clear()
@@ -622,13 +622,13 @@ async def test_failure_is_run_local_and_concurrency_is_explicit(tmp_path: Path) 
         assert isinstance(rejected, RuntimeUnavailableError)
         assert "max_concurrent_runs=1" in str(rejected)
         await provider.started.wait()
-        assert (await manager.get_agent(agent.id)).status is AgentStatus.RUNNING
+        assert (await manager.get_agent(agent.id)).status == AgentStatus.RUNNING
         with pytest.raises(RuntimeUnavailableError, match="max_concurrent_runs=1"):
             await manager.start_run(agent.id, "second")
         cancelled = await manager.cancel_run(active.run_id)
         assert cancelled.status is RunStatus.CANCELLED
         await manager.wait_terminal(active.run_id)
-        assert (await manager.get_agent(agent.id)).status is AgentStatus.IDLE
+        assert (await manager.get_agent(agent.id)).status == AgentStatus.IDLE
     finally:
         services.close()
 
@@ -732,7 +732,7 @@ async def test_inactive_provider_stream_fails_run_instead_of_stalling(
         assert record.status is RunStatus.FAILED
         assert "no activity" in (record.error or "")
         assert not manager.holds_agent_slot(run.run_id)
-        assert services.get_card(agent.id).status == "idle"
+        assert services.get_card(agent.id).status == "error"
     finally:
         services.close()
 
@@ -832,6 +832,6 @@ async def test_silent_stream_exhaustion_is_a_provider_protocol_error(
         assert record.status is RunStatus.FAILED
         assert "provider protocol error" in (record.error or "")
         assert not manager.holds_agent_slot(run.run_id)
-        assert services.get_card(agent.id).status == "idle"
+        assert services.get_card(agent.id).status == "error"
     finally:
         services.close()

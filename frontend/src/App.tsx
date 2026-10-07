@@ -16,6 +16,7 @@ import { SettingsPanel } from "./shell/SettingsPanel";
 import { ToastStack } from "./shell/ToastStack";
 import { TopBar } from "./shell/TopBar";
 import { CardLibrary } from "./shell/CardLibrary";
+import { StateMachineEditor } from "./stateMachines/StateMachineEditor";
 import { useWorldStore } from "./state/worldStore";
 import { useLocale } from "./i18n";
 import './shell/motion.css';
@@ -55,6 +56,7 @@ export function App() {
         <RuntimeConnection />
         <SettingsPanel />
         <CardLibrary />
+        <StateMachineEditor />
         {DevelopmentPanel && <Suspense fallback={null}><DevelopmentPanel /></Suspense>}
       </main>
     </ReactFlowProvider>

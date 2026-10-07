@@ -1,0 +1,15 @@
+.react-flow__handle.boundary-connection-source {
+  left: var(--connection-hint-x, 50%);
+  top: var(--connection-hint-y, 0px);
+  width: 28px;
+  height: 28px;
+  transform: translate(-50%, -50%);
+  border: 0;
+  background: transparent;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 20;
+  cursor: crosshair;
+}
+[data-connection-hot="true"] > .boundary-connection-source { pointer-events: all; }
+[data-connection-hot="true"] > .connection-hover-hint { opacity: .65; }

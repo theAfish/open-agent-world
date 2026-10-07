@@ -42,10 +42,12 @@ class StateStore:
         registry: PluginRegistry,
         *,
         event_sink: Callable[[StateMutation], None] | None = None,
+        durable_sink: Callable[[StateMutation], None] | None = None,
     ) -> None:
         self.database = database
         self.registry = registry
         self.event_sink = event_sink
+        self.durable_sink = durable_sink
 
     def get_scope(
         self, scope_kind: StateScopeRef | str, owner_id: str | None = None
@@ -118,6 +120,9 @@ class StateStore:
                 "DELETE FROM state_scopes WHERE scope_kind = ? AND owner_id = ?",
                 ref.identity,
             )
+            for row in value_rows:
+                self._persist(StateMutation(kind=StateMutationKind.DELETED,
+                    scope=self._scope(scope_row), key=str(row["key"]), revision=int(row["revision"]) + 1))
         deleted_scope = self._scope(scope_row)
         for row in value_rows:
             self._emit(StateMutation(
@@ -241,6 +246,8 @@ class StateStore:
                 "UPDATE state_scopes SET revision = revision + 1, updated_at = ? WHERE scope_id = ?",
                 (now, persisted.scope_id),
             )
+            self._persist(StateMutation(kind=StateMutationKind.UPDATED, scope=self.get_scope(persisted),
+                key=key, revision=previous_revision + 1, actor_id=actor_id, run_id=run_id))
         revision = previous_revision + 1
         self._emit(StateMutation(
             kind=StateMutationKind.UPDATED,
@@ -290,6 +297,8 @@ class StateStore:
                 "UPDATE state_scopes SET revision = revision + 1, updated_at = ? WHERE scope_id = ?",
                 (now, persisted.scope_id),
             )
+            self._persist(StateMutation(kind=StateMutationKind.DELETED, scope=self.get_scope(persisted),
+                key=key, revision=revision + 1, actor_id=actor_id, run_id=run_id))
         current_scope = self.get_scope(persisted)
         self._emit(StateMutation(
             kind=StateMutationKind.DELETED,
@@ -411,6 +420,9 @@ class StateStore:
                 "UPDATE state_scopes SET revision = revision + 1, updated_at = ? WHERE scope_id = ?",
                 (now, persisted.scope_id),
             )
+            self._persist(StateMutation(
+                kind=StateMutationKind.CREATED if previous is _MISSING else StateMutationKind.UPDATED,
+                scope=self.get_scope(persisted), key=key, revision=revision, actor_id=actor_id, run_id=run_id))
         current_scope = self.get_scope(persisted)
         result = StateValueRecord(
             scope=current_scope,
@@ -535,3 +547,7 @@ class StateStore:
     def _emit(self, mutation: StateMutation) -> None:
         if self.event_sink is not None:
             self.event_sink(mutation)
+
+    def _persist(self, mutation: StateMutation) -> None:
+        if self.durable_sink is not None:
+            self.durable_sink(mutation)

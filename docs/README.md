@@ -55,6 +55,7 @@ Connect agents, files, and tools. Give each agent a role and a place to work tog
 | Install the desktop app | [Download and install](install.md) |
 | Get an Agent working with a document | [Your first team](user-guide/first-team.md) |
 | Add a model connection | [Models and settings](user-guide/models.md) |
+| Configure, simulate and enable user-state transitions | [State machines](state-machines.md) |
 | Find a card or plugin | [Plugins and packs](user-guide/plugins.md) |
 | Create a new kind of card | [Your first plugin](developers/first-plugin.md) |
 | Run or contribute to OAW itself | [Contributor guide](contributing/index.md) |

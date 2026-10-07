@@ -31,7 +31,7 @@ import { NodePreview } from "./NodePreview";
 import { WorkspaceSurface } from "./NodeWorkspace";
 import { SandboxCardBody } from "./SandboxCard";
 import { TextCardBody } from "./TextCard";
-import { RelationshipList } from "./CardUtilities";
+import { RelationshipList, StateMachineButton } from "./CardUtilities";
 import type { CanvasNode } from "./types";
 import { ActivityGlow } from "../effects/ActivityGlow";
 import { useNodeActivity } from "../effects/useNodeActivity";
@@ -87,7 +87,7 @@ export function CardContent({ card, level }: BodyProps) {
   const ministerTab = useMinisterRole(s => s.settingsCardId === card.id);
   if (isMissingCard(card, catalog)) return <MissingPlugin card={card} />;
   const Body = definition?.traits.includes("ui.agent-barracks.v1") ? BarracksBody : definition?.traits.includes("ui.skill.v1") ? SkillNodeBody : definition?.traits.includes("ui.skill-package.v1") ? SkillToolboxBody : definition?.traits.includes("ui.task-board.v1") ? TaskBoardBody : definition?.traits.includes("core.agent") ? AgentCardBody : BODIES[card.type] ?? GenericCardBody;
-  return <>{card.minister && <nav className="agent-window-tabs nodrag nopan" role="tablist" aria-label={t('Agent card')}>
+  return <><div className="action-row"><StateMachineButton card={card} /></div>{card.minister && <nav className="agent-window-tabs nodrag nopan" role="tablist" aria-label={t('Agent card')}>
     <button type="button" role="tab" aria-selected={!ministerTab} onClick={() => useMinisterRole.setState({ settingsCardId: undefined })}>{t('Settings')}</button>
     <button type="button" role="tab" aria-selected={ministerTab} onClick={() => openMinisterSettings(card.id)}>{t('Minister')}</button>
   </nav>}
@@ -106,7 +106,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
   const activity = useNodeActivity(card);
   const generation = useNodeGeneration(card.id);
   const generationPhase = generation?.targetId === card.id ? generation.phase : undefined;
-  const displayStatus = card.missing_plugin ? "unavailable" : activity.phase === "idle" ? card.status : activity.phase;
+  const displayStatus = card.missing_plugin ? "unavailable" : (card.has_state_machine || activity.phase === "idle") ? (card.primary_state ?? card.status) : activity.phase;
   const catalog = useWorldStore((state) => state.catalog);
   const level = useNodeSurfaceStore((state) => surfaceLevelForNode(card.id, state.surfaceLevels));
   const showPreview = useNodeSurfaceStore((state) => state.showPreview);
@@ -235,8 +235,8 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
             <span className="card-eyebrow">{isMissingCard(card, catalog) ? `MISSING · ${card.type}` : label}</span>
             <CardName key={`${card.id}:${visualLevel}`} card={card} label={label} editable={visualLevel !== "node"} />
           </div>
-          <div className="card-status" data-material-layer="top-print" data-status={displayStatus} title={`${t('Status')}: ${t(statusLabel(displayStatus))}`}>
-            <span aria-hidden="true" /><span>{t(statusLabel(displayStatus))}</span>
+          <div className="card-status" data-material-layer="top-print" data-status={displayStatus} title={`${t('Status')}: ${t((displayStatus === (card.primary_state ?? card.status) ? card.status_label ?? statusLabel(displayStatus) : statusLabel(displayStatus)))}`}>
+            <span aria-hidden="true" /><span>{t((displayStatus === (card.primary_state ?? card.status) ? card.status_label ?? statusLabel(displayStatus) : statusLabel(displayStatus)))}</span>
           </div>
           {(visualLevel === "node" || visualLevel === "preview") && support.node && support.preview ? (
             <IconButton

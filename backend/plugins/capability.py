@@ -10,6 +10,16 @@ class CapabilityContext(Protocol):
     @property
     def state(self) -> CardStateStore | None: ...
 
+    @property
+    def invocation(self) -> dict[str, Any] | None:
+        """Stable caller, target and invocation identity for this host call."""
+        ...
+
+    def associate_execution(self, kind: str, reference_id: str, *, object_id: str | None = None,
+                            produced: bool = False) -> dict[str, Any] | None:
+        """Associate an execution/object with this call; does not imply completion."""
+        ...
+
     async def node_resource_action(self, capability: Any, action: str, arguments: dict[str, Any]) -> dict[str, Any]: ...
 
     async def minister_action(self, capability: Any, arguments: dict[str, Any]) -> Any: ...

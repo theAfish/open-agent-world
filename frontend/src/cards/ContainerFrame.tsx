@@ -13,6 +13,7 @@ import { useNodeActivity } from "../effects/useNodeActivity";
 import { useNodeGeneration } from "../effects/generation";
 import { CardFinishLayer } from "./CardFinishLayer";
 import { normalizeCardFinish } from "./cardFinish";
+import { StateMachineButton } from "./CardUtilities";
 
 /** Shared spatial shell. Plugin presentations provide their header and controls. */
 export function ContainerFrame({ card, selected, className, label, header, children }: {
@@ -51,6 +52,7 @@ export function ContainerActions({ card, busy = false, deleteLabel = t("Delete {
   const remove = useWorldStore((state) => state.deleteCards);
   const dissolve = useWorldStore((state) => state.dissolveContainer);
   return <>
+    <StateMachineButton card={card} />
     <button className="secondary-button nodrag nopan" disabled={busy} aria-pressed={releaseMode?.active} title={releaseMode?t("切换移出模式：开启后拖到阴影边缘移出成员"):t("Remove the container; keep members and their connections")} onClick={e=>{e.stopPropagation();if(releaseMode)releaseMode.toggle();else void dissolve(card.id);}}><Ungroup size={14} /> {releaseMode?(releaseMode.active?t("完成移出"):t("移出成员")):t("Dissolve")}</button>
     <button className="secondary-button nodrag nopan" disabled={busy} aria-label={deleteLabel} title={t("Delete the container and its members. Ctrl+Z to undo.")} onClick={() => void remove([card.id])}><Trash2 size={14} /></button>
   </>;

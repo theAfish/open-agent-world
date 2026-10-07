@@ -82,6 +82,10 @@ class NodeContinuationMixin:
         manager = self.services.run_manager
         groups = {}
         for entry in [*state["attempts"], *state.get("wakeups", [])]:
+            # One durable owner is chosen at dispatch. A state-machine action
+            # must never also produce a legacy notification Run.
+            if entry.get("continuation_owner") == "state_machine":
+                continue
             if not entry.get("auto_continue") or entry.get("notification_suppressed") or entry.get("observed_by_run"):
                 continue
             if entry.get("notification_run_id"):
@@ -179,6 +183,7 @@ class NodeContinuationMixin:
                     entry.update(notification_suppressed=True, notification_error=str(error))
                 self.save(node_id, state)
         return any(e.get("auto_continue") and not e.get("notification_suppressed")
+                   and e.get("continuation_owner") != "state_machine"
                    and not e.get("observed_by_run") and not e.get("notification_run_id")
                    for e in [*state["attempts"], *state.get("wakeups", [])])
 
@@ -206,5 +211,6 @@ class NodeContinuationMixin:
         created = (record.finished_at or datetime.now(UTC)).timestamp()
         wakeups.append(dict(request_id=key, source_run_id=record.run_id, item_id=entry["item_id"],
             coordinator_run_id=entry["coordinator_run_id"], auto_continue=entry.get("auto_continue", False),
+            continuation_owner=entry.get("continuation_owner", "legacy"),
             created_at=created, due_at=created + report["check_after_seconds"],
             reason=report["next_step"] or report["summary"], external_jobs=report["external_jobs"]))

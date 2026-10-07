@@ -56,13 +56,13 @@ def sync_members(services, node_id, entries):
         if member.name != entry["name"]:
             updated = services.world.update_card(member.id, CardPatch(name=entry["name"]))
             services.events.publish_event_nowait(RuntimeEvent(type=EventType.CARD_UPDATED, node_id=member.id,
-                payload={"node": updated.model_dump(mode="json")}))
+                payload={"node": services.enrich_card(updated).model_dump(mode="json")}))
     for key, member in members.items():
         if key not in kept:
             # Removing from a collection detaches the skill, preserving its edges.
             updated = services.world.update_card(key, CardPatch(parent_id=None))
             services.events.publish_event_nowait(RuntimeEvent(type=EventType.CARD_UPDATED, node_id=key,
-                payload={"node": updated.model_dump(mode="json")}))
+                payload={"node": services.enrich_card(updated).model_dump(mode="json")}))
 
 
 def migrate_collections(services):

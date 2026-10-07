@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator, TypeAdapter
 from backend.plugins.state import PluginStateSpec, LEGACY_STATE
+from backend.state_machine import StateMachineConfig
 
 from backend.errors import GraphValidationError, PluginCompatibilityError, PluginUnavailableError
 from backend.plugins.lifecycle import NodeLifecycleHandler
@@ -178,6 +179,8 @@ class NodeTypeCatalogItem(BaseModel):
     has_document: bool = False
     transformations: dict[str, dict[str, Any]] = Field(default_factory=dict)
     has_execution: bool = False
+    has_state_machine: bool = False
+    state_machine_editor: bool = False
     container: dict[str, Any] | None = None
     summoning: dict[str, Any] | None = None
     default_config: dict[str, Any]
@@ -250,6 +253,7 @@ class CapabilityDefinition:
     target_parameter: str = "target"
     selectors: tuple[CapabilitySelector, ...] = ()
     target_capabilities: frozenset[str] = frozenset()
+    label: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,9 +277,9 @@ class NodeTypeDefinition:
     deck_icon: str
     default_name: str
     default_size: tuple[float, float]
-    default_status: str
-    statuses: frozenset[str]
     config_model: type[BaseModel]
+    default_status: str = ""
+    statuses: frozenset[str] = frozenset()
     # Legacy category revision, used only when importing pre-Pack browser decks.
     # Collected decks are user-owned and are never reassigned by the catalog.
     deck_revision: int = 1
@@ -311,6 +315,9 @@ class NodeTypeDefinition:
     canvas_create_requires_confirmation: bool = False
     deployment: NodeDeploymentDefinition | None = None
     state: PluginStateSpec | None = None
+    # Optional editable graph; status_entity_id binds its primary group to Card.status.
+    state_machine_editor: bool = False
+    state_machine: StateMachineConfig | Mapping[str, Any] | None = None
     card_face: CardFaceSpec | Mapping[str, str] | None = None
     tutorials: Tutorials = ()
 
@@ -321,6 +328,12 @@ class NodeTypeDefinition:
 
     def catalog_item(self, plugin_id: str) -> NodeTypeCatalogItem:
         default_config = self.config_model().model_dump(mode="json")
+        config_schema = self.config_model.model_json_schema()
+        if self.state_machine and self.state_machine.status_entity_id:
+            default_config.pop("status", None)
+            config_schema.get("properties", {}).pop("status", None)
+            if "required" in config_schema:
+                config_schema["required"] = [key for key in config_schema["required"] if key != "status"]
         presentation = self.resolved_presentation()
         face = CardFaceSpec.model_validate(self.card_face) if self.card_face is not None else None
         return NodeTypeCatalogItem(
@@ -351,12 +364,14 @@ class NodeTypeDefinition:
             },
             presentation=presentation,
             default_config=default_config,
-            config_schema=self.config_model.model_json_schema(),
+            config_schema=config_schema,
             state=self.state or LEGACY_STATE,
             has_scoped_state=self.state is not None and self.state.mode == "scoped",
             has_document=self.document is not None,
             transformations={key: {"label": item.label, "source_traits": sorted(item.source_traits)} for key, item in self.document.transformations.items()} if self.document else {},
             has_execution=self.execution is not None,
+            has_state_machine=self.state_machine is not None,
+            state_machine_editor=self.state_machine_editor or self.state_machine is not None,
             container=self.container.catalog_item() if self.container else None,
             summoning={} if self.summoning else None,
             user_creatable=self.user_creatable,
@@ -441,6 +456,36 @@ class PluginRegistration:
         self._add(self.assets, asset.id, asset, "asset")
 
     def register_node_type(self, definition: NodeTypeDefinition) -> None:
+        if "core.agent" in definition.traits and definition.state_machine is None:
+            from backend.agent_state_machine import agent_state_machine
+            definition = replace(definition, state_machine=agent_state_machine())
+        if definition.state_machine is not None:
+            machine = StateMachineConfig.model_validate(definition.state_machine)
+            if "core.agent" in definition.traits:
+                from backend.agent_state_machine import agent_state_machine
+                execution = StateMachineConfig.model_validate(agent_state_machine()).entities[0]
+                present = next((group for group in machine.entities if group.id == execution.id), None)
+                if present is not None and present != execution:
+                    raise ValueError("Agent Execution is owned by RunManager and cannot be overridden by a plugin")
+                if present is None:
+                    machine = machine.model_copy(update={"entities": [execution, *machine.entities]})
+            if machine.status_entity_id is None and any(group.ownership == "system" for group in machine.entities):
+                machine = machine.model_copy(update={"status_entity_id": next(group.id for group in machine.entities if group.ownership == "system")})
+            if machine.references or any(entity.card_id for entity in machine.entities):
+                raise ValueError("Node type state machines must use local state groups, without concrete card references")
+            triggers = [trigger for rule in machine.rules for trigger in
+                        ([rule.trigger] + ([signal.match for signal in rule.program.signals] if rule.program else []))]
+            if any(trigger.target_card_id for trigger in triggers) or any(
+                selector.card_id or selector.kind == "specific"
+                for rule in machine.rules for action in rule.actions for selector in (action.target, action.caller)
+            ):
+                raise ValueError("Node type state machines cannot target concrete cards; configure these per object")
+            definition = replace(definition, state_machine=machine.model_copy(deep=True))
+            if machine.status_entity_id:
+                group = next(entity for entity in machine.entities if entity.id == machine.status_entity_id)
+                definition = replace(definition, default_status=group.initial_state,
+                                     statuses=frozenset(state.id for state in group.states),
+                                     template_status=group.initial_state if definition.templateable else None)
         self._add(self.nodes, definition.id, definition, "node type")
 
     def register_relationship(self, definition: RelationshipDefinition) -> None:
@@ -701,7 +746,7 @@ class PluginRegistry:
                 raise ValueError(
                     f"node type {definition.id!r} has an invalid template status"
                 )
-            if definition.template_status is not None:
+            if definition.template_status is not None and not (definition.state_machine and definition.state_machine.status_entity_id):
                 default_config = definition.config_model().model_dump(mode="json")
                 try:
                     validated_template_config = definition.config_model.model_validate({

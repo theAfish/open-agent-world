@@ -17,6 +17,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { CardName } from "./CardName";
+import { StateMachineButton } from "./CardUtilities";
 import { IconButton } from "../components/IconButton";
 import { collapsedSurface, nodePresentation, useNodeSurfaceStore, useSurfaceDraft, surfaceDraftKey } from "../state/nodeSurfaces";
 import { useWorldStore } from "../state/worldStore";
@@ -55,6 +56,7 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
         <CardName card={card} workspace label={catalog.node_types.find(item => item.id === card.type)?.label ?? card.type} />
       </div>
       <div className="workspace-window-actions">
+        <StateMachineButton card={card} compact />
         {!card.ephemeral && <IconButton icon={Trash2} size="sm" quiet danger onClick={() => { void deleteCard(card.id); }}
           label={t("Remove {v0}", { v0: String(card.name) })} title={card.missing_plugin ? t("Remove") : t("Remove object (Ctrl+Z to undo)")} />}
         {canCollapse && <IconButton icon={X} size="sm" quiet onClick={() => closeWorkspace(card.id)} label={t("Close workspace")} />}

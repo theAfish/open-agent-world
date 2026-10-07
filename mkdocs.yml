@@ -105,6 +105,7 @@ nav:
           - Configuration: configuration.md
           - Packs and decks: card-library.md
           - Legions: legions.md
+          - State machine configuration: state-machines.md
           - Minister: minister.md
           - Runs: runs.md
           - Context management: context-management.md
@@ -138,6 +139,7 @@ nav:
           - Writing checklist: contributing/docs-checklist.md
   - 简体中文:
       - README.zh-CN.md
+      - 状态机配置与事件预览: state-machines.zh-CN.md
       - 下载与安装: install.zh-CN.md
       - 使用入门: user-guide/index.zh-CN.md
       - MatCreator 预设 Legion 示例: user-guide/matcreator-example.zh-CN.md

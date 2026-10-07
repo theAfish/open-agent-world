@@ -105,10 +105,22 @@ class LegionTemplateNode(BaseModel):
     expanded: bool
     status: str
     config: dict[str, Any]
+    state_machine: dict[str, Any] | None = None
     presentation: LegionNodePresentation | None = None
     dependencies: list[LegionTemplateDependency] = Field(default_factory=list)
     payload_version: int | None = Field(default=None, ge=1)
     payload: dict[str, Any] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_preview_state_machine(cls, value):
+        """One portable import boundary for pre-runtime preview templates."""
+        if isinstance(value, dict) and isinstance(value.get("config"), dict) and "state_machine" in value["config"]:
+            value = {**value, "config": dict(value["config"])}
+            legacy = value["config"].pop("state_machine")
+            if legacy is not None and value.get("state_machine") is None:
+                value["state_machine"] = {"definition": legacy}
+        return value
 
     @model_validator(mode="after")
     def require_payload_version_pair(self) -> "LegionTemplateNode":

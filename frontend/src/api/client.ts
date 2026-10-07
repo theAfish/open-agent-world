@@ -1,3 +1,5 @@
+import type { StateMachineEventCatalog, MachineDocument, MachineDefinition, MachinePresentation, MachineMember, PreviewEvent, PreviewResult, MachineRuntime } from '../stateMachines/apiTypes';
+import type { StateMachine } from '../stateMachines/model';
 import { cardStateSession, stateSessionHeaders } from "../state/cardState";
 import { normalizeCardFinish } from '../cards/cardFinish';
 import { fetchWithRetry } from './fetchWithRetry';
@@ -138,6 +140,13 @@ export function normalizeCard(input: unknown): WorldCard {
   }
   return {
     missing_plugin: source.missing_plugin as WorldCard["missing_plugin"],
+    has_state_machine: source.has_state_machine === true,
+    status_label: typeof source.status_label === 'string' ? source.status_label : undefined,
+    operational_status: typeof source.operational_status === 'string' ? source.operational_status : undefined,
+    primary_state: typeof source.primary_state === 'string' ? source.primary_state : undefined,
+    state_groups: source.state_groups as WorldCard['state_groups'],
+    active_run_count: asNumber(source.active_run_count, 0),
+    occupied_run_count: asNumber(source.occupied_run_count, 0),
     state_scope: source.state_scope as WorldCard["state_scope"],
     state_scope_override: source.state_scope_override as WorldCard["state_scope_override"],
     id: String(source.id),
@@ -157,7 +166,7 @@ export function normalizeCard(input: unknown): WorldCard {
       height: asNumber(size.height ?? source.height, 190),
     },
     expanded: Boolean(source.expanded),
-    status: String(config.status ?? source.status ?? (type === "sandbox" ? "stopped" : type === "agent" ? "idle" : "available")) as CardStatus,
+    status: String(source.status ?? config.status ?? (type === "sandbox" ? "stopped" : type === "agent" ? "idle" : "available")) as CardStatus,
     config: source.missing_plugin || !(["agent", "conversation", "text", "image", "sandbox"].includes(type)) ? { ...asRecord(source.config) } : config,
     created_at: typeof source.created_at === "string" ? source.created_at : undefined,
     updated_at: typeof source.updated_at === "string" ? source.updated_at : undefined,
@@ -295,6 +304,33 @@ function unwrap<T>(input: unknown, key: string): T {
 }
 
 export const worldApi = {
+  getStateMachineEvents(cardId?: string): Promise<StateMachineEventCatalog> {
+    return request(`/state-machines/events${cardId ? `?card_id=${encodeURIComponent(cardId)}` : ''}`);
+  },
+
+  getStateMachine(cardId: string): Promise<MachineDocument> {
+    return request(`/state-machines/${encodeURIComponent(cardId)}`);
+  },
+  saveStateMachine(cardId: string, definition: MachineDefinition, presentation: MachinePresentation, expectedRevision: number): Promise<MachineDocument> {
+    return request(`/state-machines/${encodeURIComponent(cardId)}`, { method: 'PUT', body: JSON.stringify({ definition, presentation, expected_revision: expectedRevision }) });
+  },
+  getStateMachineMembers(cardId: string): Promise<MachineMember[]> {
+    return request<{ members: MachineMember[] }>(`/state-machines/${encodeURIComponent(cardId)}/members`).then(result => result.members);
+  },
+  previewStateMachine(machine: StateMachine, events: PreviewEvent[], states?: Record<string, string>): Promise<PreviewResult> {
+    return request('/state-machines/preview', { method: 'POST', body: JSON.stringify({ machine, events, ...(states ? { states } : {}) }) });
+  },
+  getStateMachineRuntime(cardId: string): Promise<MachineRuntime> {
+    return request(`/state-machines/${encodeURIComponent(cardId)}/runtime`);
+  },
+  enableStateMachine(cardId: string, definitionVersion: number, scopeKey = 'default'): Promise<unknown> {
+    return request(`/state-machines/${encodeURIComponent(cardId)}/instances`, { method: 'POST', body: JSON.stringify({ definition_version: definitionVersion, scope_key: scopeKey }) });
+  },
+
+  disableStateMachine(cardId: string, instanceId: string): Promise<unknown> {
+    return request(`/state-machines/${encodeURIComponent(cardId)}/instances/${encodeURIComponent(instanceId)}`, { method: 'PATCH', body: JSON.stringify({ enabled: false }) });
+  },
+
   factory<T>(nodeId: string, action: string, body?: unknown): Promise<T> {
     return request(`/packs/factory/${encodeURIComponent(nodeId)}/${action}`, {
       method: action === 'context' ? 'GET' : 'POST', headers: { 'X-OAW-Pack-Install': '1' },
@@ -580,6 +616,10 @@ export const worldApi = {
       }),
     });
     return normalizeCard(unwrap(body, "node"));
+  },
+
+  async getNode(id: string): Promise<WorldCard> {
+    return normalizeCard(await request(`/nodes/${encodeURIComponent(id)}`));
   },
 
   async updateNode(

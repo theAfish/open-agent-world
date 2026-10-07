@@ -1550,4 +1550,17 @@ describe("authoritative world synchronization", () => {
     expect(batchUpdateNodes).toHaveBeenCalledTimes(3);
     expect(useWorldStore.getState().cards[0].position).toEqual(original.position);
   });
+  it('keeps machine state through provider progress, completion and error notifications', () => {
+    const agent = {...card('stateful', 'agent'), has_state_machine: true, status: 'researching'};
+    useWorldStore.setState({cards: [agent]});
+    for (const type of ['agent_completed', 'agent_stopped', 'runtime_error', 'agent_progress']) {
+      useWorldStore.getState().ingestEvent({id: type, type, node_id: agent.id,
+        timestamp: new Date().toISOString(), payload: {status: 'idle'}});
+      expect(useWorldStore.getState().cards[0].status).toBe('researching');
+    }
+    useWorldStore.getState().ingestEvent({id: 'host-state', type: 'agent_status_changed', node_id: agent.id,
+      timestamp: new Date().toISOString(), payload: {status: 'signoff', active_run_count: 0, occupied_run_count: 0}});
+    expect(useWorldStore.getState().cards[0]).toMatchObject({status: 'signoff', active_run_count: 0, occupied_run_count: 0});
+  });
+
 });

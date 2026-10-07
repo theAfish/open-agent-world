@@ -99,7 +99,8 @@ async def prepare_factory_export(services, node_id):
                 source = resolve_item(services, item)
                 key = hashlib.sha256(f"{item.kind}:{item.id}".encode()).hexdigest()[:16]
                 path = f"content/item-{key}.json"
-                if item.kind == "node" and "ui.factory-card.v1" in services.plugins.node_type(source.type).traits:
+                if (item.kind == "node" and "ui.factory-card.v1" in services.plugins.node_type(source.type).traits
+                        and services.state_machines.get(source.id)["definition"] is None):
                     recipe = CardRecipe(id=f"{design.id}.card{key}", design=apply_params(PrintedCard.model_validate(source.config), config.params))
                     _scan(recipe.model_dump(), source.name, issues)
                     _scan({field.key: field.default for field in recipe.design.function.fields}, source.name + ".defaults", issues)
