@@ -12,7 +12,7 @@ vi.mock("@oaw/plugin-api", () => ({
     ? value.replace(/\{(v\d+)\}/g, (_, key: string) => String(params[key]))
     : value,
   useLocale: () => undefined,
-  useNestedFlowGestures: () => null,
+  NetworkMap: () => <div aria-label="Knowledge graph map" />,
   useWorkspaceSections: () => ({ isInline: () => true }),
   WorkspaceSection: ({ title, children }: { title: string; children: ReactNode }) =>
     <section aria-label={title}>{children}</section>,

@@ -1,11 +1,7 @@
-import { t, useLocale } from "@oaw/plugin-api";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ReactFlow, ReactFlowProvider, Background, Controls, useNodesState, useEdgesState, useReactFlow, type Node, type Edge } from "@xyflow/react";
+import { t, useLocale, NetworkMap, type NetworkData, type NetworkMapHandle } from "@oaw/plugin-api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FrontendPlugin, PluginViewProps } from "@oaw/plugin-api";
-import { useNestedFlowGestures } from "@oaw/plugin-api";
 import "./workspace.css";
-import { mapEdgeTypes } from "./MapEdge";
-import { graphLayout } from "./graphLayout";
 import { TaskBoard, TaskPreview } from "./TaskBoard";
 
 type Knowledge = { id: string; title: string; type: string; summary: string; content?: string; tags?: string[]; aliases?: string[]; trust: number; verification: string; refinement: string; owner?: string; provenance?: object; usage_count?: number };
@@ -13,14 +9,15 @@ type Result = { nodes: Knowledge[]; edges: { id: string; source: string; target:
 type Detail = { entry: Knowledge; resources: { skill_node_id: string; path: string; files: string[] }[]; relationships: Result["edges"] };
 const kinds = ["capability", "procedure", "heuristic", "memory"];
 const relations = ["dependency", "prerequisite", "refinement_of", "related_workflow", "derived_from", "heuristic_for", "related_memory", "replacement"];
-const layouts = new Map<string, Map<string, { x: number; y: number }>>();
 
 function Workspace(props: PluginViewProps) {
-  useLocale(); return <ReactFlowProvider><GraphWorkspace {...props} /></ReactFlowProvider>; }
+  useLocale(); return <GraphWorkspace {...props} />; }
 function GraphWorkspace({ card, host }: PluginViewProps) {
   useLocale();
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [nodes, setNodes] = useState<Knowledge[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const map = useRef<NetworkMapHandle>(null);
+  const [edges, setEdges] = useState<Result["edges"]>([]);
   const [query, setQuery] = useState("");
   const [type, setType] = useState("");
   const [relation, setRelation] = useState("");
@@ -34,8 +31,6 @@ function GraphWorkspace({ card, host }: PluginViewProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [resourcePreview, setResourcePreview] = useState<{ path: string; content: string } | null>(null);
   const [navigation, setNavigation] = useState(false);
-  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
-  const [hoveredEdge, setHoveredEdge] = useState<string | null>(null);
   const [inspector, setInspector] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [revision, setRevision] = useState(0);
@@ -53,11 +48,6 @@ function GraphWorkspace({ card, host }: PluginViewProps) {
   const sequence = useRef(0);
   const inspectSequence = useRef(0);
   const workspaceRef = useRef<HTMLElement>(null);
-  const canvasRef = useRef<HTMLElement>(null);
-  const flow = useReactFlow();
-  const positions = layouts.get(card.id) ?? new Map<string, { x: number; y: number }>();
-  layouts.set(card.id, positions);
-  const selectionBox = useNestedFlowGestures(canvasRef, dragged => dragged.forEach(node => positions.set(node.id, node.position)));
   const run = async (work: () => Promise<void>) => { setBusy(true); setError(""); try { await work(); } catch (e) { setError(String(e)); } finally { setBusy(false); } };
   const load = useCallback(async (ids: string[] = [], append = false, offset = 0) => {
     const request = ++sequence.current;
@@ -65,25 +55,21 @@ function GraphWorkspace({ card, host }: PluginViewProps) {
     if (request !== sequence.current) return;
     const data = response.value as Result;
     setRevision(response.revision); setResult(data);
-    const layoutIds = [...new Set([...(append ? flow.getNodes().map(node => node.id) : []), ...data.nodes.map(entry => entry.id)])];
-    const topology = append ? [...flow.getEdges(), ...data.edges] : data.edges;
-    graphLayout(layoutIds, topology, positions).forEach((position, id) => positions.set(id, position));
-    const next = data.nodes.map(entry => ({ id: entry.id, position: positions.get(entry.id)!,
-      data: { title: entry.title, label: <><span className="kdg-node-kind">{entry.type}</span><span>{entry.title}</span></> },
-      ariaLabel: `${entry.type}: ${entry.title}`, className: `kdg-node kdg-${entry.type}`, style: { width: 110, height: 110 }, connectable: false }));
-    setNodes(old => { const selected = new Set(old.filter(n => n.selected).map(n => n.id)); const updated = next.map(n => ({ ...n, selected: selected.has(n.id) })); return append ? [...old.filter(n => !next.some(item => item.id === n.id)), ...updated] : updated; });
-    const links = data.edges.map(edge => ({ ...edge, data: { relation: edge.relation.replaceAll("_", " ") }, type: "knowledge" }));
-    setEdges(old => append ? [...old.filter(e => !links.some(item => item.id === e.id)), ...links] : links);
-    if (!append) requestAnimationFrame(() => requestAnimationFrame(() => void flow.fitView({ padding: 0.2, maxZoom: 1, duration: 150 })));
-  }, [host, query, type, relation, source, memory, trusted, mode, setNodes, setEdges, positions]);
+    setNodes(old => append ? [...new Map([...old, ...data.nodes].map(n => [n.id, n])).values()] : data.nodes);
+    setEdges(old => append ? [...new Map([...old, ...data.edges].map(e => [e.id, e])).values()] : data.edges);
+  }, [host, query, type, relation, source, memory, trusted, mode]);
   useEffect(() => { void run(() => load()); }, [card, type, relation, memory, trusted, mode]);
+  useEffect(() => () => { sequence.current++; inspectSequence.current++; }, [card.id]);
   const select = async (id: string) => {
     const request = ++inspectSequence.current;
+    if (!nodes.some(node => node.id === id)) await load([id], true);
+    if (request !== inspectSequence.current) return;
+    setSelectedIds([id]);
     setEditing(false); setConfirmDelete(false); setResourcePreview(null); setInspector(true); setDetail(null);
     const response = await host.documentAction("inspect", { entry_id: id });
     if (request !== inspectSequence.current) return;
     setDetail(response.value as Detail); setSavedDetail(response.value as Detail); setDetailRevision(response.revision); setRevision(response.revision);
-    setNodes(current => current.map(node => ({ ...node, selected: node.id === id })));
+
   };
   const mutate = async (operation: string, args: Record<string, unknown>) => {
     const response = await host.documentAction(operation, args, detailRevision);
@@ -91,29 +77,21 @@ function GraphWorkspace({ card, host }: PluginViewProps) {
     await load();
     const created = !args.entry_id && operation === 'edit' ? (response.value as { entries?: Knowledge[] }).entries?.at(-1)?.id : undefined;
     const id = args.entry_id ?? created ?? detail?.entry.id;
-    if (operation === 'delete_entry') { setDetail(null); setSavedDetail(null); setInspector(false); positions.delete(String(id)); }
+    if (operation === 'delete_entry') { setDetail(null); setSavedDetail(null); setInspector(false); setSelectedIds([]); }
     else if (id) await select(String(id));
     else { setDetail(null); setSavedDetail(null); }
   };
-  const focus = () => { const selected = nodes.filter(n => n.selected); if (selected.length) void flow.fitView({ nodes: selected, padding: 0.5, duration: 250 }); };
-  const arrange = () => {
-    const layout = graphLayout(nodes.map(node => node.id), edges);
-    layout.forEach((position, id) => positions.set(id, position));
-    setNodes(current => current.map(node => ({ ...node, position: layout.get(node.id)! })));
-    requestAnimationFrame(() => void flow.fitView({ padding: 0.2, maxZoom: 1, duration: 200 }));
-  };
+  const focus = () => map.current?.focus(selectedIds);
+  const arrange = () => map.current?.arrange();
+  const network = useMemo<NetworkData>(() => ({ nodes: nodes.map(n => ({ id: n.id, label: n.title, kind: n.type, tags: n.tags })),
+    edges: edges.map(e => ({ id: e.id, source: e.source, target: e.target, label: e.relation.replaceAll('_', ' ') })) }), [nodes, edges]);
   const inspectEntry = detail?.entry;
   const newEntry = () => {
     inspectSequence.current += 1;
     setInspector(true); setEditing(true); setConfirmDelete(false); setSavedDetail(null); setDetailRevision(revision);
     setDetail({ entry: { id: "", title: t("New knowledge"), type: "capability", summary: "", content: "", owner: "user", trust: 0.5, verification: "unverified", refinement: "pending" }, resources: [], relationships: [] });
   };
-  const selected = nodes.filter(node => node.selected);
-  const active = new Set(hoveredNode ? [hoveredNode] : selected.map(node => node.id));
-  const neighbors = new Set(active);
-  edges.forEach(edge => { if (active.has(edge.source) || active.has(edge.target)) { neighbors.add(edge.source); neighbors.add(edge.target); } });
-  const visibleNodes = nodes.map(node => ({ ...node, className: `${node.className} ${active.size ? neighbors.has(node.id) ? 'is-related' : 'is-muted' : ''}` }));
-  const visibleEdges = edges.map(edge => ({ ...edge, className: active.size ? active.has(edge.source) || active.has(edge.target) ? 'is-related' : 'is-muted' : '', data: { ...edge.data, reveal: edge.id === hoveredEdge }, style: { stroke: edge.selected || edge.id === hoveredEdge || active.has(edge.source) || active.has(edge.target) ? 'var(--map-accent)' : 'var(--edge)', strokeWidth: edge.selected || active.has(edge.source) || active.has(edge.target) ? 2 : 1.2, opacity: active.size && !active.has(edge.source) && !active.has(edge.target) ? 0.08 : edge.selected || edge.id === hoveredEdge || active.size ? 0.85 : 0.28 } }));
+  const selected = nodes.filter(node => selectedIds.includes(node.id));
   return <section ref={workspaceRef} className="kdg-workspace nodrag nowheel" aria-label={t("Know-Do Graph workspace")} onPointerDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
     <header className="kdg-toolbar">
       <button onClick={() => setNavigation(!navigation)} aria-label={t("Toggle navigator")} aria-expanded={navigation}>{t("Browse")}</button>
@@ -122,9 +100,8 @@ function GraphWorkspace({ card, host }: PluginViewProps) {
       <button onClick={arrange} disabled={!nodes.length || busy} title={t("Group connected entries and fit the graph")}>{t("Arrange")}</button>
       <button onClick={newEntry} disabled={busy}>{t("New entry")}</button>
     </header>
-    <div className="kdg-map-guide"><div className="kdg-legend" aria-label={t("Knowledge type legend")}>{kinds.map(kind => <span className={`kdg-${kind}`} key={kind}><i />{kind}</span>)}</div><span>{t("Drag to pan · Shift-drag to select")}</span></div>
     {selected.length > 0 && <div className="kdg-selection-actions" aria-label={t("Selection actions")}><span>{selected.length} {t("selected")}</span><button onClick={focus}>{t("Focus selection")}</button>
-      <button onClick={() => { const ids = new Set(nodes.filter(n => n.selected).map(n => n.id)); if (ids.size) { setNodes(ns => ns.filter(n => ids.has(n.id))); setEdges(es => es.filter(e => ids.has(e.source) && ids.has(e.target))); } }}>{t("Isolate")}</button>
+      <button onClick={() => { const ids = new Set(selectedIds); if (ids.size) { setNodes(ns => ns.filter(n => ids.has(n.id))); setEdges(es => es.filter(e => ids.has(e.source) && ids.has(e.target))); } }}>{t("Isolate")}</button>
       <button onClick={() => setInspector(!inspector)} aria-label={t("Toggle inspector")}>{t("Inspector")}</button>
     </div>}
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
@@ -146,17 +123,12 @@ function GraphWorkspace({ card, host }: PluginViewProps) {
           {preview && <div role="dialog" aria-label={t("Confirm assimilation")}><p>{t("Assimilate “")}{String(preview.source_name)}{t("” and consume its card?")}</p><button disabled={busy} onClick={() => void run(async () => { await host.transform("assimilate", { source_id: toolset, source_revision: preview.source_revision, expected_revision: preview.revision, confirm: true }); setPreview(null); setToolset(""); setNotice(t("Toolset assimilated. Source package preserved in snapshots.")); await load(); })}>{t("Confirm assimilation")}</button><button onClick={() => setPreview(null)}>{t("Cancel")}</button></div>}
         </details>
       </aside>}
-      <main ref={canvasRef} className="kdg-canvas"><ReactFlow id={`oaw-knowledge-map-${card.id}`} nodes={visibleNodes} edges={visibleEdges} edgeTypes={mapEdgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
-        onNodeMouseEnter={(_, node) => setHoveredNode(node.id)} onNodeMouseLeave={() => setHoveredNode(null)}
-        onEdgeMouseEnter={(_, edge) => setHoveredEdge(edge.id)} onEdgeMouseLeave={() => setHoveredEdge(null)}
-        onNodeClick={(_, node) => void run(() => select(node.id))} onNodeDoubleClick={(_, node) => void run(() => load([node.id], true))}
-        onNodeDragStop={(_, node) => positions.set(node.id, node.position)} onNodeContextMenu={(event, node) => { event.preventDefault(); const element = workspaceRef.current!; const rect = element.getBoundingClientRect(); setMenu({ id: node.id, x: (event.clientX - rect.left) * element.clientWidth / rect.width, y: (event.clientY - rect.top) * element.clientHeight / rect.height }); void run(() => select(node.id)); }}
-        onPaneClick={() => setMenu(null)}
-        noPanClassName="kdg-nopan" noDragClassName="kdg-nodrag" noWheelClassName="kdg-nowheel"
-        nodesDraggable={false} panOnDrag={false} zoomOnScroll={false} zoomOnPinch={false} zoomOnDoubleClick={false}
-        selectionKeyCode={null} selectionOnDrag={false} autoPanOnNodeDrag={false} autoPanOnSelection={false}
-        nodesConnectable={false} deleteKeyCode={null} onlyRenderVisibleElements minZoom={0.1} maxZoom={2} fitView><Background /><Controls showInteractive={false} /></ReactFlow>
-        {selectionBox && <div className="kdg-selection-box" style={{ left: selectionBox.x, top: selectionBox.y, width: selectionBox.width, height: selectionBox.height }} />}</main>
+      <main className="kdg-canvas"><NetworkMap ref={map} graphKey={`matcreator:${card.id}`} data={network} selected={selectedIds}
+        onSelectionChange={setSelectedIds} onSelect={id => void run(() => select(id))}
+        onExpand={id => void run(() => load([id], true))}
+        onContextMenu={(id, point) => { const element = workspaceRef.current!; const rect = element.getBoundingClientRect();
+          setMenu({ id, x: (point.x - rect.left) * element.clientWidth / rect.width, y: (point.y - rect.top) * element.clientHeight / rect.height }); void run(() => select(id)); }}
+        label={t("Know-Do Graph map")} /></main>
       {inspector && <aside className="kdg-inspector" aria-label={t("Knowledge details")}><button className="kdg-inspector-close" aria-label={t("Close inspector")} onClick={() => { inspectSequence.current += 1; setInspector(false); setEditing(false); setConfirmDelete(false); }}>{t("Close")}</button>{inspectEntry ? <>
         <h3>{inspectEntry.title}</h3><p>{inspectEntry.type} · {inspectEntry.verification} {t("· trust")} {inspectEntry.trust}</p>
         {inspectEntry.id && <div className="kdg-entry-actions"><button disabled={busy} onClick={() => void run(() => load([inspectEntry.id], true))}>{t("Expand neighborhood")}</button>
@@ -177,7 +149,7 @@ function GraphWorkspace({ card, host }: PluginViewProps) {
           <div className="kdg-entry-actions"><button type="submit" disabled={busy}>{t("Save changes")}</button><button type="button" disabled={busy} onClick={() => { setDetail(savedDetail); setEditing(false); if (!savedDetail) setInspector(false); }}>{t("Cancel editing")}</button></div>
           </form>}
           {!editing && inspectEntry.id && <details><summary>{t("Edit relationships")}</summary>
-          <label>{t("Connect to")}<select value={connectTarget} onChange={e => setConnectTarget(e.target.value)}><option value="">{t("Choose entry…")}</option>{nodes.filter(n => n.id !== inspectEntry.id).map(n => <option key={n.id} value={n.id}>{String(n.data.title)}</option>)}</select></label>
+          <label>{t("Connect to")}<select value={connectTarget} onChange={e => setConnectTarget(e.target.value)}><option value="">{t("Choose entry…")}</option>{nodes.filter(n => n.id !== inspectEntry.id).map(n => <option key={n.id} value={n.id}>{n.title}</option>)}</select></label>
           <select aria-label={t("New relationship type")} value={connectRelation} onChange={e => setConnectRelation(e.target.value)}>{relations.map(r => <option key={r}>{r}</option>)}</select>
           <button disabled={!connectTarget || busy} onClick={() => void run(() => mutate("connect", { source: inspectEntry.id, target: connectTarget, relation: connectRelation }))}>{t("Commit relationship")}</button></details>}
         {mode === "review" && !editing && <><label>{t("Reviewed knowledge")}<textarea value={inspectEntry.content} onChange={e => setDetail({ ...detail, entry: { ...inspectEntry, content: e.target.value } })} /></label><label>{t("Evidence")}<input value={evidence} onChange={e => setEvidence(e.target.value)} /></label><button disabled={!evidence || busy} onClick={() => void run(() => mutate("distill", { memory_ids: [inspectEntry.id], title: inspectEntry.title, content: inspectEntry.content, evidence }))}>{t("Distill to Heuristic")}</button></>}
@@ -187,7 +159,7 @@ function GraphWorkspace({ card, host }: PluginViewProps) {
         <details><summary>{t("Provenance and usage")}</summary><p>{t("Uses:")} {inspectEntry.usage_count ?? 0} · {inspectEntry.refinement}</p><pre>{JSON.stringify(inspectEntry.provenance, null, 2)}</pre></details>
       </> : <p>{t("Select an entry to inspect it. Double-click to expand its neighborhood.")}</p>}</aside>}
     </div>
-    {menu && <div role="menu" style={{ position: "absolute", left: Math.max(0, Math.min(menu.x, (workspaceRef.current?.clientWidth ?? 400) - 190)), top: Math.max(0, Math.min(menu.y, (workspaceRef.current?.clientHeight ?? 400) - 90)), zIndex: 200, background: "var(--surface-solid)", padding: 8 }}><button role="menuitem" onClick={() => { void run(() => load([menu.id], true)); setMenu(null); }}>{t("Expand neighborhood")}</button><button role="menuitem" onClick={() => { void flow.fitView({ nodes: [{ id: menu.id }], padding: 0.5 }); setMenu(null); }}>{t("Focus")}</button></div>}
+    {menu && <div role="menu" style={{ position: "absolute", left: Math.max(0, Math.min(menu.x, (workspaceRef.current?.clientWidth ?? 400) - 190)), top: Math.max(0, Math.min(menu.y, (workspaceRef.current?.clientHeight ?? 400) - 90)), zIndex: 200, background: "var(--surface-solid)", padding: 8 }}><button role="menuitem" onClick={() => { void run(() => load([menu.id], true)); setMenu(null); }}>{t("Expand neighborhood")}</button><button role="menuitem" onClick={() => { map.current?.focus([menu.id]); setMenu(null); }}>{t("Focus")}</button></div>}
   </section>;
 }
 export default { apiVersion: 1, views: { workspace: Workspace, tasks: TaskBoard, 'tasks-preview': TaskPreview } } satisfies FrontendPlugin;

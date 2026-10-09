@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test('connects SQL, chooses schema, plots dense data and retains config after reload', async ({page,request})=>{
   test.setTimeout(60000);
   await page.setViewportSize({width:1600,height:1000});
-  const api = 'http://127.0.0.1:8017/api';
+  const api = '/api';
   const create = async (type:string,name:string,x:number,y:number) => {
     const response=await request.post(`${api}/nodes`,{data:{type,name,position:{x,y}}});
     expect(response.ok(),await response.text()).toBeTruthy(); return await response.json();
@@ -77,7 +77,7 @@ test('connects SQL, chooses schema, plots dense data and retains config after re
 });
 
 test('MKB nullable schemas are selected before connecting and expose numeric fields',async({page,request})=>{
-  const api='http://127.0.0.1:8017/api', ids:string[]=[];
+  const api='/api', ids:string[]=[];
   const create=async(type:string,x:number)=>{
     const response=await request.post(`${api}/nodes`,{data:{type,position:{x,y:400}}});
     expect(response.ok(),await response.text()).toBeTruthy(); const node=await response.json(); ids.push(node.id); return node;
@@ -110,7 +110,7 @@ test('MKB nullable schemas are selected before connecting and expose numeric fie
 
 test('SQL graph, grouped bars and histogram use the same data-source contract',async({page,request})=>{
   test.setTimeout(60000); await page.setViewportSize({width:1600,height:1000});
-  const api='http://127.0.0.1:8017/api', ids:string[]=[];
+  const api='/api', ids:string[]=[];
   const create=async(type:string,config:Record<string,unknown>={})=>{
     const response=await request.post(`${api}/nodes`,{data:{type,config,position:{x:700,y:400}}});
     expect(response.ok(),await response.text()).toBeTruthy(); const node=await response.json(); ids.push(node.id); return node;
@@ -125,8 +125,11 @@ test('SQL graph, grouped bars and histogram use the same data-source contract',a
       await request.post(`${api}/edges`,{data:{source:chart.id,target:db.id,relationship:'data.visualization.source'}});
       await page.goto('/');
       const surface=page.locator(`[data-card-id="${chart.id}"][data-surface-level="inspector"]`);
-      await expect(surface.getByRole('img',{name:/chart:/})).toBeVisible();
-      if(kind==='graph')await expect(surface.getByRole('img',{name:/chart:/})).toHaveAttribute('aria-label','graph chart: 5 nodes');
+      if(kind==='graph') {
+        await expect(surface.locator('.network-map')).toHaveAttribute('data-layout-state','ready');
+        await expect(surface.locator('.network-map')).toHaveAttribute('data-node-count','5');
+        await expect(surface.locator('canvas.sigma-nodes')).toBeVisible();
+      } else await expect(surface.getByRole('img',{name:/chart:/})).toBeVisible();
       if(kind==='bar')await expect(surface.locator('.viz-status')).toContainText('Full-data aggregate');
       await page.screenshot({path:`../.outputs/visualization-${kind}.png`});
       await request.delete(`${api}/nodes/${chart.id}`);

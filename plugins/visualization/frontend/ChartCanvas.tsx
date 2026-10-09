@@ -4,13 +4,13 @@ import { envelope, format, type Kind, type Plot } from './plot';
 const colors = ['#438ec0', '#d78c51', '#52a797', '#a27ac3', '#d16c84', '#a4a149'];
 type Hit = {x: number; y: number; text: string};
 
-export function ChartCanvas({plot, kind, xLabel, yLabel}: {plot: Plot; kind: Kind; xLabel: string; yLabel: string}) {
+export function ChartCanvas({plot, kind, xLabel, yLabel}: {plot: Plot; kind: Exclude<Kind, 'graph'>; xLabel: string; yLabel: string}) {
   const canvas = useRef<HTMLCanvasElement>(null), frame = useRef<HTMLDivElement>(null), hits = useRef<Hit[]>([]);
   const [size, setSize] = useState({width: 600, height: 320}), [tip, setTip] = useState<Hit | null>(null);
   const [view, setView] = useState({zoom: 1, x: 0, y: 0});
   const [theme, setTheme] = useState(0);
   const drag = useRef<{x: number; y: number; left: number; top: number} | null>(null);
-  const groups = useMemo(() => [...new Set(kind === 'graph' ? plot.nodes.map(n => n.type || '') : plot.points.map(p => p.series))], [plot, kind]);
+  const groups = useMemo(() => [...new Set(plot.points.map(p => p.series))], [plot, kind]);
   useEffect(() => { setView({zoom: 1, x: 0, y: 0}); setTip(null); }, [plot]);
   useEffect(() => {
     const observer = new MutationObserver(() => setTheme(value => value + 1));
@@ -30,57 +30,10 @@ export function ChartCanvas({plot, kind, xLabel, yLabel}: {plot: Plot; kind: Kin
     ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, h);
     const text = getComputedStyle(element).color;
     ctx.font = '11px system-ui'; hits.current = [];
-    const left = kind === 'graph' ? 18 : 62, top = 16, right = w - 20, bottom = h - (kind === 'graph' ? 18 : 48);
+    const left = 62, top = 16, right = w - 20, bottom = h - 48;
     const width = Math.max(1, right - left), height = Math.max(1, bottom - top);
     const groupIndices = new Map(groups.map((group,index)=>[group,index]));
     const color = (group: string) => colors[(groupIndices.get(group) ?? 0) % colors.length];
-    if (kind === 'graph') {
-      const positions = new Map<string, Hit>();
-      const grouped = new Map<string, Plot['nodes']>();
-      for (const node of plot.nodes) { const key = node.type || ''; const group = grouped.get(key); if (group) group.push(node); else grouped.set(key, [node]); }
-      groups.forEach((group, gi) => {
-        const nodes = grouped.get(group)!, angle = gi / groups.length * Math.PI * 2;
-        const cx = w / 2 + (groups.length > 1 ? Math.cos(angle) * width * .26 : 0);
-        const cy = h / 2 + (groups.length > 1 ? Math.sin(angle) * height * .24 : 0);
-        const radius = Math.min(width, height) * (groups.length > 1 ? .19 : .38);
-        nodes.forEach((node, i) => {
-          const a = i * 2.39996323, r = radius * Math.sqrt((i + .5) / nodes.length);
-          const x = cx + Math.cos(a) * r;
-          const y = cy + Math.sin(a) * r;
-          positions.set(node.id, {x, y, text: `${node.name}${node.type ? ` · ${node.type}` : ''}`});
-        });
-      });
-      // Fit the actual graph bounds, including tiny graphs, into the available area.
-      const raw = [...positions.values()];
-      if (raw.length) {
-        const xmin=Math.min(...raw.map(p=>p.x)), xmax=Math.max(...raw.map(p=>p.x));
-        const ymin=Math.min(...raw.map(p=>p.y)), ymax=Math.max(...raw.map(p=>p.y));
-        for (const p of raw) {
-          p.x = (xmax===xmin ? w/2 : 32+(p.x-xmin)/(xmax-xmin)*Math.max(1,w-150));
-          p.y = (ymax===ymin ? h/2 : 32+(p.y-ymin)/(ymax-ymin)*Math.max(1,h-75));
-          p.x = (p.x-w/2)*view.zoom+w/2+view.x; p.y = (p.y-h/2)*view.zoom+h/2+view.y;
-        }
-      }
-      ctx.strokeStyle = text; ctx.globalAlpha = .32; ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (const edge of plot.edges) {
-        const a = positions.get(edge.source), b = positions.get(edge.target);
-        if (a && b) {
-          ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
-          const angle=Math.atan2(b.y-a.y,b.x-a.x), x=b.x-Math.cos(angle)*8, y=b.y-Math.sin(angle)*8;
-          if(plot.edges.length<=2000){ctx.moveTo(x-Math.cos(angle-.5)*6,y-Math.sin(angle-.5)*6);ctx.lineTo(x,y);ctx.lineTo(x-Math.cos(angle+.5)*6,y-Math.sin(angle+.5)*6);}
-          hits.current.push({x:(a.x+b.x)/2,y:(a.y+b.y)/2,text:`${a.text} → ${b.text}${edge.type?` · ${edge.type}`:''}`});
-        }
-      }
-      ctx.stroke(); ctx.globalAlpha = 1;
-      for (const node of plot.nodes) {
-        const p = positions.get(node.id)!; ctx.fillStyle = color(node.type || ''); ctx.beginPath();
-        ctx.arc(p.x, p.y, Math.max(2, Math.min(6, 50 / Math.sqrt(plot.nodes.length || 1))) * Math.sqrt(view.zoom), 0, 2 * Math.PI); ctx.fill();
-        if (plot.nodes.length <= 40 || view.zoom >= 3) {ctx.fillStyle = text; ctx.fillText(node.name.slice(0, 28), p.x + 8, p.y + 4);}
-        hits.current.push(p);
-      }
-      return;
-    }
     if (!plot.points.length) return;
     const xs = plot.points.map(p => p.x), ys = plot.points.map(p => p.y);
     let xmin = Math.min(...xs), xmax = Math.max(...xs), ymin = Math.min(...ys), ymax = Math.max(...ys);
@@ -142,7 +95,7 @@ export function ChartCanvas({plot, kind, xLabel, yLabel}: {plot: Plot; kind: Kin
       let nearest: Hit | null = null, distance = 25;
       for (const p of hits.current) { const d = Math.hypot(p.x-x,p.y-y); if(d<distance){nearest=p;distance=d;} } setTip(nearest);
     }}>
-    <canvas ref={canvas} role="img" aria-label={`${kind} chart: ${plot.nodes.length || plot.points.length} ${kind === 'graph' ? 'nodes' : 'points'}`} />
+    <canvas ref={canvas} role="img" aria-label={`${kind} chart: ${plot.points.length} points`} />
     {tip && <div className="viz-tooltip" style={{left: Math.min(tip.x + 12, size.width - 190), top: Math.max(4, tip.y - 32)}}>{tip.text}</div>}
     {view.zoom !== 1 || view.x !== 0 || view.y !== 0 ? <button className="viz-reset" onPointerDown={e=>e.stopPropagation()} onClick={()=>setView({zoom:1,x:0,y:0})}>↺ 1:1</button> : null}
     {groups.some(Boolean) && <div className="viz-legend">{groups.slice(0, 8).map((group,i)=><span key={group}><i style={{background:colors[i%colors.length]}}/>{group}</span>)}{groups.length > 8 && <span>+{groups.length-8}</span>}</div>}

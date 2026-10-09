@@ -120,6 +120,7 @@ nav:
           - Canvas control: canvas-control.md
           - Canvas placement: layout.md
           - Canvas performance: canvas-performance.md
+          - Relationship maps: graph-architecture.md
           - Terrain renderer: terrain-webgl.md
           - Card finishes: developers/card-finishes.md
           - Card design: developers/card-design.md

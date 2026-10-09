@@ -1116,7 +1116,7 @@ export function Workspace({ host, card }: PluginViewProps) {
             v0: graph.entities.length, v1: graph.relations.length,
             v2: graph.truncated ? t(" · result limited") : "" })}</p>
           <div className="knowledge-graph">
-            <GraphMap entities={graph.entities} relations={graph.relations} selected={entity}
+            <GraphMap graphKey={`knowledge:${card.id}`} entities={graph.entities} relations={graph.relations} selected={entity}
               onSelect={setEntity} onExpand={expand} />
             <div className="knowledge-graphside">
               <ul className="knowledge-list">

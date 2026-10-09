@@ -9,6 +9,11 @@ import { fetchWithRetry } from './api/fetchWithRetry';
 
 async function start() {
   const root = document.getElementById("root")!;
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has('network-map')) {
+    const { NetworkMapPreview } = await import('./debug/NetworkMapPreview');
+    ReactDOM.createRoot(root).render(<NetworkMapPreview />);
+    return;
+  }
   if (import.meta.env.DEV && new URLSearchParams(location.search).has('card-studio')) {
     const { CardProductionPreview } = await import('./debug/CardProductionPreview');
     ReactDOM.createRoot(root).render(<CardProductionPreview />);

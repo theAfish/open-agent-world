@@ -10,6 +10,9 @@ export { CARD_FACE_VARIANTS, CARD_FACE_TONES, cardFaceDesign } from '../componen
 export type { CardFaceDesign, CardFaceVariant, CardFaceTone } from '../components/cardFaceDesign';
 export { t, useLocale } from "../i18n";
 export { useNestedFlowGestures } from "../canvas/useNestedFlowGestures";
+export { NetworkMap } from '../graph/NetworkMap';
+export type { NetworkMapProps } from '../graph/NetworkMap';
+export type { NetworkData, NetworkNode, NetworkEdge, NetworkMapHandle } from '../graph/types';
 export { useFileViewer } from "../state/openFiles";
 export type { FileReference, OpenedFile } from "../state/openFiles";
 export { WorkspaceSection, useWorkspaceSections } from "../workspace/WorkspaceSection";

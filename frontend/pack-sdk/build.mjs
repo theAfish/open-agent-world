@@ -8,7 +8,7 @@ const exports = {
     'useMemo', 'useReducer', 'useRef', 'useState', 'useSyncExternalStore', 'useTransition', 'version'],
   reactDom: ['createPortal', 'flushSync'],
   jsx: ['Fragment', 'jsx', 'jsxs'],
-  sdk: ['SchemaFields', 't', 'useLocale', 'useNestedFlowGestures', 'useFileViewer', 'WorkspaceSection', 'useWorkspaceSections'],
+  sdk: ['SchemaFields', 't', 'useLocale', 'useNestedFlowGestures', 'NetworkMap', 'useFileViewer', 'WorkspaceSection', 'useWorkspaceSections'],
 };
 const shared = { react: 'react', 'react-dom': 'reactDom', 'react/jsx-runtime': 'jsx', '@oaw/plugin-api': 'sdk' };
 

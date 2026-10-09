@@ -20,7 +20,7 @@ export default defineConfig({
   css: { postcss: { plugins: [autoprefixer({ overrideBrowserslist: ["Chrome >= 109", "Firefox >= 115", "Safari >= 16.4"] })] } },
   worker: { format: "es" },
   // PDF.js worker is a URL asset, not a dependency to prebundle as JavaScript.
-  optimizeDeps: { exclude: ["pdfjs-dist"], esbuildOptions: { plugins: [{
+  optimizeDeps: { include: ["sigma", "@sigma/edge-curve", "graphology", "graphology-layout-forceatlas2", "graphology-communities-louvain", "d3-contour"], exclude: ["pdfjs-dist"], esbuildOptions: { plugins: [{
     name: "threlte-local-canvas-dimensions",
     setup(build) {
       // MatterViz is prebundled in dev; nested imports bypass Vite's resolver.

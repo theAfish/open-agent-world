@@ -1,3 +1,4 @@
+import { NetworkMap, type NetworkData } from "@oaw/plugin-api";
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, type DataSchema, type Dataset, type FrontendPlugin, type PluginViewProps } from '@oaw/plugin-api';
 import { ChartCanvas } from './ChartCanvas';
@@ -67,6 +68,12 @@ export function Visualization({card, host}: PluginViewProps) {
     return ()=>{request.current++;};
   },[api,sourceId,config.schema_id,config.x,config.y,config.series,config.aggregate,config.limit,config.entity_type,config.relation_type,configured,saving,schema]);
   const plot = useMemo(()=>data?preparePlot(data,kind,config):null,[data,kind,config.x,config.y,config.series,config.aggregate]);
+  const network = useMemo<NetworkData>(() => {
+    const counts = new Map<string, number>();
+    return { nodes: (plot?.nodes ?? []).map(n => ({ id: n.id, label: n.name, kind: n.type })),
+      edges: (plot?.edges ?? []).map(e => { const key = JSON.stringify([e.source, e.target, e.type ?? '']); const count = counts.get(key) ?? 0; counts.set(key, count + 1);
+        return { id: e.id ?? `${key}:${count}`, source: e.source, target: e.target, label: e.type }; }) };
+  }, [plot]);
   const pickSource = async (id: string) => {
     if (!id) return;
     setSaving(true);
@@ -114,7 +121,7 @@ export function Visualization({card, host}: PluginViewProps) {
     <div className="viz-stage">
       {error?<div className="viz-empty" role="alert">{error}<button onClick={()=>void reloadSources()}>{label('Retry','重试')}</button></div>:
         loading||schemaBusy?<div className="viz-empty" role="status">{label('Loading data…','读取数据中…')}</div>:
-        plot&&(plot.points.length||plot.nodes.length)?<ChartCanvas plot={plot} kind={kind} xLabel={kind==='histogram'?config.y:config.x} yLabel={kind==='histogram'?label('Count','数量'):config.aggregate==='count'?label('Count','数量'):config.y}/>:
+        plot&&(plot.points.length||plot.nodes.length)?kind==='graph'?<NetworkMap graphKey={`visualization:${card.id}`} data={network} label="Graph visualization" />:<ChartCanvas plot={plot} kind={kind} xLabel={kind==='histogram'?config.y:config.x} yLabel={kind==='histogram'?label('Count','数量'):config.aggregate==='count'?label('Count','数量'):config.y}/>:
         <div className="viz-empty"><span className="viz-empty-icon">{kind==='graph'?'⌘':'▥'}</span>{!connected?label('Connect a data source to begin','连接数据源，开始可视化'):!schema?label('Choose a schema to visualize','选择需要展示的 schema'):!configured?label('Choose fields to plot','选择需要绘制的字段'):label('No plottable data','暂无可绘制的数据')}</div>}
     </div>
     <footer className="viz-status"><span role="status">{data?data.kind==='graph'?`${data.nodes?.length??0} ${label('nodes','节点')} · ${data.edges?.length??0} ${label('edges','关系')}`:`${data.rows?.length??0} ${label('rows','行')}${data.scope==='full'?` · ${label('Full-data aggregate','全量统计')}`:''}`:label('Read-only','只读')}

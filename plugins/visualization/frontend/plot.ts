@@ -4,7 +4,7 @@ export type Kind = 'graph' | 'line' | 'bar' | 'scatter' | 'histogram';
 export interface Selection { x: string; y: string; series: string; aggregate: string }
 export interface Point { x: number; y: number; label: string; series: string }
 export interface Plot { points: Point[]; categories: string[]; dateX: boolean; nodes: {id: string; name: string; type?: string}[];
-  edges: {source: string; target: string; type?: string}[]; skipped: number }
+  edges: {id?: string; source: string; target: string; type?: string}[]; skipped: number }
 export const numeric = (value: unknown): number | null => {
   if (value == null || typeof value === 'boolean' || (typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '') return null;
   const result = Number(value);
