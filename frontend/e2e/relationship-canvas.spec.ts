@@ -709,16 +709,17 @@ test("a Conversation workspace creates a group and routes explicit mentions", as
 
     const workspace = page.locator(`[data-workspace-node-id="${conversation.id}"]`);
     await expect(workspace).toBeVisible();
+    await workspace.getByRole('button', { name: /^Switch group:/ }).click();
     await workspace.getByRole("button", { name: "New group" }).click();
     await workspace.getByLabel("Group name").fill("E2E Review Group");
-    await workspace.getByLabel("E2E Atlas").check();
+    await workspace.getByRole('checkbox', { name: 'E2E Atlas', exact: true }).check();
     await workspace.getByRole("button", { name: "Create group" }).click();
 
     await expect(workspace.getByText("E2E Review Group", { exact: true }).last()).toBeVisible();
     await workspace.getByRole("button", { name: "Add agents to session" }).click();
     await workspace.getByLabel("Add E2E River to session").check();
     await workspace.getByRole("button", { name: "Add selected" }).click();
-    await expect(workspace.getByText("2 active participants", { exact: true })).toBeVisible();
+    await expect(workspace.locator('.conversation-participant-row')).toHaveCount(2);
 
     const composer = workspace.getByLabel("Conversation message");
     await composer.fill("Please ask@E2E At");
@@ -771,16 +772,18 @@ test("a Conversation group can remove a participant and be dissolved", async ({ 
     const conversationCard = page.locator(`[data-card-id="${conversation.id}"]`);
     await expect(conversationCard).toHaveAttribute("data-surface-level", "workspace");
     const workspace = page.locator(`[data-workspace-node-id="${conversation.id}"]`);
+    await workspace.getByRole('button', { name: /^Switch group:/ }).click();
     await workspace.getByRole("button", { name: "New group" }).click();
     await workspace.getByLabel("Group name").fill("E2E Kick Group");
-    await workspace.getByLabel("E2E Kick Atlas").check();
-    await workspace.getByLabel("E2E Kick River").check();
+    await workspace.getByRole('checkbox', { name: 'E2E Kick Atlas', exact: true }).check();
+    await workspace.getByRole('checkbox', { name: 'E2E Kick River', exact: true }).check();
     await workspace.getByRole("button", { name: "Create group" }).click();
-    await expect(workspace.getByText("2 active participants", { exact: true })).toBeVisible();
+    await expect(workspace.locator('.conversation-participant-row')).toHaveCount(2);
 
     page.once("dialog", (dialog) => dialog.accept());
     await workspace.getByRole("button", { name: "Remove E2E Kick River from session" }).click();
-    await expect(workspace.getByText("1 active participants", { exact: true })).toBeVisible();
+    await expect(workspace.locator('.conversation-participant-row')).toHaveCount(1);
+    await workspace.getByLabel('Session actions for New session').click();
     page.once("dialog", (dialog) => dialog.accept());
     await workspace.getByRole("button", { name: "Delete session" }).click();
     await expect(workspace.getByText("E2E Kick Group", { exact: true })).toHaveCount(0);

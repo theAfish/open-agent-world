@@ -1,4 +1,5 @@
 {
+  "Switch group: {v0}": ["Switch group: {v0}", "切换分组：{v0}"],
   "Follow opened files": ["Follow opened files", "跟随打开的文件"],
   "Let this viewer read files from the connected source and follow files opened in its window.": ["Let this viewer read files from the connected source and follow files opened in its window.", "允许查看器读取已连接来源中的文件，并跟随你在来源窗口中打开的文件。"],
   "Card tutorials & docs": ["Card tutorials & docs", "卡片教程与文档"],

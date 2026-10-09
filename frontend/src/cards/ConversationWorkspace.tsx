@@ -6,10 +6,10 @@ import { RunActivityDetails, RunActivityStream } from "./RunActivityStream";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { ConversationAttachments } from "./ConversationAttachments";
 import { ConversationActions } from "./ConversationActions";
+import { ConversationGroupMenu } from "./ConversationGroupMenu";
 import { ContextAvatar } from "./ContextAvatar";
 import { ArrowDown, Bot, Check, Info, LoaderCircle, MessageSquare, Paperclip, Pencil, Plus, Send, Trash2, UserMinus, UserRound, Users, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type SetStateAction } from "react";
-import { createPortal } from "react-dom";
 import { apiErrorMessage, worldApi } from "../api/client";
 import {
   appendMention,
@@ -31,8 +31,16 @@ type OutgoingMessage = { message: ConversationMessage; status: "sending" | "conf
 const NO_ATTACHMENTS: ConversationAttachment[] = [];
 const NO_OUTGOING: OutgoingMessage[] = [];
 
+function sessionDateLabel(value: string, locale: string) {
+  const date = new Date(value);
+  const today = new Date();
+  return date.toDateString() === today.toDateString()
+    ? date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleDateString(locale, { year: date.getFullYear() === today.getFullYear() ? undefined : 'numeric', month: 'short', day: 'numeric' });
+}
+
 export function ConversationWorkspace({ card }: { card: WorldCard }) {
-  useLocale();
+  const locale = useLocale(state => state.locale);
   const { deployed, permissions } = useWorkspaceAccess();
   const sections = useWorkspaceSections();
   const sessionsInline = sections.isInline("sessions");
@@ -92,9 +100,8 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const [creatingGroup, setCreatingGroup] = useSurfaceDraft(key('creating-group'), false);
   const [groupTitle, setGroupTitle] = useSurfaceDraft(key('group-title'), '');
   const [groupAgentIds, setGroupAgentIds] = useSurfaceDraft<string[]>(key('group-agents'), []);
-  const groupRow = useRef<HTMLFormElement>(null);
   const groupNameInput = useRef<HTMLInputElement>(null);
-  const groupPicker = useRef<HTMLDivElement>(null);
+  const [groupsOpen, setGroupsOpen] = useState(false);
   const [sessionRegion, setSessionRegion] = useState<HTMLDivElement | null>(null);
   const newGroupButton = useRef<HTMLButtonElement>(null);
   const [addingParticipants, setAddingParticipants] = useSurfaceDraft(key('adding-participants'), false);
@@ -102,7 +109,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const [mentionCaret, setMentionCaret] = useState<number>();
   const [mentionIndex, setMentionIndex] = useState(0);
   const [busy, setBusy] = useState(false);
-  useHydrationLease(card.id, 'conversation-operation', busy || uploading || stoppingRuns.size > 0 || creatingGroup || addingParticipants);
+  useHydrationLease(card.id, 'conversation-operation', busy || uploading || stoppingRuns.size > 0 || creatingGroup || addingParticipants || groupsOpen);
   const [error, setError] = useState<string>();
   const transcript = useRef<HTMLDivElement>(null);
 
@@ -114,38 +121,10 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const connectedAgents = agents.filter((agent) => agent.connected);
   const selectedGroupAgents = groupAgentIds.filter((id) => connectedAgents.some((agent) => agent.id === id));
   useLayoutEffect(() => {
-    if (!creatingGroup) return;
-    const picker = groupPicker.current;
-    const row = groupRow.current;
-    if (!picker || !row || !sessionRegion) return;
-    const position = () => {
-      const anchor = row.getBoundingClientRect();
-      const origin = sessionRegion.getBoundingClientRect();
-      const scale = sessionRegion.offsetWidth ? origin.width / sessionRegion.offsetWidth || 1 : 1;
-      const bounds = sessionRegion.closest(".conversation-workspace-grid, .legion-pane-content")?.getBoundingClientRect() ?? origin;
-      const right = (anchor.right - origin.left) / scale + 8;
-      const availableRight = (bounds.right - origin.left) / scale;
-      const fitsBeside = right + picker.offsetWidth <= availableRight;
-      const left = fitsBeside ? right : Math.max(4, (anchor.left - origin.left) / scale);
-      picker.style.left = `${left}px`;
-      picker.style.top = `${((fitsBeside ? anchor.top : anchor.bottom) - origin.top) / scale + (fitsBeside ? 0 : 4)}px`;
-      picker.style.maxWidth = `${Math.max(0, availableRight - left - 4)}px`;
-    };
-    position();
+    if (!creatingGroup || !groupsOpen) return;
     groupNameInput.current?.focus();
     groupNameInput.current?.select();
-    window.addEventListener("resize", position);
-    window.addEventListener("scroll", position, true);
-    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(position);
-    observer?.observe(row);
-    observer?.observe(picker);
-    observer?.observe(sessionRegion);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", position);
-      window.removeEventListener("scroll", position, true);
-    };
-  }, [creatingGroup, sessionRegion]);
+  }, [creatingGroup, groupsOpen]);
   const participants = (activeSession?.participant_ids ?? [])
     .map((id) => agents.find((item) => item.id === id))
     .filter((item): item is ConversationAgent => Boolean(item?.connected));
@@ -168,6 +147,9 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const runActivities = useRunActivity(card.id, activeSessionId, runtimeEvents, activeRuns, history.runSummaries);
   const deliveryAgents = new Map(agents.map((agent) => [agent.id, agent.name]));
   const activeGroupId = activeSession?.group_id ?? activeSession?.id;
+  useEffect(() => {
+    if (activeGroupId && activeSessionId) useConversationView.getState().rememberGroupSession(card.id, activeGroupId, activeSessionId);
+  }, [card.id, activeGroupId, activeSessionId]);
   const groups = [...new Map(sessions.map((session) => [session.group_id ?? session.id, session])).values()];
   const groupSessions = sessions.filter((session) => (session.group_id ?? session.id) === activeGroupId);
   const [renaming, setRenaming] = useSurfaceDraft<string | undefined>(key('renaming'), undefined);
@@ -235,6 +217,10 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       setCreatingGroup(false);
       setGroupTitle("");
       setGroupAgentIds([]);
+      if (!groupId) {
+        setGroupsOpen(false);
+        sessionRegion?.querySelector<HTMLButtonElement>('.conversation-group-tab')?.focus();
+      }
       return session;
     } catch (reason) {
       pushToast({ tone: "error", title: t("Session was not created"), detail: apiErrorMessage(reason) });
@@ -390,8 +376,14 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
       <WorkspaceSection id="sessions" title={t("Sessions")} className={`conversation-sessions-section${conversationInline || participantsInline ? " has-neighbor" : ""}`}>
       <div ref={setSessionRegion} className="conversation-session-region">
       <nav className="workspace-session-sidebar conversation-session-navigation nodrag nopan nowheel" aria-label={t("Sessions")}>
-        <div className="workspace-nav-label">
-          <Users size={11} /> {t("Groups")}
+        <div className="conversation-session-toolbar">
+          <span className="conversation-session-label">{t("Sessions")}</span>
+          <button type="button" className="conversation-nav-add" aria-label={t("New session")} title={t("New session")} disabled={!activeSession || busy} onClick={() => void createSession(t("New session"), activeSession?.participant_ids ?? [], activeGroupId)}><Plus size={13} aria-hidden="true" /></button>
+          <ConversationGroupMenu host={sessionRegion} title={activeSession?.group_title ?? activeSession?.title ?? t("Groups")} open={groupsOpen} onOpenChange={setGroupsOpen}>
+          {(groupMenu, closeGroups) => <>
+        <div className="conversation-group-menu-scroll">
+        <div className="conversation-group-menu-heading">
+          <span>{t("Groups")}</span>
           <button ref={newGroupButton} type="button" className="conversation-nav-add" aria-label={t("New group")} title={t("New group")} disabled={busy} onClick={() => {
             if (creatingGroup) { groupNameInput.current?.focus(); return; }
             setGroupTitle(t("New group"));
@@ -400,7 +392,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
           }}><Plus size={13} aria-hidden="true" /></button>
         </div>
         {creatingGroup ? (
-          <form ref={groupRow} className="conversation-group-draft" onSubmit={(event) => {
+          <form className="conversation-group-draft" onSubmit={(event) => {
             event.preventDefault();
             if (busy || !groupTitle.trim() || selectedGroupAgents.length === 0) return;
             void createSession(groupTitle, selectedGroupAgents);
@@ -410,11 +402,12 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
             }
             if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault();
           }}>
-            <Users size={13} aria-hidden="true" />
+            <div className="conversation-group-name-row"><Users size={13} aria-hidden="true" />
             <input ref={groupNameInput} value={groupTitle} maxLength={200} disabled={busy} onChange={(event) => setGroupTitle(event.target.value)} aria-label={t("Group name")} />
             <button type="submit" aria-label={t("Create group")} title={t("Create group")} disabled={busy || !groupTitle.trim() || selectedGroupAgents.length === 0}><Check size={13} /></button>
             <button type="button" disabled={busy} onClick={() => { setCreatingGroup(false); newGroupButton.current?.focus(); }} aria-label={t("Cancel group")} title={t("Cancel group")}><X size={13} /></button>
-            {sessionRegion ? createPortal(<div ref={groupPicker} className="conversation-group-agent-picker nodrag nopan nowheel" role="group" aria-label={t("Participants")}>
+            </div>
+            <div className="conversation-group-agent-picker" role="group" aria-label={t("Participants")}>
               <strong>{t("Participants")}</strong>
               <div className="conversation-group-agent-options">
                 {connectedAgents.map((agent) => (
@@ -425,16 +418,22 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
                 ))}
                 {connectedAgents.length === 0 ? <p>{t("Connect an Agent using Participate.")}</p> : null}
               </div>
-            </div>, sessionRegion) : null}
+            </div>
           </form>
         ) : null}
-        <div className="conversation-sidebar-scroll">
+        <div className="conversation-group-list">
           {groups.map((group) => (
             <div className="conversation-session-row conversation-group-row" key={group.group_id ?? group.id}>
-            <button type="button" className={`workspace-session ${(group.group_id ?? group.id) === activeGroupId ? "is-active" : ""}`} onClick={() => setActiveSessionId(sessions.find((item) => (item.group_id ?? item.id) === (group.group_id ?? group.id))?.id)}>
-              <Users size={13} /><span><strong>{group.group_title ?? group.title}</strong></span>
+            <button type="button" className={`workspace-session ${(group.group_id ?? group.id) === activeGroupId ? "is-active" : ""}`} aria-current={(group.group_id ?? group.id) === activeGroupId ? "true" : undefined} onClick={() => {
+              const groupId = group.group_id ?? group.id;
+              const remembered = useConversationView.getState().groupSessions[card.id]?.[groupId];
+              const members = sessions.filter(item => (item.group_id ?? item.id) === groupId);
+              setActiveSessionId(members.find(item => item.id === remembered)?.id ?? members[0]?.id);
+              closeGroups();
+            }}>
+              {(group.group_id ?? group.id) === activeGroupId ? <Check size={13} aria-hidden="true" /> : <Users size={13} aria-hidden="true" />}<span><strong>{group.group_title ?? group.title}</strong></span>
             </button>
-            <ConversationActions host={sessionRegion} label={t("Group actions for {v0}", { v0: group.group_title ?? group.title })} title={t("Group actions")}>
+            <ConversationActions host={groupMenu} label={t("Group actions for {v0}", { v0: group.group_title ?? group.title })} title={t("Group actions")}>
                 <button type="button" disabled={busy} onClick={(event) => {
                   event.currentTarget.closest("details")?.removeAttribute("open");
                   setRenamedGroupTitle(group.group_title ?? group.title); setRenamingGroup(group.group_id ?? group.id);
@@ -461,16 +460,19 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
             </div>
           ))}
         </div>
+        </div>
+          </>}
+          </ConversationGroupMenu>
+        </div>
         <div className="conversation-session-list">
-          <div className="workspace-nav-label">
-            <MessageSquare size={11} /> {t("Sessions")}
-            <button type="button" className="conversation-nav-add" aria-label={t("New session")} title={t("New session")} disabled={!activeSession || busy} onClick={() => void createSession(t("New session"), activeSession?.participant_ids ?? [], activeGroupId)}><Plus size={13} aria-hidden="true" /></button>
-          </div>
           <div className="conversation-sidebar-scroll">
             {groupSessions.map((session) => (
               <div className="conversation-session-row" key={session.id}>
                 <button type="button" className={`workspace-session ${session.id === activeSessionId ? "is-active" : ""}`} title={session.title} aria-current={session.id === activeSessionId ? "true" : undefined} onClick={() => setActiveSessionId(session.id)}>
-                  <MessageSquare size={13} /><span><strong>{session.title}</strong><small>{new Date(session.created_at).toLocaleString(useLocale.getState().locale)}</small></span>
+                  <MessageSquare size={13} aria-hidden="true" /><span>
+                    <strong title={`${session.title}\n${new Date(session.created_at).toLocaleString(locale)}`}>{session.title}</strong>
+                    <time dateTime={session.created_at} title={new Date(session.created_at).toLocaleString(locale)} aria-label={new Date(session.created_at).toLocaleString(locale)}>{sessionDateLabel(session.created_at, locale)}</time>
+                  </span>
                 </button>
                 <ConversationActions host={sessionRegion} label={t("Session actions for {v0}", { v0: String(session.title) })} title={t("Session actions")}>
                     <button type="button" disabled={busy} onClick={(event) => { event.currentTarget.closest("details")?.removeAttribute("open"); setSessionTitle(session.title); setRenaming(session.id); }}><Pencil size={12} /> {t("Rename session")}</button>
