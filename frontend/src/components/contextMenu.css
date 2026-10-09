@@ -1,0 +1,5 @@
+.ui-context-menu { position: fixed; z-index: 10000; min-width: 160px; max-width: calc(100vw - 8px); max-height: calc(100vh - 8px); overflow: auto; padding: 4px; border: 1px solid var(--line); border-radius: 7px; background: var(--card-surface); color: var(--ink); box-shadow: 0 6px 24px #0003; font-size: 11px; }
+.ui-context-menu > button { display: flex; width: 100%; gap: 8px; align-items: center; padding: 8px; border: 0; border-radius: 4px; background: transparent; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.ui-context-menu > button:hover, .ui-context-menu > button:focus-visible { background: var(--accent-soft); outline: none; }
+.ui-context-menu > button.is-danger { color: var(--danger); }
+.ui-context-menu > button:disabled { opacity: .4; cursor: not-allowed; }

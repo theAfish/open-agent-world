@@ -254,6 +254,8 @@ fn launch(app: tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 .inner_size(1440.0, 940.0)
                 .min_inner_size(860.0, 600.0)
                 .devtools(false)
+                // Let the shared HTML file drop targets receive WebView2 drops.
+                .disable_drag_drop_handler()
                 .on_navigation(move |target| {
                     if target.origin() == origin {
                         true

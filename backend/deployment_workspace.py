@@ -215,11 +215,11 @@ def workspace_router(manifest):
         return await sandbox(sandbox_id, services)
 
     @router.get("/sandboxes/{sandbox_id}/files")
-    async def files(sandbox_id: str, operation: str = "roots", root: str = "workspace", path: str = "", services=Depends(get_services)):
+    async def files(sandbox_id: str, operation: str = "roots", root: str = "workspace", path: str = "", services=Depends(get_services), cursor: str = '', query: str = ''):
         require(sandbox_id, "files", "preview")
         if root != "workspace":
             raise HTTPException(404, "This root is not published")
-        result = await runtime.sandbox_files(sandbox_id, operation, root, path, services)
+        result = await runtime.sandbox_files(sandbox_id, operation, root, path, services, cursor=cursor, query=query)
         if operation == "roots" and isinstance(result, list):
             return [{"id": "workspace", "label": "Workspace", "directory": True, "access": item.get("access", "read_only")}
                     for item in result if item["id"] == "workspace"]

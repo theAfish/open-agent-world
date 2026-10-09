@@ -14,6 +14,29 @@ afterEach(() => {
 });
 
 describe("API normalization boundary", () => {
+  it('sends sandbox deletion and move paths through explicit mutation endpoints', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response('{}', { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await worldApi.deleteSandboxFile('sandbox one', 'folder/file.txt');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/sandboxes/sandbox%20one/files?path=folder%2Ffile.txt');
+    expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
+    await worldApi.moveSandboxFile('sandbox one', 'folder/file.txt', 'other/file.txt');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/sandboxes/sandbox%20one/files/move');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ path: 'folder/file.txt', destination: 'other/file.txt' });
+  });
+  it('sends raw sandbox bytes, relative paths and explicit directory intent through the real client', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ written: 3 }), { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const file = new File(['abc'], 'data.txt');
+    await worldApi.uploadSandboxEntry('sandbox one', 'folder/data.txt', file);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/sandboxes/sandbox%20one/files?path=folder%2Fdata.txt&directory=false');
+    expect(init.body).toBe(file);
+    expect(init.headers.get('Content-Type')).toBe('application/octet-stream');
+    await worldApi.uploadSandboxEntry('sandbox one', 'folder/empty');
+    expect(fetchMock.mock.calls[1][0]).toContain('directory=true');
+    expect(fetchMock.mock.calls[1][1].body).toBe('');
+  });
   it("sends global environment variables when saving Sandbox settings", async () => {
     const settings = { workspace_root: null, runtime: "auto", environment_variables: { OAW_MINERU_TOKEN: "test-global-token" } };
     const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify(settings), {

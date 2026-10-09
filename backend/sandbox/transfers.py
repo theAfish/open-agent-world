@@ -20,7 +20,7 @@ def signature(info):
 
 
 def transfer(root, operation, *, path='', paths=None, expected=None, offset=0,
-             data=None, read_only=False, runtime_pinned_root=None):
+             data=None, read_only=False, runtime_pinned_root=None, allow_hardlink=False):
     root = Path(root)
     target = root.joinpath(*parts(path))
     if operation == 'capture_manifest':
@@ -48,8 +48,12 @@ def transfer(root, operation, *, path='', paths=None, expected=None, offset=0,
                 raise SandboxValidationError('Select explicit files or directories, not the workspace root')
             visit(relative)
         return sorted(result.values(), key=lambda item: item['path'])
-    if operation == 'read_chunk':
-        with pinned(target, runtime_pinned_root=runtime_pinned_root) as fd:
+    if operation == 'download_info':
+        with pinned(target, runtime_pinned_root=runtime_pinned_root, allow_hardlink=allow_hardlink) as fd:
+            info = os.fstat(fd)
+            return {'size': info.st_size, 'signature': signature(info), 'name': target.name}
+    if operation in {'read_chunk', 'download_chunk'}:
+        with pinned(target, runtime_pinned_root=runtime_pinned_root, allow_hardlink=allow_hardlink) as fd:
             before = signature(os.fstat(fd))
             if before != expected:
                 raise SandboxValidationError('Source changed during publication; finalize inputs and use a new request key')

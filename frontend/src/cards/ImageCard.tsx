@@ -1,11 +1,14 @@
 import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
 import { t, useLocale } from "../i18n";
 import { ImagePlus, UploadCloud } from "lucide-react";
-import { useId, useState } from "react";
+import { useRef, useState } from "react";
 import { useWorldStore } from "../state/worldStore";
 import type { WorldCard } from "../types/world";
 import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { RelationshipList } from "./CardUtilities";
+import { useFileIntake, FileDropOverlay } from '../files/useFileIntake';
+import { apiErrorMessage } from '../api/client';
+import { useHydrationLease } from '../canvas/useCardRendering';
 
 function formatBytes(bytes: unknown): string {
   if (typeof bytes !== "number" || !Number.isFinite(bytes)) return t("No file imported");
@@ -17,19 +20,27 @@ function formatBytes(bytes: unknown): string {
 export function ImageCardBody({ card }: { card: WorldCard; level: NodeSurfaceLevel }) {
   useLocale();
   const { deployed } = useWorkspaceAccess();
-  const inputId = useId();
+  const fileInput = useRef<HTMLInputElement>(null);
   const uploadImage = useWorldStore((state) => state.uploadImage);
-  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
   const previewUrl = typeof card.config.preview_url === "string" ? card.config.preview_url : undefined;
   const filename = String(card.config.filename ?? card.name);
   const imported = Boolean(previewUrl || Number(card.config.revision ?? 0) > 0);
 
-  const importFile = async (file?: File) => {
-    if (!file) return;
-    setUploading(true);
-    await uploadImage(card.id, file);
-    setUploading(false);
-  };
+  const intake = useFileIntake({
+    disabled: deployed || imported,
+    limits: { maxEntries: 1, maxFileBytes: 25 * 1024 * 1024, directories: false },
+    destination: () => undefined,
+    onError: reason => setError(apiErrorMessage(reason)),
+    onEntries: async entries => {
+      const file = entries[0].file!;
+      if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type) && !/\.(png|jpe?g|gif|webp)$/i.test(file.name)) throw new Error(t('Choose a PNG, JPEG, GIF or WebP image.'));
+      setError('');
+      await uploadImage(card.id, file);
+    },
+  });
+  const uploading = intake.processing;
+  useHydrationLease(card.id, 'image-import', uploading);
 
   const preview = previewUrl ? (
     <img src={previewUrl} alt={t("Preview of {v0}", { v0: String(filename) })} draggable={false} />
@@ -42,7 +53,7 @@ export function ImageCardBody({ card }: { card: WorldCard; level: NodeSurfaceLev
   );
 
   return (
-    <div className="expanded-stack">
+    <div className="expanded-stack file-drop-target" {...intake.dragProps} {...intake.pasteProps}>
       <div className="image-preview-expanded">{preview}</div>
       <div className="image-metadata-grid">
         <div><span>{t("Filename")}</span><strong title={filename}>{filename}</strong></div>
@@ -53,34 +64,33 @@ export function ImageCardBody({ card }: { card: WorldCard; level: NodeSurfaceLev
         <div><span>{t("Size")}</span><strong>{formatBytes(card.config.bytes)}</strong></div>
       </div>
 
-      {!deployed && <>{imported ? (
-        <div className="upload-zone upload-zone--locked">
-          <UploadCloud size={17} />
-          <span>{t("Managed image imported")}</span>
-          <small>{t("Image resources are immutable in this POC. Create a new Image card to import another file.")}</small>
-        </div>
-      ) : (
-        <label htmlFor={inputId} className={`upload-zone ${uploading ? "is-uploading" : ""}`}>
+      {!deployed && <>{!imported && (
+        <>
+        <button type="button" aria-label={t('Import image')} disabled={uploading} className={`upload-zone ${uploading ? "is-uploading" : ""}`}
+          onClick={() => fileInput.current?.click()}>
           <UploadCloud size={17} />
           <span>{uploading ? t("Importing managed copy…") : t("Import image")}</span>
-          <small>{t("PNG, JPEG, GIF or WebP")}</small>
+        </button>
           <input
-            id={inputId}
+            ref={fileInput}
+            hidden
             type="file"
             accept="image/png,image/jpeg,image/gif,image/webp"
             disabled={uploading}
             onChange={(event) => {
-              void importFile(event.target.files?.[0]);
+              if (event.target.files) void intake.pick(event.target.files, undefined);
               event.currentTarget.value = "";
             }}
           />
-        </label>
+        </>
       )}
+      {error && <p role="alert" className="ui-error">{error}</p>}
 
       <section className="card-section">
         <div className="section-heading"><span>{t("Relationships")}</span><small>{t("read-only resource")}</small></div>
         <RelationshipList card={card} />
       </section></>}
+      <FileDropOverlay visible={intake.hovering}>{t('Drop image here')}</FileDropOverlay>
     </div>
   );
 }

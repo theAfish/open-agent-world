@@ -260,12 +260,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
 
+  return readResponse<T>(response, headers);
+}
+
+async function readResponse<T>(response: Response, headers = new Headers(), binary = false): Promise<T> {
   const contentType = response.headers.get("content-type") ?? "";
   const body = response.status === 204
     ? undefined
     : contentType.includes("application/json")
       ? await response.json()
-      : response.ok && contentType.includes("application/vnd.oaw.pack")
+      : response.ok && (binary || contentType.includes("application/vnd.oaw.pack"))
       ? await response.blob()
       : await response.text();
 
@@ -287,6 +291,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   return body as T;
+}
+
+async function transferRequest<T>(path: string, file: Blob | undefined, options: import('../files/transferQueue').TransferOptions, binary = false): Promise<T> {
+  const { transferResponse } = await import('./transfer');
+  const response = await transferResponse(`${API_BASE}${path}`, file === undefined ? 'GET' : 'POST', file, options);
+  return readResponse<T>(response, undefined, binary);
 }
 
 function unwrap<T>(input: unknown, key: string): T {
@@ -880,15 +890,16 @@ export const worldApi = {
     return request<ConversationSession[]>(`/agents/${encodeURIComponent(agentId)}/conversation-sessions`);
   },
 
-  async uploadConversationAttachment(conversationId: string, sessionId: string, file: File): Promise<import("../types/world").ConversationAttachment> {
-    const response = await fetch(`${API_BASE}/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/attachments?${new URLSearchParams({ filename: file.name })}`, {
+  async uploadConversationAttachment(conversationId: string, sessionId: string, file: File, options?: import('../files/transferQueue').TransferOptions): Promise<import("../types/world").ConversationAttachment> {
+    const path = `/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/attachments?${new URLSearchParams({ filename: file.name })}`;
+    if (options) return transferRequest(path, file, options);
+    return request(path, {
       method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file,
     });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new ApiError(errorMessage(data.detail, response.status), response.status);
-    }
-    return response.json();
+  },
+
+  previewConversationAttachment(conversationId: string, sessionId: string, file: { version_id: string; path: string }, signal?: AbortSignal): Promise<{ state: string; text?: string; truncated?: boolean }> {
+    return request(`/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(file.version_id)}?${new URLSearchParams({ path: file.path, text_preview: 'true' })}`, { signal });
   },
 
   getModelConnections(): Promise<import("../state/modelConnections").ModelCatalog> {
@@ -922,13 +933,35 @@ export const worldApi = {
     return request<T>(`/sandboxes/${encodeURIComponent(nodeId)}/${action}`, body === undefined ? undefined : { method: "POST", body: JSON.stringify(body) });
   },
 
-  async downloadSandboxFile(nodeId: string, root: string, path: string): Promise<Blob> {
-    const response = await fetch(`${API_BASE}/sandboxes/${encodeURIComponent(nodeId)}/files?${new URLSearchParams({ operation: "download", root, path })}`);
+  deleteSandboxFile(nodeId: string, path: string): Promise<{ deleted: string }> {
+    return request(`/sandboxes/${encodeURIComponent(nodeId)}/files?${new URLSearchParams({ path })}`, { method: 'DELETE' });
+  },
+
+  moveSandboxFile(nodeId: string, path: string, destination: string): Promise<{ moved: string; destination: string }> {
+    return request(`/sandboxes/${encodeURIComponent(nodeId)}/files/move`, { method: 'POST', body: JSON.stringify({ path, destination }) });
+  },
+
+  async downloadSandboxFile(nodeId: string, root: string, path: string, options?: import('../files/transferQueue').TransferOptions): Promise<Blob> {
+    const route = `/sandboxes/${encodeURIComponent(nodeId)}/files?${new URLSearchParams({ operation: "download", root, path })}`;
+    if (options) {
+      const result = await transferRequest<Blob | { message?: string }>(route, undefined, options, true);
+      if (!(result instanceof Blob)) throw new Error(result.message ?? 'File is missing or access was denied.');
+      return result;
+    }
+    const response = await fetch(`${API_BASE}${route}`);
     if (!response.ok || response.headers.get("content-type")?.includes("application/json")) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.state === "oversized" ? "Download exceeds the 16 MiB limit." : error.message ?? error.error?.message ?? "File is missing or access was denied.");
+      throw new Error(error.message ?? error.error?.message ?? "File is missing or access was denied.");
     }
     return response.blob();
+  },
+
+  uploadSandboxEntry(nodeId: string, path: string, file?: File, options?: import('../files/transferQueue').TransferOptions): Promise<{ written?: number; created?: boolean }> {
+    const route = `/sandboxes/${encodeURIComponent(nodeId)}/files?${new URLSearchParams({ path, directory: String(!file) })}`;
+    if (options) return transferRequest(route, file ?? new Blob(), options);
+    return request(route, {
+      method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file ?? '',
+    });
   },
 
   getSandbox(nodeId: string): Promise<SandboxInfo> {

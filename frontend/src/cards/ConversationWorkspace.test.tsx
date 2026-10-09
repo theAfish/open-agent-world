@@ -401,6 +401,46 @@ describe("ConversationWorkspace snapshots", () => {
     fireEvent.click(screen.getByRole('button', { name: 'Second' }));
     await act(async () => finish({ version_id: 'private', path: 'private.txt', name: 'private.txt', size_bytes: 7, media_type: 'text/plain' }));
     expect(screen.queryByRole('button', { name: 'Remove attachment private.txt' })).toBeNull();
+    act(() => useConversationView.getState().selectSession(card.id, session.id));
+    expect(await screen.findByRole('button', { name: 'Remove attachment private.txt' })).toBeTruthy();
+  });
+
+  it('drops attachments anywhere in the thread without submitting and ignores ordinary text drags', async () => {
+    const upload = vi.spyOn(worldApi, 'uploadConversationAttachment').mockImplementation(async (_card, _session, file) => ({
+      version_id: file.name, path: file.name, name: file.name, size_bytes: file.size, media_type: 'text/plain',
+    }));
+    const send = vi.spyOn(worldApi, 'postConversationMessage');
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    const thread = screen.getByLabelText('Conversation message').closest('main')!;
+    fireEvent.drop(thread, { dataTransfer: { types: ['text/plain'], files: [] } });
+    expect(upload).not.toHaveBeenCalled();
+    const file = new File(['notes'], 'notes.txt');
+    fireEvent.dragEnter(thread, { dataTransfer: { types: ['Files'], files: [file] } });
+    expect(screen.getByText('Drop files to attach to this conversation')).toBeTruthy();
+    fireEvent.drop(thread, { dataTransfer: { types: ['Files'], files: [file] } });
+    expect(await screen.findByRole('button', { name: 'Remove attachment notes.txt' })).toBeTruthy();
+    expect(upload).toHaveBeenCalledWith(card.id, session.id, file, expect.objectContaining({ signal: expect.any(AbortSignal), onProgress: expect.any(Function) }));
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('continues a batch after a failed attachment and prevents simultaneous duplicate intake', async () => {
+    let finish!: () => void;
+    const upload = vi.spyOn(worldApi, 'uploadConversationAttachment')
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { finish = () => reject(new Error('Upload interrupted')); }))
+      .mockResolvedValue({ version_id: 'ok', path: 'ok.txt', name: 'ok.txt', size_bytes: 2, media_type: 'text/plain' });
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    const target = screen.getByLabelText('Conversation message');
+    const dataTransfer = { types: ['Files'], files: [new File(['bad'], 'bad.txt'), new File(['ok'], 'ok.txt')] };
+    fireEvent.drop(target, { dataTransfer });
+    fireEvent.drop(target, { dataTransfer });
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+    await act(async () => finish());
+    await screen.findByRole('button', { name: 'Remove attachment ok.txt' });
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('alert').textContent).toContain('Upload interrupted');
+    expect(screen.getByRole('button', { name: 'Retry bad.txt' })).toBeTruthy();
   });
 
   it("loads persisted history while the WebSocket is offline", async () => {

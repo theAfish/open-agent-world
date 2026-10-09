@@ -54,7 +54,7 @@ sys.modules['oaw_sandbox.linux_worker'].main(payload['request'],stdin_pending=bo
 # source change the next unrestricted transport helper.
 _WORKER_MODULES = tuple(
     (name, (Path(__file__).parent / f"{name}.py").read_text(encoding="utf-8"))
-    for name in ("models", "materialization", "base", "environment", "files", "transfers", "python_launchers", "python_runtime", "linux_network", "linux", "linux_worker")
+    for name in ("models", "materialization", "base", "environment", "files", "transfers", "listing", "streaming", "mutations", "python_launchers", "python_runtime", "linux_network", "linux", "linux_worker")
 )
 
 
@@ -297,8 +297,11 @@ class WslSandboxBackend(SandboxBackend):
             return self._info(raw)
 
     async def managed_workspace(self, sandbox_id: str) -> Path:
-        import hashlib
         await self.get(sandbox_id)
+        return self._managed_workspace_path(sandbox_id)
+
+    def _managed_workspace_path(self, sandbox_id: str) -> Path:
+        import hashlib
         return self._managed_root / "sandbox-runtimes" / hashlib.sha256(self._runtime_id.encode()).hexdigest()[:16] / "sandboxes" / sandbox_id / "workspace"
 
     async def configure(self, sandbox_id: str, *, workspace_path: str | None,
@@ -316,6 +319,16 @@ class WslSandboxBackend(SandboxBackend):
             return self._info(raw, workspace_path=workspace_path, preserve_workspace=False)
 
     async def file_operation(self, sandbox_id, operation, **options):
+        if os.name == 'nt' and operation in {'move', 'delete'}:
+            # WSL workspaces live on Windows storage. DrvFS cannot perform
+            # renameat2(RENAME_NOREPLACE); use the same pinned Win32 mutation
+            # boundary as the Windows runtime, not a racy check-then-rename.
+            # Ask the trusted worker for current authority, never cached UI info.
+            from .files import file_operation, run_file_operation
+            async with self._lock(sandbox_id):
+                raw = await self._request(self._payload('get', sandbox_id))
+                workspace = Path(raw['workspace_path']) if raw.get('workspace_path') else self._managed_workspace_path(sandbox_id)
+                return await run_file_operation(file_operation, workspace, ResourceAccess(raw['workspace_access']), (), operation, **options)
         return await self._request(self._payload("files", sandbox_id, file_operation=operation, options=options))
 
     async def start(self, sandbox_id: str) -> SandboxInfo:

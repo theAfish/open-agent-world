@@ -13,6 +13,7 @@ interface OpenFilesState {
   pins: Record<string, OpenedFile | undefined>;
   open(reference: FileReference, name: string): void;
   clear(sourceId: string): void;
+  changeSandboxPath(sourceId: string, path: string, destination?: string): void;
   pin(viewerId: string, file?: OpenedFile): void;
 }
 
@@ -25,6 +26,18 @@ export const useOpenFiles = create<OpenFilesState>((set) => ({
     sources: Object.fromEntries(Object.entries(state.sources).filter(([id]) => id !== sourceId)),
     pins: Object.fromEntries(Object.entries(state.pins).filter(([, file]) => file?.reference.source_id !== sourceId)),
   })),
+  changeSandboxPath: (sourceId, path, destination) => set(state => {
+    function update(file: OpenedFile | undefined): OpenedFile | undefined {
+      const reference = file?.reference;
+      if (!file || reference?.kind !== 'sandbox' || reference.source_id !== sourceId || reference.root !== 'workspace'
+        || (reference.path !== path && !reference.path.startsWith(`${path}/`))) return file;
+      return destination === undefined ? undefined : { ...file, reference: { ...reference, path: destination + reference.path.slice(path.length) } };
+    }
+    return {
+      sources: Object.fromEntries(Object.entries(state.sources).flatMap(([id, file]) => { const next = update(file); return next ? [[id, next]] : []; })),
+      pins: Object.fromEntries(Object.entries(state.pins).map(([id, file]) => [id, update(file)])),
+    };
+  }),
   pin: (viewerId, file) => set(state => ({ pins: { ...state.pins, [viewerId]: file } })),
 }));
 

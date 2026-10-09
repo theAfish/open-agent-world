@@ -36,10 +36,12 @@ async def upload_attachment(conversation_id: str, session_id: str, filename: str
 
 @router.get('/conversations/{conversation_id}/sessions/{session_id}/attachments/{version_id}')
 async def attachment_content(conversation_id: str, session_id: str, version_id: str, path: str,
-                             preview: bool = False, services: ApplicationServices = Depends(get_services)):
+                             preview: bool = False, services: ApplicationServices = Depends(get_services), text_preview: bool = False):
     from backend.conversations.models import ConversationAttachmentRef
     from backend.conversations.attachments import resolve
     attachment = resolve(services, conversation_id, session_id, [ConversationAttachmentRef(version_id=version_id, path=path)])[0]
+    if text_preview:
+        return await services.resources.artifacts.preview(services, conversation_id, version_id, path)
     inline = preview and attachment.media_type in {'image/png', 'image/jpeg', 'image/gif', 'image/webp'}
     stream = services.resources.artifacts.read(services, conversation_id, version_id, path)
     try:
@@ -55,6 +57,7 @@ async def attachment_content(conversation_id: str, session_id: str, version_id: 
             await stream.aclose()
     return StreamingResponse(body(), media_type=attachment.media_type if inline else 'application/octet-stream',
         headers={'Content-Disposition': f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(attachment.name, safe='')}",
+                 'Content-Length': str(attachment.size_bytes),
                  'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox"})
 
 

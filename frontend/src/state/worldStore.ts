@@ -1721,7 +1721,6 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       sandboxRevisions: { ...state.sandboxRevisions, [id]: revision },
       cards: state.cards.map((card) => card.id === id
         ? mergeCardPatch(card, { config: { active_command: command, output: [...(Array.isArray(card.config.output) ? card.config.output : []), `$ ${command}`].slice(-100) } }) : card),
-      activityOpen: true,
     }));
     try {
       const result = await worldApi.executeSandbox(id, command);
@@ -1901,7 +1900,21 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
       void get().refreshWorld();
     }
     if (normalizedType.includes("resource_modified") && nodeId) {
-      void get().loadText(nodeId);
+      const resource = get().cards.find(card => card.id === nodeId);
+      if (resource?.type === 'text') void get().loadText(nodeId);
+      else if (resource?.type === 'image') {
+        const payload = event.payload;
+        if (typeof payload.revision === 'number' && payload.revision >= Number(resource.config.revision ?? 0)) {
+          set(state => ({ cards: state.cards.map(card => card.id === nodeId ? mergeCardPatch(card, { config: {
+            revision: payload.revision as number, preview_url: resourceContentUrl(nodeId),
+            ...(typeof payload.filename === 'string' ? { filename: payload.filename } : {}),
+            ...(typeof payload.media_type === 'string' ? { mime_type: payload.media_type } : {}),
+            ...(typeof payload.size_bytes === 'number' ? { bytes: payload.size_bytes } : {}),
+            ...(typeof payload.width === 'number' ? { image_width: payload.width } : {}),
+            ...(typeof payload.height === 'number' ? { image_height: payload.height } : {}),
+          } }) : card) }));
+        }
+      }
     }
     if (nodeId && ["sandbox_command_finished", "sandbox_state_changed"].includes(normalizedType)) {
       void get().refreshSandbox(nodeId);

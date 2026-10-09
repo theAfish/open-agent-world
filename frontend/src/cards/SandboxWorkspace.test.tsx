@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { worldApi } from "../api/client";
 import { buildCardDraft } from "../state/helpers";
@@ -61,6 +61,134 @@ describe("Sandbox workspace interaction", () => {
   });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+  it('uploads a dropped file through the shared API and refreshes the listing', async () => {
+    const upload = vi.spyOn(worldApi, 'uploadSandboxEntry').mockResolvedValue({ written: 4 });
+    render(<Workspace />);
+    await screen.findByRole('button', { name: 'first.txt' });
+    const panel = screen.getByLabelText('Sandbox files');
+    const file = new File(['data'], 'dragged.txt');
+    const dataTransfer = { types: ['Files'], files: [file] };
+    fireEvent.dragEnter(panel, { dataTransfer });
+    expect(panel.getAttribute('data-drop-active')).toBe('true');
+    fireEvent.drop(panel, { dataTransfer });
+    await waitFor(() => expect(upload).toHaveBeenCalledWith(card.id, 'dragged.txt', file, expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    await screen.findByText('1 completed');
+    expect(panel.hasAttribute('data-drop-active')).toBe(false);
+  });
+
+  it('keeps read-only workspace drop targets non-writable', async () => {
+    const upload = vi.spyOn(worldApi, 'uploadSandboxEntry');
+    const readonly: SandboxInfo = { ...info, workspace_access: 'read_only' };
+    vi.mocked(worldApi.getSandbox).mockResolvedValue(readonly);
+    useWorldStore.setState({ sandboxInfo: { [card.id]: readonly } });
+    render(<Workspace />);
+    await screen.findByRole('button', { name: 'first.txt' });
+    fireEvent.drop(screen.getByLabelText('Sandbox files'), { dataTransfer: { types: ['Files'], files: [new File(['data'], 'no.txt')] } });
+    await act(async () => {});
+    expect(upload).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Upload files' })).toBeNull();
+    const file = screen.getByRole('button', { name: 'first.txt' });
+    expect(file.draggable).toBe(false);
+    fireEvent.contextMenu(file);
+    expect(screen.queryByRole('menuitem', { name: 'Delete' })).toBeNull();
+  });
+
+  it('confirms deletion and clears a removed preview only after the server succeeds', async () => {
+    const remove = vi.spyOn(worldApi, 'deleteSandboxFile').mockRejectedValueOnce(new Error('File is in use')).mockResolvedValue({ deleted: 'first.txt' });
+    render(<Workspace />);
+    fireEvent.click(await screen.findByRole('button', { name: 'first.txt' }));
+    await screen.findByText('Contents of first.txt');
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'first.txt' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    expect(remove).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    expect(remove).not.toHaveBeenCalled();
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'first.txt' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+    await screen.findByText('File is in use');
+    expect(screen.getByText('Contents of first.txt')).toBeTruthy();
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(remove).toHaveBeenLastCalledWith(card.id, 'first.txt');
+    expect(screen.queryByText('Contents of first.txt')).toBeNull();
+    expect(useOpenFiles.getState().sources[card.id]).toBeUndefined();
+  });
+
+  it('moves a dragged file into a folder and updates the current preview path', async () => {
+    const original = vi.mocked(worldApi.sandboxWorkspace).getMockImplementation()!;
+    let moved = false;
+    vi.mocked(worldApi.sandboxWorkspace).mockImplementation(async <T,>(id: string, action: string): Promise<T> => {
+      const query = new URLSearchParams(action.split('?')[1]);
+      if (query.get('operation') !== 'list') return await original(id, action) as T;
+      const entries = query.get('path') === 'inputs'
+        ? moved ? [{ name: 'first.txt', directory: false, blocked: false, size: 4 }] : []
+        : [{ name: 'inputs', directory: true, blocked: false, size: 0 }, ...moved ? [] : [{ name: 'first.txt', directory: false, blocked: false, size: 4 }]];
+      return { entries } as T;
+    });
+    const move = vi.spyOn(worldApi, 'moveSandboxFile').mockImplementation(async (_id, path, destination) => { moved = true; return { moved: path, destination }; });
+    render(<Workspace />);
+    const file = await screen.findByRole('button', { name: 'first.txt' });
+    fireEvent.click(file);
+    await screen.findByText('Contents of first.txt');
+    const dataTransfer = { types: [] as string[], setData(type: string) { this.types.push(type); } };
+    fireEvent.dragStart(file, { dataTransfer });
+    const folder = screen.getByRole('button', { name: 'inputs' });
+    fireEvent.dragOver(folder, { dataTransfer });
+    expect(folder.parentElement?.getAttribute('data-drop-target')).toBe('true');
+    fireEvent.drop(folder, { dataTransfer });
+    await waitFor(() => expect(move).toHaveBeenCalledWith(card.id, 'first.txt', 'inputs/first.txt'));
+    await screen.findByText('Contents of inputs/first.txt');
+    expect(useOpenFiles.getState().sources[card.id]?.reference).toMatchObject({ path: 'inputs/first.txt' });
+    expect(screen.getByRole('button', { name: 'inputs' }).getAttribute('aria-expanded')).toBe('true');
+    // A folder cannot be dropped into itself or its descendants.
+    dataTransfer.types = [];
+    fireEvent.dragStart(screen.getByRole('button', { name: 'inputs' }), { dataTransfer });
+    fireEvent.drop(screen.getByRole('button', { name: 'first.txt' }), { dataTransfer });
+    expect(move).toHaveBeenCalledTimes(1);
+    // A matching MIME string from another browser tree carries no local authority.
+    fireEvent.drop(screen.getByRole('button', { name: 'inputs' }), { dataTransfer });
+    expect(move).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a file batch running when switching to Settings and back', async () => {
+    let finish!: () => void;
+    const upload = vi.spyOn(worldApi, 'uploadSandboxEntry')
+      .mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve({ written: 1 }); }))
+      .mockResolvedValue({ written: 1 });
+    render(<Workspace />);
+    await screen.findByRole('button', { name: 'first.txt' });
+    fireEvent.drop(screen.getByLabelText('Sandbox files'), { dataTransfer: { types: ['Files'], files: [new File(['a'], 'a.txt'), new File(['b'], 'b.txt')] } });
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+    await act(async () => finish());
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+    await screen.findByText('2 completed');
+  });
+
+  it('opens a keyboard-accessible context menu for the clicked file, independently of preview selection', async () => {
+    const download = vi.spyOn(worldApi, 'downloadSandboxFile').mockResolvedValue(new Blob(['second']));
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:test') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    render(<Workspace />);
+    fireEvent.click(await screen.findByRole('button', { name: 'first.txt' }));
+    await screen.findByText('Contents of first.txt');
+    const second = screen.getByRole('button', { name: 'second.txt' });
+    fireEvent.contextMenu(second, { clientX: 20, clientY: 30 });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Download' }));
+    await waitFor(() => expect(download).toHaveBeenCalledWith(card.id, 'workspace', 'second.txt', expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    expect(screen.queryByRole('menu')).toBeNull();
+    fireEvent.keyDown(second, { key: 'F10', shiftKey: true });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Preview' }));
+    await screen.findByText('Contents of second.txt');
+    fireEvent.contextMenu(second);
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(second);
+  });
+
   it('restores draft and file intent after virtualized unmount, without mounting unopened settings', async () => {
     const view = render(<Workspace />);
     expect(screen.queryByLabelText('Working folder')).toBeNull();
@@ -75,6 +203,45 @@ describe("Sandbox workspace interaction", () => {
     render(<Workspace />);
     expect((screen.getByRole('textbox', { name: 'Command' }) as HTMLTextAreaElement).value).toBe('echo retained');
     expect(await screen.findByText('Contents of first.txt')).toBeTruthy();
+  });
+
+  it('loads subsequent file pages, selects multiple files, and searches nested paths', async () => {
+    const original = vi.mocked(worldApi.sandboxWorkspace).getMockImplementation()!;
+    const download = vi.spyOn(worldApi, 'downloadSandboxFile').mockRejectedValue(new Error('cancelled in test'));
+    vi.mocked(worldApi.sandboxWorkspace).mockImplementation(async <T,>(id: string, action: string): Promise<T> => {
+      const query = new URLSearchParams(action.split('?')[1]);
+      if (query.get('operation') !== 'list') return await original(id, action) as T;
+      if (query.get('query')) return { entries: [{ name: 'report.csv', path: 'deep/report.csv', directory: false, size: 8 }] } as T;
+      return query.get('cursor') ? { entries: [{ name: 'last.txt', directory: false, size: 4 }] } as T
+        : { entries: [{ name: 'first.txt', directory: false, size: 4 }], next_cursor: 'next-page' } as T;
+    });
+    render(<Workspace />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more' }));
+    await screen.findByRole('button', { name: 'last.txt' });
+    expect(screen.getByRole('button', { name: 'first.txt' })).toBeTruthy();
+    expect(screen.queryByRole('checkbox', { name: 'Select first.txt' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'first.txt' }), { ctrlKey: true });
+    fireEvent.click(screen.getByRole('button', { name: 'last.txt' }), { shiftKey: true });
+    expect(screen.getByText('2 selected')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'first.txt' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'last.txt' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Download selected files' }));
+    await waitFor(() => expect(download).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('searchbox')).toBeNull();
+    const searchToggle = screen.getByRole('button', { name: 'Search workspace files' });
+    fireEvent.click(searchToggle);
+    expect(document.activeElement).toBe(screen.getByRole('searchbox'));
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search workspace files' }), { target: { value: 'report' } });
+    await screen.findByRole('button', { name: 'deep/report.csv' });
+    expect(screen.queryByText('2 selected')).toBeNull();
+    fireEvent.keyDown(screen.getByRole('searchbox'), { key: 'Escape' });
+    expect(screen.queryByRole('searchbox')).toBeNull();
+    expect(screen.getByRole('button', { name: 'first.txt' })).toBeTruthy();
+    expect(document.activeElement).toBe(searchToggle);
+    fireEvent.click(searchToggle);
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    fireEvent.click(searchToggle);
+    expect(screen.queryByRole('searchbox')).toBeNull();
   });
 
   it("keeps synthetic workspaces rendered without requesting nonexistent backend resources", async () => {

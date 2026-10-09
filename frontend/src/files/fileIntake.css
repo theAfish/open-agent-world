@@ -1,0 +1,3 @@
+.file-drop-target { position: relative; }
+.file-drop-overlay { position: absolute; inset: 5px; z-index: 8; display: flex; align-items: center; justify-content: center; padding: 16px; border: 2px dashed var(--accent); border-radius: 6px; background: color-mix(in srgb, var(--card-surface) 86%, transparent); color: var(--accent-strong); font-size: 12px; text-align: center; pointer-events: none; }
+.file-drop-overlay > span { max-width: 28em; overflow-wrap: anywhere; }

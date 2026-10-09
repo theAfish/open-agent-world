@@ -1,0 +1,15 @@
+.ui-modal-backdrop { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: 24px; background: #11182766; }
+.ui-modal { width: min(440px, 100%); max-height: min(85vh, 900px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--card-surface); color: var(--ink); box-shadow: 0 20px 70px #0003; }
+.ui-modal > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.ui-modal h2 { font-size: 15px; margin: 0; overflow-wrap: anywhere; }
+.ui-modal-content { padding: 20px; overflow: auto; min-height: 0; font-size: 13px; }
+.ui-modal-content > p:first-child { margin-top: 0; }
+.ui-modal > footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--line); }
+.ui-confirm-items { list-style: none; margin: 12px 0 0; padding: 0; }
+.ui-confirm-items li { padding: 8px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.ui-destructive { background: #b53535; border-color: #b53535; color: white; }
+.ui-error { color: #b53535; overflow-wrap: anywhere; }
+.ui-modal.file-preview-modal { width: min(1000px, 94vw); }
+.file-preview-modal .ui-modal-content { min-height: 180px; }
+.file-preview-modal img { display: block; margin: auto; max-width: 100%; max-height: 65vh; object-fit: contain; }
+.file-preview-modal pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.65 var(--font-mono, monospace); }

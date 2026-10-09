@@ -203,8 +203,23 @@ name, media type and byte size). User uploads stream into the existing immutable
 artifact journal and retention store. The composer accepts up to 20 attachments
 per message and 64 MiB per uploaded file, also subject to configured artifact and
 storage quotas. Empty text is allowed when attachments are present. PNG, JPEG,
-GIF and WebP attachments have clickable previews; other files download without
-executing active content. Session changes do not redirect an in-flight upload.
+GIF and WebP attachments have clickable previews. Other files open a built-in,
+bounded text preview or a download action, even without a connected viewer.
+HTML and other active content are rendered as literal text, never executed.
+Session changes do not redirect an in-flight upload.
+
+Drop individual files anywhere in the conversation thread or use the composer's
+attachment button. Both routes share validation and add files to the unsent
+attachment draft; dropping never sends a message. Uploads finishing after a
+session switch remain in the original session's draft. If one file fails, its
+error is reported and the remaining files continue. Folder drops are supported
+by Sandbox Files; the conversation reports that distinction instead of silently
+flattening a folder into attachments. The same queue provides byte progress,
+cancel and retry actions. Pasted image files also enter the attachment draft;
+ordinary text paste remains unchanged. Image cards reuse this intake for file
+selection, drops and screenshot paste, while retaining their immutable resource
+contract. Session and group deletion use an application dialog showing affected
+sessions; errors stay in the dialog for retry, and General remains protected.
 
 Participate grants `send_conversation_message` and the existing artifact read,
 publish and materialize operations. Publishing/materializing additionally needs

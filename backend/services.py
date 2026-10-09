@@ -2353,6 +2353,7 @@ class ApplicationServices:
             payload={
                 "operation": "import",
                 "revision": record.revision,
+                "filename": record.filename,
                 "size_bytes": record.size_bytes,
                 "media_type": record.media_type,
                 "width": record.width,

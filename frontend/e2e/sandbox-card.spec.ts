@@ -12,7 +12,7 @@ test("saved networking retries stale broker discovery without reloading (mock AP
   await page.routeWebSocket("**/ws/events", () => {});
   await page.route(/^https?:\/\/[^/]+\/api\//, async route => {
     const path = new URL(route.request().url()).pathname;
-    if (path.startsWith("/api/application") || ["/api/card-library", "/api/settings/models", "/api/canvas/glue"].includes(path)) return route.continue();
+    if (path.startsWith("/api/application") || ["/api/deployment", "/api/card-library", "/api/settings/models", "/api/canvas/glue"].includes(path)) return route.continue();
     const reply = (json: unknown, status = 200) => route.fulfill({ json, status });
     if (path === "/api/catalog") return reply(TEST_CATALOG);
     if (path === "/api/world") return reply({ nodes: [card], edges: [], chunks: ["0:0"] });
@@ -76,7 +76,7 @@ test("sandbox window keeps files, preview and terminal together with separate se
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
-    if (path.startsWith("/api/application") || ["/api/card-library", "/api/settings/models", "/api/canvas/glue"].includes(path)) return route.continue();
+    if (path.startsWith("/api/application") || ["/api/deployment", "/api/card-library", "/api/settings/models", "/api/canvas/glue"].includes(path)) return route.continue();
     const reply = (json: unknown, status = 200) => route.fulfill({ status, json });
     if (path === "/api/catalog") return reply(TEST_CATALOG);
     if (path === "/api/world") return reply({ nodes: [{ ...card, status: state }], edges: [], chunks: ["0:0"] });
@@ -196,6 +196,8 @@ test("sandbox window keeps files, preview and terminal together with separate se
   await expect(window.getByLabel("Command", { exact: true })).toHaveValue("");
   await window.getByLabel("Command", { exact: true }).fill("printf 'next'");
   await expect(preview.locator("pre")).toHaveText("hello");
+  const activityClose = page.getByRole("button", { name: "Close runtime activity" });
+  if (await activityClose.isVisible()) await activityClose.click();
   const downloadEvent = page.waitForEvent("download");
   await preview.getByRole("button", { name: "Download file", exact: true }).click();
   const download = await downloadEvent;
@@ -211,7 +213,6 @@ test("sandbox window keeps files, preview and terminal together with separate se
   previewState = "text";
   await sidebar.getByRole("button", { name: "result.txt", exact: true }).click();
   await expect(preview.locator("pre")).toHaveText("hello");
-  const activityClose = page.getByRole("button", { name: "Close runtime activity" });
   if (await activityClose.isVisible()) await activityClose.click();
 
   const fileDivider = window.getByRole("separator", { name: "Resize file sidebar" });
