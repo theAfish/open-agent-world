@@ -57,10 +57,15 @@ def _resolve_group(kb, group_id, settings):
     return kb.collections.require(_uuid(group_id, "group_id"))
 
 
+def _client(context):
+    return open_client(context.node_id, context.storage_path,
+                       resolve_secret=getattr(context, "resolve_secret", None))
+
+
 def _base(context, group_id=None):
     """The client plus one resolved group, opened lazily on first use."""
     settings = settings_of(context)
-    kb = open_client(context.node_id, context.storage_path)
+    kb = _client(context)
     return kb, _resolve_group(kb, group_id, settings), settings
 
 
@@ -123,7 +128,8 @@ def overview(context, arguments):
         "collection": {"id": str(group.id), "name": group.name},
         "groups": [_group_json(item, default_group_id) for item in kb.collections.list(limit=500)],
         "settings": settings,
-        "engines": available_engines(settings["mineru_base_url"] or None),
+        "engines": available_engines(settings["mineru_base_url"] or None,
+                                     resolve_secret=getattr(context, "resolve_secret", None)),
         "graph_schema_id": graph_schema_id_of(context) or None,
         "counts": {
             "sources": len(sources),
@@ -184,7 +190,7 @@ def groups(context, arguments):
     """
     request = Groups.model_validate(arguments)
     settings = settings_of(context)
-    kb = open_client(context.node_id, context.storage_path)
+    kb = _client(context)
     default_group_id = str(collection(kb, settings["collection_name"]).id)
 
     if request.operation == "list":
@@ -334,7 +340,7 @@ def process_sources(context, arguments):
     """
     request = ProcessSources.model_validate(arguments)
     settings = settings_of(context)
-    kb = open_client(context.node_id, context.storage_path)
+    kb = _client(context)
 
     if request.source_ids:
         sources_to_run = [kb.sources.require(_uuid(value, "source_ids"))
@@ -677,7 +683,7 @@ def draft(context, arguments):
              "created_by": item.created_by, "updated_at": item.updated_at}
             for item in kb.knowledge.list_drafts(
                 collection_id=_scope(group, request.all_groups), limit=request.limit)]})
-    kb = open_client(context.node_id, context.storage_path)
+    kb = _client(context)
     if request.operation == "get":
         if not request.draft_id:
             raise KnowledgeError("draft_id is required")
@@ -750,7 +756,7 @@ def experiment_assemble_prompt(context, arguments):
     save_projection already use, for the same reason: only the caller may hold model
     credentials, and the plugin owns the write regardless of who called."""
     request = ExperimentAssemblePrompt.model_validate(arguments)
-    kb = open_client(context.node_id, context.storage_path)
+    kb = _client(context)
     group_id = _projections_group(kb, request.projection_ids)
     items = [kb.projections.require(_uuid(pid, "projection_id")) for pid in request.projection_ids]
     schema_ids = {str(item.schema_id) for item in items}
@@ -794,7 +800,7 @@ def experiment_save(context, arguments):
     existing record (``record_id`` given) replaces its evidence wholesale, so a
     record's evidence always matches whichever projections most recently produced it."""
     request = ExperimentSave.model_validate(arguments)
-    kb = open_client(context.node_id, context.storage_path)
+    kb = _client(context)
     schema = kb.schemas.require(request.schema_id)
     if _schema_kind(schema) != "experiment":
         raise KnowledgeError('Only a schema tagged kind="experiment" can build an experiment record')
@@ -859,7 +865,7 @@ def experiment_update(context, arguments):
     or the published graph — an experiment record is its own object from start to
     finish, exactly as the design keeps the knowledge graph optional."""
     request = ExperimentUpdate.model_validate(arguments)
-    kb = open_client(context.node_id, context.storage_path)
+    kb = _client(context)
     if request.operation == "confirm":
         record = kb.oaw_experiments.update(
             request.record_id, status="confirmed", expected_revision=request.expected_revision)
@@ -1016,7 +1022,7 @@ def graph_schema(context, arguments):
         raise KnowledgeError("Card state is unavailable")
     if request.operation == "set":
         if request.schema_id:
-            kb = open_client(context.node_id, context.storage_path)
+            kb = _client(context)
             schema = kb.schemas.require(request.schema_id)
             if _schema_kind(schema) != "literature":
                 raise KnowledgeError(
@@ -1039,7 +1045,7 @@ class GraphQuery(Request):
 
 def graph(context, arguments):
     request = GraphQuery.model_validate(arguments)
-    kb = open_client(context.node_id, context.storage_path)
+    kb = _client(context)
     scope = _any_group(request.group_id)
     if request.operation == "traverse":
         if not request.entity_id:
@@ -1101,7 +1107,7 @@ class Jobs(Request):
 
 def jobs(context, arguments):
     request = Jobs.model_validate(arguments)
-    kb = open_client(context.node_id, context.storage_path)
+    kb = _client(context)
     if request.job_id:
         job = kb.jobs.require(_uuid(request.job_id, "job_id"))
         # jobs.events() yields plain dicts from a generator, not typed models.

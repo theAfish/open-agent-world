@@ -2,7 +2,7 @@
 
 ``actions.py`` only ever touches five attributes — ``node_id``, ``storage_path``,
 ``state``, ``actor_id`` and ``confirmed``. OAW's ``NodeResourceContext`` happens to
-expose exactly those names, so the card passes its own context straight through and
+expose those names plus an optional private secret resolver, so the card passes its own context straight through and
 only the service and the CLI need the dataclass below.
 
 ``state`` follows OAW's ``CardStateStore`` shape: ``get()`` returns
@@ -14,7 +14,7 @@ import json
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass
@@ -26,6 +26,7 @@ class KnowledgeContext:
     state: Any = None
     actor_id: str | None = None
     confirmed: bool = False
+    resolve_secret: Callable[[str], str | None] | None = field(default=None, repr=False)
 
 
 class MemorySettings:

@@ -14,6 +14,17 @@ afterEach(() => {
 });
 
 describe("API normalization boundary", () => {
+  it("sends global environment variables when saving Sandbox settings", async () => {
+    const settings = { workspace_root: null, runtime: "auto", environment_variables: { OAW_MINERU_TOKEN: "test-global-token" } };
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify(settings), {
+      headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await worldApi.saveSandboxSettings(settings)).toEqual(settings);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/settings/sandbox");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(settings);
+    expect((await worldApi.getSandboxSettings()).environment_variables).toEqual(settings.environment_variables);
+  });
   it('retains missing implementation diagnostics and opaque config through snapshots and events', () => {
     const missing_plugin = { plugin_id: 'removed.pack', reason: 'owner_mismatch' };
     const card = { id: 'lost', type: 'text', config: { nested: { items: [1, 2] } }, missing_plugin };

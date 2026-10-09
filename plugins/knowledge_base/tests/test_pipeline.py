@@ -78,6 +78,33 @@ def test_ingest_converts_to_markdown_with_evidence(card):
     assert [str(link.source_id) for link in links] == [source_id]
 
 
+def test_mineru_job_resolves_a_private_token_without_persisting_it(card, monkeypatch):
+    from oaw_knowledge_base import markdown
+
+    seen = []
+    card.resolve_secret = lambda reference: "private-job-token" if reference == "OAW_MINERU_TOKEN" else None
+    def convert(data, filename, base_url, **kwargs):
+        seen.append(kwargs["token"])
+        return "# Converted paper"
+    monkeypatch.setattr(markdown, "_mineru_markdown", convert)
+    run(card, actions.update_settings, pdf_engine="mineru", mineru_base_url="https://mineru.example")
+    source = run(card, actions.ingest, filename="paper.pdf", media_type="application/pdf",
+                 content_base64=base64.b64encode(b"%PDF-test").decode())["source"]
+    result = run(card, actions.process_sources, source_ids=[source["id"]])
+    kb = client.open_client(card.node_id, card.storage_path)
+    job = kb.jobs.wait(result["jobs"][0]["job"]["id"], timeout=60)
+    assert job.status == "COMPLETED", job.error
+    assert seen == ["private-job-token"]
+    assert "private-job-token" not in json.dumps(card.state.get())
+    from sqlalchemy import text
+    with kb.oaw_engine.connect() as connection:
+        tables = connection.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
+        for (table,) in list(tables):
+            escaped = table.replace('"', '""')
+            rows = connection.execute(text(f'SELECT * FROM "{escaped}"')).fetchall()
+            assert "private-job-token" not in str(rows), table
+
+
 def test_conversion_also_indexes_the_document_for_search(card):
     source_id, _ = ingest_document(card)
     kb = client.open_client(card.node_id, card.storage_path)

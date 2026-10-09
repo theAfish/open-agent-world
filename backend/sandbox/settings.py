@@ -22,7 +22,7 @@ class SandboxSettings(BaseModel):
     @field_validator("environment_variables")
     @classmethod
     def validate_environment(cls, value: dict[str, str]) -> dict[str, str]:
-        return validate_command_environment(value, allow_target=False)
+        return validate_command_environment(value, allow_target=False, allow_host=True)
 
     @field_validator("workspace_root", "runtime")
     @classmethod

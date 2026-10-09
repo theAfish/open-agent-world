@@ -144,6 +144,75 @@ def resource(client, node_id, operation, **arguments):
     return response.json()
 
 
+def test_mineru_secret_is_encrypted_survives_restart_and_is_scoped(data_root, monkeypatch):
+    from backend.security.resource_credentials import resource_secret_resolver
+
+    monkeypatch.setenv("OAW_MINERU_TOKEN", "external-token")
+    settings = Settings.for_data_root(data_root)
+    app = create_app(settings)
+    with TestClient(app) as client:
+        node = create_node(client, NODE_TYPE)
+        other = create_node(client, NODE_TYPE)
+        url = f"/api/knowledge/{node['id']}/mineru-token"
+        assert client.get(url).json() == {"configured": True, "source": "external"}
+        saved = client.put(url, json={"value": "private-card-token"})
+        assert saved.json() == {"configured": True, "source": "card"}
+        host = app.state.services
+        resolve = resource_secret_resolver(host, host.world.get_card(node["id"]))
+        assert resolve("OAW_MINERU_TOKEN") == "private-card-token"
+        assert resource_secret_resolver(host, host.world.get_card(other["id"]))("OAW_MINERU_TOKEN") == "external-token"
+        with host.database.locked() as db:
+            raw = json.dumps([dict(row) for row in db.execute("SELECT * FROM application_settings")])
+        assert "private-card-token" not in raw
+        assert "private-card-token" not in client.get(f"/api/nodes/{node['id']}").text
+        assert "private-card-token" not in json.dumps(resource(client, node["id"], "overview"))
+        # Secret updates are not ordinary card resource actions available to Agents.
+        assert client.post(f"/api/nodes/{node['id']}/resource/settings",
+                           json={"arguments": {"mineru_token": "private-card-token"}}).status_code == 422
+        for bad in ("", {"secret": "sensitive-value"}, "sensitive-value\0"):
+            response = client.put(url, json={"value": bad})
+            assert response.status_code == 422
+            assert "sensitive-value" not in response.text
+
+    app = create_app(settings)
+    with TestClient(app) as client:
+        assert client.get(url).json() == {"configured": True, "source": "card"}
+        assert client.put(url, json={"value": "replacement-token"}).status_code == 200
+        host = app.state.services
+        assert resource_secret_resolver(host, host.world.get_card(node["id"]))("OAW_MINERU_TOKEN") == "replacement-token"
+        assert client.put(url, json={"value": None}).json() == {"configured": True, "source": "external"}
+        monkeypatch.delenv("OAW_MINERU_TOKEN")
+        assert client.get(url).json() == {"configured": False, "source": None}
+        ordinary = create_node(client, "text")
+        assert client.put(f"/api/knowledge/{ordinary['id']}/mineru-token", json={"value": "wrong-node"}).status_code == 422
+
+
+def test_mineru_reads_global_settings_without_changing_process_environment(client, monkeypatch):
+    from backend.sandbox.settings import SandboxSettings, SandboxSettingsStore
+    from backend.security.resource_credentials import resource_secret_resolver
+
+    monkeypatch.setenv("OAW_MINERU_TOKEN", "process-token")
+    node = create_node(client, NODE_TYPE)
+    services = client.app.state.services
+    SandboxSettingsStore(services.database, services.settings.data_root).save(
+        SandboxSettings(environment_variables={"OAW_MINERU_TOKEN": "global-token"}))
+    resolve = resource_secret_resolver(services, services.world.get_card(node["id"]))
+    assert resolve("OAW_MINERU_TOKEN") == "global-token"
+    resource(client, node["id"], "settings", mineru_base_url="https://mineru.example")
+    assert "mineru" in resource(client, node["id"], "overview")["engines"]
+    import os
+    assert os.environ["OAW_MINERU_TOKEN"] == "process-token"
+    from backend.execution_config import effective_variables
+    from backend.sandbox.environment import validate_command_environment
+    from backend.sandbox.models import SandboxValidationError
+    sandbox = create_node(client, "sandbox")
+    assert not effective_variables(services, sandbox["id"])[1]
+    with pytest.raises(SandboxValidationError):
+        validate_command_environment({"OAW_MINERU_TOKEN": "must-not-be-injected"})
+    with pytest.raises(ValueError):
+        SandboxSettings(environment_variables={"OAW_CONTROL_TOKEN": "still-reserved"})
+
+
 def test_the_research_formation_deploys_wired_independent_bases(client):
     preset = next(item for item in client.get("/api/legions/presets").json()
                   if item["id"] == PRESET)

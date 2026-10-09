@@ -13,7 +13,7 @@ deployment route in ``backend/deployment_workspace.py`` both call it, so a publi
 release runs the exact same model call the engineering canvas does.
 """
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.api.dependencies import get_services
@@ -24,6 +24,49 @@ from backend.security.model_connections import MODEL_REF_PREFIX, ModelConnection
 router = APIRouter()
 
 NODE_TYPE = "knowledge.base"
+MINERU_REFERENCE = "OAW_MINERU_TOKEN"
+
+
+def _mineru_status(services, node):
+    from backend.security.resource_credentials import resource_secret_resolver
+
+    local = services.execution_credentials.configured(node.id, MINERU_REFERENCE)
+    configured = local or bool(resource_secret_resolver(services, node)(MINERU_REFERENCE))
+    return {"configured": configured, "source": "card" if local else "external" if configured else None}
+
+
+@router.get("/knowledge/{node_id}/mineru-token")
+async def mineru_token_status(node_id: str, services=Depends(get_services)):
+    async with services._node_mutation(read_only=True):
+        node = services.world.get_card(node_id)
+        if node.type != NODE_TYPE:
+            raise ResourceValidationError("Expected a Knowledge base node")
+        return _mineru_status(services, node)
+
+
+@router.put("/knowledge/{node_id}/mineru-token")
+async def save_mineru_token(node_id: str, request: Request, services=Depends(get_services)):
+    # Parse manually: Pydantic validation errors may echo submitted secret values.
+    try:
+        payload = await request.json()
+    except ValueError:
+        raise ResourceValidationError("Invalid credential request") from None
+    if not isinstance(payload, dict) or set(payload) != {"value"}:
+        raise ResourceValidationError("Supply a credential value, or null to remove it")
+    value = payload["value"]
+    if value is not None and (not isinstance(value, str) or not value.strip()
+                             or "\0" in value or len(value.encode()) > 16000):
+        raise ResourceValidationError("Credential must be a nonempty NUL-free string up to 16 KB")
+    async with services._node_mutation():
+        node = services.world.get_card(node_id)
+        if node.type != NODE_TYPE:
+            raise ResourceValidationError("Expected a Knowledge base node")
+        services.node_execution.assert_editable(node_id)
+        if value is None:
+            services.execution_credentials.unbind(node_id, MINERU_REFERENCE)
+        else:
+            services.execution_credentials.bind(node_id, MINERU_REFERENCE, value)
+        return _mineru_status(services, node)
 
 
 def _prompt_builders():

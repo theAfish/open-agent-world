@@ -28,12 +28,14 @@ backend running.
 
 ## Install the engines
 
-The plugin loader does not install plugin dependencies, so MKB, the PDF reader and
-the spreadsheet reader go into the backend environment once (the standalone install
-is [below](#running-it-without-oaw)):
+MKB, the PDF reader and the spreadsheet reader are declared in this plugin's
+`pyproject.toml`, independently of the host dependencies. `scripts/setup.ps1` /
+`scripts/setup.sh` install the bundled plugins and their dependencies automatically;
+the desktop builder also includes them. To install only this plugin into an existing
+backend environment:
 
 ```sh
-backend/.venv/bin/pip install "mat-know-base @ /path/to/mat_know_base" pymupdf4llm openpyxl
+uv pip install --python backend/.venv/bin/python -e plugins/knowledge_base
 ```
 
 Without MKB the card loads but every action reports that `mat-know-base` is
@@ -42,7 +44,18 @@ the remote engine or fail with a named missing engine. Without `openpyxl`, `.xls
 uploads fail the same way — text, markdown, CSV, TSV and JSON never need either
 package.
 
-For the optional remote PDF engine, set the token in the backend environment:
+On Windows use `backend/.venv/Scripts/python.exe`. After manually running
+`uv sync`, use `--inexact` to retain installed plugins, or rerun
+`scripts/install-plugins.py` with the backend Python. Source discovery itself
+never installs packages. Distributed `.oawpack` v1 files automatically provision
+**Sandbox** requirements; their backend dependencies must already be satisfied
+by the host. That is a different installation path from this bundled plugin.
+
+For the optional remote PDF engine, open the card's **Settings**, set the
+**MinerU base URL**, enter **MinerU token** and choose **Save token**. The token is
+encrypted in the host credential store, scoped to this card. Leaving it blank
+preserves the saved value; **Remove token** restores external fallback. Resolution
+order is card Secret, global `OAW_MINERU_TOKEN` setting, then server environment:
 
 ```sh
 export OAW_MINERU_TOKEN=...
@@ -57,10 +70,11 @@ export OAW_VISION_BASE_URL=https://api.openai.com/v1
 export OAW_VISION_MODEL=gpt-4o-mini   # optional, this is the default
 ```
 
-Both are read **only** from those environment variables. Neither is stored in card
-configuration, sent to the frontend, or reached by an Agent. The card's **MinerU
-base URL** setting selects the PDF service; it carries no credential. The
-standalone service reads the same variables from its own environment.
+Vision credentials and the standalone service use the environment variables above.
+Saved MinerU tokens are never returned to the frontend or stored in card state,
+job parameters or Legion templates. Global Value settings remain ordinary values;
+use the card's Secret field for encrypted storage. `OAW_MINERU_TOKEN` in global
+settings is host-only and is not injected into Sandboxes.
 
 ## The Knowledge research formation
 
@@ -94,7 +108,7 @@ ever shows.
 ### Literature
 
 1. **Sources** — organize documents into **groups** (create, rename or delete one
-   from the group selector in the toolbar or right here in Sources), then add PDF,
+   from **Manage groups** beside the group selector), then add PDF,
    markdown, text, CSV, TSV, Excel (`.xlsx`), image or JSON files up to 32 MiB each.
    Uploading never converts a file on its own: select one or more sources and press
    **Process** — alone or in a batch — to queue their markdown conversion. The
@@ -102,9 +116,9 @@ ever shows.
    below the source list, not in a tab of their own. Sources also holds full-text
    **search** over every already-converted document — ranked, each result carrying
    the source filename and the heading it falls under, and a click jumps straight
-   to that source. Once a source is converted, a small **Markdown** button next to
-   its entry opens the extracted markdown (a real table for spreadsheets, a
-   model's transcription for images) right there, with an ad hoc, single-document
+   to that source. Click a converted source to read its formatted document (a
+   real table for spreadsheets, a model's transcription for images). **Markdown**
+   switches to the raw text. The reader also offers an ad hoc, single-document
    **Project to JSON** against any schema — batch-projecting several sources at
    once lives in Projections and Graph instead, scoped to the schema each is for.
 2. **Schemas** — a schema is a JSON Schema object plus the system prompt used to
@@ -139,7 +153,7 @@ ever shows.
 2. **Schemas** — the same schema list as Literature's, so an experiment-kind
    schema created here shows up there too, and back.
 
-The group selector — in the toolbar, and again right in Sources — narrows every
+The group selector — in Sources, or the toolbar for other sections — narrows every
 section to one group at a time, or shows everything across every group. A source
 belongs to exactly one group for its whole life; markdown, projections, drafts,
 experiment records and the entities and relations a draft publishes all trace back
@@ -199,8 +213,8 @@ routes; a deployment reaches the same underlying calls through
 instead, each gated on the release granting both halves of the pipeline it drives.
 
 See [`examples/knowledge-legion-deploy`](../../examples/knowledge-legion-deploy/README.md)
-for a runnable end-to-end example — it also automates the one extra setup step this
-plugin needs (installing `mat-know-base` and `pymupdf4llm` into `backend/.venv`)
+for a runnable end-to-end example — it also installs this plugin and its declared
+dependencies into `backend/.venv` if they are missing
 before publishing and serving a release.
 
 ## Running it without OAW
@@ -210,8 +224,7 @@ and neither is loaded outside the backend. So the same code runs as a small
 service with an HTTP API, an MCP server for an agent harness, and a `kb` CLI:
 
 ```sh
-python -m venv .venv && .venv/bin/pip install -e plugins/knowledge_base[service] \
-    "mat-know-base @ /path/to/mat_know_base" pymupdf4llm openpyxl
+python -m venv .venv && .venv/bin/pip install -e 'plugins/knowledge_base[service]'
 ```
 
 A **store** is a directory holding one `knowledge.db` plus a small settings file;

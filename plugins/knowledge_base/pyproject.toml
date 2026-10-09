@@ -3,11 +3,16 @@ name = "oaw-knowledge-base"
 version = "0.2.0"
 description = "Research knowledge base: raw data to markdown, projection, reviewed knowledge graph"
 requires-python = ">=3.11"
-dependencies = ["pydantic>=2.11,<3"]
+dependencies = [
+    "pydantic>=2.11,<3",
+    "mat-know-base @ git+https://github.com/theAfish/mat_know_base.git@0d05057e5fdbd821ec96c99227266d4c5e0d6af6",
+    "pymupdf4llm>=0.0.17",
+    "openpyxl>=3.1,<4",
+    "httpx>=0.28,<1",
+]
 
-# mat-know-base and pymupdf4llm are deliberately absent: the plugin loader never
-# installs plugin dependencies, so they are documented as a backend venv step in
-# README.md and reported as a missing engine at runtime instead of breaking load.
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [project.optional-dependencies]
 # Everything the standalone service, its MCP server and the `kb` CLI need. Not

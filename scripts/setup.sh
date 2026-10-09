@@ -13,7 +13,8 @@ if ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0
   exit 1
 fi
 
-uv sync --project backend --dev --extra adk --extra litellm --extra knowledge
+uv sync --project backend --dev --extra adk --extra litellm --inexact
+backend/.venv/bin/python scripts/install-plugins.py
 npm --prefix frontend ci --ignore-scripts --no-audit --no-fund
 npm --prefix frontend run build
 printf '\nSetup complete. Start Open Agent World with:\n  bash "%s/scripts/start.sh"\n' "$PWD"

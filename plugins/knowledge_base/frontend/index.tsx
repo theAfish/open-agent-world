@@ -5,6 +5,9 @@ import { useWorldStore } from "../../../frontend/src/state/worldStore";
 import { availableModels } from "../../../frontend/src/state/modelConnections";
 import { deploymentApiBase } from "../../../frontend/src/deployment/api";
 import { ModelSelect } from "../../../frontend/src/cards/ModelSelect";
+import { DocumentMarkdown } from "../../../frontend/src/cards/DocumentMarkdown";
+import { BookOpen, FlaskConical, Settings2, Plus, RefreshCw, MoreHorizontal, FileText, X } from "lucide-react";
+import { MineruCredentials } from "./MineruCredentials";
 import { GraphMap } from "./GraphMap";
 import "./style.css";
 
@@ -144,6 +147,8 @@ export function Workspace({ host, card }: PluginViewProps) {
   const [activeGroup, setActiveGroup] = useState("");
   const [groupName, setGroupName] = useState("");
   const [groupEditing, setGroupEditing] = useState(false);
+  const [groupCreating, setGroupCreating] = useState(false);
+  const [rawMarkdown, setRawMarkdown] = useState(false);
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   // Which literature schema's projections build the published graph — the one
   // pipeline Graph owns end to end. Every other literature schema is "custom":
@@ -302,9 +307,7 @@ export function Workspace({ host, card }: PluginViewProps) {
         media_type: file.type || "application/octet-stream",
         ...(activeGroup ? { group_id: activeGroup } : {}) });
     }
-    setNotice(list.length === 1
-      ? t("{v0} uploaded. Select it below and press Process to convert it to markdown.", { v0: list[0].name })
-      : t("{v0} files uploaded. Select them below and press Process to convert them in a batch.", { v0: list.length }));
+    setNotice(t("{v0} uploaded · ready to process", { v0: list.length }));
     await refresh();
   });
 
@@ -314,7 +317,7 @@ export function Workspace({ host, card }: PluginViewProps) {
     const outcomes = result.jobs as { job?: { id: string } }[];
     const queued = outcomes.filter(item => item.job).length;
     setNotice(queued
-      ? t("Converting {v0} of {v1} selected source(s)…", { v0: queued, v1: outcomes.length })
+      ? ""
       : t("Nothing to convert: already converted or already running"));
     setSelectedSources([]);
     await refresh();
@@ -324,7 +327,7 @@ export function Workspace({ host, card }: PluginViewProps) {
     const result = await call("process", groupFilter());
     const outcomes = result.jobs as unknown[];
     setNotice(outcomes.length
-      ? t("Converting {v0} pending source(s)…", { v0: outcomes.length })
+      ? ""
       : t("Nothing pending to convert"));
     await refresh();
   });
@@ -539,7 +542,6 @@ export function Workspace({ host, card }: PluginViewProps) {
     await host.updateConfig({ default_model: value });
   });
 
-  const counts = overview?.counts ?? {};
   const current = settings ?? { collection_name: "", pdf_engine: "auto", mineru_base_url: "" };
   const currentSource = sources.find(item => item.id === selectedSource);
   const running = jobs.filter(job => ACTIVE.has(job.status));
@@ -564,38 +566,32 @@ export function Workspace({ host, card }: PluginViewProps) {
   const graphPendingSources = convertedSources.filter(item => !graphProjectedRecordIds.has(item.record_id!));
 
   return <div className="knowledge-app nodrag nowheel" aria-label={t("{v0} knowledge base", { v0: card.name })}>
-    <header className="knowledge-toolbar">
-      <span className="knowledge-badge">{t("Knowledge base")}</span>
-      <label className="knowledge-groupselect">{t("Group")}
-        <select value={activeGroup} disabled={busy}
-          onChange={event => { setActiveGroup(event.target.value); setGroupEditing(false); }}>
+    {!(category === "literature" && literatureTab === "sources") && <header className="knowledge-toolbar">
+      <label className="knowledge-groupselect">
+        <span className="knowledge-visually-hidden">{t("Group")}</span>
+        <select aria-label={t("Group")} value={activeGroup} disabled={busy} onChange={event => setActiveGroup(event.target.value)}>
           <option value="">{t("All groups")}</option>
-          {groups.map(item => <option key={item.id} value={item.id}>
-            {item.name}{item.is_default ? ` (${t("default")})` : ""}</option>)}
+          {groups.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
       </label>
-      <span className="knowledge-counts">
-        {t("{v0} documents · {v1} projections · {v2} facts · {v3} entities", {
-          v0: counts.sources ?? 0, v1: counts.projections ?? 0,
-          v2: counts.facts ?? 0, v3: counts.entities ?? 0 })}
-      </span>
       {!!running.length && <span className="knowledge-running" role="status">
         {t("{v0} conversion running", { v0: running.length })}</span>}
-      <button type="button" disabled={busy} onClick={() => void perform(async () => {
-        setNotice(""); await refresh(); await loadGraph();
-      })}>{t("Refresh")}</button>
-    </header>
+      <button type="button" className="knowledge-icon-button" aria-label={t("Refresh")} title={t("Refresh")}
+        disabled={busy} onClick={() => void perform(async () => {
+          setNotice(""); await refresh(); await loadGraph();
+        })}><RefreshCw size={15} /></button>
+    </header>}
 
     <div className="knowledge-layout">
       {/* The rail switches workflows; each workflow keeps its own tab strip, so the
           middle column only ever shows the tabs that belong to whichever is active. */}
       <nav className="knowledge-rail" aria-label={t("Workflow")}>
         <button type="button" aria-pressed={category === "literature"} onClick={() => setCategory("literature")}>
-          {t("Literature")}</button>
+          <BookOpen size={16} />{t("Literature")}</button>
         <button type="button" aria-pressed={category === "experiment"} onClick={() => setCategory("experiment")}>
-          {t("Experiment")}</button>
+          <FlaskConical size={16} />{t("Experiment")}</button>
         {!deployed && <button type="button" aria-pressed={category === "settings"} onClick={() => setCategory("settings")}>
-          {t("Settings")}</button>}
+          <Settings2 size={16} />{t("Settings")}</button>}
       </nav>
       <div className="knowledge-content">
         {category === "literature" && <div className="knowledge-tabstrip" role="tablist" aria-label={t("Literature sections")}>
@@ -613,6 +609,7 @@ export function Workspace({ host, card }: PluginViewProps) {
         {/* A detached section is portaled straight into its own tab, past ".knowledge-app": this
             wrapper carries the same classes so base colors and control styling still apply there. */}
         <div className="knowledge-section knowledge-settings-section">
+        <h3>{t("Settings")}</h3>
         <Banner error={error} notice={notice} />
         <label>{t("Collection name")}
           <input value={current.collection_name} disabled={busy}
@@ -630,8 +627,9 @@ export function Workspace({ host, card }: PluginViewProps) {
             onChange={event => setSettings({ ...current, mineru_base_url: event.target.value })}
             onBlur={event => void saveSettings({ mineru_base_url: event.target.value })} />
         </label>
-        <small>{t("The MinerU token comes from the OAW_MINERU_TOKEN environment variable, never from this card.")}</small>
-        <p>{t("Available engines: {v0}", { v0: (overview?.engines ?? []).join(", ") || "—" })}</p>
+        <MineruCredentials cardId={card.id} onSaved={refresh} />
+        <details className="knowledge-disclosure"><summary>{t("Available engines")}</summary>
+          <p>{(overview?.engines ?? []).join(", ") || "—"}</p></details>
         <label>{t("Default model for deployment")}
           <select value={defaultModel} disabled={busy || !models.length}
             onChange={event => void saveDefaultModel(event.target.value)}>
@@ -639,67 +637,81 @@ export function Workspace({ host, card }: PluginViewProps) {
             {models.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
         </label>
-        <small>{t("A published deployment has no live model picker, so Project to JSON there always uses this one.")}</small>
+
         <h4>{t("Connected agents")}</h4>
         {!connectedAgents.length
-          ? <p className="knowledge-meta">{t("No Agent is wired to this base yet — connect one with a Knowledge read or Knowledge extract edge on the canvas.")}</p>
+          ? <p className="knowledge-meta">{t("Connect an Agent on the canvas to choose its model.")}</p>
           : connectedAgents.map(agent => <div key={agent.id} className="knowledge-agent-model">
               <span>{agent.name}</span>
               <ModelSelect label={t("{v0}’s model", { v0: agent.name })}
                 value={String(agent.config?.model ?? "oaw:default")}
                 onChange={value => void updateCard(agent.id, { config: { model: value } })} />
             </div>)}
-        <small>{t("This is the same model catalog configured on the canvas — it changes what the Agent itself uses to answer, in every conversation, not just this one.")}</small>
         </div>
       </WorkspaceSection>}
       {category === "literature" && literatureTab === "sources" && <WorkspaceSection id="sources" title={t("Sources")} className="knowledge-section">
         <div className="knowledge-section">
-        <h3>{t("Sources")}</h3>
-        <Banner error={error} notice={notice} />
-        <div className="knowledge-groupbar">
-          {/* The toolbar's own group picker lives outside every section, so a layout that
-              places Sources into its own tab (as a deployment does) can leave it with no way
-              to switch groups at all; this copy keeps that control reachable right here. */}
-          {!groupEditing ? <div className="knowledge-formbar">
-            <label className="knowledge-groupselect">{t("Group")}
-              <select value={activeGroup} disabled={busy}
-                onChange={event => { setActiveGroup(event.target.value); setGroupEditing(false); }}>
-                <option value="">{t("All groups")}</option>
-                {groups.map(item => <option key={item.id} value={item.id}>
-                  {item.name}{item.is_default ? ` (${t("default")})` : ""}</option>)}
-              </select>
-            </label>
-            <button type="button" disabled={busy} onClick={() => { setGroupName(""); setGroupEditing(true); }}>
-              {t("New group")}</button>
-            {activeGroupObject && <button type="button" disabled={busy}
-              onClick={() => { setGroupName(activeGroupObject.name); setGroupEditing(true); }}>
-              {t("Rename group")}</button>}
-            {activeGroupObject && !activeGroupObject.is_default && <button type="button" disabled={busy}
-              onClick={() => void deleteGroup()}>{t("Delete group")}</button>}
-          </div> : <div className="knowledge-formbar">
-            <input value={groupName} disabled={busy} placeholder={t("Group name")} autoFocus
-              onChange={event => setGroupName(event.target.value)} />
-            <button type="button" className="knowledge-primary" disabled={busy || !groupName.trim()}
-              onClick={() => void (activeGroupObject ? renameGroup() : createGroup())}>
-              {activeGroupObject ? t("Save") : t("Create")}</button>
-            <button type="button" disabled={busy} onClick={() => setGroupEditing(false)}>{t("Cancel")}</button>
-          </div>}
+        <div className="knowledge-section-heading">
+          <div><h3>{t("Documents")} <span className="knowledge-total">{sources.length}</span></h3>
+            {!!running.length && <span className="knowledge-running" role="status">
+              {t("{v0} conversion running", { v0: running.length })}</span>}</div>
+          <div className="knowledge-heading-actions">
+          <button type="button" className="knowledge-icon-button" aria-label={t("Refresh")} title={t("Refresh")}
+            disabled={busy} onClick={() => void perform(async () => { setNotice(""); await refresh(); })}>
+            <RefreshCw size={15} /></button>
+          <label className={`knowledge-upload${busy ? " is-disabled" : ""}`}>
+            <Plus size={16} />{t("Add documents")}
+            <input className="knowledge-visually-hidden" type="file" multiple disabled={busy}
+              aria-label={t("Add documents")} title={t("Up to 32 MiB per file")}
+              onChange={event => {
+                const files = Array.from(event.target.files ?? []);
+                event.target.value = "";
+                if (files.length) void upload(files);
+              }} />
+          </label>
+          </div>
         </div>
-        <label className="knowledge-upload">{t("Add documents")}
-          <input type="file" multiple disabled={busy} onChange={event => {
-            const files = Array.from(event.target.files ?? []);
-            event.target.value = "";
-            if (files.length) void upload(files);
-          }} />
-        </label>
-        <small>{t("PDF, markdown, text, CSV, TSV, Excel (.xlsx), images or JSON up to 32 MiB each. Uploads stay unconverted until you process them below, alone or in a batch.")}</small>
-
+        <Banner error={error} notice={notice} />
+        <div className="knowledge-source-toolbar">
+        <div className="knowledge-document-controls">
+          <label className="knowledge-groupselect">
+            <span className="knowledge-visually-hidden">{t("Group")}</span>
+            <select aria-label={t("Group")} value={activeGroup} disabled={busy}
+              onChange={event => { setActiveGroup(event.target.value); setGroupEditing(false); }}>
+              <option value="">{t("All groups")}</option>
+              {groups.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </label>
+          <details className="knowledge-group-menu">
+            <summary aria-label={t("Manage groups")} title={t("Manage groups")}><MoreHorizontal size={18} /></summary>
+            <div className="knowledge-group-actions">
+              <button type="button" disabled={busy} onClick={event => {
+                setGroupName(""); setGroupCreating(true); setGroupEditing(true);
+                event.currentTarget.closest("details")?.removeAttribute("open");
+              }}>{t("New group")}</button>
+              {activeGroupObject && <button type="button" disabled={busy} onClick={event => {
+                setGroupName(activeGroupObject.name); setGroupCreating(false); setGroupEditing(true);
+                event.currentTarget.closest("details")?.removeAttribute("open");
+              }}>{t("Rename group")}</button>}
+              {activeGroupObject && !activeGroupObject.is_default && <button type="button" disabled={busy}
+                onClick={() => void deleteGroup()}>{t("Delete group")}</button>}
+            </div>
+          </details>
+        </div>
+        {groupEditing && <div className="knowledge-formbar">
+          <input value={groupName} disabled={busy} placeholder={t("Group name")} aria-label={t("Group name")} autoFocus
+            onChange={event => setGroupName(event.target.value)} />
+          <button type="button" className="knowledge-primary" disabled={busy || !groupName.trim()}
+            onClick={() => void (groupCreating ? createGroup() : renameGroup())}>
+            {groupCreating ? t("Create") : t("Save")}</button>
+          <button type="button" disabled={busy} onClick={() => setGroupEditing(false)}>{t("Cancel")}</button>
+        </div>}
         {/* Folded in from what used to be its own "Search" tab: Sources already
             has almost every source-level action, so full-text search over the
             converted documents belongs right here too, not behind another tab. */}
         <div className="knowledge-search-inline">
           <div className="knowledge-formbar">
-            <input value={searchQuery} disabled={busy} placeholder={t("Search converted documents…")}
+            <input type="search" value={searchQuery} disabled={busy} aria-label={t("Search converted documents")} placeholder={t("Search converted documents…")}
               onChange={event => setSearchQuery(event.target.value)}
               onKeyDown={event => { if (event.key === "Enter") void runSearch(); }} />
             <button type="button" disabled={busy || !searchQuery.trim()}
@@ -716,9 +728,15 @@ export function Workspace({ host, card }: PluginViewProps) {
             </li>)}
           </ul>}
         </div>
+        </div>
 
-        {!sources.length && <p className="knowledge-empty">{t("Nothing uploaded yet.")}</p>}
-        <ul className="knowledge-list">
+        <div className={`knowledge-document-layout${currentSource ? " has-document" : ""}`}>
+        <div className="knowledge-source-pane">
+        {!sources.length && <div className="knowledge-empty-state"><FileText size={30} />
+          <strong>{t("Add your first document")}</strong>
+          <p>{t("Papers, notes, spreadsheets or images · up to 32 MiB each")}</p>
+        </div>}
+        <ul className="knowledge-list knowledge-source-list">
           {sources.map(item => <li key={item.id} className="knowledge-checkrow">
             <label><input type="checkbox" checked={selectedSources.includes(item.id)} disabled={busy}
               onChange={event => setSelectedSources(event.target.checked
@@ -727,27 +745,28 @@ export function Workspace({ host, card }: PluginViewProps) {
             </label>
             <button type="button" aria-pressed={selectedSource === item.id}
               onClick={() => viewSource(item.id)}>
-              <span>{item.filename}{!activeGroup && item.group_name ? ` · ${item.group_name}` : ""}</span>
-              <small>{bytes(item.size)} · {item.markdown
-                ? t("markdown via {v0}", { v0: item.markdown.engine ?? "?" })
-                : t("awaiting conversion")} · {t("{v0} projections", { v0: item.projections })}</small>
+              <span title={item.filename}>{item.filename}</span>
+              <small>{bytes(item.size)} · {item.markdown ? t("Ready") : t("awaiting conversion")}
+                {!activeGroup && item.group_name && groups.length > 1 ? ` · ${item.group_name}` : ""}</small>
             </button>
-            <button type="button" className="knowledge-viewmarkdown" disabled={!item.markdown}
-              aria-pressed={selectedSource === item.id} title={item.markdown ? t("View extracted markdown") : t("Not converted yet")}
-              onClick={() => viewSource(item.id)}>{t("Markdown")}</button>
           </li>)}
         </ul>
-        <div className="knowledge-formbar">
-          <button type="button" className="knowledge-primary" disabled={busy || !selectedSources.length}
+        {(selectedSources.length > 0 || pendingSources.length > 0) && <div className="knowledge-formbar knowledge-batchbar">
+          {selectedSources.length > 0 && <button type="button" className="knowledge-primary" disabled={busy}
             onClick={() => void processSources(selectedSources)}>
-            {t("Process {v0} selected", { v0: selectedSources.length })}</button>
-          <button type="button" disabled={busy || !pendingSources.length}
+            {t("Process {v0} selected", { v0: selectedSources.length })}</button>}
+          {pendingSources.length > 0 && <button type="button" disabled={busy}
             onClick={() => void processPending()}>
-            {t("Process all pending ({v0})", { v0: pendingSources.length })}</button>
+            {t("Process all pending ({v0})", { v0: pendingSources.length })}</button>}
+        </div>}
         </div>
 
-        {currentSource && <div className="knowledge-detail">
-          <h4>{t("Extracted markdown — {v0}", { v0: currentSource.filename })}</h4>
+        {currentSource && <div className="knowledge-detail knowledge-reader">
+          <div className="knowledge-reader-heading">
+            <h4>{currentSource.filename}</h4>
+            <button type="button" className="knowledge-icon-button" aria-label={t("Close document")} title={t("Close document")}
+              onClick={() => setSelectedSource("")}><X size={16} /></button>
+          </div>
           <div className="knowledge-projectbar">
             {/* An ad hoc, single-document projection while reading — any schema,
                 including the graph one. Batch-projecting several sources at once
@@ -768,20 +787,23 @@ export function Workspace({ host, card }: PluginViewProps) {
                 </label>}
             <button type="button" className="knowledge-primary" disabled={busy || !extracted || !schemaId || !selectedModel}
               onClick={() => void project()}>{busy ? t("Working…") : t("Project to JSON")}</button>
-            <button type="button" onClick={() => setSelectedSource("")}>{t("Close")}</button>
+
           </div>
           {documentError ? <p className="knowledge-empty">{documentError}</p>
             : !extracted ? <p role="status">{t("Loading markdown…")}</p> : <>
-            <p className="knowledge-meta">{t("{v0} · {v1} characters · engine {v2}", {
-              v0: extracted.filename ?? currentSource.filename, v1: extracted.total_characters,
-              v2: extracted.engine ?? "?" })}</p>
-            <pre className="knowledge-markdown">{extracted.markdown}</pre>
+            <div className="knowledge-reading-toolbar">
+              <span className="knowledge-meta">{t("{v0} characters", { v0: extracted.total_characters })}</span>
+              <button type="button" aria-pressed={rawMarkdown} onClick={() => setRawMarkdown(!rawMarkdown)}>{t("Markdown")}</button>
+            </div>
+            {rawMarkdown ? <pre className="knowledge-markdown">{extracted.markdown}</pre>
+              : <article className="knowledge-prose"><DocumentMarkdown content={extracted.markdown} /></article>}
             {extracted.has_more && <button type="button" disabled={busy} onClick={() => void extend()}>{t("Load more")}</button>}
           </>}
         </div>}
 
-        <h4>{t("Conversion jobs")}</h4>
-        {!jobs.length && <p className="knowledge-empty">{t("No jobs yet.")}</p>}
+        </div>
+        {!!jobs.length && <details className="knowledge-disclosure knowledge-jobs" open={running.length > 0 || jobs.some(job => !!job.error) || undefined}>
+        <summary>{t("Conversion jobs")} <span className="knowledge-total">{jobs.length}</span></summary>
         <ul className="knowledge-list">
           {jobs.map(job => <li key={job.id}>
             <button type="button" aria-pressed={jobDetail?.job.id === job.id} disabled={busy}
@@ -800,6 +822,7 @@ export function Workspace({ host, card }: PluginViewProps) {
             </li>)}
           </ul>
         </div>}
+        </details>}
         </div>
       </WorkspaceSection>}
 
@@ -807,7 +830,7 @@ export function Workspace({ host, card }: PluginViewProps) {
         <div className="knowledge-section">
         <h3>{t("Schemas")}</h3>
         <Banner error={error} notice={notice} />
-        <p className="knowledge-meta">{t("A schema is a JSON Schema plus the system prompt used to extract it.")}</p>
+
         <ul className="knowledge-list">
           {schemas.map(item => <li key={item.id}>
             <button type="button" aria-pressed={editor?.id === item.id} disabled={busy} onClick={() => void openSchema(item.id)}>
@@ -828,8 +851,8 @@ export function Workspace({ host, card }: PluginViewProps) {
           <label>{t("Kind")}
             <select value={editor.kind} disabled={busy}
               onChange={event => setEditor({ ...editor, kind: event.target.value as "literature" | "experiment" })}>
-              <option value="literature">{t("Literature — projections build a draft for the knowledge graph")}</option>
-              <option value="experiment">{t("Experiment — projections assemble into one experiment record")}</option>
+              <option value="literature">{t("Literature")}</option>
+              <option value="experiment">{t("Experiment")}</option>
             </select>
           </label>
           <label>{t("System prompt")}<textarea value={editor.system_prompt} disabled={busy} rows={3}
@@ -849,7 +872,7 @@ export function Workspace({ host, card }: PluginViewProps) {
         <div className="knowledge-section">
         <h3>{t("Projections")}</h3>
         <Banner error={error} notice={notice} />
-        <p className="knowledge-meta">{t("Custom structured extraction — pull domain-specific data (e.g. materials properties) out of your documents with a schema of your own. A projection here is reviewed right below; it never builds a draft or reaches the published graph — only Graph's own schema does that.")}</p>
+        <p className="knowledge-meta">{t("Extract structured data with a schema. Review results below.")}</p>
 
         <h4>{t("Project sources")}</h4>
         {!customSchemas.length
@@ -917,7 +940,7 @@ export function Workspace({ host, card }: PluginViewProps) {
         <div className="knowledge-section">
         <h3>{t("Experiments")}</h3>
         <Banner error={error} notice={notice} />
-        <p className="knowledge-meta">{t("Assemble several per-file extractions (one kind=\"experiment\" schema) into one structured, queryable experiment record. Never touches a draft, review or the published graph.")}</p>
+        <p className="knowledge-meta">{t("Combine extractions into an experiment record, then review and confirm.")}</p>
         <h4>{t("Select projections to assemble")}</h4>
         {!experimentProjections.length
           ? <p className="knowledge-empty">{t("Project a document against an experiment-kind schema first, in Sources.")}</p>
@@ -980,7 +1003,7 @@ export function Workspace({ host, card }: PluginViewProps) {
         <div className="knowledge-section knowledge-wide">
         <h3>{t("Knowledge graph")}</h3>
         <Banner error={error} notice={notice} />
-        <p className="knowledge-meta">{t("The graph is a specific, always-on projection: one literature schema, chosen once below, whose output is projected, reviewed and published right here — end to end.")}</p>
+        <p className="knowledge-meta">{t("Extract → build draft → review → publish")}</p>
         <label>{t("Graph schema")}
           <select value={graphSchemaId} disabled={busy} onChange={event => void setGraphSchema(event.target.value)}>
             <option value="">{t("Choose a schema")}</option>

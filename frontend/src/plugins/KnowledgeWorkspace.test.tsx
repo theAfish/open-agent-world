@@ -63,7 +63,56 @@ const open = (handler: Action, overrides: { card?: Record<string, unknown>; host
 
 const ORIGINAL_UPDATE_CARD = useWorldStore.getState().updateCard;
 
+it("saves a token through its private HTTP endpoint and keeps it when Settings reopens", async () => {
+  let saved = false;
+  const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method === "PUT") saved = JSON.parse(String(init.body)).value !== null;
+    return { ok: true, json: async () => ({ configured: saved, source: saved ? "card" : null }) };
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const action = open(async () => undefined);
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  const input = await screen.findByLabelText("MinerU token") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "ui-private-token" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save token" }));
+  await screen.findByText("Saved securely");
+  expect(input.value).toBe("");
+  expect(fetchMock).toHaveBeenCalledWith("/api/knowledge/card-1/mineru-token", expect.objectContaining({
+    method: "PUT", body: JSON.stringify({ value: "ui-private-token" }) }));
+  expect(JSON.stringify(action.mock.calls)).not.toContain("ui-private-token");
+
+  fireEvent.click(screen.getByRole("button", { name: "Literature" }));
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await screen.findByText("Saved securely");
+  expect((screen.getByLabelText("MinerU token") as HTMLInputElement).value).toBe("");
+  expect((screen.getByRole("button", { name: "Save token" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Remove token" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/knowledge/card-1/mineru-token",
+    expect.objectContaining({ method: "PUT", body: JSON.stringify({ value: null }) })));
+});
+
+it("creates a new group while another group is selected", async () => {
+  const group = { id: "group-1", name: "Existing", source_count: 0, is_default: false };
+  const action = open(async (name, args) => {
+    if (name === "overview") return { ...overview(), groups: [group] };
+    if (name === "groups" && args.operation === "create") return { group: { ...group, id: "group-2", name: args.name } };
+    return undefined;
+  });
+  await screen.findByRole("option", { name: "Existing" });
+  expect(screen.getAllByLabelText("Group")).toHaveLength(1);
+  fireEvent.change(screen.getByLabelText("Group"), { target: { value: "group-1" } });
+  fireEvent.click(screen.getByLabelText("Manage groups"));
+  await waitFor(() => expect((screen.getByRole("button", { name: "New group" }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "New group" }));
+  fireEvent.change(screen.getByLabelText("Group name"), { target: { value: "New collection" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("groups", { operation: "create", name: "New collection" }, undefined));
+  expect(action.mock.calls.some(([name, args]) => name === "groups" && args.operation === "rename")).toBe(false);
+});
+
 beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ configured: false, source: null }) })));
   // The Graph section draws a React Flow map, which measures itself on mount.
   vi.stubGlobal("ResizeObserver", class {
     observe() {} unobserve() {} disconnect() {}
@@ -132,7 +181,9 @@ it("uploads a document and reads its markdown once a batch process job finishes"
   await waitFor(() => expect(action).toHaveBeenCalledWith(
     "process", { source_ids: ["source-1"] }, undefined));
 
-  fireEvent.click(await screen.findByRole("button", { name: /sintering\.md.*markdown via text/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /sintering\.md.*Ready/ }));
+  expect(await screen.findByRole("heading", { name: "Sintering of Si3N4" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Markdown" }));
   expect(await screen.findByText("# Sintering of Si3N4")).toBeTruthy();
 });
 
@@ -202,7 +253,7 @@ it("projects the selected document through the host bridge, never the plugin", a
   });
 
   fireEvent.click(await screen.findByRole("button", { name: /sintering\.md/ }));
-  await screen.findByText("# Sintering of Si3N4");
+  await screen.findByRole("heading", { name: "Sintering of Si3N4" });
   fireEvent.change(screen.getByLabelText("Extraction schema"), { target: { value: "schema-1" } });
   expect((screen.getByLabelText("Model") as HTMLSelectElement).value).toBe("oaw:model:model-1");
   fireEvent.click(screen.getByRole("button", { name: "Project to JSON" }));
@@ -366,7 +417,7 @@ it("hides engineering settings and posts through the deployment bridge when depl
   expect(screen.queryByLabelText("Collection name")).toBeNull();
 
   fireEvent.click(await screen.findByRole("button", { name: /sintering\.md/ }));
-  await screen.findByText("# Sintering of Si3N4");
+  await screen.findByRole("heading", { name: "Sintering of Si3N4" });
   // No live picker either: the deployment shows the model fixed at publish time.
   expect(screen.queryByLabelText("Model")).toBeNull();
   expect(await screen.findByText("Model: oaw:model:model-1")).toBeTruthy();

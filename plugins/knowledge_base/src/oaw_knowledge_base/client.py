@@ -19,8 +19,8 @@ _clients: dict[str, object] = {}
 _lock = threading.Lock()
 
 INSTALL_HINT = (
-    "This card needs mat-know-base in the backend environment. Install it with "
-    "`backend/.venv/bin/pip install \"mat-know-base @ /path/to/mat_know_base\"` and reopen the card."
+    "Knowledge base dependencies are missing. Run scripts/setup.ps1 (Windows) or "
+    "scripts/setup.sh, or install plugins/knowledge_base into the backend environment."
 )
 
 
@@ -63,7 +63,7 @@ def _backfill_search_index(kb, engine):
         offset += len(batch)
 
 
-def _build(path):
+def _build(path, resolve_secret=None):
     try:
         from mkb.sdk import KnowledgeBase
     except ImportError as error:  # pragma: no cover - depends on the deployment env
@@ -89,6 +89,8 @@ def _build(path):
     kb.initialize()
     kb.oaw_graph_store = graph_store
     kb.oaw_engine = engine
+    # Only a callable lives in memory; no secret enters the durable job database.
+    kb.oaw_resolve_secret = resolve_secret
     ensure_search_schema(engine)
     kb.oaw_experiments = ExperimentRecordStore(engine)
     register_pipelines(kb)
@@ -106,14 +108,16 @@ def collection(kb, name=None):
     return kb.collections.create(name=wanted)
 
 
-def open_client(node_id, storage_path):
+def open_client(node_id, storage_path, *, resolve_secret=None):
     path = database_path(storage_path)
     with _lock:
         cached = _clients.get(node_id)
         if cached is not None:
+            if resolve_secret is not None:
+                cached.oaw_resolve_secret = resolve_secret
             return cached
     # Build outside the lock: initialize() touches the disk and can be slow.
-    kb = _build(path)
+    kb = _build(path, resolve_secret)
     with _lock:
         cached = _clients.get(node_id)
         if cached is not None:

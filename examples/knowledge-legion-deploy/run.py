@@ -4,7 +4,7 @@ Unlike ``examples/deployed-workspace`` this is not a canned, key-free demo: the
 Librarian reads a real knowledge base, and turning a document into structured
 JSON genuinely calls a model. What this script *does* automate is the one extra
 setup step this one plugin needs that the rest of the project does not: the
-"knowledge" extra (``mat-know-base``, ``pymupdf4llm``, ``openpyxl``) in
+plugin and its declared dependencies in
 ``backend/.venv``. It installs that automatically, then builds the release the same
 way the Publish application panel does — deploy the preset, upload and convert one
 sample document, seed one hand-written projection so Review and the graph have
@@ -71,7 +71,7 @@ INSTALL_HINT = ("See plugins/knowledge_base/README.md#install-the-engines to ins
 
 def ensure_knowledge_dependencies(python: Path) -> None:
     """The knowledge base card needs mat-know-base, pymupdf4llm and openpyxl in this
-    venv; ``scripts/setup.sh``/``setup.ps1`` do not install them by default. Skip the
+    venv. Normal setup installs all bundled plugins and their dependencies. Skip the
     (slower) sync once they are already importable, so a second run is instant.
     """
     probe = subprocess.run([str(python), "-c", "import mkb, pymupdf4llm, openpyxl"], cwd=ROOT,
@@ -82,13 +82,10 @@ def ensure_knowledge_dependencies(python: Path) -> None:
           file=sys.stderr)
     if shutil.which("uv") is None:
         raise SystemExit(f"uv is required to install them automatically. {INSTALL_HINT}")
-    # The same extras setup.sh syncs, plus "knowledge": uv sync prunes anything
-    # outside what is requested, so dropping --dev/adk/litellm here would silently
-    # uninstall them from an already-set-up venv.
-    result = subprocess.run(["uv", "sync", "--project", "backend", "--dev",
-                            "--extra", "adk", "--extra", "litellm", "--extra", "knowledge"], cwd=ROOT)
+    result = subprocess.run([str(python), str(ROOT / "scripts/install-plugins.py"),
+                             str(ROOT / "plugins/knowledge_base")], cwd=ROOT)
     if result.returncode != 0:
-        raise SystemExit(f"Automatic install failed (uv sync exited {result.returncode}). {INSTALL_HINT}")
+        raise SystemExit(f"Automatic plugin install failed. {INSTALL_HINT}")
     probe = subprocess.run([str(python), "-c", "import mkb, pymupdf4llm, openpyxl"], cwd=ROOT,
                            capture_output=True)
     if probe.returncode != 0:

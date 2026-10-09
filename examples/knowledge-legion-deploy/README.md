@@ -9,12 +9,11 @@ configure one.
 
 ## What it automates
 
-The knowledge base card depends on two Python packages (`mat-know-base`,
-`pymupdf4llm`) that the rest of the project does not install by default — see
+The knowledge base card declares its engines in its own `pyproject.toml` — see
 [the plugin's own install note](../../plugins/knowledge_base/README.md#install-the-engines).
-Running this script installs them into `backend/.venv` automatically (via
-`uv sync --project backend --extra knowledge`, alongside whatever other extras are
-already synced there) before it does anything else. If they are already
+Normal setup installs the bundled plugins. This example also installs the
+knowledge plugin into `backend/.venv` through `scripts/install-plugins.py` if its
+dependencies are missing. If they are already
 importable, that step is skipped and the run is fast.
 
 ## Run it

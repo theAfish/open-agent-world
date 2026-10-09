@@ -368,7 +368,8 @@ export const worldApi = {
 
   saveSandboxSettings(settings: SandboxSettings): Promise<SandboxSettings> {
     return request<SandboxSettings>("/settings/sandbox", {
-      method: "PUT", body: JSON.stringify({ workspace_root: settings.workspace_root, runtime: settings.runtime }),
+      method: "PUT", body: JSON.stringify({ workspace_root: settings.workspace_root, runtime: settings.runtime,
+        environment_variables: settings.environment_variables }),
     });
   },
   async getSummoning(id: string): Promise<SummoningSnapshot> {

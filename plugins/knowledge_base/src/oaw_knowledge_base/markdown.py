@@ -6,9 +6,9 @@ a base URL is configured, and a plain-text passthrough for text-like uploads. Ta
 files (``.csv``/``.tsv``/``.xlsx``) get their own engine: a real markdown table
 instead of a fenced dump of the raw file, self-contained here rather than importing
 MKB's own dataframe processor (the same reasoning the MinerU client already gives for
-staying out of MKB's heavier module chain). Images get a vision engine, configured the
-same way as MinerU — an environment-provided credential the plugin calls directly,
-never a host-mediated model connection: a photographed lab notebook or a chart needs a
+staying out of MKB's heavier module chain). MinerU accepts a host-resolved private
+credential, with an environment fallback for standalone use. Images get a vision
+engine configured through the environment: a photographed lab notebook or a chart needs a
 model that can actually see it, and OCR alone cannot read handwriting.
 """
 from __future__ import annotations
@@ -45,7 +45,7 @@ VISION_PROMPT = (
 MAX_MARKDOWN_BYTES = 4 * 1024 * 1024
 
 
-def available_engines(mineru_base_url=None):
+def available_engines(mineru_base_url=None, *, resolve_secret=None):
     """What this deployment can actually run, for the overview action."""
     engines = ["text", "tabular"]
     try:
@@ -54,11 +54,15 @@ def available_engines(mineru_base_url=None):
         pass
     else:
         engines.insert(0, "pymupdf4llm")
-    if mineru_base_url and os.environ.get(MINERU_TOKEN_ENV):
+    if mineru_base_url and _secret(MINERU_TOKEN_ENV, resolve_secret):
         engines.append("mineru")
     if os.environ.get(VISION_API_KEY_ENV) and os.environ.get(VISION_BASE_URL_ENV):
         engines.append("vision")
     return engines
+
+
+def _secret(reference, resolve_secret=None):
+    return resolve_secret(reference) if resolve_secret else os.environ.get(reference)
 
 
 def _is_pdf(filename, media_type):
@@ -202,15 +206,14 @@ def _pymupdf_markdown(data):
         return pymupdf4llm.to_markdown(str(path))
 
 
-def _mineru_markdown(data, filename, base_url, timeout=600):
+def _mineru_markdown(data, filename, base_url, timeout=600, *, token=None):
     """MinerU v4 batch upload.
 
-    MKB's own ``PDFMineruAPIProcessor`` is not importable here: its module chain pulls in
-    the heavy materials stack. Try it anyway, then fall back to this self-contained client.
+    This self-contained client avoids MKB's heavier materials processor imports.
     """
-    token = os.environ.get(MINERU_TOKEN_ENV)
+    token = token or os.environ.get(MINERU_TOKEN_ENV)
     if not token:
-        raise KnowledgeError(f"Set {MINERU_TOKEN_ENV} to use the MinerU engine")
+        raise KnowledgeError("Add a MinerU token in Knowledge base Settings or set OAW_MINERU_TOKEN")
     import httpx
 
     root = base_url.rstrip("/")
@@ -244,8 +247,7 @@ def _mineru_markdown(data, filename, base_url, timeout=600):
                 if state == "done":
                     return _read_zip(client, result.get("full_zip_url"))
                 if state == "failed":
-                    raise KnowledgeError(
-                        f"MinerU extraction failed: {result.get('err_msg') or 'unknown error'}")
+                    raise KnowledgeError("MinerU extraction failed; check the document and service status")
     raise KnowledgeError("MinerU extraction timed out")
 
 
@@ -264,7 +266,7 @@ def _read_zip(client, url):
         return bundle.read(name).decode("utf-8", errors="replace")
 
 
-def to_markdown(data, filename, media_type, *, engine="auto", mineru_base_url=None):
+def to_markdown(data, filename, media_type, *, engine="auto", mineru_base_url=None, resolve_secret=None):
     """Return ``(text, engine_used, metadata)`` or raise ``KnowledgeError``."""
     requested = engine or "auto"
     if _is_pdf(filename, media_type):
@@ -277,7 +279,8 @@ def to_markdown(data, filename, media_type, *, engine="auto", mineru_base_url=No
                 elif candidate == "mineru":
                     if not mineru_base_url:
                         raise KnowledgeError("No MinerU base URL is configured")
-                    text = _mineru_markdown(data, filename, mineru_base_url)
+                    text = _mineru_markdown(data, filename, mineru_base_url,
+                                            token=_secret(MINERU_TOKEN_ENV, resolve_secret))
                 elif candidate == "text":
                     text = _text_markdown(data, filename)
                 else:

@@ -34,7 +34,8 @@ def _convert(context, state):
     text, engine, metadata = to_markdown(
         data, source.filename, source.media_type,
         engine=context.parameters.get("engine", "auto"),
-        mineru_base_url=context.parameters.get("mineru_base_url"))
+        mineru_base_url=context.parameters.get("mineru_base_url"),
+        resolve_secret=getattr(kb, "oaw_resolve_secret", None))
     context.check_cancelled()
 
     artifact_id = derived_id(source_id, "artifact")

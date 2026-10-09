@@ -25,9 +25,12 @@ _SAFE_OVERRIDE_NAMES = frozenset(
 # portable profile cannot acquire different authority on Windows.
 _RESERVED = frozenset("PATH HOME USER USERNAME USERPROFILE SHELL COMSPEC PATHEXT SYSTEMROOT WINDIR TEMP TMP TMPDIR LOCALAPPDATA APPDATA SANDBOX_RESOURCES ENV BASH_ENV BASHOPTS SHELLOPTS CDPATH IFS GCONV_PATH LOCPATH NLSPATH GETCONF_DIR HOSTALIASES RES_OPTIONS LOCALDOMAIN NODE_OPTIONS NODE_PATH RUBYOPT RUBYLIB PERL5OPT PERL5LIB PERLLIB JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS CLASSPATH R_ENVIRON R_PROFILE R_ENVIRON_USER R_PROFILE_USER ZDOTDIR FPATH FPATHEXT PROMPT_COMMAND WSLENV WSL_INTEROP WSL_DISTRO_NAME DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS XAUTHORITY".split())
 _RESERVED_PREFIXES = ("LD_", "DYLD_", "_RLD", "LDR_", "PYTHON", "BASH_FUNC_", "XDG_", "OAW_", "SANDBOX_", "DOTNET_", "COMPLUS_", "COR_", "VIRTUAL_ENV", "CONDA_", "PIP_", "UV_")
+# Explicit host integration settings, never passed into Sandbox processes.
+HOST_ENVIRONMENT_NAMES = frozenset({"OAW_MINERU_TOKEN"})
 
 
-def validate_command_environment(values: Mapping[str, str], *, allow_target: bool = True) -> dict[str, str]:
+def validate_command_environment(values: Mapping[str, str], *, allow_target: bool = True,
+                                 allow_host: bool = False) -> dict[str, str]:
     if not isinstance(values, Mapping):
         raise SandboxValidationError("env must be an object")
     seen = set()
@@ -38,7 +41,8 @@ def validate_command_environment(values: Mapping[str, str], *, allow_target: boo
         if normalized in seen:
             raise SandboxValidationError("Environment names must be unique ignoring case")
         seen.add(normalized)
-        allowed = normalized in _SAFE_OVERRIDE_NAMES or (allow_target and key == "OAW_TARGET_CONFIG_JSON")
+        allowed = (normalized in _SAFE_OVERRIDE_NAMES or (allow_target and key == "OAW_TARGET_CONFIG_JSON")
+                   or (allow_host and normalized in HOST_ENVIRONMENT_NAMES))
         if not allowed and (normalized in _RESERVED or normalized.startswith(_RESERVED_PREFIXES)):
             raise SandboxValidationError(f"Environment variable {key!r} is reserved by the sandbox")
         if not isinstance(value, str) or "\0" in value:
