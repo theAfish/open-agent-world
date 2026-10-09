@@ -74,6 +74,10 @@ def main():
          "--no-emit-project", "--output-file", requirements], root=root, env=env, quiet=True)
     run([uv, "pip", "install", "--python", python, "--target", site_packages,
          "--require-hashes", "--no-deps", "--only-binary", ":all:", "-r", requirements], root=root, env=env)
+    # Bundled plugin dependencies belong to each plugin, not the host project.
+    # Resolve against the exported host pins so a plugin cannot upgrade the host.
+    run([args.python, root / "scripts/install-plugins.py", "--python", python,
+         "--target", site_packages, "--constraint", requirements], root=root, env=env)
     # Honor repository ignores, including local .env files, caches and user data.
     # New implementation files are included even before a developer commits them.
     source_files = subprocess.check_output(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard",

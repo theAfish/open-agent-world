@@ -8,11 +8,11 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 
 Push-Location $projectRoot
 try {
-    & uv run --project backend pytest -p no:cacheprovider tests backend/tests
+    & uv run --project backend --inexact pytest -p no:cacheprovider tests backend/tests
     if ($LASTEXITCODE -ne 0) { throw "Backend verification failed." }
 
     if (-not $SkipNativeSandbox) {
-        & uv run --project backend python -m backend.scripts.native_sandbox_smoke
+        & uv run --project backend --inexact python -m backend.scripts.native_sandbox_smoke
         if ($LASTEXITCODE -ne 0) { throw "Native Sandbox verification failed." }
     }
 

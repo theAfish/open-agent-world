@@ -19,6 +19,9 @@ class NodeResourceContext:
     actor_id: str | None = None
     confirmed: bool = False  # Desktop only; never accepted from Agent arguments.
     state: CardStateStore | None = None
+    # Trusted backend code only. Values must never enter state, job parameters,
+    # action responses or exports. Resolve at execution time, not when queueing.
+    resolve_secret: Callable[[str], str | None] | None = None
 
 
 @dataclass(frozen=True, slots=True)

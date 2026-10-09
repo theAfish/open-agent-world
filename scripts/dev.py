@@ -65,6 +65,7 @@ def main() -> None:
     node = shutil.which("node")
     if not python.is_file() or not vite.is_file() or node is None:
         parser.error("Run scripts/setup.sh (Linux/WSL/macOS) or scripts/setup.ps1 (Windows) first")
+    subprocess.run([str(python), str(root / "scripts/install-plugins.py")], cwd=root, check=True)
     backend_port = available_port(args.backend_port)
     frontend_port = available_port(args.frontend_port)
     if frontend_port == backend_port:

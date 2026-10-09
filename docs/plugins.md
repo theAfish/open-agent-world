@@ -232,6 +232,13 @@ authenticated control-plane API. Lifecycle handlers obtain the same directory
 from `context.resources.node_storage_path(node.id)` and own reversible creation
 and journaled post-delete cleanup. Do not create files during registration.
 
+Resource contexts also provide an optional `resolve_secret(reference)` callback
+for trusted backend handlers. It resolves the live node's encrypted binding,
+then a global environment setting, then the server environment. Resolve inside
+the executing job; never put values in card state, durable job parameters,
+responses, or logs. Credential writes use host-only settings endpoints, not
+Agent capabilities. Standalone callers may omit this callback.
+
 For native resources without a canvas snapshot, set `deletion_warning` on the
 node definition. The UI confirms permanent deletion, clears undo history after
 success, and rejects copy or undo operations that would silently lose the native

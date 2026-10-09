@@ -1,6 +1,6 @@
 # Published applications
 
-Try the ready-to-run, key-free example with `python examples/deployed-workspace/run.py`. It opens <http://127.0.0.1:38475>; the demo password is `oaw-demo-2026`. See the [example instructions](../examples/deployed-workspace/README.md).
+Try the ready-to-run, key-free example with `python examples/deployed-workspace/run.py`. It opens <http://127.0.0.1:38475>; the demo password is `oaw-demo-2026`. See the [example instructions](../examples/deployed-workspace/README.md). For a real (model-calling) published Legion, see the [Knowledge research deployment example](../examples/knowledge-legion-deploy/README.md).
 
 [Documentation](README.md) · [简体中文 / complete deployment guide](deployment.zh-CN.md)
 

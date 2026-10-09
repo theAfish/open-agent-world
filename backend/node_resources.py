@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.errors import PermissionDeniedError, ResourceValidationError
 from backend.node_documents import validation_message
 from backend.plugins.resources import NodeResourceContext
+from backend.security.resource_credentials import resource_secret_resolver
 
 
 class ResourceActionRequest(BaseModel):
@@ -31,7 +32,8 @@ async def invoke_resource_action(services, node_id, action, request, *, capabili
                 raise PermissionDeniedError("Agents cannot supply desktop confirmation")
         context = NodeResourceContext(node_id, services.resources.node_storage_path(node_id), Event(),
             actor_id=capability.agent_id if capability else None, confirmed=request.confirm,
-            state=services.card_state.bind(node_id))
+            state=services.card_state.bind(node_id),
+            resolve_secret=resource_secret_resolver(services, node))
         task = asyncio.create_task(asyncio.to_thread(operation.handler, context, request.arguments))
         try:
             return await asyncio.shield(task)

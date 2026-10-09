@@ -4,6 +4,9 @@ from copy import deepcopy
 from fastapi import APIRouter, Depends, HTTPException, Request
 from backend.api import conversations, node_documents, resources, runtime
 from backend.api.dependencies import get_services
+from backend.api.knowledge_bridge import (
+    ExperimentAssembleRequest, ProjectionRequest, run_experiment_assemble, run_projection,
+)
 from backend.node_documents import DocumentActionRequest, read_document, invoke_document_action
 from backend.node_resources import ResourceActionRequest, invoke_resource_action
 from backend.plugins.deployment import project_document
@@ -172,6 +175,22 @@ def workspace_router(manifest):
             raise HTTPException(404, "This operation is not published")
         result = await invoke_resource_action(services, node_id, action, request)
         return {key: value for key, value in result.items() if key in actions[action]}
+
+    @router.post("/knowledge/{node_id}/project")
+    async def knowledge_project(node_id: str, request: ProjectionRequest, services=Depends(get_services)):
+        # The bridge itself never checks capability; a release only reaches it once
+        # both halves of the pipeline it drives are published for this node.
+        actions = manifest.get("plugin_access", {}).get(node_id, {}).get("resource_actions", {})
+        if not {"projection_prompt", "save_projection"} <= set(actions):
+            raise HTTPException(404, "This operation is not published")
+        return await run_projection(node_id, request, services)
+
+    @router.post("/knowledge/{node_id}/assemble")
+    async def knowledge_assemble(node_id: str, request: ExperimentAssembleRequest, services=Depends(get_services)):
+        actions = manifest.get("plugin_access", {}).get(node_id, {}).get("resource_actions", {})
+        if not {"experiment_assemble_prompt", "experiment_save"} <= set(actions):
+            raise HTTPException(404, "This operation is not published")
+        return await run_experiment_assemble(node_id, request, services)
 
     for route in node_documents.router.routes:
         if route.endpoint.__name__ in {"execution", "start_execution", "stop_execution"}:
