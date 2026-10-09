@@ -1,3 +1,4 @@
+import { reportInteraction } from '../state/interactions';
 import { CardFace, CardStock } from "../components/CardFace";
 import { useMotionPresence } from './useMotionPresence';
 import { finishLabel } from "../cards/cardFinish";
@@ -41,6 +42,9 @@ export function CardLibrary() {
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<DeckEntry | null>(null);
   const detailSidebar = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (library.open && selected?.kind === 'node') reportInteraction({ type: 'card-inspected', cardType: selected.id });
+  }, [library.open, selected]);
   useEffect(() => {
     if (detailSidebar.current) detailSidebar.current.scrollTop = 0;
   }, [selected?.kind, selected?.id]);
@@ -146,7 +150,7 @@ export function CardLibrary() {
         }} data-library-card={item.id} onClick={event => {
           if (suppressClick.current && event.detail !== 0) { suppressClick.current = false; return; }
           setSelected(item);
-        }} aria-label={t("Inspect {v0}", { v0: String(item.label) })}><CardStock finish={item.finish} data-deck-visual className="library-card-stock"><CardFace icon={item.kind === "legion" ? <Layers3 /> : <CatalogIcon definition={item.definition} />} label={item.label} description={item.description} />
+        }} aria-label={t("Inspect {v0}", { v0: String(item.label) })}><CardStock finish={item.finish} data-deck-visual className="library-card-stock"><CardFace definition={item.definition} icon={item.kind === "legion" ? <Layers3 /> : <CatalogIcon definition={item.definition} />} label={item.label} description={item.description} />
         {!item.available && !item.internal ? <span className="library-unavailable">{t("Unavailable")}</span> : null}</CardStock></button>
       {item.internal && !included ? <div className="library-card-usage">{item.owners.length ? t("Use through its container") : t("Created by a world action")}</div> :
         <button className={`library-card-add ${included ? "is-in-deck" : ""}`} disabled={library.busy || !deck || (!included && !item.available)} onClick={() => toggleCard(item)} aria-label={t(included ? 'Remove {v0} from deck' : 'Add {v0} to deck', { v0: item.label })}>

@@ -1,5 +1,9 @@
 # Share a Legion as a content Pack
 
+For visual card design and multi-item composition, use the bundled
+[Card Factory / 卡包工厂](card-factory.md). Its connected designers, printer and
+packer export standalone declarative cards together with Legion templates.
+
 You can create and share a useful formation without writing a plugin or signing
 in to a store. A content Pack contains saved Legion templates, usage instructions
 and references to the original Packs that supply its cards and tools.
@@ -107,6 +111,6 @@ registry adapter. No Python module or JavaScript bundle comes from the content
 archive. Existing `python -m open_agent_world.pack build/inspect/install` commands
 can process these artifacts as well.
 
-Future creator work can add multi-Legion composition, cover assets, card presets,
-Deck recipes and a guided temporary-profile preview. These are not part of the
-current editor.
+The Library editor above remains a single-Legion shortcut. Card Factory adds
+multi-Legion composition and declarative card recipes. Cover asset authoring,
+Deck recipes and a guided temporary-profile preview remain future work.

@@ -1,123 +1,77 @@
-/* Shared printed stock: a coloured crest above a quiet, readable title plaque. */
-:root { --compact-card-width: 106px; --compact-card-height: 122px; --compact-card-state: #353535; }
-:root[data-theme="dark"] { --compact-card-state: #d6d6d6; }
-@media (max-width: 620px) { :root { --compact-card-width: 96px; } }
-@media (max-height: 650px) { :root { --compact-card-height: 101px; } }
-
+/* Printed collectible cards: stock, ink, selective tooling, optical film, top print.
+   Paper and ink are authored colours; application theme never recolours the print. */
+:root { --compact-card-width:106px; --compact-card-height:122px; --compact-card-state:#353535; }
+:root[data-theme="dark"] { --compact-card-state:#d6d6d6; }
+@media(max-width:620px) { :root { --compact-card-width:96px; } }
+@media(max-height:650px) { :root { --compact-card-height:101px; } }
 .card-stock.card-stock {
-  --card-print: color-mix(in srgb, var(--collection-color, #78967b) 76%, #283b39);
-  --card-paper: color-mix(in srgb, var(--card-surface) 95%, #dfc793);
-  --card-metal: color-mix(in srgb, var(--collection-color, #78967b) 35%, #c5a96e);
-  border: 1px solid color-mix(in srgb, var(--card-metal) 62%, var(--line-strong));
-  border-radius: 10px;
-  background: linear-gradient(145deg, color-mix(in srgb, var(--card-paper) 84%, #fff), var(--card-paper) 45%, color-mix(in srgb, var(--card-metal) 22%, var(--card-paper)));
-  box-shadow: inset 0 0 0 1px var(--highlight), 0 2px 0 var(--line-strong), 0 5px 12px var(--shadow);
+  position:relative; display:flex; container-type:inline-size; padding:0;
+  border:1px solid var(--stock-edge,#d3ccbc); border-radius:9px;
+  background:var(--stock-paper,#f5f3e9);
+  box-shadow:0 1px 0 var(--stock-edge,#d3ccbc),0 3px 0 -1px var(--stock-paper,#f5f3e9),0 4px 0 -1px var(--stock-edge,#d3ccbc),0 12px 24px #162d2414;
 }
 .card-face {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  gap: 0;
-  padding: 5px;
-  border: 1px solid color-mix(in srgb, var(--card-metal) 54%, transparent);
-  border-radius: 6px;
-  background: var(--card-paper);
-  color: var(--ink);
-  text-align: left;
+  --face-accent:#5a7761; --face-paper:var(--stock-paper,#f5f3e9); --face-ink:var(--stock-ink,#293d37); --face-muted:var(--stock-muted,#66746a);
+  --face-pad:clamp(8px,6cqi,21px); --face-symbol:clamp(24px,20cqi,64px);
+  position:relative; display:flex; flex-direction:column; width:100%; height:100%; min-width:0; min-height:0;
+  overflow:hidden; border-radius:inherit; padding:var(--face-pad); background:var(--face-paper); color:var(--face-ink); text-align:left;
+  font-family:"Segoe UI Variable","Aptos","Segoe UI",ui-sans-serif,system-ui,sans-serif;
 }
-.card-face::after {
-  content: "";
-  position: absolute;
-  inset: 2px;
-  border: 1px solid color-mix(in srgb, var(--card-metal) 23%, transparent);
-  border-radius: 3px;
-  pointer-events: none;
-}
-.card-face-corner {
-  position: absolute;
-  top: 9px;
-  left: 9px;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border: 1px solid color-mix(in srgb, var(--card-metal) 70%, #fff5);
-  border-radius: 50%;
-  background: var(--card-paper);
-  color: var(--ink-soft);
-  box-shadow: 0 1px 3px #17292424;
-}
-.card-face-corner > .catalog-asset-icon { --catalog-icon-size: 10px; }
-.card-face-corner > svg, .card-face-corner > img { width: 10px; height: 10px; }
-.card-face-art {
-  position: relative;
-  display: grid;
-  place-items: center;
-  flex: 1;
-  min-height: 48px;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--card-print) 50%, transparent);
-  border-radius: 3px 3px 12px 12px;
-  background:
-    radial-gradient(ellipse at 50% 37%, color-mix(in srgb, var(--collection-color, #78967b) 38%, #f8ecd2) 0%, transparent 62%),
-    radial-gradient(ellipse at 50% 100%, #182f414a, transparent 74%),
-    linear-gradient(180deg, color-mix(in srgb, var(--card-print) 76%, #e3d9be), var(--card-print));
-  box-shadow: inset 0 0 0 2px #f9eccc20, inset 0 0 14px #18292521;
-  color: #fff4da;
-}
-/* The crest and foliage are engraved in the print, not a moving light texture. */
-.card-face-engraving { position: absolute; inset: 0; pointer-events: none; color: #fff1c5; opacity: .5; }
-.card-face-engraving > svg { width: 100%; height: 100%; stroke: currentColor; stroke-width: .85; }
-.card-face-engraving .card-face-arch { opacity: .65; }
-.card-face-engraving .card-face-gem { fill: currentColor; stroke: none; }
-.card-face-art::before {
-  content: "";
-  grid-area: 1 / 1;
-  width: 42%;
-  max-width: 78px;
-  aspect-ratio: 1;
-  border: 1px solid #f7e6aeaa;
-  border-radius: 50%;
-  background: radial-gradient(circle at 40% 20%, color-mix(in srgb, var(--card-print) 75%, #f7e1a6), color-mix(in srgb, var(--card-print) 85%, #162b2b));
-  box-shadow: 0 0 0 3px #172c2b24, 0 0 0 4px #f8e7bc5c, 0 5px 9px #122d3633, inset 0 1px 1px #fff6db55;
-}
-.card-face-art > .catalog-asset-icon { --catalog-icon-size: 32px; }
-.card-face-art > svg, .card-face-art > img, .card-face-art > .catalog-asset-icon {
-  grid-area: 1 / 1;
-  /* Keep the embossed symbol legible above the transparent finish plates. */
-  z-index: 2;
-  width: 32px;
-  height: 32px;
-  filter: drop-shadow(0 1px 1px #17292466);
-}
-.card-face-copy {
-  position: relative;
-  display: grid;
-  gap: 5px;
-  flex: 0 0 auto;
-  min-width: 0;
-  margin-top: 5px;
-  padding: 5px 3px 3px;
-  border-top: 1px solid color-mix(in srgb, var(--card-metal) 55%, transparent);
-  background: var(--card-paper);
-  text-align: center;
-}
-.card-face-copy::before { content: ""; position: absolute; top: -2px; left: calc(50% - 9px); width: 18px; height: 3px; border-inline: 4px solid var(--card-paper); background: var(--card-metal); }
-.card-face-copy strong { font-size: 14px; font-weight: 650; line-height: 1.25; letter-spacing: .015em; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.card-face-copy small { font-size: 10px; line-height: 1.5; color: var(--ink-soft); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-
-.card-stock.card-stock--compact { display: flex; flex-direction: column; padding: 4px; box-shadow: inset 0 1px 0 var(--highlight), 0 5px 12px var(--shadow); }
-.card-stock--compact .card-face { gap: 0; padding: 3px; }
-.card-stock--compact .card-face-corner { top: 6px; left: 6px; width: 14px; height: 14px; }
-.card-stock--compact .card-face-corner > .catalog-asset-icon { --catalog-icon-size: 8px; }
-.card-stock--compact .card-face-corner > svg, .card-stock--compact .card-face-corner > img { width: 8px; height: 8px; }
-.card-stock--compact .card-face-art { min-height: 27px; border-radius: 2px 2px 8px 8px; }
-.card-stock--compact .card-face-art > .catalog-asset-icon { --catalog-icon-size: 22px; }
-.card-stock--compact .card-face-art > svg, .card-stock--compact .card-face-art > img { width: 22px; height: 22px; }
-.card-stock--compact .card-face-copy { gap: 2px; margin-top: 4px; padding: 4px 1px 2px; }
-.card-stock--compact .card-face-copy strong { font-size: 10px; }
-.card-stock--compact .card-face-copy small { font-size: 8px; -webkit-line-clamp: 1; }
+.card-face::before { content:""; position:absolute; inset:0; pointer-events:none; opacity:calc(var(--stock-grain,.32)*.17);
+  background-image:repeating-linear-gradient(13deg,#4d483e44 0 .5px,transparent .5px 3px),repeating-linear-gradient(97deg,#fff8 0 .5px,transparent .5px 4px); }
+.card-face[data-tone="midnight"] { --face-accent:#667b91; }
+.card-face[data-tone="sand"] { --face-accent:#a47e50; }
+.card-face[data-tone="sky"] { --face-accent:#5b8593; }
+.card-face[data-tone="rose"] { --face-accent:#a57077; }
+.card-face[data-tone="stone"] { --face-accent:#7b8273; }
+.card-face-edition { position:relative; display:flex; align-items:center; justify-content:space-between; gap:8px; flex:none;
+  margin-bottom:clamp(8px,4cqi,14px); background:var(--face-paper); font-size:clamp(6px,3.2cqi,9px); line-height:1.1; letter-spacing:.13em; text-transform:uppercase; }
+.card-face-edition b { font-size:1.25em; font-weight:750; letter-spacing:.05em; }
+.card-face-edition > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.card-face-art { position:relative; display:flex; align-items:center; justify-content:center; flex:1 1 0; min-height:0;
+  border:1px solid color-mix(in srgb,var(--face-accent) 45%,var(--face-paper)); border-radius:2px;
+  background:color-mix(in srgb,var(--face-accent) 16%,var(--face-paper)); color:var(--face-accent); }
+.card-print-art { position:absolute; inset:0; pointer-events:none; overflow:hidden; color:var(--face-accent,#687e68); }
+.card-print-art > svg { display:block; width:100%; height:100%; opacity:calc(.2 + var(--print-density,.38)*.6); }
+.card-print-field { fill:currentColor; opacity:.18; }
+.card-print-rail { position:absolute; top:7%; left:7%; right:7%; height:1px; background:currentColor; opacity:.65; }
+.card-print-rail.is-bottom { top:auto; bottom:7%; }
+.card-face-symbol { position:relative; display:grid; place-items:center; flex:none; width:clamp(38px,34cqi,110px); aspect-ratio:1;
+  border:1px solid color-mix(in srgb,var(--face-accent) 55%,var(--face-paper)); border-radius:50%;
+  color:var(--face-ink); background:var(--face-paper); box-shadow:0 0 0 5px color-mix(in srgb,var(--face-paper) 75%,transparent); }
+.card-face-symbol > svg,.card-face-symbol > img { width:var(--face-symbol); height:var(--face-symbol); object-fit:contain; }
+.card-face-symbol > svg { stroke-width:1.35; }
+.card-face-symbol > .catalog-asset-icon { --catalog-icon-size:var(--face-symbol); }
+.card-face-copy { position:relative; display:flex; flex-direction:column; flex:0 0 auto; gap:clamp(5px,2.5cqi,9px);
+  min-width:0; padding-top:clamp(10px,5cqi,18px); background:var(--face-paper); }
+.card-face-copy strong { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere;
+  font-size:clamp(12px,8cqi,25px); font-weight:650; letter-spacing:-.03em; line-height:1.18; }
+.card-face-copy small { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere;
+  font-size:clamp(10px,4.6cqi,14px); line-height:1.6; color:var(--face-muted); }
+.card-face-detail { display:flex; align-items:center; gap:6px; border-top:1px solid color-mix(in srgb,var(--face-accent) 28%,var(--face-paper));
+  padding-top:clamp(7px,3cqi,12px); margin-top:clamp(3px,2cqi,8px); font-size:clamp(5px,2.6cqi,8px); line-height:1.3; letter-spacing:.08em; color:var(--face-muted); }
+.card-face-detail i { width:4px; height:4px; background:var(--face-accent); }
+.card-face-detail > span { margin-left:auto; white-space:nowrap; }
+.card-face-badge { position:absolute; top:calc(var(--face-pad) + clamp(18px,8cqi,28px)); right:calc(var(--face-pad) + 8px); z-index:4;
+  max-width:55%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-radius:2px; padding:4px 6px;
+  background:var(--face-paper); color:var(--face-ink); border:1px solid var(--stock-edge,#d3ccbc);
+  font-size:clamp(7px,3cqi,10px); line-height:1.2; letter-spacing:.04em; }
+.card-face-art.has-image { display:block; overflow:hidden; }
+.card-face-image { display:block; position:relative; width:100%; height:100%; object-fit:cover; }
+.card-face--image .card-print-art { z-index:1; }
+.card-face--image .card-print-art > svg { display:none; }
+.card-face--image .card-print-rail { background:var(--face-paper); }
+.card-face--text .card-face-art { flex-basis:24%; align-items:center; justify-content:flex-start; padding:12px; }
+.card-face--text .card-face-symbol { width:clamp(28px,20cqi,60px); --face-symbol:clamp(18px,12cqi,34px); }
+.card-face--text .card-face-copy small { -webkit-line-clamp:3; }
+.card-face--compact .card-face-copy { text-align:center; align-items:center; }
+.card-face--compact .card-face-detail { width:100%; }
+.card-face--compact .card-face-copy small { -webkit-line-clamp:1; }
+.card-face.card-face--dark { --face-paper:#233332; --face-ink:#edf0e4; --face-muted:#b7c5b9; --face-accent:#9eb2a6; }
+.card-stock--compact .card-face { --face-pad:7px; --face-symbol:22px; }
+.card-stock--compact .card-face-edition { font-size:5px; margin-bottom:5px; }
+.card-stock--compact .card-face-symbol { width:30px; box-shadow:none; }
+.card-stock--compact .card-face-copy { padding-top:7px; gap:0; }
+.card-stock--compact .card-face-copy strong { font-size:10px; line-height:1.15; }
+.card-stock--compact .card-face-copy small,.card-stock--compact .card-face-detail,.card-stock--compact .card-face-badge { display:none; }
+@media(max-height:650px) { .card-stock--compact .card-face-edition { display:none; } .card-stock--compact .card-face-symbol { width:25px; --face-symbol:18px; } }

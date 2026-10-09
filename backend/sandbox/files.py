@@ -48,11 +48,18 @@ def parts(relative):
 
 
 @contextmanager
-def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlink=False, runtime_pinned_root=None):
+def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlink=False, runtime_pinned_root=None, create_parents_from=None):
     """Yield an fd; all ancestors remain pinned until it closes."""
     path = Path(path)
     if not path.is_absolute():
         raise SandboxSecurityError("File root is not absolute")
+    parent_root = Path(create_parents_from) if create_parents_from is not None else None
+    if parent_root is not None and (not write or not parent_root.is_absolute() or not path.is_relative_to(parent_root)):
+        raise SandboxSecurityError("Parent creation requires a write inside an authorized root")
+
+    def may_create(current, last):
+        return parent_root is not None and not last and current != parent_root and current.is_relative_to(parent_root)
+
     with ExitStack() as stack:
         if os.name == "nt":
             import ctypes
@@ -75,6 +82,13 @@ def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlin
                 sequence.append(current)
             for index, current in enumerate(sequence):
                 last = index == len(sequence) - 1
+                if may_create(current, last):
+                    # All ancestors are already pinned against replacement.
+                    # Open and validate even after EEXIST; never follow a junction.
+                    try:
+                        current.mkdir()
+                    except FileExistsError:
+                        pass
                 # Share read/write but deny delete/rename, including ancestors.
                 # The Windows backend already pins a running external root with
                 # MAXIMUM_ALLOWED (including DELETE) and denies delete sharing.
@@ -105,8 +119,15 @@ def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlin
         else:
             fd = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             stack.callback(os.close, fd)
+            current = Path(path.anchor)
             for index, part in enumerate(path.parts[1:]):
                 last = index == len(path.parts) - 2
+                current /= part
+                if may_create(current, last):
+                    try:
+                        os.mkdir(part, 0o700, dir_fd=fd)
+                    except FileExistsError:
+                        pass
                 flags = os.O_NOFOLLOW | os.O_NONBLOCK
                 flags |= (os.O_WRONLY | os.O_CREAT | (os.O_EXCL if exclusive else 0)) if last and write else os.O_RDONLY
                 if not last or directory:
@@ -119,7 +140,29 @@ def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlin
         yield fd
 
 
-def operate(root: Path, relative: str, operation: str, *, read_only=False, data=None, overwrite=False, allow_hardlink=False, runtime_pinned_root=None):
+def operate(root: Path, relative: str, operation: str, *, read_only=False, data=None, overwrite=False, allow_hardlink=False, runtime_pinned_root=None, create_parents=False):
+    """Normalize write failures before crossing runtime transports."""
+    if operation != "write":
+        return _operate(root, relative, operation, read_only=read_only, data=data,
+                        overwrite=overwrite, allow_hardlink=allow_hardlink,
+                        runtime_pinned_root=runtime_pinned_root, create_parents=create_parents)
+    try:
+        return _operate(root, relative, operation, read_only=read_only, data=data,
+                        overwrite=overwrite, allow_hardlink=allow_hardlink,
+                        runtime_pinned_root=runtime_pinned_root, create_parents=create_parents)
+    except FileNotFoundError as exc:
+        hint = ("Check that the Sandbox workspace is still available, then retry." if create_parents else
+                "Create the destination parent directory in this Sandbox workspace before copying, then retry.")
+        raise SandboxValidationError(f"Sandbox path {relative!r} does not exist. {hint}") from exc
+    except FileExistsError as exc:
+        raise SandboxValidationError(f"Sandbox path {relative!r} already exists. Choose another destination or explicitly enable overwrite.") from exc
+    except (NotADirectoryError, IsADirectoryError) as exc:
+        raise SandboxValidationError(f"Sandbox path {relative!r} has the wrong file/directory type. Check the path and its parent directories.") from exc
+    except PermissionError as exc:
+        raise SandboxValidationError(f"Access to Sandbox path {relative!r} was denied. Choose an accessible path within the authorized root.") from exc
+
+
+def _operate(root: Path, relative: str, operation: str, *, read_only=False, data=None, overwrite=False, allow_hardlink=False, runtime_pinned_root=None, create_parents=False):
     target = root.joinpath(*parts(relative))
     if operation == "write" and read_only:
         raise SandboxSecurityError("This root is read-only")
@@ -130,7 +173,8 @@ def operate(root: Path, relative: str, operation: str, *, read_only=False, data=
         if len(content) > DOWNLOAD_LIMIT:
             raise SandboxValidationError("File exceeds 16 MiB copy limit")
     with pinned(target, directory=operation == "list", write=operation == "write", exclusive=not overwrite,
-                allow_hardlink=allow_hardlink, runtime_pinned_root=runtime_pinned_root) as fd:
+                allow_hardlink=allow_hardlink, runtime_pinned_root=runtime_pinned_root,
+                create_parents_from=root if create_parents and operation == "write" else None) as fd:
         if operation == "list":
             entries = []
             # Windows cannot scandir(fd), but its entire path is pinned above.

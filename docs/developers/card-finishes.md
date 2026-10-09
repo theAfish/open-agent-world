@@ -12,38 +12,141 @@ Placement through `/card-library/nodes` copies the owned finish to the new `Card
 
 ## Material rendering
 
-`frontend/src/cards/CardFinishLayer.tsx` is a pointer-transparent, self-clipped decorative layer. A normal card creates no material DOM. The artwork stays in the existing renderer. Shared `CardStock` integrates Library and deck faces; workspace surfaces use the same layer. Library inspection enables the showcase material, while text-heavy inspectors and legion workspaces restrict decoration to their headers/tabs.
+The v1 surface engine is a layered, parameter-driven model. Material IDs do not appear in either optical kernel: a preset supplies weights to the same reflection, interference, diffraction, flake and clearcoat lobes.
 
-Expanded containers, equipped cards and shadow collections also use the shared layer on their existing chrome. The fallback positioning selector has zero specificity so it cannot override absolute headers or custom drag geometry.
+### Shared print stack
 
-- **Foil:** silver response, fine grain and a broad reflection with weak spectral color.
-- **Rainbow:** a saturated cyan, violet and magenta spectrum, a clear reflection and microtexture.
-- **Starlight:** a smoked base and a fixed, non-tiling flake plate beneath a clear coat.
-- **Laser:** an engraved holographic relief and a directional diffraction highlight.
+The [card production model](card-design.md) owns the design; this engine renders its ordered process plates. Existing cards without `production.layers` retain the following legacy stack:
 
-`useCardFinish` measures once on pointer entry, normalizes local coordinates and coalesces CSS-variable updates into one requested frame. The studio light stays fixed at the upper left; surface orientation changes the broad reflection. Collectible `CardStock` faces opt into gentle perspective rotation, including ordinary and thumbnail cards. Canvas nodes keep their existing geometry. The hook never updates React state on pointer movement or writes the host transform, and cancels pending work on leave, scroll, resize, drag, finish change and unmount. Existing pack and deck movement is preserved.
+1. **Stock / substrate:** authored paper, grain and cut edge.
+2. **Printed artwork:** permanent DOM/SVG/illustration, visible without any surface process.
+3. **Selective finishing:** local UV gloss, metal stamping, emboss relief and edge foil.
+4. **Laminate / optical film:** an optional thin film above the finishing.
+5. **Protected top print:** titles, copy, symbols, labels and controls, composited above the optical passes. Transparent ink and intentionally uncoated backed labels have distinct semantics.
 
-Thumbnail materials omit grain. Idle cards have no JavaScript animation loop or permanent GPU promotion; only the hovered collectible queues a paint. Shared SVG print plates are generated once at module initialization. Higher quality materials activate their stronger reflection only during interaction. Pack illumination mounts after the face emerges and runs once. Touch input and reduced motion retain a static material and static revealed faces. Blend/mask fallbacks reduce decoration while retaining readable artwork.
+The two legacy surface passes are evaluated separately, then composited film-over-finishing into one pointer-transparent canvas at z-index 3. Protected DOM ink remains at z-index 4. Continuous laminate is visible through its transparent surroundings; only an explicitly uncoated label or region cuts a hole in the surface passes. Workspace and inspector chrome stay matte.
 
-The shared collectible face uses an engraved crest, a framed emblem, double printed borders and a separate paper title plaque. Library collection and detail panes scroll independently inside the bounded dialog. The showcase card scales to available pane height; narrow screens place the selected detail above the collection.
+An explicit `production.layers` stack replaces those two aggregate passes. Each entry renders an independent masked plate in array order; repeats are supported. A laminate can precede emboss, foil, ink or UV, and later plates composite over earlier ones. An empty array renders no processes. Legacy base artwork stays below the stack. With `print.layered: true`, authored ink content joins that stack through `InkPrintLayer`, so text, shapes, illustrations and live fields can print before or after any coating. Exact coverage controls which regions receive each explicit process; unlike legacy masking, it does not automatically exclude text or controls. This is a visual approximation of authored process order, not a simulation of adhesive chemistry or physical manufacturing feasibility.
 
-## Development preview
+Normal is a complete uncoated design with zero tooling and film energy. Its canvas is elided outside debug/proof views. Film alpha is capped at 0.32, including clearcoat and flakes, in both kernels. Default holo/aurora recipes are substantially below that ceiling. Metal may be opaque locally, but only inside its tooling mask.
 
-Run the frontend dev server and open `/?card-finishes`, or open **DEV · F3 → Card finish preview** in a development profile. The standalone gallery works without a backend. It includes every finish, dark/bright stock, a one-shot reveal and a 200-thumbnail mode. It changes no collection data or probabilities. The route and tools are excluded from production builds.
+### Schema and presets
+
+`cards/cardMaterial.ts` owns `CardMaterial`, schema version 1, bounds, presets and environment normalization. `configureMaterial` merges partial groups without mutating presets, clamps values and rejects nonfinite inputs. Protection is not a user-tunable weight.
+
+| Group | Parameters | Responsibility |
+| --- | --- | --- |
+| laminate | opacity, roughness, metalness | Film energy and neutral metallic reflection |
+| response | specular, iridescence, diffraction, sparkle | Weights of the shared optical lobes |
+| pattern | scale, brush, domains, flow, grooves | Anchored surface structure / thickness |
+| clearcoat | strength | Achromatic area-light highlight |
+| mask | artwork, frame, accent | Coating weights, applied before mandatory protection |
+
+Low-level optical descriptors retain six canonical IDs: `normal / foil / holo / aurora / laser / starlight`. Production recipes expose four representative MVP treatments:
+
+- **Normal:** uncoated print, zero film and clearcoat energy.
+- **Foil:** selective champagne-gold or silver tooling on printed accents and the cut edge; no optical film by default. The low-level legacy foil descriptor remains available to specialist callers.
+- **Holo:** embossed domains with angular diffraction and spectral separation.
+- **Aurora:** continuous warped thickness with broad interference colour travel.
+- **Laser / starlight:** extension presets using the same groove and flake parameters; no separate rendering branches. Shared clearcoat can remain visible outside the laser diffraction window.
+
+Storage remains independent: existing `CardFinish` IDs and reward probabilities are unchanged. `materialForFinish('rainbow')` maps to `aurora` to preserve the old flowing-film identity. Holo is a distinct laminate, selectable in the production editor; this change does not add new inventory rewards.
+
+### Light, view and optical evaluation
+
+`CardMaterialOptions.pose` controls the card-local view independently from `environment.light`, `intensity` and `ambient`. Both tooling and film share the view and light. The renderer resolves a view vector, light vector and half vector once conceptually for all lobes, using the actual surface aspect ratio. Surface fields remain anchored to print coordinates; changing the pose changes reflected energy and optical phase. There is no time uniform or random animation state.
+
+`cardMaterialShader.ts` is the shared GLSL evaluator. `cardMaterialOptics.ts` is its pure CPU reference. They use the same parameter contract and equations; GPU precision, flake hashes and raster resolution can differ. This is a physically inspired RGB approximation, not a calibrated spectral/PBR simulation or an environment-map renderer. The existing DOM artwork supplies the base colour; the renderer supplies selective tooling and the bounded optical overlay. Emboss is a mask-gradient lighting approximation; it does not displace geometry.
+
+### Mask contract
+
+`MaterialMask` contains two immutable, opaque canvases:
+
+- `regions`: R = artwork, G = frame, B = accent. Channels can overlap.
+- `protection`: white = protected, black = available for coating.
+
+Both renderers apply this film coverage:
+
+```text
+coverage = max(artwork * weight, frame * weight, accent * weight)
+         * (1 - protection)
+```
+
+Stamping follows B (accent) or R (artwork), edge foil follows G (frame), and spot UV follows R. Emboss derives a local relief gradient from the selected tooling region. Every finishing contribution is multiplied by mandatory protection before compositing.
+
+Separate textures preserve RGB values independently from alpha premultiplication. Protection always wins, regardless of draw order, preset or parameter overrides.
+
+New layouts declare `data-material-region="artwork|frame|accent"` and distinguish two kinds of protected print:
+
+- `data-material-layer="top-print"`: transparent foreground ink at z-index 4. It does **not** exclude laminate from its bounding rectangle. Use it for titles, copy, icons and metadata printed over a continuous coated board. Controls inside this layer inherit its compositing policy.
+- `data-material-layer="protected"` (or legacy region `text|icon|background`): an intentional uncoated label/panel, including its backing. Its rectangle and antialias padding exclude both finishing passes. Use this only when the authored design calls for that cutout.
+
+`WorldCardPrint` gives full, mid and far canvas cards a complete artwork plane and a shared printed accent rule. Header/body wrappers must not create a stacking context above the film; only top-print information does. Built-in image previews remain below it. Unknown plugin previews default to protected information widgets; authored factory art supplies its own layer contract. Workspace and inspector chrome stay matte. Legacy selectors for explicitly backed collectible/factory layouts remain confined to the DOM-mask adapter. Nested card surfaces own their masks and are excluded from the parent's coating.
+
+The adapter measures untransformed layout coordinates, so outer card tilt, dragging and canvas zoom do not move the masks relative to print. Resize, content, role, class and child style changes invalidate masks; pose-only CSS writes on the host do not. Arbitrarily transformed inner artwork or text is outside this rectangular DOM adapter's MVP contract; a custom renderer caller can supply authored mask canvases.
+
+### Integration
+
+Existing callers can continue to pass `finish`. The adapter resolves it to production intent. New card authoring supplies an explicit recipe:
+
+```tsx
+const production = productionForFinish('foil');
+production.laminate = { type: 'holo', strength: 0.45, roughness: 0.38 };
+
+<CardStock size="standard" materialOptions={{ production }}>
+  <CardFace icon={<MyIcon />} label="Protected title"
+    description="Protected information" artwork={<MyArtwork />} />
+</CardStock>
+```
+
+`cardProduction.ts` separates production intent from optical parameters. `compileProduction` outputs the legacy normalized finishing pass plus a `CardMaterial`. `compileProductionLayer` outputs one independent optical plate; the process renderer supplies its coverage, colour and relief direction. A zero film strength extinguishes all film lobes, including flakes. Direct `material` overrides remain available for optical diagnostics; they do not replace production presets in the normal editor.
+
+Explicit masks select all card pixels, text glyphs, shapes, artwork, legacy accents/frame regions, specific element IDs, a classic pattern, or a bounded embedded PNG. PNG coverage follows alpha or luminance, can be inverted, and defaults to aspect-preserving containment (`cover` and `stretch` are explicit alternatives). Every mask is clipped to the authored card silhouette. Reordering modifies composition without rewriting any element geometry or the mask payload.
+
+Create a material by adding preset data. Add a new optical primitive only if the schema needs a genuinely new response; implement it in both reference kernels and validate its masked output. Do not add a finish-ID branch, full-card CSS filter or independent per-preset animation.
+
+### Rendering lifecycle and fallback
+
+One offscreen WebGL context serves all visible cards via 2D snapshots. The renderer resolves inputs, uploads region/protection masks, binds shared uniforms, evaluates tooling and optical lobes, applies their masks and composites below DOM print. Rasters are capped at 640 x 800 for standard/showcase and 256 x 320 for thumbnails.
+
+Pointer input is coalesced and finite interpolation stops when settled. Offscreen work stops; unmount releases observers, listeners and pending callbacks. Production has no autonomous animation. Touch and reduced-motion input retain a static finish. A controlled pose disables pointer tilt.
+
+When WebGL is unavailable or lost, expensive optical fields are evaluated at a bounded 192 x 240 resolution. The fallback then applies finishing masks, emboss gradients and mandatory exclusion at the original canvas resolution. This preserves thin tooling lines and prevents colour leaking into protected print. Optical micro-detail and floating-point precision can differ from the GPU. GPU restoration is used on the next render request. HMR disposes shared GPU resources.
+
+## Development inspector
+
+Run Vite and open `/?card-materials`. No backend is required. The page changes no collection data.
+
+- Four representative presets with identical artwork, light, view and mask semantics.
+- Independent view X/Y and studio-light X/Y.
+- Composite, uncoated print, selective finishing, optical film, region, protection and film-coverage views.
+- Shared production controls for stock, printed pattern, finishing and laminate; preset reset and resolved JSON.
+- Renderer/settled markers and a forced CPU fallback.
+- Light/dark surroundings, thumbnails, pointer interaction and optional laser/starlight extension presets.
+
+The existing `/?card-finishes` gallery remains a compatibility and performance harness for saved IDs, layer comparisons, opt-in development sweeps and 200 passive thumbnails. It links to the inspector.
 
 ## Validation
 
-- `backend/tests/test_card_finishes.py`: deterministic weight boundaries, invalid distributions, exactly one sample per roll, new entry assignment, overlap/reopen/stale requests, legacy defaults, SQLite restart, deck moves, placement, duplication, legion capture, restore and deployed workspace persistence.
-- `frontend/src/cards/cardFinish.test.ts`, `CardFinishLayer.test.tsx`: compatibility, stable rendering, pointer coalescing, cleanup, interaction pass-through, reduced motion and 200 passive materials.
-- `frontend/src/api/client.test.ts`: API load/create/restore preservation.
-- Library, pack, world card and `NodeWorkspace.finish.test.tsx` component tests cover stored finish propagation, stale parent snapshots, reveal timing and legacy cards.
-- `ContainerFinishes.test.tsx` covers expanded containers, equipment and shadow collections. The Library browser scenario checks placement, undo/redo and reload against the saved finish, plus three viewport sizes.
-- `frontend/e2e/card-finishes.spec.ts`: real browser light/dark inspection, pointer response, reduced motion and idle performance for 200 cards. Screenshots are diagnostic artifacts, not pixel assertions.
-- `frontend/e2e/library-preview-layout.spec.ts`: showcase/thumbnail tilt, full preview visibility and independent scrolling at desktop, narrow and mobile sizes, including long descriptions and a full collection.
+- `cardMaterial.test.ts`: schema bounds, immutable presets, storage compatibility, zero-energy normal, finite and deterministic evaluation, continuous view response and independent lighting.
+- `card-materials.spec.ts`: four-preset WebGL integration, one GPU context, pixel-stable top print, independent masks, role/style invalidation, responsive fallback and editable parameters.
+- `card-finishes.spec.ts`: retained collection-surface tests, legacy IDs, hand/world/LOD layouts, drag and zoom, matte chrome, reduced motion, fallback and 200 passive cards with zero idle animation callbacks.
+- `cardProduction.test.ts` and `productionPresets.test.ts` cover independent passes, zero film strength and persistent recipes; `card-production.spec.ts` covers the seven-stage editor and mobile layout.
+- `card-world-materials.spec.ts`: real React Flow cards in GPU and CPU modes, continuous coating through title/body spacing, stable solid ink pixels, coated images, selective foil rules, light/dark themes, LOD and collapse.
+- Existing card, Library, pack and factory unit tests continue to cover ownership and surface integration. Backend ownership and probability logic are unchanged.
 
-Run `npm.cmd test -- --maxWorkers=2 --minWorkers=1` and `npm.cmd run build` in `frontend`, and `backend/.venv/Scripts/python.exe -m pytest backend/tests/test_card_finishes.py` from the repository root. The repository currently has no configured formatter; retain surrounding conventions and check whitespace with `git diff --check`.
+Run from `frontend`:
 
-For browser material checks, start Vite, set `OAW_E2E_BASE_URL` to its local URL and run `node node_modules/@playwright/test/cli.js test e2e/card-finishes.spec.ts`. The existing `run-e2e.mjs` harness starts an isolated backend for Library integration checks.
+```powershell
+npm.cmd test -- --maxWorkers=2 --minWorkers=1
+npm.cmd run build
+# In another terminal, start npm.cmd run dev and use its URL:
+$env:OAW_E2E_BASE_URL='http://127.0.0.1:5173'
+$env:PLAYWRIGHT_CHANNEL='msedge' # or installed Chrome
+npx.cmd playwright test e2e/card-production.spec.ts e2e/card-materials.spec.ts e2e/card-finishes.spec.ts e2e/card-design.spec.ts e2e/card-world-materials.spec.ts
+```
+
+Browser screenshots and numeric assertions check invariants rather than fixing artistic brightness or sparkle counts to a single preset revision.
 
 ## Main implementation files
 

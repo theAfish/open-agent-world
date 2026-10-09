@@ -1,0 +1,11 @@
+.card-production-preview { height:100dvh; overflow:auto; min-height:0; padding:30px 40px; background:#e8eae3; color:#2c4038; font:13px/1.6 system-ui,sans-serif; }
+.card-production-preview > header { display:flex; justify-content:space-between; align-items:center; gap:28px; padding:0 0 25px; }
+.card-production-preview h1 { font-size:30px; font-weight:500; letter-spacing:-.035em; margin:8px 0; line-height:1.2; }
+.card-production-preview > header small { letter-spacing:.16em; font-size:9px; color:#6c7d70; }
+.card-production-preview p { color:#6c7d70; margin:8px 0 0; font-size:12px; }
+.card-production-preview > header nav { display:flex; gap:18px; font-size:11px; }
+.card-production-preview a { color:inherit; }
+.card-production-preview > .factory-face-editor { height:calc(100vh - 220px); min-height:600px; max-height:960px; border:1px solid #c7d0c4; border-radius:10px; container-type:inline-size; }
+.card-production-preview > details { margin-top:20px; font-size:11px; }
+.card-production-preview pre { max-height:400px; overflow:auto; }
+@media(max-width:700px) { .card-production-preview { padding:18px 12px; } .card-production-preview > header { display:block; } .card-production-preview h1 { font-size:24px; } .card-production-preview > header nav { margin-top:15px; } .card-production-preview > .factory-face-editor { height:calc(100dvh - 180px); min-height:640px; } }

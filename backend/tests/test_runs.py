@@ -90,7 +90,14 @@ class RecordingProvider(RuntimeProvider):
                     ),
                 ),
             )[0]
-            await tool()
+            yield AgentEvent(context.agent_id, context.run_id, AgentEventType.TOOL_STARTED,
+                             {"name": "buggy_tool", "call_id": "test-bug"})
+            self.tool_feedback = await tool()
+            yield AgentEvent(context.agent_id, context.run_id, AgentEventType.TOOL_COMPLETED,
+                             {"name": "buggy_tool", "call_id": "test-bug",
+                              "response": self.tool_feedback, "success": False})
+            self.tool_started.set()
+            await self.continue_tool.wait()
         if self.mode == "tool":
             yield AgentEvent(
                 context.agent_id,
@@ -114,7 +121,7 @@ class RecordingProvider(RuntimeProvider):
         )
         if self.mode == "waiting":
             await self.release_turn.wait()
-        if self.mode in {"success", "tool"}:
+        if self.mode in {"success", "tool", "tool_failure"}:
             yield AgentEvent(
                 context.agent_id,
                 context.run_id,
@@ -627,7 +634,7 @@ async def test_failure_is_run_local_and_concurrency_is_explicit(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-async def test_unexpected_tool_exception_fails_the_run(tmp_path: Path) -> None:
+async def test_unexpected_tool_exception_is_feedback_and_run_can_continue(tmp_path: Path) -> None:
     provider = RecordingProvider(mode="tool_failure")
     services = _services(tmp_path, provider)
     try:
@@ -635,10 +642,21 @@ async def test_unexpected_tool_exception_fails_the_run(tmp_path: Path) -> None:
         manager = services._require_run_manager()
 
         started = await manager.start_run(agent.id, "exercise tool")
-        failed = await manager.wait_terminal(started.run_id)
+        await asyncio.wait_for(provider.tool_started.wait(), timeout=2)
+        assert provider.tool_feedback["ok"] is False
+        assert provider.tool_feedback["error"]["code"] == "tool_execution_error"
+        assert "plugin implementation bug" not in str(provider.tool_feedback)
+        assert manager.get_run(started.run_id).status is RunStatus.RUNNING
+        assert manager.holds_agent_slot(started.run_id)
+        assert manager.get_run(started.run_id).lifecycle["active_tools"] == 0
 
-        assert failed.status is RunStatus.FAILED
-        assert failed.error == "plugin implementation bug"
+        provider.continue_tool.set()
+        completed = await asyncio.wait_for(manager.wait_terminal(started.run_id), timeout=2)
+        await manager.wait_execution(started.run_id)
+        assert completed.status is RunStatus.SUCCEEDED
+        assert completed.error is None
+        assert manager.final_text(started.run_id) == "exercise tool"
+        assert not manager.holds_agent_slot(started.run_id)
     finally:
         services.close()
 

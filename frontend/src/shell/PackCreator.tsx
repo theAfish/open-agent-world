@@ -4,6 +4,7 @@ import { apiErrorMessage, worldApi } from '../api/client';
 import { t } from '../i18n';
 import type { LegionSummary } from '../types/world';
 import type { CreatorInspection, CreatorMetadata, CreatorRequest } from '../types/packs';
+import { PACK_DESIGNS, PACK_PACKAGING, packPackaging } from './packDesign';
 import './packCreator.css';
 
 export function PackGuide({ creator }: { creator?: CreatorMetadata | null }) {
@@ -54,6 +55,9 @@ export function PackCreator({ legion }: { legion: LegionSummary }) {
         <label>{t('Pack name')}<input required maxLength={120} value={draft.name} onChange={event => change({ name: event.target.value })} /></label>
         <div className="pack-creator-row"><label>{t('Version')}<input required maxLength={64} value={draft.version} onChange={event => change({ version: event.target.value })} /></label>
           <label>{t('Accent color')}<input type="color" value={draft.creator.accent_color} onChange={event => metadata('accent_color', event.target.value)} /></label></div>
+        <label>{t('Pack packaging')}<select value={draft.creator.packaging ?? 'standard'} onChange={event => change({ creator: { ...draft.creator, packaging: packPackaging(event.target.value) } })}>
+          {PACK_PACKAGING.map(value => <option key={value} value={value}>{t(PACK_DESIGNS[value].label)}</option>)}
+        </select></label>
         <label>{t('Author (self-declared)')}<input maxLength={120} value={draft.creator.author} onChange={event => metadata('author', event.target.value)} /></label>
         <label>{t('Description')}<textarea maxLength={500} rows={2} value={draft.creator.description} onChange={event => metadata('description', event.target.value)} /></label>
         <details><summary>{t('First-use guide')}</summary>

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CardFinishLayer, type CardFinishQuality } from "./CardFinishLayer";
 import type { CardFinish } from "./cardFinish";
 import { useCardFinish } from "./useCardFinish";
+import { newProductionLayer, productionForFinish } from './cardProduction';
 
 let frames: Map<number, FrameRequestCallback>;
 let nextFrame: number;
@@ -51,6 +52,31 @@ function flush() {
 }
 
 describe("CardFinishLayer", () => {
+  it('composites repeated passes in authored order and explicit empty stacks suppress legacy finishing', () => {
+    const first = { ...newProductionLayer('foil'), id: 'foil-one' };
+    const film = { ...newProductionLayer('laminate'), id: 'film' };
+    const last = { ...newProductionLayer('foil'), id: 'foil-two' };
+    const production = { ...productionForFinish('foil'), layers: [first, film, last] };
+    const { container, rerender } = render(<CardFinishLayer production={production} />);
+    const ids = () => [...container.querySelectorAll('[data-process-layer]')].map(element => element.getAttribute('data-process-layer'));
+    expect(ids()).toEqual(['foil-one', 'film', 'foil-two']);
+    rerender(<CardFinishLayer production={{ ...production, layers: [last, film, first] }} />);
+    expect(ids()).toEqual(['foil-two', 'film', 'foil-one']);
+    rerender(<CardFinishLayer production={{ ...production, layers: [] }} />);
+    expect(container.querySelectorAll('canvas')).toHaveLength(0);
+  });
+
+  it('omits disabled passes and separates finishing and laminate proofs', () => {
+    const production = { ...productionForFinish(), layers: [newProductionLayer('foil'), newProductionLayer('laminate'),
+      { ...newProductionLayer('uv'), enabled: false }] };
+    const { container, rerender } = render(<CardFinishLayer production={production} debugView="finishing" />);
+    expect(container.querySelector('[data-process-kind]')?.getAttribute('data-process-kind')).toBe('foil');
+    expect(container.querySelectorAll('canvas')).toHaveLength(1);
+    rerender(<CardFinishLayer production={production} debugView="laminate" />);
+    expect(container.querySelector('[data-process-kind]')?.getAttribute('data-process-kind')).toBe('laminate');
+    rerender(<CardFinishLayer production={production} debugView="artwork" />);
+    expect(container.querySelectorAll('canvas')).toHaveLength(0);
+  });
   it("adds no overlay for legacy or normal cards and preserves the assigned plate on rerender", () => {
     const { container, rerender } = render(<CardFinishLayer />);
     expect(container.childElementCount).toBe(0);
@@ -69,12 +95,20 @@ describe("CardFinishLayer", () => {
     expect(schedule).not.toHaveBeenCalled();
   });
 
+  it("never mounts a material on application chrome", () => {
+    const { container } = render(<CardFinishLayer finish="rainbow" surface="chrome" />);
+    expect(container.childElementCount).toBe(0);
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
   it("coalesces pointer events, measures once, keeps the light fixed, and leaves host transforms alone", () => {
     const clicked = vi.fn();
     const { getByRole } = render(<Surface onClick={clicked} />);
     const node = getByRole("button");
     node.style.transform = "rotate(7deg)";
     const bounds = measure(node);
+    const light = vi.fn();
+    node.addEventListener('card-material-light', event => light((event as CustomEvent).detail));
     fireEvent.pointerEnter(node, { clientX: 110, clientY: 170 });
     fireEvent.pointerMove(node, { clientX: 200, clientY: 30 });
     fireEvent.pointerMove(node, { clientX: 410, clientY: -200 });
@@ -88,10 +122,12 @@ describe("CardFinishLayer", () => {
     expect(node.style.transform).toBe("rotate(7deg)");
     expect(bounds).toHaveBeenCalledTimes(1);
     expect(paints).toBe(1);
+    expect(light).toHaveBeenLastCalledWith({ x: 1, y: -1, active: true });
     expect(frames.size).toBe(0);
     fireEvent.click(node);
     expect(clicked).toHaveBeenCalledOnce();
     fireEvent.pointerLeave(node);
+    expect(light).toHaveBeenLastCalledWith({ x: 0, y: 0, active: false });
     expect(node.hasAttribute("data-finish-active")).toBe(false);
     expect(node.style.getPropertyValue("--pointer-x")).toBe("");
     expect(node.style.transform).toBe("rotate(7deg)");
@@ -170,18 +206,37 @@ describe("CardFinishLayer", () => {
     expect(frames.size).toBe(0);
   });
 
-  it("does not schedule work for hundreds of passive thumbnails or normal cards", () => {
+  it("resumes from a reset on pointer movement without requiring the cursor to leave", () => {
+    const { getByRole } = render(<Surface finish="rainbow" />);
+    const node = getByRole("button");
+    measure(node);
+    fireEvent.pointerEnter(node, { clientX: 90, clientY: 80 });
+    flush();
+    fireEvent.scroll(window);
+    expect(node.hasAttribute("data-finish-active")).toBe(false);
+    fireEvent.pointerMove(node, { clientX: 110, clientY: 110 });
+    flush();
+    expect(node.hasAttribute("data-finish-active")).toBe(true);
+    expect(frames.size).toBe(0);
+  });
+
+  it("does not schedule work for hundreds of passive thumbnails, then lights only the hovered card", () => {
     const { getAllByRole, container } = render(<>
       {Array.from({ length: 200 }, (_, index) => <Surface key={index} quality="thumbnail" finish="laser" />)}
       <Surface finish="normal" />
     </>);
-    getAllByRole("button").forEach(node => {
-      fireEvent.pointerEnter(node, { clientX: 40, clientY: 60 });
-      fireEvent.pointerMove(node, { clientX: 80, clientY: 90 });
-    });
-    expect(container.querySelectorAll(".card-finish-layer")).toHaveLength(200);
-    expect(container.querySelectorAll(".card-finish-grain")).toHaveLength(0);
+    expect(container.querySelectorAll(".card-material-canvas")).toHaveLength(200);
     expect(schedule).not.toHaveBeenCalled();
+    const nodes = getAllByRole("button");
+    const first = nodes[0];
+    measure(first);
+    fireEvent.pointerEnter(first, { clientX: 40, clientY: 60 });
+    fireEvent.pointerMove(first, { clientX: 80, clientY: 90 });
+    fireEvent.pointerEnter(nodes[200], { clientX: 40, clientY: 60 });
+    expect(schedule).toHaveBeenCalledTimes(1);
+    flush();
+    expect(first.hasAttribute("data-finish-active")).toBe(true);
+    expect(nodes[1].hasAttribute("data-finish-active")).toBe(false);
     expect(frames.size).toBe(0);
     expect(paints).toBe(201);
   });

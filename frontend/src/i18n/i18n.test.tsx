@@ -46,3 +46,9 @@ it('covers every tutorial message and keeps placeholders in both locales', () =>
     expect(tokens(pair[1]), key).toEqual(tokens(pair[0]));
   }
 });
+
+it('keeps the message catalog free of encoding replacement characters', () => {
+  for (const [key, pair] of Object.entries(messages)) {
+    for (const text of pair) expect(text, key).not.toMatch(/\?{2,}|\uFFFD/);
+  }
+});

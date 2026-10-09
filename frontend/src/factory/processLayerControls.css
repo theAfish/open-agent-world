@@ -1,0 +1,83 @@
+/* Process navigation stays in the horizontal production path. */
+.face-studio .face-step-rail { gap:12px; padding:12px 18px; overflow:visible; min-width:0; z-index:20; }
+.factory .face-studio .face-step-rail button { flex:none; border-radius:8px; padding:8px 12px; gap:9px; }
+.factory .face-studio .face-step-rail button::before { display:none; }
+.factory .face-studio .face-step-rail button[aria-current=step] { background:var(--studio-selected); }
+.factory .face-studio .face-step-rail button>span { width:auto; height:auto; border:0; background:transparent; box-shadow:none; color:inherit; }
+.factory .face-studio .face-step-rail .face-end-step { min-height:44px; }
+.face-step-rail .process-layer-list { display:flex; align-items:center; gap:8px; list-style:none; padding:3px 1px; margin:0; flex:1; min-width:0; overflow-x:auto; scrollbar-width:thin; scrollbar-color:var(--studio-line) transparent; }
+.process-layer-list>li { display:flex; align-items:center; gap:8px; flex:none; }
+.process-layer-list>li::before { content:''; width:12px; border-top:1px solid var(--studio-line); }
+.process-layer-list>li[data-enabled=false] { opacity:.5; }
+.factory .face-studio .process-layer-list .process-layer-select { border:1px solid var(--studio-line); text-align:left; min-width:94px; }
+.factory .face-studio .process-layer-list .process-layer-select[aria-pressed=true] { border-color:var(--studio-accent); }
+.factory .face-studio .face-step-rail .process-chip-label { display:grid; gap:2px; place-items:start; }
+.process-chip-label small { font-size:9px; font-variant-numeric:tabular-nums; }
+.process-chip-label b { font-size:12px; font-weight:500; }
+.factory .face-studio .process-layer-swatch, .factory .face-studio .face-step-rail .process-layer-swatch { flex:none; display:block; width:23px; height:29px; border-radius:4px; border:1px solid #6b756c30; background:var(--process-color); }
+.factory .face-studio .process-layer-swatch[data-kind=foil] { background:linear-gradient(135deg,var(--process-color),#fff0c9 47%,var(--process-color) 65%); }
+.factory .face-studio .process-layer-swatch[data-kind=emboss] { background:linear-gradient(135deg,#d8d8cd,#f0f0e8); box-shadow:inset 2px 2px 3px #9b998d60; }
+.factory .face-studio .process-layer-swatch[data-kind=uv], .factory .face-studio .process-layer-swatch[data-kind=laminate] { background:linear-gradient(125deg,#cdd3cd,#fff 46%,#d3dbd3 70%); }
+.factory .face-studio .process-layer-swatch[data-kind=laminate]:not([data-film=gloss]) { background:linear-gradient(125deg,#a8cbd0,#d9bdcf 36%,#e6d8b2 65%,#a9c9b7); }
+.process-add-menu { position:relative; flex:none; }
+.process-add-menu summary { display:flex; align-items:center; gap:6px; min-height:38px; padding:0 10px; border:1px dashed var(--studio-line); border-radius:7px; font-size:11px; cursor:pointer; list-style:none; }
+.process-add-menu summary::-webkit-details-marker { display:none; }
+.process-add-menu[open] summary { background:var(--studio-selected); border-color:var(--studio-accent); }
+.process-add-menu>div { position:absolute; top:calc(100% + 8px); right:0; width:190px; display:grid; gap:3px; padding:8px; background:var(--studio-panel); border:1px solid var(--studio-line); border-radius:10px; box-shadow:0 8px 26px #243b2920; }
+.factory .face-studio .process-add-menu button { justify-content:flex-start; padding:8px; }
+.process-add-menu>div>small { padding:7px 5px 3px; }
+.process-controls, .process-inspector { display:grid; gap:14px; min-width:0; }
+.process-inspector-heading { display:flex; align-items:center; justify-content:space-between; }
+.process-inspector-heading h3 { font-size:17px; font-weight:500; margin:5px 0 0; }
+.process-layer-actions { display:flex; gap:4px; padding-bottom:12px; border-bottom:1px solid var(--studio-line); }
+.factory .face-studio .process-layer-actions button { min-height:27px; width:30px; padding:4px; color:var(--studio-muted); }
+.process-layer-actions button:last-child { margin-left:auto; }
+.process-inspector>label { display:grid; gap:6px; }
+.process-color>span { display:flex; align-items:center; gap:10px; }
+.factory .face-studio .process-color input[type=color] { width:32px; height:27px; padding:2px; }
+.process-color output { font-size:11px; color:var(--studio-muted); }
+.process-relief { display:flex; gap:7px; }
+.factory .face-studio .process-relief button { flex:1; border-color:var(--studio-line); }
+.process-elements-panel { display:grid; gap:8px; border-top:1px solid var(--studio-line); padding-top:17px; }
+.factory .face-studio .process-elements-panel>h4 { margin-bottom:4px; }
+.factory .face-studio .process-element-panel { border:1px solid var(--studio-line); border-radius:9px; padding:0; overflow:hidden; }
+.factory .face-studio .process-element-panel>summary { display:flex; align-items:center; gap:10px; padding:12px; margin:0; cursor:pointer; list-style:none; }
+.process-element-panel>summary::-webkit-details-marker { display:none; }
+.process-element-panel>summary>span { display:grid; gap:3px; flex:1; font-size:12px; }
+.process-element-panel>summary>svg:last-child { transition:transform 120ms; }
+.process-element-panel[open]>summary { background:var(--studio-selected); }
+.process-element-panel[open]>summary>svg:last-child { transform:rotate(180deg); }
+.process-element-options { display:grid; gap:2px; padding:5px; }
+.factory .face-studio .process-element-option { justify-content:space-between; text-align:left; padding:9px; gap:10px; }
+.process-element-option>span { display:grid; gap:3px; }
+.process-element-option b { font-weight:500; font-size:11px; }
+.factory .face-studio .process-element-option[data-added=true] { color:var(--studio-muted); opacity:.58; }
+.process-shape-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:4px; padding:12px 7px 5px; }
+.factory .face-studio .process-shape-options button { display:flex; flex-direction:column; gap:8px; font-size:10px; padding:10px 4px; }
+.factory .face-studio .process-fill-card { margin:3px 8px 10px; width:calc(100% - 16px); border-color:var(--studio-line); font-size:11px; }
+.factory .face-studio .process-image-upload { position:relative; display:flex; flex-direction:column; align-items:center; gap:7px; border:1px dashed var(--studio-line); border-radius:7px; padding:20px 8px; margin:10px; cursor:pointer; }
+.process-image-upload input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
+.process-image-upload:focus-within { outline:2px solid var(--studio-accent); }
+.process-patterns { display:grid; gap:12px; padding:6px 10px 12px; }
+.process-patterns>div { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+.factory .face-studio .process-patterns button { display:flex; flex-direction:column; padding:5px; gap:5px; border-color:var(--studio-line); }
+.process-patterns button>span { display:block; position:relative; width:100%; height:53px; overflow:hidden; border-radius:4px; background:var(--studio-workspace); }
+.process-patterns .card-print-art { width:100%; height:100%; }
+.process-owned-elements { display:grid; gap:4px; margin-top:12px; }
+.process-owned-elements>h4 { display:flex; justify-content:space-between; padding-bottom:7px; }
+.factory .face-studio .process-owned-elements>button { justify-content:flex-start; gap:8px; padding:7px 9px; font-size:11px; }
+.process-recipes { display:grid; gap:7px; }
+.factory .face-studio .process-recipes button { display:grid; justify-content:stretch; text-align:left; gap:5px; padding:12px; border-color:var(--studio-line); }
+.process-recipes strong { font-size:12px; font-weight:500; }
+.face-preset-section>summary { cursor:pointer; }
+.face-preset-section[open]>summary { margin-bottom:12px; }
+@container (max-width:580px) {
+ .face-studio .face-step-rail { padding:8px; gap:5px; }
+ .factory .face-studio .face-step-rail .face-end-step { padding:6px; gap:5px; }
+ .face-end-step>span { display:none!important; }
+ .process-add-menu summary { padding:0 7px; }
+ .process-add-menu summary>span { display:none; }
+ .process-layer-list>li::before { width:5px; }
+ .face-step-rail .process-layer-list, .process-layer-list>li { gap:4px; }
+ .factory .face-studio .process-layer-list .process-layer-select { min-width:84px; padding:6px 8px; }
+}

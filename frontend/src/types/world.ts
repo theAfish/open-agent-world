@@ -160,6 +160,9 @@ export interface WorldSnapshot {
 }
 
 export interface NodeTypeCatalogItem {
+  tutorials?: import('../tutorials/types').TutorialDefinition[];
+  /** Layout and colour are independent of the owned card's material finish. */
+  card_face?: import('../components/cardFaceDesign').CardFaceDesign | null;
   state?: PluginStateSpec;
   has_scoped_state?: boolean;
   icon_url?: string | null;
@@ -216,10 +219,14 @@ export interface RelationshipCatalogItem {
   templateable: boolean;
 }
 
+export type PackPackaging = 'standard' | 'premium' | 'paper' | 'collector';
+
 export interface PackDefinition {
+  tutorials?: import('../tutorials/types').TutorialDefinition[];
   source?: 'bundled' | 'installed';
   id: string; plugin_id: string; name: string; description: string; cards: string[];
   artwork_asset?: string | null; artwork_url?: string | null; accent_color?: string | null;
+  packaging?: PackPackaging;
 }
 
 export interface RuntimeFrontendModule { version: string; api_version: number; url: string }

@@ -103,13 +103,87 @@ for the cover. Use a portrait composition (roughly 3:4) with room for the host's
 name, count and foil treatment. Artwork is cropped to fill the printed panel.
 `accent_color` accepts a six-digit hex color. Without artwork (or if it fails to
 load), the host prints a line pattern, pack name, plugin name, description and
-card count, using the pack accent or its first card's color.
+card count, using the pack accent or the packaging preset's default color.
 
-The Library displays compact foil wrappers with crimped seams and pointer-driven
-light/tilt. Each wrapper is a CSS 3D frustum: the front and four planar gussets share
-one depth, so the folded edges stay joined throughout collapse. A successful
-`open_pack` transaction tears the top seal, draws up to three actual card previews
-completely out, and then collapses the wrapper from 26px to 1px depth. All contents
+Plugin API **1.25** adds `packaging` to `PackDefinition`:
+
+| Value | Form | Default material |
+| --- | --- | --- |
+| `standard` (default) | Soft pouch, crimped seams and tear notches | Mist blue, soft-touch matte |
+| `premium` | Pearl pouch with a narrow holographic seal | Warm ivory, satin foil |
+| `paper` | Reusable envelope with an arched flap and leaf seal | Sage green, fibrous paper |
+| `collector` | Rigid box with a visible spine and lifting lid | Pale blue, layered landscape |
+
+For example, add `packaging="paper"` to the registration above and declare
+`plugin_api_version="1.25"` in the plugin descriptor (and `compatibility.plugin_api`
+in its distribution manifest). Existing registrations default to `standard`.
+All four presets support `artwork_asset` and `accent_color` independently.
+The artwork replaces the decorative pattern/landscape but keeps the host's
+brand, icon, title, description and count. Content Pack authors can select the
+same four options in **Make a Pack → Pack packaging**; exports store it under
+`creator.packaging`, and it survives installation and restart.
+
+Bundled defaults: **Core essentials → collector**, **Codex Agent → premium**,
+and **Research Library → paper**. Registry reconciliation refreshes their
+appearance in existing libraries without resetting opened packs or collected cards.
+
+During frontend development, open **`/?pack-design`** or the F3 panel's
+**Pack design presets** link for the live Concept C design sheet. It uses the
+production `PackSurface`, includes opening interactions, Library-size and
+dark-background previews, and copies the selected Python registration. Inspect
+front, side, back and top views, rotate the light, or switch to clay/wireframe.
+The opening study scrubs the selected preset through its actual 3D animation.
+These demo openings are local and never modify the Card Library.
+
+The Library renders packages with the directly pinned `three` dependency,
+loaded lazily by `PackSurface`. `shell/pack3d` owns procedural geometry, print
+textures, materials and rendering. Soft pouches have continuous inflated meshes,
+modeled shoulder wrinkles, notches and crimped seals. The envelope has solid
+folds and a curved, hinged flap. The collector has continuous inner/outer walls,
+a base and a separate fitted lid; these retain their volume when rotated.
+
+Pouch tessellation follows the shape: dense crimp rows, intermediate shoulder
+rows and a sparse belly are stitched without T-junctions. Explicit columns keep
+the premium foil's printed boundaries intact. Including shell, lining and tear
+strip, the standard/premium meshes contain 16,660/16,836 triangles, down from
+56,640 each. A sealed pouch skips its occluded lining, drawing 8,748/8,836
+triangles before shadow passes; opening reveals the same deforming interior.
+
+Each region has its own material: matte film, pearl laminate, fibrous paper,
+uncoated board, interior lining and metallic foil. Printed color, roughness and
+emboss maps are generated from the current pack metadata. The premium strip
+uses its own mesh material group with thin-film iridescence, anisotropy and a
+view-dependent diffraction accent shader. The rainbow is driven by viewing and
+lighting angles. Room-based environment lighting, clearcoat micro-normals and
+blurred contact shadows provide consistent illumination across presets.
+
+All visible packs share **one WebGL context**. Each render is copied into its
+own DOM canvas so scrolling, dialogs and clipping remain native. Rendering is
+on demand, at the screen's pixel density capped at 2× and a 1024px buffer.
+Unchanged React updates do not redraw. Visible views are processed in rotating
+batches with a 6ms CPU budget and at most one new model per frame (an individual
+model/render can exceed that budget). Hidden card contents are built only during
+a reveal. Offscreen views and hidden tabs stop drawing; views do not load the
+3D module or create GPU resources until they approach the viewport.
+
+After 1.5 seconds offscreen, including when the Library dialog is closed,
+models/textures are released. The shared renderer is released 1.2 seconds after
+the last view detaches. Brief scrolling retains the models. A session-local LRU
+cache of up to 24 default-angle 3D bitmaps (12 MiB of decoded pixels) displays
+previously seen covers immediately on remount while interactive rendering starts.
+Its keys include printed metadata, packaging, opening state and view settings;
+animated or pointer-tilted frames are not cached. A failed or lost GPU
+context shows the CSS cover; restored contexts resume rendering. During initial
+loading without a cached preview, the slot reserves its space and fades in the first 3D frame, without
+showing the legacy cover. Hover smoothly tilts towards the pointer (up to 14°
+horizontally and 11° vertically); shadows project away from the key light. Drag to rotate,
+use arrow keys to inspect or Home to reset. Click/Enter still opens or browses;
+dragging does not trigger opening. Reduced motion uses a stable reveal pose.
+
+A successful `open_pack` transaction tears the pouch's top seal, folds back the
+paper flap, or lifts the box lid, then draws up to three actual card previews
+completely out. Pouches collapse in depth; the rigid box keeps its
+shape and the paper sleeve keeps its folded-back flap. All contents
 are collected by that transaction. Failures leave the sealed, full wrapper intact.
 `opened` determines its persistent empty appearance after reload or plugin disable.
 There are no buttons or details below a pack. Click the empty wrapper to browse
@@ -118,6 +192,14 @@ collection of new cards added by plugin updates. Unavailable wrappers also lead
 there so an installed, disabled plugin can be re-enabled. Motion is decorative and
 honors reduced-motion preferences; keyboard and touch use the wrapper button.
 Collection cards use paper borders, thickness shadows and a lighter surface sheen.
+
+`shell/pack3d/motion.ts` defines `PACK_OPENING_PRESETS`: soft pouches open their
+mouth before a straight upward pull; paper folds its flap behind the mouth and
+pulls the centred stack upward; the collector lifts/parks its lid and moves cards
+forward through the front opening before raising them. Each preset controls
+release, clearance, presentation timing, height and spread. Cards fan only after
+clearing the rim and fade about their own centres. Animation framing includes
+the lid and cards when inspecting any side of the package.
 
 ## Persistent model and API
 

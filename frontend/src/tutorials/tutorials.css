@@ -1,0 +1,24 @@
+.progressive-tutorial { position: fixed; z-index: 155; right: 18px; bottom: 110px; width: min(370px, calc(100vw - 32px)); max-height: min(620px, calc(100dvh - 160px)); display: flex; flex-direction: column; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--surface-raised); box-shadow: var(--panel-shadow); color: var(--ink); overflow: hidden; }
+.progressive-tutorial.is-document { width: min(560px, calc(100vw - 32px)); }
+.progressive-tutorial > header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.progressive-tutorial > header > span { flex: 1; overflow-wrap: anywhere; }
+.progressive-tutorial-content { padding: 14px 18px; overflow: auto; overscroll-behavior: contain; min-height: 0; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.progressive-tutorial h2 { margin: 0 0 8px; font-size: 17px; line-height: 1.4; }
+.progressive-tutorial h3 { margin: 8px 0; font-size: 14px; }
+.progressive-tutorial p { margin: 8px 0; }
+.progressive-tutorial a { color: var(--accent-strong); }
+.progressive-tutorial pre { overflow: auto; }
+.progressive-tutorial table { display: block; overflow: auto; }
+.progressive-tutorial .tutorial-step-count { color: var(--ink-soft); font-size: 11px; }
+.progressive-tutorial > footer { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.progressive-tutorial :is(.primary-button, .secondary-button) { display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-size: 12px; min-height: 32px; }
+.tutorial-text-button { background: transparent; border: 0; color: var(--ink-soft); cursor: pointer; font-size: 12px; padding: 6px; }
+.tutorial-library-content { padding: 18px 20px; }
+.tutorial-preference { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.tutorial-library-content > input { width: 100%; box-sizing: border-box; margin: 4px 0 16px; }
+.tutorial-library-list { display: grid; gap: 12px; }
+.tutorial-library-list article { border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.tutorial-library-list article > div { display: flex; gap: 8px; flex-wrap: wrap; }
+.tutorial-library-list small { color: var(--ink-soft); }
+.tutorial-library-list h3 { margin: 7px 0; font-size: 15px; }
+@media (max-width: 600px) { .progressive-tutorial { right: 12px; bottom: 90px; max-height: calc(100dvh - 135px); } }

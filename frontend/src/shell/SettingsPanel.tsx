@@ -15,7 +15,7 @@ import type { SandboxSettings, StorageSettings } from "../api/client";
 import type { SandboxRuntime } from "../types/world";
 import { FolderPathInput } from "./FolderPathInput";
 import { DeepLSettings } from "./DeepLSettings";
-import { EnvironmentVariablesEditor, environmentVariablesFromValue, environmentVariablesToValue, type EnvironmentVariableRow } from "../cards/ExecutionConfiguration";
+import { EnvironmentVariablesEditor, environmentSecretUpdates, environmentFolderUpdates, environmentVariablesFromValue, environmentVariablesToValue, type EnvironmentVariableRow } from "../cards/ExecutionConfiguration";
 
 export function SettingsPanel() {
   const { locale, setLocale } = useLocale();
@@ -46,6 +46,8 @@ export function SettingsPanel() {
   }, [open, section, storageRetry]);
   const [sandbox, setSandbox] = useState<SandboxSettings>({ workspace_root: null, runtime: "auto" });
   const [sandboxSaved, setSandboxSaved] = useState(false);
+  const [environmentSecrets, setEnvironmentSecrets] = useState<Record<string, string>>({});
+  useEffect(() => { if (!open) setEnvironmentSecrets({}); }, [open]);
   const [environmentRows, setEnvironmentRows] = useState<EnvironmentVariableRow[]>([]);
   const [runtimes, setRuntimes] = useState<SandboxRuntime[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -89,7 +91,8 @@ export function SettingsPanel() {
       .then(([value, catalog]) => {
         if (!active) return;
         setSandbox(value);
-        setEnvironmentRows(environmentVariablesFromValue({ variables: value.environment_variables ?? {} }));
+        setEnvironmentSecrets({});
+        setEnvironmentRows(environmentVariablesFromValue({ variables: value.environment_variables ?? {} }, value.folder_bindings));
         setRuntimes(catalog.runtimes);
         setLoaded(true);
       })
@@ -108,6 +111,7 @@ export function SettingsPanel() {
     if (section === 'model' && simpleSetup && !draft.default_model) { setError(t('Choose a model before saving.')); return; }
     setBusy(true);
     setError("");
+    setSandboxSaved(false);
     try {
       if (section === "storage") {
         if (!storage?.editable) return;
@@ -115,11 +119,14 @@ export function SettingsPanel() {
         setStorage(saved);
         setStoragePath(saved.pending_path ?? "");
       } else if (section === "sandbox") {
-        const variables = environmentVariablesToValue(environmentRows).variables as Record<string, string>;
-        const saved = await worldApi.saveSandboxSettings({ runtime: sandbox.runtime, workspace_root: sandbox.workspace_root?.trim() || null, environment_variables: variables });
+        const variables = environmentVariablesToValue(environmentRows).variables as NonNullable<SandboxSettings["environment_variables"]>;
+        const secrets = environmentSecretUpdates(environmentRows, environmentSecrets, sandbox.secret_bindings ?? {});
+        const folders = environmentFolderUpdates(environmentRows);
+        const saved = await worldApi.saveSandboxSettings({ ...(Object.keys(secrets).length ? { secrets } : {}), ...(Object.keys(folders).length ? { folders } : {}), runtime: sandbox.runtime, workspace_root: sandbox.workspace_root?.trim() || null, environment_variables: variables });
         setSandbox(saved);
+        setEnvironmentRows(environmentVariablesFromValue({ variables: saved.environment_variables ?? {} }, saved.folder_bindings));
+        setEnvironmentSecrets({});
         setSandboxSaved(true);
-        if (!saved.backup_paths?.length) setOpen();
       } else {
         const saved = await worldApi.saveModelConnections(draft);
         useWorldStore.setState({ modelCatalog: saved });
@@ -187,11 +194,10 @@ export function SettingsPanel() {
             {storage.previous_path && <label className="field-label"><span>{t("Retained backup (before the move)")}</span><input readOnly value={storage.previous_path} /></label>}
           </>}
           {error && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setError(""); setStorageRetry(value => value + 1); }}>{t("Reload storage settings")}</button>}
-        </div> : <div className="settings-form">
+        </div> : <div className="settings-form" onChangeCapture={() => setSandboxSaved(false)}>
           <div className="settings-page-heading"><h3>{t("Sandbox")}</h3></div>
           {!!sandbox.backup_paths?.length && <section className="settings-workspace-backups" aria-label={t("Old workspace folders")}>
             <strong>{t("Old workspace folders")}</strong>
-            {sandboxSaved && <p role="status">{t("Workspace settings saved.")}</p>}
             <p>{t("After verifying the new files, please delete unused backup folders manually.")}</p>
             <ul>{sandbox.backup_paths.map(path => <li key={path}><code>{path}</code></li>)}</ul>
           </section>}
@@ -215,9 +221,8 @@ export function SettingsPanel() {
           <section aria-label={t("Global environment variables")}>
             <h3>{t("Global environment variables")}</h3>
             <p className="settings-description">{t("Applies to all Sandboxes on their next command. Local values take priority.")}</p>
-            <EnvironmentVariablesEditor rows={environmentRows} onChange={setEnvironmentRows} disabled={!loaded || busy}
-              allowSecrets={false} secrets={{}} bindings={{}} onSecretsChange={() => {}} />
-            {environmentRows.length > 0 && <small>{t("Plain text values. Store credentials as Sandbox secrets.")}</small>}
+            <EnvironmentVariablesEditor rows={environmentRows} onChange={rows => { setEnvironmentRows(rows); setSandboxSaved(false); }} disabled={!loaded || busy}
+              secrets={environmentSecrets} bindings={sandbox.secret_bindings ?? {}} onSecretsChange={setEnvironmentSecrets} />
           </section>
         </div>}
         {(error || (section === "model" && modelError)) && <p role="alert" className="settings-error">{error || modelError} {section === "sandbox" && !loaded && <button type="button" className="secondary-button" onClick={() => setRetry((value) => value + 1)}>{t("Retry")}</button>} {section === "model" && <button type="button" className="secondary-button" onClick={() => { setError(""); setModelRetry((value) => value + 1); }}>{modelLoaded ? t("Discard draft and reload") : t("Retry")}</button>}</p>}
@@ -225,6 +230,7 @@ export function SettingsPanel() {
         </div>
         </div>
         <footer>
+          {section === "sandbox" && sandboxSaved && <span className="settings-save-status" role="status">{t("Settings saved")}</span>}
           <button type="button" className="secondary-button" onClick={setOpen} disabled={busy}>{t(section === "sandbox" && sandboxSaved ? "Close" : "Cancel")}</button>
           {section !== "deepl" && <button data-tutorial={section === "model" ? "model-save" : undefined} type="submit" className="primary-button" disabled={busy || (section === "storage" && (!storage?.editable || !storagePath.trim() || storagePath.trim() === storage.pending_path)) || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)}>{saving ? t("Saving…") : t("Save settings")}</button>}
         </footer>

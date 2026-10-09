@@ -105,7 +105,7 @@ def read(value, args):
 
 class LibraryPlugin:
     descriptor = PluginDescriptor(id="research.library", version="0.2.0",
-        plugin_api_version="1.14", name="Library", description="PDF reading and native research spaces")
+        plugin_api_version="1.25", name="Library", description="PDF reading and native research spaces")
 
     async def read_paper(self, context, capability, arguments):
         document = await context.node_document_action(capability, "read", arguments)
@@ -137,7 +137,7 @@ class LibraryPlugin:
             description="Associate an Agent with a library; membership alone grants no paper access.",
             source_traits=frozenset({"core.agent"}),target_types=frozenset({"library.region"}),templateable=True))
         registration.register_pack(PackDefinition(id='research.library.default', name='Research Library',
-            description='Papers and reading spaces.', cards=tuple(registration.nodes)))
+            description='Papers and reading spaces.', cards=tuple(registration.nodes), packaging='paper'))
 
 def create_plugin():
     return LibraryPlugin()

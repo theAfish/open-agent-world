@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { compileModule } from "svelte/compiler";
 import react from "@vitejs/plugin-react";
+import autoprefixer from "autoprefixer";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { fileURLToPath, URL } from "node:url";
 import { localControlPlaneProxy, localManagementProxy } from "./server/control-plane.mjs";
@@ -15,6 +16,8 @@ const isThrelteMeasure = (source: string, importer?: string) =>
   source.endsWith("/useMeasure.svelte.js") && !!importer?.replaceAll("\\", "/").includes("/@threlte/core/");
 
 export default defineConfig({
+  // Apply the same WebKit mask/backdrop fallbacks in development and releases.
+  css: { postcss: { plugins: [autoprefixer({ overrideBrowserslist: ["Chrome >= 109", "Firefox >= 115", "Safari >= 16.4"] })] } },
   worker: { format: "es" },
   // PDF.js worker is a URL asset, not a dependency to prebundle as JavaScript.
   optimizeDeps: { exclude: ["pdfjs-dist"], esbuildOptions: { plugins: [{

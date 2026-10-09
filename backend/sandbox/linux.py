@@ -222,7 +222,7 @@ def bubblewrap_command(
     workspace: Path, access: ResourceAccess,
     attachments: Sequence[ResourceAttachment], argv: Sequence[str],
     environment: Mapping[str, str],
-    runtime_mount: tuple[Path, str] | None = None, *, network_enabled=False, python_runtime=None, home: Path | None = None,
+    runtime_mount: tuple[Path, str] | None = None, *, network_enabled=False, python_runtime=None, home: Path | None = None, folder_mounts=(),
 ) -> list[str]:
     result = [
         "/usr/bin/bwrap", "--unshare-all", "--unshare-user",
@@ -257,6 +257,13 @@ def bubblewrap_command(
     # Attachments occupy an independent ephemeral tree: mounting one never
     # creates files in, shadows files in, or changes the selected real folder.
     result.extend(("--dir", "/sandbox", "--dir", "/sandbox/resources"))
+    if folder_mounts:
+        result.extend(("--dir", "/sandbox/folders", "--dir", "/sandbox/files"))
+        for folder in folder_mounts:
+            if folder.kind == "file":
+                result.extend(("--dir", str(Path(folder.linux_path).parent)))
+            result.extend(("--ro-bind" if folder.access == ResourceAccess.READ_ONLY else "--bind",
+                           folder.source, folder.linux_path))
     if home is not None:
         result.extend(("--bind", str(home), "/sandbox/home"))
     else:
@@ -307,6 +314,7 @@ class _Record:
 
 class LinuxSandboxBackend(SandboxBackend):
     supports_invocation_environment = True
+    supports_folder_mounts = True
     supports_execution_policy = True
     _network_ready = False
 
@@ -492,6 +500,7 @@ class LinuxSandboxBackend(SandboxBackend):
         _unit_name: str | None = None,
         invocation_env: Mapping[str, str] | None = None,
         runtime_mount: RuntimeMount | None = None,
+        folder_mounts=(),
         execution_policy: Mapping[str, Any] | None = None,
     ) -> CommandResult:
         policy = execution_policy or {}
@@ -501,6 +510,9 @@ class LinuxSandboxBackend(SandboxBackend):
             active_process_limit=policy.get("active_process_limit", self._limits.active_process_limit),
             default_timeout_seconds=policy.get("command_timeout", self._limits.default_timeout_seconds))
         command = validate_argv(argv)
+        if folder_mounts:
+            from .environment import folder_environment
+            invocation_env = folder_environment(invocation_env or {}, folder_mounts, record.host_workspace, record.workspace_access)
         environment = minimal_linux_environment(env, invocation_env=invocation_env)
         if self.python_runtime is not None:
             self.python_runtime.environment(environment)
@@ -515,13 +527,18 @@ class LinuxSandboxBackend(SandboxBackend):
             if record.deleted or record.state != SandboxState.READY:
                 raise SandboxStateError("sandbox must be ready before executing a command")
             await asyncio.to_thread(self._validate_record_paths, record)
+            if folder_mounts:
+                for folder in folder_mounts:
+                    resolved = await asyncio.to_thread(self._validate_workspace, folder.source, kind=folder.kind)
+                    if resolved != folder.source or Path(resolved) == Path.home():
+                        raise SandboxValidationError(f"Folder {folder.name} changed; choose its directory again")
             mount = None
             if runtime_mount is not None:
                 command = runtime_mount.command(command, Path("/.oaw") / runtime_mount.bundle.key)
                 source = materialize_bundle(record.root, runtime_mount.bundle.versioned())
                 mount = (source, runtime_mount.bundle.key)
             isolated = bubblewrap_command(record.host_workspace, record.workspace_access,
-                tuple(record.attachments.values()), command, environment, mount, network_enabled=bool(policy.get("network_enabled")), python_runtime=self.python_runtime, home=record.root / "home")
+                tuple(record.attachments.values()), command, environment, mount, network_enabled=bool(policy.get("network_enabled")), python_runtime=self.python_runtime, home=record.root / "home", folder_mounts=folder_mounts)
             invocation = service_command(isolated, unit, limits, timeout, network_enabled=bool(policy.get("network_enabled")))
             record.state = SandboxState.RUNNING
             record.active_command, record.unit = command, unit
@@ -870,15 +887,18 @@ class LinuxSandboxBackend(SandboxBackend):
             workspace_access=record.workspace_access, resources_path=Path("/sandbox"),
             runtime_locked=True)
 
-    def _validate_workspace(self, raw: str) -> str:
+    def _validate_workspace(self, raw: str, *, kind: str = "folder") -> str:
         if not isinstance(raw, str) or "\0" in raw:
             raise SandboxValidationError("workspace_path must be an absolute directory")
         path = Path(raw)
         if not path.is_absolute():
             raise SandboxValidationError("workspace_path must be absolute")
         resolved = path.resolve(strict=True)
-        if not resolved.is_dir() or resolved == Path(resolved.anchor):
-            raise SandboxValidationError("workspace_path must be a directory, not a filesystem root")
+        if not (resolved.is_file() if kind == "file" else resolved.is_dir()) or resolved == Path(resolved.anchor):
+            raise SandboxValidationError(f"path must be an existing {kind}, not a filesystem root")
+        if kind == "file":
+            if any(component.is_symlink() for component in (path, *path.parents)) or resolved.stat().st_nlink != 1:
+                raise SandboxValidationError("file variables may not expose links or hard-linked files")
         if resolved.is_relative_to(self._managed_root) or self._managed_root.is_relative_to(resolved):
             raise SandboxValidationError("workspace_path may not overlap application managed storage")
         # Prevent authorizing a host control tree which would contain runtime
@@ -886,7 +906,8 @@ class LinuxSandboxBackend(SandboxBackend):
         for protected in ("/proc", "/sys", "/dev", "/run", "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64"):
             if resolved.is_relative_to(Path(protected).resolve()):
                 raise SandboxValidationError("workspace_path may not expose a system directory")
-        self._validate_workspace_tree(resolved)
+        if kind == "folder":
+            self._validate_workspace_tree(resolved)
         return str(resolved)
 
     @staticmethod

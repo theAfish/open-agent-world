@@ -17,3 +17,7 @@ there are no host source paths or bundler aliases into the OAW checkout.
 
 The declared `colorama==0.4.6` dependency is provisioned by the existing shared
 Sandbox Python runtime; it is deliberately not imported into the host backend.
+
+## Progressive help
+
+This example requires Plugin API 1.26 and declares a two-step card tutorial plus Pack reference documentation. Definitions live in the Python entrypoint and are delivered through the catalog; the frontend needs no tutorial code. See [the authoring guide](../../../docs/developers/progressive-tutorials.md).

@@ -1,13 +1,11 @@
 import { t, useLocale } from "../i18n";
-import { useEffect, useState, type CSSProperties } from "react";
-import { ChevronRight } from "lucide-react";
+import { useEffect, useState } from "react";
 import { CatalogIcon } from "../components/CatalogIcon";
-import { useSurfaceTilt } from "../components/useSurfaceTilt";
 import { useCardLibrary, type LibrarySnapshot } from "../state/cardLibrary";
-import { CardFinishLayer } from "../cards/CardFinishLayer";
+import { PackSurface, type PackPhase } from './PackSurface';
 import { libraryCardMetadata } from "./libraryCatalog";
 import { packIssue, type InstalledPack } from './installedPacks';
-import "./libraryPack.css";
+import { packPackaging } from './packDesign';
 
 export function LibraryPack({ pack, snapshot, onOpened, onBrowse, onInspect, status, versions, contentCountKnown = true }: {
   pack: LibrarySnapshot["packs"][string]; snapshot: LibrarySnapshot;
@@ -17,21 +15,17 @@ export function LibraryPack({ pack, snapshot, onOpened, onBrowse, onInspect, sta
 }) {
   useLocale();
   const library = useCardLibrary();
-  const tilt = useSurfaceTilt(15);
-  const [phase, setPhase] = useState<"idle" | "pending" | "revealing">("idle");
+  const [phase, setPhase] = useState<PackPhase>("idle");
   const [revealedSnapshot, setRevealedSnapshot] = useState<LibrarySnapshot | null>(null);
   const [finishVisible, setFinishVisible] = useState(false);
-  const [failedArtwork, setFailedArtwork] = useState<string | null>(null);
   const definition = { ...pack.definition, name: t(pack.definition.name), description: t(pack.definition.description) };
   const plugin = snapshot.plugins[definition.plugin_id];
   const available = snapshot.available_pack_ids.includes(definition.id);
   const issue = packIssue(pack, snapshot, versions);
   const canOpen = !issue && !library.busy && phase === "idle" && available && pack.owned && !pack.opened;
-  const artwork = definition.artwork_url && definition.artwork_url !== failedArtwork ? definition.artwork_url : null;
   const presetCount = Object.values(snapshot.preset_pack_ids ?? {}).filter(ids => ids.includes(definition.id)).length;
   const revealSnapshot = phase === "revealing" ? revealedSnapshot : null;
   const cards = definition.cards.slice(0, 3).map(id => (revealSnapshot ?? snapshot).card_definitions[id]);
-  const color = definition.accent_color ?? cards.find(card => card?.color)?.color ?? "#617b72";
   useEffect(() => {
     if (phase !== "revealing") return;
     // The printed face emerges first, then its saved material catches the light.
@@ -54,39 +48,20 @@ export function LibraryPack({ pack, snapshot, onOpened, onBrowse, onInspect, sta
     } else setPhase("idle");
   };
   const unavailable = issue ? t(issue.label) : !plugin?.installed ? t("Pack uninstalled") : !plugin.enabled ? t("Pack disabled") : !available ? t("Pack unavailable") : !pack.owned ? t("Not owned") : "";
-  return <article aria-label={definition.name} data-pack-id={definition.id} data-pack-issue={issue?.kind} className={`library-pack ${pack.opened || revealSnapshot ? "is-opened" : ""} is-${phase}`} style={{ "--pack-color": color } as CSSProperties}>
-    <button className="pack-touch-area" {...tilt} aria-label={onInspect ? t('View pack {name}', { name: definition.name }) : `${pack.opened || !available || issue ? t("View cards in") : t("Tear open")} ${definition.name}`}
-      title={onInspect ? t('View pack {name}', { name: definition.name }) : phase === "pending" ? t("Opening…") : pack.opened ? t("View {v0} cards", { v0: String(definition.name) }) : unavailable || t("Open {v0}", { v0: String(definition.name) })}
-      aria-busy={phase === "pending"} disabled={phase !== "idle" || (!pack.opened && (library.busy || !pack.owned))}
-      onClick={() => onInspect ? onInspect() : pack.opened || !available || issue ? onBrowse(definition.id) : void openPack()}>
-      <span className="pack-shadow" aria-hidden="true" />
-      <span className="pack-object" aria-hidden="true" onAnimationEnd={event => { if (event.target === event.currentTarget && event.animationName === "packDeflate") setPhase("idle"); }}>
-        <span className="pack-back" />
-        <span className="pack-mouth" />
-        <span className="pack-card-pocket"><span className="pack-drawn-cards">{cards.map((card, index) => <span className="pack-drawn-card card-finish-surface" key={definition.cards[index]}
-          style={{ "--card-offset": index - (cards.length - 1) / 2, "--collection-color": card?.color ?? color } as CSSProperties}>
-          <CatalogIcon definition={card} size={23} /><strong>{card ? libraryCardMetadata(revealSnapshot ?? snapshot, card).label : definition.cards[index]}</strong><small>{t("COLLECTED CARD")}</small>
-          {revealSnapshot && finishVisible && <CardFinishLayer finish={revealSnapshot.collection[definition.cards[index]]?.finish} quality="standard" reveal />}
-        </span>)}</span></span>
-        <span className="pack-facet pack-facet-left" />
-        <span className="pack-facet pack-facet-right" />
-        <span className="pack-facet pack-facet-top" />
-        <span className="pack-facet pack-facet-bottom" />
-        <span className="pack-wrapper">
-          <span className="pack-print">
-            {!issue && (artwork ? <img className="pack-artwork" src={artwork} alt="" draggable={false} onError={() => setFailedArtwork(artwork)} /> : <span className="pack-guilloche" />)}
-            <span className="pack-edition">{t(plugin?.descriptor.name ?? definition.plugin_id)}</span>
-            <span className="pack-emblem">{issue ? <strong className="pack-issue-mark">{issue.kind === 'missing' ? 'MISSING' : 'ERROR'}</strong> : <CatalogIcon definition={cards[0]} size={38} />}</span>
-            <span className="pack-title">{definition.name}</span>
-            <span className="pack-subtitle">{definition.description || t("A collection of possibilities.")}</span>
-            <span className="pack-print-footer"><b>{contentCountKnown ? String(definition.cards.length + presetCount).padStart(2, "0") : '—'} <small>{t("CARDS")}</small></b><span>{t("OPEN AGENT")}<br />{t("WORLD")}</span></span>
-          </span>
-          <span className="pack-foil" />
-        </span>
-        <span className="pack-bottom-seal" />
-        <span className="pack-top-seal"><span>{t(onInspect || issue || !available ? 'VIEW PACK' : 'TEAR TO OPEN')}</span><ChevronRight size={10} /></span>
-      </span>
-    </button>
-    {(issue || status) && <span className="pack-inventory-status">{t(issue?.label ?? status!)}</span>}
-  </article>;
+  const packaging = packPackaging(definition.packaging);
+  const openLabel = packaging === 'paper' || packaging === 'collector' ? t("Open {v0}", { v0: definition.name }) : `${t("Tear open")} ${definition.name}`;
+  return <PackSurface definition={definition} edition={t(plugin?.descriptor.name ?? definition.plugin_id)}
+    cards={cards.map((card, index) => ({ id: definition.cards[index],
+      label: card ? libraryCardMetadata(revealSnapshot ?? snapshot, card).label : definition.cards[index],
+      icon: <CatalogIcon definition={card} size={38} />, iconUrl: card?.icon_url ?? undefined, color: card?.color,
+      finish: revealSnapshot?.collection[definition.cards[index]]?.finish,
+    }))} count={contentCountKnown ? definition.cards.length + presetCount : null}
+    opened={pack.opened || !!revealSnapshot} phase={phase} finishVisible={finishVisible}
+    issue={issue?.kind} status={issue || status ? t(issue?.label ?? status!) : undefined}
+    label={onInspect ? t('View pack {name}', { name: definition.name }) : pack.opened || !available || issue ? `${t("View cards in")} ${definition.name}` : openLabel}
+    title={onInspect ? t('View pack {name}', { name: definition.name }) : phase === "pending" ? t("Opening…") : pack.opened ? t("View {v0} cards", { v0: definition.name }) : unavailable || t("Open {v0}", { v0: definition.name })}
+    sealLabel={t(onInspect || issue || !available ? 'VIEW PACK' : 'TEAR TO OPEN')}
+    disabled={phase !== "idle" || (!pack.opened && (library.busy || !pack.owned))}
+    onClick={() => onInspect ? onInspect() : pack.opened || !available || issue ? onBrowse(definition.id) : void openPack()}
+    onSettled={() => setPhase('idle')} />;
 }

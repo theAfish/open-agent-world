@@ -25,6 +25,7 @@ from .models import (
     CommandResult, ResourceAccess, ResourceAttachment, SandboxEvent,
     SandboxEventType, SandboxInfo, SandboxLimits, SandboxNotFoundError,
     SandboxSecurityError, SandboxState, SandboxStateError, SandboxValidationError,
+    FolderMount,
 )
 
 _BOOTSTRAP = """import json,os,sys,types
@@ -102,6 +103,7 @@ class _Active:
 
 class WslSandboxBackend(SandboxBackend):
     supports_invocation_environment = True
+    supports_folder_mounts = True
     supports_execution_policy = True
 
     def __init__(self, managed_root: Path, *, distribution: str,
@@ -330,7 +332,8 @@ class WslSandboxBackend(SandboxBackend):
     async def execute(self, sandbox_id: str, argv: Sequence[str], *,
         timeout_seconds: float | None = None, env: Mapping[str, str] | None = None,
         invocation_env: Mapping[str, str] | None = None,
-        runtime_mount: RuntimeMount | None = None, execution_policy: Mapping[str, Any] | None = None) -> CommandResult:
+        runtime_mount: RuntimeMount | None = None, execution_policy: Mapping[str, Any] | None = None,
+        folder_mounts: Sequence[FolderMount] = ()) -> CommandResult:
         from .models import execution_command_id
         from uuid import uuid4
         command_id = execution_command_id.get() or uuid4().hex
@@ -359,6 +362,7 @@ class WslSandboxBackend(SandboxBackend):
             raw = await self._request(self._payload("execute", sandbox_id, argv=list(command),
                 timeout_seconds=timeout, env=dict(env) if env is not None else None,
                 invocation_env=dict(invocation_env) if invocation_env is not None else None,
+                folder_mounts=[asdict(folder) for folder in folder_mounts],
                 unit=active.unit, command_id=command_id, execution_policy=policy, runtime_mount=runtime_mount.to_wire() if runtime_mount is not None else None),
                 timeout=timeout + 20, active=active)
             result = CommandResult(sandbox_id=raw["sandbox_id"], argv=tuple(raw["argv"]),

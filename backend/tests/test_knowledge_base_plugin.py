@@ -187,15 +187,24 @@ def test_mineru_secret_is_encrypted_survives_restart_and_is_scoped(data_root, mo
         assert client.put(f"/api/knowledge/{ordinary['id']}/mineru-token", json={"value": "wrong-node"}).status_code == 422
 
 
-def test_mineru_reads_global_settings_without_changing_process_environment(client, monkeypatch):
-    from backend.sandbox.settings import SandboxSettings, SandboxSettingsStore
+@pytest.mark.parametrize("secret", [False, True])
+def test_mineru_reads_global_settings_without_changing_process_environment(client, monkeypatch, secret):
+    from backend.sandbox.settings import SandboxSettings
     from backend.security.resource_credentials import resource_secret_resolver
 
     monkeypatch.setenv("OAW_MINERU_TOKEN", "process-token")
     node = create_node(client, NODE_TYPE)
     services = client.app.state.services
-    SandboxSettingsStore(services.database, services.settings.data_root).save(
-        SandboxSettings(environment_variables={"OAW_MINERU_TOKEN": "global-token"}))
+    payload = {"environment_variables": {
+        "OAW_MINERU_TOKEN": {"secret_ref": "mineru-token"} if secret else "global-token",
+    }}
+    if secret:
+        payload["secrets"] = {"mineru-token": "global-token"}
+    response = client.put("/api/settings/sandbox", json=payload)
+    assert response.status_code == 200, response.text
+    if secret:
+        assert "global-token" not in response.text
+        assert "global-token" not in client.get("/api/settings/sandbox").text
     resolve = resource_secret_resolver(services, services.world.get_card(node["id"]))
     assert resolve("OAW_MINERU_TOKEN") == "global-token"
     resource(client, node["id"], "settings", mineru_base_url="https://mineru.example")

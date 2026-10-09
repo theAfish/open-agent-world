@@ -2229,7 +2229,8 @@ const unsubscribeSurfaces = useWorldStore.subscribe((state, previous) => {
     }
   }
   if (state.catalog !== previous.catalog || cards.length !== before.length
-    || cards.some((card, i) => card.id !== before[i]?.id || card.type !== before[i]?.type)) {
+      || cards.some((card, i) => card.id !== before[i]?.id || card.type !== before[i]?.type
+        || (card.config !== before[i]?.config && state.catalog.node_types.find(type => type.id === card.type)?.traits.includes('ui.factory-card.v1')))) {
     useNodeSurfaceStore.getState().syncCards(cards, state.catalog);
   }
 });

@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import subprocess
 import yaml
+from oaw_matcreator.compatibility import adapt_package
 
 REVISION = "a1a57688cdb7fc476498476cc388f932b6e83d6a"
 GROUPS = {
@@ -75,7 +76,7 @@ def build(root):
                 "instructions": GUIDANCE + "\nRun scripts/build_structure.py with interpreter python and argv [--repeat, 2, --output, copper]. Requires ASE installed in the selected Sandbox runtime. Check exit code and report, then publish copper.cif, copper.extxyz and copper.json through OAW artifact publishing. Related task: repeat 3 and compare atom count (108 instead of 32).",
                 "files": {"scripts/build_structure.py": Path(__file__).with_name("demo_structure.py").read_text(encoding="utf-8")},
                 "defaults": {"runtime": {"python": ">=3.11", "dependencies": ["ase>=3.23,<4"]}, "metadata": {"tags": ["ASE", "structure", "copper", "supercell"]}, "upstream": {"repository": "OAW adaptation", "path": "local-structure"}}})
-        (output / (group + ".json")).write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
+        (output / (group + ".json")).write_text(json.dumps(adapt_package(package), ensure_ascii=False, indent=2), encoding="utf-8")
     discovered = {p.parent.relative_to(skills_root).as_posix() for p in skills_root.rglob("SKILL.md")}
     assert covered == discovered, discovered - covered
 

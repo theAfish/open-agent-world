@@ -1,5 +1,6 @@
 """Read-only, node-scoped credentials for trusted resource handlers."""
 import os
+from backend.execution_config import SecretRequirement
 from backend.sandbox.settings import SandboxSettingsStore
 
 
@@ -14,8 +15,14 @@ def resource_secret_resolver(services, node):
         credentials = services.execution_credentials
         if credentials.configured(node_id, reference):
             return credentials.resolve(node_id, reference)
-        variables = SandboxSettingsStore(services.database, services.settings.data_root).read().environment_variables
-        return next((value for key, value in variables.items()
-                     if key.casefold() == reference.casefold() and value), None) or os.environ.get(reference)
+        settings = SandboxSettingsStore(services.database, services.settings.data_root)
+        for key, value in settings.read().environment_variables.items():
+            if key.casefold() != reference.casefold():
+                continue
+            if isinstance(value, SecretRequirement):
+                return settings.credentials.resolve(None, value.secret_ref)
+            if isinstance(value, str) and value:
+                return value
+        return os.environ.get(reference)
 
     return resolve

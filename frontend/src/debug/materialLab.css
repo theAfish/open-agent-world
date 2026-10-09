@@ -1,0 +1,66 @@
+.material-lab { --lab-bg:#111819; --lab-panel:#1a2324; --lab-ink:#e8ede8; --lab-muted:#99aaa5; --lab-border:#374544; --card-surface:#263633; background:var(--lab-bg); color:var(--lab-ink); min-height:100vh; padding:36px clamp(18px,3vw,56px); font:13px/1.6 system-ui,sans-serif; }
+.material-lab[data-theme="light"] { --lab-bg:#f2f3ed; --lab-panel:#fafbf7; --lab-ink:#243933; --lab-muted:#63766e; --lab-border:#ccd6cf; --card-surface:#f8f8f4; }
+.material-lab { --ink:var(--lab-ink); --ink-soft:var(--lab-muted); }
+.material-lab * { box-sizing:border-box; }
+.material-lab header { display:flex; justify-content:space-between; align-items:start; gap:20px; margin-bottom:30px; }
+.material-lab-eyebrow { color:var(--lab-muted); font-size:10px; letter-spacing:.18em; }
+.material-lab h1 { font-size:clamp(26px,3vw,40px); font-weight:500; letter-spacing:-.04em; margin:12px 0 5px; line-height:1.2; }
+.material-lab header p { color:var(--lab-muted); margin:12px 0 0; }
+.material-lab a { color:var(--lab-muted); }
+.material-lab-toolbar { display:flex; flex-wrap:wrap; gap:12px 24px; padding:18px 0; border-block:1px solid var(--lab-border); margin-bottom:28px; }
+.material-lab-toolbar label { display:flex; align-items:center; gap:8px; }
+.material-lab button,.material-lab select { border:1px solid var(--lab-border); background:var(--lab-panel); color:var(--lab-ink); border-radius:6px; padding:6px 10px; font:inherit; cursor:pointer; }
+.material-lab :is(button,input,select):focus-visible { outline:2px solid #8bbfaf; outline-offset:3px; }
+.material-lab input { accent-color:#8bbfaf; }
+.material-lab-layout { display:grid; grid-template-columns:minmax(0,1fr) 280px; gap:32px; }
+.material-lab-status { margin:-14px 0 20px; color:var(--lab-muted); font-size:11px; }
+.material-lab-stage { min-width:0; }
+.material-lab-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:22px; align-items:start; }
+.material-lab-grid figure { margin:0; min-width:0; }
+.material-lab .material-lab-select { display:flex; justify-content:space-between; width:100%; padding:6px 0 12px; border:0; border-radius:0; background:transparent; text-transform:capitalize; font-size:15px; }
+.material-lab-select span { opacity:.3; }
+.material-lab [data-selected="true"] .material-lab-select { color:#82bca6; }
+.material-lab-card.card-stock { width:100%; aspect-ratio:.72; border-radius:14px; overflow:hidden; }
+.material-lab-card .card-face { height:auto; }
+.material-lab-card .card-face-copy strong { font-size:clamp(14px,8cqi,23px); }
+.material-lab-card .card-face-copy small { font-size:clamp(10px,5cqi,14px); -webkit-line-clamp:3; }
+.material-lab-card[data-compact="true"] { width:106px; height:146px; max-width:100%; }
+.material-lab-card[data-compact="true"] .card-face-copy strong { font-size:11px; }
+.material-lab-card[data-lab-view="laminate"] { background:repeating-conic-gradient(#172126 0% 25%,#1f2a30 0% 50%) 0/16px 16px; }
+.material-lab-card:not([data-lab-view="composite"]):not([data-lab-view="artwork"]) .card-face { visibility:hidden; }
+.material-lab-grid figcaption { margin-top:14px; font-size:11px; color:var(--lab-muted); min-height:36px; }
+.material-lab-legend { margin:26px 0; padding:16px; background:var(--lab-panel); border:1px solid var(--lab-border); border-radius:8px; color:var(--lab-muted); }
+.material-lab-light { display:grid; grid-template-columns:1fr 1fr 1.25fr; gap:26px; border-top:1px solid var(--lab-border); padding-top:18px; }
+.material-lab h2 { font-size:13px; font-weight:550; margin:0 0 14px; }
+.material-lab-slider { display:block; margin:10px 0; color:var(--lab-muted); font-size:11px; }
+.material-lab-slider span { display:flex; justify-content:space-between; gap:8px; }
+.material-lab-slider output { color:var(--lab-ink); font-variant-numeric:tabular-nums; }
+.material-lab-slider input { width:100%; display:block; margin:8px 0; }
+.material-lab-contract p { color:var(--lab-muted); font-size:12px; }
+.material-lab-inspector { padding:18px; background:var(--lab-panel); border:1px solid var(--lab-border); border-radius:10px; align-self:start; min-width:0; }
+.material-lab-inspector-heading { display:flex; flex-wrap:wrap; align-items:center; gap:10px; justify-content:space-between; }
+.material-lab-inspector-heading h2 { margin:0; text-transform:capitalize; }
+.material-lab-inspector small { color:var(--lab-muted); font-size:10px; font-weight:400; }
+.material-lab-inspector button { font-size:10px; }
+.material-lab fieldset { margin:18px 0 0; padding:0; border:0; border-top:1px solid var(--lab-border); }
+.material-lab legend { padding:0 8px 0 0; color:var(--lab-ink); font-size:11px; }
+.material-lab details { margin-top:20px; font-size:11px; }
+.material-lab summary { cursor:pointer; }
+.material-lab pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:10px; }
+@media(max-width:1250px) { .material-lab-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .material-lab-light { grid-template-columns:1fr 1fr; } .material-lab-contract { grid-column:1/-1; } }
+@media(max-width:720px) { .material-lab-layout { grid-template-columns:minmax(0,1fr); } .material-lab-grid { gap:14px; } .material-lab header { display:block; } .material-lab header a { display:inline-block; margin-top:14px; } }
+
+.material-lab-card.card-stock { aspect-ratio:.7; border-radius:9px; }
+.material-lab-inspector .face-production-options { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin:12px 0; }
+.material-lab-inspector .face-production-options button { display:grid; text-align:left; gap:5px; padding:8px; min-width:0; }
+.material-lab-inspector .face-production-options button[aria-pressed=true] { border-color:#658d7d; }
+.material-lab-inspector .face-production-options strong { font-size:11px; }
+.material-lab-inspector small { font-size:9px; line-height:1.5; }
+.material-lab-inspector .face-slider { display:block; margin:12px 0; font-size:11px; }
+.material-lab-inspector .face-slider input { display:block; width:100%; margin:7px 0; }
+.material-lab-inspector .face-slider > span { display:flex; justify-content:space-between; }
+.material-lab-inspector .face-note { font-size:10px; color:var(--lab-muted); }
+.material-lab-inspector label:has(select) { display:grid; margin:12px 0; gap:5px; }
+.material-lab-inspector select { width:100%; font-size:10px; }
+.material-lab-inspector summary { text-transform:capitalize; padding-bottom:8px; border-bottom:1px solid var(--lab-border); }
+.material-lab .face-stock-sample { display:flex; justify-content:space-between; padding:9px; }

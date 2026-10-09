@@ -44,7 +44,7 @@ async function openStatus() {
 describe('Help menu', () => {
   it('opens help without replaying the tutorial or checking the backend', () => {
     openMenu();
-    expect(screen.getAllByRole('menuitem')).toHaveLength(4);
+    expect(screen.getAllByRole('menuitem')).toHaveLength(5);
     expect(tutorial.replay).not.toHaveBeenCalled();
     expect(worldApi.getDiagnostics).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Tutorial' }));

@@ -20,10 +20,12 @@ it('excludes initial content by default and requires a new check after changing 
   const inspect = vi.spyOn(worldApi, 'inspectContentPack').mockResolvedValue(result);
   const screen = render(<PackCreator legion={legion} />);
   fireEvent.click(screen.getByRole('button', { name: 'Make a Pack…' }));
+  fireEvent.change(screen.getByRole('combobox', { name: 'Pack packaging' }), { target: { value: 'paper' } });
   fireEvent.click(screen.getByRole('button', { name: 'Check Pack' }));
   await screen.findByRole('button', { name: 'Export .oawpack' });
   expect(inspect.mock.calls[0][0].include_state_nodes).toEqual([]);
   expect(inspect.mock.calls[0][0].id).toBe('local.legion1234abcd');
+  expect(inspect.mock.calls[0][0].creator.packaging).toBe('paper');
   fireEvent.click(screen.getByRole('checkbox', { name: 'My document' }));
   expect(screen.queryByRole('button', { name: 'Export .oawpack' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Check Pack' }));

@@ -21,6 +21,7 @@ from backend.packs.installation import PackInstallationManager
 from backend.packs.manifest import PackManifest
 from backend.packs.requirements import aggregate_requirements
 from backend.plugins.builtin import create_builtin_registry
+from backend.plugins.registry import PLUGIN_API_VERSION
 from backend.plugins.loader import load_installed_packs
 
 MANIFEST = {
@@ -89,7 +90,7 @@ def test_inspection_never_executes_backend_and_emits_schema(tmp_path):
     {'schema_version': 2}, {'id': '../core'}, {'version': 'v1.0'}, {'post_install': 'curl | bash'},
     {'compatibility': {'oaw': '>=99', 'plugin_api': '1.23', 'frontend_api': 1}},
     {'compatibility': {'oaw': '>=0.1', 'plugin_api': '2.0', 'frontend_api': 1}},
-    {'compatibility': {'oaw': '>=0.1', 'plugin_api': '1.24', 'frontend_api': 1}},
+    {'compatibility': {'oaw': '>=0.1', 'plugin_api': f"1.{int(PLUGIN_API_VERSION.split('.')[1]) + 1}", 'frontend_api': 1}},
     {'compatibility': {'oaw': '>=0.1', 'plugin_api': '1.23', 'frontend_api': 2}},
     {'runtime': {'sandbox': {'python': ['https://evil/wheel.whl']}}},
     {'runtime': {'sandbox': {'python': ['git+https://evil/repo']}}},

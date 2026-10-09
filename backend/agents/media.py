@@ -53,8 +53,13 @@ def codex_tool_content(result: Any) -> list[dict[str, Any]]:
 
 def adk_tool_result(result: Any) -> Any:
     if not isinstance(result, VisualToolResult):
+        # Validate while still inside the tool boundary, before ADK persists or
+        # constructs a model response from this plugin-owned payload.
+        json.dumps(result, allow_nan=False)
         return result
+    summary = result.summary()
+    json.dumps(summary, allow_nan=False)
     from google.genai import types
-    return {"result": result.summary(), "media": [
+    return {"result": summary, "media": [
         types.Part.from_bytes(data=image.data, mime_type=image.media_type) for image in result.images
     ]}

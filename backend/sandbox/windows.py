@@ -85,6 +85,7 @@ class WindowsSandboxBackend(SandboxBackend):
     """
 
     supports_invocation_environment = True
+    supports_folder_mounts = True
     supports_execution_policy = True
 
     def __init__(
@@ -244,7 +245,7 @@ class WindowsSandboxBackend(SandboxBackend):
         from uuid import uuid4
         owner = await self._record(sandbox_id)
         command_id = execution_command_id.get() or uuid4().hex
-        exclusive = options.get("runtime_mount") is not None or bool((options.get("execution_policy") or {}).get("network_enabled"))
+        exclusive = options.get("runtime_mount") is not None or bool(options.get("folder_mounts")) or bool((options.get("execution_policy") or {}).get("network_enabled"))
         if self.python_runtime is not None:
             await self.python_runtime.prepare()
         async with owner.lock:
@@ -253,9 +254,11 @@ class WindowsSandboxBackend(SandboxBackend):
             # Windows bundle ACLs and network filters belong to the shared
             # AppContainer identity. Changing them needs exclusive admission.
             if owner.executions and (exclusive or owner.exclusive_execution):
-                raise SandboxBusyError("Windows runtime bundle/network policy is in use; retry after active commands finish")
+                raise SandboxBusyError("Windows folder/runtime/network permissions are in use; retry after active commands finish")
             if not owner.executions:
                 try:
+                    if await self._security_mutation(self._recover_folder_grants, owner):
+                        raise asyncio.CancelledError
                     self._revoke_runtime_access(owner)
                     if self.python_runtime is not None:
                         for path in (self.python_runtime.venv, self.python_runtime.base):
@@ -322,6 +325,7 @@ class WindowsSandboxBackend(SandboxBackend):
         env: Any = None,
         invocation_env: Mapping[str, str] | None = None,
         runtime_mount: RuntimeMount | None = None,
+        folder_mounts=(),
         execution_policy: Mapping[str, Any] | None = None,
     ) -> CommandResult:
         policy = execution_policy or {}
@@ -354,6 +358,9 @@ class WindowsSandboxBackend(SandboxBackend):
                 self._assert_workspace_identity(record)
                 await asyncio.to_thread(self._validate_workspace, record.workspace_path)
             storage = record.root / "workspace"
+            if folder_mounts:
+                from .environment import folder_environment
+                invocation_env = folder_environment(invocation_env or {}, folder_mounts, record.workspace, record.workspace_access, windows=True)
             environment = minimal_windows_environment(
                 record.workspace, env, storage_directory=storage, invocation_env=invocation_env
             )
@@ -415,9 +422,9 @@ class WindowsSandboxBackend(SandboxBackend):
         try:
             (storage / ".tmp").mkdir(exist_ok=True)
             native_task = asyncio.create_task(asyncio.to_thread(
-                self._run_with_runtime_mount,
+                self._run_with_folder_mounts,
                 record, mount_root,
-                command,
+                command, folder_mounts,
                 cwd=record.workspace,
                 environment=environment,
                 limits=limits,
@@ -533,13 +540,14 @@ class WindowsSandboxBackend(SandboxBackend):
         await self.cancel(sandbox_id)
         interrupted = False
         async with record.lock:
+            interrupted = await self._security_mutation(self._recover_folder_grants, record)
             self._revoke_runtime_access(record)
             if self.python_runtime is not None:
                 for path in (self.python_runtime.venv, self.python_runtime.base):
                     self._native.revoke_path(path, record.profile.sid)
             if record.workspace_path is not None:
                 try:
-                    interrupted = await self._security_mutation(self._revoke_workspace, record)
+                    interrupted = await self._security_mutation(self._revoke_workspace, record) or interrupted
                 except BaseException:
                     record.state = SandboxState.ERROR
                     self._write_manifest(record)
@@ -742,6 +750,70 @@ class WindowsSandboxBackend(SandboxBackend):
                 self._native.revoke_path(path, record.profile.sid)
             self._revoke_runtime_access(record)
 
+    def _folder_journal(self, record):
+        return record.root / "environment-folders.json"
+
+    def _recover_folder_grants(self, record):
+        journal = self._folder_journal(record)
+        if not journal.exists():
+            return
+        entries = json.loads(journal.read_text(encoding="utf-8"))
+        for entry in entries:
+            path = self._validate_workspace_name(entry["path"])
+            cleanup = replace(record, workspace=path, workspace_path=str(path),
+                workspace_authorized=True, workspace_identity=tuple(entry["identity"]), workspace_handle=None)
+            self._revoke_workspace(cleanup)
+        journal.unlink()
+
+    def _run_with_folder_mounts(self, record, mount_root, command, folders, **options):
+        if not folders:
+            return self._run_with_runtime_mount(record, mount_root, command, **options)
+        # Folder commands have exclusive admission: NTFS grants belong to this
+        # Sandbox identity. Journal before granting so crash recovery can revoke.
+        grants = []
+        journal = self._folder_journal(record)
+        try:
+            for folder in sorted(folders, key=lambda item: len(Path(item.source).parts)):
+                path = self._validate_workspace(folder.source, kind=folder.kind)
+                if path.is_relative_to(record.workspace):
+                    continue  # already granted with the same access mode
+                if record.workspace.is_relative_to(path):
+                    raise SandboxValidationError("A folder variable may not contain the Windows working folder; select a separate directory")
+                if any(path.is_relative_to(item.workspace) for item in grants):
+                    continue
+                handle = self._native.open_workspace(path)
+                try:
+                    metadata = path.stat()
+                except BaseException:
+                    self._native.close_workspace(handle)
+                    raise
+                grants.append(replace(record, workspace=path, workspace_path=str(path),
+                    workspace_access=folder.access, workspace_authorized=True,
+                    workspace_identity=(metadata.st_dev, metadata.st_ino), workspace_handle=handle))
+            if grants:
+                temporary = journal.with_suffix(".tmp")
+                temporary.write_text(json.dumps([{"path": str(item.workspace), "identity": item.workspace_identity} for item in grants]), encoding="utf-8")
+                temporary.replace(journal)
+                for item in grants:
+                    self._native.grant_workspace(item.workspace, record.profile.sid,
+                        read_only=item.workspace_access == ResourceAccess.READ_ONLY, root_handle=item.workspace_handle)
+            return self._run_with_runtime_mount(record, mount_root, command, **options)
+        finally:
+            errors = []
+            for item in reversed(grants):
+                try:
+                    if journal.exists():
+                        self._revoke_workspace(item)
+                except BaseException as error:
+                    errors.append(str(error))
+                finally:
+                    if item.workspace_handle is not None:
+                        self._native.close_workspace(item.workspace_handle)
+                        item.workspace_handle = None
+            if errors:
+                raise SandboxSecurityError("Folder permission cleanup failed: " + "; ".join(errors[:3]))
+            journal.unlink(missing_ok=True)
+
     async def destroy(self, sandbox_id: str) -> None:
         record = await self._record(sandbox_id)
         await self.terminate(sandbox_id)
@@ -868,6 +940,11 @@ class WindowsSandboxBackend(SandboxBackend):
                 tuple(identity_data) if identity_data is not None else None
             ),
         )
+        try:
+            self._recover_folder_grants(record)
+        except BaseException:
+            self._native.free_appcontainer_sid(profile)
+            raise
         if record.workspace_path is not None:
             try:
                 self._revoke_workspace(record)
@@ -940,7 +1017,7 @@ class WindowsSandboxBackend(SandboxBackend):
         path = Path(raw)
         if not path.is_absolute() or raw.startswith(("\\\\", "//")):
             raise SandboxValidationError("workspace must be an absolute local folder")
-        if any(part in {".", ".."} or part.rstrip(" .") != part for part in path.parts[1:]):
+        if any(part in {".", ".."} or ":" in part or part.rstrip(" .") != part for part in path.parts[1:]):
             raise SandboxValidationError("workspace path contains ambiguous components")
         # Compare lexical paths before resolving: resolving first would hide a
         # junction in the path and accidentally authorize its target.
@@ -966,15 +1043,19 @@ class WindowsSandboxBackend(SandboxBackend):
             getattr(metadata, "st_file_attributes", 0) & 0x400
         )
 
-    def _validate_workspace(self, raw: str) -> Path:
+    def _validate_workspace(self, raw: str, *, kind: str = "folder") -> Path:
         path = self._validate_workspace_name(raw)
         try:
             for component in (*reversed(path.parents), path):
                 if self._is_reparse(component):
                     raise SandboxValidationError("workspace paths may not contain links or reparse points")
-            if not path.is_dir():
-                raise SandboxValidationError("workspace must be an existing folder")
+            if not (path.is_file() if kind == "file" else path.is_dir()):
+                raise SandboxValidationError(f"path must be an existing {kind}")
             self._native.validate_workspace_volume(path)
+            if kind == "file":
+                if path.stat().st_nlink != 1:
+                    raise SandboxValidationError("file variables may not expose hard-linked files")
+                return path
             for directory, directories, files in os.walk(path, followlinks=False, onerror=self._walk_error):
                 for name in (*directories, *files):
                     child = Path(directory) / name
