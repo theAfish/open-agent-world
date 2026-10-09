@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from backend.api.dependencies import get_services
 from backend.services import ApplicationServices
 from backend.runs import RunRecord
-from backend.sandbox.settings import SandboxSettings, SandboxSettingsStatus, SandboxSettingsStore
+from backend.sandbox.settings import SandboxSettingsUpdate, SandboxSettingsStatus, SandboxSettingsStore
 from backend.sandbox.manager import SandboxManager
 from backend.sandbox.models import SandboxValidationError
 
@@ -292,9 +292,13 @@ async def get_sandbox_settings(
 
 @router.put("/settings/sandbox", response_model=SandboxSettingsStatus)
 async def save_sandbox_settings(
-    request: SandboxSettings,
+    request: Request,
     services: ApplicationServices = Depends(get_services),
 ) -> SandboxSettingsStatus:
+    try:
+        request = SandboxSettingsUpdate.model_validate(await request.json())
+    except (ValueError, ValidationError):
+        raise HTTPException(status_code=422, detail="Invalid Sandbox settings") from None
     if request.runtime != "auto":
         backend = services.sandbox_backend
         if not isinstance(backend, SandboxManager) or request.runtime not in {
@@ -367,24 +371,137 @@ async def sandbox_cancel(sandbox_id: str, command_id: str | None = None, service
 
 
 @router.get("/sandboxes/{sandbox_id}/files")
-async def sandbox_files(sandbox_id: str, operation: str = "roots", root: str = "workspace", path: str = "", services=Depends(get_services)):
+async def sandbox_files(sandbox_id: str, operation: str = "roots", root: str = "workspace", path: str = "", services=Depends(get_services), cursor: str = '', query: str = ''):
     import base64
     if operation not in {"roots", "list", "preview", "download"}:
         raise SandboxValidationError("Unsupported read operation")
     async with services._node_mutation(read_only=True):
         services._require_card_type(sandbox_id, "sandbox")
         try:
-            result = await services._require_sandbox_backend().file_operation(sandbox_id, operation, root=root, path=path)
+            backend = services._require_sandbox_backend()
+            result = await backend.file_operation(sandbox_id, 'download_info' if operation == 'download' else operation,
+                root=root, path=path, **({'cursor': cursor, 'query': query} if operation == 'list' else {}))
         except FileNotFoundError:
             return {"state": "missing", "message": "File or directory no longer exists"}
         except FileExistsError:
             return {"state": "conflict", "message": "Destination exists"}
         except (PermissionError, OSError):
             return {"state": "permission_denied", "message": "Access denied or path is not a regular file/directory"}
-    if operation == "download" and result.get("state") == "ready":
-        return Response(base64.b64decode(result["data"]), media_type="application/octet-stream",
-            headers={"Content-Disposition": "attachment", "X-Content-Type-Options": "nosniff"})
+    if operation == 'download':
+        from fastapi.responses import StreamingResponse
+        from urllib.parse import quote
+        async def body():
+            offset = 0
+            while offset < result['size']:
+                async with services._node_mutation(read_only=True):
+                    services._require_card_type(sandbox_id, 'sandbox')
+                    chunk = await backend.file_operation(sandbox_id, 'download_chunk', root=root, path=path,
+                        expected=result['signature'], offset=offset)
+                if not chunk['size']:
+                    raise SandboxValidationError('File changed during download')
+                offset += chunk['size']
+                yield base64.b64decode(chunk['data'])
+        return StreamingResponse(body(), media_type='application/octet-stream', headers={
+            'Content-Length': str(result['size']), 'Content-Disposition': f"attachment; filename*=UTF-8''{quote(result['name'], safe='')}",
+            'X-Content-Type-Options': 'nosniff'})
     return result
+
+
+@router.post("/sandboxes/{sandbox_id}/files", status_code=201)
+async def upload_sandbox_file(sandbox_id: str, path: str, request: Request,
+                              directory: bool = False, services=Depends(get_services)):
+    """Stream into a staged file with a binding lease and bounded runtime chunks."""
+    import base64
+    import asyncio
+    import logging
+    from backend.sandbox.files import parts
+    from backend.sandbox.streaming import UPLOAD_LIMIT
+    from backend.sandbox.transfers import CHUNK_BYTES
+    if not parts(path):
+        raise SandboxValidationError("Choose a file or folder within the workspace")
+    services._require_card_type(sandbox_id, "sandbox")
+    if directory:
+        async for chunk in request.stream():
+            if chunk:
+                raise HTTPException(413, detail='Folders must have an empty body')
+        async with services._node_mutation():
+            services._require_card_type(sandbox_id, 'sandbox')
+            return await services._require_sandbox_backend().file_operation(sandbox_id, 'mkdir', path=path)
+    async with services.resources.artifacts.workspace(services, sandbox_id, None, allow_running=True):
+        backend = services._require_sandbox_backend()
+        async def step(operation, **options):
+            # Runtime workers finish under their pins even on cancellation. Obtain
+            # the receipt first so cleanup always knows the created file identity.
+            task = asyncio.create_task(backend.file_operation(sandbox_id, operation, path=path, **options))
+            cancelled = False
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    cancelled = True
+            return task.result(), cancelled
+        staged, cancelled = await step('upload_begin')
+        expected, offset = staged['signature'], 0
+        committed = False
+        try:
+            if cancelled:
+                raise asyncio.CancelledError
+            async for incoming in request.stream():
+                if offset + len(incoming) > UPLOAD_LIMIT:
+                    raise HTTPException(413, detail='File exceeds the 1 GiB upload limit')
+                for start in range(0, len(incoming), CHUNK_BYTES):
+                    chunk = incoming[start:start + CHUNK_BYTES]
+                    result, cancelled = await step('upload_chunk',
+                        staging=staged['staging'], expected=expected, offset=offset, data=base64.b64encode(chunk).decode())
+                    expected = result['signature']
+                    offset += len(chunk)
+                    if cancelled:
+                        raise asyncio.CancelledError
+            if await request.is_disconnected():
+                from starlette.requests import ClientDisconnect
+                raise ClientDisconnect()
+            result, _ = await step('upload_commit',
+                staging=staged['staging'], expected=expected, offset=offset)
+            committed = True
+            return result
+        finally:
+            if not committed:
+                cleanup = asyncio.create_task(backend.file_operation(sandbox_id, 'upload_abort', path=path,
+                    staging=staged['staging'], expected=expected))
+                # Keep the lease until cancellation cleanup finishes, too.
+                while not cleanup.done():
+                    try:
+                        await asyncio.shield(cleanup)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                try:
+                    cleanup.result()
+                except Exception:
+                    logging.getLogger(__name__).warning('Sandbox upload cleanup failed', exc_info=True)
+
+
+class SandboxFileMove(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    path: str = Field(min_length=1, max_length=4096)
+    destination: str = Field(min_length=1, max_length=4096)
+
+
+@router.delete('/sandboxes/{sandbox_id}/files')
+async def delete_sandbox_file(sandbox_id: str, path: str, services=Depends(get_services)):
+    async with services._node_mutation():
+        services._require_card_type(sandbox_id, 'sandbox')
+        services.resources.artifacts.assert_source_idle(sandbox_id)
+        return await services._require_sandbox_backend().file_operation(sandbox_id, 'delete', path=path)
+
+
+@router.post('/sandboxes/{sandbox_id}/files/move')
+async def move_sandbox_file(sandbox_id: str, request: SandboxFileMove, services=Depends(get_services)):
+    async with services._node_mutation():
+        services._require_card_type(sandbox_id, 'sandbox')
+        services.resources.artifacts.assert_source_idle(sandbox_id)
+        return await services._require_sandbox_backend().file_operation(sandbox_id, 'move', path=request.path, destination=request.destination)
 
 
 class DiagnosticRequest(BaseModel):

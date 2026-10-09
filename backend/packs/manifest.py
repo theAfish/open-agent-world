@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from backend import __version__
 from backend.plugins.registry import _supports_plugin_api
+from backend.plugins.tutorials import Tutorials, validate_tutorials
 from backend.sandbox.python_runtime import validate_requirements
 
 PACK_ID = r"^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$"
@@ -91,27 +92,46 @@ class Entrypoints(Model):
 
 
 class Content(Model):
-    legions: tuple[str, ...] = Field(min_length=1, max_length=50)
+    legions: tuple[str, ...] = Field(default=(), max_length=50)
+    cards: tuple[str, ...] = Field(default=(), max_length=50)
 
-    @field_validator("legions")
+    @property
+    def paths(self) -> tuple[str, ...]:
+        return self.legions + self.cards
+
+    @model_validator(mode="after")
+    def entries(self):
+        if not self.paths or len(set(self.paths)) != len(self.paths):
+            raise ValueError("Content requires unique card or Legion paths")
+        return self
+
+    @field_validator("legions", "cards")
     @classmethod
-    def paths(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+    def validate_paths(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         if len(set(values)) != len(values):
             raise ValueError("Content paths must be unique")
         for value in values:
             safe_path(value)
             if not value.startswith("content/") or not value.endswith(".json"):
-                raise ValueError("Legions must be JSON files under content/")
+                raise ValueError("Content must be JSON files under content/")
         return values
 
 
 class CreatorMetadata(Model):
+    tutorials: Tutorials = ()
+
+    @model_validator(mode="after")
+    def validate_tutorial_content(self) -> Self:
+        validate_tutorials(self.tutorials)
+        return self
+
     description: str = Field(default="", max_length=500)
     author: str = Field(default="", max_length=120)
     preparation: str = Field(default="", max_length=2000)
     example: str = Field(default="", max_length=2000)
     expected_result: str = Field(default="", max_length=2000)
     accent_color: str = Field(default="#617b72", pattern=r"^#[0-9a-fA-F]{6}$")
+    packaging: Literal["standard", "premium", "paper", "collector"] = "standard"
 
 
 class PackManifest(Model):

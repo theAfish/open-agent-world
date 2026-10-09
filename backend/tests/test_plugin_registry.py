@@ -51,6 +51,28 @@ def test_public_plugin_api_exports_canonical_contracts() -> None:
     assert PublicLifecycleTransaction is NodeLifecycleTransaction
 
 
+def test_data_consumer_declares_its_own_config_fields() -> None:
+    from dataclasses import replace
+    from open_agent_world.plugin_api import NodeDataConsumer, PluginRegistry
+
+    class ReaderConfig(BaseModel):
+        provider_ref: str = ""
+        dataset_key: str = ""
+
+    consumer = NodeDataConsumer(source_field="provider_ref", schema_field="dataset_key", kinds=("table",))
+    node = replace(create_builtin_registry().node_type("text"), id="example.reader",
+                   config_model=ReaderConfig, data_consumer=consumer)
+    registry = PluginRegistry()
+    registry.install(PluginDefinition(PluginDescriptor(id="example.reader", version="1", plugin_api_version="1.27"),
+                                     lambda registration: registration.register_node_type(node)))
+    assert registry.catalog().node_types[0].data_consumer == consumer
+    invalid = replace(node, id="example.invalid", data_consumer=consumer.model_copy(update={"schema_field": "missing"}))
+    with pytest.raises(ValueError, match="string config fields"):
+        registry.install(PluginDefinition(PluginDescriptor(id="example.invalid", version="1", plugin_api_version="1.27"),
+                                         lambda registration: registration.register_node_type(invalid)))
+    assert not registry.has_plugin("example.invalid")
+
+
 def test_plugin_install_is_compatible_owned_and_atomic() -> None:
     registry = create_builtin_registry()
 

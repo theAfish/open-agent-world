@@ -250,17 +250,21 @@ class _CapabilityContext:
         info = await self.services.stop_sandbox(sandbox_id, agent_id=agent_id)
         return {"sandbox_id": sandbox_id, "state": info.state.value}
 
-    async def inspect_sandbox(self, agent_id: str, sandbox_id: str) -> dict[str, Any]:
+    async def inspect_sandbox(self, agent_id: str, sandbox_id: str, *, history_scope="caller", history_limit=3,
+                              include_output=False, include_shared_python=False) -> dict[str, Any]:
         self.services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
         info = await self.services.get_sandbox(sandbox_id)
         from backend.sandbox.manager import SandboxManager
         backend = self.services.sandbox_backend
-        python_status = await backend.python_status(sandbox_id) if isinstance(backend, SandboxManager) else None
+        python_status = await backend.python_status(sandbox_id) if include_shared_python and isinstance(backend, SandboxManager) else None
         self.services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
         from backend.execution_config import configuration_summary
         active = [dict(r) for r in self.services._sandbox_commands.values() if r["sandbox_id"] == sandbox_id]
         current = active[0] if len(active) == 1 else None
         from backend.sandbox.history import recent_summaries
+        context = self.services.run_manager.current_context
+        if history_scope == "run" and context is None:
+            raise ResourceValidationError("Run history requires an active Agent Run; use caller history instead")
         return {
             "sandbox_id": sandbox_id, "state": info.state.value,
             "runtime_id": info.runtime_id, "platform": info.platform,
@@ -275,11 +279,15 @@ class _CapabilityContext:
             "active_commands": [{key: item.get(key) for key in ("id", "operation_kind", "requirements", "caller", "run_id", "argv", "started_at")} for item in active],
             "current_caller": current["caller"] if current else None,
             "current_command_id": current["id"] if current else None,
-            "recent_commands": recent_summaries(self.services, sandbox_id),
+            "recent_commands": recent_summaries(self.services, sandbox_id,
+                caller=agent_id if history_scope != "all" else None,
+                run_id=context.run_id if history_scope == "run" else None,
+                limit=history_limit, include_output=include_output),
+            "history_scope": history_scope,
             "shared_python": python_status,
             "console_mode": "non-interactive; each command starts in the configured workspace; cd/export/activation do not persist",
-            "command_timeout": self.services.world.get_card(sandbox_id).config.get("command_timeout", 600),
-            "installation": "Use install_python_packages for the shared read-only Python environment. On Linux/WSL, HOME=/sandbox/home persists; use $HOME/.local/bin or $HOME/bin for local CLI tools, or create a private venv in HOME/workspace and invoke its interpreter explicitly. npm -g defaults to $HOME/.local, with bins on PATH. /tmp is ephemeral.",
+            "command_timeout": self.services.world.get_card(sandbox_id).config.get("command_timeout", 6000),
+            "installation": "Use install_python_packages for the shared read-only Python environment. On Linux/WSL, HOME=/sandbox/home persists; use $HOME/.local/bin or $HOME/bin for local CLI tools, or create a private venv in HOME/workspace and invoke its interpreter explicitly. npm -g defaults to $HOME/.local, with bins on PATH. /tmp is recreated for EVERY command; use HOME or workspace for files needed by subsequent commands. Shared installer logs are optional (include_shared_python=true) and do not prove a current operation is running.",
             "attachments": [
                 {"resource_id": item.resource_id,
                  "path": str(info.resources_path / item.relative_path.replace("\\", "/")) if info.resources_path else None,
@@ -331,6 +339,20 @@ class WorldAgentCapabilityProvider:
                     input_schema=schema,
                 )
             )
+        context = self.services.run_manager.current_context
+        if context and context.agent_id == agent_id and context.delegation_context:
+            from backend.plugins.execution import ExecutionReport
+            schema = ExecutionReport.model_json_schema()
+            definitions.append(ScopedToolDefinition(
+                capability_id="host:report_delegated_task", name="report_delegated_task",
+                description="Report only this Run's assigned work before ending. Complete requires evidence; "
+                    "partial/blocked require a useful next_step. Waiting on external jobs requires their references "
+                    "and check_after_seconds (1-86400); OAW schedules a coordinator check. "
+                    "Reports are claims awaiting verification, never task acceptance. Return paths, not file contents.",
+                parameters=tuple(ToolParameter(name, _python_type(prop.get("type")),
+                    prop.get("description", "Report field"), name in schema.get("required", []))
+                    for name, prop in sorted(schema["properties"].items(), key=lambda item: item[0] not in schema.get("required", []))),
+                input_schema=schema))
         return definitions
 
     async def invoke_tool(
@@ -339,6 +361,10 @@ class WorldAgentCapabilityProvider:
         capability_id: str,
         arguments: Mapping[str, Any],
     ) -> Any:
+        if capability_id == "host:report_delegated_task":
+            from backend.plugins.execution import ExecutionReport
+            report = _validate_tool_request(ExecutionReport, dict(arguments))
+            return await self.services.node_execution.report_delegated_task(agent_id, report.model_dump())
         async with self.services._node_mutation(read_only=True):
             if capability_id.startswith("operation:"):
                 from backend.capabilities.projection import resolve_operation
@@ -349,11 +375,17 @@ class WorldAgentCapabilityProvider:
                 from backend.capabilities.projection import authorize_invocation
                 capability = authorize_invocation(self.services, agent_id, capability_id, arguments)
         handler = self.services.plugins.capability_handler(capability.kind)
-        from backend.sandbox.models import SandboxValidationError, SandboxStateError, SandboxOperationError
+        from backend.sandbox.models import SandboxValidationError, SandboxStateError, SandboxOperationError, SandboxSecurityError, SandboxNotFoundError
         try:
             return await handler(_CapabilityContext(self.services, capability), capability, dict(arguments))
         except SandboxOperationError as exc:
             return exc.feedback()
+        except SandboxSecurityError as exc:
+            from backend.errors import PermissionDeniedError
+            raise PermissionDeniedError(str(exc)) from exc
+        except SandboxNotFoundError as exc:
+            from backend.errors import NotFoundError
+            raise NotFoundError(str(exc)) from exc
         except SandboxValidationError as exc:
             # All Agent runtimes already return domain errors as tool feedback.
             # Validation can also fail during bundle construction/materialization,
@@ -361,7 +393,8 @@ class WorldAgentCapabilityProvider:
             raise ResourceValidationError(str(exc)) from exc
         except SandboxStateError as exc:
             from backend.errors import ConflictError
-            raise ConflictError(f"{exc}. Inspect the Sandbox activity and retry when the conflicting operation finishes.") from exc
+            raise ConflictError(f"{exc}. Inspect Sandbox state and activity. If stopped, start it through authorized "
+                "Sandbox controls or ask the coordinator; otherwise wait for the conflicting operation before retrying.") from exc
 
 
 def _python_type(schema_type: object) -> type[Any]:

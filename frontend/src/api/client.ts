@@ -260,12 +260,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
 
+  return readResponse<T>(response, headers);
+}
+
+async function readResponse<T>(response: Response, headers = new Headers(), binary = false): Promise<T> {
   const contentType = response.headers.get("content-type") ?? "";
   const body = response.status === 204
     ? undefined
     : contentType.includes("application/json")
       ? await response.json()
-      : response.ok && contentType.includes("application/vnd.oaw.pack")
+      : response.ok && (binary || contentType.includes("application/vnd.oaw.pack"))
       ? await response.blob()
       : await response.text();
 
@@ -289,12 +293,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+async function transferRequest<T>(path: string, file: Blob | undefined, options: import('../files/transferQueue').TransferOptions, binary = false): Promise<T> {
+  const { transferResponse } = await import('./transfer');
+  const response = await transferResponse(`${API_BASE}${path}`, file === undefined ? 'GET' : 'POST', file, options);
+  return readResponse<T>(response, undefined, binary);
+}
+
 function unwrap<T>(input: unknown, key: string): T {
   const record = asRecord(input);
   return (record[key] ?? input) as T;
 }
 
 export const worldApi = {
+  factory<T>(nodeId: string, action: string, body?: unknown): Promise<T> {
+    return request(`/packs/factory/${encodeURIComponent(nodeId)}/${action}`, {
+      method: action === 'context' ? 'GET' : 'POST', headers: { 'X-OAW-Pack-Install': '1' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  },
   getDiagnostics(signal?: AbortSignal): Promise<import('../shell/helpChecks').HelpDiagnostics> {
     return request('/diagnostics', { signal });
   },
@@ -362,13 +378,25 @@ export const worldApi = {
       method: "POST", body: JSON.stringify({ initial_path: initialPath }),
     });
   },
+  pickFile(initialPath: string | null): Promise<{ path: string | null }> {
+    return request<{ path: string | null }>("/desktop/pick-file", {
+      method: "POST", body: JSON.stringify({ initial_path: initialPath }),
+    });
+  },
+  inspectEnvironmentPath(path: string, signal?: AbortSignal): Promise<{ path: string; kind: "folder" | "file" }> {
+    return request("/desktop/inspect-path", { method: "POST", body: JSON.stringify({ path }), signal });
+  },
   getSandboxSettings(): Promise<SandboxSettings> {
     return request<SandboxSettings>("/settings/sandbox");
   },
 
-  saveSandboxSettings(settings: SandboxSettings): Promise<SandboxSettings> {
+  saveSandboxSettings(settings: SandboxSettings & { secrets?: Record<string, string>; folders?: Record<string, EnvironmentFolderBinding> }): Promise<SandboxSettings> {
     return request<SandboxSettings>("/settings/sandbox", {
-      method: "PUT", body: JSON.stringify({ workspace_root: settings.workspace_root, runtime: settings.runtime }),
+      method: "PUT", body: JSON.stringify({
+        workspace_root: settings.workspace_root, runtime: settings.runtime,
+        environment_variables: settings.environment_variables, secrets: settings.secrets,
+        folders: settings.folders,
+      }),
     });
   },
   async getSummoning(id: string): Promise<SummoningSnapshot> {
@@ -390,6 +418,20 @@ export const worldApi = {
   async nodeResourceAction(id: string, action: string, args: Record<string, unknown>, confirm = false, sessionId: string | null = cardStateSession(id) ?? null): Promise<Record<string, unknown>> {
     return request(`/nodes/${encodeURIComponent(id)}/resource/${encodeURIComponent(action)}`, {
       method: "POST", headers: stateSessionHeaders(sessionId), body: JSON.stringify({ arguments: args, confirm }),
+    });
+  },
+
+  async dataSources(id: string): Promise<{sources: {id: string; name: string; type: string}[]}> {
+    return request(`/nodes/${encodeURIComponent(id)}/data-sources`);
+  },
+  async dataSourceSchemas(id: string, source: string, relationship: string): Promise<{schemas: import('../plugins/dataSources').DataSchema[]; truncated?: boolean}> {
+    return request(`/nodes/${encodeURIComponent(id)}/data-source-schemas`, {
+      method: 'POST', body: JSON.stringify({source_id: source, relationship}),
+    });
+  },
+  async dataSource<T>(id: string, source: string, operation: 'schemas' | 'read', args: unknown): Promise<T> {
+    return request(`/nodes/${encodeURIComponent(id)}/data-sources/${encodeURIComponent(source)}/${operation}`, {
+      method: 'POST', body: JSON.stringify({arguments: args}),
     });
   },
 
@@ -706,9 +748,13 @@ export const worldApi = {
     });
   },
 
-  async saveEnvironment(id: string, value: Record<string, unknown>, secrets: Record<string, string>, expectedRevision: number): Promise<{ value: Record<string, unknown>; revision: number; summary: Record<string, unknown> }> {
+  async getEnvironmentFolderBindings(id: string): Promise<Record<string, EnvironmentFolderBinding>> {
+    return request(`/nodes/${encodeURIComponent(id)}/environment-folders`);
+  },
+
+  async saveEnvironment(id: string, value: Record<string, unknown>, secrets: Record<string, string>, expectedRevision: number, folders?: Record<string, EnvironmentFolderBinding>): Promise<{ value: Record<string, unknown>; revision: number; summary: Record<string, unknown> }> {
     return request(`/nodes/${encodeURIComponent(id)}/environment`, {
-      method: "PUT", body: JSON.stringify({ value, secrets, expected_revision: expectedRevision }),
+      method: "PUT", body: JSON.stringify({ value, secrets, expected_revision: expectedRevision, folders }),
     });
   },
 
@@ -844,15 +890,16 @@ export const worldApi = {
     return request<ConversationSession[]>(`/agents/${encodeURIComponent(agentId)}/conversation-sessions`);
   },
 
-  async uploadConversationAttachment(conversationId: string, sessionId: string, file: File): Promise<import("../types/world").ConversationAttachment> {
-    const response = await fetch(`${API_BASE}/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/attachments?${new URLSearchParams({ filename: file.name })}`, {
+  async uploadConversationAttachment(conversationId: string, sessionId: string, file: File, options?: import('../files/transferQueue').TransferOptions): Promise<import("../types/world").ConversationAttachment> {
+    const path = `/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/attachments?${new URLSearchParams({ filename: file.name })}`;
+    if (options) return transferRequest(path, file, options);
+    return request(path, {
       method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file,
     });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new ApiError(errorMessage(data.detail, response.status), response.status);
-    }
-    return response.json();
+  },
+
+  previewConversationAttachment(conversationId: string, sessionId: string, file: { version_id: string; path: string }, signal?: AbortSignal): Promise<{ state: string; text?: string; truncated?: boolean }> {
+    return request(`/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(file.version_id)}?${new URLSearchParams({ path: file.path, text_preview: 'true' })}`, { signal });
   },
 
   getModelConnections(): Promise<import("../state/modelConnections").ModelCatalog> {
@@ -886,13 +933,35 @@ export const worldApi = {
     return request<T>(`/sandboxes/${encodeURIComponent(nodeId)}/${action}`, body === undefined ? undefined : { method: "POST", body: JSON.stringify(body) });
   },
 
-  async downloadSandboxFile(nodeId: string, root: string, path: string): Promise<Blob> {
-    const response = await fetch(`${API_BASE}/sandboxes/${encodeURIComponent(nodeId)}/files?${new URLSearchParams({ operation: "download", root, path })}`);
+  deleteSandboxFile(nodeId: string, path: string): Promise<{ deleted: string }> {
+    return request(`/sandboxes/${encodeURIComponent(nodeId)}/files?${new URLSearchParams({ path })}`, { method: 'DELETE' });
+  },
+
+  moveSandboxFile(nodeId: string, path: string, destination: string): Promise<{ moved: string; destination: string }> {
+    return request(`/sandboxes/${encodeURIComponent(nodeId)}/files/move`, { method: 'POST', body: JSON.stringify({ path, destination }) });
+  },
+
+  async downloadSandboxFile(nodeId: string, root: string, path: string, options?: import('../files/transferQueue').TransferOptions): Promise<Blob> {
+    const route = `/sandboxes/${encodeURIComponent(nodeId)}/files?${new URLSearchParams({ operation: "download", root, path })}`;
+    if (options) {
+      const result = await transferRequest<Blob | { message?: string }>(route, undefined, options, true);
+      if (!(result instanceof Blob)) throw new Error(result.message ?? 'File is missing or access was denied.');
+      return result;
+    }
+    const response = await fetch(`${API_BASE}${route}`);
     if (!response.ok || response.headers.get("content-type")?.includes("application/json")) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.state === "oversized" ? "Download exceeds the 16 MiB limit." : error.message ?? error.error?.message ?? "File is missing or access was denied.");
+      throw new Error(error.message ?? error.error?.message ?? "File is missing or access was denied.");
     }
     return response.blob();
+  },
+
+  uploadSandboxEntry(nodeId: string, path: string, file?: File, options?: import('../files/transferQueue').TransferOptions): Promise<{ written?: number; created?: boolean }> {
+    const route = `/sandboxes/${encodeURIComponent(nodeId)}/files?${new URLSearchParams({ path, directory: String(!file) })}`;
+    if (options) return transferRequest(route, file ?? new Blob(), options);
+    return request(route, {
+      method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file ?? '',
+    });
   },
 
   getSandbox(nodeId: string): Promise<SandboxInfo> {
@@ -919,10 +988,14 @@ export const worldApi = {
   },
 };
 
+export interface EnvironmentFolderBinding { path: string; access: "read_only" | "read_write"; kind?: "folder" | "file" }
+
 export interface SandboxSettings {
   workspace_root: string | null;
   runtime: string;
-  environment_variables?: Record<string, string>;
+  environment_variables?: Record<string, string | { secret_ref: string } | { folder_ref: string } | { file_ref: string } | { path_ref: string }>;
+  secret_bindings?: Record<string, boolean>;
+  folder_bindings?: Record<string, EnvironmentFolderBinding>;
   backup_paths?: string[];
 }
 

@@ -13,7 +13,7 @@ def register(registry):
         icon='boxes', color='#697c78', deck_id='resources', deck_label='Resources', deck_icon='file-text',
         default_name='Published artifacts', default_size=(320, 200), default_status='available',
         statuses=frozenset({'available'}), config_model=ArtifactCollectionConfig,
-        traits=frozenset({'core.artifact-collection'}),
+        traits=frozenset({'core.artifact-collection'}), templateable=True,
         surfaces={'preview': True, 'inspector': True, 'workspace': True}))
     sandbox = CapabilitySelector(parameter='sandbox', argument='sandbox_id', capability_kinds=frozenset({'sandbox.execute'}))
     operations = [

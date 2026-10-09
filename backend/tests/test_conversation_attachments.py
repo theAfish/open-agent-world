@@ -31,6 +31,19 @@ def ref(file):
     return {key: file[key] for key in ('version_id', 'path')}
 
 
+def test_text_preview_is_bounded_and_authorized_to_its_session(client):
+    node, _, base = room(client)
+    file = upload(client, base, 'report.html', b'<script>alert(1)</script>\n' + b'x' * 70000)
+    response = client.get(base + '/attachments/' + file['version_id'], params={'path': file['path'], 'text_preview': True})
+    assert response.status_code == 200
+    assert response.headers['content-type'].startswith('application/json')
+    assert response.json()['state'] == 'text' and response.json()['truncated']
+    assert len(response.json()['text']) == 65536
+    other = client.post(f"/api/conversations/{node['id']}/sessions", json={'title': 'Other'}).json()
+    response = client.get(f"/api/conversations/{node['id']}/sessions/{other['id']}/attachments/{file['version_id']}", params={'path': file['path'], 'text_preview': True})
+    assert response.status_code == 403
+
+
 def test_general_admits_existing_and_new_connections_once(client):
     node, session, base = room(client)
     first = _create(client, 'agent', 'First')

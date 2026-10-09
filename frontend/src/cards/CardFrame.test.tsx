@@ -48,12 +48,13 @@ it('keeps one working backpack across surfaces and mounts inspector actions only
     expect(surface.querySelector(':scope > .equipment-toggle')).toBe(backpack()[0]);
     expect(surface.getAttribute('data-finish')).toBe('starlight');
     expect(surface.querySelector(':scope > .card-finish-layer')?.getAttribute('data-quality')).toBe(level === 'node' ? 'thumbnail' : 'standard');
+    expect(surface.querySelector(':scope > .card-finish-layer > .card-material-canvas')).not.toBeNull();
   }
   fireEvent.click(backpack()[0]);
   expect(useEquipmentPanel.getState().openIds).toEqual([card.id]);
   act(() => useNodeSurfaceStore.getState().openInspector(card.id));
   expect(surface.querySelector(':scope > .card-finish-layer')).toBeNull();
-  expect(surface.querySelector('.card-header .card-finish-layer')?.getAttribute('data-finish')).toBe('starlight');
+  expect(surface.querySelector('.card-header .card-finish-layer')).toBeNull();
   expect(screen.getByText('Finish: Starlight')).toBeTruthy();
   expect(backpack()).toHaveLength(1);
   expect(surface.querySelector('.node-inspector-footer .equipment-toggle')).toBe(backpack()[0]);

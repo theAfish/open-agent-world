@@ -14,6 +14,18 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it('follows moved folder paths in pinned previews and clears only deleted descendants', () => {
+  open('a', 'folder/child.txt');
+  useOpenFiles.getState().pin('viewer', useOpenFiles.getState().sources.a);
+  open('a', 'unrelated.txt'); open('b', 'folder/child.txt');
+  useOpenFiles.getState().changeSandboxPath('a', 'folder', 'destination/folder');
+  expect(useOpenFiles.getState().pins.viewer?.reference).toMatchObject({ path: 'destination/folder/child.txt' });
+  expect(useOpenFiles.getState().sources.a.reference).toMatchObject({ path: 'unrelated.txt' });
+  useOpenFiles.getState().changeSandboxPath('a', 'destination');
+  expect(useOpenFiles.getState().pins.viewer).toBeUndefined();
+  expect(useOpenFiles.getState().sources.b.reference).toMatchObject({ path: 'folder/child.txt' });
+});
+
 it("picks up files opened before connecting and follows the most recent connected source", () => {
   open("a", "first.cif"); open("b", "other.xyz");
   const { result } = renderHook(() => useFileViewer("viewer"));

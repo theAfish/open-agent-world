@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { mapReady, mapIds, clickMapNode } from './network-map-helpers';
+import { expect, test, type APIRequestContext } from "@playwright/test";
 
 test('knowledge map has quiet curves and contextual neighborhood emphasis', async ({ page, request }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
@@ -9,35 +10,19 @@ test('knowledge map has quiet curves and contextual neighborhood emphasis', asyn
   expect(imported.status()).toBe(200);
   await page.goto('/');
   const map = page.getByRole('region', { name: 'Demo knowledge workspace', exact: true });
-  await expect(map.locator('.kdg-node').first()).toBeVisible();
+  await mapReady(map);
   await expect(map.locator('.kdg-navigator')).toHaveCount(0);
   await expect(map.getByRole('button', { name: 'Focus selection' })).toHaveCount(0);
-  await expect(map.locator('.react-flow__edge-text')).toHaveCount(0);
-  const path = map.locator('.react-flow__edge-path').first();
-  await expect(path).toHaveAttribute('d', / C .* C /);
-  expect(await path.evaluate(el => Number(getComputedStyle(el).opacity))).toBeLessThan(.4);
-  const edge = await (await request.post(`/api/nodes/${graph.id}/actions/search`, { data: { arguments: { limit: 100 } } })).json();
-  const source = edge.value.edges[0].source;
-  // The initial fit animates the parent viewport for 150ms after nodes mount.
-  await page.waitForTimeout(250);
-  await map.locator(`.kdg-node[data-id="${source}"]`).hover();
-  await expect(map.locator('.kdg-node.is-muted').first()).toBeAttached();
-  await expect(map.locator('.react-flow__edge.is-related').first()).toBeAttached();
-  await map.getByRole('button', { name: 'Toggle navigator' }).hover();
-  const midpoint = await path.evaluate(el => {
-    const path = el as SVGPathElement;
-    const point = path.getPointAtLength(path.getTotalLength() / 2);
-    return new DOMPoint(point.x, point.y).matrixTransform(path.getScreenCTM()!).toJSON();
-  });
-  await page.mouse.move(midpoint.x, midpoint.y);
-  await expect(map.locator('.react-flow__edge-text').first()).toBeVisible();
-  await page.mouse.click(midpoint.x, midpoint.y);
-  await map.getByRole('button', { name: 'Toggle navigator' }).hover();
-  await expect(map.locator('.react-flow__edge-text').first()).toBeVisible();
+  await expect(map.locator('.react-flow')).toHaveCount(0);
+  const result = await (await request.post(`/api/nodes/${graph.id}/actions/search`, { data: { arguments: { limit: 100 } } })).json();
+  const source = result.value.edges[0].source;
+  await clickMapNode(page, map, source);
+  await expect(map.locator('.kdg-inspector h3')).toBeVisible();
+  await expect(map.getByRole('button', {name:'Back to previous focus'})).toBeEnabled();
   await page.screenshot({ path: '../.outputs/matcreator-native-map-dark.png' });
 });
 
-test.beforeEach(async ({ request }) => {
+async function clearDemoCards({ request }: { request: APIRequestContext }) {
   const world = await (await request.get('/api/world')).json();
   const roots = new Set<string>(world.nodes.filter((node: { name: string }) => ['Demo knowledge', 'Demo Materials Core', 'Materials Core', 'Drop source', 'Drop destination'].includes(node.name)).map((node: { id: string }) => node.id));
   const owned = new Set(roots);
@@ -45,7 +30,9 @@ test.beforeEach(async ({ request }) => {
   while (changed) { changed = false; for (const node of world.nodes) if (owned.has(node.parent_id) && !owned.has(node.id)) { owned.add(node.id); changed = true; } }
   for (const node of [...world.nodes].reverse()) if (owned.has(node.id) && !roots.has(node.id)) await request.delete(`/api/nodes/${node.id}`);
   for (const id of roots) await request.delete(`/api/nodes/${id}`);
-});
+}
+test.beforeEach(clearDemoCards);
+test.afterEach(clearDemoCards);
 
 test("KDG workspace assimilates, selects, filters and expands real knowledge", async ({ page, request }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
@@ -63,26 +50,29 @@ test("KDG workspace assimilates, selects, filters and expands real knowledge", a
   await expect(workspace.getByRole("dialog", { name: "Confirm assimilation" })).toBeVisible();
   expect((await request.get(`/api/nodes/${source.id}/document`)).status()).toBe(200);
   await workspace.getByRole("button", { name: "Confirm assimilation", exact: true }).click();
-  await expect(workspace.getByRole("status")).toContainText("Toolset assimilated");
+  await expect(workspace.getByRole('status').filter({ hasText: 'Toolset assimilated' })).toBeVisible();
   expect((await request.get(`/api/nodes/${source.id}/document`)).status()).toBe(404);
   await workspace.getByLabel("Search knowledge").fill("copper");
   await workspace.getByRole("button", { name: "Search", exact: true }).click();
-  const local = workspace.locator(".react-flow__node").filter({ hasText: "Local structure demo" });
-  await expect(local).toBeVisible();
-  await local.click();
+  const result = await (await request.post(`/api/nodes/${graph.id}/actions/search`, { data: { arguments: { query: 'copper' } } })).json();
+  const local = result.value.nodes.find((n: any) => n.title === 'Local structure demo').id;
+  await expect.poll(() => mapIds(workspace)).toContain(local);
+  await mapReady(workspace);
+  await workspace.locator('.network-map-scale button').last().click();
+  await clickMapNode(page, workspace, local);
   await expect(workspace.locator(".kdg-inspector h3")).toHaveText("Local structure demo");
   await expect(workspace.getByText("scripts/build_structure.py", { exact: true })).toBeAttached();
-  await workspace.getByRole("button", { name: "Expand neighborhood" }).click();
+  await workspace.locator('.kdg-inspector').getByRole("button", { name: "Expand neighborhood" }).click();
   await workspace.getByRole("button", { name: "Focus selection" }).click();
   await workspace.getByLabel("Knowledge type", { exact: true }).selectOption("memory");
-  await expect(workspace.locator(".react-flow__node")).toHaveCount(0);
+  await expect(workspace.locator('.network-map')).toHaveAttribute('data-node-count', '0');
   await workspace.getByLabel("Knowledge type", { exact: true }).selectOption("");
-  await expect(local).toBeVisible();
+  await expect.poll(() => mapIds(workspace)).toContain(local);
   await workspace.getByRole("button", { name: "New entry", exact: true }).click();
   await workspace.getByLabel("Title", { exact: true }).fill("Copper validation note");
   await workspace.getByLabel("Content", { exact: true }).fill("Verify atom count and cell volume after conversion.");
   await workspace.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(workspace.locator('.react-flow__node').filter({ hasText: 'Copper validation note' })).toBeVisible();
+  await expect(workspace.locator('.kdg-inspector h3')).toHaveText('Copper validation note');
   const saved = await request.post(`/api/nodes/${graph.id}/actions/search`, { data: { arguments: { query: 'Copper validation note' } } });
   expect((await saved.json()).value.nodes.some((entry: { title: string }) => entry.title === 'Copper validation note')).toBe(true);
   await workspace.getByRole("button", { name: "Toggle navigator" }).click();
@@ -142,9 +132,19 @@ test('palette Toolset drops directly into an inline graph workspace', async ({ p
   const palette = page.locator('[data-palette-card="matcreator.core"]');
   const destination = workspace.locator('.kdg-canvas');
   async function dragPalette() {
-    await page.locator('.component-palette').hover({ position: { x: 20, y: 20 } });
+    await page.locator('[data-tutorial="deck"]').hover();
+    await expect(page.getByRole('tab', { name: /Tools/ })).toBeEnabled();
+    await palette.hover();
+    await expect(palette).toHaveAttribute('data-unavailable', 'false');
     const target = await destination.boundingBox();
-    await palette.dragTo(destination, { targetPosition: { x: target!.width * .65, y: 100 } });
+    const source = (await palette.boundingBox())!;
+    await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2 - 35, { steps: 3 });
+    await expect(page.locator('.palette-drag-preview')).toBeVisible();
+    await page.mouse.move(target!.x + target!.width * .65, target!.y + 100, { steps: 12 });
+    await expect(page.locator(`.react-flow__node[data-id="${graph.id}"]`)).toHaveAttribute('data-transformation-hint');
+    await page.mouse.up();
   }
   const cancelled = new Promise<void>(resolve => page.once('dialog', async dialog => { expect(dialog.message()).toContain('Materials Core'); await dialog.dismiss(); resolve(); }));
   await dragPalette();
@@ -153,9 +153,8 @@ test('palette Toolset drops directly into an inline graph workspace', async ({ p
   const confirmed = new Promise<void>(resolve => page.once('dialog', async dialog => { expect(dialog.message()).toContain('Materials Core'); await dialog.accept(); resolve(); }));
   await dragPalette();
   await confirmed;
-  await expect(workspace.locator('.kdg-node').first()).toBeVisible();
-  const shape = await workspace.locator('.kdg-node').first().evaluate(el => ({ radius: getComputedStyle(el).borderRadius, width: el.clientWidth, height: el.clientHeight }));
-  expect(shape.radius).toBe('50%'); expect(shape.width).toBe(shape.height);
+  await mapReady(workspace);
+  await expect(workspace.locator('.react-flow')).toHaveCount(0);
   const outer = await container.boundingBox(); const inner = await workspace.boundingBox();
   expect(inner!.x).toBeGreaterThanOrEqual(outer!.x);
   expect(inner!.y + inner!.height).toBeLessThanOrEqual(outer!.y + outer!.height + 1);

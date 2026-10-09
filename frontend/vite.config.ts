@@ -1,8 +1,10 @@
-import { defineConfig, transformWithEsbuild } from "vite";
+import { transformWithEsbuild } from "vite";
+import { defineConfig } from "vitest/config";
 import { readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { compileModule } from "svelte/compiler";
 import react from "@vitejs/plugin-react";
+import autoprefixer from "autoprefixer";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { fileURLToPath, URL } from "node:url";
 import { localControlPlaneProxy, localManagementProxy } from "./server/control-plane.mjs";
@@ -14,9 +16,11 @@ const isThrelteMeasure = (source: string, importer?: string) =>
   source.endsWith("/useMeasure.svelte.js") && !!importer?.replaceAll("\\", "/").includes("/@threlte/core/");
 
 export default defineConfig({
+  // Apply the same WebKit mask/backdrop fallbacks in development and releases.
+  css: { postcss: { plugins: [autoprefixer({ overrideBrowserslist: ["Chrome >= 109", "Firefox >= 115", "Safari >= 16.4"] })] } },
   worker: { format: "es" },
   // PDF.js worker is a URL asset, not a dependency to prebundle as JavaScript.
-  optimizeDeps: { exclude: ["pdfjs-dist"], esbuildOptions: { plugins: [{
+  optimizeDeps: { include: ["sigma", "@sigma/edge-curve", "graphology", "graphology-layout-forceatlas2", "graphology-communities-louvain", "d3-contour"], exclude: ["pdfjs-dist"], esbuildOptions: { plugins: [{
     name: "threlte-local-canvas-dimensions",
     setup(build) {
       // MatterViz is prebundled in dev; nested imports bypass Vite's resolver.
@@ -36,6 +40,7 @@ export default defineConfig({
       "@oaw/plugin-api": fileURLToPath(new URL("./src/plugins/sdk.ts", import.meta.url)),
       "pdfjs-dist": fileURLToPath(new URL("./node_modules/pdfjs-dist", import.meta.url)),
       "@xyflow/react": fileURLToPath(new URL("./node_modules/@xyflow/react", import.meta.url)),
+      "lucide-react": fileURLToPath(new URL("./node_modules/lucide-react", import.meta.url)),
       "react": fileURLToPath(new URL("./node_modules/react", import.meta.url)),
       "react-dom": fileURLToPath(new URL("./node_modules/react-dom", import.meta.url)),
     },
@@ -54,4 +59,5 @@ export default defineConfig({
       "/ws": localManagementProxy(backendWsUrl, true),
     },
   },
+  test: { setupFiles: ["./src/test/setup.ts"] },
 });

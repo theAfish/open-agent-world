@@ -1,9 +1,18 @@
 import type { ComponentType } from "react";
 import type { NodeSurfaceLevel, NodeTypeCatalogItem, WorldCard } from "../types/world";
+export type { TutorialDefinition, TutorialStep, TutorialText } from '../tutorials/types';
+export type { DataConsumer, DataSchema, DataQuery, Dataset, DataSourceHost } from './dataSources';
 export type { NodePresentation, NodeSurfaceLevel, PluginStateSpec } from "../types/world";
 export { SchemaFields } from "./SchemaFields";
+export { CardFace, CardStock } from '../components/CardFace';
+export type { CardFaceProps } from '../components/CardFace';
+export { CARD_FACE_VARIANTS, CARD_FACE_TONES, cardFaceDesign } from '../components/cardFaceDesign';
+export type { CardFaceDesign, CardFaceVariant, CardFaceTone } from '../components/cardFaceDesign';
 export { t, useLocale } from "../i18n";
 export { useNestedFlowGestures } from "../canvas/useNestedFlowGestures";
+export { NetworkMap } from '../graph/NetworkMap';
+export type { NetworkMapProps } from '../graph/NetworkMap';
+export type { NetworkData, NetworkNode, NetworkEdge, NetworkMapHandle } from '../graph/types';
 export { useFileViewer } from "../state/openFiles";
 export type { FileReference, OpenedFile } from "../state/openFiles";
 export { WorkspaceSection, useWorkspaceSections } from "../workspace/WorkspaceSection";
@@ -128,6 +137,7 @@ export interface PluginViewProps {
   definition: NodeTypeCatalogItem;
   level: NodeSurfaceLevel;
   host: {
+    dataSources?: import('./dataSources').DataSourceHost;
     /** Optional transient UI draft, isolated by the host's card/state scope/session.
      * Survives surface unmount; never written to durable state or preferences.
      * Clear with undefined after save/cancel. Older hosts may omit this capability. */
@@ -159,7 +169,7 @@ export interface PluginViewProps {
     getAgentInfo(nodeId?: string): Promise<{ session_id: string; details?: Record<string, unknown> }>;
     openLinkedCanvas?(type: string, name: string): Promise<void>;
     documentAction(action: string, arguments_: Record<string, unknown>, expectedRevision?: number, nodeId?:string): Promise<{ value: unknown; revision: number }>;
-    delegationAction(action: 'collect' | 'wait' | 'stop', arguments_: Record<string, unknown>): Promise<Record<string, unknown>>;
+    delegationAction(action: 'collect' | 'wait' | 'inspect' | 'stop' | 'cancel_defer', arguments_: Record<string, unknown>): Promise<Record<string, unknown>>;
     resourceAction(action: string, arguments_: Record<string, unknown>, confirm?: boolean): Promise<Record<string, unknown>>;
     listCards(traits?: string[]): Promise<WorldCard[]>;
     readDocument(nodeId?: string): Promise<{ value: unknown; revision: number }>;

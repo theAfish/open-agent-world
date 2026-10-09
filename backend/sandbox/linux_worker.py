@@ -18,7 +18,7 @@ from typing import Any
 
 from .linux import LinuxSandboxBackend
 from .materialization import RuntimeMount
-from .models import ResourceAccess, SandboxEvent, SandboxLimits, SandboxValidationError
+from .models import ResourceAccess, SandboxEvent, SandboxLimits, SandboxValidationError, FolderMount
 
 
 def _write(payload: dict[str, Any]) -> None:
@@ -77,6 +77,7 @@ async def handle(request: dict[str, Any], *, stdin_pending: bool = False) -> Any
         execution = asyncio.create_task(backend.execute(sandbox_id, request["argv"],
             timeout_seconds=request.get("timeout_seconds"), env=request.get("env"),
             invocation_env=request.get("invocation_env"), execution_policy=request.get("execution_policy"),
+            folder_mounts=tuple(FolderMount(item["name"], _linux_path(item["source"]), ResourceAccess(item["access"]), item.get("kind", "folder")) for item in request.get("folder_mounts", [])),
             runtime_mount=RuntimeMount.from_wire(request["runtime_mount"]) if request.get("runtime_mount") is not None else None,
             _unit_name=request["unit"]))
         disconnected = asyncio.Event()

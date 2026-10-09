@@ -22,18 +22,34 @@
 .sandbox-pane-heading > span { min-width: 0; display: flex; align-items: center; gap: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); font-size: 10px; font-weight: 600; }
 .sandbox-pane-heading svg { flex-shrink: 0; }
 .sandbox-pane-actions { display: flex; flex-shrink: 0; align-items: center; gap: 8px; }
+.sandbox-files .sandbox-pane-actions { gap: 4px; }
+.sandbox-pane-actions .icon-button[aria-expanded=true] { color: var(--accent-strong); background: var(--accent-soft); }
 .sandbox-tree-scroll { flex: 1; min-height: 0; overflow: auto; padding: 9px 6px; }
 .sandbox-file-root + .sandbox-file-root { margin-top: 12px; }
-.sandbox-tree-entry { width: 100%; min-height: 28px; display: flex; align-items: center; gap: 5px; padding: 4px 7px; border: 0; border-radius: 5px; color: var(--ink-soft); background: transparent; text-align: left; font-size: 11px; cursor: pointer; }
+.sandbox-tree-entry { width: 100%; min-height: 28px; display: flex; align-items: center; gap: 5px; padding: 4px 7px; border: 0; border-radius: 5px; color: var(--ink); background: transparent; text-align: left; font-size: 11px; cursor: pointer; }
+.sandbox-tree-entry:disabled { color: var(--ink-faint); cursor: not-allowed; }
+.sandbox-files[data-drop-active=true] { outline: 1px solid var(--accent); outline-offset: -1px; }
+.sandbox-file-row[data-drop-target=true], .sandbox-root-entry[data-drop-target=true] { background: var(--accent-soft); outline: 1px solid var(--accent); border-radius: 5px; }
+.sandbox-file-row[data-drag-source=true] { opacity: .5; }
 .sandbox-tree-entry > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sandbox-tree-entry > svg { flex-shrink: 0; color: var(--ink-faint); }
 .sandbox-tree-entry > small { flex-shrink: 0; margin-left: auto; font-size: 8px; color: var(--ink-faint); }
 .sandbox-tree-entry:not(:disabled):hover { color: var(--ink); background: var(--surface-soft); }
-.sandbox-tree-entry[aria-current="true"] { color: var(--accent-strong); background: var(--accent-soft); }
-.sandbox-tree-entry[aria-current="true"] > svg { color: var(--accent); }
+.sandbox-file-row { display: flex; align-items: center; gap: 2px; border-radius: 5px; }
+.sandbox-file-row.is-selected { background: var(--accent-soft); }
+.sandbox-file-row > button { min-width: 0; flex: 1; }
+.sandbox-file-search, .sandbox-file-selection { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-bottom: 1px solid var(--line); color: var(--ink-faint); }
+.sandbox-file-search > input { min-width: 0; width: 100%; border: 0; border-radius: 0; background: transparent; color: var(--ink); padding: 2px; font: inherit; outline-offset: 2px; }
+.sandbox-file-search > input::-webkit-search-cancel-button { display: none; }
+.sandbox-file-selection > span { flex: 1; color: var(--ink-soft); }
+.sandbox-file-selection > input { accent-color: var(--accent); }
+.sandbox-load-more { justify-content: center; color: var(--accent-strong); }
+.sandbox-tree-entry[aria-current="true"], .sandbox-tree-entry[aria-pressed="true"] { color: var(--accent-strong); background: var(--accent-soft); }
+.sandbox-tree-entry[aria-current="true"] > svg, .sandbox-tree-entry[aria-pressed="true"] > svg { color: var(--accent); }
 .sandbox-root-entry { font-weight: 600; }
 .sandbox-files ul { list-style: none; padding: 0 0 0 15px; margin: 1px 0; }
 .sandbox-tree-note { margin: 0; padding: 8px; color: var(--ink-faint); font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
+.sandbox-upload-error { color: var(--danger); white-space: pre-wrap; max-height: 160px; overflow: auto; }
 .sandbox-files-footer { display: flex; align-items: center; gap: 6px; flex-shrink: 0; min-height: 29px; padding: 6px 12px; border-top: 1px solid var(--line); color: var(--ink-faint); font: 9px/1.5 "Cascadia Code", Consolas, monospace; }
 .sandbox-files-footer > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sandbox-files-footer > svg { flex-shrink: 0; }

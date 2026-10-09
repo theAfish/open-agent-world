@@ -38,7 +38,7 @@ it("requires reviewing a reset before submitting the exact profile and generatio
   fireEvent.click(screen.getByRole("button", { name: "Confirm and restart" }));
   await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
   expect(JSON.parse(request.mock.calls[1][1].body)).toEqual({ scopes: ["workspace"], profile_id: "dev-test", generation: "generation-7" });
-  await screen.findByRole("status");
+  expect((await screen.findByText(/Cleaning up and restarting/)).getAttribute('role')).toBe('status');
 });
 
 it("invalidates the confirmation when the scope changes", async () => {

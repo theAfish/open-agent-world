@@ -23,10 +23,10 @@ export function CardStaticPreview({ card, definition, workspace, width, height }
   const image = card.type === 'image';
   const content = <>
     {image ? <div className="card-static-image">
-      {typeof card.config.preview_url === 'string' ? <img src={card.config.preview_url} alt="" draggable={false} decoding="async" loading="lazy" /> : <ImageIcon size={40} />}
-      <span>{filename}</span>
-    </div> : <p className={card.type === 'text' ? 'card-static-document' : ''}>{text}</p>}
-    <div className="card-static-metadata"><span>{agent ? bounded(card.config.model, t('Default')) : card.type === 'text' ? filename : t(definition?.label ?? card.type)}</span>
+      {typeof card.config.preview_url === 'string' ? <img src={card.config.preview_url} alt="" draggable={false} decoding="async" loading="lazy" /> : <span data-material-layer="top-print"><ImageIcon size={40} /></span>}
+      <span data-material-layer="top-print">{filename}</span>
+    </div> : <p data-material-layer="top-print" className={card.type === 'text' ? 'card-static-document' : ''}>{text}</p>}
+    <div className="card-static-metadata" data-material-layer="top-print"><span>{agent ? bounded(card.config.model, t('Default')) : card.type === 'text' ? filename : t(definition?.label ?? card.type)}</span>
       <span>{card.type === 'text' ? `r${Number(card.config.revision ?? 0)}` : t(card.status)}</span></div>
   </>;
   if (!workspace) return <div className="card-static-preview"><div className="node-preview-body">{content}</div></div>;

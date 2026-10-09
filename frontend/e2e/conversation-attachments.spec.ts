@@ -12,7 +12,7 @@ test('General auto joins agents and uploaded images open a preview after reload'
     const card = page.locator(`[data-card-id="${room.id}"]`);
     await expect(card).toHaveAttribute('data-surface-level', 'workspace');
     const workspace = page.locator(`[data-workspace-node-id="${room.id}"]`);
-    await expect(workspace.getByText('1 active participants')).toBeVisible();
+    await expect(workspace.locator('.conversation-participant-row')).toHaveCount(1);
     await workspace.locator('input[type=file]').setInputFiles([
       { name: 'chart.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAUAAAAC0CAIAAABqhmJGAAACwUlEQVR4nO3TRQ4YBBQA0X86vDgU1+LuWkOKt+jH3d3leNyBDZnkJe8As5k57fACUfO/FwD/mYEhbE4/skCUgSHMwBA2ZxxdIMrAEGZgCJszjy0QZWAIMzCEzVnHF4gyMIQZGMLm7KcWiDIwhBkYwuacpxeIMjCEGRjC5sAzC0QZGMIMDGFz7rMLRBkYwgwMYXPeiQWiDAxhBoawOf+5BaIMDGEGhrC54PkFogwMYQaGsLnwhQWiDAxhBoawuejFBaIMDGEGhrC5+KUFogwMYQaGsLnk5QWiDAxhBoawufSVBaIMDGEGhrA5eHKBKANDmIEhbC47tUCUgSHMwBA2l7+6QJSBIczAEDZXvLZAlIEhzMAQNle+vkCUgSHMwBA2V72xQJSBIczAEDZXv7lAlIEhzMAQNte8tUCUgSHMwBA21+4CUQaGMAND2Fz39gJRBoYwA0PYXP/OAlEGhjADQ9jc8O4CUQaGMAND2Nz43gJRBoYwA0PYHHp/gSgDQ5iBIWxu+mCBKANDmIEhbG7+cIEoA0OYgSFsbvlogSgDQ5iBIWxu/XiBKANDmIEhbG77ZIEoA0OYgSFsbv90gSgDQ5iBIWzu+GyBKANDmIEhbO78fIEoA0OYgSFs7vpigSgDQ5iBIWzu/nKBKANDmIEhbO75aoEoA0OYgSFs7v16gSgDQ5iBIWzu+2aBKANDmIEhbO7/doEoA0OYgSFsHvhugSgDQ5iBIWwe/H6BKANDmIEhbB76YYEoA0OYgSFsHv5xgSgDQ5iBIWwe+WmBKANDmIEhbB79eYEoA0OYgSFsHvtlgSgDQ5iBIWwe/3WBKANDmIEhbJ74bYEoA0OYgSFsnvx9gSgDQ5iBIWwO/7FAlIEhzMAQNkf+XCDKwBBmYAibo38tEGVgCDMwhM2xvxeIMjCEGRjC5vg/C0QZGMIMDGH/AlUWKM71iqmXAAAAAElFTkSuQmCC', 'base64') },
       { name: 'data.csv', mimeType: 'text/csv', buffer: Buffer.from('name,value\nx,42\n') },

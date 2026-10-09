@@ -1,0 +1,33 @@
+/* One continuous printed board, shared by full and semantic-zoom cards. */
+.world-card-print {
+  position:absolute; inset:0; overflow:hidden; border-radius:inherit;
+  pointer-events:none; color:var(--card-kind,var(--ink-faint));
+  background:linear-gradient(155deg,color-mix(in srgb,currentColor 3%,transparent),transparent 65%);
+}
+.world-card-print-art { position:absolute; top:0; left:0; right:0; height:144px; opacity:.32; }
+.world-card-print .card-print-art { color:inherit; }
+.world-card-print .card-print-art > svg { opacity:.32; }
+.world-card-print .card-print-rail { display:none; }
+.world-card-print-rule {
+  position:absolute; top:149px; left:16px; right:16px; height:1px;
+  background:color-mix(in srgb,currentColor 28%,transparent);
+}
+.is-node > .world-card-print .world-card-print-art { height:100%; }
+.is-node > .world-card-print .world-card-print-rule { display:none; }
+.world-card-print[data-full-bleed] { color:var(--face-accent,var(--stock-ink)); background:none; }
+.world-card-print[data-full-bleed] .world-card-print-art { height:100%; opacity:var(--print-density,.38); }
+.world-card-print[data-full-bleed] .card-print-rail { display:block; opacity:.35; }
+
+/* Layout wrappers cannot create a stacking context above the optical film.
+   Only foreground ink and controls belong to protected top print. */
+.world-card[data-card-print="collectible"] :is(.node-surface-header,.card-lod-heading) { z-index:auto; }
+.world-card[data-card-print="collectible"] :is(.node-preview-content,.card-static-preview) {
+  z-index:auto; transform:none;
+}
+.world-card[data-card-print="collectible"] :is(.node-preview-content,.card-static-preview) { border-top-color:transparent; }
+.world-card[data-card-print="collectible"] :is(.card-kind-icon,.card-lod-kind) {
+  background:transparent; border-color:transparent; box-shadow:none; color:var(--ink);
+}
+.world-card[data-card-print="collectible"] :is(.card-title-group,.card-lod-title) { background:transparent; }
+.world-card[data-card-print="collectible"] .card-lod-symbol::after { z-index:4; }
+.world-card[data-card-print="collectible"] .node-surface-toggle { position:absolute; z-index:4; }

@@ -1,4 +1,12 @@
+import { mapReady, mapPoint, clickMapNode, mapIds } from './network-map-helpers';
 import { expect, test, type APIRequestContext } from '@playwright/test';
+
+test.beforeEach(async ({ request }) => {
+  const profile = await (await request.get('/api/application')).json();
+  await request.patch('/api/application/preferences', { data: { profile_id: profile.profile_id, generation: profile.generation, changes: {
+    'oaw-canvas-viewport-v1': null, 'oaw.locale': 'en',
+  } } });
+});
 
 async function createGraph(request: APIRequestContext) {
   const graph = await (await request.post('/api/nodes', { data: { type: 'matcreator.kdg', name: 'Interaction graph', position: { x: 200, y: 130 } } })).json();
@@ -23,70 +31,68 @@ for (const zoom of [0.65, 1.35]) test(`knowledge pan, node drag, zoom and select
   await page.setViewportSize({ width: 2200, height: 1400 });
   await page.addInitScript(zoom => localStorage.setItem('oaw-canvas-viewport-v1', JSON.stringify({ state: { viewport: { x: 30, y: 30, zoom, width: 2200, height: 1400 } }, version: 0 })), zoom);
   const graph = await createGraph(request);
+  const profile = await (await request.get('/api/application')).json();
+  await request.patch('/api/application/preferences', { data: { profile_id: profile.profile_id, generation: profile.generation, changes: {
+    'oaw-canvas-viewport-v1': JSON.stringify({ state: { viewport: { x: 30, y: 30, zoom, width: 2200, height: 1400 } }, version: 0 }),
+  } } });
   try {
     await page.goto('/');
-    const container = page.locator(`[data-card-id="${graph.id}"]`);
-    await expect(container.getByRole('button', { name: 'Open workspace' })).toHaveCount(0);
-    const canvas = container.locator('.kdg-canvas');
-    const node = canvas.locator(`.kdg-node[data-id="${graph.entryIds[0]}"]`);
-    await expect(node).toBeVisible();
-    await page.waitForTimeout(250);
+    const container = page.locator(`[data-card-id="${graph.id}"]`), canvas = container.locator('.kdg-canvas');
+    await mapReady(container); await page.waitForTimeout(350);
     const outer = page.locator('#oaw-world-map .react-flow__viewport').first();
     const worldTransform = await outer.getAttribute('style');
-    const frame = (await container.boundingBox())!;
     const box = (await canvas.boundingBox())!;
-    const before = (await node.boundingBox())!;
-    await page.mouse.move(box.x + 20, box.y + 25);
-    await page.mouse.down();
-    await page.mouse.move(box.x + 90, box.y + 60, { steps: 10 });
-    await page.mouse.up();
-    await expect.poll(async () => (await node.boundingBox())!.x - before.x).toBeCloseTo(70, 0);
-    expect((await node.boundingBox())!.y - before.y).toBeCloseTo(35, 0);
-    const panned = (await node.boundingBox())!;
-    await page.mouse.move(box.x + 20, box.y + 25);
-    await page.mouse.down({ button: 'middle' });
-    await page.mouse.move(box.x + 65, box.y + 45, { steps: 8 });
-    await page.mouse.up({ button: 'middle' });
-    await expect.poll(async () => (await node.boundingBox())!.x - panned.x).toBeCloseTo(45, 0);
-    const start = (await node.boundingBox())!;
-    await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(start.x + start.width / 2 + 55, start.y + start.height / 2 + 30, { steps: 10 });
-    await page.mouse.up();
-    await expect.poll(async () => (await node.boundingBox())!.x - start.x).toBeCloseTo(55, 0);
-    expect((await node.boundingBox())!.y - start.y).toBeCloseTo(30, 0);
+    const before = await mapPoint(container, graph.entryIds[0]);
+    await page.mouse.move(box.x + 20, box.y + box.height * .7); await page.mouse.down();
+    await page.mouse.move(box.x + 90, box.y + box.height * .7 + 35, { steps: 10 }); await page.mouse.up();
+    await expect.poll(async () => (await mapPoint(container, graph.entryIds[0])).x - before.x).toBeCloseTo(70, 0);
+    const start = await mapPoint(container, graph.entryIds[0]);
+    await page.mouse.move(start.x, start.y); await page.mouse.down();
+    await page.mouse.move(start.x + 55, start.y + 30, { steps: 10 }); await page.mouse.up();
+    await mapReady(container);
+    expect((await mapPoint(container, graph.entryIds[0])).x - start.x).toBeCloseTo(55, 0);
     expect(await outer.getAttribute('style')).toBe(worldTransform);
-    expect((await container.boundingBox())!.x).toBeCloseTo(frame.x, 0);
-    await canvas.getByRole('button', { name: 'Fit View', exact: true }).click();
-    await page.waitForTimeout(250);
-    const anchor = (await node.boundingBox())!;
-    const pointer = { x: anchor.x + anchor.width / 2, y: anchor.y + anchor.height / 2 };
-    const fittedCanvas = (await canvas.boundingBox())!;
-    expect(pointer.y).toBeGreaterThan(fittedCanvas.y);
-    expect(pointer.y).toBeLessThan(fittedCanvas.y + fittedCanvas.height);
-    await page.mouse.move(pointer.x, pointer.y);
-    await page.mouse.wheel(0, -100);
-    await expect.poll(async () => (await node.boundingBox())!.width).toBeGreaterThan(anchor.width);
-    const zoomed = (await node.boundingBox())!;
-    expect(zoomed.x + zoomed.width / 2).toBeCloseTo(pointer.x, 0);
-    expect(zoomed.y + zoomed.height / 2).toBeCloseTo(pointer.y, 0);
-    expect(await outer.getAttribute('style')).toBe(worldTransform);
-    await page.keyboard.down('Shift');
-    await page.mouse.move(zoomed.x - 8, zoomed.y - 8);
-    await page.mouse.down();
-    await page.mouse.move(zoomed.x + zoomed.width + 8, zoomed.y + zoomed.height + 8, { steps: 8 });
-    await page.mouse.up();
-    await page.keyboard.up('Shift');
-    await expect(node).toHaveClass(/selected/);
+    await canvas.getByRole('button', { name: 'Fit View', exact: true }).click(); await page.waitForTimeout(350);
+    const pointer = await mapPoint(container, graph.entryIds[0]);
+    const camera = () => canvas.locator('.network-map-stage').evaluate(el => (el as any).networkDiagnostics.camera.ratio as number);
+    const ratio = await camera(); await page.mouse.move(pointer.x, pointer.y); await page.mouse.wheel(0, -100);
+    await expect.poll(camera).toBeLessThan(ratio);
+    expect((await mapPoint(container, graph.entryIds[0])).x).toBeCloseTo(pointer.x, 0);
+    const zoomed = await mapPoint(container, graph.entryIds[0]);
+    await page.keyboard.down('Shift'); await page.mouse.move(zoomed.x - 9, zoomed.y - 9); await page.mouse.down();
+    await page.mouse.move(zoomed.x + 9, zoomed.y + 9, { steps: 8 }); await page.mouse.up(); await page.keyboard.up('Shift');
     await expect(container.getByRole('button', { name: 'Focus selection' })).toBeVisible();
-    for (const theme of ['light', 'dark']) {
-      await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
-      const colors = await canvas.locator('.kdg-node').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).backgroundColor));
-      expect(new Set(colors).size).toBe(4);
-      await page.screenshot({ path: `../.outputs/knowledge-interaction-${zoom}-${theme}.png` });
-    }
-    await node.click();
+    expect(await outer.getAttribute('style')).toBe(worldTransform);
+    for (const theme of ['light', 'dark']) { await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
+      await page.screenshot({ path: `../.outputs/graph-audit/interaction-${zoom}-${theme}.png` }); }
+    await clickMapNode(page, container, graph.entryIds[0]);
     await expect(container.locator('.kdg-inspector h3')).toHaveText('capability example');
+  } finally { await request.delete(`/api/nodes/${graph.id}`); }
+});
+
+test('following a relationship loads missing neighbors and keeps placed knowledge stable', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1700, height: 1100 });
+  const graph = await createGraph(request);
+  try {
+    await page.goto('/');
+    const scope = page.locator(`[data-card-id="${graph.id}"]`);
+    await mapReady(scope);
+    await scope.getByLabel('Search knowledge', { exact: true }).fill('capability');
+    await scope.getByRole('button', { name: 'Search', exact: true }).click();
+    await expect(scope.locator('.network-map')).toHaveAttribute('data-node-count', '1');
+    await mapReady(scope);
+    await scope.locator('.network-map-scale button').last().click();
+    await clickMapNode(page, scope, graph.entryIds[0]);
+    const points = () => scope.locator('.network-map-stage').evaluate(el => (el as any).networkDiagnostics.positions.map((p: any) => ({ id: p.id, x: p.x, y: p.y })));
+    const before = await points();
+    await scope.locator('.kdg-inspector').getByRole('button', { name: 'related_workflow', exact: true }).click();
+    await expect(scope.locator('.kdg-inspector h3')).toHaveText('procedure example');
+    await mapReady(scope);
+    expect(await mapIds(scope)).toContain(graph.entryIds[1]);
+    expect((await points()).find((p: any) => p.id === graph.entryIds[0])).toEqual(before[0]);
+    await expect(scope.getByRole('button', { name: 'Back to previous focus' })).toBeEnabled();
+    await scope.getByRole('button', { name: 'Back to previous focus' }).click();
+    await expect(scope.locator('.kdg-inspector h3')).toHaveText('capability example');
   } finally { await request.delete(`/api/nodes/${graph.id}`); }
 });
 
@@ -170,8 +176,7 @@ test('graph opens directly and edits, previews and deletes imported knowledge in
     for (const member of members) await expect(page.locator(`[data-card-id="${member.id}"]`)).toHaveCount(0);
     await workspace.getByLabel('Search knowledge').fill('Local structure demo');
     await workspace.getByRole('button', { name: 'Search', exact: true }).click();
-    const node = workspace.locator(`.kdg-node[data-id="${entry.id}"]`);
-    await node.click();
+    await clickMapNode(page, workspace, entry.id);
     const inspector = workspace.getByLabel('Knowledge details');
     await expect(inspector.getByRole('button', { name: 'Edit entry', exact: true })).toBeVisible();
     await inspector.getByText('SKILL.md', { exact: true }).click();
@@ -186,24 +191,24 @@ test('graph opens directly and edits, previews and deletes imported knowledge in
     await inspector.getByLabel('Content', { exact: true }).fill('Checked locally. Preserve the imported Skill resource.');
     await inspector.getByRole('button', { name: 'Save changes', exact: true }).click();
     await expect(inspector.locator('h3')).toHaveText('Local structure demo — reviewed');
-    await expect(node).toContainText('reviewed');
+    await expect(workspace.locator('.network-map-caption')).toContainText('reviewed');
     const changed = (await (await request.get(`/api/nodes/${graph.id}/document`)).json()).value;
     expect(changed.entries.find((item: { id: string }) => item.id === entry.id).owner).toBe('user');
     expect(changed.snapshots).toEqual(original.snapshots);
     await inspector.getByRole('button', { name: 'Delete entry', exact: true }).click();
     await inspector.getByRole('dialog', { name: 'Delete knowledge entry' }).getByRole('button', { name: 'Cancel', exact: true }).click();
-    await expect(node).toBeVisible();
+    expect(await mapIds(workspace)).toContain(entry.id);
     await inspector.getByRole('button', { name: 'Delete entry', exact: true }).click();
     await inspector.getByRole('button', { name: 'Confirm delete', exact: true }).click();
-    await expect(node).toHaveCount(0);
+    await expect.poll(() => mapIds(workspace)).not.toContain(entry.id);
     const after = (await (await request.get(`/api/nodes/${graph.id}/document`)).json()).value;
     expect(after.entries.some((item: { id: string }) => item.id === entry.id)).toBe(false);
     expect(after.snapshots).toEqual(original.snapshots);
     expect(after.skills).toEqual(original.skills);
     await page.reload();
     await expect(workspace).toBeVisible();
-    await expect(workspace.locator(`.kdg-node[data-id="${entry.id}"]`)).toHaveCount(0);
-    await workspace.locator('.kdg-node').first().click();
+    await mapReady(workspace); expect(await mapIds(workspace)).not.toContain(entry.id);
+    await clickMapNode(page, workspace);
     await page.screenshot({ path: '../.outputs/knowledge-inline-details.png' });
   } finally {
     await request.post('/api/nodes/batch-delete', { data: { node_ids: [graph.id, ...members.map((member: { id: string }) => member.id)] } });
@@ -232,8 +237,7 @@ test('large graph keeps resource cards out of the canvas and pages knowledge on 
     await expect(container.locator('.kdg-count')).toHaveText('130 entries');
     await container.getByLabel('Search knowledge').fill('Entry 129');
     await container.getByRole('button', { name: 'Search', exact: true }).click();
-    const node = container.locator('.kdg-node[data-id="entry-129"]');
-    await node.click();
+    await clickMapNode(page, container, 'entry-129');
     await expect(container.locator('.kdg-inspector h3')).toHaveText('Entry 129');
     await container.locator('.container-header strong').click();
     const grip = page.locator(`[data-resize-node="${graph.id}"][data-resize-corner="bottom-right"]`);

@@ -1,6 +1,6 @@
 import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
 import { t, useLocale } from "../i18n";
-import { ChevronDown, ChevronRight, Download, File, FileText, Folder, FolderOpen, History, LayoutPanelLeft, RefreshCw, Settings, Square, Terminal } from "lucide-react";
+import { Download, FileText, History, LayoutPanelLeft, RefreshCw, Settings, Square, Terminal } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { apiErrorMessage, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
@@ -11,12 +11,13 @@ import type { WorldCard } from "../types/world";
 import { IconButton } from "../components/IconButton";
 import { SandboxRuntimeControls, SandboxSettings, sandboxSettingsDirty } from "./SandboxCard";
 import { PublishFiles } from "./Artifacts";
+import { useTransferQueue } from '../files/TransferList';
+import { saveDownload } from '../files/transferQueue';
 import { WorkspaceSection, useWorkspaceSections } from "../workspace/WorkspaceSection";
 import "./sandboxWorkspace.css";
 
-interface Root { id: string; label: string; access: string; directory: boolean }
-interface Entry { name: string; directory: boolean; blocked: boolean; size: number }
-interface Files { entries?: Entry[]; truncated?: boolean; state?: string; text?: string; data?: string; media_type?: string; message?: string }
+import { SandboxFileBrowser, type FileRoot as Root, type FileEntry as Entry, type FileSelection, type FileChange } from "./SandboxFileBrowser";
+interface Files { entries?: Entry[]; truncated?: boolean; next_cursor?: string; state?: string; text?: string; data?: string; media_type?: string; message?: string }
 interface Receipt { id: string; caller: string; state: string; argv: string[]; stdout?: string; stderr?: string; error?: string; exit_code?: number; duration_seconds?: number; skill_id?: string }
 interface Bundle { cached?: boolean; current?: boolean; revision: number; files: string[]; status: string; note: string }
 
@@ -90,6 +91,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const [commands, setCommands] = useSurfaceDraft<string[]>(draftKey('commands'), []);
   const [terminalTab, setTerminalTab] = useSurfaceDraft(draftKey('terminal-tab'), 'terminal');
   const [selection, setSelection] = useSurfaceDraft<{ root: string; path: string; label: string } | undefined>(draftKey('selection'), undefined);
+  const selectionRef = useRef(selection); selectionRef.current = selection;
   const [preview, setPreview] = useState<Files>();
   const staticPreviewKey = draftKey('static-preview');
   useEffect(() => {
@@ -106,6 +108,8 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const [publishPaths, setPublishPaths] = useSurfaceDraft<string[]>(draftKey('publish-paths'), []);
   const binding = JSON.stringify([card.id, card.config.runtime, card.config.workspace_path, card.config.workspace_access,
     info?.runtime_id, info?.workspace_path, info?.workspace_access, info?.workspace]);
+  const transfers = useTransferQueue(binding);
+  useHydrationLease(card.id, 'sandbox-transfers', transfers.active);
   const fileContext = useRef({ binding, live: true, generation: 0, requests: new Map<string, number>() });
   if (fileContext.current.binding !== binding) {
     fileContext.current.live = false;
@@ -199,10 +203,13 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     if (tree[key]) return;
     await loadDirectory(root, path);
   }
-  async function loadDirectory(root: string, path: string) {
+  async function loadDirectory(root: string, path: string, cursor = '') {
     const key = `${root}:${path}`, current = fileRequest(`directory:${key}`);
     setLoading(s => ({ ...s, [key]: true }));
-    try { const value = await worldApi.sandboxWorkspace<Files>(card.id, fileQuery("list", root, path)); if (current()) setTree(s => ({ ...s, [key]: value })); }
+    try {
+      const value = await worldApi.sandboxWorkspace<Files>(card.id, `${fileQuery('list', root, path)}&${new URLSearchParams({ cursor })}`);
+      if (current()) setTree(s => ({ ...s, [key]: { ...value, entries: cursor ? [...(s[key]?.entries ?? []), ...(value.entries ?? [])].filter((entry, index, all) => all.findIndex(other => other.name === entry.name) === index) : value.entries } }));
+    }
     catch (e) { if (current()) setTree(s => ({ ...s, [key]: { state: "permission_denied", message: apiErrorMessage(e) } })); }
     finally { if (current()) setLoading(s => ({ ...s, [key]: false })); }
   }
@@ -215,21 +222,29 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
       if (current()) setPreview(value);
     } catch (e) { if (current()) setPreview({ state: "permission_denied", message: apiErrorMessage(e) }); }
   }
-  function directory(root: string, path: string): React.ReactNode {
-    const key = `${root}:${path}`, value = tree[key];
-    if (!expanded[key]) return null;
-    return <ul>{loading[key] && !value ? <li className="sandbox-tree-note">{t("Loading…")}</li> : value?.state ? <li className="sandbox-tree-note">{value.message ?? value.state}</li> : <>
-      {value?.entries?.length === 0 && <li className="sandbox-tree-note">{t("Empty folder")}</li>}
-      {value?.entries?.map(e => { const next = path ? `${path}/${e.name}` : e.name; return <li key={e.name}>
-        <button className="sandbox-tree-entry" disabled={e.blocked} title={e.blocked ? t("Links are blocked") : next}
-          aria-expanded={e.directory ? !!expanded[`${root}:${next}`] : undefined}
-          aria-current={!e.directory && selection?.root === root && selection.path === next ? "true" : undefined}
-          onClick={() => void (e.directory ? expand(root, next) : select(root, next, e.name))}>
-          {e.directory ? <>{expanded[`${root}:${next}`] ? <ChevronDown size={11} /> : <ChevronRight size={11} />}<Folder size={13} /></> : <FileText size={13} />}
-          <span>{e.name}</span>
-        </button>{e.directory && directory(root, next)}</li>; })}
-      {value?.truncated && <li className="sandbox-tree-note">{t("First 300 entries shown.")}</li>}
-    </>}</ul>;
+  async function filesChanged(change: FileChange) {
+    if (!context.live || fileContext.current !== context) return;
+    const remap = (path: string) => path === change.path || path.startsWith(`${change.path}/`)
+      ? change.destination === undefined ? undefined : change.destination + path.slice(change.path.length) : path;
+    context.generation++; setLoading({}); setTree({});
+    const open = Object.fromEntries(Object.entries(expandedRef.current).flatMap(([key, value]) => {
+      if (!key.startsWith('workspace:')) return [[key, value]];
+      const path = remap(key.slice('workspace:'.length));
+      return path === undefined ? [] : [[`workspace:${path}`, value]];
+    }));
+    if (change.destination !== undefined) open[`workspace:${change.destination.split('/').slice(0, -1).join('/')}`] = true;
+    expandedRef.current = open; setExpanded(open);
+    setPublishPaths(paths => paths.flatMap(path => { const next = remap(path); return next === undefined ? [] : [next]; }));
+    useOpenFiles.getState().changeSandboxPath(card.id, change.path, change.destination);
+    const current = selectionRef.current;
+    if (current?.root === 'workspace' && remap(current.path) === undefined) {
+      setSelection(undefined); setPreview(undefined);
+      useNodeSurfaceStore.getState().setDraft(staticPreviewKey, '');
+    } else if (current) {
+      const path = current.root === 'workspace' ? remap(current.path)! : current.path;
+      void select(current.root, path, current.label);
+    }
+    await refreshFiles();
   }
   async function action(name: string, body: unknown = {}) {
     setError("");
@@ -284,14 +299,12 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
       setDraft(recalled.current === -1 ? savedDraft.current : previous[recalled.current]);
     }
   }
-  async function download() {
-    if (!selection) return;
-    try {
-      const blob = await worldApi.downloadSandboxFile(card.id, selection.root, selection.path);
-      const url = URL.createObjectURL(blob), link = document.createElement("a");
-      link.href = url; link.download = selection.label; link.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (e) { setError(apiErrorMessage(e)); }
+  async function download(file: FileSelection | undefined = selection) {
+    if (!file) return;
+    await transfers.queue.add([{ name: file.label, size: file.size ?? 0, direction: 'download', run: async options => {
+      const blob = await worldApi.downloadSandboxFile(card.id, file.root, file.path, options);
+      if (!options.signal?.aborted) saveDownload(blob, file.label);
+    } }]);
   }
   async function savePreset() {
     // Route through the store so the mutation is serialized and revision-guarded.
@@ -315,30 +328,14 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
       <SandboxRuntimeControls card={card} disabled={settingsDirty || diagnosticBusy} />
     </header>
     {(error || (tab === "workspace" && runtimeError)) && <p className="sandbox-workspace-error" role="alert">{error || runtimeError}</p>}
-    {tab === 'workspace' && <div className="sandbox-workbench" role="tabpanel" id={`${card.id}-workspace-panel`} aria-labelledby={`${card.id}-workspace-tab`}>
+    <div className="sandbox-workbench" role="tabpanel" hidden={tab !== 'workspace'} id={`${card.id}-workspace-panel`} aria-labelledby={`${card.id}-workspace-tab`}>
       <WorkspaceSection id="files" title={t("Files")} className={`sandbox-files-section${hasWorkArea ? "" : " is-only-section"}`} style={{ width: hasWorkArea ? sidebarWidth : "100%" }}>
-      <aside ref={sidebarElement} className="sandbox-files nodrag nopan nowheel" aria-label={t("Sandbox files")}>
-        <header className="sandbox-pane-heading"><span><FolderOpen size={13} /> {t("Files")}</span>
-          <IconButton icon={RefreshCw} size="xs" quiet label={t("Refresh files")} disabled={loading.roots} onClick={() => { void refreshFiles(); if (selection) void select(selection.root, selection.path, selection.label); }} />
-        </header>
-        <div className="sandbox-tree-scroll">
-          {loading.roots && !roots.length && <p className="sandbox-tree-note">{t("Loading files…")}</p>}
-          {filesError && <p className="sandbox-tree-note" role="alert">{filesError}</p>}
-          {!loading.roots && !roots.length && !filesError && <p className="sandbox-tree-note">{t("Start the sandbox to browse files.")}</p>}
-          {roots.map(root => <section className="sandbox-file-root" key={root.id}>
-            <button className="sandbox-tree-entry sandbox-root-entry" aria-expanded={root.directory ? !!expanded[`${root.id}:`] : undefined}
-              title={root.id === "workspace" ? info?.workspace_path ?? info?.workspace ?? t("Managed workspace") : root.label}
-              onClick={() => void (root.directory ? expand(root.id, "") : select(root.id, "", root.label))}>
-              {root.directory ? <>{expanded[`${root.id}:`] ? <ChevronDown size={11} /> : <ChevronRight size={11} />}<Folder size={13} /></> : <File size={13} />}
-              <span>{root.label}</span>{root.access === "read_only" && <small>{t("Read only")}</small>}
-            </button>
-            {root.directory && directory(root.id, "")}
-          </section>)}
-        </div>
-        <footer className="sandbox-files-footer" title={info?.workspace_path ?? info?.workspace ?? t("Managed workspace")}>
-          <Folder size={11} /><span>{info?.workspace_path ?? info?.workspace ?? t("Managed workspace")}</span>
-        </footer>
-      </aside>
+      <SandboxFileBrowser key={binding} cardId={card.id} roots={roots} tree={tree} expanded={expanded}
+        loading={loading} selection={selection} error={filesError} sidebarRef={sidebarElement}
+        workspacePath={info?.workspace_path ?? info?.workspace ?? t("Managed workspace")}
+        writable={!deployed && !card.ephemeral && roots.some(root => root.id === 'workspace' && root.access === 'read_write') && info?.workspace_access !== 'read_only'}
+        onExpand={expand} onSelect={select} onDownload={download} transfers={transfers} onLoadMore={loadDirectory} onChange={filesChanged}
+        onRefresh={async () => { await refreshFiles(); if (selection) await select(selection.root, selection.path, selection.label); }} />
       </WorkspaceSection>
       {filesInline && hasWorkArea && <div className="sandbox-file-divider" role="separator" aria-label={t("Resize file sidebar")} aria-orientation="vertical"
         aria-valuemin={180} aria-valuemax={420} aria-valuenow={sidebarWidth} tabIndex={0}
@@ -368,7 +365,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
             <span title={selection?.path}><FileText size={13} />{selection?.label ?? t("File preview")}</span>
             {selection && <div className="sandbox-pane-actions">
               {selection.root.startsWith("resource:") && <button className="secondary-button" onClick={() => useNodeSurfaceStore.getState().openInspector(selection.root.slice(9))}>{t("Edit resource")}</button>}
-              <IconButton icon={Download} size="xs" quiet label={t("Download file")} title={t("Download file (up to 16 MiB)")} onClick={() => void download()} />
+              <IconButton icon={Download} size="xs" quiet label={t("Download file")} onClick={() => void download()} />
             </div>}
           </header>
           {selection ? <>
@@ -431,7 +428,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
         </section>
         </WorkspaceSection>
       </main>
-    </div>}
+    </div>
     {!deployed && tab === 'settings' && <div className="sandbox-settings-window" role="tabpanel" id={`${card.id}-settings-panel`} aria-labelledby={`${card.id}-settings-tab`}>
       <div className="sandbox-settings-content">
         <SandboxSettings card={card} onDirtyChange={setSettingsDirty} />

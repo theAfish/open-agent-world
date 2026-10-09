@@ -17,6 +17,8 @@ import { WorkspaceSurfaceContext } from './WorkspaceSurfaceContext';
 import type { PluginSlot, PluginViewProps } from "./sdk";
 import { useWorkspaceAccess } from "../workspace/WorkspaceAccess";
 
+import { PrintedCardView } from '../factory/PrintedCardView';
+
 class PluginBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   state: { error: string | null } = { error: null };
   static getDerivedStateFromError(error: unknown) { return { error: error instanceof Error ? error.message : String(error) }; }
@@ -39,6 +41,24 @@ export function PluginSurface({ card, slot, level, children }: {
   const source = useWorldStore(s=>xrdCanvasSource(card,s.cards,s.edges));
   const viewCard = useMemo(()=>source?{...card,config:{...card.config,source_node_id:source}}:card,[card,source]);
   const host = useMemo<PluginViewProps["host"]>(() => ({
+    dataSources: access.deployed ? undefined : {
+      list: () => worldApi.dataSources(card.id),
+      schemas: source => worldApi.dataSource(card.id, source, 'schemas', {}),
+      read: (source, query) => worldApi.dataSource(card.id, source, 'read', query),
+      connect: async (target, relationship) => {
+        const state = useWorldStore.getState();
+        state.requestConnection(card.id, target);
+        const pending = useWorldStore.getState().pendingConnection;
+        if (pending?.source === card.id && pending.target === target) {
+          useWorldStore.setState({pendingConnection:{...pending,options:pending.options.filter(option=>option.value===relationship)}});
+        }
+      },
+      subscribe: listener => useWorldStore.subscribe((next, previous) => {
+        const links = (state: typeof next) => state.edges.filter(edge => edge.source === card.id || edge.target === card.id)
+          .map(edge => `${edge.id}:${edge.source}:${edge.target}:${edge.relationship}:${edge.direction}`).sort().join('|');
+        if (links(next) !== links(previous)) listener();
+      }),
+    },
     draft: {
       get: () => {
         const value = useNodeSurfaceStore.getState().drafts[surfaceDraftKey(card.id, 'plugin', card.state_scope, sessionId)];
@@ -180,7 +200,8 @@ export function PluginSurface({ card, slot, level, children }: {
   const reference = definition?.frontend?.[slot];
   if (covered && !inWorkspace && card.type.startsWith('xrd.')) return null;
   if (!reference || !definition) return <>{children}</>;
-  const View = pluginView(definition.plugin_id, reference, runtime);
+  const View = definition.traits.includes('ui.factory-card.v1') && reference === 'factory-card'
+    ? PrintedCardView : pluginView(definition.plugin_id, reference, runtime);
   return <PluginBoundary key={`${card.id}:${definition.plugin_id}:${runtime?.version}:${reference}:${card.state_scope}:${sessionId ?? ""}`}>
     <Suspense fallback={<p role="status">{t("Loading Pack view...")}</p>}>
       <View card={viewCard} definition={definition} level={level} host={host} />

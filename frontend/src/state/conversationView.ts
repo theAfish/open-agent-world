@@ -8,11 +8,18 @@ import { useOpenFiles } from './openFiles';
 export const useConversationView = create<{
   activeConversationId?: string;
   sessions: Record<string, string | undefined>;
+  groupSessions: Record<string, Record<string, string>>;
+  rememberGroupSession: (conversationId: string, groupId: string, sessionId: string) => void;
   activate: (conversationId: string) => void;
   selectSession: (conversationId: string, sessionId: string | undefined) => void;
   showSession: (conversationId: string, sessionId: string) => void;
 }>()(persist((set) => ({
   sessions: {},
+  groupSessions: {},
+  rememberGroupSession: (conversationId, groupId, sessionId) => set(state => {
+    if (state.groupSessions[conversationId]?.[groupId] === sessionId) return state;
+    return { groupSessions: { ...state.groupSessions, [conversationId]: { ...state.groupSessions[conversationId], [groupId]: sessionId } } };
+  }),
   activate: (activeConversationId) => set({ activeConversationId }),
   selectSession: (conversationId, sessionId) => set(state => {
     if (state.sessions[conversationId] !== sessionId) useOpenFiles.getState().clear(conversationId);

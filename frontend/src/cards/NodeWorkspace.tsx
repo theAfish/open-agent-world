@@ -59,7 +59,7 @@ function WorkspaceTitlebar({ card }: WorkspaceSurfaceProps) {
           label={t("Remove {v0}", { v0: String(card.name) })} title={card.missing_plugin ? t("Remove") : t("Remove object (Ctrl+Z to undo)")} />}
         {canCollapse && <IconButton icon={X} size="sm" quiet onClick={() => closeWorkspace(card.id)} label={t("Close workspace")} />}
       </div>
-      <CardFinishLayer finish={card.finish} quality="thumbnail" />
+      <CardFinishLayer finish={card.finish} quality="thumbnail" surface="chrome" />
     </header>
   );
 }

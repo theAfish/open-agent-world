@@ -1,0 +1,56 @@
+/* Use the application palette instead of OS button and field skins. */
+button,
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+textarea,
+select {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+button, input, textarea, select { font: inherit; }
+button { color: inherit; }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
+
+/* Preserve each field's existing dimensions, background and border. */
+select:not([multiple]):not([size]), select:not([multiple])[size="1"] {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='m2 2 4 4 4-4' fill='none' stroke='%23888277' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  background-position: right 9px center !important;
+  background-size: 12px 8px !important;
+  background-repeat: no-repeat !important;
+  padding-right: 28px !important;
+  cursor: pointer;
+}
+select:disabled { cursor: not-allowed !important; opacity: 0.48; }
+
+.ui-select-menu {
+  position: fixed;
+  z-index: 20000;
+  padding: 4px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-solid);
+  color: var(--ink);
+  box-shadow: var(--panel-shadow);
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+.ui-select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+.ui-select-option > span:first-child { overflow-wrap: anywhere; }
+.ui-select-option > span:last-child { flex: 0 0 12px; color: var(--accent); }
+.ui-select-option.is-active, .ui-select-option:not([aria-disabled="true"]):hover { background: var(--surface-soft); }
+.ui-select-option[aria-selected="true"] { color: var(--accent-strong); }
+.ui-select-option[aria-disabled="true"] { opacity: 0.48; cursor: not-allowed; }
+.ui-select-group { padding: 6px 8px 3px; color: var(--ink-soft); font-size: 0.9em; }

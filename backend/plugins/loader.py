@@ -128,7 +128,7 @@ def load_installed_packs(registry: PluginRegistry, data_root: Path) -> None:
                 if manifest.kind == "content":
                     from backend.packs.content import content_plugin
                     root = manager.version_path(manifest.id, manifest.version)
-                    plugin = content_plugin(manifest, {name: (root / name).read_bytes() for name in manifest.content.legions}, registry)
+                    plugin = content_plugin(manifest, {name: (root / name).read_bytes() for name in manifest.content.paths}, registry)
                     registry.install(plugin, distribution=manifest)
                     registry.installed_packs[manifest.id] = manifest
                     registry.runtime_requirements[manifest.id] = ()

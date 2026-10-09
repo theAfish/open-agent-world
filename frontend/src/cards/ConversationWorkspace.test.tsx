@@ -55,7 +55,7 @@ describe("ConversationWorkspace snapshots", () => {
       value: vi.fn(),
     });
     useWorldStore.setState({ events: [], socketState: "closed", toasts: [] });
-    useConversationView.setState({ sessions: {}, activeConversationId: undefined });
+    useConversationView.setState({ sessions: {}, groupSessions: {}, activeConversationId: undefined });
     useNodeSurfaceStore.setState({ drafts: {} });
     vi.spyOn(worldApi, "getConversation").mockResolvedValue({
       conversation_id: card.id,
@@ -127,7 +127,7 @@ describe("ConversationWorkspace snapshots", () => {
     other.unmount();
   });
 
-  it("creates an inline named group with the only connected agent selected by default", async () => {
+  it("creates a named group from the switcher with the only connected agent selected by default", async () => {
     vi.mocked(worldApi.getConversation).mockResolvedValue({
       conversation_id: card.id, sessions: [session],
       agents: [
@@ -140,6 +140,7 @@ describe("ConversationWorkspace snapshots", () => {
     });
     render(<ConversationWorkspace card={card} />);
     await screen.findByText(historicalMessage.content);
+    fireEvent.click(screen.getByRole("button", { name: "Switch group: General" }));
     fireEvent.click(screen.getByRole("button", { name: "New group" }));
     const input = screen.getByRole("textbox", { name: "Group name" }) as HTMLInputElement;
     expect(input.value).toBe("New group");
@@ -164,6 +165,7 @@ describe("ConversationWorkspace snapshots", () => {
     const create = vi.spyOn(worldApi, "createConversationSession").mockRejectedValue(new Error("Unavailable"));
     render(<ConversationWorkspace card={card} />);
     await screen.findByText(historicalMessage.content);
+    fireEvent.click(screen.getByRole("button", { name: "Switch group: General" }));
     fireEvent.click(screen.getByRole("button", { name: "New group" }));
     const input = screen.getByRole("textbox", { name: "Group name" }) as HTMLInputElement;
     const confirm = screen.getByRole("button", { name: "Create group" }) as HTMLButtonElement;
@@ -182,6 +184,56 @@ describe("ConversationWorkspace snapshots", () => {
     fireEvent.click(screen.getByRole("button", { name: "New group" }));
     expect((screen.getByRole("textbox", { name: "Group name" }) as HTMLInputElement).value).toBe("New group");
     expect((screen.getByRole("checkbox", { name: "Boreal" }) as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('restores the last session per group after remount and falls back when that session was deleted', async () => {
+    const first = { ...session, group_id: 'research', group_title: 'Research' };
+    const second = { ...first, id: 'second', title: 'Second topic' };
+    const other = { ...session, id: 'other', group_id: 'notes', group_title: 'Notes', title: 'Notes topic' };
+    vi.mocked(worldApi.getConversation).mockResolvedValue({ conversation_id: card.id, sessions: [first, second, other], agents: [] });
+    const view = render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    fireEvent.click(screen.getByTitle('Second topic'));
+    fireEvent.change(screen.getByLabelText('Conversation message'), { target: { value: 'Research draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Switch group: Research' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Groups' })).getByRole('button', { name: 'Notes' }));
+    expect(useConversationView.getState().sessions[card.id]).toBe(other.id);
+    expect(screen.queryByRole('dialog', { name: 'Groups' })).toBeNull();
+    view.unmount();
+    const restored = render(<ConversationWorkspace card={card} />);
+    const trigger = await screen.findByRole('button', { name: 'Switch group: Notes' });
+    fireEvent.click(trigger);
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Groups' })).getByRole('button', { name: 'Research' }));
+    expect(useConversationView.getState().sessions[card.id]).toBe(second.id);
+    expect((screen.getByLabelText('Conversation message') as HTMLTextAreaElement).value).toBe('Research draft');
+    fireEvent.click(screen.getByRole('button', { name: 'Switch group: Research' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Groups' })).getByRole('button', { name: 'Notes' }));
+    restored.unmount();
+    vi.mocked(worldApi.getConversation).mockResolvedValue({ conversation_id: card.id, sessions: [first, other], agents: [] });
+    render(<ConversationWorkspace card={card} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Switch group: Notes' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Groups' })).getByRole('button', { name: 'Research' }));
+    expect(useConversationView.getState().sessions[card.id]).toBe(first.id);
+  });
+
+  it('opens groups by keyboard, dismisses with Escape or outside click, and retains an unfinished group draft', async () => {
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    const trigger = screen.getByRole('button', { name: 'Switch group: General' });
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const group = within(screen.getByRole('dialog', { name: 'Groups' })).getByRole('button', { name: 'General' });
+    expect(document.activeElement).toBe(group);
+    fireEvent.keyDown(group, { key: 'Escape' });
+    expect(document.activeElement).toBe(trigger);
+    expect(screen.queryByRole('dialog', { name: 'Groups' })).toBeNull();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('button', { name: 'New group' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Group name' }), { target: { value: 'Unfinished research' } });
+    fireEvent.pointerDown(screen.getByLabelText('Conversation message'));
+    expect(screen.queryByRole('dialog', { name: 'Groups' })).toBeNull();
+    act(() => trigger.focus());
+    fireEvent.click(trigger);
+    expect((screen.getByRole('textbox', { name: 'Group name' }) as HTMLInputElement).value).toBe('Unfinished research');
   });
 
   it("scopes quiet participant rings to the selected session and refreshes on context events", async () => {
@@ -345,9 +397,50 @@ describe("ConversationWorkspace snapshots", () => {
     render(<ConversationWorkspace card={card} />);
     await screen.findByText(historicalMessage.content);
     fireEvent.change(screen.getByLabelText('Attach files', { selector: 'input' }), { target: { files: [new File(['private'], 'private.txt')] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Switch group: General' }));
     fireEvent.click(screen.getByRole('button', { name: 'Second' }));
     await act(async () => finish({ version_id: 'private', path: 'private.txt', name: 'private.txt', size_bytes: 7, media_type: 'text/plain' }));
     expect(screen.queryByRole('button', { name: 'Remove attachment private.txt' })).toBeNull();
+    act(() => useConversationView.getState().selectSession(card.id, session.id));
+    expect(await screen.findByRole('button', { name: 'Remove attachment private.txt' })).toBeTruthy();
+  });
+
+  it('drops attachments anywhere in the thread without submitting and ignores ordinary text drags', async () => {
+    const upload = vi.spyOn(worldApi, 'uploadConversationAttachment').mockImplementation(async (_card, _session, file) => ({
+      version_id: file.name, path: file.name, name: file.name, size_bytes: file.size, media_type: 'text/plain',
+    }));
+    const send = vi.spyOn(worldApi, 'postConversationMessage');
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    const thread = screen.getByLabelText('Conversation message').closest('main')!;
+    fireEvent.drop(thread, { dataTransfer: { types: ['text/plain'], files: [] } });
+    expect(upload).not.toHaveBeenCalled();
+    const file = new File(['notes'], 'notes.txt');
+    fireEvent.dragEnter(thread, { dataTransfer: { types: ['Files'], files: [file] } });
+    expect(screen.getByText('Drop files to attach to this conversation')).toBeTruthy();
+    fireEvent.drop(thread, { dataTransfer: { types: ['Files'], files: [file] } });
+    expect(await screen.findByRole('button', { name: 'Remove attachment notes.txt' })).toBeTruthy();
+    expect(upload).toHaveBeenCalledWith(card.id, session.id, file, expect.objectContaining({ signal: expect.any(AbortSignal), onProgress: expect.any(Function) }));
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('continues a batch after a failed attachment and prevents simultaneous duplicate intake', async () => {
+    let finish!: () => void;
+    const upload = vi.spyOn(worldApi, 'uploadConversationAttachment')
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { finish = () => reject(new Error('Upload interrupted')); }))
+      .mockResolvedValue({ version_id: 'ok', path: 'ok.txt', name: 'ok.txt', size_bytes: 2, media_type: 'text/plain' });
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText(historicalMessage.content);
+    const target = screen.getByLabelText('Conversation message');
+    const dataTransfer = { types: ['Files'], files: [new File(['bad'], 'bad.txt'), new File(['ok'], 'ok.txt')] };
+    fireEvent.drop(target, { dataTransfer });
+    fireEvent.drop(target, { dataTransfer });
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+    await act(async () => finish());
+    await screen.findByRole('button', { name: 'Remove attachment ok.txt' });
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('alert').textContent).toContain('Upload interrupted');
+    expect(screen.getByRole('button', { name: 'Retry bad.txt' })).toBeTruthy();
   });
 
   it("loads persisted history while the WebSocket is offline", async () => {

@@ -64,9 +64,10 @@ test("durable grouped sessions page both ways with stable scroll anchors", async
     const sessionsPanel = workspace.locator(".conversation-session-navigation .conversation-session-list");
     await expect(sessionsPanel).toBeVisible();
     await expect(workspace.locator(".conversation-participant-panel .conversation-session-list")).toHaveCount(0);
-    const newButton = await sessionsPanel.getByRole("button", { name: "New session", exact: true }).boundingBox();
+    const toolbar = await workspace.locator('.conversation-session-toolbar').boundingBox();
     const firstSession = await sessionsPanel.locator(".conversation-sidebar-scroll .workspace-session").first().boundingBox();
-    expect(firstSession!.y - (newButton!.y + newButton!.height)).toBeGreaterThanOrEqual(8);
+    expect(firstSession!.y - (toolbar!.y + toolbar!.height)).toBeGreaterThanOrEqual(0);
+    expect(firstSession!.y - (toolbar!.y + toolbar!.height)).toBeLessThan(12);
     await transcript.evaluate((node) => { node.scrollTop = node.scrollHeight - node.clientHeight - 240; node.dispatchEvent(new Event("scroll")); });
     await expect(latest).toBeVisible();
     await page.screenshot({ path: "../.outputs/conversation-layout.png" });

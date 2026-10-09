@@ -189,7 +189,7 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
     onDragEnd={() => { setDragging(false); setSelected(null); }}>
     <header className="legion-window-titlebar" data-finish={normalizeCardFinish(card.finish)}>
       <span className="legion-window-mark"><LayoutTemplate size={16} /></span>
-      <div className="legion-window-title card-finish-surface"><strong>{card.name}</strong><CardFinishLayer finish={card.finish} quality="thumbnail" /></div>
+      <div className="legion-window-title card-finish-surface"><strong>{card.name}</strong><CardFinishLayer finish={card.finish} quality="thumbnail" surface="chrome" /></div>
       <span className="legion-window-status" role="status">{busy ? t('Saving...') : dirty ? t('Unsaved layout') : saved ? t('Layout saved') : ''}</span>
       {actions}
       {!locked && <><PublishApplication card={card} disabled={busy || dirty || editing} />
@@ -291,7 +291,7 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
             const id = drawerId; setDrawerId(null);
             if (id) document.getElementById(`legion-tray-${id}`)?.focus();
           }}><X size={14} /></button>
-          {drawerCard && <CardFinishLayer finish={drawerCard.finish} quality="thumbnail" />}
+          {drawerCard && <CardFinishLayer finish={drawerCard.finish} quality="thumbnail" surface="chrome" />}
         </header>
         {unplaced.filter(member => mountedIds.current.has(member.id)).map(member =>
           <PaneMount key={member.id} id={member.id} host={surfaceHosts.current.get(viewKey({ card_id: member.id }))} hidden={member.id !== drawerCard?.id} label={member.name} />)}
@@ -449,7 +449,7 @@ function WorkspacePane({ leaf, members, hosts, viewTitle, editing, selected, dra
                 buttons?.[nextIndex]?.focus(); activate(views[nextIndex]);
               }}>
               <CatalogIcon definition={tabDefinition} size={13} /><span>{viewTitle(tabView)}</span>
-              <CardFinishLayer finish={member.finish} quality="thumbnail" />
+              <CardFinishLayer finish={member.finish} quality="thumbnail" surface="chrome" />
             </button>
             {editing && tabView.section_id && <button className="legion-tab-close" title={t('Restore to card')}
               aria-label={t('Restore {v0} to card', { v0: viewTitle(tabView) })} onClick={() => restore(tabView)}><ArrowLeft size={12} /></button>}

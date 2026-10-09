@@ -34,6 +34,32 @@ def edit(store, action, **kwargs):
     return store.edit(LibraryEdit(expected_revision=store.read().revision, action=action, **kwargs))
 
 
+def test_bundled_packaging_presets_are_published(client):
+    packs = client.get('/api/card-library').json()['packs']
+    assert packs['open-agent-world.core.default']['definition']['packaging'] == 'collector'
+    assert packs['openai.codex.default']['definition']['packaging'] == 'premium'
+    assert packs['research.library.default']['definition']['packaging'] == 'paper'
+
+
+def test_new_packaging_refreshes_old_metadata_without_resetting_ownership(tmp_path):
+    db = Database(tmp_path / 'world.db')
+    try:
+        registry = create_builtin_registry()
+        store = CardLibraryStore(db, registry)
+        opened = edit(store, 'open_pack', id='open-agent-world.core.default')
+        payload = opened.model_dump(mode='json')
+        payload['packs']['open-agent-world.core.default']['definition']['packaging'] = 'standard'
+        with db.transaction(immediate=True) as connection:
+            connection.execute('UPDATE application_settings SET value_json=? WHERE key=?', (json.dumps(payload), KEY))
+        refreshed = CardLibraryStore(db, registry).read()
+        pack = refreshed.packs['open-agent-world.core.default']
+        assert pack.definition.packaging == 'collector'
+        assert pack.opened and pack.opened_at == opened.packs[pack.definition.id].opened_at
+        assert refreshed.collection == opened.collection
+    finally:
+        db.close()
+
+
 def test_legacy_empty_pack_snapshot_survives_restart(tmp_path):
     db = Database(tmp_path / "world.db")
     registry = create_builtin_registry()

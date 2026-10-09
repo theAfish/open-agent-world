@@ -25,6 +25,7 @@ from .models import (
     CommandResult, ResourceAccess, ResourceAttachment, SandboxEvent,
     SandboxEventType, SandboxInfo, SandboxLimits, SandboxNotFoundError,
     SandboxSecurityError, SandboxState, SandboxStateError, SandboxValidationError,
+    FolderMount,
 )
 
 _BOOTSTRAP = """import json,os,sys,types
@@ -53,7 +54,7 @@ sys.modules['oaw_sandbox.linux_worker'].main(payload['request'],stdin_pending=bo
 # source change the next unrestricted transport helper.
 _WORKER_MODULES = tuple(
     (name, (Path(__file__).parent / f"{name}.py").read_text(encoding="utf-8"))
-    for name in ("models", "materialization", "base", "environment", "files", "transfers", "python_launchers", "python_runtime", "linux_network", "linux", "linux_worker")
+    for name in ("models", "materialization", "base", "environment", "files", "transfers", "listing", "streaming", "mutations", "python_launchers", "python_runtime", "linux_network", "linux", "linux_worker")
 )
 
 
@@ -102,6 +103,7 @@ class _Active:
 
 class WslSandboxBackend(SandboxBackend):
     supports_invocation_environment = True
+    supports_folder_mounts = True
     supports_execution_policy = True
 
     def __init__(self, managed_root: Path, *, distribution: str,
@@ -295,8 +297,11 @@ class WslSandboxBackend(SandboxBackend):
             return self._info(raw)
 
     async def managed_workspace(self, sandbox_id: str) -> Path:
-        import hashlib
         await self.get(sandbox_id)
+        return self._managed_workspace_path(sandbox_id)
+
+    def _managed_workspace_path(self, sandbox_id: str) -> Path:
+        import hashlib
         return self._managed_root / "sandbox-runtimes" / hashlib.sha256(self._runtime_id.encode()).hexdigest()[:16] / "sandboxes" / sandbox_id / "workspace"
 
     async def configure(self, sandbox_id: str, *, workspace_path: str | None,
@@ -314,6 +319,16 @@ class WslSandboxBackend(SandboxBackend):
             return self._info(raw, workspace_path=workspace_path, preserve_workspace=False)
 
     async def file_operation(self, sandbox_id, operation, **options):
+        if os.name == 'nt' and operation in {'move', 'delete'}:
+            # WSL workspaces live on Windows storage. DrvFS cannot perform
+            # renameat2(RENAME_NOREPLACE); use the same pinned Win32 mutation
+            # boundary as the Windows runtime, not a racy check-then-rename.
+            # Ask the trusted worker for current authority, never cached UI info.
+            from .files import file_operation, run_file_operation
+            async with self._lock(sandbox_id):
+                raw = await self._request(self._payload('get', sandbox_id))
+                workspace = Path(raw['workspace_path']) if raw.get('workspace_path') else self._managed_workspace_path(sandbox_id)
+                return await run_file_operation(file_operation, workspace, ResourceAccess(raw['workspace_access']), (), operation, **options)
         return await self._request(self._payload("files", sandbox_id, file_operation=operation, options=options))
 
     async def start(self, sandbox_id: str) -> SandboxInfo:
@@ -330,7 +345,8 @@ class WslSandboxBackend(SandboxBackend):
     async def execute(self, sandbox_id: str, argv: Sequence[str], *,
         timeout_seconds: float | None = None, env: Mapping[str, str] | None = None,
         invocation_env: Mapping[str, str] | None = None,
-        runtime_mount: RuntimeMount | None = None, execution_policy: Mapping[str, Any] | None = None) -> CommandResult:
+        runtime_mount: RuntimeMount | None = None, execution_policy: Mapping[str, Any] | None = None,
+        folder_mounts: Sequence[FolderMount] = ()) -> CommandResult:
         from .models import execution_command_id
         from uuid import uuid4
         command_id = execution_command_id.get() or uuid4().hex
@@ -359,6 +375,7 @@ class WslSandboxBackend(SandboxBackend):
             raw = await self._request(self._payload("execute", sandbox_id, argv=list(command),
                 timeout_seconds=timeout, env=dict(env) if env is not None else None,
                 invocation_env=dict(invocation_env) if invocation_env is not None else None,
+                folder_mounts=[asdict(folder) for folder in folder_mounts],
                 unit=active.unit, command_id=command_id, execution_policy=policy, runtime_mount=runtime_mount.to_wire() if runtime_mount is not None else None),
                 timeout=timeout + 20, active=active)
             result = CommandResult(sandbox_id=raw["sandbox_id"], argv=tuple(raw["argv"]),

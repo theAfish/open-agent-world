@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 from backend.plugins.documents import NodeDocumentAction, NodeDocumentDefinition
 from backend.plugins.registry import CapabilityDefinition, CapabilityGrantDefinition, CapabilitySelector, NodeTypeDefinition, RelationshipDefinition
 from backend.sandbox.environment import validate_command_environment
+from backend.security.execution_folders import FolderRequirement, FileRequirement, PathRequirement, PATH_REQUIREMENTS, folder_store, GlobalExecutionFolderStore
+from backend.sandbox.models import FolderMount, SandboxValidationError
 
 TARGET_VARIABLE = "OAW_TARGET_CONFIG_JSON"
 ENVIRONMENT_SELECTOR = CapabilitySelector("environment", "environment_id", capability_kinds=frozenset({"environment.use"}),
@@ -29,7 +31,7 @@ class SecretRequirement(BaseModel):
 
 class EnvironmentProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    variables: dict[str, StrictStr | SecretRequirement] = Field(default_factory=dict)
+    variables: dict[str, StrictStr | SecretRequirement | FolderRequirement | FileRequirement | PathRequirement] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_variables(self):
@@ -92,6 +94,8 @@ def resolve_execution_configuration(services, environment_id, target_id):
     if environment_id is not None:
         profile = EnvironmentProfile.model_validate(read_document(services, environment_id)["value"])
         for key, value in profile.variables.items():
+            if isinstance(value, PATH_REQUIREMENTS):
+                raise SandboxValidationError("Folder variables require Sandbox execution")
             if isinstance(value, SecretRequirement):
                 value = resolve_environment_secret(services, environment_id, key, value.secret_ref)
                 secrets.append(value)
@@ -124,11 +128,13 @@ def linked_environment(services, sandbox_id):
 def effective_variables(services, sandbox_id, environment_id=None):
     from backend.node_documents import read_document
     from backend.sandbox.settings import SandboxSettingsStore
+    from backend.sandbox.environment import HOST_ENVIRONMENT_NAMES
     profile_id = environment_id or linked_environment(services, sandbox_id)
     layers = [(profile_id, "invocation" if environment_id else "linked"), (sandbox_id, "local")]
     defaults = SandboxSettingsStore(services.database, services.settings.data_root).read()
     effective = {name.upper(): (name, value, "global", "global")
-                 for name, value in defaults.environment_variables.items()}
+                 for name, value in defaults.environment_variables.items()
+                 if name.upper() not in HOST_ENVIRONMENT_NAMES}
     for node_id, source in layers:
         if node_id is None:
             continue
@@ -139,12 +145,25 @@ def effective_variables(services, sandbox_id, environment_id=None):
     return profile_id, list(effective.values())
 
 
-def resolve_sandbox_configuration(services, sandbox_id, environment_id=None, target_id=None):
+def resolve_sandbox_configuration(services, sandbox_id, environment_id=None, target_id=None, *, folder_mounts=None):
     _, variables = effective_variables(services, sandbox_id, environment_id)
     environment, secrets = {}, []
-    for name, value, owner, _ in variables:
+    for name, value, owner, source in variables:
+        if isinstance(value, PATH_REQUIREMENTS):
+            if folder_mounts is None:
+                raise SandboxValidationError("This caller does not support folder variables")
+            store = GlobalExecutionFolderStore(services.database, services.settings.data_root) if source == "global" else folder_store(services)
+            binding = store.resource(owner, value)
+            folder_mounts.append(FolderMount(name, binding.path, binding.access, binding.kind))
+            # Backends replace this host path with their actual accessible path.
+            environment[name] = binding.path
+            continue
         if isinstance(value, SecretRequirement):
-            value = resolve_environment_secret(services, owner, name, value.secret_ref)
+            if source == "global":
+                from backend.security.execution_credentials import GlobalExecutionCredentialStore
+                value = GlobalExecutionCredentialStore(services.database, services.settings.data_root).resolve(None, value.secret_ref)
+            else:
+                value = resolve_environment_secret(services, owner, name, value.secret_ref)
             secrets.append(value)
         environment[name] = value
     if target_id:
@@ -156,10 +175,38 @@ def resolve_sandbox_configuration(services, sandbox_id, environment_id=None, tar
 
 def configuration_summary(services, sandbox_id):
     profile_id, variables = effective_variables(services, sandbox_id)
+    from backend.security.execution_credentials import GlobalExecutionCredentialStore
+    global_credentials = GlobalExecutionCredentialStore(services.database, services.settings.data_root)
     result = []
     for name, value, owner, source in variables:
         secret = isinstance(value, SecretRequirement)
+        folder = isinstance(value, PATH_REQUIREMENTS)
+        configured = True
+        shown = value
+        folder_access = None
+        folder_error = None
+        available = None
+        if folder:
+            store = GlobalExecutionFolderStore(services.database, services.settings.data_root) if source == "global" else folder_store(services)
+            configured = store.configured(owner, value.reference)
+            binding = store.folder(owner, value.reference) if configured else None
+            shown = binding.path if binding else None
+            folder_access = binding.access.value if binding else None
+            if binding:
+                from backend.sandbox.settings import SandboxSettingsStore
+                try:
+                    if value.kind != "path" and binding.kind != value.kind:
+                        raise SandboxValidationError("Path type changed; choose the file or folder again and save")
+                    SandboxSettingsStore(services.database, services.settings.data_root).validator.validate_environment_path(binding.path, binding.kind)
+                    available = True
+                except (ValueError, OSError, SandboxValidationError) as error:
+                    available = False
+                    folder_error = str(error)
         result.append({"name": name, "source": source, "owner": owner, "secret": secret,
-            "value": None if secret else value,
-            "configured": services.execution_credentials.configured(owner, value.secret_ref) if secret else True})
-    return {"profile_id": profile_id, "variables": result, "ready": all(v["configured"] for v in result)}
+            "folder": folder, "kind": binding.kind if folder and binding else None, "value": None if secret else shown,
+            **({"access": folder_access, "error": folder_error, "available": available,
+                "status": "unconfigured" if not configured else "path_unavailable" if available is False else "configured",
+                "validation_scope": "host_path"} if folder else {}),
+            "configured": (global_credentials if source == "global" else services.execution_credentials).configured(owner, value.secret_ref) if secret else configured})
+    return {"profile_id": profile_id, "variables": result,
+            "ready": all(v["configured"] and v.get("available") is not False for v in result)}

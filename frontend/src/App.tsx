@@ -10,6 +10,7 @@ import { LegionWorkspace } from './legions/LegionWorkspace';
 import { ActivityPanel } from "./shell/ActivityPanel";
 import { BackendUnavailableNotice } from "./shell/BackendUnavailableNotice";
 import { Onboarding } from "./onboarding/Onboarding";
+import { ProgressiveTutorials } from './tutorials/ProgressiveTutorials';
 import { RuntimeConnection } from "./shell/RuntimeConnection";
 import { SettingsPanel } from "./shell/SettingsPanel";
 import { ToastStack } from "./shell/ToastStack";
@@ -47,6 +48,7 @@ export function App() {
         <ComponentPalette />
         <LegionHoverPanel />
         <Onboarding />
+        <ProgressiveTutorials />
         <ActivityPanel />
         <ConnectionDialog />
         <ToastStack />

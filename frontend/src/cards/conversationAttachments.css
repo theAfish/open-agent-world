@@ -7,9 +7,6 @@
 .conversation-image-thumbnail { padding: 0; border: 0; background: transparent; cursor: zoom-in; }
 .conversation-image-thumbnail { max-width: 100%; }
 .conversation-image-thumbnail img { display: block; max-width: min(320px, 100%); max-height: 220px; object-fit: contain; }
-.conversation-image-overlay { position: fixed; inset: 0; z-index: 10000; background: #000b; display: grid; place-items: center; padding: 24px; }
-.conversation-image-overlay [role=dialog] { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
-.conversation-image-overlay img { max-width: 90vw; max-height: 82vh; object-fit: contain; }
-.conversation-image-overlay button { padding: 8px 12px; color: var(--ink); background: var(--surface-raised); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font: inherit; }
 .conversation-pending-files { padding: 0 12px; }
 .conversation-pending-files > span { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; overflow-wrap: anywhere; font-size: inherit; }
+.conversation-pending-files > span > span { min-width: 0; }

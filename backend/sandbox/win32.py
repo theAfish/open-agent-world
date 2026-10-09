@@ -503,10 +503,12 @@ class WindowsNativeApi:
                 pending.extend(item.iterdir())
 
     def open_workspace(self, path: Path) -> int:
-        # Keep the selected directory identity stable while authority is live.
-        # Without delete sharing the root cannot be renamed or replaced.
+        # Pin either a directory or a single file without delete sharing. Ask
+        # only for metadata/ACL rights: MAXIMUM_ALLOWED includes DELETE and
+        # makes ordinary file readers (which do not share delete) fail with a
+        # sharing violation while this host handle is held.
         handle = self._kernel32.CreateFileW(
-            str(path), 0x02000000, 0x3, None, 3, 0x02200000, None,
+            str(path), 0x00060080, 0x3, None, 3, 0x02200000, None,
         )
         if handle == ctypes.c_void_p(-1).value:
             self._raise_last_error(f"hold workspace directory: {path}")

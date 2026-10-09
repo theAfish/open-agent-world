@@ -115,7 +115,7 @@ def test_file_bounds_readonly_and_explicit_overwrite(tmp_path):
     with pytest.raises(SandboxSecurityError):
         operate(tmp_path, "copy", "write", read_only=True, data=data)
     operate(tmp_path, "copy", "write", data=data)
-    with pytest.raises(FileExistsError):
+    with pytest.raises(SandboxValidationError, match="already exists"):
         operate(tmp_path, "copy", "write", data=data)
     operate(tmp_path, "copy", "write", data=data, overwrite=True)
     assert (tmp_path / "copy").read_bytes() == b"new"
@@ -135,6 +135,10 @@ def test_links_and_junctions_cannot_escape(tmp_path):
         assert operate(workspace, "", "list")["entries"][0]["blocked"]
         with pytest.raises((SandboxSecurityError, OSError)):
             operate(workspace, "escape/secret", "preview")
+        with pytest.raises((SandboxSecurityError, SandboxValidationError, OSError)):
+            operate(workspace, "escape/new/report.md", "write",
+                    data=base64.b64encode(b"blocked").decode(), create_parents=True)
+        assert not (outside / "new").exists()
     finally:
         if os.name == "nt": link.rmdir()
         else: link.unlink()
@@ -189,6 +193,53 @@ def test_skill_copy_uses_live_authorization_and_never_exposes_cache(runtime_clie
     assert client.post(base + "/reset-cache").status_code == 200
     info = client.portal.call(backend.get, sandbox["id"])
     assert (info.workspace / "report.md").read_text() == "# Report"
+
+
+def test_skill_copy_creates_parents_and_preserves_conflict_feedback(runtime_client):
+    from backend.agents.tools import build_scoped_tool_callables
+
+    client, backend, _ = runtime_client
+    agent, sandbox, skill, _, _ = setup_skill(client)
+    provider = WorldAgentCapabilityProvider(client.app.state.services)
+    definitions = client.portal.call(provider.list_tools, agent["id"])
+    copy = next(tool for tool in build_scoped_tool_callables(provider, agent["id"], definitions)
+                if tool.__name__ == "copy_skill_resource")
+    arguments = {"sandbox": sandbox["id"], "skill": skill["id"],
+                 "source": "templates/report.md", "destination": "lip_cl_work/nested/report.md"}
+    assert client.portal.call(lambda: copy(**arguments))["written"]
+    info = client.portal.call(backend.get, sandbox["id"])
+    target = info.workspace / "lip_cl_work/nested/report.md"
+    assert target.read_text() == "# Report"
+    target.write_text("user edit")
+    result = client.portal.call(lambda: copy(**arguments))
+    assert result["ok"] is False
+    assert result["error"]["code"] == "invalid_resource"
+    assert "already exists" in result["error"]["message"]
+    assert target.read_text() == "user edit"
+    assert client.portal.call(lambda: copy(**arguments, overwrite=True))["written"]
+    assert target.read_text() == "# Report"
+
+
+@pytest.mark.parametrize("failure", ["readonly", "traversal", "file_parent", "missing_root"])
+def test_copy_parent_creation_rejects_invalid_targets(tmp_path, failure):
+    root = tmp_path / "workspace"
+    root.mkdir()
+    relative = "new/nested/report.md"
+    if failure == "traversal":
+        relative = "../outside/report.md"
+    elif failure == "file_parent":
+        (root / "new").write_text("keep")
+    elif failure == "missing_root":
+        root = root / "missing"
+    with pytest.raises((SandboxValidationError, SandboxSecurityError)):
+        operate(root, relative, "write", data=base64.b64encode(b"report").decode(),
+                read_only=failure == "readonly", create_parents=True)
+    assert not (root / "new/nested").exists()
+    assert not (tmp_path / "outside").exists()
+    if failure == "file_parent":
+        assert (root / "new").read_text() == "keep"
+    if failure == "missing_root":
+        assert not root.exists()
 
 
 def test_receipt_recovery_cancelled_peer_and_configuration_snapshot(runtime_client, monkeypatch):
@@ -293,7 +344,7 @@ def test_network_enforcement_preserves_other_boundaries(tmp_path):
     for flag in ("--unshare-all", "--cap-drop", "--remount-ro", "--ro-bind"):
         assert flag in offline
     command = service_command(offline, "oaw-sandbox-" + "a" * 32 + ".scope", SandboxLimits(), 60)
-    assert "--property=TasksMax=64" in command and "--property=MemoryMax=536870912" in command
+    assert "--property=TasksMax=64" in command and f"--property=MemoryMax={SandboxLimits().memory_bytes}" in command
     compile(_SERVICE_GUARD, "guard", "exec")
 
 
@@ -500,7 +551,7 @@ def test_parallel_commands_dispatch_without_waiting(runtime_client, monkeypatch)
         write_document(services, sandbox['id'], {'variables': {'REGION': 'queued'}}, document['revision'])
         release.set()
         await asyncio.wait_for(asyncio.gather(first, second), 5)
-        assert calls == [(['cmd.exe', 'first'], 600), (['cmd.exe', 'second'], 3600)]
+        assert calls == [(['cmd.exe', 'first'], sandbox['config']['command_timeout']), (['cmd.exe', 'second'], 3600)]
         assert native.last_environment.get('REGION') != 'queued'
         assert not any(r['sandbox_id'] == sandbox['id'] for r in services._sandbox_commands.values())
 

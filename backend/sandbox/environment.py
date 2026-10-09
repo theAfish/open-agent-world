@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from .models import SandboxValidationError
 
@@ -25,9 +25,12 @@ _SAFE_OVERRIDE_NAMES = frozenset(
 # portable profile cannot acquire different authority on Windows.
 _RESERVED = frozenset("PATH HOME USER USERNAME USERPROFILE SHELL COMSPEC PATHEXT SYSTEMROOT WINDIR TEMP TMP TMPDIR LOCALAPPDATA APPDATA SANDBOX_RESOURCES ENV BASH_ENV BASHOPTS SHELLOPTS CDPATH IFS GCONV_PATH LOCPATH NLSPATH GETCONF_DIR HOSTALIASES RES_OPTIONS LOCALDOMAIN NODE_OPTIONS NODE_PATH RUBYOPT RUBYLIB PERL5OPT PERL5LIB PERLLIB JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS CLASSPATH R_ENVIRON R_PROFILE R_ENVIRON_USER R_PROFILE_USER ZDOTDIR FPATH FPATHEXT PROMPT_COMMAND WSLENV WSL_INTEROP WSL_DISTRO_NAME DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS XAUTHORITY".split())
 _RESERVED_PREFIXES = ("LD_", "DYLD_", "_RLD", "LDR_", "PYTHON", "BASH_FUNC_", "XDG_", "OAW_", "SANDBOX_", "DOTNET_", "COMPLUS_", "COR_", "VIRTUAL_ENV", "CONDA_", "PIP_", "UV_")
+# Explicit host integration settings, never passed into Sandbox processes.
+HOST_ENVIRONMENT_NAMES = frozenset({"OAW_MINERU_TOKEN"})
 
 
-def validate_command_environment(values: Mapping[str, str], *, allow_target: bool = True) -> dict[str, str]:
+def validate_command_environment(values: Mapping[str, str], *, allow_target: bool = True,
+                                 allow_host: bool = False) -> dict[str, str]:
     if not isinstance(values, Mapping):
         raise SandboxValidationError("env must be an object")
     seen = set()
@@ -38,7 +41,8 @@ def validate_command_environment(values: Mapping[str, str], *, allow_target: boo
         if normalized in seen:
             raise SandboxValidationError("Environment names must be unique ignoring case")
         seen.add(normalized)
-        allowed = normalized in _SAFE_OVERRIDE_NAMES or (allow_target and key == "OAW_TARGET_CONFIG_JSON")
+        allowed = (normalized in _SAFE_OVERRIDE_NAMES or (allow_target and key == "OAW_TARGET_CONFIG_JSON")
+                   or (allow_host and normalized in HOST_ENVIRONMENT_NAMES))
         if not allowed and (normalized in _RESERVED or normalized.startswith(_RESERVED_PREFIXES)):
             raise SandboxValidationError(f"Environment variable {key!r} is reserved by the sandbox")
         if not isinstance(value, str) or "\0" in value:
@@ -106,4 +110,44 @@ def windows_environment_block(environment: Mapping[str, str]) -> str:
             raise SandboxValidationError("invalid Windows environment entry")
         entries.append(f"{key}={value}")
     return "\x00".join(entries) + "\x00\x00"
+
+
+def host_environment_path(raw: str, *, windows: bool | None = None) -> str:
+    """Interpret source paths on the backend host, never guess a remote filesystem."""
+    windows = os.name == "nt" if windows is None else windows
+    if not isinstance(raw, str) or not raw or "\0" in raw:
+        raise SandboxValidationError("Choose an absolute file or folder path on the backend host")
+    if windows:
+        # Accept the standard WSL spelling as an alias for a local Windows drive.
+        match = re.fullmatch(r"/mnt/([A-Za-z])(?:/(.*))?", raw)
+        if match:
+            return str(PureWindowsPath(match[1].upper() + ":/" + (match[2] or "")))
+        if raw.startswith("/") and not raw.startswith("//"):
+            raise SandboxValidationError("This backend runs on Windows. Use a Windows path or /mnt/<drive>/...; a Linux /home/... path belongs to a specific Linux host or WSL distribution and cannot be inferred.")
+    elif PureWindowsPath(raw).drive:
+        raise SandboxValidationError("This backend runs on Linux. Select the file or folder at its mounted Linux path; a Windows drive is not automatically available on this host.")
+    return raw
+
+
+def folder_environment(environment, folders, workspace, workspace_access, *, windows=False):
+    """Check overlapping grants and supply runtime paths without changing inputs."""
+    result = dict(environment)
+    seen = set()
+    grants = [(Path(workspace), workspace_access)]
+    for folder in folders:
+        validate_command_environment({folder.name: folder.source}, allow_target=False)
+        if folder.name.upper() in seen:
+            raise SandboxValidationError("Folder variable names must be unique ignoring case")
+        seen.add(folder.name.upper())
+        source = Path(folder.source)
+        for path, access in grants:
+            if (source.is_relative_to(path) or path.is_relative_to(source)) and folder.access != access:
+                raise SandboxValidationError(f"Folder {folder.name} overlaps another folder or the working folder with different permissions")
+        grants.append((source, folder.access))
+        for key in tuple(result):
+            if key.upper() == folder.name.upper():
+                del result[key]
+        result[folder.name] = folder.source if windows else folder.linux_path
+    validate_command_environment(result)
+    return result
 

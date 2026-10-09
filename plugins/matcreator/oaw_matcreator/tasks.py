@@ -22,11 +22,12 @@ class Task(Model):
     id: str = Field(min_length=1, max_length=80)
     title: str = Field(min_length=1, max_length=180)
     description: str = Field(default="", max_length=8000)
-    depends_on: list[str] = Field(default_factory=list, max_length=100)
-    status: Literal["pending", "running", "review", "blocked", "done"] = "pending"
+    depends_on: list[str] = Field(default_factory=list, max_length=100, description="Array of prerequisite task IDs, for example ['prepare']; use [] for no dependencies.")
+    status: Literal["pending", "running", "review", "blocked", "done"] = Field(default="pending",
+        description="Use pending for new tasks. Readiness is computed from dependencies; ready is not a status. Done requires verified evidence.")
     acceptance: str = Field(default="", max_length=8000)
     result: str = Field(default="", max_length=12000)
-    outputs: list[str] = Field(default_factory=list, max_length=40)
+    outputs: list[str] = Field(default_factory=list, max_length=40, description="Array of output paths/references, for example ['research/task/result.json']; never inline file contents.")
 
     @model_validator(mode="after")
     def validate_task(self):
@@ -185,6 +186,7 @@ def work_items(value):
                     "Report missing scientific parameters rather than inventing them. Do not edit the plan.\n"
                     + json.dumps(contract, ensure_ascii=False),
                 ready=ready and task["status"] == "pending", retryable=ready and task["status"] == "blocked",
+                completed=task["status"] == "done",
                 metadata={"plan_id": plan["id"], "task_id": task["id"], "title": task["title"]}))
     return items
 
@@ -195,6 +197,11 @@ def apply_outcome(value, outcome):
         raise ValueError("Task was removed; its execution result is retained in the attempt history")
     task["status"] = "running" if outcome.status == "running" else "review" if outcome.status == "succeeded" else "blocked"
     task["result"] = (outcome.text or outcome.error or ("Awaiting executor results" if outcome.status == "running" else outcome.status))[:12000]
+    if outcome.report is not None and outcome.status == "succeeded":
+        report = outcome.report
+        task["status"] = "blocked" if report.outcome in {"partial", "blocked"} else "review"
+        task["result"] = f"Executor report ({report.outcome}; not yet accepted): {report.summary}\n{report.evidence}\nNext: {report.next_step}"[:12000]
+        task["outputs"] = report.outputs
     if outcome.status == "running":
         task["outputs"] = []
     return value
@@ -233,12 +240,17 @@ def register(registration):
     # One control grant with bounded operations; host validates each operation's inputs.
     delegate_schema = {
         "type": "object", "properties": {
-            "action": {"type": "string", "enum": ["delegate", "wait", "collect", "stop"]},
+            "action": {"type": "string", "enum": ["delegate", "wait", "collect", "inspect", "stop", "defer", "cancel_defer"]},
             "item_id": {"type": "string"}, "library_id": {"type": "string"}, "agent_id": {"type": "string"},
             "request_id": {"type": "string"}, "expected_revision": {"type": "integer", "minimum": 0},
             "instance_id": {"type": "string"}, "instance_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 32},
             "wait_mode": {"type": "string", "enum": ["any", "all"]},
             "timeout_seconds": {"type": "number", "minimum": 0, "maximum": 60},
+            "detail": {"type": "string", "enum": ["summary", "full"], "default": "summary"},
+            "since": {"type": "string", "description": "Previous collect cursor; unchanged responses omit repeated state."},
+            "delay_seconds": {"type": "number", "minimum": 1, "maximum": 86400},
+            "reason": {"type": "string", "maxLength": 2000},
+            "external_jobs": {"type": "array", "items": {"type": "string"}, "maxItems": 20},
         }, "required": ["action"], "additionalProperties": False,
     }
     async def delegate(context, capability, arguments):
@@ -247,11 +259,16 @@ def register(registration):
         return await context.node_delegation_action(capability, action, args)
     registration.register_capability(CapabilityDefinition(kind=delegation_kind, tool_name="task_board_execute",
         target_parameter="board", input_schema=delegate_schema,
-        description="Coordinate research Executors. collect returns the board, runnable items (item_id) and live attempts. "
-            "delegate requires item_id, library_id, agent_id, expected_revision and a unique request_id; it starts asynchronously "
+        description="Coordinate research Executors. collect returns document.revision, runnable items and authorized executors "
+            "with library_id/agent_id. Summary is the default; pass since=cursor to omit unchanged state. "
+            "inspect with instance_id returns one full report; detail=full explicitly reads the whole board. "
+            "delegate requires item_id, expected_revision and a unique request_id; library_id/agent_id may be omitted "
+            "for a unique authorized executor, otherwise select returned IDs or unambiguous names. It starts asynchronously "
             "and automatically records the Run and task context. Reuse request_id only to recover the same invocation; retries use new IDs. "
-            "Use Summoning list to discover Barracks/Agent IDs first. Dispatch independent items, then wait with instance_ids, "
-            "wait_mode any/all and timeout_seconds (up to 60). Repeat waits while work is pending. "
+            "Dispatch independent items, then wait with instance_ids, wait_mode any/all and timeout_seconds (up to 60). "
+            "Unobserved results automatically wake you in this session after your turn ends; manual Stop prevents this. "
+            "defer requires request_id, delay_seconds and reason, optionally external_jobs; it schedules a persistent "
+            "follow-up check after you finish. cancel_defer cancels a check by request_id. Never infer remote job completion from time. "
             "Successful execution becomes review, not done: inspect outputs and update_task with verified evidence. "
             "stop requires instance_id. Task edits alone never stop execution."), delegate)
     registration.register_node_type(NodeTypeDefinition(

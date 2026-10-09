@@ -21,6 +21,10 @@ To disable a plugin, first remove its world objects, relationships, dependent Ag
 
 ## Bundled plugin guides
 
+The [Data visualization Pack](../plugins/visualization/README.md) connects charts
+to SQL and MKB through the public [data-source protocol](developers/data-sources.md)
+introduced in Plugin API 1.27.
+
 | Plugin | Use it for |
 | --- | --- |
 | [Task Board](../plugins/task_board/README.md) | Shared tasks, dependencies, and Agent execution |
@@ -30,7 +34,7 @@ To disable a plugin, first remove its world objects, relationships, dependent Ag
 | [Structure viewer](../plugins/structure_viewer/README.md) | Viewing connected structure files |
 | [MatCreator](../plugins/matcreator/README.md) | Materials-oriented graph and workflow tools |
 
-Plugin-specific documentation can remain in its own package or repository. These links are a directory, not a requirement to copy all plugin content into OAW's docs. In-app plugin documentation and tutorial delivery are not implemented; no new manifest or framework is required here.
+Plugin-specific documentation can remain in its own package or repository. These links are a directory, not a requirement to copy all plugin content into OAW's docs. Plugin API 1.26 adds optional [progressive tutorials and offline documents](developers/progressive-tutorials.md) on card and Pack definitions.
 
 ## Developing a plugin
 
@@ -231,6 +235,13 @@ the registered action. Frontend views call `host.resourceAction` through the
 authenticated control-plane API. Lifecycle handlers obtain the same directory
 from `context.resources.node_storage_path(node.id)` and own reversible creation
 and journaled post-delete cleanup. Do not create files during registration.
+
+Resource contexts also provide an optional `resolve_secret(reference)` callback
+for trusted backend handlers. It resolves the live node's encrypted binding,
+then a global environment setting, then the server environment. Resolve inside
+the executing job; never put values in card state, durable job parameters,
+responses, or logs. Credential writes use host-only settings endpoints, not
+Agent capabilities. Standalone callers may omit this callback.
 
 For native resources without a canvas snapshot, set `deletion_warning` on the
 node definition. The UI confirms permanent deletion, clears undo history after

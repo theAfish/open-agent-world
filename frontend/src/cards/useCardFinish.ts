@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { normalizeCardFinish, type CardFinish } from "./cardFinish";
 import type { CardFinishQuality } from "./CardFinishLayer";
+import { MATERIAL_LIGHT_EVENT } from './cardMaterialRenderer';
 
 const LIGHT_PROPERTIES = [
   "--pointer-x", "--pointer-y", "--card-angle-x", "--card-angle-y",
-  "--finish-light-x", "--finish-light-y", "--finish-shift-x", "--finish-shift-y", "--finish-angle", "--finish-active",
+  "--finish-light-x", "--finish-light-y", "--finish-active",
 ];
 
 /** Opt-in tilt for collectible faces; canvas hosts keep their existing geometry. */
 export function useCardFinish(finish?: CardFinish, quality: CardFinishQuality = "standard", tilt = false) {
-  const active = tilt || (normalizeCardFinish(finish) !== "normal" && quality !== "thumbnail");
+  const active = tilt || normalizeCardFinish(finish) !== "normal";
   const state = useRef<{
     node: HTMLElement | null;
     bounds: DOMRect | null;
@@ -26,6 +27,7 @@ export function useCardFinish(finish?: CardFinish, quality: CardFinishQuality = 
       LIGHT_PROPERTIES.forEach(property => current.node!.style.removeProperty(property));
       current.node.removeAttribute("data-finish-active");
       current.node.removeAttribute("data-card-tilting");
+      current.node.dispatchEvent(new CustomEvent(MATERIAL_LIGHT_EVENT, { detail: { x: 0, y: 0, active: false } }));
     }
     current.motion?.removeEventListener?.("change", reset);
     window.removeEventListener("scroll", reset, true);
@@ -60,16 +62,12 @@ export function useCardFinish(finish?: CardFinish, quality: CardFinishQuality = 
         style.setProperty("--card-angle-y", `${(x * strength).toFixed(2)}deg`);
         current.node.setAttribute("data-card-tilting", "true");
       }
-      // A fixed studio light: only the broad reflection changes with orientation.
+      // The studio light is fixed; the material renderer changes the viewing angle.
       style.setProperty("--finish-light-x", "32%");
       style.setProperty("--finish-light-y", "24%");
-      // Etched diffraction film has a stronger angular response than plain foil.
-      const travel = normalizeCardFinish(finish) === "laser" ? 38 : 12;
-      style.setProperty("--finish-shift-x", `${(50 - x * travel).toFixed(2)}%`);
-      style.setProperty("--finish-shift-y", `${(50 - y * travel).toFixed(2)}%`);
-      style.setProperty("--finish-angle", `${(124 + x * 8 + y * 4).toFixed(2)}deg`);
       style.setProperty("--finish-active", "1");
       current.node.setAttribute("data-finish-active", "true");
+      current.node.dispatchEvent(new CustomEvent(MATERIAL_LIGHT_EVENT, { detail: { x, y, active: true } }));
     });
   }, [finish, quality, reset, tilt]);
 
@@ -91,7 +89,12 @@ export function useCardFinish(finish?: CardFinish, quality: CardFinishQuality = 
 
   return {
     onPointerEnter: active ? enter : undefined,
-    onPointerMove: active ? queueLight : undefined,
+    // A mode/preference change or scroll can reset the light while the cursor stays
+    // inside the card. The next real movement establishes a fresh entry pose.
+    onPointerMove: active ? (event: ReactPointerEvent<HTMLElement>) => {
+      if (state.current.node) queueLight(event);
+      else enter(event);
+    } : undefined,
     onPointerLeave: active ? reset : undefined,
     onPointerCancel: active ? reset : undefined,
   };

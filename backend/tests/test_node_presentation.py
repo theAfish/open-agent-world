@@ -14,6 +14,7 @@ def test_builtin_catalog_presentation_and_legacy_flags_agree():
         item = next(item for item in catalog.node_types if item.id == kind)
         assert item.presentation.model_dump(mode="json") == {
             "states": ["node", "preview", "workspace"], "initial": "workspace", "open": "workspace",
+            "sizes": {},
         }
         assert item.surfaces == {"preview": True, "inspector": False, "workspace": True}
 

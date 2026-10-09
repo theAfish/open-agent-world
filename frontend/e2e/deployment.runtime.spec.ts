@@ -16,6 +16,7 @@ test('deployment reuses Legion workspace and business controls without engineeri
   await expect(page.locator('.published-layout, .runtime-conversation')).toHaveCount(0);
   await expect(page.locator('.text-editor:visible')).toHaveValue('# Welcome\nThis is the published guide.');
   await expect(page.locator('.text-editor:visible')).toHaveAttribute('readonly', '');
+  await page.getByRole('button', { name: /^Switch group:/ }).click();
   await page.getByRole('button', { name: 'New group', exact: true }).click();
   await page.getByRole('button', { name: 'Create group', exact: true }).click();
   await expect(page.locator('.conversation-group-draft')).toHaveCount(0);

@@ -17,6 +17,7 @@ from backend.runs.models import TERMINAL_RUN_STATUSES
 from backend.state import StateContext
 from backend.card_state import state_session, active_state_session, DEFAULT_SESSION
 from backend.node_delegation import NodeDelegationMixin
+from backend.node_continuations import NodeContinuationMixin
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +29,17 @@ class ExecutionRequest(BaseModel):
 
 
 @dataclass
-class NodeExecutionService(NodeDelegationMixin):
+class NodeExecutionService(NodeDelegationMixin, NodeContinuationMixin):
     services: object
     workers: dict[str | tuple[str, str], asyncio.Task] = field(default_factory=dict)
     stopping: set[str | tuple[str, str]] = field(default_factory=set)
+    continuation_keys: set[tuple[str, str | None]] = field(default_factory=set)
+    continuation_versions: dict[tuple[str, str | None], int] = field(default_factory=dict)
+    continuation_event: asyncio.Event = field(default_factory=asyncio.Event)
+    continuation_task: asyncio.Task | None = None
+    continuation_closed: bool = False
+    continuation_delay: float = 30
+    continuation_outputs: set[asyncio.Task] = field(default_factory=set)
 
     def spec(self, node_id):
         node = self.services.world.get_card(node_id)
@@ -45,13 +53,15 @@ class NodeExecutionService(NodeDelegationMixin):
         self.spec(node_id)
         return self.services.card_state.scope(node_id)
 
-    def state(self, node_id):
-        return self.services.state.resolve(StateContext((self._scope(node_id),)), "execution").value or {
+    def state(self, node_id, *, state_identity=None):
+        scope = self.services.card_state.scope(node_id, state_identity) if state_identity else self._scope(node_id)
+        return self.services.state.resolve(StateContext((scope,)), "execution").value or {
             "status": "idle", "attempts": [], "error": None,
         }
 
-    def save(self, node_id, state):
-        self.services.state.set(self._scope(node_id), "execution", state)
+    def save(self, node_id, state, *, state_identity=None):
+        scope = self.services.card_state.scope(node_id, state_identity) if state_identity else self._scope(node_id)
+        self.services.state.set(scope, "execution", state)
 
     def worker_key(self, node_id):
         scope_type, scope_id = self.services.card_state.identity(node_id)
@@ -70,9 +80,23 @@ class NodeExecutionService(NodeDelegationMixin):
         return False
 
     def active_attempts(self, state):
-        return any(self.services.run_manager.get_run(entry["run_id"]).status not in TERMINAL_RUN_STATUSES
+        manager = self.services.run_manager
+        if any(manager.get_run(entry["run_id"]).status not in TERMINAL_RUN_STATUSES
                    if entry.get("run_id") else entry.get("status") in {"created", "running", "waiting"}
-                   for entry in state.get("attempts", []))
+                   for entry in state.get("attempts", [])):
+            return True
+        for entry in [*state.get("attempts", []), *state.get("wakeups", [])]:
+            if entry.get("notification_run_id"):
+                from backend.errors import NotFoundError
+                try:
+                    if manager.get_run(entry["notification_run_id"]).status not in TERMINAL_RUN_STATUSES:
+                        return True
+                except NotFoundError:
+                    pass
+            elif (entry.get("auto_continue") and not entry.get("notification_suppressed")
+                  and not entry.get("observed_by_run") and self._continuation_parent(entry["coordinator_run_id"])):
+                return True
+        return False
 
     def retained_states(self, *, node_id=None, session_id=None):
         """Inspect existing ledgers without resolving or creating another namespace.
@@ -183,11 +207,18 @@ class NodeExecutionService(NodeDelegationMixin):
             async with self.services._node_mutation():
                 self.authorize(node_id, capability)
                 self.stopping.add(self.worker_key(node_id))
+                state = self.state(node_id)
+                for entry in [*state["attempts"], *state.get("wakeups", [])]:
+                    entry["notification_suppressed"] = True
+                self.save(node_id, state)
                 attempts = self.state(node_id)["attempts"]
             try:
                 for entry in attempts:
                     if entry.get("run_id"):
                         await self.services.run_manager.cancel_run(entry["run_id"])
+                for entry in [*state["attempts"], *state.get("wakeups", [])]:
+                    if entry.get("notification_run_id"):
+                        await self.services.run_manager.cancel_run(entry["notification_run_id"])
                 async with self.services._node_mutation():
                     self.collect_delegations(node_id)
                     return self.snapshot(node_id)
@@ -320,6 +351,9 @@ class NodeExecutionService(NodeDelegationMixin):
         self.save(node_id, state)
 
     async def startup(self):
+        # ApplicationServices activates delivery after all recovery and node
+        # lifecycle startup has completed.
+        self.continuation_closed = True
         for node in self.services.world.list_cards():
             if node.missing_plugin:
                 continue
@@ -336,10 +370,15 @@ class NodeExecutionService(NodeDelegationMixin):
                 with state_session(namespace if kind == "session" else None):
                     if self.spec(node.id).summoning:
                         self.collect_delegations(node.id)
+                        self.watch_continuations(node.id)
                     elif self.state(node.id)["status"] == "running":
                         await self.reconcile(node.id)
 
     async def shutdown(self):
+        self.continuation_closed = True
+        if self.continuation_task is not None:
+            self.continuation_task.cancel()
+            await asyncio.gather(self.continuation_task, return_exceptions=True)
         for key in tuple(self.workers):
             node_id, session_id = key if isinstance(key, tuple) else (key, None)
             with state_session(session_id):

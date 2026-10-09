@@ -1,5 +1,15 @@
 """Bounded host-only command receipts. Portable node state never carries these."""
 import json
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class SandboxInspection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    history_scope: Literal["caller", "run", "all"] = "caller"
+    history_limit: int = Field(default=3, ge=0, le=20)
+    include_output: bool = False
+    include_shared_python: bool = False
 
 
 def key(services, sandbox_id):
@@ -26,14 +36,16 @@ def read_key(services, history_key, sandbox_id):
     return items
 
 
-def recent_summaries(services, sandbox_id):
+def recent_summaries(services, sandbox_id, *, caller=None, run_id=None, limit=3, include_output=False):
     """The Agent view uses the same receipts as the UI, with smaller output tails."""
     fields = ("id", "operation_kind", "caller", "run_id", "argv", "started_at", "state", "exit_code", "timed_out", "cancelled", "termination_reason",
               "cancellation_reason", "error", "duration_seconds")
+    entries = [entry for entry in read(services, sandbox_id)
+               if (caller is None or entry.get("caller") == caller) and (run_id is None or entry.get("run_id") == run_id)]
     return [
         {key: entry[key] for key in fields if key in entry}
-        | {label: entry.get(label, "")[-8192:] for label in ("stdout", "stderr")}
-        for entry in read(services, sandbox_id)[-3:]
+        | ({label: entry.get(label, "")[-8192:] for label in ("stdout", "stderr")} if include_output else {})
+        for entry in (entries[-limit:] if limit else [])
     ]
 
 

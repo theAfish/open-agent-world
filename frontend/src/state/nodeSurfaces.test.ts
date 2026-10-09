@@ -5,6 +5,20 @@ import type { NodePresentation, NodeSurfaceLevel } from "../types/world";
 import { buildCardDraft } from './helpers';
 
 describe("node surface state", () => {
+  it('uses declared details sizes once and preserves manual resize and collapse choices', () => {
+    const definition = {...TEST_CATALOG.node_types[0], id:'data.visualization.line',
+      presentation:{states:['node','preview','inspector'] as const,initial:'inspector' as const,open:'inspector' as const,
+        sizes:{inspector:{width:720,height:480}}}};
+    const catalog={...TEST_CATALOG,node_types:[definition]};
+    useNodeSurfaceStore.setState({surfaceLevels:{},surfaceSizes:{},baseLevels:{}});
+    const store=useNodeSurfaceStore.getState(), cards=[{id:'chart',type:definition.id}];
+    store.syncCards(cards,catalog);
+    expect(useNodeSurfaceStore.getState().surfaceLevels.chart).toBe('inspector');
+    expect(useNodeSurfaceStore.getState().surfaceSizes.chart.inspector).toEqual({width:720,height:480});
+    store.resizeSurface('chart','inspector',{width:880,height:600}); store.closeInspector('chart'); store.syncCards(cards,catalog);
+    expect(useNodeSurfaceStore.getState().surfaceSizes.chart.inspector).toEqual({width:880,height:600});
+    expect(useNodeSurfaceStore.getState().surfaceLevels.chart).toBe('preview');
+  });
   it('keeps private hydration drafts out of persisted preferences and clears them on deletion', () => {
     const store = useNodeSurfaceStore.getState();
     store.setPrivateDraft('secret-card', { token: 'sensitive draft' });

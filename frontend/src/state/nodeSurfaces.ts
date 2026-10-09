@@ -5,6 +5,7 @@ import { profileStorage } from "./profileStorage";
 import { clampSurfaceSize, type SurfaceSizes, type SurfaceSize } from "./surfaceGeometry";
 export { NODE_SURFACE_SIZE, surfaceSizeFor, type SurfaceSize, type SurfaceSizes } from "./surfaceGeometry";
 import type { CardType, LegionNodePresentation, NodePresentation, NodeSurfaceLevel, PluginCatalog, WorldCard } from "../types/world";
+import { cardStudio, type FaceCard } from '../factory/faceDesign';
 
 export type { NodeSurfaceLevel } from "../types/world";
 
@@ -56,6 +57,11 @@ export function nodePresentation(type: CardType, catalog?: PluginCatalog): NodeP
     open: support.inspector ? "inspector" : support.workspace ? "workspace" : support.preview ? "preview" : "node" };
 }
 
+export function cardPresentation(card: FaceCard, catalog: PluginCatalog): NodePresentation {
+  const studio = cardStudio(card, catalog);
+  return studio ? { states: studio.enabled, initial: studio.initial, open: studio.open } : nodePresentation(card.type, catalog);
+}
+
 function supportedLevel(presentation: NodePresentation, level: NodeSurfaceLevel): NodeSurfaceLevel {
   return presentation.states.includes(level) ? level : presentation.open;
 }
@@ -78,7 +84,7 @@ interface NodeSurfaceState {
   capturePresentation: (cards: readonly WorldCard[], catalog: PluginCatalog) => Record<string, LegionNodePresentation>;
   restorePresentation: (cards: readonly WorldCard[], catalog: PluginCatalog, presentation?: Record<string, LegionNodePresentation>) => void;
   presentations: Record<string, NodePresentation>;
-  syncCards: (cards: readonly (Pick<WorldCard, "id" | "type"> & Partial<Pick<WorldCard, "parent_id">>)[], catalog: PluginCatalog) => void;
+  syncCards: (cards: readonly (Pick<WorldCard, "id" | "type"> & Partial<Pick<WorldCard, "parent_id" | "config">>)[], catalog: PluginCatalog) => void;
   surfaceSizes: SurfaceSizes;
   resizeSurface: (nodeId: string, level: NodeSurfaceLevel, size: SurfaceSize) => void;
   surfaceLevels: Record<string, NodeSurfaceLevel>;
@@ -95,6 +101,7 @@ interface NodeSurfaceState {
   hidePreview: (nodeId: string) => void;
   openInspector: (nodeId: string) => void;
   openPrimary: (nodeId: string) => void;
+  selectSurface: (nodeId: string, level: NodeSurfaceLevel) => void;
   closeInspector: (nodeId?: string) => void;
   dismiss: (nodeId?: string) => void;
   openWorkspace: (nodeId: string) => void;
@@ -135,7 +142,7 @@ export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set, get)
   capturePresentation: (cards, catalog) => {
     const state = get();
     return Object.fromEntries(cards.map(card => [card.id, {
-      level: state.surfaceLevels[card.id] ?? nodePresentation(card.type, catalog).initial,
+      level: state.surfaceLevels[card.id] ?? cardPresentation(card, catalog).initial,
       base_level: state.baseLevels[card.id] === 'node' ? 'node' : 'preview',
       ...(state.surfaceSizes[card.id] ? { surface_sizes: structuredClone(state.surfaceSizes[card.id]) } : {}),
     }]));
@@ -145,7 +152,7 @@ export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set, get)
     for (const card of cards) {
       const value = saved[card.id];
       if (!value) continue;
-      const presentation = nodePresentation(card.type, catalog);
+      const presentation = cardPresentation(card, catalog);
       surfaceLevels[card.id] = supportedLevel(presentation, value.level);
       baseLevels[card.id] = baseLevel(presentation, value.base_level ?? undefined);
       surfaceSizes[card.id] = { ...(value.workspace_size ? { workspace: value.workspace_size } : {}), ...value.surface_sizes };
@@ -156,10 +163,19 @@ export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set, get)
   syncCards: (cards, catalog) => set(state => {
     const presentations: Record<string, NodePresentation> = {};
     const surfaceLevels = { ...state.surfaceLevels }, baseLevels = { ...state.baseLevels };
+    const surfaceSizes = { ...state.surfaceSizes };
     for (const card of cards) {
       // Wait for the catalog instead of persisting a guessed initial surface.
       if (!catalog.node_types.some(type => type.id === card.type)) continue;
-      const presentation = nodePresentation(card.type, catalog);
+      const presentation = cardPresentation(card, catalog);
+      const studio = cardStudio(card, catalog);
+      for (const [level, size] of Object.entries(presentation.sizes ?? {})) {
+        const surface = level as NodeSurfaceLevel;
+        if (!surfaceSizes[card.id]?.[surface]) surfaceSizes[card.id] = {
+          ...surfaceSizes[card.id], [surface]: clampSurfaceSize(surface, size),
+        };
+      }
+      if (studio) surfaceSizes[card.id] = Object.fromEntries(Object.entries(studio.modes).map(([mode, design]) => [mode, { width: design!.width, height: design!.height }]));
       presentations[card.id] = presentation;
       const definition = catalog.node_types.find(type => type.id === card.type)!;
       const initial = card.parent_id && !definition.container && presentation.states.includes("node")
@@ -167,7 +183,7 @@ export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set, get)
       surfaceLevels[card.id] = supportedLevel(presentation, surfaceLevels[card.id] ?? initial);
       baseLevels[card.id] = baseLevel(presentation, baseLevels[card.id] ?? surfaceLevels[card.id]);
     }
-    return { presentations, surfaceLevels, baseLevels };
+    return { presentations, surfaceLevels, baseLevels, surfaceSizes };
   }),
   surfaceSizes: {},
   resizeSurface: (nodeId, level, size) => set(state => {
@@ -211,6 +227,7 @@ export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set, get)
   }),
 
   openPrimary: (nodeId) => set(state => openSurface(state, nodeId)),
+  selectSurface: (nodeId, level) => set(state => openSurface(state, nodeId, level)),
   openInspector: (nodeId) => set(state => openSurface(state, nodeId, "inspector")),
 
   closeInspector: (nodeId) => set(state => closeSurfaces(state, "inspector", nodeId)),

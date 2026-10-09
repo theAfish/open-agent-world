@@ -102,6 +102,8 @@ class RunManager:
     _live_output: dict[str, str] = field(default_factory=dict)
     admission_check: Any = None
     cleanup_execution: Callable[[str], Awaitable[None]] | None = None
+    execution_settled: Callable[[], None] | None = None
+    shutting_down: bool = False
 
     def __post_init__(self):
         import math
@@ -166,6 +168,7 @@ class RunManager:
         return False
 
     async def startup(self) -> None:
+        self.shutting_down = False
         for record in self.store.interrupt_incomplete():
             record = self.store.update_lifecycle(record.run_id, execution='interrupted',
                 holds_capacity=False, cleanup='uncertain', session_lost=True,
@@ -178,6 +181,7 @@ class RunManager:
                     cleanup_reason='Backend restarted during cancellation; external termination is unconfirmed')
 
     async def shutdown(self) -> None:
+        self.shutting_down = True
         records = [record for record in self.list_runs() if record.status not in TERMINAL_RUN_STATUSES
                    or record.lifecycle.get('cleanup') in {'pending', 'failed'}]
         results = await asyncio.gather(*(self.cancel_run(record.run_id) for record in records), return_exceptions=True)
@@ -251,8 +255,11 @@ class RunManager:
                 parent_run_id = self.current_context.run_id
             if parent_run_id is not None:
                 parent = self.get_run(parent_run_id)
-                if parent.status in {RunStatus.CANCELLED, RunStatus.INTERRUPTED, RunStatus.FAILED} or parent.lifecycle.get('cancellation_requested'):
-                    raise RuntimeUnavailableError('The parent Run has ended; dependent work cannot be admitted')
+                ancestor = parent
+                while ancestor:
+                    if ancestor.status in {RunStatus.CANCELLED, RunStatus.INTERRUPTED, RunStatus.FAILED} or ancestor.lifecycle.get('cancellation_requested'):
+                        raise RuntimeUnavailableError('The parent Run has ended; dependent work cannot be admitted')
+                    ancestor = self.get_run(ancestor.parent_run_id) if ancestor.parent_run_id else None
                 task_id = task_id or parent.task_id
                 context_id = context_id or parent.context_id
             record = self.store.create(
@@ -446,14 +453,21 @@ class RunManager:
 
     async def cancel_run(self, run_id: str, *, propagate: bool = True) -> RunRecord:
         lock = self._cancel_locks.setdefault(run_id, asyncio.Lock())
-        async with lock:
-            return await self._cancel_run_locked(run_id, propagate=propagate)
+        try:
+            async with lock:
+                return await self._cancel_run_locked(run_id, propagate=propagate)
+        finally:
+            if self.execution_settled is not None:
+                self.execution_settled()
 
     async def _cancel_run_locked(
         self, run_id: str, *, propagate: bool
     ) -> RunRecord:
         current = self.store.get(run_id)
         if current.status in TERMINAL_RUN_STATUSES and current.lifecycle.get('cleanup') not in {'pending', 'failed', 'uncertain'}:
+            # Explicit Stop also revokes pending continuations of a finished turn.
+            if not self.shutting_down:
+                current = self.store.update_lifecycle(run_id, cancellation_requested=True)
             # A provider can emit a terminal status before its local stream has
             # finished unwinding. Agent deletion must join that tail before it
             # removes provider state.
@@ -643,6 +657,7 @@ class RunManager:
             runtime_provider_id=record.runtime_provider_id,
             state_context=self._state_context(record),
             group_context=team,
+            delegation_context=record.lifecycle.get("delegation_context"),
         )
         token = _current_invocation.set(context)
         try:
@@ -902,6 +917,8 @@ class RunManager:
             # Successful terminal output has already been checkpointed once
             # before the terminal transition; release the ephemeral overlay.
             self._live_output.pop(run_id, None)
+        if self.execution_settled is not None:
+            self.execution_settled()
 
     def _provider_id(self, card: Card) -> str:
         provider_id = self._optional_provider_id(card)

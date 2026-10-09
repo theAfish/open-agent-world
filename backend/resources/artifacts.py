@@ -118,19 +118,19 @@ class ArtifactStore:
             raise ConflictError('Resource is in use by an artifact transfer; retry after it finishes')
 
     @asynccontextmanager
-    async def workspace(self, services, sandbox_id, agent_id, *, reserved=False):
+    async def workspace(self, services, sandbox_id, agent_id, *, reserved=False, allow_running=False):
         if not reserved:
             async with services._node_mutation():
-                self.reserve_source(services, sandbox_id, agent_id)
+                self.reserve_source(services, sandbox_id, agent_id, allow_running=allow_running)
         try:
             yield
         finally:
             self.source_leases.pop(sandbox_id, None)
 
-    def reserve_source(self, services, sandbox_id, agent_id):
+    def reserve_source(self, services, sandbox_id, agent_id, *, allow_running=False):
         self.check_source(services, sandbox_id, agent_id)
         services.summoning.assert_admission(sandbox_id)
-        if any(r["sandbox_id"] == sandbox_id for r in services._sandbox_commands.values()) or sandbox_id in services._sandbox_stopping:
+        if (not allow_running and any(r["sandbox_id"] == sandbox_id for r in services._sandbox_commands.values())) or sandbox_id in services._sandbox_stopping:
             raise ConflictError('Finalize files and wait for Sandbox execution and cleanup before transfer')
         self.assert_source_idle(sandbox_id)
         self.source_leases[sandbox_id] = 1

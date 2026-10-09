@@ -15,16 +15,38 @@ test('MatCreator preset opens sessions, files, conversation and a persistent res
     'oaw-onboarding-v1': JSON.stringify({ version: 1, state: { status: 'skipped' } }), 'oaw.locale': 'en',
     'oaw-canvas-viewport-v1': null, 'oaw-node-surfaces-v1': null, 'oaw-theme': 'light',
   } } })).ok()).toBe(true);
+  // Presets are available in the Library but are not auto-equipped in new decks.
+  let library = await (await request.get('/api/card-library')).json();
+  const sourcePack = Object.values(library.packs).find((pack: any) => pack.definition.cards.includes('matcreator.tasks')) as any;
+  const opened = await request.post('/api/card-library/actions', { data: {
+    expected_revision: library.revision, action: 'open_pack', id: sourcePack.definition.id,
+  } });
+  expect(opened.ok(), await opened.text()).toBe(true);
+  library = await opened.json();
+  const equipped = await request.post('/api/card-library/actions', { data: {
+    expected_revision: library.revision, action: 'update_deck', id: 'saved-legions',
+    entries: [{ kind: 'legion', id: 'matcreator.research' }],
+  } });
+  expect(equipped.ok(), await equipped.text()).toBe(true);
   await page.goto('/');
   await page.getByRole('tab', { name: /Legions/ }).click();
   const deployed = page.waitForResponse(response => response.url().includes('/presets/matcreator.research/instances'));
+  // Open the remaining owned dependencies, including Published artifacts.
+  page.once('dialog', async dialog => {
+    expect(dialog.type()).toBe('confirm');
+    expect(dialog.message()).toContain('Open these owned packs and continue?');
+    await dialog.accept();
+  });
   await page.getByRole('button', { name: 'Place MatCreator research', exact: true }).click();
   const response = await deployed;
-  expect(response.status()).toBe(201);
+  expect(response.status(), await response.text()).toBe(201);
   const instance = await response.json();
   expect(instance.nodes.find((node: { id: string }) => node.id === instance.node_ids.summoning).equipment.owner_id).toBe(instance.node_ids.agent);
   expect(instance.nodes.find((node: { id: string }) => node.id === instance.node_ids.executor).parent_id).toBe(instance.node_ids.barracks);
   const group = instance.node_ids.group;
+  const groupCard = page.locator(`.react-flow__node[data-id="${group}"]`);
+  await expect(groupCard).toBeAttached();
+  expect(instance.nodes.find((node: { id: string }) => node.id === instance.node_ids.artifacts).type).toBe('core.artifact-collection');
   await page.getByRole('button', { name: 'Fit view', exact: true }).click();
   const toolsets = ['knowledge', 'barracks'].map(key => page.locator(`[data-card-id="${instance.node_ids[key]}"]`));
   for (const toolset of toolsets) await expect(toolset).toBeVisible();
@@ -36,7 +58,7 @@ test('MatCreator preset opens sessions, files, conversation and a persistent res
   await page.screenshot({ path: 'test-results/matcreator-formation.png' });
   const open = async () => {
     await page.getByRole('button', { name: 'Fit view', exact: true }).click();
-    await page.locator(`[data-card-id="${group}"]`).getByRole('button', { name: 'Workspace mode', exact: true }).click();
+    await groupCard.getByRole('button', { name: 'Workspace mode', exact: true }).click();
     return page.getByRole('dialog', { name: 'MatCreator research workspace mode' });
   };
   const workspace = await open();

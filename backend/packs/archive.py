@@ -139,7 +139,7 @@ def inspect_archive(data: bytes) -> InspectedPack:
     for name in files:
         allowed = name in {"manifest.json", "checksums.json", "README.md"}
         if manifest.kind == "content":
-            allowed = allowed or name in manifest.content.legions
+            allowed = allowed or name in manifest.content.paths
         else:
             allowed = allowed or name.startswith(("backend/", "frontend/", "assets/"))
         if not allowed:
@@ -155,7 +155,9 @@ def inspect_archive(data: bytes) -> InspectedPack:
             raise ValueError(f"Checksum mismatch: {name}")
     if manifest.kind == "content":
         from backend.packs.content import read_presets
+        from backend.packs.factory_cards import read_recipes
         read_presets(manifest, files)
+        read_recipes(manifest, files)
         return InspectedPack(manifest, files, hashlib.sha256(data).hexdigest(), None)
     assert manifest.entrypoints is not None
     for entry in (manifest.entrypoints.backend, manifest.entrypoints.frontend):

@@ -13,7 +13,7 @@ import { ShadowCollectionNode } from './ShadowCollection';
 vi.mock('../effects/ShadowGasBoundary', () => ({ ShadowGasBoundary: () => null }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-it('preserves finishes on container chrome, equipment and custom shadow collections', () => {
+it('keeps container and collection chrome matte while preserving equipped card finishes', () => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
   const base: WorldCard = { id: 'printed', type: 'legion', name: 'Printed container', status: 'idle',
     config: {}, position: { x: 0, y: 0 }, size: { width: 360, height: 240 }, expanded: false, finish: 'rainbow' };
@@ -23,7 +23,7 @@ it('preserves finishes on container chrome, equipment and custom shadow collecti
       <input aria-label="Working content" />
     </ContainerFrame>
   </ReactFlowProvider>);
-  expect(container.querySelector('.container-header .card-finish-layer')?.getAttribute('data-finish')).toBe('rainbow');
+  expect(container.querySelector('.container-header .card-finish-layer')).toBeNull();
   expect(container.querySelector('.container-frame > .card-finish-layer')).toBeNull();
   const equipment = { ...base, type: 'text', name: 'Equipped text' };
   const props: ComponentProps<typeof EquipmentCardNode> = {
@@ -40,6 +40,6 @@ it('preserves finishes on container chrome, equipment and custom shadow collecti
   };
   rerender(<ReactFlowProvider><ShadowCollectionNode {...shadowProps} /></ReactFlowProvider>);
   expect(container.querySelector('.shadow-collection')?.getAttribute('data-finish')).toBe('rainbow');
-  expect(container.querySelector('.shadow-counts .card-finish-layer')?.getAttribute('data-quality')).toBe('thumbnail');
+  expect(container.querySelector('.shadow-counts .card-finish-layer')).toBeNull();
   expect(container.querySelector('.shadow-silhouette .card-finish-layer')).toBeNull();
 });

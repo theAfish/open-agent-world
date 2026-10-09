@@ -1,0 +1,33 @@
+.network-map { position:relative; width:100%; height:100%; min-height:220px; overflow:hidden; color:var(--ink,#384541); background:var(--surface-solid,#f7f9f7); border-radius:8px; isolation:isolate; font:12px/1.4 system-ui,sans-serif; }
+.network-map-stage { position:absolute; inset:0; outline:none; touch-action:none; cursor:grab; }
+.network-map-stage:focus-visible { box-shadow:inset 0 0 0 1px var(--ink-faint,#78918b); }
+.network-map :is(button,input,select) { font:inherit; color:inherit; border:0; border-radius:5px; background:transparent; padding:6px 8px; min-width:0; }
+.network-map button { cursor:pointer; }
+.network-map button:hover { background:var(--surface-soft,#edf2ee); }
+.network-map button:disabled { opacity:.3; cursor:default; }
+.network-map :is(button,input,select):focus-visible { outline:1px solid var(--ink-faint,#78918b); outline-offset:1px; }
+.network-map-tools { position:absolute; top:12px; left:12px; right:12px; display:flex; align-items:center; gap:4px; width:fit-content; max-width:calc(100% - 24px); background:var(--surface-solid,#f7f9f7); border:1px solid var(--line,#dce4df); border-radius:7px; padding:3px; }
+.network-map-tools input { width:150px; }
+.network-map-tools select { max-width:125px; }
+.network-map small { color:var(--ink-faint,#78847e); font-size:10px; }
+.network-map-status { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); color:var(--ink-soft,#78847e); pointer-events:none; }
+.network-map-error { position:absolute; inset:65px 20px auto; background:var(--surface-solid,#f7f9f7); padding:10px; overflow-wrap:anywhere; }
+.network-map:has(.network-results) .network-map-error { top:auto; bottom:65px; }
+.network-map-details { position:absolute; top:60px; right:12px; width:min(230px,40%); max-height:65%; overflow:auto; padding:12px; border:1px solid var(--line); border-radius:7px; background:var(--surface-solid); }
+.network-map-details strong { display:block; font-weight:550; margin-bottom:8px; }
+.network-map-details button { display:flex; flex-direction:column; align-items:flex-start; width:100%; text-align:left; }
+.network-topics,.network-results { position:absolute; top:56px; left:12px; width:min(320px,calc(100% - 24px)); max-height:55%; overflow:auto; border:1px solid var(--line,#dce4df); border-radius:7px; padding:5px; background:var(--surface-solid,#f7f9f7); }
+.network-topics button,.network-results button { width:100%; display:flex; align-items:center; gap:8px; text-align:left; }
+.network-topics span,.network-results span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.network-map i { display:inline-block; flex-shrink:0; width:6px; height:6px; border-radius:50%; }
+.network-map-caption { position:absolute; bottom:45px; left:14px; display:flex; align-items:center; gap:8px; max-width:calc(100% - 28px); padding:5px 8px; background:var(--surface-solid,#f7f9f7); border-radius:5px; pointer-events:none; }
+.network-map-caption button { pointer-events:auto; }
+.network-map-caption span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.network-map-scale { position:absolute; right:12px; bottom:12px; display:flex; background:var(--surface-solid,#f7f9f7); border:1px solid var(--line,#dce4df); border-radius:6px; }
+.network-map-scale button { font-size:16px; width:30px; padding:3px; }
+.network-map-key { position:absolute; bottom:18px; left:16px; right:110px; display:flex; flex-wrap:wrap; gap:8px 14px; color:var(--ink-soft,#78847e); font-size:10px; pointer-events:none; }
+.network-map-key span { display:flex; gap:5px; align-items:center; }
+.network-selection-box { position:absolute; z-index:2; pointer-events:none; border:1px solid #6b999a; background:#6b999a15; }
+@media (max-width:600px) { .network-map-tools input { width:110px; } .network-map-tools { gap:0; } .network-map-caption button { max-width:100px; } }
+.network-preview-toolbar :is(button,select),.network-preview-toolbar input::file-selector-button { font:12px system-ui; color:var(--ink); background:var(--surface-solid); border:1px solid var(--line); border-radius:5px; padding:6px 9px; }
+.network-preview-toolbar label { font:12px system-ui; color:var(--ink-soft); }

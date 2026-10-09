@@ -48,11 +48,18 @@ def parts(relative):
 
 
 @contextmanager
-def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlink=False, runtime_pinned_root=None):
+def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlink=False, runtime_pinned_root=None, create_parents_from=None, create_directory=False, delete=False):
     """Yield an fd; all ancestors remain pinned until it closes."""
     path = Path(path)
     if not path.is_absolute():
         raise SandboxSecurityError("File root is not absolute")
+    parent_root = Path(create_parents_from) if create_parents_from is not None else None
+    if parent_root is not None and (not (write or (directory and create_directory)) or not parent_root.is_absolute() or not path.is_relative_to(parent_root)):
+        raise SandboxSecurityError("Parent creation requires a write inside an authorized root")
+
+    def may_create(current, last):
+        return parent_root is not None and (not last or create_directory) and current != parent_root and current.is_relative_to(parent_root)
+
     with ExitStack() as stack:
         if os.name == "nt":
             import ctypes
@@ -75,13 +82,20 @@ def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlin
                 sequence.append(current)
             for index, current in enumerate(sequence):
                 last = index == len(sequence) - 1
+                if may_create(current, last):
+                    # All ancestors are already pinned against replacement.
+                    # Open and validate even after EEXIST; never follow a junction.
+                    try:
+                        current.mkdir()
+                    except FileExistsError:
+                        pass
                 # Share read/write but deny delete/rename, including ancestors.
                 # The Windows backend already pins a running external root with
                 # MAXIMUM_ALLOWED (including DELETE) and denies delete sharing.
                 # A second deny-delete handle would conflict with that handle's
                 # access. Keep its existing pin under the backend record lock.
                 share = 7 if runtime_pinned_root is not None and current == runtime_pinned_root else 3
-                handle = create(str(current), (0x40000000 if write else 0x80000000) if last else 0x80,
+                handle = create(str(current), ((0x40000000 if write else 0x80000000) | (0x10000 if delete else 0)) if last else 0x80,
                     share, None, (1 if exclusive else 4) if last and write else 3, 0x02200000, None)
                 if handle == wintypes.HANDLE(-1).value:
                     error = ctypes.WinError(ctypes.get_last_error())
@@ -105,8 +119,15 @@ def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlin
         else:
             fd = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             stack.callback(os.close, fd)
+            current = Path(path.anchor)
             for index, part in enumerate(path.parts[1:]):
                 last = index == len(path.parts) - 2
+                current /= part
+                if may_create(current, last):
+                    try:
+                        os.mkdir(part, 0o700, dir_fd=fd)
+                    except FileExistsError:
+                        pass
                 flags = os.O_NOFOLLOW | os.O_NONBLOCK
                 flags |= (os.O_WRONLY | os.O_CREAT | (os.O_EXCL if exclusive else 0)) if last and write else os.O_RDONLY
                 if not last or directory:
@@ -114,35 +135,54 @@ def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlin
                 fd = os.open(part, flags, 0o600, dir_fd=fd)
                 stack.callback(os.close, fd)
         info = os.fstat(fd)
+        if directory and not stat.S_ISDIR(info.st_mode):
+            raise NotADirectoryError(str(path))
         if not directory and (not stat.S_ISREG(info.st_mode) or (info.st_nlink != 1 and not allow_hardlink)):
             raise SandboxSecurityError("Only regular, non-hardlinked files are supported")
         yield fd
 
 
-def operate(root: Path, relative: str, operation: str, *, read_only=False, data=None, overwrite=False, allow_hardlink=False, runtime_pinned_root=None):
+def operate(root: Path, relative: str, operation: str, *, read_only=False, data=None, overwrite=False, allow_hardlink=False, runtime_pinned_root=None, create_parents=False, cursor='', query=''):
+    """Normalize write failures before crossing runtime transports."""
+    if operation not in {"write", "mkdir"}:
+        return _operate(root, relative, operation, read_only=read_only, data=data,
+                        overwrite=overwrite, allow_hardlink=allow_hardlink,
+                        runtime_pinned_root=runtime_pinned_root, create_parents=create_parents, cursor=cursor, query=query)
+    try:
+        return _operate(root, relative, operation, read_only=read_only, data=data,
+                        overwrite=overwrite, allow_hardlink=allow_hardlink,
+                        runtime_pinned_root=runtime_pinned_root, create_parents=create_parents, cursor=cursor, query=query)
+    except FileNotFoundError as exc:
+        hint = ("Check that the Sandbox workspace is still available, then retry." if create_parents else
+                "Create the destination parent directory in this Sandbox workspace before copying, then retry.")
+        raise SandboxValidationError(f"Sandbox path {relative!r} does not exist. {hint}") from exc
+    except FileExistsError as exc:
+        raise SandboxValidationError(f"Sandbox path {relative!r} already exists. Choose another destination or explicitly enable overwrite.") from exc
+    except (NotADirectoryError, IsADirectoryError) as exc:
+        raise SandboxValidationError(f"Sandbox path {relative!r} has the wrong file/directory type. Check the path and its parent directories.") from exc
+    except PermissionError as exc:
+        raise SandboxValidationError(f"Access to Sandbox path {relative!r} was denied. Choose an accessible path within the authorized root.") from exc
+
+
+def _operate(root: Path, relative: str, operation: str, *, read_only=False, data=None, overwrite=False, allow_hardlink=False, runtime_pinned_root=None, create_parents=False, cursor='', query=''):
     target = root.joinpath(*parts(relative))
-    if operation == "write" and read_only:
+    if operation in {"write", "mkdir"} and read_only:
         raise SandboxSecurityError("This root is read-only")
-    if operation not in {"list", "preview", "download", "write"}:
+    if operation not in {"list", "preview", "download", "write", "mkdir"}:
         raise SandboxValidationError("Unsupported file operation")
+    if operation == 'list':
+        from .listing import list_directory
+        return list_directory(root, relative, cursor=cursor, query=query, runtime_pinned_root=runtime_pinned_root)
     if operation == "write":
         content = base64.b64decode(data, validate=True)
         if len(content) > DOWNLOAD_LIMIT:
             raise SandboxValidationError("File exceeds 16 MiB copy limit")
-    with pinned(target, directory=operation == "list", write=operation == "write", exclusive=not overwrite,
-                allow_hardlink=allow_hardlink, runtime_pinned_root=runtime_pinned_root) as fd:
-        if operation == "list":
-            entries = []
-            # Windows cannot scandir(fd), but its entire path is pinned above.
-            with os.scandir(target if os.name == "nt" else fd) as iterator:
-                for item in iterator:
-                    if len(entries) == DIRECTORY_LIMIT:
-                        return {"entries": entries, "truncated": True}
-                    info = item.stat(follow_symlinks=False)
-                    blocked = stat.S_ISLNK(info.st_mode) or bool(getattr(info, "st_file_attributes", 0) & 0x400)
-                    entries.append({"name": item.name, "directory": stat.S_ISDIR(info.st_mode) and not blocked,
-                        "blocked": blocked, "size": info.st_size})
-            return {"entries": sorted(entries, key=lambda e: (not e["directory"], e["name"].casefold())), "truncated": False}
+    with pinned(target, directory=operation in {"list", "mkdir"}, write=operation == "write", exclusive=not overwrite,
+                allow_hardlink=allow_hardlink, runtime_pinned_root=runtime_pinned_root,
+                create_parents_from=root if (create_parents and operation == "write") or operation == "mkdir" else None,
+                create_directory=operation == "mkdir") as fd:
+        if operation == "mkdir":
+            return {"created": True}
         if operation == "write":
             os.ftruncate(fd, 0)
             with os.fdopen(os.dup(fd), "wb") as output:
@@ -170,16 +210,27 @@ def operate(root: Path, relative: str, operation: str, *, read_only=False, data=
 
 
 def file_operation(workspace, access, attachments, operation, root="workspace", path="", **options):
+    if operation in {'delete', 'move'}:
+        if root != 'workspace':
+            raise SandboxSecurityError('Only workspace files can be moved or deleted')
+        from .mutations import mutate
+        return mutate(workspace, operation, path=path, read_only=str(access) == 'read_only', **options)
     if operation == "roots":
         return [{"id": "workspace", "label": "Workspace", "access": str(access), "directory": True},
             *[{"id": "resource:" + a.resource_id, "label": a.relative_path, "access": str(a.access), "directory": False} for a in attachments]]
     if root == "workspace":
-        if operation in {'capture_manifest', 'read_chunk', 'write_chunk', 'transfer_mkdir'}:
+        if operation.startswith('upload_'):
+            from .streaming import upload_operation
+            return upload_operation(workspace, operation, path=path, read_only=str(access) == 'read_only', **options)
+        if operation in {'capture_manifest', 'read_chunk', 'write_chunk', 'transfer_mkdir', 'download_info', 'download_chunk'}:
             from .transfers import transfer
             return transfer(workspace, operation, path=path, read_only=str(access) == 'read_only', **options)
         return operate(Path(workspace), path, operation, read_only=str(access) == "read_only", **options)
     for attachment in attachments:
         if root == "resource:" + attachment.resource_id and not path:
+            if operation in {'download_info', 'download_chunk'}:
+                from .transfers import transfer
+                return transfer(attachment.source.parent, operation, path=attachment.source.name, allow_hardlink=True, **options)
             return operate(attachment.source.parent, attachment.source.name, operation,
                 read_only=str(attachment.access) == "read_only", allow_hardlink=True, **options)
     raise SandboxSecurityError("File root is not authorized for this Sandbox")

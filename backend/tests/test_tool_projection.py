@@ -103,6 +103,42 @@ def test_exposed_callable_and_modified_schema_cannot_bypass_live_revocation(clie
         client.portal.call(provider.invoke_tool, agent["id"], f"text.read:{note['id']}", {})
 
 
+@pytest.mark.parametrize("failure,code", [("security", "permission_denied"), ("missing", "not_found"),
+                                         ("cancel", "tool_cancelled"), ("unexpected", "tool_execution_error")])
+def test_sandbox_tool_failure_boundary(client, monkeypatch, failure, code):
+    import asyncio
+    from backend.sandbox.models import SandboxSecurityError, SandboxNotFoundError
+
+    agent = create_node(client, "agent")
+    note = create_node(client, "text", name="Notes", content="unchanged")
+    connect(client, agent, note, "read")
+    provider, definitions = tools(client, agent)
+    errors = {"security": SandboxSecurityError("Access blocked"),
+              "missing": SandboxNotFoundError("Sandbox missing"),
+              "cancel": asyncio.CancelledError(), "unexpected": RuntimeError("Unexpected bug")}
+    error = errors[failure]
+
+    async def handler(*args):
+        raise error
+
+    tool = build_scoped_tool_callables(provider, agent["id"], [definitions["read_text"]])[0]
+
+    async def check():
+        with monkeypatch.context() as patch:
+            patch.setattr(client.app.state.services.plugins, "capability_handler", lambda kind: handler)
+            result = await tool(target="notes")
+        assert result["ok"] is False
+        assert result["error"]["code"] == code
+        if failure == "unexpected":
+            assert result["error"]["type"] == "ToolExecutionError"
+            assert result["error"]["error_id"]
+            assert "Unexpected bug" not in str(result)
+        # A failed invocation must not poison the callable or its live broker.
+        assert (await tool(target="notes"))["content"] == "unchanged"
+
+    client.portal.call(check)
+
+
 @pytest.mark.parametrize("equipment,toolbox", [(False, False), (True, True)])
 def test_composite_tool_has_independent_selectors_without_cartesian_names(runtime_client, equipment, toolbox):
     client, _, native = runtime_client

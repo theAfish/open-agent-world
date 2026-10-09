@@ -29,8 +29,8 @@ test('nested knowledge backgrounds never change world pixels or share SVG resour
       await expect(page.locator('.kdg-canvas .terrain-webgl-background, .contour-chunk')).toHaveCount(0);
       await expect(world.locator(':scope > .terrain-webgl-background')).toHaveCount(1);
     };
-    await expect(page.getByRole('region', { name: 'Background isolation check workspace' }).first().locator('.react-flow__background')).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Background isolation check workspace' }).last().locator('.react-flow__background')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Background isolation check workspace' }).first().locator('.network-map')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Background isolation check workspace' }).last().locator('.network-map')).toBeVisible();
     await checkBackground();
     const map = page.locator(`[data-card-id="${created[1]}"] .kdg-canvas`);
     await map.getByRole('button', { name: /zoom in/i }).click();

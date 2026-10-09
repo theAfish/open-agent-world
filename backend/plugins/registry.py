@@ -12,8 +12,10 @@ from backend.plugins.state import PluginStateSpec, LEGACY_STATE
 from backend.errors import GraphValidationError, PluginCompatibilityError, PluginUnavailableError
 from backend.plugins.lifecycle import NodeLifecycleHandler
 from backend.plugins.resources import NodeResourceAction
+from backend.plugins.data_sources import NodeDataConsumer, NodeDataSource
 from backend.plugins.template import NodeTemplateHandler
 from backend.plugins.presets import LegionPresetDefinition
+from backend.plugins.tutorials import Tutorials, validate_tutorials
 
 if TYPE_CHECKING:
     from backend.legions.models import LegionBlueprintPreset
@@ -29,7 +31,7 @@ from backend.plugins.deployment import NodeDeploymentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.23"
+PLUGIN_API_VERSION = "1.27"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -69,6 +71,13 @@ class PackDefinition(BaseModel):
     cards: tuple[str, ...] = ()
     artwork_asset: str | None = Field(default=None, min_length=1, max_length=128)
     accent_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    packaging: Literal["standard", "premium", "paper", "collector"] = "standard"
+    tutorials: Tutorials = ()
+
+    @model_validator(mode="after")
+    def validate_tutorial_content(self) -> Self:
+        validate_tutorials(self.tutorials)
+        return self
 
 
 class PackCatalogItem(PackDefinition):
@@ -104,6 +113,7 @@ class NodePresentation(BaseModel):
     states: tuple[SurfaceLevel, ...] = Field(min_length=1)
     initial: SurfaceLevel
     open: SurfaceLevel
+    sizes: dict[SurfaceLevel, dict[str, float]] = Field(default_factory=dict)
 
     @classmethod
     def from_legacy_surfaces(cls, surfaces: dict[str, bool]) -> Self:
@@ -121,11 +131,35 @@ class NodePresentation(BaseModel):
             raise ValueError("presentation states must be unique")
         if self.initial not in self.states or self.open not in self.states:
             raise ValueError("presentation initial and open must belong to states")
+        for level, size in self.sizes.items():
+            if level not in self.states or set(size) != {"width", "height"}:
+                raise ValueError("presentation sizes must specify width and height for supported states")
+            if not all(96 <= value <= 4096 for value in size.values()):
+                raise ValueError("presentation sizes must be between 96 and 4096")
         return self
+
+
+class CardFaceDesign(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    variant: Literal["icon", "image", "text", "compact", "dark"] = "icon"
+    tone: Literal["midnight", "sage", "sand", "sky", "rose", "stone"] = "sage"
+
+
+class CardFaceSpec(CardFaceDesign):
+    """Optional print layout; artwork references this plugin's registered assets."""
+
+    image_asset: str | None = None
+
+
+class CardFaceCatalog(CardFaceDesign):
+    image_url: str | None = None
 
 
 class NodeTypeCatalogItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    tutorials: Tutorials = ()
 
     id: str
     plugin_id: str
@@ -133,6 +167,7 @@ class NodeTypeCatalogItem(BaseModel):
     description: str
     icon: str
     icon_url: str | None = None
+    card_face: CardFaceCatalog | None = None
     frontend: dict[str, str] = Field(default_factory=dict)
     color: str
     deck_id: str
@@ -143,6 +178,7 @@ class NodeTypeCatalogItem(BaseModel):
     default_size: dict[str, float]
     default_status: str
     traits: list[str]
+    data_consumer: NodeDataConsumer | None = None
     surfaces: dict[str, bool]
     presentation: NodePresentation
     state: PluginStateSpec = LEGACY_STATE
@@ -175,6 +211,7 @@ class RelationshipCatalogItem(BaseModel):
     directions: list[str]
     templateable: bool
     generated: bool = False
+    data_read: bool = False
 
 
 class PluginCatalog(BaseModel):
@@ -274,6 +311,8 @@ class NodeTypeDefinition:
     template_remap_config: Callable[[dict[str, Any], Mapping[str, str]], dict[str, Any]] | None = None
     document: NodeDocumentDefinition | None = None
     resource_actions: Mapping[str, NodeResourceAction] = field(default_factory=dict)
+    data_source: NodeDataSource | None = None
+    data_consumer: NodeDataConsumer | None = None
     # Native state with no browser snapshot must never masquerade as undoable.
     deletion_warning: str | None = None
     execution: NodeExecutionDefinition | None = None
@@ -283,6 +322,8 @@ class NodeTypeDefinition:
     canvas_create_requires_confirmation: bool = False
     deployment: NodeDeploymentDefinition | None = None
     state: PluginStateSpec | None = None
+    card_face: CardFaceSpec | Mapping[str, str] | None = None
+    tutorials: Tutorials = ()
 
     def resolved_presentation(self) -> NodePresentation:
         if self.presentation is not None:
@@ -292,13 +333,17 @@ class NodeTypeDefinition:
     def catalog_item(self, plugin_id: str) -> NodeTypeCatalogItem:
         default_config = self.config_model().model_dump(mode="json")
         presentation = self.resolved_presentation()
+        face = CardFaceSpec.model_validate(self.card_face) if self.card_face is not None else None
         return NodeTypeCatalogItem(
+            tutorials=validate_tutorials(self.tutorials),
             id=self.id,
             plugin_id=plugin_id,
             label=self.label,
             description=self.description,
             icon=self.icon,
             icon_url=f"/api/plugins/{plugin_id}/assets/{self.icon_asset}" if self.icon_asset else None,
+            card_face=CardFaceCatalog(variant=face.variant, tone=face.tone,
+                image_url=f"/api/plugins/{plugin_id}/assets/{face.image_asset}" if face.image_asset else None) if face else None,
             frontend=dict(self.frontend),
             color=self.color,
             deck_id=self.deck_id,
@@ -312,6 +357,7 @@ class NodeTypeDefinition:
             },
             default_status=self.default_status,
             traits=sorted(self.traits),
+            data_consumer=self.data_consumer,
             surfaces={
                 level: level in presentation.states for level in ("preview", "inspector", "workspace")
             },
@@ -349,6 +395,8 @@ class RelationshipDefinition:
     generated: bool = False
     # Ordinary connections are autonomous; sensitive grants explicitly require review.
     canvas_requires_confirmation: bool = False
+    # Read-only dataset access from source (consumer) to target (provider).
+    data_read: bool = False
 
     def catalog_item(self, plugin_id: str) -> RelationshipCatalogItem:
         return RelationshipCatalogItem(
@@ -364,6 +412,7 @@ class RelationshipDefinition:
             directions=sorted(self.directions),
             templateable=self.templateable,
             generated=self.generated,
+            data_read=self.data_read,
         )
 
 
@@ -639,7 +688,14 @@ class PluginRegistry:
                 raise ValueError("state schema ids must be namespaced")
 
         for definition in staged.nodes.values():
+            validate_tutorials(definition.tutorials)
             definition.resolved_presentation()
+            if definition.card_face is not None:
+                face = CardFaceSpec.model_validate(definition.card_face)
+                if face.image_asset is not None:
+                    asset = staged.assets.get(face.image_asset)
+                    if asset is None or not asset.media_type.startswith("image/"):
+                        raise ValueError("card face image must reference an image asset registered by the same plugin")
             if definition.icon_asset is not None and definition.icon_asset not in staged.assets:
                 raise ValueError("node icon must reference an asset registered by the same plugin")
             for slot, reference in definition.frontend.items():
@@ -741,12 +797,17 @@ class PluginRegistry:
                 if execution.control_capability_kind and execution.control_capability_kind not in staged.capability_handlers:
                     raise ValueError("execution control capability must be owned by the same plugin")
             try:
-                definition.config_model()
+                default_config = definition.config_model().model_dump(mode="json")
             except ValidationError as exc:
                 raise ValueError(
                     f"node type {definition.id!r} config model must provide defaults "
                     "for palette creation"
                 ) from exc
+            if definition.data_consumer is not None:
+                consumer = definition.data_consumer
+                if any(not isinstance(default_config.get(name), str)
+                       for name in (consumer.source_field, consumer.schema_field)):
+                    raise ValueError("data consumer fields must name string config fields with defaults")
 
         operations: dict[str, CapabilityDefinition] = {}
         for definition in (*self._capabilities.values(), *staged.capabilities.values()):
