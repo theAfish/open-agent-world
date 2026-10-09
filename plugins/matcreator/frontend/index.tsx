@@ -123,7 +123,7 @@ function GraphWorkspace({ card, host }: PluginViewProps) {
           {preview && <div role="dialog" aria-label={t("Confirm assimilation")}><p>{t("Assimilate “")}{String(preview.source_name)}{t("” and consume its card?")}</p><button disabled={busy} onClick={() => void run(async () => { await host.transform("assimilate", { source_id: toolset, source_revision: preview.source_revision, expected_revision: preview.revision, confirm: true }); setPreview(null); setToolset(""); setNotice(t("Toolset assimilated. Source package preserved in snapshots.")); await load(); })}>{t("Confirm assimilation")}</button><button onClick={() => setPreview(null)}>{t("Cancel")}</button></div>}
         </details>
       </aside>}
-      <main className="kdg-canvas"><NetworkMap ref={map} graphKey={`matcreator:${card.id}`} data={network} selected={selectedIds}
+      <main className="kdg-canvas"><NetworkMap ref={map} graphKey={`matcreator:${card.id}`} data={network} selected={selectedIds} search={false}
         onSelectionChange={setSelectedIds} onSelect={id => void run(() => select(id))}
         onExpand={id => void run(() => load([id], true))}
         onContextMenu={(id, point) => { const element = workspaceRef.current!; const rect = element.getBoundingClientRect();

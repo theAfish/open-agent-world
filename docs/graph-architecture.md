@@ -128,7 +128,10 @@ GPU buffers again for each crossed node. This change was driven by a measured
 Double-click/Expand delegates server expansion to the Pack. The generic data
 card gets a relationship inspector when no business inspector is supplied.
 Local search finds loaded nodes; server-backed search and pagination remain
-explicit Pack operations. Local filters preserve positions and camera context;
+explicit Pack operations. MatCreator disables the map-local search input and keeps
+one **Search knowledge** entry point, covering all stored entries including content,
+summaries and aliases, rather than only the currently loaded nodes.
+Local filters preserve positions and camera context;
 Fit can frame the filtered results.
 
 Pointer handling compensates for the outer world canvas's CSS scale before
