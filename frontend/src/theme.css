@@ -433,6 +433,9 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .card-status[data-status="error"] > span:first-child { background: var(--danger); }
 
 .card-body { flex: 1; min-height: 0; padding-top: 11px; }
+.connection-schema { margin: 16px 0; }
+.connection-schema select { width: 100%; min-width: 0; padding: 9px 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+.connection-schema p { color: var(--muted); font-size: 12px; }
 .world-card.is-inspector { cursor: default; }
 .world-card.is-inspector > .node-drag-region { cursor: grab; }
 .world-card.is-inspector > .node-drag-region:active { cursor: grabbing; }

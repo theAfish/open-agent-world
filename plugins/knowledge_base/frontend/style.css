@@ -14,8 +14,6 @@
 :is(.knowledge-app, .knowledge-section) label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-soft); min-width: 0; }
 
 .knowledge-badge { color: var(--knowledge-accent); border: 1px solid #8a6fd155; background: #8a6fd115; border-radius: 5px; padding: 3px 7px; font-size: 11px; letter-spacing: .03em; }
-.knowledge-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 22px; border-bottom: 1px solid var(--line); }
-.knowledge-toolbar > button:last-child { margin-left: auto; }
 .knowledge-meta { color: var(--ink-soft); font-size: 11px; }
 .knowledge-running { color: var(--knowledge-accent); font-size: 11px; }
 .knowledge-groupselect { flex-direction: row; align-items: center; gap: 6px; font-size: 11px; }
@@ -102,7 +100,7 @@
 /* Documents are the visual anchor; controls remain quiet until they are needed. */
 :is(.knowledge-app, .knowledge-section) .knowledge-icon-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; padding: 6px; border-color: transparent; background: transparent; }
 .knowledge-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-.knowledge-heading-actions { display: flex; align-items: center; gap: 10px; }
+.knowledge-heading-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .knowledge-source-toolbar { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px 16px; align-items: start; }
 .knowledge-source-toolbar > .knowledge-search-inline { grid-column: 2; grid-row: 1; }
 .knowledge-source-toolbar > .knowledge-formbar { grid-column: 1 / -1; grid-row: 2; }
@@ -170,7 +168,6 @@
   .knowledge-rail button { font-size: 12px; padding: 7px; }
   .knowledge-grid { padding: 20px 14px; }
   .knowledge-tabstrip { margin: 0 14px; gap: 18px; }
-  .knowledge-toolbar { padding: 10px 14px; }
   .knowledge-section h3 { font-size: 21px; }
   .knowledge-section-heading { flex-wrap: wrap; }
 }

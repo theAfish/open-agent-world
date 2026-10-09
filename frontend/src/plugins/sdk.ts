@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import type { NodeSurfaceLevel, NodeTypeCatalogItem, WorldCard } from "../types/world";
 export type { TutorialDefinition, TutorialStep, TutorialText } from '../tutorials/types';
+export type { DataConsumer, DataSchema, DataQuery, Dataset, DataSourceHost } from './dataSources';
 export type { NodePresentation, NodeSurfaceLevel, PluginStateSpec } from "../types/world";
 export { SchemaFields } from "./SchemaFields";
 export { CardFace, CardStock } from '../components/CardFace';
@@ -133,6 +134,7 @@ export interface PluginViewProps {
   definition: NodeTypeCatalogItem;
   level: NodeSurfaceLevel;
   host: {
+    dataSources?: import('./dataSources').DataSourceHost;
     /** Optional transient UI draft, isolated by the host's card/state scope/session.
      * Survives surface unmount; never written to durable state or preferences.
      * Clear with undefined after save/cancel. Older hosts may omit this capability. */

@@ -12,6 +12,7 @@ from backend.plugins.state import PluginStateSpec, LEGACY_STATE
 from backend.errors import GraphValidationError, PluginCompatibilityError, PluginUnavailableError
 from backend.plugins.lifecycle import NodeLifecycleHandler
 from backend.plugins.resources import NodeResourceAction
+from backend.plugins.data_sources import NodeDataConsumer, NodeDataSource
 from backend.plugins.template import NodeTemplateHandler
 from backend.plugins.presets import LegionPresetDefinition
 from backend.plugins.tutorials import Tutorials, validate_tutorials
@@ -30,7 +31,7 @@ from backend.plugins.deployment import NodeDeploymentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.26"
+PLUGIN_API_VERSION = "1.27"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -112,6 +113,7 @@ class NodePresentation(BaseModel):
     states: tuple[SurfaceLevel, ...] = Field(min_length=1)
     initial: SurfaceLevel
     open: SurfaceLevel
+    sizes: dict[SurfaceLevel, dict[str, float]] = Field(default_factory=dict)
 
     @classmethod
     def from_legacy_surfaces(cls, surfaces: dict[str, bool]) -> Self:
@@ -129,6 +131,11 @@ class NodePresentation(BaseModel):
             raise ValueError("presentation states must be unique")
         if self.initial not in self.states or self.open not in self.states:
             raise ValueError("presentation initial and open must belong to states")
+        for level, size in self.sizes.items():
+            if level not in self.states or set(size) != {"width", "height"}:
+                raise ValueError("presentation sizes must specify width and height for supported states")
+            if not all(96 <= value <= 4096 for value in size.values()):
+                raise ValueError("presentation sizes must be between 96 and 4096")
         return self
 
 
@@ -171,6 +178,7 @@ class NodeTypeCatalogItem(BaseModel):
     default_size: dict[str, float]
     default_status: str
     traits: list[str]
+    data_consumer: NodeDataConsumer | None = None
     surfaces: dict[str, bool]
     presentation: NodePresentation
     state: PluginStateSpec = LEGACY_STATE
@@ -203,6 +211,7 @@ class RelationshipCatalogItem(BaseModel):
     directions: list[str]
     templateable: bool
     generated: bool = False
+    data_read: bool = False
 
 
 class PluginCatalog(BaseModel):
@@ -302,6 +311,8 @@ class NodeTypeDefinition:
     template_remap_config: Callable[[dict[str, Any], Mapping[str, str]], dict[str, Any]] | None = None
     document: NodeDocumentDefinition | None = None
     resource_actions: Mapping[str, NodeResourceAction] = field(default_factory=dict)
+    data_source: NodeDataSource | None = None
+    data_consumer: NodeDataConsumer | None = None
     # Native state with no browser snapshot must never masquerade as undoable.
     deletion_warning: str | None = None
     execution: NodeExecutionDefinition | None = None
@@ -346,6 +357,7 @@ class NodeTypeDefinition:
             },
             default_status=self.default_status,
             traits=sorted(self.traits),
+            data_consumer=self.data_consumer,
             surfaces={
                 level: level in presentation.states for level in ("preview", "inspector", "workspace")
             },
@@ -383,6 +395,8 @@ class RelationshipDefinition:
     generated: bool = False
     # Ordinary connections are autonomous; sensitive grants explicitly require review.
     canvas_requires_confirmation: bool = False
+    # Read-only dataset access from source (consumer) to target (provider).
+    data_read: bool = False
 
     def catalog_item(self, plugin_id: str) -> RelationshipCatalogItem:
         return RelationshipCatalogItem(
@@ -398,6 +412,7 @@ class RelationshipDefinition:
             directions=sorted(self.directions),
             templateable=self.templateable,
             generated=self.generated,
+            data_read=self.data_read,
         )
 
 
@@ -782,12 +797,17 @@ class PluginRegistry:
                 if execution.control_capability_kind and execution.control_capability_kind not in staged.capability_handlers:
                     raise ValueError("execution control capability must be owned by the same plugin")
             try:
-                definition.config_model()
+                default_config = definition.config_model().model_dump(mode="json")
             except ValidationError as exc:
                 raise ValueError(
                     f"node type {definition.id!r} config model must provide defaults "
                     "for palette creation"
                 ) from exc
+            if definition.data_consumer is not None:
+                consumer = definition.data_consumer
+                if any(not isinstance(default_config.get(name), str)
+                       for name in (consumer.source_field, consumer.schema_field)):
+                    raise ValueError("data consumer fields must name string config fields with defaults")
 
         operations: dict[str, CapabilityDefinition] = {}
         for definition in (*self._capabilities.values(), *staged.capabilities.values()):

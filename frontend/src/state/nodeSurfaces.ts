@@ -169,6 +169,12 @@ export const useNodeSurfaceStore = create<NodeSurfaceState>()(persist((set, get)
       if (!catalog.node_types.some(type => type.id === card.type)) continue;
       const presentation = cardPresentation(card, catalog);
       const studio = cardStudio(card, catalog);
+      for (const [level, size] of Object.entries(presentation.sizes ?? {})) {
+        const surface = level as NodeSurfaceLevel;
+        if (!surfaceSizes[card.id]?.[surface]) surfaceSizes[card.id] = {
+          ...surfaceSizes[card.id], [surface]: clampSurfaceSize(surface, size),
+        };
+      }
       if (studio) surfaceSizes[card.id] = Object.fromEntries(Object.entries(studio.modes).map(([mode, design]) => [mode, { width: design!.width, height: design!.height }]));
       presentations[card.id] = presentation;
       const definition = catalog.node_types.find(type => type.id === card.type)!;

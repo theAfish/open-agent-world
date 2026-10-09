@@ -8,6 +8,7 @@ export interface NodePresentation {
   states: readonly NodeSurfaceLevel[];
   initial: NodeSurfaceLevel;
   open: NodeSurfaceLevel;
+  sizes?: Partial<Record<NodeSurfaceLevel, { width: number; height: number }>>;
 }
 
 export type AgentStatus = "idle" | "running" | "waiting" | "error";
@@ -160,6 +161,7 @@ export interface WorldSnapshot {
 }
 
 export interface NodeTypeCatalogItem {
+  data_consumer?: import('../plugins/dataSources').DataConsumer | null;
   tutorials?: import('../tutorials/types').TutorialDefinition[];
   /** Layout and colour are independent of the owned card's material finish. */
   card_face?: import('../components/cardFaceDesign').CardFaceDesign | null;
@@ -204,6 +206,7 @@ export interface NodeTypeCatalogItem {
 }
 
 export interface RelationshipCatalogItem {
+  data_read?: boolean;
   generated?: boolean;
   id: Relationship;
   plugin_id: string;

@@ -85,6 +85,7 @@ nav:
       - Your first plugin: developers/first-plugin.md
       - Give an Agent a tool: developers/agent-tools.md
       - Add a custom interface: developers/frontend.md
+      - Connected data sources: developers/data-sources.md
       - Progressive card tutorials: developers/progressive-tutorials.md
       - Test and distribute: developers/testing.md
       - Local Pack distribution: pack-distribution.md

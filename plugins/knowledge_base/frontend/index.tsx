@@ -565,22 +565,25 @@ export function Workspace({ host, card }: PluginViewProps) {
   const graphProjectedRecordIds = new Set(graphProjections.map(item => item.record_id));
   const graphPendingSources = convertedSources.filter(item => !graphProjectedRecordIds.has(item.record_id!));
 
-  return <div className="knowledge-app nodrag nowheel" aria-label={t("{v0} knowledge base", { v0: card.name })}>
-    {!(category === "literature" && literatureTab === "sources") && <header className="knowledge-toolbar">
-      <label className="knowledge-groupselect">
-        <span className="knowledge-visually-hidden">{t("Group")}</span>
-        <select aria-label={t("Group")} value={activeGroup} disabled={busy} onChange={event => setActiveGroup(event.target.value)}>
-          <option value="">{t("All groups")}</option>
-          {groups.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>
-      </label>
+  const groupSelect = <label className="knowledge-groupselect">
+    <span className="knowledge-visually-hidden">{t("Group")}</span>
+    <select aria-label={t("Group")} value={activeGroup} disabled={busy}
+      onChange={event => { setActiveGroup(event.target.value); setGroupEditing(false); }}>
+      <option value="">{t("All groups")}</option>
+      {groups.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+    </select>
+  </label>;
+
+  const refreshControls = <>
       {!!running.length && <span className="knowledge-running" role="status">
         {t("{v0} conversion running", { v0: running.length })}</span>}
       <button type="button" className="knowledge-icon-button" aria-label={t("Refresh")} title={t("Refresh")}
         disabled={busy} onClick={() => void perform(async () => {
           setNotice(""); await refresh(); await loadGraph();
         })}><RefreshCw size={15} /></button>
-    </header>}
+  </>;
+
+  return <div className="knowledge-app nodrag nowheel" aria-label={t("{v0} knowledge base", { v0: card.name })}>
 
     <div className="knowledge-layout">
       {/* The rail switches workflows; each workflow keeps its own tab strip, so the
@@ -609,7 +612,10 @@ export function Workspace({ host, card }: PluginViewProps) {
         {/* A detached section is portaled straight into its own tab, past ".knowledge-app": this
             wrapper carries the same classes so base colors and control styling still apply there. */}
         <div className="knowledge-section knowledge-settings-section">
-        <h3>{t("Settings")}</h3>
+        <div className="knowledge-section-heading">
+          <h3>{t("Settings")}</h3>
+          <div className="knowledge-heading-actions">{refreshControls}</div>
+        </div>
         <Banner error={error} notice={notice} />
         <label>{t("Collection name")}
           <input value={current.collection_name} disabled={busy}
@@ -674,14 +680,7 @@ export function Workspace({ host, card }: PluginViewProps) {
         <Banner error={error} notice={notice} />
         <div className="knowledge-source-toolbar">
         <div className="knowledge-document-controls">
-          <label className="knowledge-groupselect">
-            <span className="knowledge-visually-hidden">{t("Group")}</span>
-            <select aria-label={t("Group")} value={activeGroup} disabled={busy}
-              onChange={event => { setActiveGroup(event.target.value); setGroupEditing(false); }}>
-              <option value="">{t("All groups")}</option>
-              {groups.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-          </label>
+          {groupSelect}
           <details className="knowledge-group-menu">
             <summary aria-label={t("Manage groups")} title={t("Manage groups")}><MoreHorizontal size={18} /></summary>
             <div className="knowledge-group-actions">
@@ -828,7 +827,10 @@ export function Workspace({ host, card }: PluginViewProps) {
 
       {((category === "literature" && literatureTab === "schemas") || (category === "experiment" && experimentTab === "schemas")) && <WorkspaceSection id="schemas" title={t("Schemas")} className="knowledge-section">
         <div className="knowledge-section">
-        <h3>{t("Schemas")}</h3>
+        <div className="knowledge-section-heading">
+          <h3>{t("Schemas")}</h3>
+          <div className="knowledge-heading-actions">{refreshControls}</div>
+        </div>
         <Banner error={error} notice={notice} />
 
         <ul className="knowledge-list">
@@ -870,7 +872,10 @@ export function Workspace({ host, card }: PluginViewProps) {
 
       {category === "literature" && literatureTab === "projections" && <WorkspaceSection id="projections" title={t("Projections")} className="knowledge-section">
         <div className="knowledge-section">
-        <h3>{t("Projections")}</h3>
+        <div className="knowledge-section-heading">
+          <h3>{t("Projections")}</h3>
+          <div className="knowledge-heading-actions">{groupSelect}{refreshControls}</div>
+        </div>
         <Banner error={error} notice={notice} />
         <p className="knowledge-meta">{t("Extract structured data with a schema. Review results below.")}</p>
 
@@ -938,7 +943,10 @@ export function Workspace({ host, card }: PluginViewProps) {
 
       {category === "experiment" && experimentTab === "experiments" && <WorkspaceSection id="experiments" title={t("Experiments")} className="knowledge-section">
         <div className="knowledge-section">
-        <h3>{t("Experiments")}</h3>
+        <div className="knowledge-section-heading">
+          <h3>{t("Experiments")}</h3>
+          <div className="knowledge-heading-actions">{groupSelect}{refreshControls}</div>
+        </div>
         <Banner error={error} notice={notice} />
         <p className="knowledge-meta">{t("Combine extractions into an experiment record, then review and confirm.")}</p>
         <h4>{t("Select projections to assemble")}</h4>
@@ -1001,7 +1009,10 @@ export function Workspace({ host, card }: PluginViewProps) {
 
       {category === "literature" && literatureTab === "graph" && <WorkspaceSection id="graph" title={t("Graph")} className="knowledge-section knowledge-wide">
         <div className="knowledge-section knowledge-wide">
-        <h3>{t("Knowledge graph")}</h3>
+        <div className="knowledge-section-heading">
+          <h3>{t("Knowledge graph")}</h3>
+          <div className="knowledge-heading-actions">{groupSelect}{refreshControls}</div>
+        </div>
         <Banner error={error} notice={notice} />
         <p className="knowledge-meta">{t("Extract → build draft → review → publish")}</p>
         <label>{t("Graph schema")}

@@ -98,6 +98,25 @@ class SqlGraphStore:
             type=row["type"], properties=json.loads(row["properties"]),
             created_at=_aware(row["created_at"]), updated_at=_aware(row["updated_at"]))
 
+    def dataset(self, *, limit, entity_type=None, relation_type=None):
+        """Bound the SQL result before loading a graph for visualization."""
+        query = select(ENTITIES.c.id, ENTITIES.c.name, ENTITIES.c.type).order_by(ENTITIES.c.id).limit(limit + 1)
+        if entity_type:
+            query = query.where(ENTITIES.c.type == entity_type)
+        with self._engine.connect() as connection:
+            rows = connection.execute(query).mappings().all()
+            nodes = [dict(row) for row in rows[:limit]]
+            identifiers = [node["id"] for node in nodes]
+            links = select(RELATIONS.c.id, RELATIONS.c.source_id.label("source"),
+                           RELATIONS.c.target_id.label("target"), RELATIONS.c.type).where(
+                RELATIONS.c.source_id.in_(identifiers), RELATIONS.c.target_id.in_(identifiers)
+            ).order_by(RELATIONS.c.id).limit(limit + 1)
+            if relation_type:
+                links = links.where(RELATIONS.c.type == relation_type)
+            edges = connection.execute(links).mappings().all() if nodes else []
+        return {"kind": "graph", "nodes": nodes, "edges": [dict(row) for row in edges[:limit]],
+                "truncated": len(rows) > limit or len(edges) > limit, "scope": "published"}
+
     @staticmethod
     def _values(element):
         return {"type": element.type, "properties": json.dumps(element.properties, sort_keys=True),

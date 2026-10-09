@@ -21,6 +21,10 @@ To disable a plugin, first remove its world objects, relationships, dependent Ag
 
 ## Bundled plugin guides
 
+The [Data visualization Pack](../plugins/visualization/README.md) connects charts
+to SQL and MKB through the public [data-source protocol](developers/data-sources.md)
+introduced in Plugin API 1.27.
+
 | Plugin | Use it for |
 | --- | --- |
 | [Task Board](../plugins/task_board/README.md) | Shared tasks, dependencies, and Agent execution |

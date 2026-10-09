@@ -12,7 +12,7 @@ from typing import Literal
 from open_agent_world.plugin_api import (
     CapabilityDefinition, CapabilityGrantDefinition, DeploymentSurface, NodeDeploymentDefinition,
     NodeResourceAction, NodeTypeDefinition, PackDefinition, PluginAsset, PluginDescriptor,
-    RelationshipDefinition,
+    RelationshipDefinition, NodeDataSource,
 )
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -20,6 +20,7 @@ from .errors import KnowledgeError, operator_message
 from .lifecycle import KnowledgeLifecycle
 from .operations import EXTRACT_ACTIONS, OPERATIONS, READ_ACTIONS
 from .preset import definition as research_preset
+from .data_source import DATA_SOURCE
 
 PREFIX = "knowledge.base"
 
@@ -138,7 +139,7 @@ class KnowledgeConfig(BaseModel):
 
 
 class KnowledgeBasePlugin:
-    descriptor = PluginDescriptor(id=PREFIX, version="0.2.0", plugin_api_version="1.21",
+    descriptor = PluginDescriptor(id=PREFIX, version="0.2.0", plugin_api_version="1.27",
         name="Knowledge base",
         description="Embedded research knowledge base: documents to markdown, markdown to structured JSON, and a review-gated knowledge graph.")
 
@@ -166,7 +167,8 @@ class KnowledgeBasePlugin:
             deck_id="knowledge", deck_label="Knowledge", deck_icon="library",
             default_name="Knowledge base", default_size=(360, 280), default_status="available",
             statuses=frozenset({"available", "error"}), config_model=KnowledgeConfig,
-            traits=frozenset({"knowledge.base"}), lifecycle=KnowledgeLifecycle(),
+            traits=frozenset({"knowledge.base", "data.source"}), lifecycle=KnowledgeLifecycle(),
+            data_source=NodeDataSource(DATA_SOURCE.schemas, _guarded(DATA_SOURCE.read)),
             resource_actions=resource_actions,
             deletion_warning="Deleting this card permanently removes its documents, projections, drafts, published facts and knowledge graph. Canvas undo and copy do not preserve knowledge base files. Back up your profile before deleting knowledge you need.",
             # Templateable with no template handler: a Legion copy deploys a card with

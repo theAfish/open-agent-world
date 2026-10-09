@@ -41,6 +41,24 @@ export function PluginSurface({ card, slot, level, children }: {
   const source = useWorldStore(s=>xrdCanvasSource(card,s.cards,s.edges));
   const viewCard = useMemo(()=>source?{...card,config:{...card.config,source_node_id:source}}:card,[card,source]);
   const host = useMemo<PluginViewProps["host"]>(() => ({
+    dataSources: access.deployed ? undefined : {
+      list: () => worldApi.dataSources(card.id),
+      schemas: source => worldApi.dataSource(card.id, source, 'schemas', {}),
+      read: (source, query) => worldApi.dataSource(card.id, source, 'read', query),
+      connect: async (target, relationship) => {
+        const state = useWorldStore.getState();
+        state.requestConnection(card.id, target);
+        const pending = useWorldStore.getState().pendingConnection;
+        if (pending?.source === card.id && pending.target === target) {
+          useWorldStore.setState({pendingConnection:{...pending,options:pending.options.filter(option=>option.value===relationship)}});
+        }
+      },
+      subscribe: listener => useWorldStore.subscribe((next, previous) => {
+        const links = (state: typeof next) => state.edges.filter(edge => edge.source === card.id || edge.target === card.id)
+          .map(edge => `${edge.id}:${edge.source}:${edge.target}:${edge.relationship}:${edge.direction}`).sort().join('|');
+        if (links(next) !== links(previous)) listener();
+      }),
+    },
     draft: {
       get: () => {
         const value = useNodeSurfaceStore.getState().drafts[surfaceDraftKey(card.id, 'plugin', card.state_scope, sessionId)];

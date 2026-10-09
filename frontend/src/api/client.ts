@@ -411,6 +411,20 @@ export const worldApi = {
     });
   },
 
+  async dataSources(id: string): Promise<{sources: {id: string; name: string; type: string}[]}> {
+    return request(`/nodes/${encodeURIComponent(id)}/data-sources`);
+  },
+  async dataSourceSchemas(id: string, source: string, relationship: string): Promise<{schemas: import('../plugins/dataSources').DataSchema[]; truncated?: boolean}> {
+    return request(`/nodes/${encodeURIComponent(id)}/data-source-schemas`, {
+      method: 'POST', body: JSON.stringify({source_id: source, relationship}),
+    });
+  },
+  async dataSource<T>(id: string, source: string, operation: 'schemas' | 'read', args: unknown): Promise<T> {
+    return request(`/nodes/${encodeURIComponent(id)}/data-sources/${encodeURIComponent(source)}/${operation}`, {
+      method: 'POST', body: JSON.stringify({arguments: args}),
+    });
+  },
+
   async nodeDocumentAction(id: string, action: string, args: Record<string, unknown>, expectedRevision?: number, sessionId: string | null = cardStateSession(id) ?? null): Promise<{ value: Record<string, unknown>; revision: number; summary: Record<string, unknown> }> {
     return request(`/nodes/${encodeURIComponent(id)}/actions/${encodeURIComponent(action)}`, {
       method: "POST", headers: stateSessionHeaders(sessionId), body: JSON.stringify({ arguments: args, expected_revision: expectedRevision }),
