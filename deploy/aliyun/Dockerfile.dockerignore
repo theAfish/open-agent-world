@@ -1,0 +1,31 @@
+# Only source inputs enter the build context. Never include personal profiles,
+# credentials, Git history, caches, local virtualenvs or generated test output.
+**
+!frontend/
+!frontend/**
+!backend/
+!backend/**
+!open_agent_world/
+!open_agent_world/**
+!plugins/
+!plugins/**
+!docs/
+!docs/**
+docs/internal/
+**/node_modules/
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+**/dist/
+**/test-results/
+**/playwright-report/
+**/coverage/
+**/.env
+**/.env.*
+**/*.sqlite*
+**/*.db
+**/*.log
+**/.git/
+**/.aws/
+**/.codex/

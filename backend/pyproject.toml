@@ -15,6 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+aliyun = ["e2b==2.31.0"]
 hosting = ["authlib>=1.7.2,<2", "itsdangerous>=2.2,<3"]
 adk = ["google-adk>=2.8,<3"]
 litellm = ["litellm>=1.74,<2"]

@@ -1,0 +1,28 @@
+# Place behind your HTTPS load balancer. Render only OAW_* variables; preserve
+# nginx's own $http_* variables. Set NGINX_ENVSUBST_FILTER=^OAW_ with nginx's
+# official container entrypoint. Never put the rendered secret in source control.
+map $http_upgrade $oaw_connection_upgrade {
+    default upgrade;
+    '' close;
+}
+server {
+    listen 8080;
+    server_name _;
+    client_max_body_size 1g;
+    location / {
+        # Fixed operator-selected upstream; never a request/query parameter.
+        proxy_pass ${OAW_AGENTCORE_ORIGIN};
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+        proxy_set_header Host $proxy_host;
+        proxy_set_header ${OAW_AGENTCORE_AUTH_HEADER} "${OAW_AGENTCORE_AUTH_VALUE}";
+        proxy_set_header Origin $http_origin;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $oaw_connection_upgrade;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 300s;
+    }
+}
