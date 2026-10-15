@@ -74,6 +74,10 @@ backend/.venv/Scripts/python.exe -m backend.cloud.aliyun.identity_probe --env-fi
 `OAW_SESSION_SECRET`；启动 uvicorn 时使用 `--host 127.0.0.1 --port 8080 --no-access-log`。
 正式云服务使用 `OAW_OIDC_*` 配置和持久会话密钥，不使用探针的临时会话密钥。
 
+验证记录（2026-10-15）：Windows 本机已完成真实 RAM OAuth 2.0 登录、回调和 OIDC 身份校验，
+成功保存经过验证的 `issuer + subject`；本地登录探针和通用 OIDC 的 25 项测试通过。
+这证明了 RAM 登录链路，AgentCore 路由、Sandbox 执行与数据库持久化仍待真实云环境验证。
+
 ## 已选择的部署路径
 
 AgentCore 托管 OAW 前后端与受信任的编排逻辑，阿里 Agent Sandbox 执行生成命令。
