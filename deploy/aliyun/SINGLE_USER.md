@@ -76,7 +76,8 @@ backend/.venv/Scripts/python.exe -m backend.cloud.aliyun.identity_probe --env-fi
 
 验证记录（2026-10-15）：Windows 本机已完成真实 RAM OAuth 2.0 登录、回调和 OIDC 身份校验，
 成功保存经过验证的 `issuer + subject`；本地登录探针和通用 OIDC 的 25 项测试通过。
-这证明了 RAM 登录链路，AgentCore 路由、Sandbox 执行与数据库持久化仍待真实云环境验证。
+这证明了 RAM 登录链路。后续真实 Sandbox 检查见下文；AgentCore 路由、OAW 完整执行链路
+与数据库持久化仍待真实云环境验证。
 
 ## 已选择的部署路径
 
@@ -129,7 +130,7 @@ OAW profile 的数据库持久存储，再配置 AgentCore 与镜像仓库。
 
    ```powershell
    aliyun configure --mode OAuth --profile oaw-poc
-   aliyun sts get-caller-identity --profile oaw-poc
+   aliyun sts GetCallerIdentity --profile oaw-poc
    ```
 
 最后一条仅验证身份，不会创建资源；资源操作还取决于 RAM 权限。CLI 会保存并续期临时凭据，
@@ -138,14 +139,42 @@ Windows 默认配置位于 `%USERPROFILE%/.aliyun/config.json`，只需提供配
 参见[CLI OAuth 凭证](https://help.aliyun.com/zh/cli/oauth-credentials)及
 [凭证管理](https://help.aliyun.com/zh/cli/configure-credentials)。
 
-## 下一步所需信息
+### 真实云验证记录（2026-10-15）
 
-- 已选择 AgentCore 托管；需要已开通的 AgentCore Workspace、Sandbox 版本/地域及
-  持久存储权限信息。AgentCore profile 存储与 Sandbox 工作卷是两份独立资源，
-  不能直接把 SQLite WAL 放到未经验证的网络文件系统。
-- 要验证阿里登录，需要管理员创建上述 RAM OAuth 应用，提供客户端 ID 和私密配置文件路径。
-- 镜像上传还需要 AgentCore 支持的 ACR 仓库；按高代码部署文档核对仓库类型与拉取权限。
-  镜像包含项目源代码，确认可见范围后再上传。
+- CLI 3.5.1 已通过 `official-cli` 浏览器 OAuth 授权，`oaw-poc` profile 的
+  `sts GetCallerIdentity` 返回 RAM 用户。无需另建长期 AccessKey。
+- 杭州已有状态为 `Initialized` 的 AgentCore Workspace，存储类型为 `PLATFORM`、
+  未启用 VPC；这不证明应用已获得可挂载的数据库持久卷。
+- 极速版已有可用 Team；初次清点没有自建模板、Volume 或 API Key。
+  已为本次测试创建 7 天有效的 API Key，保存在仓库外；到期时间为
+  **2026-10-22 14:42（北京时间）**，继续联调前需确认有效期。
+- 使用真实 E2B SDK 和公共 `base` 模板完成命令及临时文件读写检查，命令退出码为 0，
+  执行用户 UID 为 1000。创建时设置 60 秒生命周期并请求禁用互联网和公共流量。
+  后续环境检查确认平台的三个阿里凭据变量为空，未注入部署者管理凭据。
+  两次实例均已销毁，最终列表为空。
+- 上述测试未挂载 Volume，也未通过 OAW 的完整 Sandbox 适配器执行；不代表持久性、
+  完整隔离审计、网络策略验证或 MatCreator/Legion 云端验收。
+- NAS 查询返回 `User.Disabled`，原文为“Your account does not open Nas Service yet
+  or balance is insufficient.”，需要在控制台区分服务未开通与余额问题。
+  杭州 ACR 企业版实例列表为空；尚未上传镜像或创建 AgentCore 应用。
+
+CLI 3.5.1 的产品目录尚不识别 `Sandbox`。本次资源清点和 API Key 创建使用独立临时目录中的
+官方 `alibabacloud-sandbox20260820==1.2.0` 管理 SDK，执行使用项目已有的 E2B SDK；
+管理 SDK 未加入应用运行依赖。资源 ID、创建回执及密钥仅保存在仓库外，不记录到此文档。
+
+## 仍需完成的部署条件
+
+- 确认 NAS 服务状态及 AgenticFS 邀测权限，随后准备实际文件系统、访问点、VPC/RAM 配置
+  和 Sandbox Volume；仅创建 Volume 元数据不会创建底层文件系统。
+  参见 [AgenticFS 概述](https://help.aliyun.com/zh/nas/product-overview/agenticfs-overview)
+  及 [创建 AgenticFS Volume](https://help.aliyun.com/zh/agent-sandbox/create-an-agenticfs-volume)。
+- 为 AgentCore 中的 OAW profile 确认可用持久存储及数据库方案。
+  profile 与 Sandbox 工作卷是两份独立资源，不能直接把 SQLite WAL 放到未经验证的网络文件系统。
+- 按当前[高代码部署文档](https://help.aliyun.com/zh/agentcore/high-code-agent-deployment-guide)，
+  AgentCore 镜像来源要求 ACR 企业版的公开、可匿名拉取仓库。镜像包含项目源代码，
+  需要先确认仓库费用和代码可见范围；本次未购买实例或公开镜像。
+- 镜像部署后验证网页路径、WebSocket、登录回调、重建后的持久数据，以及内化 MatCreator
+  通过 OAW 适配器执行的完整链路。现有私密环境文件仍为待补全配置，不能直接宣称可部署。
 
 未来恢复“别人自行注册”测试时，再选择用户注册服务及自动工作区开通方案，
 参考 [多用户内部测试准备](INTERNAL_TEST.md)。

@@ -151,10 +151,17 @@ backend/.venv/bin/uvicorn backend.cloud.aliyun.app:create_app --factory \
 
 ## 本地验证记录
 
+真实云接入进展（2026-10-15）：已完成 RAM OAuth 登录及身份校验、CLI OAuth 管理授权，
+并使用阿里真实 Sandbox 的公共 `base` 模板完成命令执行和临时文件读写。
+两次测试实例均已销毁，最终实例列表为空；部署者管理凭据未注入测试命令环境。
+这些检查不包含 Volume、OAW 完整执行适配、AgentCore 托管或真实模型科学工作流。
+NAS 服务状态和 AgenticFS 权限、适合数据库的 profile 持久存储，以及 ACR 镜像仓库仍待解决，
+详见[单人云端验证记录及部署条件](SINGLE_USER.md#真实云验证记录2026-10-15)。
+
 单人托管适配更新（2026-10-15）：本轮 55 项相关测试通过，包含使用真实内化引擎和
 受控模型端点验证的计划、递归执行、工具失败恢复、会话检查点，以及云端 worker 环境
 过滤、托管命令路由、Legion 创建和 OIDC 登录探针。个人版同组回归通过。
-阿里 Sandbox 使用测试 SDK 传输；没有真实阿里账号联调或外部模型验收。
+这组本地测试中的阿里 Sandbox 使用测试 SDK 传输，不包含真实阿里账号联调或外部模型验收。
 `oaw-aliyun-poc:single-user` 的 Linux 镜像已构建通过，包含前端及内化引擎依赖。
 禁用外网、使用一次性 profile 的容器检查通过：UID 10001、引擎依赖可读、服务健康、
 前端加载、匿名及错误所有者拦截，以及已签名测试会话下的 Legion 创建。
@@ -166,8 +173,9 @@ backend/.venv/bin/uvicorn backend.cloud.aliyun.app:create_app --factory \
 部署验收跳过；覆盖通用身份边界、OIDC、个人版访问与 Sandbox 管理、原有发布流程、
 MatCreator 原生/工作区回归及上传协议。阿里适配部分使用测试 SDK 传输，OIDC 使用
 模拟身份端点和真实签名令牌，文件 helper 使用独立 Python 进程验证协议。
-`npm run build` 通过。尚未验证真实阿里隔离/存储、实际 IdP 登录、
-AgentCore 公网路由及网关配置，也未进行桌面安装包或日常 GUI 验收。
+`npm run build` 通过。这组本地测试不包含真实阿里隔离/存储、实际 IdP 登录、
+AgentCore 公网路由及网关配置，也未进行桌面安装包或日常 GUI 验收；
+后续真实服务检查的范围见本节开头。
 
 ## 官方依据（实现时核对）
 
