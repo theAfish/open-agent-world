@@ -154,17 +154,38 @@ Windows 默认配置位于 `%USERPROFILE%/.aliyun/config.json`，只需提供配
   两次实例均已销毁，最终列表为空。
 - 上述测试未挂载 Volume，也未通过 OAW 的完整 Sandbox 适配器执行；不代表持久性、
   完整隔离审计、网络策略验证或 MatCreator/Legion 云端验收。
-- NAS 查询返回 `User.Disabled`，原文为“Your account does not open Nas Service yet
-  or balance is insufficient.”，需要在控制台区分服务未开通与余额问题。
+- NAS 首次查询返回 `User.Disabled`；运营方开通 NAS 后重新查询成功，杭州文件系统列表为空。
+  NAS 服务开通不等于已获得 AgenticFS 或 Sandbox Volume 邀测权限。
   杭州 ACR 企业版实例列表为空；尚未上传镜像或创建 AgentCore 应用。
 
 CLI 3.5.1 的产品目录尚不识别 `Sandbox`。本次资源清点和 API Key 创建使用独立临时目录中的
 官方 `alibabacloud-sandbox20260820==1.2.0` 管理 SDK，执行使用项目已有的 E2B SDK；
 管理 SDK 未加入应用运行依赖。资源 ID、创建回执及密钥仅保存在仓库外，不记录到此文档。
 
+### AgenticFS 与 Volume 邀测申请
+
+当前需要分别确认 **NAS AgenticFS** 和 **Agent Sandbox 极速版 Volume** 的邀测权限；
+后者能查询空列表，不足以证明已开放创建及挂载能力。
+可在[阿里云工单入口](https://smartservice.console.aliyun.com/service/create-ticket)
+提交以下说明，并附上当前账号、地域与 Sandbox Team ID：
+
+> 申请开通华东 1（杭州，cn-hangzhou）的 NAS AgenticFS（含 AgenticSpace、Access Point）
+> 及 Agent Sandbox 极速版 Volume 能力，用于 OAW 单人 POC。NAS 已开通，Sandbox Team 已存在，
+> 已验证基础沙箱执行。需要为用户提供独立持久工作区，销毁并重建 Sandbox 后保留文件。
+> 请确认两项邀测资格、所需 RAM 权限、杭州可用区 K 的接入条件及当前按量计费规则。
+
+也可先在 [NAS 控制台](https://nasnext.console.aliyun.com/)选择杭州，进入
+“文件系统 > 文件系统列表 > 创建文件系统”，查看类型中是否已有 AgenticFS；
+看不到或提示未获授权时，按上述方式申请。参见
+[创建 AgenticFS](https://help.aliyun.com/zh/nas/user-guide/create-agenticfs)。
+获批后再创建文件系统、AgenticSpace 和 Access Point，并配置 Sandbox Volume。
+普通 NAS 挂载地址不能直接填入本适配使用的 AgenticFS Volume。
+AgenticFS 默认按量付费，按每小时实际存储容量峰值计费，单价需按当前地域确认；
+参见[计费说明](https://help.aliyun.com/zh/nas/product-overview/billing-of-agenticfs)。
+
 ## 仍需完成的部署条件
 
-- 确认 NAS 服务状态及 AgenticFS 邀测权限，随后准备实际文件系统、访问点、VPC/RAM 配置
+- 确认 AgenticFS 及 Sandbox Volume 邀测权限，随后准备实际文件系统、访问点、VPC/RAM 配置
   和 Sandbox Volume；仅创建 Volume 元数据不会创建底层文件系统。
   参见 [AgenticFS 概述](https://help.aliyun.com/zh/nas/product-overview/agenticfs-overview)
   及 [创建 AgenticFS Volume](https://help.aliyun.com/zh/agent-sandbox/create-an-agenticfs-volume)。

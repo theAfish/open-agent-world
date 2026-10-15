@@ -155,7 +155,7 @@ backend/.venv/bin/uvicorn backend.cloud.aliyun.app:create_app --factory \
 并使用阿里真实 Sandbox 的公共 `base` 模板完成命令执行和临时文件读写。
 两次测试实例均已销毁，最终实例列表为空；部署者管理凭据未注入测试命令环境。
 这些检查不包含 Volume、OAW 完整执行适配、AgentCore 托管或真实模型科学工作流。
-NAS 服务状态和 AgenticFS 权限、适合数据库的 profile 持久存储，以及 ACR 镜像仓库仍待解决，
+NAS 已开通；AgenticFS/Volume 邀测权限、适合数据库的 profile 持久存储，以及 ACR 镜像仓库仍待解决，
 详见[单人云端验证记录及部署条件](SINGLE_USER.md#真实云验证记录2026-10-15)。
 
 单人托管适配更新（2026-10-15）：本轮 55 项相关测试通过，包含使用真实内化引擎和
