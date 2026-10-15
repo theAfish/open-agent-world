@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 import time
+import re
 from urllib.parse import urlsplit
 
 from starlette.applications import Starlette
@@ -29,12 +30,19 @@ class OidcSettings:
     public_origin: str
     session_seconds: int = 3600
     allow_local_http: bool = False
+    scopes: tuple[str, ...] = ("openid", "profile")
+    token_endpoint_auth_method: str = "client_secret_basic"
 
     def __post_init__(self):
         if len(self.session_secret) < 32 or not self.client_id or not self.client_secret:
             raise ValueError("OIDC requires a client ID, client secret and stable session secret of at least 32 characters")
         if not 60 <= self.session_seconds <= 3600:
             raise ValueError("OIDC session duration must be between 60 and 3600 seconds")
+        if ("openid" not in self.scopes or len(set(self.scopes)) != len(self.scopes)
+                or any(not re.fullmatch(r'[\x21\x23-\x5b\x5d-\x7e]+', scope) for scope in self.scopes)):
+            raise ValueError("OIDC scopes must be unique OAuth scope tokens and include openid")
+        if self.token_endpoint_auth_method not in {"client_secret_basic", "client_secret_post"}:
+            raise ValueError("OIDC requires client_secret_basic or client_secret_post authentication")
         for value in (self.issuer, self.discovery_url, self.public_origin):
             url = urlsplit(value)
             local_http = self.allow_local_http and url.scheme == "http" and url.hostname in {"localhost", "127.0.0.1"}
@@ -53,7 +61,9 @@ class OidcSessionIdentity:
         from authlib.integrations.starlette_client import OAuth
 
         self.settings = settings
-        client_kwargs = {"scope": "openid profile", "code_challenge_method": "S256", "timeout": 15,
+        client_kwargs = {"scope": " ".join(settings.scopes),
+                         "token_endpoint_auth_method": settings.token_endpoint_auth_method,
+                         "code_challenge_method": "S256", "timeout": 15,
                          "follow_redirects": False}
         if transport is not None:
             client_kwargs["transport"] = transport
