@@ -110,6 +110,13 @@ class MatCreatorRuntime(RuntimeProvider):
     async def _snapshot(self, agent_id, run_id, value):
         await self.provider.publish_execution(agent_id, run_id, project_history(value))
 
+    def _worker_environment(self):
+        """Deployment adapters may narrow inherited process configuration."""
+        env = {k: v for k, v in os.environ.items() if not k.startswith((
+            "MATCREATOR_", "MATCLAW_", "LLM_", "KDG_", "BOHRIUM_", "OPENAI_", "ANTHROPIC_", "GEMINI_", "GOOGLE_API_"))}
+        env.update(PYTHONUTF8="1", PYTHONUNBUFFERED="1")
+        return env
+
     async def execute(self, config, context, runtime_input):
         settings = self._settings(config)
         await self.get_agent(config.agent_id)
@@ -128,9 +135,7 @@ class MatCreatorRuntime(RuntimeProvider):
             raise AgentDependencyError(str(exc)) from exc
         # Runtime-specific configuration is constructed inside the worker before
         # importing the engine. Do not inherit ambient model or MatCreator settings.
-        env = {k: v for k, v in os.environ.items() if not k.startswith((
-            "MATCREATOR_", "MATCLAW_", "LLM_", "KDG_", "BOHRIUM_", "OPENAI_", "ANTHROPIC_", "GEMINI_", "GOOGLE_API_"))}
-        env.update(PYTHONUTF8="1", PYTHONUNBUFFERED="1")
+        env = self._worker_environment()
         process = None
         pending = set()
         write_lock = asyncio.Lock()
