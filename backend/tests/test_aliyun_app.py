@@ -97,17 +97,28 @@ def test_personal_profile_default_is_not_accepted_by_cloud_entry(monkeypatch):
         cloud.create_app()
 
 
-@pytest.mark.asyncio
-async def test_cloud_matcreator_cannot_launch_host_worker(monkeypatch):
-    import asyncio
-    from backend.agents import AgentDependencyError
-    async def forbidden(*args, **kwargs):
-        pytest.fail("Cloud MatCreator started a host subprocess")
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", forbidden)
-    runtime = cloud.approved_plugins().create_runtime_provider("matcreator.native", None)
-    with pytest.raises(AgentDependencyError, match="not adapted"):
-        async for _ in runtime.execute(None, None, None):
-            pass
+def test_cloud_matcreator_legion_can_be_instantiated_with_supported_policy(cloud_client):
+    client, sdk = cloud_client
+    response = client.post("/api/legions/presets/matcreator.native-research/instances", json={})
+    assert response.status_code == 201, response.text
+    world = client.get("/api/world").json()
+    nodes = world["nodes"]
+    assert any(node["type"] == "matcreator.agent" for node in nodes)
+    assert any(node["type"] == "matcreator.kdg" for node in nodes)
+    sandbox = next(node for node in nodes if node["type"] == "sandbox")
+    assert sandbox["config"]["network_enabled"] is False
+    assert sandbox["config"]["command_timeout"] == 60
+    assert not sdk.created
+    response = client.post(f"/api/sandboxes/{sandbox['id']}/start")
+    assert response.status_code == 200, response.text
+    response = client.post(f"/api/sandboxes/{sandbox['id']}/execute", json={"command": "printf hello"})
+    assert response.status_code == 200, response.text
+    assert response.json()["stdout"] == "hello from remote\n"
+    assert sdk.killed == ["remote-1"]
+    from oaw_matcreator.preset import native_definition
+    personal = next(node for node in native_definition().nodes if node.type == "sandbox")
+    assert personal.config["network_enabled"] is True
+    assert "command_timeout" not in personal.config
 
 
 def test_cloud_entry_requires_persistence_confirmation(tmp_path, monkeypatch):

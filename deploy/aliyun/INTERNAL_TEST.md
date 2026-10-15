@@ -1,11 +1,15 @@
 # 内部自助注册与 MatCreator Legion 测试
 
-本轮验收要求是真实用户在阿里托管页面自行注册，然后从统一入口进入自己的 OAW，
+本页保留后续多用户自助注册的要求。考虑 CIAM 成本，当前可先按 [单人方案](SINGLE_USER.md)
+验证本人使用，不需要购买 CIAM。
+
+多用户验收要求是真实用户在阿里托管页面自行注册，然后从统一入口进入自己的 OAW，
 运行仓库内化的 MatCreator Legion。管理员预建账号、每用户手工部署、只验证 Sandbox
 命令或只展示 Legion 页面，都不满足这一要求。
 
 当前仍处于部署准备阶段，不能按下面的身份配置直接得到完整多用户服务。
-统一入口、自动工作区开通和 MatCreator 云端执行尚未完成。
+统一多用户入口和自动工作区开通尚未完成；内化 MatCreator 已恢复服务端编排入口，
+但真实云端执行和科学工具覆盖仍待验收。
 
 ## 身份服务选型
 
@@ -82,8 +86,9 @@ ssh -N -L 127.0.0.1:8080:127.0.0.1:8080 <已授权的SSH连接名>
 
 这里的 MatCreator 始终是仓库内的 `plugins/matcreator/oaw_matcreator_engine`。
 `native_runtime.py` 启动 worker，并通过 OAW 工具接口执行任务；“原生”指这条内化引擎路径，
-不代表另一个云产品。目前云入口在 `backend/cloud/aliyun/matcreator.py` 主动阻止执行，
-在完成隔离和工具桥接前不能移除这道限制。
+不代表另一个云产品。当前云入口在 `backend/cloud/aliyun/matcreator.py` 使用受信任的编排
+worker，限制继承的环境变量，并复用逐次授权的工具桥。只有生成的命令进入阿里 Sandbox，
+worker 进程本身不构成 OS 隔离边界。网络授权、runtime bundle 等未支持能力仍明确拒绝。
 
 交付前必须在真实环境中完成：
 

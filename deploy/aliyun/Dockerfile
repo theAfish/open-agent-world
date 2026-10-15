@@ -14,12 +14,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certifi
     && useradd --uid 10001 --create-home oaw
 COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /opt/oaw
+COPY backend/pyproject.toml backend/uv.lock ./backend/
+# Export locked versions and hashes so an optional build-time mirror can serve
+# the same artifacts without rewriting the repository's lockfile.
+ARG OAW_PYPI_INDEX=https://pypi.org/simple
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv export --frozen --no-dev --project backend --extra hosting --extra aliyun --extra adk --extra litellm \
+      --format requirements-txt --output-file /tmp/oaw-requirements.txt --quiet \
+    && uv venv backend/.venv \
+    && UV_LINK_MODE=copy uv pip sync --python backend/.venv/bin/python --require-hashes \
+      --index-url "$OAW_PYPI_INDEX" /tmp/oaw-requirements.txt
+# Install the same Pack-owned orchestration dependencies used by the personal
+# edition. They are immutable image inputs, never installed by end users.
+COPY plugins/matcreator ./plugins/matcreator
+RUN --mount=type=cache,target=/root/.cache/uv \
+    UV_LINK_MODE=copy UV_DEFAULT_INDEX="$OAW_PYPI_INDEX" \
+      backend/.venv/bin/python plugins/matcreator/oaw_matcreator/native_environment.py
 COPY backend ./backend
 COPY open_agent_world ./open_agent_world
 COPY plugins/structure_viewer ./plugins/structure_viewer
-COPY plugins/matcreator ./plugins/matcreator
 COPY plugins/sqlite ./plugins/sqlite
-RUN uv sync --frozen --no-dev --project backend --extra hosting --extra aliyun --extra adk --extra litellm
 COPY --from=frontend /build/frontend/dist ./frontend/dist
 ENV PATH="/opt/oaw/backend/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \

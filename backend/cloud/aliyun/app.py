@@ -14,13 +14,14 @@ from starlette.responses import JSONResponse
 
 from backend.config import Settings
 from backend.hosting.identity import ProfileAccess, VerifiedIdentity
-from backend.hosting.oidc import OidcSessionIdentity, OidcSettings
+from backend.hosting.oidc import OidcSessionIdentity
 from backend.main import create_app as core_app
 from backend.plugins.builtin import create_builtin_registry
 from backend.request_context import TenantScope
 from backend.services import create_services
 
 from .sandbox import AliyunSandboxSettings, registry_factory
+from .identity import oidc_settings, require_env
 
 
 class CloudSurfaceMiddleware:
@@ -56,13 +57,6 @@ def approved_plugins():
     return registry
 
 
-def require_env(name):
-    value = os.environ.get(name, "").strip()
-    if not value:
-        raise ValueError(f"Missing required cloud configuration: {name}")
-    return value
-
-
 def create_app():
     # Explicitly refuse the personal data-directory fallback.
     root = Path(require_env("OPEN_AGENT_WORLD_DATA_ROOT")).resolve()
@@ -71,14 +65,7 @@ def create_app():
         marker = root / ".oaw-persistent-volume"
         if not marker.is_file() or marker.read_text(encoding="utf-8").strip() != workspace_id:
             raise ValueError("Provision persistent profile storage and its workspace marker; see deploy/aliyun/README.md")
-    oidc = OidcSettings(
-        issuer=require_env("OAW_OIDC_ISSUER"), discovery_url=require_env("OAW_OIDC_DISCOVERY_URL"),
-        client_id=require_env("OAW_OIDC_CLIENT_ID"), client_secret=require_env("OAW_OIDC_CLIENT_SECRET"),
-        session_secret=require_env("OAW_SESSION_SECRET"), public_origin=require_env("OAW_PUBLIC_ORIGIN"),
-        allow_local_http=os.environ.get("OAW_ALLOW_LOCAL_HTTP") == "1",
-        scopes=tuple(os.environ.get("OAW_OIDC_SCOPES", "openid profile").split()),
-        token_endpoint_auth_method=os.environ.get("OAW_OIDC_TOKEN_AUTH_METHOD", "client_secret_basic"),
-    )
+    oidc = oidc_settings()
     identity = OidcSessionIdentity(oidc)
     tenant = TenantScope(require_env("OAW_ORGANIZATION_ID"), workspace_id)
     access = ProfileAccess(identity, VerifiedIdentity(oidc.issuer, require_env("OAW_OWNER_SUBJECT")),

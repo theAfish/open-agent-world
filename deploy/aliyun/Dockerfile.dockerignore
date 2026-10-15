@@ -16,6 +16,10 @@ docs/internal/
 **/.venv/
 **/__pycache__/
 **/.pytest_cache/
+**/.pytest-tmp*/
+**/.tmp/
+**/.outputs/
+**/.open-agent-world/
 **/.ruff_cache/
 **/dist/
 **/test-results/
@@ -26,6 +30,8 @@ docs/internal/
 **/*.sqlite*
 **/*.db
 **/*.log
+**/*.pem
+**/*.key
 **/.git/
 **/.aws/
 **/.codex/

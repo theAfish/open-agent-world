@@ -3,8 +3,10 @@
 这是第一轮可本地验证的适配尝试，不是已完成云端验收的部署。普通桌面入口
 `backend.main:app`、个人数据目录和本地 Sandbox 默认选择保持不变。
 
-本轮新增要求为**内部用户自行注册并运行内化的 MatCreator Legion**。
-身份服务、未备案访问方式和运营方准备步骤见 [内部测试部署准备](INTERNAL_TEST.md)。
+考虑 CIAM 成本，当前先验证本人使用，继续选择 AgentCore + 阿里 Sandbox，
+参见 [不依赖 CIAM 的单人方案](SINGLE_USER.md)。
+后续**内部用户自行注册并运行内化 MatCreator Legion**的身份服务、访问方式和准备步骤
+见 [多用户内部测试部署准备](INTERNAL_TEST.md)。CIAM 不是部署个人 OAW 的前提。
 当前固定用户实例的步骤仍仅用于基础集成验证。
 
 ## POC 目标与当前差距
@@ -43,13 +45,18 @@ Agent Identity 用户池负责账号和 OIDC 登录。OAW 只验证外部身份�
 SQLite 和内置核心 Pack 可加载；在线安装 Pack、桌面文件选择、存储迁移和发布接口关闭。
 
 MatCreator 知识资产、技能定义和 SQLite 卡片保留在原有核心逻辑中。
-**MatCreator 原生 Agent 暂时明确禁用**：现有 native worker 是宿主进程，并继承环境，
-尚不能带着云管理凭据进入这个执行路径。后续需适配 worker/tool bridge，以及只读、
-命令级 runtime bundle。不能把标准 Agent + `echo` 的成功当成 MatCreator 科学工作流通过。
+**内化 MatCreator 已接回受信任的服务端编排路径**：镜像在构建时准备 Pack 自有依赖，
+worker 仅继承系统运行必需的环境变量；本次模型配置通过私有标准输入传入。
+现有工具桥继续逐次授权，生成的命令只进入阿里 Sandbox。worker 本身不是 OS 隔离边界，
+不得在这个部署中加载用户提供的 Python Pack。当前仍是每个部署一个固定所有者。
+云端 Legion 模板关闭网络，并将默认命令超时设为 60 秒以适配托管 VM 生命周期，个人模板不变。
+只读 runtime bundle、共享 Python 安装及网络授权仍未实现；涉及这些能力的科学工具
+会明确报错，不能宣称任意 MatCreator 科学工作流已可用。真实云端执行仍待验收。
 
 ## 需要准备的阿里资源
 
-1. Agent Identity 用户池、两个测试用户和 OIDC 客户端。回调地址为各实例的
+1. 一个 OIDC 客户端和测试身份；单人阶段使用已有 RAM 用户即可，不需要 CIAM。
+   后续双用户隔离验证也可使用 Agent Identity 用户池中的测试账号。回调地址为各实例的
    `https://<应用域名>/auth/callback`。`OAW_OWNER_SUBJECT` 必须是该用户真实 `sub`，
    不是邮箱、显示名、云 RAM AccessKey 或 AgentCore Endpoint API Key。
 2. Agent Sandbox 极速版 Team、API Key、支持 Volume 的模板和每用户独立 Volume。
@@ -70,8 +77,8 @@ MatCreator 知识资产、技能定义和 SQLite 卡片保留在原有核心逻�
 
 AgentCore 文档确认自定义 HTTP 容器部署，但没有为本 POC 证明“浏览器完整路由 +
 WebSocket + 持久 profile 挂载”都能在目标账号落地。**这三项必须实测**。
-如果 AgentCore 不提供适合 SQLite 的持久存储，第一轮可先在 ECS 的独立磁盘卷上验证
-OAW + Agent Identity + Agent Sandbox；这不等于已经完成 AgentCore 托管。
+如果 AgentCore 不提供适合 SQLite 的持久存储，需继续完成数据库持久化适配，才能交付
+所选的托管方案。当前没有将普通 ECS 部署作为本轮替代目标。
 也可以显式启用临时 profile 做一次性 AgentCore 路由测试，但不能用于用户数据。
 
 ## 构建与启动
@@ -80,9 +87,14 @@ OAW + Agent Identity + Agent Sandbox；这不等于已经完成 AgentCore 托管
 docker build --platform linux/amd64 -f deploy/aliyun/Dockerfile -t oaw-aliyun-poc .
 ```
 
+若访问 PyPI 较慢，可为这次构建添加
+`--build-arg OAW_PYPI_INDEX=https://mirrors.aliyun.com/pypi/simple/`。
+后端安装从 `uv.lock` 导出版本及哈希，再使用 `--require-hashes` 校验镜像源提供的文件；
+不修改仓库锁文件或个人版配置。MatCreator 继续使用 Pack 自有安装流程与独立依赖目录。
+
 Dockerfile 使用专用忽略文件，不把个人数据、环境文件或 Git 历史加入构建上下文。
-镜像包含源代码和批准的 Pack，不从本机 profile 制作快照。当前环境没有可用 Docker
-daemon，因此完整镜像构建需要在有 Docker 的机器/CI 上验证。
+镜像包含源代码和批准的 Pack，不从本机 profile 制作快照。
+本机已成功构建 `linux/amd64` 镜像，验证范围见下方记录。
 
 复制 `.env.example` 到仓库外的私密配置文件并填写真实资源信息。给每个用户准备独立
 数据卷，属主 UID 为 `10001`。运营方确认存储会跨容器重建保留后，在其根目录创建
@@ -100,6 +112,7 @@ AgentCore 配置：`linux/amd64`，容器启动命令使用 Dockerfile 的 CMD�
 用户通过 OAW 页面进入，不声称已嵌入 AgentCore 自带对话界面。
 
 本地直接运行需要 `uv sync --project backend --extra hosting --extra aliyun --extra adk --extra litellm`，
+使用同一 Python 执行 `plugins/matcreator/oaw_matcreator/native_environment.py` 准备内化引擎依赖，
 然后构建 `frontend`，设置上述环境变量，运行：
 
 ```sh
@@ -134,15 +147,26 @@ backend/.venv/bin/uvicorn backend.cloud.aliyun.app:create_app --factory \
    重建执行 VM 后文件仍在。用云控制台核对实例实际隔离和 Volume 归属。
 4. 重建 OAW 容器，确认会话、SQLite 卡片、MatCreator 知识数据和密钥仍在。
 5. 验证上传、流式输出、WebSocket、代理超时与注销；检查浏览器及命令环境中无云管理密钥。
-6. 单独验证 MatCreator 原生 worker 迁移后，再声明科学工作流可用。
+6. 用内化 MatCreator 完成真实模型、远端命令、文件和会话恢复测试，再声明相应科学工作流可用。
 
 ## 本地验证记录
+
+单人托管适配更新（2026-10-15）：本轮 55 项相关测试通过，包含使用真实内化引擎和
+受控模型端点验证的计划、递归执行、工具失败恢复、会话检查点，以及云端 worker 环境
+过滤、托管命令路由、Legion 创建和 OIDC 登录探针。个人版同组回归通过。
+阿里 Sandbox 使用测试 SDK 传输；没有真实阿里账号联调或外部模型验收。
+`oaw-aliyun-poc:single-user` 的 Linux 镜像已构建通过，包含前端及内化引擎依赖。
+禁用外网、使用一次性 profile 的容器检查通过：UID 10001、引擎依赖可读、服务健康、
+前端加载、匿名及错误所有者拦截，以及已签名测试会话下的 Legion 创建。
+该检查使用测试身份，不代表真实 RAM 登录或 AgentCore 部署验收。
+另外，在同一镜像中禁用外网运行 `test_aliyun_matcreator.py`，4 项全部通过；
+包含真实内化引擎配合本地受控模型端点的规划、递归执行及工具失败恢复。
 
 本地验证记录（2026-10-15）：相关测试合计 127 通过、1 项选择性原生 Windows
 部署验收跳过；覆盖通用身份边界、OIDC、个人版访问与 Sandbox 管理、原有发布流程、
 MatCreator 原生/工作区回归及上传协议。阿里适配部分使用测试 SDK 传输，OIDC 使用
 模拟身份端点和真实签名令牌，文件 helper 使用独立 Python 进程验证协议。
-`npm run build` 通过。尚未验证真实阿里隔离/存储、实际 IdP 登录、Docker 镜像构建、
+`npm run build` 通过。尚未验证真实阿里隔离/存储、实际 IdP 登录、
 AgentCore 公网路由及网关配置，也未进行桌面安装包或日常 GUI 验收。
 
 ## 官方依据（实现时核对）
