@@ -155,7 +155,11 @@ backend/.venv/bin/uvicorn backend.cloud.aliyun.app:create_app --factory \
 并使用阿里真实 Sandbox 的公共 `base` 模板完成命令执行和临时文件读写。
 两次测试实例均已销毁，最终实例列表为空；部署者管理凭据未注入测试命令环境。
 这些检查不包含 Volume、OAW 完整执行适配、AgentCore 托管或真实模型科学工作流。
-NAS 已开通；2026-10-16 AgenticFS 创建预检通过，实际资源创建及 Volume 挂载验证待完成。
+2026-10-16 已实际创建 AgenticFS、AgenticSpace、Access Point、专用 VPC/交换机/安全组、
+受访问点约束的 FC RAM 角色和 Sandbox Volume。Space 为平台最小 10 GiB 容量配额，
+访问点 active、Volume AVAILABLE，但真实沙箱创建仍在 NFS 挂载阶段返回 HTTP 400。
+两种公共模板、受限/默认出网及限定访问点的 RootAccess 对照均未解决；诊断权限已恢复，
+最终沙箱列表为空。持久读写与重建恢复尚未通过，详见单人验证记录。
 适合数据库的 profile 持久存储，以及 ACR 镜像仓库仍待解决，
 详见[单人云端验证记录及部署条件](SINGLE_USER.md#真实云验证记录2026-10-15)。
 

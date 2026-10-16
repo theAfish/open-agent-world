@@ -162,32 +162,57 @@ CLI 3.5.1 的产品目录尚不识别 `Sandbox`。本次资源清点和 API Key 
 官方 `alibabacloud-sandbox20260820==1.2.0` 管理 SDK，执行使用项目已有的 E2B SDK；
 管理 SDK 未加入应用运行依赖。资源 ID、创建回执及密钥仅保存在仓库外，不记录到此文档。
 
-### AgenticFS 配置复查（2026-10-16）
+### AgenticFS 创建与挂载验证（2026-10-16）
 
-- CLI 管理授权仍有效，返回既定 RAM 用户。
-- 杭州 NAS 文件系统列表与 VPC 列表均为空；当前 Sandbox Team 可用，已有就绪的 `base`
-  模板，Volume 列表为空。未发现可供挂载验证的实际 AgenticFS 文件系统。
-- `CreateFileSystem` 使用 `FileSystemType=standard`、`StorageType=Agentic`、
-  `ProtocolType=NFS`、`ChargeType=PayAsYouGo` 和 **`DryRun=true`** 返回成功，
-  `FileSystemId` 为空，符合官方预检查语义。创建条件预检已通过，但实际创建与数据读写尚未验证。
-  [官方 API](https://help.aliyun.com/zh/nas/developer-reference/api-nas-2017-06-26-createfilesystem)
-  明确预检不会创建实例或计费。
-- 实际创建按量付费文件系统的操作被自动审批拒绝，要求用户确认资源范围和费用类型；
-  被拒绝的命令没有执行，本轮未新增文件系统、VPC、Volume 或运行中的 Sandbox。
+用户确认按量付费的最小 POC 资源范围后，已完成实际创建和状态复核：
 
-待确认的最小配置范围：杭州 1 个 AgenticFS、杭州可用区 K 的 1 个 AgenticSpace
-（先限制 1 GiB 容量）、1 个独立 Access Point、1 个专用 VPC 及交换机和安全组、
-1 个信任 FC 且仅允许该访问点所需存储访问的 RAM 角色，以及当前 Team 的 1 个 Volume。
-随后使用两个短生命周期 Sandbox 验证“写入 → 销毁 → 新建 → 读取”，清理测试文件并销毁实例。
-采用按量付费，不购买包年包月资源、ECS 或 ACR；容量配额不是总费用上限。
-AgenticFS 按每小时实际存储容量峰值计费，Sandbox 测试按当前套餐和计费规则执行。
+| 资源 | 已验证状态 |
+| --- | --- |
+| 杭州 AgenticFS | Running，按量付费 |
+| 杭州 K 区 AgenticSpace | Running，路径 `/oawpoc/`，容量上限 10 GiB，文件数上限 10000 |
+| AgenticSpace Access Point | active、根目录正常、RAM 授权启用 |
+| 专用 VPC、交换机、安全组 | 已创建；安全组没有自定义入站开放规则 |
+| FC 存储角色 | 仅信任 FC，仅允许指定 Access Point 的 `nas:ClientMount`、`nas:ClientWrite`；禁止控制台登录 |
+| Sandbox Volume | `oaw-poc-workspace`，AGENTIC_FS，AVAILABLE，UID/GID 1000/1000，已绑定角色及完整 VPC 配置 |
 
-确认创建后才执行上述资源配置；不能把预检查成功记录为持久工作区验收通过。
+原计划的 1 GiB 配额被 API 拒绝；已按[官方最小值](https://help.aliyun.com/en/nas/user-guide/manage-agenticspace)
+设置为 10 GiB。它是容量上限，不是预购容量或总费用上限；最后查询的空间用量和文件数均为 0。
+未购买 ECS、ACR 或包年包月资源。资源 ID、操作回执和诊断材料保存在仓库外的私密配置目录。
+
+**实际挂载尚未成功。** 首次通过 OAW 适配器创建沙箱失败，未提交文件写入或业务命令。
+独立 E2B SDK 诊断捕获到平台错误：
+
+```text
+HTTP 400: Mount NFS:// command failed with output =
+"failed to update resources: failed to update resources: Failed to update container: agent update container"
+```
+
+已做以下有界对照，每次创建请求均先记录唯一标识，无业务任务重投：
+
+- `base` 与官方示例 `code-interpreter-v1` 公共模板（均为第一代运行时）返回相同错误。
+- `/workspace` 与 `/mnt/agenticfs` 均未成功；显式传入完整 VPC 配置及 FC 角色也未解决。
+- 默认拒绝出网时 DNS 探测超时；仅放行存储子网与 DNS 后，访问点解析成功，但挂载仍失败。
+  到访问点 TCP/2049 的连接建立，TCP/12049 在 3 秒内超时。这里只验证了 DNS/TCP，
+  没有取得 NFS 应用层响应或 TLS 握手，不能据此断言存储已经可访问或定位根因。
+- 按 [NAS 的 FC 沙箱挂载说明](https://help.aliyun.com/zh/nas/user-guide/mount-agenticfs-for-the-fc-agent-sandbox)
+  临时补充了仅限同一访问点的 `nas:ClientRootAccess`，并按官方默认出网参数做对照，仍返回相同错误。
+  已恢复原策略，未保留诊断用 RootAccess 或修改应用的出网配置。
+- 不挂 Volume、使用同一 VPC 的诊断沙箱可创建并执行命令，全部已释放；最终完整分页查询的沙箱列表为空。
+
+需由阿里侧结合保存的请求 ID 检查 FC 的底层挂载日志、访问点 TLS/NFS 服务和模板兼容性。
+尚未完成“写入 → 销毁 → 新建 → 读取”的持久性验证，也未验证 OAW 文件协议、SQLite 或 MatCreator。
+私密 `pending.env` 仍保留待部署状态，没有把未通过验证的挂载启用为正式工作区。
+
+创建过程中的 API 注意事项：`CreateAgenticSpace` 的 Quota 使用扁平参数
+`Quota.SizeLimit` / `Quota.FileCountLimit`，空间路径必须以 `/` 开始和结束；
+查询 AgenticFS 接入点使用 `ListAccessPoints` 或按 ID 调用 `DescribeAccessPoint`，
+旧 `DescribeAccessPoints` 本次返回空列表，不能据此判断已创建的接入点不存在。
 
 ### AgenticFS 与 Volume 邀测申请
 
-当前需要分别确认 **NAS AgenticFS** 和 **Agent Sandbox 极速版 Volume** 的邀测权限；
-后者能查询空列表，不足以证明已开放创建及挂载能力。
+以下适用于尚未开通的新账号。本次账号已成功创建 AgenticFS 和 Volume，当前应排查上文的实际挂载错误。
+新账号需要分别确认 **NAS AgenticFS** 和 **Agent Sandbox 极速版 Volume** 的邀测权限；
+仅能查询空列表，不足以证明已开放创建及挂载能力。
 可在[阿里云工单入口](https://smartservice.console.aliyun.com/service/create-ticket)
 提交以下说明，并附上当前账号、地域与 Sandbox Team ID：
 
@@ -207,8 +232,8 @@ AgenticFS 默认按量付费，按每小时实际存储容量峰值计费，单�
 
 ## 仍需完成的部署条件
 
-- AgenticFS 创建预检已通过；仍需实际创建并验证 Sandbox Volume 能力，准备文件系统、访问点、VPC/RAM 配置
-  和 Sandbox Volume；仅创建 Volume 元数据不会创建底层文件系统。
+- AgenticFS、访问点、VPC/RAM 和 Sandbox Volume 已实际创建；仍需解决 NFS 挂载错误，
+  再用 OAW 适配器验证文件写入、销毁重建后的读取与清理。Volume AVAILABLE 不代表数据面验证通过。
   参见 [AgenticFS 概述](https://help.aliyun.com/zh/nas/product-overview/agenticfs-overview)
   及 [创建 AgenticFS Volume](https://help.aliyun.com/zh/agent-sandbox/create-an-agenticfs-volume)。
 - 为 AgentCore 中的 OAW profile 确认可用持久存储及数据库方案。
