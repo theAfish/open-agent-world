@@ -10,6 +10,11 @@ AgenticFS**。不再以独立 Agent Sandbox Volume 挂载成功作为这条路�
 的真实 AG-UI 对话，见下节。**ACR 是自定义 OAW 镜像路径的前置条件，并非所有 AgentCore
 试验的前置条件。** 托管 QwenPaw 与部署自有 OAW 服务的能力边界需要分别确认。
 
+收尾状态（2026-10-16）：平台工程师进一步明确，托管 QwenPaw 不支持运行自定义服务，
+完整 OAW/内化 MatCreator 服务仍需自定义镜像部署。工程师计划于 2026-10-19（周一）
+确认 ACR 权限/限制能否放开，当前没有得到可免企业版 ACR 部署自定义服务的确认。
+本轮成果保留在 `feat/aliyun-agentcore-poc`，后续从该分支继续；现有私密配置与回执不入库。
+
 ## 无需 ACR 的 QwenPaw 实际验证（2026-10-16）
 
 通过只读 API 确认，已有 `测试` Workspace 中的 `agent-harness-b3jml`
@@ -35,8 +40,8 @@ Session，不能由此宣称已验证每用户独立运行环境。
 本机官方管理 SDK 的 `CreateManagedAgentRequestBody` 同样包含 `agenticFsMounts`，
 可继续用它作为挂载验证入口，但这次没有测试真实挂载、文件恢复或用户隔离。
 
-目前未找到托管模式可直接承载完整 OAW Web 服务、原有 Legion 和内化 MatCreator 引擎的
-官方部署步骤。若通过远程 MCP/HTTP 接入自有逻辑，该服务仍需要实际运行位置；
+平台工程师已明确托管模式不支持运行自定义服务，因此不能直接承载完整 OAW Web 服务、
+原有 Legion 和内化 MatCreator 引擎。若通过远程 MCP/HTTP 接入自有逻辑，该服务仍需要实际运行位置；
 不能将“QwenPaw 可调用我们的服务”等同于“平台已托管我们的服务”。
 开源 QwenPaw 的本地插件、Hub 或 Console 功能，也不能自动当作 AgentCore 托管版已提供的能力。
 
