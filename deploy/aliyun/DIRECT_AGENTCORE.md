@@ -6,6 +6,43 @@ AgenticFS**。不再以独立 Agent Sandbox Volume 挂载成功作为这条路�
 同日平台工程师反馈推荐 AgenticFS，并可通过 API 或控制台挂载；此前挂载问题仍在排查。
 这一反馈支持继续采用直接挂载路径，但不能替代本账号实际读写和重建验收。
 
+同日补充：工程师建议先使用托管 QwenPaw，无需用户自建 ACR。本轮已验证现有 QwenPaw
+的真实 AG-UI 对话，见下节。**ACR 是自定义 OAW 镜像路径的前置条件，并非所有 AgentCore
+试验的前置条件。** 托管 QwenPaw 与部署自有 OAW 服务的能力边界需要分别确认。
+
+## 无需 ACR 的 QwenPaw 实际验证（2026-10-16）
+
+通过只读 API 确认，已有 `测试` Workspace 中的 `agent-harness-b3jml`
+（`agent-3069e3e93fe44509a1c6c5718dedafee`）使用 `qwenpaw` Harness，状态 `Running`，
+Endpoint `READY`，已配置模型。没有新建 Agent 或修改其模型、网络、扩缩容设置。
+当前 Agent 未挂载 AgenticFS/OSS，未启用 VPC；运行策略为 `AFFINITY`，每实例最多 5 个
+Session，不能由此宣称已验证每用户独立运行环境。
+
+在独立测试会话中请求仅回复固定文本且不调用工具，实际收到 HTTP 200、
+`RUN_FINISHED` 和 `outcome.type=success`，输出与预期完全一致，用时约 4.3 秒。
+未出现工具调用事件。测试记录保存在本机私密配置目录的
+`aliyun-qwenpaw-header-smoke-20261016.json`，不含 Endpoint Key 或模型推理正文。
+测试产生了一条独立会话历史，未触碰原有业务会话。
+
+实际 Endpoint 额外要求请求头 **`X-AgentCore-Session-ID`**。仅使用当日官方示例中的
+`x-api-key`、`Content-Type`、`Accept` 和请求体 `threadId` 时，返回 HTTP 400：
+`request header X-AgentCore-Session-ID is required`。
+加上与本次独立 `threadId` 相同的 Session Header 后成功。生产应用仍须按可信身份绑定此值，
+不能直接采用浏览器提供的跨用户 Session ID。
+
+[托管 Harness 文档](https://help.aliyun.com/zh/agentcore/agent-instructions-managed-harness)
+定义的是由 QwenPaw 负责模型调用和工具执行，通过 Skill、Subagent、MCP 扩展的路径。
+本机官方管理 SDK 的 `CreateManagedAgentRequestBody` 同样包含 `agenticFsMounts`，
+可继续用它作为挂载验证入口，但这次没有测试真实挂载、文件恢复或用户隔离。
+
+目前未找到托管模式可直接承载完整 OAW Web 服务、原有 Legion 和内化 MatCreator 引擎的
+官方部署步骤。若通过远程 MCP/HTTP 接入自有逻辑，该服务仍需要实际运行位置；
+不能将“QwenPaw 可调用我们的服务”等同于“平台已托管我们的服务”。
+开源 QwenPaw 的本地插件、Hub 或 Console 功能，也不能自动当作 AgentCore 托管版已提供的能力。
+
+后续可先用托管 QwenPaw 验证平台运行和 AgenticFS，再要求平台明确自定义 Python 依赖、
+进程生命周期、HTTP/WebSocket 入口及核心数据库的承载方式；OAW 执行入口当前不作替换。
+
 ## 已完成与待完成
 
 | 项目 | 当前结果 |

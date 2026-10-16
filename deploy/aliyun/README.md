@@ -5,7 +5,8 @@
 
 考虑 CIAM 成本，当前先验证本人使用。2026-10-16 起优先推进 **AgentCore 高代码容器直接
 挂载 AgenticFS**，见 [直接托管的实际进展与部署条件](DIRECT_AGENTCORE.md)。专用 Workspace
-与本地挂载探针已准备，但缺少 ACR，云端 Agent 尚未创建。
+与本地挂载探针已准备，但缺少 ACR，自定义 OAW Agent 尚未创建。另已实际跑通现有
+托管 QwenPaw 的 AG-UI 对话；这条平台验证路径无需自建 ACR，详见上述进展说明。
 现有 OAW 云执行入口仍走独立阿里 Sandbox；其实现及历史验证见
 [不依赖 CIAM 的单人方案](SINGLE_USER.md)。
 后续**内部用户自行注册并运行内化 MatCreator Legion**的身份服务、访问方式和准备步骤
