@@ -162,6 +162,28 @@ CLI 3.5.1 的产品目录尚不识别 `Sandbox`。本次资源清点和 API Key 
 官方 `alibabacloud-sandbox20260820==1.2.0` 管理 SDK，执行使用项目已有的 E2B SDK；
 管理 SDK 未加入应用运行依赖。资源 ID、创建回执及密钥仅保存在仓库外，不记录到此文档。
 
+### AgenticFS 配置复查（2026-10-16）
+
+- CLI 管理授权仍有效，返回既定 RAM 用户。
+- 杭州 NAS 文件系统列表与 VPC 列表均为空；当前 Sandbox Team 可用，已有就绪的 `base`
+  模板，Volume 列表为空。未发现可供挂载验证的实际 AgenticFS 文件系统。
+- `CreateFileSystem` 使用 `FileSystemType=standard`、`StorageType=Agentic`、
+  `ProtocolType=NFS`、`ChargeType=PayAsYouGo` 和 **`DryRun=true`** 返回成功，
+  `FileSystemId` 为空，符合官方预检查语义。创建条件预检已通过，但实际创建与数据读写尚未验证。
+  [官方 API](https://help.aliyun.com/zh/nas/developer-reference/api-nas-2017-06-26-createfilesystem)
+  明确预检不会创建实例或计费。
+- 实际创建按量付费文件系统的操作被自动审批拒绝，要求用户确认资源范围和费用类型；
+  被拒绝的命令没有执行，本轮未新增文件系统、VPC、Volume 或运行中的 Sandbox。
+
+待确认的最小配置范围：杭州 1 个 AgenticFS、杭州可用区 K 的 1 个 AgenticSpace
+（先限制 1 GiB 容量）、1 个独立 Access Point、1 个专用 VPC 及交换机和安全组、
+1 个信任 FC 且仅允许该访问点所需存储访问的 RAM 角色，以及当前 Team 的 1 个 Volume。
+随后使用两个短生命周期 Sandbox 验证“写入 → 销毁 → 新建 → 读取”，清理测试文件并销毁实例。
+采用按量付费，不购买包年包月资源、ECS 或 ACR；容量配额不是总费用上限。
+AgenticFS 按每小时实际存储容量峰值计费，Sandbox 测试按当前套餐和计费规则执行。
+
+确认创建后才执行上述资源配置；不能把预检查成功记录为持久工作区验收通过。
+
 ### AgenticFS 与 Volume 邀测申请
 
 当前需要分别确认 **NAS AgenticFS** 和 **Agent Sandbox 极速版 Volume** 的邀测权限；
@@ -185,7 +207,7 @@ AgenticFS 默认按量付费，按每小时实际存储容量峰值计费，单�
 
 ## 仍需完成的部署条件
 
-- 确认 AgenticFS 及 Sandbox Volume 邀测权限，随后准备实际文件系统、访问点、VPC/RAM 配置
+- AgenticFS 创建预检已通过；仍需实际创建并验证 Sandbox Volume 能力，准备文件系统、访问点、VPC/RAM 配置
   和 Sandbox Volume；仅创建 Volume 元数据不会创建底层文件系统。
   参见 [AgenticFS 概述](https://help.aliyun.com/zh/nas/product-overview/agenticfs-overview)
   及 [创建 AgenticFS Volume](https://help.aliyun.com/zh/agent-sandbox/create-an-agenticfs-volume)。
