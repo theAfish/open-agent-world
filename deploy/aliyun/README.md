@@ -3,8 +3,11 @@
 这是第一轮可本地验证的适配尝试，不是已完成云端验收的部署。普通桌面入口
 `backend.main:app`、个人数据目录和本地 Sandbox 默认选择保持不变。
 
-考虑 CIAM 成本，当前先验证本人使用，继续选择 AgentCore + 阿里 Sandbox，
-参见 [不依赖 CIAM 的单人方案](SINGLE_USER.md)。
+考虑 CIAM 成本，当前先验证本人使用。2026-10-16 起优先推进 **AgentCore 高代码容器直接
+挂载 AgenticFS**，见 [直接托管的实际进展与部署条件](DIRECT_AGENTCORE.md)。专用 Workspace
+与本地挂载探针已准备，但缺少 ACR，云端 Agent 尚未创建。
+现有 OAW 云执行入口仍走独立阿里 Sandbox；其实现及历史验证见
+[不依赖 CIAM 的单人方案](SINGLE_USER.md)。
 后续**内部用户自行注册并运行内化 MatCreator Legion**的身份服务、访问方式和准备步骤
 见 [多用户内部测试部署准备](INTERNAL_TEST.md)。CIAM 不是部署个人 OAW 的前提。
 当前固定用户实例的步骤仍仅用于基础集成验证。

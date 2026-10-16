@@ -1,0 +1,12 @@
+{
+  "acr_instance_id": null,
+  "acr_namespace": null,
+  "acr_repository": null,
+  "image_tag": "mount-probe-20261016",
+  "role_arn": null,
+  "access_point_domain": null,
+  "mount_subdirectory": "agentcore-probe",
+  "mount_subdirectory_verified": false,
+  "probe_token": null,
+  "probe_run_id": null
+}

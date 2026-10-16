@@ -1,7 +1,12 @@
 # 单人云端验证：不依赖 CIAM
 
+2026-10-16 更新：下一轮优先验证 **AgentCore 直接托管容器并挂载 AgenticFS**，
+详细状态、探针、网络资源及 ACR/挂载前置条件见 [DIRECT_AGENTCORE.md](DIRECT_AGENTCORE.md)。
+独立的 `oaw-poc` Workspace 已创建，尚无云端 OAW 服务。本文保留现有独立 Sandbox
+适配的操作与历史记录，不代表直接托管路径已经完成。
+
 单人使用可以先不引入 CIAM，也不实现自助注册。保留通用 OIDC 身份接口，后续切换
-身份服务时继续使用。已选择继续验证 **AgentCore 托管 + 阿里 Agent Sandbox**，
+身份服务时继续使用。现有实现为 **AgentCore 托管 + 独立阿里 Agent Sandbox**，
 不切换为普通 ECS 个人版。当前尚未完成真实云部署或 MatCreator 云端验收。
 
 ## 登录选择
