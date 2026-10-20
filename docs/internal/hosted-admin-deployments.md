@@ -68,10 +68,47 @@ retention. This POC accepts up to 10 pending jobs, 4 MiB templates and 100 retai
 profiles.
 
 Account creation/role/password changes and infrastructure settings remain
-operator actions. The current web settings implement shared models and
-application/entry selection; the navigation can accommodate further explicitly
-designed settings. Do not expose arbitrary process environment or host settings
-to workspace users.
+operator actions. Web settings implement shared models, shared Sandbox
+environment variables and application/entry selection. Do not expose arbitrary
+process environment or host settings to workspace users.
+
+## Shared execution environment
+
+`/admin?section=environment` accepts values and secret bindings using the same
+editor as personal Sandbox settings. Administrators also reach it from their
+engineering canvas Settings. Saved secret fields remain blank; leaving a
+configured secret blank preserves it, changing it replaces it, and removing its
+last variable deletes its binding. Revision checks reject concurrent stale saves.
+
+Enable delivery during offline installation or upgrade:
+
+```sh
+backend/.venv/bin/python scripts/hosted.py shared-environment-enable \
+  --directory /srv/oaw-hosting --origin http://127.0.0.1:8080
+```
+
+Regenerate/install the systemd units as for shared models, then start the gateway
+and workers. This establishes `shared_environment_origin` on existing profiles
+and on profiles created later, independently of shared models. Subsequent
+settings saves do not need restarts or individual user configuration.
+
+The gateway encrypts secrets at rest in the control directory. A registered,
+enabled worker authenticates with its own identity and receives secrets encrypted
+for that worker. Each configuration resolution fetches one coherent snapshot;
+failed refreshes block execution rather than retaining revoked credentials.
+The existing Sandbox execution resolver injects the values and includes secrets
+in its output-redaction path. Nothing is copied into user databases, templates,
+or the host's process environment. Running commands retain their initial values.
+Precedence is deployment defaults, workspace defaults, selected/linked
+Environment Profile, then local Sandbox values (case insensitive).
+
+These are credentials shared **with all authorized Sandbox executions**. Hidden
+input fields and exact-value output redaction do not prevent user code from
+using, transforming, writing or transmitting injected credentials. Do not put
+cloud management credentials or secrets that users must never possess here.
+Host paths, interpreter/loader controls and reserved environment names remain
+unsupported. This setting does not configure ECS/systemd, Alibaba resources,
+host-side Pack processes or unrelated integrations such as DeepL.
 
 ## Shared publication contracts
 

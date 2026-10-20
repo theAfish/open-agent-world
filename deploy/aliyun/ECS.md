@@ -8,6 +8,13 @@
 完整 MatCreator Workspace。admin 保留工程画布及 `/admin` 的模型配置、搭建与发布入口。
 账号密码不变，旧工作区数据仍保留；测试账号的默认入口已切换，不再进入旧画布。
 
+`/admin?section=environment` 提供全局 Sandbox 环境变量，支持普通值和加密保存的密钥。
+管理员画布的设置窗口也有“管理全局环境”入口。部署端启用公共环境下发后，保存的配置自动作用于
+已有和新增工作区的后续 Sandbox 命令，无需逐个账号配置或重启。
+本地卡片与工作区的同名变量优先；正在运行的命令不变。这里只放允许用户执行代码使用的共享工具凭据，
+不放云管理密钥。服务器进程环境及阿里资源参数仍在部署配置中管理。
+启用与权限说明见[共享执行环境](../../docs/internal/hosted-admin-deployments.md#shared-execution-environment)。
+
 ## 运行结构
 
 - Nginx 提供 HTTPS 和 WebSocket 转发，网关只监听 `127.0.0.1:8080`。

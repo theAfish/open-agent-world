@@ -37,4 +37,19 @@ it('does not load the administrator catalog for an ordinary user', async () => {
   await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Administrator access required.'));
   expect(request).not.toHaveBeenCalled();
   expect(screen.queryByRole('button', { name: 'Save shared models' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Global environment' })).toBeNull();
+});
+
+it('opens the shared environment editor from the administration navigation', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('/environment')) return Response.json({ revision: 0, environment_variables: {}, secret_bindings: {} });
+    if (url.endsWith('/deployments')) return Response.json({ releases: [], users: [], profiles: [], jobs: [] });
+    if (url.endsWith('/status')) return Response.json({ shared_models_enabled: true, shared_environment_enabled: true, workspace_count: 3, users: [] });
+    return Response.json(catalog);
+  }));
+  render(<HostedAdmin session={session} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Global environment' }));
+  await screen.findByRole('button', { name: 'Add variable' });
+  expect(screen.getByRole('button', { name: 'Save environment variables' })).toBeTruthy();
+  expect(screen.queryByText(/delivery has not been enabled/)).toBeNull();
 });

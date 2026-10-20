@@ -59,10 +59,11 @@ async def provision(directory: Path, user_id: str, *, application_id="default", 
                                 upstream or default_upstream(profile_id), secrets.token_hex(32))
         # Validate routing uniqueness before creating any profile data.
         GatewaySettings(existing.public_origin, existing.accounts_path, (*existing.profiles, profile), existing.allow_local_http,
-                        existing.shared_models_origin)
+                        existing.shared_models_origin, existing.shared_environment_origin)
         config = WorkerConfig(profile_id, user_id, application_id, mode, existing.public_origin, profile.secret,
                               directory / "instances" / profile_id / "data", agent_runtime,
-                              shared_models_origin=existing.shared_models_origin)
+                              shared_models_origin=existing.shared_models_origin,
+                              shared_environment_origin=existing.shared_environment_origin)
         if mode == "runtime" and template is None:
             raise ValueError("Runtime profiles require --template exported from a published workspace")
         if mode == "builder" and template is not None:
@@ -84,7 +85,17 @@ async def provision(directory: Path, user_id: str, *, application_id="default", 
 
 
 def enable_shared_models(directory: Path, origin: str):
+    enable_shared_settings(directory, origin, "shared_models_origin")
+
+
+def enable_shared_environment(directory: Path, origin: str):
+    enable_shared_settings(directory, origin, "shared_environment_origin")
+
+
+def enable_shared_settings(directory: Path, origin: str, key: str):
     """Offline operator action; existing workspace/model data remains untouched."""
+    if key not in {"shared_models_origin", "shared_environment_origin"}:
+        raise ValueError("Unsupported shared service")
     from backend.storage_location import file_lock
     public_origin(origin, allow_local_http=True)
     config = directory / "control/hosting.json"
@@ -96,12 +107,12 @@ def enable_shared_models(directory: Path, origin: str):
             value = json.loads(path.read_text(encoding="utf-8"))
             if value["profile_id"] != profile.profile_id or value["user_id"] != profile.user_id:
                 raise ValueError("Worker identity differs from its registered profile")
-            value["shared_models_origin"] = origin
+            value[key] = origin
             documents.append((path, value))
         for path, value in documents:
             write_private_json(path, value)
         value = json.loads(config.read_text(encoding="utf-8"))
-        value["shared_models_origin"] = origin
+        value[key] = origin
         write_private_json(config, value)
 
 
@@ -112,9 +123,10 @@ def main(argv=None):
     init.add_argument("--directory", type=Path, required=True)
     init.add_argument("--origin", required=True)
     init.add_argument("--allow-local-http", action="store_true")
-    shared = commands.add_parser("shared-models-enable")
-    shared.add_argument("--directory", type=Path, required=True)
-    shared.add_argument("--origin", required=True, help="Gateway origin reachable by workers (loopback HTTP or HTTPS)")
+    for name in ("shared-models-enable", "shared-environment-enable"):
+        shared = commands.add_parser(name)
+        shared.add_argument("--directory", type=Path, required=True)
+        shared.add_argument("--origin", required=True, help="Gateway origin reachable by workers (loopback HTTP or HTTPS)")
     for name in ("user-add", "user-list", "user-role", "user-disable", "user-enable", "password", "identity-link", "profile-add"):
         command = commands.add_parser(name)
         command.add_argument("--directory", type=Path, required=True)
@@ -175,6 +187,10 @@ def main(argv=None):
     if args.command == "shared-models-enable":
         enable_shared_models(args.directory.resolve(), args.origin)
         print("Shared models enabled. Regenerate/install service units, then start the gateway and workers.")
+        return
+    if args.command == "shared-environment-enable":
+        enable_shared_environment(args.directory.resolve(), args.origin)
+        print("Shared environment enabled. Regenerate/install service units, then start the gateway and workers.")
         return
     if args.command == "template-export":
         from .templates import export_template

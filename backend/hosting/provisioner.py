@@ -192,7 +192,8 @@ def engineering(directory, application, name, username):
                                 default_upstream(profile_id, name), secrets.token_hex(32))
         config = WorkerConfig(profile_id, user_id, profile.application_id, profile.mode, settings.public_origin,
                               profile.secret, directory / "instances" / profile_id / "data",
-                              shared_models_origin=settings.shared_models_origin)
+                              shared_models_origin=settings.shared_models_origin,
+                              shared_environment_origin=settings.shared_environment_origin)
         install_profile(directory, application, profile, config, None, settings, name)
         register_profile(directory, profile, name)
         return profile.public()
@@ -240,7 +241,8 @@ def tick(directory: Path, application: Path, name="oaw-hosted"):
                                     template["name"], job["mode"], default_upstream(job["id"], name), secrets.token_hex(32))
             config = WorkerConfig(profile.profile_id, profile.user_id, profile.application_id, profile.mode,
                                   settings.public_origin, profile.secret, directory / "instances" / profile.profile_id / "data",
-                                  shared_models_origin=settings.shared_models_origin)
+                                  shared_models_origin=settings.shared_models_origin,
+                                  shared_environment_origin=settings.shared_environment_origin)
             install_profile(directory, application, profile, config, template, settings, name)
             register_profile(directory, profile, name)
             with store.transaction(immediate=True) as db:

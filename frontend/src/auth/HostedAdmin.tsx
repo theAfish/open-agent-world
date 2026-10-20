@@ -6,15 +6,20 @@ import { EMPTY_MODEL_CATALOG, type ModelCatalog, type ModelConnection } from '..
 import { signOutHosted, type HostedSession } from './hostedSession';
 import { adminRequest } from './adminRequest';
 import { HostedDeployments } from './HostedDeployments';
+import { HostedEnvironment } from './HostedEnvironment';
 import './hosted.css';
 
-interface HostingStatus { shared_models_enabled: boolean; workspace_count: number; users: { username: string; display_name: string; role: string; enabled: boolean }[] }
+interface HostingStatus { shared_models_enabled: boolean; shared_environment_enabled?: boolean; workspace_count: number; users: { username: string; display_name: string; role: string; enabled: boolean }[] }
+type AdminTab = 'deployments' | 'models' | 'environment' | 'accounts';
 
 export function HostedAdmin({ session }: { session: HostedSession }) {
   const { locale, setLocale } = useLocale();
   const copy = (en: string, zh: string) => locale === 'zh-CN' ? zh : en;
   const allowed = session.user?.role === 'admin';
-  const [tab, setTab] = useState<'deployments' | 'models' | 'accounts'>('deployments');
+  const [tab, setTab] = useState<AdminTab>(() => {
+    const section = new URLSearchParams(window.location.search).get('section');
+    return section === 'models' || section === 'environment' || section === 'accounts' ? section : 'deployments';
+  });
   const [draft, setDraft] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
   const [saved, setSaved] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
   const [status, setStatus] = useState<HostingStatus>();
@@ -52,9 +57,11 @@ export function HostedAdmin({ session }: { session: HostedSession }) {
     </header>
     {!allowed ? <p role="alert">{copy('Administrator access required.', '需要管理员权限。')}</p> : <>
       <nav className="hosted-admin-nav" aria-label={copy('Administration sections', '管理分类')}>
-        {(['deployments', 'models', 'accounts'] as const).map(item => <button key={item} className={tab === item ? 'primary-button' : 'secondary-button'} aria-pressed={tab === item} onClick={() => setTab(item)}>{item === 'deployments' ? copy('Build & deploy', '搭建与部署') : item === 'models' ? copy('Shared models', '公共模型') : copy('Accounts', '账号')}</button>)}
+        {(['deployments', 'models', 'environment', 'accounts'] as const).map(item => <button key={item} className={tab === item ? 'primary-button' : 'secondary-button'} aria-pressed={tab === item} onClick={() => setTab(item)}>{item === 'deployments' ? copy('Build & deploy', '搭建与部署') : item === 'models' ? copy('Shared models', '公共模型') : item === 'environment' ? copy('Global environment', '全局环境') : copy('Accounts', '账号')}</button>)}
       </nav>
       {tab === 'deployments' && <HostedDeployments session={session} />}
+      {tab === 'environment' && <HostedEnvironment enabled={status?.shared_environment_enabled} />}
+      {tab !== 'models' && error && <p className="settings-error" role="alert">{error}</p>}
       {tab === 'models' && <>
       <section className="hosted-admin-intro"><h2>{copy('Shared models', '公共模型')}</h2>
         <p>{copy('Configure a connection, add models, choose a default, then save. Users can use these models without entering their own keys.', '配置连接、添加模型并选择默认模型后保存。用户无需填写自己的密钥，即可使用这些模型。')}</p>

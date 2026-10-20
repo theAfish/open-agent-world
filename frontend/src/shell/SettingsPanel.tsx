@@ -169,6 +169,8 @@ export function SettingsPanel() {
           {!hosted && <button type="button" className="secondary-button" aria-pressed={section === "sandbox"} disabled={busy} onClick={() => { setSection("sandbox"); setError(""); }}><Box size={16} /> {t("Sandbox")}</button>}
           {!hosted && <button type="button" className="secondary-button" aria-pressed={section === "storage"} disabled={busy} onClick={() => { setSection("storage"); setError(""); }}><HardDrive size={16} /> {t("Storage")}</button>}
           <button type="button" className="secondary-button" aria-pressed={section === "deepl"} disabled={busy} onClick={() => { setSection("deepl"); setError(""); }}>{t("DeepL")}</button>
+          {hosted && currentHostedSession()?.user?.role === 'admin' && <a className="secondary-button" href="/admin?section=environment">
+            <Settings2 size={16} />{locale === 'zh-CN' ? '管理全局环境' : 'Manage global environment'}</a>}
         </nav>
 
         <div className="settings-content">

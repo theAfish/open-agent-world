@@ -1,4 +1,12 @@
 .hosted-login { min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: radial-gradient(ellipse at top, var(--surface-raised), var(--canvas)); }
+.hosted-environment-form { max-width: 860px; }
+.hosted-environment-form footer { flex-wrap: wrap; }
+.hosted-environment-form footer [role="status"] { margin-right: auto; color: var(--ink-soft); font-size: 13px; }
+.hosted-environment-form :is(input, select) { box-sizing: border-box; min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-raised); font: inherit; font-size: 13px; }
+.hosted-environment-form :is(input, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hosted-environment-form .variable-remove { display: grid; place-items: center; flex-shrink: 0; width: 32px; height: 36px; padding: 0; border: 0; border-radius: 6px; color: var(--ink-soft); background: transparent; }
+.hosted-environment-form .variable-remove:hover:enabled { color: var(--danger); background: var(--danger-soft); }
+.hosted-environment-form .environment-variable-row small { color: var(--ink-soft); font-size: 12px; }
 .hosted-login-card { width: min(420px, 100%); box-sizing: border-box; display: grid; gap: 20px; padding: 34px; border: 1px solid var(--line); border-radius: 24px; background: var(--surface-solid); box-shadow: 0 16px 60px var(--shadow); }
 .hosted-login-card h1 { margin: 0; font-size: 26px; }
 .hosted-login-card p { margin: 0; line-height: 1.6; color: var(--ink-soft); }

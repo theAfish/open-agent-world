@@ -87,10 +87,11 @@ function EnvironmentPathInput({ value, onChange, disabled, label, access }: {
   </>;
 }
 
-export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, onSecretsChange, bindings, allowSecrets = true }: {
+export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, onSecretsChange, bindings, allowSecrets = true, allowPaths = true }: {
   rows: EnvironmentVariableRow[]; onChange(rows: EnvironmentVariableRow[]): void; disabled: boolean;
   secrets: Record<string, string>; onSecretsChange(secrets: Record<string, string>): void; bindings: Record<string, boolean>;
   allowSecrets?: boolean;
+  allowPaths?: boolean;
 }) {
   useLocale();
   const latestRows = useRef(rows);
@@ -115,7 +116,7 @@ export function EnvironmentVariablesEditor({ rows, onChange, disabled, secrets, 
           onChange={(event) => patch(row.id, { kind: event.target.value as EnvironmentVariableKind,
             value: event.target.value === "value" ? "" : crypto.randomUUID(),
             folderPath: event.target.value === "path" && row.kind === "value" ? row.value : "", access: "read_only" })}>
-          <option value="value">{t("Value")}</option>{allowSecrets && <option value="secret">{t("Secret")}</option>}<option value="path">{t("Path")}</option>
+          <option value="value">{t("Value")}</option>{allowSecrets && <option value="secret">{t("Secret")}</option>}{allowPaths && <option value="path">{t("Path")}</option>}
         </select>
         {row.kind === "path" ? <select className="variable-folder-access" aria-label={t("Environment variable {v0} access", { v0: String(index + 1) })}
           value={row.access ?? "read_only"} onChange={event => patch(row.id, { access: event.target.value as EnvironmentVariableRow["access"] })}>

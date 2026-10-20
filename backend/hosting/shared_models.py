@@ -183,6 +183,7 @@ class SharedModelAdmin:
             return denied
         await self.gateway.refresh()
         return JSONResponse({"shared_models_enabled": self.gateway.settings.shared_models_origin is not None,
+                             "shared_environment_enabled": self.gateway.settings.shared_environment_origin is not None,
                              "workspace_count": len(self.gateway.settings.profiles),
                              "users": [{k: user[k] for k in ("username", "display_name", "role", "enabled")}
                                        for user in self.gateway.auth.store.list_users()]})

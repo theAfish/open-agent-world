@@ -145,6 +145,7 @@ class WorkerConfig:
     agent_runtime: str | None = "google.adk"
     sandbox_runtime: str | None = None
     shared_models_origin: str | None = None
+    shared_environment_origin: str | None = None
 
     def __post_init__(self):
         hosted_scope(self.user_id, self.application_id, self.profile_id)
@@ -161,6 +162,9 @@ class WorkerConfig:
         if self.shared_models_origin is not None:
             from .configuration import public_origin
             public_origin(self.shared_models_origin, allow_local_http=True)
+        if self.shared_environment_origin is not None:
+            from .configuration import public_origin
+            public_origin(self.shared_environment_origin, allow_local_http=True)
         object.__setattr__(self, "data_root", Path(self.data_root).resolve())
 
 
@@ -215,6 +219,9 @@ def create_worker_app(config: WorkerConfig | Mapping, *, frontend_directory=None
         if config.shared_models_origin is not None:
             from .shared_models import SharedModelSource
             services.llm_settings.model_source = SharedModelSource(config)
+        if config.shared_environment_origin is not None:
+            from .shared_environment import SharedEnvironmentSource
+            services.execution_environment_source = SharedEnvironmentSource(config)
         return services
 
     app = create_app(settings, profile_access=access, frontend_directory=None,

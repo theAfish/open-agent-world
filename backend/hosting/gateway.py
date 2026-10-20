@@ -61,7 +61,8 @@ class Gateway:
         from .configuration import read_gateway_settings
         settings = read_gateway_settings(self.settings_path)
         if (settings.public_origin != self.settings.public_origin or settings.accounts_path != self.settings.accounts_path
-                or settings.shared_models_origin != self.settings.shared_models_origin):
+                or settings.shared_models_origin != self.settings.shared_models_origin
+                or settings.shared_environment_origin != self.settings.shared_environment_origin):
             raise ValueError("Restart the gateway to change hosting service configuration")
         for profile in settings.profiles:
             if unix_socket_path(profile.upstream) and profile.profile_id not in self.unix_clients:
@@ -269,6 +270,8 @@ def create_gateway(settings: GatewaySettings, frontend_directory: Path, *, oidc_
     admin = SharedModelAdmin(gateway)
     from .deployments import DeploymentAdmin
     deployments = DeploymentAdmin(gateway, admin.authorize)
+    from .shared_environment import SharedEnvironmentAdmin
+    environment = SharedEnvironmentAdmin(gateway, admin.authorize)
 
     @asynccontextmanager
     async def lifespan(_):
@@ -286,6 +289,8 @@ def create_gateway(settings: GatewaySettings, frontend_directory: Path, *, oidc_
     routes = [Route("/health/live", health), Route("/auth/me", gateway.me)]
     routes.extend(route for route in auth.routes if route.path != "/auth/me")
     routes.extend([Route("/hosting/admin/models", admin.models, methods=["GET", "PUT"]),
+                   Route("/hosting/admin/environment", environment.settings, methods=["GET", "PUT"]),
+                   Route("/hosting/internal/environment/{profile_id}", environment.worker_environment),
                    Route("/hosting/admin/deployments", deployments.catalog, methods=["GET"]),
                    Route("/hosting/admin/deployments", deployments.deploy, methods=["POST"]),
                    Route("/hosting/admin/entry", deployments.assign, methods=["PUT"]),

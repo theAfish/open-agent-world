@@ -48,6 +48,19 @@ describe("Application settings", () => {
     expect(screen.queryByLabelText('API key')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Save settings' })).toBeNull();
     expect(save).not.toHaveBeenCalled();
+    expect(screen.queryByRole('link', { name: 'Manage global environment' })).toBeNull();
+  });
+
+  it('links administrators to deployment-wide environment settings without exposing host controls', async () => {
+    vi.spyOn(hostedAuth, 'isHosted').mockReturnValue(true);
+    vi.spyOn(hostedAuth, 'currentHostedSession').mockReturnValue({ hosted: true, authenticated: true,
+      user: { id: 'admin', username: 'admin', display_name: 'Admin', role: 'admin' },
+      login_methods: ['password'], instance: null, shared_models: true });
+    render(<SettingsPanel />);
+    await screen.findByText('Shared models');
+    expect(screen.getByRole('link', { name: 'Manage global environment' }).getAttribute('href')).toBe('/admin?section=environment');
+    expect(worldApi.getSandboxSettings).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Storage' })).toBeNull();
   });
 
   it.each(["folder", "file"] as const)("uses the shared %s picker and saves global permissions", async (kind) => {
