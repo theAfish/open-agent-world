@@ -53,6 +53,20 @@ class CloudPython:
         except ValueError as exc:
             raise SandboxValidationError(str(exc)) from None
 
+    async def _renew_lifetime(self, sandbox, value):
+        """A renewal is idempotent; never replay installation or user commands."""
+        import httpx
+        from e2b import SandboxException
+        try:
+            await sandbox.set_timeout(self.backend.settings.lifetime_seconds)
+        except (TimeoutError, httpx.RequestError, SandboxException):
+            # Recheck identity before one bounded retry on this same VM.
+            info = await sandbox.get_info()
+            if (info.metadata.get("oaw.profile") != self.backend.settings.profile_id
+                    or info.metadata.get("oaw.request") != value["request_key"]):
+                raise SandboxStateError("Cloud Python VM identity changed during renewal") from None
+            await sandbox.set_timeout(self.backend.settings.lifetime_seconds)
+
     async def status(self):
         backend = self.backend
         if not backend.path.exists():
@@ -116,9 +130,11 @@ class CloudPython:
         value["python_setup"] = {"remote_id": sandbox.sandbox_id, "digest": digest,
                                  "requirements": requirements, "state": "admitted"}
         backend._write(value)
+        phase = "initial_lifetime"
         try:
-            await sandbox.set_timeout(backend.settings.lifetime_seconds)
+            await self._renew_lifetime(sandbox, value)
             command = shlex.join(["python3", "-I", "-c", SETUP_SCRIPT, json.dumps(requirements)])
+            phase = "installation"
             async with asyncio.timeout(SETUP_SECONDS + 10):
                 handle = await sandbox.commands.run(command, user="root", cwd="/", background=True, timeout=SETUP_SECONDS)
                 value["python_setup"].update(pid=handle.pid, state="running")
@@ -138,11 +154,17 @@ class CloudPython:
             value["python_verified"] = {"remote_id": sandbox.sandbox_id, "digest": digest, **report}
             value["python_setup"] = None
             backend._write(value)
-            await sandbox.set_timeout(backend.settings.lifetime_seconds)
+            phase = "final_lifetime"
+            await self._renew_lifetime(sandbox, value)
+            value.pop("python_setup_failure", None)
+            backend._write(value)
         except SandboxPreparationError:
             raise
         except BaseException as exc:
             value["state"] = "uncertain"
+            # Preserve useful diagnostics without logging credentials or raw
+            # provider responses. A verified install and failed renewal differ.
+            value["python_setup_failure"] = {"phase": phase, "error_type": type(exc).__name__}
             backend._write(value)
             if isinstance(exc, asyncio.CancelledError):
                 raise

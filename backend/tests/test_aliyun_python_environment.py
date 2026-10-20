@@ -15,9 +15,18 @@ class PythonSDK(FakeSDK):
         super().__init__(root)
         self.setups = []
         self.setup_failure = None
+        self.renewal_failures = 0
+        self.wrong_renewal_identity = False
 
     async def create(self, **kwargs):
         sandbox = await super().create(**kwargs)
+        async def renew(seconds):
+            if self.setups and self.renewal_failures:
+                self.renewal_failures -= 1
+                if self.wrong_renewal_identity:
+                    sandbox.metadata = {**sandbox.metadata, "oaw.profile": "another-profile"}
+                raise TimeoutError("renewal response lost")
+        sandbox.set_timeout = renew
         original = sandbox.run
         async def run(command, **options):
             argv = shlex.split(command)
@@ -77,6 +86,34 @@ async def test_python_setup_unknown_result_is_never_replayed(cloud):
     assert backend.path.read_bytes() == receipt and len(sdk.setups) == 1 and not sdk.commands
     await backend.terminate("s")
     assert sdk.killed == ["remote-1"] and not backend._read("s")["python_setup"]
+
+
+@pytest.mark.asyncio
+async def test_lost_final_renewal_retries_only_same_vm_without_replaying_work(cloud):
+    backend, sdk = cloud
+    await backend.create("s")
+    sdk.renewal_failures = 1
+    result = await backend.execute("s", ["business-command"], execution_policy={"network_enabled": True})
+    assert result.exit_code == 0
+    assert len(sdk.created) == len(sdk.setups) == len(sdk.commands) == 1
+    assert sdk.killed == ["remote-1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("foreign", [False, True])
+async def test_repeated_or_foreign_vm_renewal_never_admits_user_command(cloud, foreign):
+    backend, sdk = cloud
+    await backend.create("s")
+    sdk.renewal_failures = 2
+    sdk.wrong_renewal_identity = foreign
+    with pytest.raises(SandboxStateError, match="uncertain"):
+        await backend.execute("s", ["business-command"], execution_policy={"network_enabled": True})
+    receipt = backend._read("s")
+    assert receipt["python_verified"] and receipt["python_setup_failure"]["phase"] == "final_lifetime"
+    with pytest.raises(SandboxStateError, match="uncertain"):
+        await backend.execute("s", ["business-command"], execution_policy={"network_enabled": True})
+    assert len(sdk.created) == len(sdk.setups) == 1 and not sdk.commands
+    assert sdk.renewal_failures == (1 if foreign else 0)
 
 
 @pytest.mark.asyncio

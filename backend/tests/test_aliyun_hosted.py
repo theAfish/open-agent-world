@@ -43,8 +43,13 @@ def test_full_research_publication_round_trips_into_private_cloud_workspaces(tmp
 
     registry = hosted.approved_plugins()
     preset = next(p for p in registry.legion_presets() if p.id == "matcreator.native-research")
-    assert preset == native_definition()
-    original = next(n for n in native_definition().nodes if n.key == "group")
+    personal = native_definition()
+    # Initial knowledge captures import timestamps; compare the Pack's
+    # composition and configuration, not separately generated seed documents.
+    assert preset.revision == personal.revision
+    assert [(n.key, n.type, n.name, n.config) for n in preset.nodes] == [
+        (n.key, n.type, n.name, n.config) for n in personal.nodes]
+    original = next(n for n in personal.nodes if n.key == "group")
     assert next(n for n in preset.nodes if n.key == "group").config["workspace_layout"] == original.config["workspace_layout"]
     with client(config("admin", "builder")) as admin:
         result = admin.post("/api/legions/presets/matcreator.native-research/instances", json={})
