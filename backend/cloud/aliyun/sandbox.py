@@ -1,8 +1,9 @@
-"""First Agent Sandbox adapter: one logical Sandbox + persistent volume/profile.
+"""Agent Sandbox adapter: one logical Sandbox per profile.
 
 Commands are exclusive and the VM is released after each command, including
 cancellation, so detached descendants cannot survive command completion. Files
-live on an operator-provisioned dedicated volume. This intentionally does not
+live on an operator-provisioned dedicated volume, or on ECS through the snapshot
+subclass. This intentionally does not
 claim support for concurrent commands, host mounts or private runtime bundles.
 """
 from __future__ import annotations
@@ -36,11 +37,15 @@ class AliyunSandboxSettings:
     profile_id: str
     lifetime_seconds: int = 600
     metadata: dict[str, str] = field(default_factory=dict, repr=False)
+    unavailable_reason: str | None = None
+    workspace_store: str = "volume"
 
     def __post_init__(self):
         if not re.fullmatch(r"[a-z][a-z0-9-]{2,48}", self.region):
             raise ValueError("Invalid Alibaba Sandbox region")
-        if not self.api_key or not self.template or not self.volume or not self.profile_id:
+        if self.workspace_store not in {"volume", "ecs"}:
+            raise ValueError("Unsupported workspace store")
+        if not self.api_key or not self.template or not self.profile_id or (self.workspace_store == "volume" and not self.volume):
             raise ValueError("Sandbox API key, template, dedicated volume and profile ID are required")
         if not 60 <= self.lifetime_seconds <= 3600:
             raise ValueError("Sandbox lifetime must be 60..3600 seconds in this POC")
@@ -78,9 +83,12 @@ class AliyunSandboxBackend(SandboxBackend):
         return value
 
     def _configuration(self):
-        return {"profile": self.settings.profile_id, "region": self.settings.region,
+        value = {"profile": self.settings.profile_id, "region": self.settings.region,
                 "template": self.settings.template, "volume": self.settings.volume,
                 "metadata": self.settings.metadata}
+        if self.settings.workspace_store != "volume":
+            value["workspace_store"] = self.settings.workspace_store
+        return value
 
     def _write(self, value):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -123,8 +131,9 @@ class AliyunSandboxBackend(SandboxBackend):
             state = SandboxState.ERROR
         return SandboxInfo(value["sandbox_id"], state, PurePosixPath("/workspace"),
             security_boundary="aliyun-agent-sandbox", runtime_id="aliyun.agent-sandbox", platform="linux",
-            shell=("/bin/sh", "-c"), available=state != SandboxState.ERROR,
-            unavailable_reason="Remote state requires reconciliation; no command will be resubmitted" if state == SandboxState.ERROR else None,
+            shell=("/bin/sh", "-c"), available=state != SandboxState.ERROR and not self.settings.unavailable_reason,
+            unavailable_reason=self.settings.unavailable_reason or (
+                "Remote state requires reconciliation; no command will be resubmitted" if state == SandboxState.ERROR else None),
             network_reason="This POC disables internet access; network grants are not implemented")
 
     async def get(self, sandbox_id):
@@ -164,6 +173,8 @@ class AliyunSandboxBackend(SandboxBackend):
         self._write(value)
 
     async def _start(self, value):
+        if self.settings.unavailable_reason:
+            raise SandboxStateError(self.settings.unavailable_reason)
         if value["command"] is not None:
             raise SandboxStateError("A previous command has an uncertain outcome; inspect or explicitly stop the Sandbox, never resubmit")
         if value["state"] == "uncertain":
@@ -180,7 +191,8 @@ class AliyunSandboxBackend(SandboxBackend):
         self._write(value)
         sandbox = await self.sdk.create(template=self.settings.template, timeout=self.settings.lifetime_seconds,
             metadata={**self.settings.metadata, "oaw.profile": self.settings.profile_id, "oaw.request": value["request_key"]},
-            volume_mounts={"/workspace": self.settings.volume}, allow_internet_access=False,
+            volume_mounts={"/workspace": self.settings.volume} if self.settings.workspace_store == "volume" else {},
+            allow_internet_access=False,
             network={"allow_public_traffic": False},
             **self.settings.connection)
         value.update(remote_id=sandbox.sandbox_id, state="ready")
@@ -370,11 +382,15 @@ class AliyunSandboxBackend(SandboxBackend):
 def registry_factory(settings: AliyunSandboxSettings):
     def build(root, event_sink):
         registry = SandboxRuntimeRegistry()
-        backend = AliyunSandboxBackend(root, settings, event_sink)
+        if settings.workspace_store == "ecs":
+            from .ecs_workspace import EcsWorkspaceSandboxBackend
+            backend = EcsWorkspaceSandboxBackend(root, settings, event_sink)
+        else:
+            backend = AliyunSandboxBackend(root, settings, event_sink)
 
         async def probe():
             # Discovery is local configuration validation, never a billable create.
-            return True, None
+            return not settings.unavailable_reason, settings.unavailable_reason
 
         registry.register(SandboxRuntimeRegistration(
             SandboxRuntime("aliyun.agent-sandbox", "Alibaba Agent Sandbox (POC)", "linux", ("/bin/sh", "-c"),
