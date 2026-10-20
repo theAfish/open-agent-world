@@ -9,16 +9,54 @@ const messages: ConversationMessage[] = Array.from({ length: 420 }, (_, i) => ({
   id: String(i + 1), sequence: i + 1, conversation_id: "room", session_id: "a",
   sender_kind: "agent", sender_name: "Atlas", content: `Message ${i + 1}`, mention_agent_ids: [], created_at: "2026-09-09T00:00:00Z",
 }));
-function Harness({ session = "a", refresh = "", events = [] }: { session?: string; refresh?: string; events?: RuntimeEvent[] }) {
+function Harness({ session = "a", refresh = "", events = [], socketLive = true }: { session?: string; refresh?: string; events?: RuntimeEvent[]; socketLive?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
-  const history = useConversationTimeline("room", session, refresh, true, ref, events);
+  const history = useConversationTimeline("room", session, refresh, socketLive, ref, events);
   return <><button onClick={history.loadOlder}>Older</button><button onClick={history.loadNewer}>Newer</button>
     <div ref={ref} onScroll={history.onScroll}>{history.messages.map((m) => <p key={m.id} data-message-id={m.id}>{m.content}</p>)}</div>
     <output data-testid="active">{history.activeAgentIds.join(",")}</output>
     <output data-testid="summaries">{Object.keys(history.runSummaries).sort().join(',')}</output>
+    <output data-testid="has-before">{String(history.hasBefore)}</output>
     <span>{history.loading ? "busy" : "ready"}</span></>;
 }
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
+
+it('silently polls an empty session while retaining first-load and session-switch loading', async () => {
+  vi.useFakeTimers();
+  const empty = { items: [], has_before: false, has_after: false };
+  let finish!: (page: ConversationMessagePage) => void;
+  const fetch = vi.spyOn(worldApi, 'getConversationTimeline')
+    .mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const { rerender } = render(<Harness socketLive={false} />);
+  expect(screen.getByText('busy')).toBeTruthy();
+  await act(async () => finish(empty));
+  expect(screen.getByText('ready')).toBeTruthy();
+  for (let i = 0; i < 3; i++) {
+    await act(async () => vi.advanceTimersByTime(3000));
+    expect(fetch).toHaveBeenCalledTimes(i + 2);
+    expect(screen.queryByText('busy')).toBeNull();
+    await act(async () => finish(empty));
+  }
+  rerender(<Harness session="b" socketLive={false} />);
+  expect(screen.getByText('busy')).toBeTruthy();
+  await act(async () => finish(empty));
+  expect(screen.getByText('ready')).toBeTruthy();
+});
+
+it('keeps older messages reachable when an empty session gains a full tail between refreshes', async () => {
+  const fetch = vi.spyOn(worldApi, 'getConversationTimeline')
+    .mockResolvedValue({ items: [], has_before: false, has_after: false });
+  const { rerender } = render(<Harness />);
+  await screen.findByText('ready');
+  fetch.mockResolvedValue({ items: messages.slice(-50), has_before: true, has_after: false });
+  rerender(<Harness refresh="new-tail" />);
+  await screen.findByText('Message 420');
+  expect(screen.getByTestId('has-before').textContent).toBe('true');
+  fetch.mockResolvedValue({ items: messages.slice(-100, -50), has_before: true, has_after: true });
+  fireEvent.click(screen.getByText('Older'));
+  await screen.findByText('Message 321');
+  expect(fetch).toHaveBeenLastCalledWith('room', 'a', { before: 371 });
+});
 it('keeps summaries for retained messages when paging and refreshing the tail', async () => {
   const summary = (id: string) => ({ run_id: id, agent_id: 'atlas', status: 'succeeded', tool_count: 1, tool_trace: [] });
   const latest = { items: [{ ...messages[1], run_id: 'new' }], has_before: true, has_after: false, run_summaries: { new: summary('new') } };

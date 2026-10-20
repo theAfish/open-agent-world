@@ -74,7 +74,8 @@ export function useConversationTimeline(conversationId: string, sessionId: strin
       bottom.current = direction === "latest" || ((direction === "after" || direction === "refresh") && follow.current);
       const tailGap = direction === "refresh" && incoming.items.length > 0 && current.items.length > 0
         && !incoming.items.some(item => current.items.some(existing => existing.id === item.id));
-      const merged = direction === "latest" || tailGap ? incoming.items
+      const replaceWindow = direction === "latest" || tailGap || current.items.length === 0;
+      const merged = replaceWindow ? incoming.items
         : [...new Map([...current.items, ...incoming.items].map((item) => [item.id, item])).values()]
           .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
       const trimmed = merged.length > CONVERSATION_WINDOW_SIZE;
@@ -85,7 +86,7 @@ export function useConversationTimeline(conversationId: string, sessionId: strin
         deliveries: incoming.deliveries,
         run_summaries: visibleSummaries(current, incoming, items),
         items,
-        has_before: direction === "before" || direction === "latest" || tailGap ? incoming.has_before : current.has_before || trimmed,
+        has_before: direction === "before" || replaceWindow ? incoming.has_before : current.has_before || trimmed,
         has_after: direction === "before" ? current.has_after || trimmed : incoming.has_after,
       };
       pageRef.current = next;
@@ -120,7 +121,9 @@ export function useConversationTimeline(conversationId: string, sessionId: strin
   useEffect(() => {
     const refreshTail = () => {
       // Repair missed notifications and status without moving a reader's historical window.
-      void load(pageRef.current.items.length ? "refresh" : "latest");
+      // An empty snapshot is still loaded. Background repair must not show the
+      // initial loading state again just because this session has no messages.
+      void load("refresh");
     };
     // The scope effect already starts the initial snapshot. Later invalidations
     // must queue even when a prior snapshot is still in flight.
