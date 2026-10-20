@@ -778,7 +778,7 @@ async def _wait_sandbox_operation(context, capability, values):
         operation_id, values.get("wait_seconds", 30))
 
 
-def _register_builtin(registry: PluginRegistration) -> None:
+def _register_builtin(registry: PluginRegistration, sandbox_config_model: type[SandboxConfig] = SandboxConfig) -> None:
     from backend.execution_config import register_execution_configuration, EXECUTION_SELECTORS, EnvironmentProfile
     from backend.plugins.documents import NodeDocumentDefinition
     register_execution_configuration(registry)
@@ -1069,7 +1069,7 @@ def _register_builtin(registry: PluginRegistration) -> None:
         color="#696c66", deck_id="fields", deck_label="Fields", deck_icon="workflow",
         default_name="New Sandbox", default_size=(340, 220), default_status="stopped",
         statuses=frozenset({"stopped", "ready", "running", "error"}),
-        config_model=SandboxConfig, traits=frozenset({"core.sandbox", "core.file-source"}),
+        config_model=sandbox_config_model, traits=frozenset({"core.sandbox", "core.file-source"}),
         tutorials=SANDBOX_TUTORIALS,
         document=NodeDocumentDefinition(model=EnvironmentProfile),
         presentation=NodePresentation(states=("node", "preview", "workspace"), initial="workspace", open="workspace",
@@ -1166,12 +1166,17 @@ class CorePlugin:
         description="Built-in nodes, relationships, state schemas, and runtimes.",
     )
 
+    def __init__(self, *, sandbox_config_model: type[SandboxConfig] = SandboxConfig):
+        if not issubclass(sandbox_config_model, SandboxConfig):
+            raise TypeError("Sandbox configuration must extend the core Sandbox schema")
+        self.sandbox_config_model = sandbox_config_model
+
     def register(self, registration: PluginRegistration) -> None:
         from backend.sandbox.background_jobs import definition as operation_jobs
         registration.register_background_job_provider("core.sandbox-operation", operation_jobs)
         from backend.plugins.shadow_collection import register_shadow_collection
         register_shadow_collection(registration)
-        _register_builtin(registration)
+        _register_builtin(registration, self.sandbox_config_model)
         from backend.file_preview import register_file_preview
         register_file_preview(registration)
         from backend.execution_graph import register as register_execution_graph
@@ -1182,7 +1187,7 @@ class CorePlugin:
             description='Agents, resources and workspaces for your world.', cards=tuple(registration.nodes), packaging='collector'))
 
 
-def create_builtin_registry() -> PluginRegistry:
+def create_builtin_registry(*, sandbox_config_model: type[SandboxConfig] = SandboxConfig) -> PluginRegistry:
     registry = PluginRegistry()
-    registry.install(CorePlugin())
+    registry.install(CorePlugin(sandbox_config_model=sandbox_config_model))
     return registry

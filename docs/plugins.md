@@ -60,6 +60,14 @@ Plugin-specific documentation can remain in its own package or repository. These
 
 ## Developing a plugin
 
+Plugin API 1.37 adds `AgentCapabilityProvider.subprocess_environment()` for
+trusted runtimes that launch workers. Use this fresh host-approved environment,
+then narrow it and add explicit Pack-owned worker settings. Hosted workers allow
+only basic process variables and omit deployment credentials; personal hosts
+retain inherited variables. This is cooperative secret minimization, not an OS
+sandbox for untrusted plugins. Packs remain responsible for their own workers;
+cloud adapters must not subclass a Pack's internal runtime to change this policy.
+
 Plugin API 1.36 adds `NodeDeploymentDefinition.from_document()`, shared Workspace
 sections and connected file-preview publication. Existing views and business
 handlers work in the published Workspace without a second API implementation;

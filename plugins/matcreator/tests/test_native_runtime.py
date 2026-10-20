@@ -24,6 +24,9 @@ class Provider:
         self.projections = []
         self.available = True
 
+    def subprocess_environment(self):
+        return dict(os.environ)
+
     def resolve_model(self, model):
         return RuntimeModelConnection('openai', 'native-test', self.url, 'test-secret')
 

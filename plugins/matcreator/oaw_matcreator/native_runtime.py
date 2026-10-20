@@ -115,8 +115,9 @@ class MatCreatorRuntime(RuntimeProvider):
         await self.provider.publish_execution(agent_id, run_id, project_history(value))
 
     def _worker_environment(self):
-        """Deployment adapters may narrow inherited process configuration."""
-        env = {k: v for k, v in os.environ.items() if not k.startswith((
+        """Use the ordinary host contract; the Pack owns its worker settings."""
+        source = self.provider.subprocess_environment()
+        env = {k: v for k, v in source.items() if not k.startswith((
             "MATCREATOR_", "MATCLAW_", "LLM_", "KDG_", "BOHRIUM_", "OPENAI_", "ANTHROPIC_", "GEMINI_", "GOOGLE_API_"))}
         env.update(PYTHONUTF8="1", PYTHONUNBUFFERED="1")
         return env

@@ -9,7 +9,7 @@ runtime-resources = [
 ]
 
 [compatibility]
-plugin_api = "1.36"
+plugin_api = "1.37"
 oaw = ">=0.1.0,<1"
 
 [distribution]

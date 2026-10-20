@@ -1,6 +1,7 @@
 """Pack-specific discovery, compatibility and launch; lifecycle is host-owned."""
 import asyncio
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -126,6 +127,7 @@ async def test_missing_runtime_never_falls_back_to_host_or_installs_during_run(i
     provider = SimpleNamespace(
         resolve_model=lambda _: RuntimeModelConnection("openai", "test", "http://127.0.0.1", "secret"),
         runtime_state_directory=lambda _: environment.environment_root().parent / "state",
+        subprocess_environment=lambda: dict(os.environ),
     )
     runtime = MatCreatorRuntime(provider)
     config = AgentConfig("agent", "Native")
@@ -159,6 +161,7 @@ print(json.dumps({'type': 'completed', 'text': '\\u4f60\\u597d'}, ensure_ascii=F
     provider = SimpleNamespace(
         resolve_model=lambda _: RuntimeModelConnection("openai", "test", "http://127.0.0.1", "secret"),
         runtime_state_directory=lambda _: tmp_path / "state",
+        subprocess_environment=lambda: dict(os.environ),
     )
     runtime = MatCreatorRuntime(provider)
     config = AgentConfig("agent", "Native")

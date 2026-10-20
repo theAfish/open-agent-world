@@ -462,6 +462,10 @@ class WorldAgentCapabilityProvider:
     def managed_environment_root(self):
         return self.services.settings.data_root
 
+    def subprocess_environment(self):
+        from backend.agents.environment import subprocess_environment
+        return subprocess_environment(inherit=self.services.settings.inherit_runtime_environment)
+
     def __init__(self, services: ApplicationServices) -> None:
         self.services = services
 

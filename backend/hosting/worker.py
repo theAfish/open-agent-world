@@ -203,7 +203,8 @@ def create_worker_app(config: WorkerConfig | Mapping, *, frontend_directory=None
         raise ValueError("Builder workers cannot serve deployment profiles")
     tenant = hosted_scope(config.user_id, config.application_id, config.profile_id)
     settings = replace(Settings.for_data_root(config.data_root), tenant_scope=tenant,
-                       agent_runtime=config.agent_runtime, sandbox_runtime=None, marketplace_url=None)
+                       agent_runtime=config.agent_runtime, sandbox_runtime=None, marketplace_url=None,
+                       inherit_runtime_environment=False)
     access = HostedProfileAccess(
         WorkerIdentityProvider(config.secret, config.profile_id, config.user_id),
         VerifiedIdentity(ISSUER, config.user_id), tenant, config.public_origin,

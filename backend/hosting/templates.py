@@ -148,7 +148,8 @@ async def initialize_runtime(config: WorkerConfig, template_path: Path, *, servi
             raise ValueError("Profile already contains data; provisioning never overwrites an existing profile")
         prepare_hosted_binding(root, profile_id=config.profile_id, user_id=config.user_id, application_id=config.application_id)
         settings = replace(Settings.for_data_root(root), agent_runtime=config.agent_runtime, sandbox_runtime=None,
-                           tenant_scope=hosted_scope(config.user_id, config.application_id, config.profile_id))
+                           tenant_scope=hosted_scope(config.user_id, config.application_id, config.profile_id),
+                           inherit_runtime_environment=False)
         services = (services_factory or create_worker_services)(settings)
         try:
             now = datetime.now(UTC)
