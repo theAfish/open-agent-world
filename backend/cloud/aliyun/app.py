@@ -43,16 +43,20 @@ class CloudSurfaceMiddleware:
 
 def approved_plugins():
     # Do not scan user-installed wheels or arbitrary installed entry points.
-    registry = create_builtin_registry()
+    from pydantic import Field
+    from backend.world.models import SandboxConfig
+
+    class CloudSandboxConfig(SandboxConfig):
+        # Apply the provider default to every Sandbox, regardless of its Pack.
+        command_timeout: float = Field(default=60, gt=0, le=36000)
+
+    registry = create_builtin_registry(sandbox_config_model=CloudSandboxConfig)
     plugins = Path(__file__).resolve().parents[3] / "plugins"
     for directory, module in (("structure_viewer", "oaw_structure_viewer"),
                                ("matcreator", "oaw_matcreator"), ("sqlite", "oaw_sqlite")):
         package_root = plugins / directory
         sys.path.insert(0, str(package_root / "src" if (package_root / "src").is_dir() else package_root))
         plugin = import_module(module).create_plugin()
-        if directory == "matcreator":
-            from .matcreator import hosted_matcreator
-            plugin = hosted_matcreator(plugin)
         registry.install(plugin)
     return registry
 
@@ -79,7 +83,8 @@ def create_app():
     )
     settings = replace(Settings.from_environment(), data_root=root, database_path=root / "database/world.sqlite3",
         storage_config_path=None, control_plane_token=None, tenant_scope=tenant,
-        sandbox_runtime="aliyun.agent-sandbox", plugin_directories=(), application_mode="production")
+        sandbox_runtime="aliyun.agent-sandbox", plugin_directories=(), application_mode="production",
+        inherit_runtime_environment=False)
 
     def services_factory(settings):
         return create_services(settings, plugins=approved_plugins(), sandbox_registry_factory=registry_factory(remote))

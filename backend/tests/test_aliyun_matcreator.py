@@ -1,5 +1,5 @@
 """Trusted orchestration protocol and remote-only tool routing, without a model API."""
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from importlib import import_module
 import json
 import os
@@ -12,6 +12,8 @@ pytest.importorskip("e2b")
 pytest.importorskip("authlib")
 
 from backend.cloud.aliyun.app import approved_plugins
+from backend.capabilities.provider import WorldAgentCapabilityProvider
+from backend.config import Settings
 from backend.cloud.aliyun.sandbox import AliyunSandboxBackend, AliyunSandboxSettings
 from backend.tests.test_aliyun_sandbox import FakeSDK
 from open_agent_world.plugin_api import AgentConfig, RuntimeInput, RuntimeModelConnection
@@ -42,9 +44,12 @@ async def test_hosted_worker_keeps_control_credentials_out_and_routes_authorized
 
     provider = SimpleNamespace(list_tools=list_tools, invoke_tool=invoke,
         resolve_model=lambda _: RuntimeModelConnection("test", "openai", "https://model.example", "user-model-key"),
-        runtime_state_directory=lambda _: tmp_path / "state")
+        runtime_state_directory=lambda _: tmp_path / "state",
+        subprocess_environment=WorldAgentCapabilityProvider(SimpleNamespace(
+            settings=replace(Settings.for_data_root(tmp_path), inherit_runtime_environment=False))).subprocess_environment)
     runtime = approved_plugins().create_runtime_provider("matcreator.native", provider)
-    base_module = import_module(runtime.__class__.__mro__[1].__module__)
+    base_module = import_module(runtime.__class__.__module__)
+    assert runtime.__class__ is base_module.MatCreatorRuntime
     worker = tmp_path / "native_worker.py"
     worker.write_text('''import json, os, sys
 assert "control-secret-must-not-reach-worker" not in os.environ.values()
@@ -76,10 +81,13 @@ send({"type": "completed", "text": "managed tool completed"})
         [(command, options["envs"]) for command, options in sdk.commands])
 
 
-def test_hosted_worker_environment_does_not_change_personal_environment(monkeypatch):
+def test_hosted_worker_environment_does_not_change_personal_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("OAW_LOCAL_EXTENSION_SETTING", "personal-value")
-    hosted = approved_plugins().create_runtime_provider("matcreator.native", None)
-    personal = hosted.__class__.__mro__[1](None)
+    settings = Settings.for_data_root(tmp_path)
+    provider = lambda config: WorldAgentCapabilityProvider(SimpleNamespace(settings=config))
+    hosted = approved_plugins().create_runtime_provider("matcreator.native", provider(
+        replace(settings, inherit_runtime_environment=False)))
+    personal = hosted.__class__(provider(settings))
     assert personal._worker_environment()["OAW_LOCAL_EXTENSION_SETTING"] == "personal-value"
     assert "OAW_LOCAL_EXTENSION_SETTING" not in hosted._worker_environment()
     assert os.environ["OAW_LOCAL_EXTENSION_SETTING"] == "personal-value"
@@ -90,10 +98,13 @@ def test_hosted_worker_environment_does_not_change_personal_environment(monkeypa
 @pytest.mark.parametrize("scripted_model", [False, True], indirect=True, ids=["normal", "tool-failures"])
 async def test_hosted_real_engine_retains_planning_checkpoint_and_tool_protocol(tmp_path, scripted_model, monkeypatch):
     # Exercise the maintained engine with its existing deterministic model
-    # endpoint and assertions, changing only the deployment runtime factory.
+    # endpoint and assertions, changing only the host environment policy.
     # This is neither a real external model nor an Alibaba service test.
     from plugins.matcreator.tests import test_native_runtime as contract
     registry = approved_plugins()
-    monkeypatch.setattr(contract, "MatCreatorRuntime",
-                        lambda provider: registry.create_runtime_provider("matcreator.native", provider))
+    def runtime(provider):
+        provider.subprocess_environment = WorldAgentCapabilityProvider(SimpleNamespace(
+            settings=replace(Settings.for_data_root(tmp_path), inherit_runtime_environment=False))).subprocess_environment
+        return registry.create_runtime_provider("matcreator.native", provider)
+    monkeypatch.setattr(contract, "MatCreatorRuntime", runtime)
     await contract.test_pack_engine_planner_checkpoint_executor_recursive_child_and_oaw_tool(tmp_path, scripted_model)

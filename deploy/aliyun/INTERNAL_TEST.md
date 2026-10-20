@@ -86,8 +86,8 @@ ssh -N -L 127.0.0.1:8080:127.0.0.1:8080 <已授权的SSH连接名>
 
 这里的 MatCreator 始终是仓库内的 `plugins/matcreator/oaw_matcreator_engine`。
 `native_runtime.py` 启动 worker，并通过 OAW 工具接口执行任务；“原生”指这条内化引擎路径，
-不代表另一个云产品。当前云入口在 `backend/cloud/aliyun/matcreator.py` 使用受信任的编排
-worker，限制继承的环境变量，并复用逐次授权的工具桥。只有生成的命令进入阿里 Sandbox，
+不代表另一个云产品。云入口直接加载独立 MatCreator 卡包，由卡包维护受信任的编排
+worker；通用宿主接口限制其继承的环境变量，并复用逐次授权的工具桥。只有生成的命令进入阿里 Sandbox，
 worker 进程本身不构成 OS 隔离边界。网络授权、runtime bundle 等未支持能力仍明确拒绝。
 
 交付前必须在真实环境中完成：

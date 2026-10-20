@@ -12,6 +12,90 @@ from backend.cloud.aliyun.sandbox import AliyunSandboxBackend, AliyunSandboxSett
 from backend.sandbox.models import SandboxStateError
 
 
+def test_full_research_publication_round_trips_into_private_cloud_workspaces(tmp_path, monkeypatch):
+    import asyncio
+    from contextlib import ExitStack
+    import json
+
+    from backend.hosting.templates import initialize_runtime
+    from oaw_matcreator.preset import native_definition
+
+    configure(monkeypatch, "unused")
+    monkeypatch.delenv("OAW_ALIYUN_PROFILE_ID")
+    monkeypatch.setenv("OAW_ALIYUN_WORKSPACE_STORE", "ecs")
+    monkeypatch.setenv("OAW_ALIYUN_SANDBOX_READY", "1")
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("Publishing and browsing must not allocate cloud compute")
+
+    monkeypatch.setattr(AliyunSandboxBackend, "_start", forbidden)
+
+    def config(name, mode):
+        return WorkerConfig(str(uuid4()), str(uuid4()), "research", mode,
+                            "https://hosted.example", "ab" * 32, tmp_path / name,
+                            agent_runtime="core.mock")
+
+    def client(worker):
+        return TestClient(create_worker_app(worker, services_factory=hosted.create_hosted_services),
+                          headers={"Authorization": "Bearer " + mint_worker_token(
+                              worker.secret, worker.profile_id, worker.user_id),
+                                   "Origin": worker.public_origin})
+
+    registry = hosted.approved_plugins()
+    preset = next(p for p in registry.legion_presets() if p.id == "matcreator.native-research")
+    assert preset == native_definition()
+    original = next(n for n in native_definition().nodes if n.key == "group")
+    assert next(n for n in preset.nodes if n.key == "group").config["workspace_layout"] == original.config["workspace_layout"]
+    with client(config("admin", "builder")) as admin:
+        result = admin.post("/api/legions/presets/matcreator.native-research/instances", json={})
+        assert result.status_code == 201, result.text
+        legion = next(n for n in result.json()["nodes"] if n["type"] == "legion")
+        request = {"legion_id": legion["id"], "name": "Full research"}
+        assert admin.post("/api/deployments/preview", json=request).json()["ready"]
+        release = admin.post("/api/deployments", json=request)
+        assert release.status_code == 201, release.text
+        assert len(release.json()["panels"]) == 10
+        template = admin.get("/api/hosting-template/" + release.json()["id"])
+        assert template.status_code == 200, template.text
+        path = tmp_path / "template.json"
+        path.write_text(json.dumps(template.json()), encoding="utf-8")
+
+    root = "/api/runtime-app/workspace"
+    with ExitStack() as stack:
+        workspaces = []
+        for name in ("alice", "bob"):
+            worker = config(name, "runtime")
+            asyncio.run(initialize_runtime(worker, path, services_factory=hosted.create_hosted_services))
+            runtime = stack.enter_context(client(worker))
+            bootstrap = runtime.get("/api/runtime-app")
+            assert bootstrap.status_code == 200, bootstrap.text
+            cards = {n["type"]: n["id"] for n in bootstrap.json()["cards"]}
+            assert len(bootstrap.json()["panels"]) == 10
+            assert len(bootstrap.json()["edges"]) == 2
+            for suffix in (
+                f"/nodes/{cards['core.execution-graph']}/execution-sources",
+                f"/nodes/{cards['core.jobs']}/jobs",
+                f"/artifact-collections/{cards['core.artifact-collection']}/versions",
+                f"/sandboxes/{cards['sandbox']}/files",
+            ):
+                response = runtime.get(root + suffix)
+                assert response.status_code == 200, response.text
+            assert runtime.get("/api/world").status_code == 404
+            assert runtime.get("/api/settings/models").status_code == 404
+            workspaces.append((runtime, cards))
+        (alice, a), (bob, b) = workspaces
+        assert not set(a.values()).intersection(b.values())
+        url = f"{root}/nodes/{a['matcreator.kdg']}/actions/"
+        before = alice.post(url + "search", json={"arguments": {}}).json()
+        edit = alice.post(url + "edit", json={"arguments": {
+            "title": "Alice private finding", "type": "memory", "summary": "Not a template asset"},
+            "expected_revision": before["revision"]})
+        assert edit.status_code == 200, edit.text
+        other = bob.post(f"{root}/nodes/{b['matcreator.kdg']}/actions/search", json={"arguments": {}})
+        assert other.status_code == 200 and "Alice private finding" not in other.text
+        assert bob.post(url + "search", json={"arguments": {}}).status_code == 404
+
+
 def configure(monkeypatch, profile):
     for name, value in {
         "OAW_ALIYUN_PROFILE_ID": profile,

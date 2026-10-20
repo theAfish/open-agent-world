@@ -73,11 +73,25 @@ application/entry selection; the navigation can accommodate further explicitly
 designed settings. Do not expose arbitrary process environment or host settings
 to workspace users.
 
-## Follow-up in dev
+## Shared publication contracts
 
-The general Workspace publication boundary belongs in dev, not in the Alibaba
-adapter. Reuse card components and existing SDK/business handlers, deriving
-access from authenticated ownership, the published node set and operation
-permissions. Developers should not need a second set of Workspace endpoints.
-The current explicit publication contracts do not yet cover all engineering
-pages; improving the common defaults and authorization remains separate work.
+The Alibaba branch includes dev's Plugin API 1.36 publication contracts. The
+complete MatCreator research layout reuses its ordinary card components and SDK
+business handlers, including Graph, Jobs, knowledge, structure preview and
+artifacts. The cloud composition loads the original Pack and its research preset;
+the earlier hosted-only preset is no longer offered for new instances.
+
+Plugin API 1.37 provides the provider-neutral subprocess environment contract.
+Hosted services select a minimal environment; the Pack uses this public contract
+without a cloud-specific runtime subclass. Personal process defaults are retained.
+
+Publish checks all visible pages before creating a release. Document-backed
+plugins may explicitly publish their business document; other plugin operations
+retain explicit capability permissions. This does not expose arbitrary editor
+APIs or make undeclared custom plugins automatically publishable. See
+[plugin deployment](../plugin-deployment.md).
+
+Existing releases and user workspaces are snapshots, not references to the latest
+preset. Updating application code does not rewrite their layout or account entry.
+Publish and deploy a new release to adopt the full layout; the admin chooses
+when each account switches and can switch back without replacing private data.
