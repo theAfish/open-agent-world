@@ -74,9 +74,12 @@ process environment or host settings to workspace users.
 
 ## Shared execution environment
 
-`/admin?section=environment` accepts values and secret bindings using the same
-editor as personal Sandbox settings. Administrators also reach it from their
-engineering canvas Settings. Saved secret fields remain blank; leaving a
+The administration **Settings** button and `/admin?section=environment` open the
+existing `SettingsPanel` at **Sandbox → Global environment variables**.
+Administrators use the same panel from their engineering canvas. The
+`sandboxSettingsSource` adapter selects personal storage or the administrator
+endpoint; loading, editing, saving and error recovery share one UI and workflow.
+Host runtime/path controls remain personal-only. Saved secret fields remain blank; leaving a
 configured secret blank preserves it, changing it replaces it, and removing its
 last variable deletes its binding. Revision checks reject concurrent stale saves.
 

@@ -6,11 +6,12 @@ import { EMPTY_MODEL_CATALOG, type ModelCatalog, type ModelConnection } from '..
 import { signOutHosted, type HostedSession } from './hostedSession';
 import { adminRequest } from './adminRequest';
 import { HostedDeployments } from './HostedDeployments';
-import { HostedEnvironment } from './HostedEnvironment';
+import { SettingsPanel } from '../shell/SettingsPanel';
+import { useWorldStore } from '../state/worldStore';
 import './hosted.css';
 
 interface HostingStatus { shared_models_enabled: boolean; shared_environment_enabled?: boolean; workspace_count: number; users: { username: string; display_name: string; role: string; enabled: boolean }[] }
-type AdminTab = 'deployments' | 'models' | 'environment' | 'accounts';
+type AdminTab = 'deployments' | 'models' | 'accounts';
 
 export function HostedAdmin({ session }: { session: HostedSession }) {
   const { locale, setLocale } = useLocale();
@@ -18,8 +19,13 @@ export function HostedAdmin({ session }: { session: HostedSession }) {
   const allowed = session.user?.role === 'admin';
   const [tab, setTab] = useState<AdminTab>(() => {
     const section = new URLSearchParams(window.location.search).get('section');
-    return section === 'models' || section === 'environment' || section === 'accounts' ? section : 'deployments';
+    return section === 'models' || section === 'accounts' ? section : 'deployments';
   });
+  useEffect(() => {
+    if (allowed && new URLSearchParams(window.location.search).get('section') === 'environment') {
+      useWorldStore.setState({ settingsOpen: true });
+    }
+  }, [allowed]);
   const [draft, setDraft] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
   const [saved, setSaved] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
   const [status, setStatus] = useState<HostingStatus>();
@@ -57,10 +63,11 @@ export function HostedAdmin({ session }: { session: HostedSession }) {
     </header>
     {!allowed ? <p role="alert">{copy('Administrator access required.', '需要管理员权限。')}</p> : <>
       <nav className="hosted-admin-nav" aria-label={copy('Administration sections', '管理分类')}>
-        {(['deployments', 'models', 'environment', 'accounts'] as const).map(item => <button key={item} className={tab === item ? 'primary-button' : 'secondary-button'} aria-pressed={tab === item} onClick={() => setTab(item)}>{item === 'deployments' ? copy('Build & deploy', '搭建与部署') : item === 'models' ? copy('Shared models', '公共模型') : item === 'environment' ? copy('Global environment', '全局环境') : copy('Accounts', '账号')}</button>)}
+        {(['deployments', 'models', 'accounts'] as const).map(item => <button key={item} className={tab === item ? 'primary-button' : 'secondary-button'} aria-pressed={tab === item} onClick={() => setTab(item)}>{item === 'deployments' ? copy('Build & deploy', '搭建与部署') : item === 'models' ? copy('Shared models', '公共模型') : copy('Accounts', '账号')}</button>)}
+        <button type="button" className="secondary-button" onClick={() => useWorldStore.setState({ settingsOpen: true })}>{copy('Settings', '设置')}</button>
       </nav>
       {tab === 'deployments' && <HostedDeployments session={session} />}
-      {tab === 'environment' && <HostedEnvironment enabled={status?.shared_environment_enabled} />}
+      <SettingsPanel initialSection="sandbox" />
       {tab !== 'models' && error && <p className="settings-error" role="alert">{error}</p>}
       {tab === 'models' && <>
       <section className="hosted-admin-intro"><h2>{copy('Shared models', '公共模型')}</h2>

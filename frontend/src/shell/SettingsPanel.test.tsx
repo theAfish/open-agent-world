@@ -23,7 +23,7 @@ describe("Application settings", () => {
       { id: "windows", label: "Windows", platform: "windows", available: true, reason: null, shell: [], supports_workspace: true },
     ] });
   });
-  afterEach(cleanup);
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
   it('keeps personal model settings while hiding host paths and runtime management for hosted users', async () => {
     vi.spyOn(hostedAuth, 'isHosted').mockReturnValue(true);
@@ -51,15 +51,23 @@ describe("Application settings", () => {
     expect(screen.queryByRole('link', { name: 'Manage global environment' })).toBeNull();
   });
 
-  it('links administrators to deployment-wide environment settings without exposing host controls', async () => {
+  it('uses the same Sandbox settings section for administrators without exposing host controls', async () => {
     vi.spyOn(hostedAuth, 'isHosted').mockReturnValue(true);
     vi.spyOn(hostedAuth, 'currentHostedSession').mockReturnValue({ hosted: true, authenticated: true,
       user: { id: 'admin', username: 'admin', display_name: 'Admin', role: 'admin' },
       login_methods: ['password'], instance: null, shared_models: true });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json(url.endsWith('/status')
+      ? { shared_environment_enabled: true }
+      : { revision: 0, environment_variables: {}, secret_bindings: {} })));
     render(<SettingsPanel />);
     await screen.findByText('Shared models');
-    expect(screen.getByRole('link', { name: 'Manage global environment' }).getAttribute('href')).toBe('/admin?section=environment');
+    fireEvent.click(screen.getByRole('button', { name: 'Sandbox' }));
+    await screen.findByText('No variables.');
+    expect(screen.getByRole('button', { name: 'Save settings' })).toBeTruthy();
     expect(worldApi.getSandboxSettings).not.toHaveBeenCalled();
+    expect(worldApi.getSandboxRuntimes).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Default Workspace location')).toBeNull();
+    expect(screen.queryByLabelText('Default runtime')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Storage' })).toBeNull();
   });
 

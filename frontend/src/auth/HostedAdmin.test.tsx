@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { HostedAdmin } from './HostedAdmin';
 import type { HostedSession } from './hostedSession';
+import * as hostedAuth from './hostedSession';
+import { useWorldStore } from '../state/worldStore';
 
 const session: HostedSession = { hosted: true, authenticated: true, user: { id: 'admin', username: 'admin', display_name: 'Admin', role: 'admin' }, instance: null, login_methods: ['password'], shared_models: true };
 const catalog = { revision: 1, default_model: 'oaw:model:chat', connections: [{ id: 'shared', name: 'Company AI', adapter: 'openai', base_url: 'https://models.example/v1', enabled: true, auth_mode: 'api_key', api_key_configured: true, models: [{ id: 'chat', name: 'Assistant', model_id: 'test-chat', enabled: true }] }] };
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+beforeEach(() => {
+  useWorldStore.setState({ settingsOpen: false });
+  vi.spyOn(hostedAuth, 'isHosted').mockReturnValue(true);
+  vi.spyOn(hostedAuth, 'currentHostedSession').mockReturnValue(session);
+});
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 it('edits shared settings without a workspace, keeps saved keys hidden and routes discovery to administration', async () => {
   const request = vi.fn(async (url: string, init?: RequestInit) => {
@@ -37,10 +44,10 @@ it('does not load the administrator catalog for an ordinary user', async () => {
   await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Administrator access required.'));
   expect(request).not.toHaveBeenCalled();
   expect(screen.queryByRole('button', { name: 'Save shared models' })).toBeNull();
-  expect(screen.queryByRole('button', { name: 'Global environment' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
 });
 
-it('opens the shared environment editor from the administration navigation', async () => {
+it('opens the existing Settings dialog from the administration navigation', async () => {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url.endsWith('/environment')) return Response.json({ revision: 0, environment_variables: {}, secret_bindings: {} });
     if (url.endsWith('/deployments')) return Response.json({ releases: [], users: [], profiles: [], jobs: [] });
@@ -48,8 +55,9 @@ it('opens the shared environment editor from the administration navigation', asy
     return Response.json(catalog);
   }));
   render(<HostedAdmin session={session} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Global environment' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
   await screen.findByRole('button', { name: 'Add variable' });
-  expect(screen.getByRole('button', { name: 'Save environment variables' })).toBeTruthy();
+  expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Save settings' })).toBeTruthy();
   expect(screen.queryByText(/delivery has not been enabled/)).toBeNull();
 });

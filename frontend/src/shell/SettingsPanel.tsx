@@ -18,11 +18,16 @@ import { DeepLSettings } from "./DeepLSettings";
 import { EnvironmentVariablesEditor, environmentSecretUpdates, environmentFolderUpdates, environmentVariablesFromValue, environmentVariablesToValue, type EnvironmentVariableRow } from "../cards/ExecutionConfiguration";
 import { currentHostedSession, isHosted } from '../auth/hostedSession';
 import { ManagedModels } from '../auth/ManagedModels';
+import { sandboxSettingsSource, type SandboxSettingsSnapshot } from './sandboxSettingsSource';
 
-export function SettingsPanel() {
+type SettingsSection = "model" | "sandbox" | "storage" | "deepl";
+
+export function SettingsPanel({ initialSection = "model" }: { initialSection?: SettingsSection }) {
   const { locale, setLocale } = useLocale();
   const hosted = isHosted();
   const managedModels = hosted && currentHostedSession()?.shared_models === true;
+  const sandboxSource = sandboxSettingsSource();
+  const sharedEnvironment = sandboxSource?.scope === 'deployment';
   const open = useWorldStore((state) => state.settingsOpen);
   const presence = useMotionPresence(open);
   const settings = useWorldStore((state) => state.modelSettings);
@@ -31,10 +36,13 @@ export function SettingsPanel() {
   const [draft, setDraft] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
   const [savedCatalog, setSavedCatalog] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
   const [modelLoaded, setModelLoaded] = useState(false);
+  const [modelRequested, setModelRequested] = useState(
+    initialSection === 'model' || (initialSection === 'sandbox' && !sandboxSource));
   const [modelError, setModelError] = useState("");
   const [modelRetry, setModelRetry] = useState(0);
   const [simpleSetup, setSimpleSetup] = useState(false);
-  const [section, setSection] = useState<"model" | "sandbox" | "storage" | "deepl">("model");
+  const [section, setSection] = useState<SettingsSection>(
+    initialSection === 'sandbox' && !sandboxSource ? 'model' : initialSection);
   const [storage, setStorage] = useState<StorageSettings | null>(null);
   const [storagePath, setStoragePath] = useState("");
   const [storageRetry, setStorageRetry] = useState(0);
@@ -50,6 +58,7 @@ export function SettingsPanel() {
     return () => { active = false; };
   }, [hosted, open, section, storageRetry]);
   const [sandbox, setSandbox] = useState<SandboxSettings>({ workspace_root: null, runtime: "auto" });
+  const [sandboxSnapshot, setSandboxSnapshot] = useState<SandboxSettingsSnapshot>();
   const [sandboxSaved, setSandboxSaved] = useState(false);
   const [environmentSecrets, setEnvironmentSecrets] = useState<Record<string, string>>({});
   useEffect(() => { if (!open) setEnvironmentSecrets({}); }, [open]);
@@ -67,7 +76,7 @@ export function SettingsPanel() {
   }, [presence.present]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !modelRequested) return;
     setModelLoaded(false);
     setModelError("");
     let active = true;
@@ -84,28 +93,30 @@ export function SettingsPanel() {
         if (active) setModelError(cause instanceof Error ? cause.message : t("Could not load model settings."));
       });
     return () => { active = false; };
-  }, [open, settings, modelRetry, managedModels]);
+  }, [open, settings, modelRetry, managedModels, modelRequested]);
 
   useEffect(() => {
-    if (hosted || !open) return;
+    if (!sandboxSource || !open) return;
     let active = true;
     setLoaded(false);
     setSandboxSaved(false);
     setError("");
-    Promise.all([worldApi.getSandboxSettings(), worldApi.getSandboxRuntimes()])
-      .then(([value, catalog]) => {
+    sandboxSource.load()
+      .then(snapshot => {
         if (!active) return;
+        const value = snapshot.settings;
+        setSandboxSnapshot(snapshot);
         setSandbox(value);
         setEnvironmentSecrets({});
         setEnvironmentRows(environmentVariablesFromValue({ variables: value.environment_variables ?? {} }, value.folder_bindings));
-        setRuntimes(catalog.runtimes);
+        setRuntimes(snapshot.runtimes);
         setLoaded(true);
       })
       .catch((cause: unknown) => {
         if (active) setError(cause instanceof Error ? cause.message : t("Could not load Sandbox settings."));
       });
     return () => { active = false; };
-  }, [hosted, open, retry]);
+  }, [sandboxSource, open, retry]);
 
   if (!presence.present) return null;
 
@@ -125,10 +136,13 @@ export function SettingsPanel() {
         setStorage(saved);
         setStoragePath(saved.pending_path ?? "");
       } else if (section === "sandbox") {
+        if (!sandboxSource || !sandboxSnapshot) return;
         const variables = environmentVariablesToValue(environmentRows).variables as NonNullable<SandboxSettings["environment_variables"]>;
         const secrets = environmentSecretUpdates(environmentRows, environmentSecrets, sandbox.secret_bindings ?? {});
         const folders = environmentFolderUpdates(environmentRows);
-        const saved = await worldApi.saveSandboxSettings({ ...(Object.keys(secrets).length ? { secrets } : {}), ...(Object.keys(folders).length ? { folders } : {}), runtime: sandbox.runtime, workspace_root: sandbox.workspace_root?.trim() || null, environment_variables: variables });
+        const snapshot = await sandboxSource.save({ ...(Object.keys(secrets).length ? { secrets } : {}), ...(Object.keys(folders).length ? { folders } : {}), runtime: sandbox.runtime, workspace_root: sandbox.workspace_root?.trim() || null, environment_variables: variables }, sandboxSnapshot);
+        const saved = snapshot.settings;
+        setSandboxSnapshot(snapshot);
         setSandbox(saved);
         setEnvironmentRows(environmentVariablesFromValue({ variables: saved.environment_variables ?? {} }, saved.folder_bindings));
         setEnvironmentSecrets({});
@@ -165,12 +179,10 @@ export function SettingsPanel() {
         <div className="settings-layout">
         <nav className="settings-sections" aria-label={t("Settings sections")}>
           <label className="field-label"><span>{t('Language')}</span><select aria-label={t('Language')} value={locale} onChange={event => setLocale(event.target.value === 'zh-CN' ? 'zh-CN' : 'en')}><option value="zh-CN">简体中文</option><option value="en">English</option></select></label>
-          <button type="button" className="secondary-button" data-tutorial="models-tab" aria-pressed={section === "model"} disabled={busy} onClick={() => { setSection("model"); setError(""); }}><Cpu size={16} /> {t("Models")}</button>
-          {!hosted && <button type="button" className="secondary-button" aria-pressed={section === "sandbox"} disabled={busy} onClick={() => { setSection("sandbox"); setError(""); }}><Box size={16} /> {t("Sandbox")}</button>}
+          <button type="button" className="secondary-button" data-tutorial="models-tab" aria-pressed={section === "model"} disabled={busy} onClick={() => { setModelRequested(true); setSection("model"); setError(""); }}><Cpu size={16} /> {t("Models")}</button>
+          {sandboxSource && <button type="button" className="secondary-button" aria-pressed={section === "sandbox"} disabled={busy} onClick={() => { setSection("sandbox"); setError(""); }}><Box size={16} /> {t("Sandbox")}</button>}
           {!hosted && <button type="button" className="secondary-button" aria-pressed={section === "storage"} disabled={busy} onClick={() => { setSection("storage"); setError(""); }}><HardDrive size={16} /> {t("Storage")}</button>}
           <button type="button" className="secondary-button" aria-pressed={section === "deepl"} disabled={busy} onClick={() => { setSection("deepl"); setError(""); }}>{t("DeepL")}</button>
-          {hosted && currentHostedSession()?.user?.role === 'admin' && <a className="secondary-button" href="/admin?section=environment">
-            <Settings2 size={16} />{locale === 'zh-CN' ? '管理全局环境' : 'Manage global environment'}</a>}
         </nav>
 
         <div className="settings-content">
@@ -210,7 +222,7 @@ export function SettingsPanel() {
             <ul>{sandbox.backup_paths.map(path => <li key={path}><code>{path}</code></li>)}</ul>
           </section>}
           {!loaded && !error && <p role="status">{t("Loading Sandbox settings…")}</p>}
-          <div className="field-label">
+          {!sharedEnvironment && <><div className="field-label">
             <span id="sandbox-default-workspace-label">{t("Default Workspace location")}</span>
             <FolderPathInput label={t("Default Workspace location")} describedBy="sandbox-default-workspace-help"
               value={sandbox.workspace_root ?? ""} disabled={!loaded || busy} placeholder={t("System-managed location")}
@@ -225,15 +237,23 @@ export function SettingsPanel() {
               {sandbox.runtime !== "auto" && !runtimes.some((runtime) => runtime.id === sandbox.runtime) && <option value={sandbox.runtime}>{sandbox.runtime} {t("(not installed)")}</option>}
               {runtimes.map((runtime) => <option key={runtime.id} value={runtime.id}>{runtime.label}{runtime.available ? "" : " (unavailable)"}</option>)}
             </select>
-          </label>
+          </label></>}
           <section aria-label={t("Global environment variables")}>
             <h3>{t("Global environment variables")}</h3>
-            <p className="settings-description">{t("Applies to all Sandboxes on their next command. Local values take priority.")}</p>
-            <EnvironmentVariablesEditor rows={environmentRows} onChange={rows => { setEnvironmentRows(rows); setSandboxSaved(false); }} disabled={!loaded || busy}
+            <p className="settings-description">{sharedEnvironment
+              ? (locale === 'zh-CN' ? '对所有用户的 Sandbox 生效，从下一条命令开始使用。工作区和卡片中的同名配置优先。' : 'Applies to every user’s Sandboxes on their next command. Workspace and card values take priority.')
+              : t("Applies to all Sandboxes on their next command. Local values take priority.")}</p>
+            {sharedEnvironment && <p className="settings-description">{locale === 'zh-CN'
+              ? '密钥保存后不回显；请仅配置允许所有用户通过 Sandbox 使用的服务凭据。'
+              : 'Saved secrets are hidden. Only share service credentials that all users may use through their Sandboxes.'}</p>}
+            {sandboxSnapshot?.deliveryEnabled === false && <p role="status">{locale === 'zh-CN'
+              ? '配置可以保存，但部署端尚未启用公共环境下发。'
+              : 'Settings can be saved, but shared environment delivery has not been enabled by the deployment operator.'}</p>}
+            <EnvironmentVariablesEditor rows={environmentRows} onChange={rows => { setEnvironmentRows(rows); setSandboxSaved(false); }} disabled={!loaded || busy} allowPaths={!sharedEnvironment}
               secrets={environmentSecrets} bindings={sandbox.secret_bindings ?? {}} onSecretsChange={setEnvironmentSecrets} />
           </section>
         </div>}
-        {(error || (section === "model" && modelError)) && <p role="alert" className="settings-error">{error || modelError} {section === "sandbox" && !loaded && <button type="button" className="secondary-button" onClick={() => setRetry((value) => value + 1)}>{t("Retry")}</button>} {section === "model" && <button type="button" className="secondary-button" onClick={() => { setError(""); setModelRetry((value) => value + 1); }}>{modelLoaded ? t("Discard draft and reload") : t("Retry")}</button>}</p>}
+        {(error || (section === "model" && modelError)) && <p role="alert" className="settings-error">{error || modelError} {section === "sandbox" && <button type="button" className="secondary-button" disabled={busy} onClick={() => setRetry((value) => value + 1)}>{loaded ? t("Discard draft and reload") : t("Retry")}</button>} {section === "model" && <button type="button" className="secondary-button" onClick={() => { setError(""); setModelRetry((value) => value + 1); }}>{modelLoaded ? t("Discard draft and reload") : t("Retry")}</button>}</p>}
 
         </div>
         </div>
