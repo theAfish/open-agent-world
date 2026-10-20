@@ -189,8 +189,7 @@ def workspace_router(manifest):
                                   WHERE m.session_id=s.id AND m.conversation_id=s.conversation_id
                                   AND m.run_id=?)
                 """, (run.context_id, run.caller_id, run.caller_kind, run_id)).fetchall()
-            if any({"conversation", "sessions"}.intersection(
-                    manifest["permissions"].get(row["conversation_id"], [])) for row in visible):
+            if any("conversation" in manifest["permissions"].get(row["conversation_id"], []) for row in visible):
                 return
             # Only recorded parentage carries a published conversation's
             # visibility to its delegated work; shared Agent/context IDs do not.

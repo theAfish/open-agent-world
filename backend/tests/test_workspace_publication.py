@@ -183,6 +183,21 @@ def test_conversation_run_details_reuse_archives_without_exposing_unpublished_ru
         assert client.post(base + "/cancel").status_code == 404
         assert client.get(ROOT + "/runs").status_code == 404
         assert client.get(ROOT + "/runs/missing/activity").status_code == 404
+        # Publishing a session picker or participant list does not publish
+        # conversation content, including the Run's public tool/reasoning bodies.
+        from fastapi import FastAPI
+        from backend.api.dependencies import get_services
+        from backend.deployment_workspace import workspace_router
+        for grant in ("sessions", "participants"):
+            limited = FastAPI()
+            limited.include_router(workspace_router({
+                "permissions": {records["nodes"]["conversation"]["id"]: [grant]},
+            }), prefix="/api/runtime-app")
+            limited.dependency_overrides[get_services] = lambda: services
+            with TestClient(limited) as restricted:
+                for run in (visible, child):
+                    for suffix in ("/activity", "/reasoning", "/invocations/tools"):
+                        assert restricted.get(ROOT + "/runs/" + run.run_id + suffix).status_code == 404
 
 
 def test_document_shorthand_is_explicit_freezes_registered_operations_and_preserves_projections():
