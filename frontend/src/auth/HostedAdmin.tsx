@@ -10,7 +10,7 @@ import { SettingsPanel } from '../shell/SettingsPanel';
 import { useWorldStore } from '../state/worldStore';
 import './hosted.css';
 
-interface HostingStatus { shared_models_enabled: boolean; shared_environment_enabled?: boolean; workspace_count: number; users: { username: string; display_name: string; role: string; enabled: boolean }[] }
+interface HostingStatus { shared_models_enabled: boolean; workspace_count: number; users: { username: string; display_name: string; role: string; enabled: boolean }[] }
 type AdminTab = 'deployments' | 'models' | 'accounts';
 
 export function HostedAdmin({ session }: { session: HostedSession }) {

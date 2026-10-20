@@ -48,7 +48,7 @@ describe("Application settings", () => {
     expect(screen.queryByLabelText('API key')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Save settings' })).toBeNull();
     expect(save).not.toHaveBeenCalled();
-    expect(screen.queryByRole('link', { name: 'Manage global environment' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sandbox' })).toBeNull();
   });
 
   it('uses the same Sandbox settings section for administrators without exposing host controls', async () => {
