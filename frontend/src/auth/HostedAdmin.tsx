@@ -3,23 +3,18 @@ import { LogOut, ShieldCheck } from 'lucide-react';
 import { useLocale } from '../i18n';
 import { ModelConnectionsEditor } from '../shell/ModelConnectionsEditor';
 import { EMPTY_MODEL_CATALOG, type ModelCatalog, type ModelConnection } from '../state/modelConnections';
-import { invalidateHostedSession, signOutHosted, type HostedSession } from './hostedSession';
+import { signOutHosted, type HostedSession } from './hostedSession';
+import { adminRequest } from './adminRequest';
+import { HostedDeployments } from './HostedDeployments';
 import './hosted.css';
 
 interface HostingStatus { shared_models_enabled: boolean; workspace_count: number; users: { username: string; display_name: string; role: string; enabled: boolean }[] }
-
-async function adminRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch('/hosting/admin/' + path, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(20_000), ...init });
-  if (response.status === 401) invalidateHostedSession();
-  const value = await response.json();
-  if (!response.ok) throw new Error(value.error?.message ?? 'Could not load shared settings.');
-  return value;
-}
 
 export function HostedAdmin({ session }: { session: HostedSession }) {
   const { locale, setLocale } = useLocale();
   const copy = (en: string, zh: string) => locale === 'zh-CN' ? zh : en;
   const allowed = session.user?.role === 'admin';
+  const [tab, setTab] = useState<'deployments' | 'models' | 'accounts'>('deployments');
   const [draft, setDraft] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
   const [saved, setSaved] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
   const [status, setStatus] = useState<HostingStatus>();
@@ -56,6 +51,11 @@ export function HostedAdmin({ session }: { session: HostedSession }) {
         <button className="secondary-button" onClick={() => { void signOutHosted(); }}><LogOut size={15} />{copy('Sign out', '退出登录')}</button></div>
     </header>
     {!allowed ? <p role="alert">{copy('Administrator access required.', '需要管理员权限。')}</p> : <>
+      <nav className="hosted-admin-nav" aria-label={copy('Administration sections', '管理分类')}>
+        {(['deployments', 'models', 'accounts'] as const).map(item => <button key={item} className={tab === item ? 'primary-button' : 'secondary-button'} aria-pressed={tab === item} onClick={() => setTab(item)}>{item === 'deployments' ? copy('Build & deploy', '搭建与部署') : item === 'models' ? copy('Shared models', '公共模型') : copy('Accounts', '账号')}</button>)}
+      </nav>
+      {tab === 'deployments' && <HostedDeployments session={session} />}
+      {tab === 'models' && <>
       <section className="hosted-admin-intro"><h2>{copy('Shared models', '公共模型')}</h2>
         <p>{copy('Configure a connection, add models, choose a default, then save. Users can use these models without entering their own keys.', '配置连接、添加模型并选择默认模型后保存。用户无需填写自己的密钥，即可使用这些模型。')}</p>
         <small>{copy('Saved keys are never displayed. Changes apply to subsequent model calls; open workspaces refresh the list automatically.', '已保存的密钥不会显示。修改作用于后续模型调用，已打开的工作区会自动刷新模型列表。')}</small>
@@ -68,7 +68,8 @@ export function HostedAdmin({ session }: { session: HostedSession }) {
         <footer><button type="button" className="secondary-button" disabled={busy || loading} onClick={() => setReload(value => value + 1)}>{copy('Discard draft and reload', '放弃草稿并重新加载')}</button>
           <button className="primary-button" type="submit" disabled={busy || loading || !status}>{busy ? copy('Saving…', '正在保存…') : copy('Save shared models', '保存公共模型')}</button></footer>
       </form>
-      {status && <section className="hosted-admin-users"><h2>{copy('Accounts', '账号')}</h2><p>{copy('Accounts and administrator roles are assigned by the deployment operator.', '账号及管理员权限由部署人员开通和分配。')}</p><ul>{status.users.map(user => <li key={user.username}><strong>{user.username}</strong><span>{user.role === 'admin' ? copy('Administrator', '管理员') : copy('User', '用户')}{!user.enabled && (' · ' + copy('Disabled', '已停用'))}</span></li>)}</ul></section>}
+      </>}
+      {tab === 'accounts' && status && <section className="hosted-admin-users"><h2>{copy('Accounts', '账号')}</h2><p>{copy('Accounts and administrator roles are assigned by the deployment operator. Manage workspace access in Build & deploy.', '账号及管理员权限由部署人员开通和分配，工作区入口可在“搭建与部署”中管理。')}</p><ul>{status.users.map(user => <li key={user.username}><strong>{user.username}</strong><span>{user.role === 'admin' ? copy('Administrator', '管理员') : copy('User', '用户')}{!user.enabled && (' · ' + copy('Disabled', '已停用'))}</span></li>)}</ul></section>}
     </>}
   </main>;
 }

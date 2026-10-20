@@ -45,6 +45,24 @@ def test_hosted_composition_exposes_only_unavailable_cloud_runtime_until_verifie
         assert client.post("/api/nodes", json={"type": "text"}).status_code == 201
 
 
+def test_new_ecs_workspace_files_work_before_any_compute_start(tmp_path, monkeypatch):
+    profile, user = str(uuid4()), str(uuid4())
+    configure(monkeypatch, profile)
+    monkeypatch.setenv("OAW_ALIYUN_WORKSPACE_STORE", "ecs")
+    monkeypatch.setenv("OAW_ALIYUN_SANDBOX_READY", "1")
+    worker = WorkerConfig(profile, user, "files", "builder", "https://hosted.example", "ab" * 32,
+                          tmp_path, agent_runtime="core.mock")
+    headers = {"Authorization": "Bearer " + mint_worker_token(worker.secret, profile, user), "Origin": worker.public_origin}
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("File browsing must not allocate cloud compute")
+    monkeypatch.setattr(AliyunSandboxBackend, "_start", forbidden)
+    with TestClient(create_worker_app(worker, services_factory=hosted.create_hosted_services), headers=headers) as client:
+        card = client.post("/api/nodes", json={"type": "sandbox", "name": "Files"}).json()
+        response = client.get(f"/api/sandboxes/{card['id']}/files")
+        assert response.status_code == 200, response.text
+        assert client.get(f"/api/sandboxes/{card['id']}").json()["state"] == "stopped"
+
+
 def test_worker_rejects_another_users_sandbox_configuration(tmp_path, monkeypatch):
     profile, user = str(uuid4()), str(uuid4())
     configure(monkeypatch, str(uuid4()))

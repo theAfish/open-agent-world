@@ -38,5 +38,21 @@ def hosted_matcreator(plugin):
                 }})
                                if node.type == "sandbox" else node for node in definition.nodes),
             })
+            # A deployable presentation keeps all research/knowledge assets in
+            # the Legion, while publishing only declared runtime surfaces.
+            # The full engineering preset remains available on the canvas.
+            from oaw_matcreator.preset import pane, split, tabs, view
+            hosted = registration.legion_presets[definition.id]
+            layout = {"version": 2, "hidden_sections": [], "root": split("horizontal", .20,
+                pane("conversation", "sessions"),
+                split("horizontal", .70, pane("conversation", "conversation"),
+                      tabs(view("sandbox", "files"), view("sandbox", "preview"))))}
+            registration.legion_presets["matcreator.hosted-workspace"] = hosted.model_copy(update={
+                "id": "matcreator.hosted-workspace", "name": "MatCreator hosted workspace",
+                "description": "Deployable MatCreator conversation, files and preview; research and knowledge assets stay in the background.",
+                "nodes": tuple(node.model_copy(update={"name": "MatCreator workspace", "config": {
+                    **node.config, "workspace_layout": layout,
+                }}) if node.key == "group" else node for node in hosted.nodes),
+            })
 
     return HostedMatCreator()

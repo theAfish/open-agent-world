@@ -7,17 +7,25 @@
 ## 运行结构
 
 - Nginx 提供 HTTPS 和 WebSocket 转发，网关只监听 `127.0.0.1:8080`。
-- 每个账号对应一个独立 Linux UID、Unix socket、OAW profile 和 SQLite 数据库。
+- 每个工作区对应独立 Linux UID、Unix socket、OAW profile 和 SQLite 数据库；账号可保留多个版本，选择一个登录入口。
 - 账号由管理员预先创建，用户通过同一个地址登录；暂不开放自行注册。
-- 当前使用 `builder` 画布模式。后续验证通过后，按通用托管文档发布 Legion、导出模板，
-  为用户显式创建 `runtime` 实例；切换模式不得覆盖已有用户数据。
+- admin 在工程画布搭建 Legion、编排 Workspace 并发布，再从 `/admin` 的“搭建与部署”
+  选择版本、账号以及 `builder` 画布或 `runtime` Workspace 界面。部署生成全新的私有工作区，
+  就绪后显式设为账号入口；旧画布、对话、文件和后台任务保留，可切回。
 - 账户库和用户数据位于 ECS 本地持久磁盘。备份必须包含完整
   `/srv/oaw-hosting/control` 和 `/srv/oaw-hosting/instances`，并保持权限及凭据一致。
 - 工作文件也保存在各自 ECS profile 的 `ecs-workspace` 目录。每次执行前恢复到该用户的
   阿里临时 Sandbox，执行结束后保存到 ECS，再释放 Sandbox。后续执行会使用新的 VM。
   账号库、OAW 数据库、登录凭据及云管理密钥不会传入 Sandbox。
+- ECS 文件模式在首次浏览文件时准备本地私有目录，无需启动或创建云端计算实例；
+  计算仍由阿里 Sandbox 执行。个人版及其他存储后端保留原有启动规则。
 
 ## 阿里执行适配
+
+云端提供 `MatCreator hosted workspace` 预设：保留完整研究智能体与知识资产，
+发布的 Workspace 包含会话列表、对话、沙盒文件和预览。完整工程预设仍可用于画布搭建；
+Agent Graph、Jobs、Know-Do Graph、结构查看器等尚未声明公开部署页面，暂不能直接放进发布布局。
+可见布局不包含这些页面，不会移除后台智能体使用它们的能力。
 
 管理员在 `/srv/oaw-hosting/worker-common.env` 统一配置一次（root 持有、0600）：
 

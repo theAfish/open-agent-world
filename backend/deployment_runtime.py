@@ -38,8 +38,9 @@ def runtime_router(manifest: dict, *, secure_cookie: bool = False, hosted: bool 
             context = context_from_scope(request.scope)
             if context.actor.kind != ActorKind.USER or context.auth_method != "external_identity":
                 raise HTTPException(401, "Sign in to this application")
-            with bind_request_context(context):
-                yield context
+            # ProfileAccessMiddleware owns the context lifetime, including
+            # exceptions and streaming. Do not nest a generator-owned binding.
+            yield context
             return
         context = establish_request_context(request.scope, ActorRef(ActorKind.ANONYMOUS, "deployment-public"),
                                             auth_method="deployment_public")

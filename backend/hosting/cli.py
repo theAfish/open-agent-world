@@ -195,7 +195,7 @@ def main(argv=None):
             if oidc_path.is_file():
                 from .oidc import OidcSettings
                 oidc = OidcSettings(**json.loads(oidc_path.read_text(encoding="utf-8")))
-            app = create_gateway(read_gateway_settings(config), args.frontend, oidc_settings=oidc)
+            app = create_gateway(read_gateway_settings(config), args.frontend, oidc_settings=oidc, settings_path=config)
         else:
             from .worker import create_worker_app
             value = json.loads(args.config.read_text(encoding="utf-8"))

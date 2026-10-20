@@ -489,7 +489,12 @@ class SandboxManager(SandboxBackend):
                 from .files import file_operation, run_file_operation
                 return await run_file_operation(file_operation, Path(binding.workspace_path), binding.workspace_access,
                     tuple(binding.attachments.values()), operation, **options)
-            raise SandboxStateError("Start once to prepare the managed workspace")
+            runtime = await self.registry.select(self.preferred if binding.runtime == "auto" else binding.runtime)
+            if not runtime.available or not runtime.files_before_start:
+                raise SandboxStateError("Start once to prepare the managed workspace")
+            async with binding.lock:
+                if not binding.provisioned:
+                    await self._provision(binding, runtime.id)
         return await self._backend(binding.resolved_runtime or "").file_operation(sandbox_id, operation, **options)
 
     async def terminate(self, sandbox_id: str) -> None:

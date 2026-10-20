@@ -473,7 +473,8 @@ def registry_factory(settings: AliyunSandboxSettings):
                            network_available=True, network_status="available", network_transport="platform_firewall",
                            network_reason=NETWORK_REASON, resource_limits_available=False,
                            resource_limit_reason="Resource limits are set by the Alibaba template",
-                           installation_guidance=INSTALLATION_GUIDANCE), lambda: backend, probe,
+                           installation_guidance=INSTALLATION_GUIDANCE,
+                           files_before_start=settings.workspace_store == "ecs"), lambda: backend, probe,
         ))
         return registry
     return build

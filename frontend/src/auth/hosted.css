@@ -35,4 +35,19 @@ html.hosted-session-obscured dialog, html.hosted-session-obscured dialog * { vis
 .hosted-admin-users li, .managed-models li { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .hosted-admin-users li span, .managed-models li span { color: var(--ink-soft); }
 .managed-models p { line-height: 1.7; }
+.hosted-admin-nav { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 24px; }
+.hosted-deployments p { color: var(--ink-soft); line-height: 1.7; }
+.hosted-deployments a.primary-button { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
+.hosted-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.hosted-section-heading h2 { margin: 0; }
+.hosted-deploy-fields { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-block: 20px; }
+.hosted-deploy-fields label { display: grid; gap: 8px; min-width: 0; }
+.hosted-deployments select { width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-raised); color: var(--ink); }
+.hosted-targets { display: flex; flex-wrap: wrap; gap: 18px; border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin: 0 0 20px; }
+.hosted-targets label { display: flex; align-items: center; gap: 8px; }
+.hosted-entry { display: grid; grid-template-columns: 100px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding-block: 14px; border-bottom: 1px solid var(--line); }
+.hosted-job-list { list-style: none; padding: 0; }
+.hosted-job-list li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.hosted-job-list small { display: block; color: var(--ink-soft); margin-top: 6px; }
+@media(max-width: 700px) { .hosted-deploy-fields, .hosted-entry { grid-template-columns: 1fr; } .hosted-job-list li { align-items: flex-start; flex-direction: column; } }
 @media(max-width: 700px) { .hosted-admin { padding: 16px; } .hosted-admin-form { padding: 16px; } .hosted-admin .connections-layout { grid-template-columns: 1fr; } .hosted-admin .connection-fields, .hosted-admin .connection-model-row { grid-template-columns: 1fr; } }

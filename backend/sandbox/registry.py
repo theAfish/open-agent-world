@@ -30,6 +30,9 @@ class SandboxRuntime:
     resource_limits_available: bool = True
     resource_limit_reason: str = ""
     installation_guidance: str | None = None
+    # Opt-in for providers whose create() prepares stopped storage without
+    # allocating compute. Personal/native runtimes retain explicit Start.
+    files_before_start: bool = False
 
 
 @dataclass(frozen=True, slots=True)

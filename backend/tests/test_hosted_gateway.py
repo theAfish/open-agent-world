@@ -251,7 +251,7 @@ def test_registry_rejects_ambiguous_routes_and_hides_credentials(tmp_path):
     _, _, profiles, _, settings = fixture_data(tmp_path)
     assert "secret" not in profiles[0].public()
     assert profiles[0].secret not in repr(profiles[0])
-    for field in ("user_id", "profile_id", "upstream", "secret"):
+    for field in ("profile_id", "upstream", "secret"):
         duplicate = replace(profiles[1], **{field: getattr(profiles[0], field)})
         with pytest.raises(ValueError, match="unique"):
             GatewaySettings(ORIGIN, settings.accounts_path, (profiles[0], duplicate))

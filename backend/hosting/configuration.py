@@ -86,7 +86,7 @@ class GatewaySettings:
         public_origin(self.public_origin, self.allow_local_http)
         if self.shared_models_origin is not None:
             public_origin(self.shared_models_origin, allow_local_http=True)
-        for key in ("profile_id", "user_id", "upstream", "secret"):
+        for key in ("profile_id", "upstream", "secret"):
             values = [getattr(profile, key) for profile in self.profiles]
             if key == "secret":
                 values = [value.lower() for value in values]

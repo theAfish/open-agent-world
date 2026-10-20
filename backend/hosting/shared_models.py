@@ -181,12 +181,14 @@ class SharedModelAdmin:
         denied = await self.authorize(request)
         if denied is not None:
             return denied
+        await self.gateway.refresh()
         return JSONResponse({"shared_models_enabled": self.gateway.settings.shared_models_origin is not None,
                              "workspace_count": len(self.gateway.settings.profiles),
                              "users": [{k: user[k] for k in ("username", "display_name", "role", "enabled")}
                                        for user in self.gateway.auth.store.list_users()]})
 
     async def worker_catalog(self, request):
+        await self.gateway.refresh()
         profile = next((p for p in self.gateway.settings.profiles if p.profile_id == request.path_params["profile_id"]), None)
         headers = request.headers.getlist("authorization")
         if (self.gateway.settings.shared_models_origin is None or profile is None or len(headers) != 1

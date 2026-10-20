@@ -10,12 +10,14 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it('edits shared settings without a workspace, keeps saved keys hidden and routes discovery to administration', async () => {
   const request = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/deployments')) return Response.json({ releases: [], users: [], profiles: [], jobs: [] });
     if (url.endsWith('/status')) return Response.json({ shared_models_enabled: true, workspace_count: 3, users: [] });
     if (url.endsWith('/discover')) return Response.json({ models: [{ id: 'another', name: 'Another model' }], truncated: false });
     return Response.json({ ...catalog, revision: init?.method === 'PUT' ? 2 : 1 });
   });
   vi.stubGlobal('fetch', request);
   render(<HostedAdmin session={session} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Shared models' }));
   const key = await screen.findByLabelText('API key');
   expect((key as HTMLInputElement).value).toBe('');
   fireEvent.click(screen.getByRole('button', { name: 'Get available models' }));

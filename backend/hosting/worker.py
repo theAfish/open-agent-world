@@ -216,7 +216,24 @@ def create_worker_app(config: WorkerConfig | Mapping, *, frontend_directory=None
             services.llm_settings.model_source = SharedModelSource(config)
         return services
 
-    app = create_app(settings, profile_access=access, frontend_directory=frontend_directory,
+    app = create_app(settings, profile_access=access, frontend_directory=None,
                      services_factory=composed_services)
+    if config.mode == "builder":
+        from fastapi import Depends, HTTPException
+        from backend.api.dependencies import get_services
+
+        @app.get("/api/hosting-template/{release_id}")
+        async def hosted_template(release_id: UUID, services=Depends(get_services)):
+            from .templates import capture_template
+            try:
+                return await capture_template(services, str(release_id))
+            except ValueError as error:
+                raise HTTPException(409, str(error)) from None
+
+    # Mount static fallback after the hosted API, otherwise it shadows template
+    # export in real installations that serve a built frontend.
+    if frontend_directory is not None:
+        from starlette.staticfiles import StaticFiles
+        app.mount("/", StaticFiles(directory=frontend_directory, html=True), name="frontend")
     app.add_middleware(HostedPolicyMiddleware, managed_models=config.shared_models_origin is not None)
     return app
