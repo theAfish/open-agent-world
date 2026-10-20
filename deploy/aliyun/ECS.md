@@ -57,7 +57,7 @@ OAW_ALIYUN_SANDBOX_TEMPLATE=code-interpreter-v1
 OAW_ALIYUN_WORKSPACE_STORE=ecs
 OAW_ALIYUN_SANDBOX_LIFETIME=600
 OAW_ALIYUN_SANDBOX_READY=0
-OAW_ALIYUN_SANDBOX_PYTHON_REQUIREMENTS="[\"numpy>=2.1,<3\",\"scipy>=1.14,<2\",\"ase>=3.23,<4\",\"pymatgen>=2025.1\",\"matplotlib>=3.9,<4\",\"mp-api\"]"
+OAW_ALIYUN_SANDBOX_PYTHON_REQUIREMENTS="[\"numpy>=2.1,<3\",\"scipy>=1.14,<2\",\"ase>=3.23,<4\",\"pymatgen>=2025.1\",\"matplotlib>=3.9,<4\",\"mp-api==0.45.13\",\"emmet-core==0.85.1\"]"
 ```
 
 工厂校验 profile 身份，只加载核心、MatCreator、结构查看器和 SQLite 这几组批准的代码。
@@ -76,6 +76,8 @@ profile ID 取自已验证的 worker 身份；新老用户共用基础配置，�
 仅支持二进制 wheel，不运行源码构建；不支持包 URL、私有索引凭据或安装系统软件。
 冷启动准备最多等待 480 秒，并始终比配置的 Sandbox 生命周期少 60 秒；
 生命周期至少为 300 秒，网络关闭时无法准备新环境。
+POC 固定 `mp-api` 和 `emmet-core` 版本，避免自动升级引入大型 Arrow/DeltaLake
+下载；升级这组依赖时应重新检查导入兼容性和首次准备耗时。
 安装结果未知时保留 PID 和远程 ID，先核对并停止对应 VM，再显式重试；不能自动重复提交。
 准备期间的 VM 续期遇到传输或 Sandbox SDK 错误时，只在确认原 VM 的 profile 和 request 标识
 匹配后重试一次相同续期操作，不重建 VM、不重跑安装或用户命令。仍失败则保留阶段与错误类型供核对。
