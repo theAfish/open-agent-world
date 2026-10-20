@@ -1,4 +1,5 @@
 from dataclasses import replace
+from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -54,6 +55,27 @@ def test_worker_rejects_another_users_sandbox_configuration(tmp_path, monkeypatc
     monkeypatch.setenv("OAW_ALIYUN_WORKSPACE_VOLUME", "shared-volume")
     with pytest.raises(ValueError, match="own oaw-"):
         hosted.create_hosted_services(settings)
+
+
+def test_shared_cloud_environment_derives_new_users_private_identity(tmp_path, monkeypatch):
+    configure(monkeypatch, str(uuid4()))
+    monkeypatch.delenv("OAW_ALIYUN_PROFILE_ID")
+    monkeypatch.delenv("OAW_ALIYUN_WORKSPACE_VOLUME")
+    monkeypatch.setenv("OAW_ALIYUN_WORKSPACE_STORE", "ecs")
+    monkeypatch.setenv("OAW_ALIYUN_SANDBOX_TEMPLATE", "code-interpreter-v1")
+    monkeypatch.setenv("OAW_ALIYUN_SANDBOX_PYTHON_REQUIREMENTS", '["numpy", "ase"]')
+    captured = []
+    monkeypatch.setattr(hosted, "registry_factory", lambda remote: captured.append(remote))
+    monkeypatch.setattr(hosted, "create_services", lambda *args, **kwargs:
+        SimpleNamespace(world=SimpleNamespace(list_cards=lambda: [])))
+    profiles = [str(uuid4()), str(uuid4())]
+    for profile in profiles:
+        settings = replace(Settings.for_data_root(tmp_path / profile),
+                           tenant_scope=hosted_scope(str(uuid4()), "canvas", profile))
+        hosted.create_hosted_services(settings)
+    assert [remote.profile_id for remote in captured] == profiles
+    assert all(remote.template == "code-interpreter-v1" and remote.python_requirements == ("numpy", "ase")
+               and remote.workspace_store == "ecs" and not remote.volume for remote in captured)
 
 
 @pytest.mark.asyncio

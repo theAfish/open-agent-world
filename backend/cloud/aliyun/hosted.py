@@ -18,8 +18,10 @@ from .sandbox import AliyunSandboxSettings, registry_factory
 
 def create_hosted_services(settings):
     tenant = settings.tenant_scope
-    profile_id = require_env("OAW_ALIYUN_PROFILE_ID")
-    if tenant is None or not tenant.world_id or tenant.world_id != profile_id:
+    if tenant is None or not tenant.world_id:
+        raise ValueError("Alibaba Sandbox requires an authenticated hosted profile")
+    profile_id = tenant.world_id
+    if os.environ.get("OAW_ALIYUN_PROFILE_ID", profile_id) != profile_id:
         raise ValueError("Alibaba Sandbox configuration must belong to this hosted profile")
     store = os.environ.get("OAW_ALIYUN_WORKSPACE_STORE", "volume")
     volume = require_env("OAW_ALIYUN_WORKSPACE_VOLUME") if store == "volume" else ""
@@ -31,6 +33,7 @@ def create_hosted_services(settings):
         template=require_env("OAW_ALIYUN_SANDBOX_TEMPLATE"),
         volume=volume, profile_id=profile_id,
         workspace_store=store,
+        python_requirements=tuple(json.loads(os.environ.get("OAW_ALIYUN_SANDBOX_PYTHON_REQUIREMENTS", "[]"))),
         lifetime_seconds=int(os.environ.get("OAW_ALIYUN_SANDBOX_LIFETIME", "600")),
         metadata=json.loads(os.environ.get("OAW_ALIYUN_SANDBOX_METADATA", "{}")),
         unavailable_reason=None if os.environ.get("OAW_ALIYUN_SANDBOX_READY") == "1" else (

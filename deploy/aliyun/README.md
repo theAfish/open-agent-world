@@ -57,9 +57,12 @@ MatCreator 知识资产、技能定义和 SQLite 卡片保留在原有核心逻�
 worker 仅继承系统运行必需的环境变量；本次模型配置通过私有标准输入传入。
 现有工具桥继续逐次授权，生成的命令只进入阿里 Sandbox。worker 本身不是 OS 隔离边界，
 不得在这个部署中加载用户提供的 Python Pack。当前仍是每个部署一个固定所有者。
-云端 Legion 模板关闭网络，并将默认命令超时设为 60 秒以适配托管 VM 生命周期，个人模板不变。
-只读 runtime bundle、共享 Python 安装及网络授权仍未实现；涉及这些能力的科学工具
-会明确报错，不能宣称任意 MatCreator 科学工作流已可用。真实云端执行仍待验收。
+云端 Legion 模板默认开启公网出网，并将默认命令超时设为 60 秒以适配托管 VM 生命周期，个人模板不变。
+有 Execute + Start/Stop 权限的 Agent 执行命令时自动启动沙盒，无需单独调用 `start_sandbox`。
+云 Python 已接入 `install_python_packages`：在每台阿里 VM 内安装 wheel，依赖配方保存在用户 profile，
+下一台 VM 自动重建。管理员可用 `OAW_ALIYUN_SANDBOX_PYTHON_REQUIREMENTS` 配置默认依赖，见
+[ECS 配置及实测范围](ECS.md)。私有 runtime bundle 挂载仍未实现；涉及这一能力的科学工具
+会明确报错，不能宣称任意 MatCreator 科学工作流已可用。
 
 ## 需要准备的阿里资源
 
@@ -130,14 +133,17 @@ backend/.venv/bin/uvicorn backend.cloud.aliyun.app:create_app --factory \
 
 ## 执行与恢复边界
 
-- 每 profile 目前只允许一个 Sandbox Card。卡片配置 `command_timeout: 60`，保持
-  `network_enabled: false`，不绑定宿主工作目录；不支持共享 Python 安装或可写资源挂载。
+- 每 profile 目前只允许一个 Sandbox Card。云端 Legion 卡片配置 `command_timeout: 60`、
+  `network_enabled: true`；关闭网络仍可显式设置为 `false`。不绑定宿主工作目录；
+  基础 Python 依赖在云 VM 内自动准备；不支持可写资源挂载或私有 runtime bundle，科学命令不在 ECS 宿主执行。
 - `/workspace` 挂载用户的专属持久卷。命令、文件浏览、预览、上传下载使用原有 API；
   文件操作复用 OAW 的路径校验和 no-follow 实现，经远端标准库 helper 执行，不依赖共享宿主路径。
 - 一次只允许一条远端操作。每条用户命令完成、取消或超时后回收执行 VM，包括其后台
   子进程；后续命令创建新 VM 并重挂同一卷。**不保留后台 shell 进程和内存状态**。
   文件读取也可能按需创建实例，持续使用期间仍会计费。闲置实例由平台 TTL 回收。
-- 网络默认关闭；VPC/Volume 授权配置仍需运营方限制到该用户存储。没有承诺可运行任意
+- 公网出网通过阿里网络策略控制，默认拒绝私网、链路本地地址及云元数据地址；入站保持鉴权。
+  参考[阿里网络访问控制](https://help.aliyun.com/zh/agent-sandbox/network-access-control)。
+  VPC/Volume 授权及存储网络仍需运营方单独配置并验证。没有承诺可运行任意
   联网工具或多日云 Sandbox 命令。多日外部计算继续使用既有持久 Jobs 机制，不能重投。
 - `aliyun-sandbox.json` 保存远端 ID、创建 request key、执行回执，不保存 API Key。
   创建响应丢失时按 metadata 对账；找不到唯一实例就停止，绝不自动再创建。

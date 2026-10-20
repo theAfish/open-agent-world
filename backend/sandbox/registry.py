@@ -29,6 +29,7 @@ class SandboxRuntime:
     network_status: str = "not_implemented"
     resource_limits_available: bool = True
     resource_limit_reason: str = ""
+    installation_guidance: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

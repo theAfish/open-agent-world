@@ -60,6 +60,14 @@ class SandboxBackend(ABC):
         Pending cleanup may still reject admission.
         """
 
+    async def start_with_policy(self, sandbox_id: str, *, execution_policy: Mapping[str, object]) -> SandboxInfo:
+        """Supply saved policy to runtimes that enforce it when creating a VM.
+
+        Local backends continue applying policy to each command as before.
+        """
+        self.validate_execution_policy(execution_policy)
+        return await self.start(sandbox_id)
+
     @abstractmethod
     async def execute(
         self,

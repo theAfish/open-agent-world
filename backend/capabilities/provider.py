@@ -382,22 +382,29 @@ class _CapabilityContext:
         # and ``configuration.ready`` only reports configured variables. Make
         # the command gate explicit so an errored sandbox is not mistaken for
         # a usable one.
-        commands_accepted = info.state.value in {"ready", "running"}
+        auto_start = info.available and info.state.value in {"stopped", "ready", "running"} and any(c.id == f"sandbox.start:{sandbox_id}"
+            for c in self.services.capabilities.derive(agent_id).capabilities)
+        commands_accepted = info.available and (info.state.value in {"ready", "running"}
+            or (info.state.value == "stopped" and auto_start))
         state_guidance = None
         if info.state.value == "error":
             state_guidance = ("Commands are rejected while state is \"error\". One start_sandbox "
                               "call recovers it once active commands finish; it requires an "
                               "Execute + Start/Stop connection, otherwise restart the Sandbox "
                               "from its card.")
+        elif not info.available:
+            state_guidance = info.unavailable_reason or "This Sandbox runtime is unavailable."
         elif info.state.value == "stopped":
-            state_guidance = ("The Sandbox is stopped: start it (start_sandbox with an Execute "
-                              "+ Start/Stop connection, or its card) before executing commands.")
+            state_guidance = ("The Sandbox is idle. execute_command starts it automatically using your live "
+                              "Execute + Start/Stop grant and saved network policy; a separate start_sandbox call is unnecessary."
+                              if auto_start else "The Sandbox is stopped and you have no Start/Stop grant. "
+                              "Ask the user to start it from its card or grant Execute + Start/Stop before executing commands.")
         context = self.services.run_manager.current_context
         if history_scope == "run" and context is None:
             raise ResourceValidationError("Run history requires an active Agent Run; use caller history instead")
         return {
             "sandbox_id": sandbox_id, "state": info.state.value,
-            "commands_accepted": commands_accepted, "state_guidance": state_guidance,
+            "commands_accepted": commands_accepted, "auto_start": auto_start, "state_guidance": state_guidance,
             "runtime_id": info.runtime_id, "platform": info.platform,
             "shell": list(info.shell), "workspace": str(info.workspace),
             "workspace_access": info.workspace_access.value,
@@ -421,7 +428,7 @@ class _CapabilityContext:
             "python_environment": _python_environment_summary(python_status),
             "console_mode": "non-interactive; each command starts in the configured workspace; cd/export/activation do not persist",
             "command_timeout": self.services.world.get_card(sandbox_id).config.get("command_timeout", 6000),
-            "installation": "Use install_python_packages for the shared read-only Python environment. HOME persists (at /sandbox/home on Linux, WSL and macOS Container VM); use $HOME/.local/bin or $HOME/bin for local CLI tools, or create a private venv in HOME/workspace and invoke its interpreter explicitly. npm -g defaults to $HOME/.local, with bins on PATH. /tmp is recreated for EVERY command; use HOME or workspace for files needed by subsequent commands. Shared installer logs are optional (include_shared_python=true) and do not prove a current operation is running.",
+            "installation": info.installation_guidance or "Use install_python_packages for the shared read-only Python environment. HOME persists (at /sandbox/home on Linux, WSL and macOS Container VM); use $HOME/.local/bin or $HOME/bin for local CLI tools, or create a private venv in HOME/workspace and invoke its interpreter explicitly. npm -g defaults to $HOME/.local, with bins on PATH. /tmp is recreated for EVERY command; use HOME or workspace for files needed by subsequent commands. Shared installer logs are optional (include_shared_python=true) and do not prove a current operation is running.",
             "attachments": [
                 {"resource_id": item.resource_id,
                  "path": str(info.resources_path / item.relative_path.replace("\\", "/")) if info.resources_path else None,

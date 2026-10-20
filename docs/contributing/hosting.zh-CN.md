@@ -109,7 +109,17 @@ sudo systemctl list-units 'oaw-hosted-worker-*'
 sudo systemctl restart oaw-hosted.target
 ```
 
-应用和插件代码由管理员审核安装。浏览器不能安装插件、读取宿主目录、重定位存储、开启本地 Codex 或选择本机 Sandbox。后续接入阿里云远程 Sandbox 时，在实例的 `worker.env` 设置 `OAW_HOSTED_SERVICES_FACTORY=package.module:factory`；工厂签名为 `factory(settings)`，返回 `ApplicationServices`。工厂代码应安装在共享应用环境，继续使用实例数据目录和经过批准的插件，不能启用宿主命令执行。
+应用和插件代码由管理员审核安装。浏览器不能安装插件、读取宿主目录、重定位存储、开启本地 Codex 或选择本机 Sandbox。
+管理员可在 `/srv/oaw-hosting/worker-common.env` 一次性配置所有用户的执行平台、模板、基础环境及服务凭据；
+该文件由 root 持有、权限为 0600。每个新生成的 worker 服务都会读取它，用户不需要重复配置。
+文件不存在时保持原行为；存在时它在实例 `worker.env` 之后加载，同名公共值优先。
+不要在公共文件中设置用户/profile 标识、共享数据目录或某个用户的专属 Volume；适配器应从已验证的实例身份派生独立资源。
+该文件不映射给 worker 或浏览器，由 systemd 读取并注入运行环境。修改后需在任务空闲时滚动重启 worker；
+新增用户仍按上述账号/实例和 systemd 安装流程操作，无需复制基础环境。
+
+例如接入远程 Sandbox 时，在公共文件设置 `OAW_HOSTED_SERVICES_FACTORY=package.module:factory`；
+工厂签名为 `factory(settings)`，返回 `ApplicationServices`。工厂代码应安装在共享应用环境，
+继续使用实例数据目录和经过批准的插件，不能启用宿主命令执行。个人版不读取此托管部署文件。
 
 systemd 的 `IPAddressDeny` 阻止链路本地地址和阿里云元数据地址 `100.100.100.200`。安装器会用临时回环监听器实际检查内核的 cgroup BPF 过滤能力，不支持时拒绝安装，不会访问真实元数据地址。仍需按实际内网拓扑阻断管理服务的出站访问。不应给应用附加可管理整台 ECS 的 RAM 角色；远程 Sandbox 凭证应只有适配器所需权限。此方案适用于几个用户使用受信任应用和远程 Sandbox，不能把服务进程当作运行任意不可信本地代码的隔离环境。
 

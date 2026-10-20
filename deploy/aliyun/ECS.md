@@ -19,27 +19,43 @@
 
 ## 阿里执行适配
 
-每个实例的管理员私有 `worker.env` 配置：
+管理员在 `/srv/oaw-hosting/worker-common.env` 统一配置一次（root 持有、0600）：
 
 ```ini
 OAW_HOSTED_SERVICES_FACTORY=backend.cloud.aliyun.hosted:create_hosted_services
-OAW_ALIYUN_PROFILE_ID=<对应的 profile UUID>
 OAW_ALIYUN_REGION=cn-hangzhou
 OAW_ALIYUN_SANDBOX_API_KEY=<管理员配置，不能提交到仓库>
-OAW_ALIYUN_SANDBOX_TEMPLATE=base
+OAW_ALIYUN_SANDBOX_TEMPLATE=code-interpreter-v1
 OAW_ALIYUN_WORKSPACE_STORE=ecs
 OAW_ALIYUN_SANDBOX_LIFETIME=600
 OAW_ALIYUN_SANDBOX_READY=0
+OAW_ALIYUN_SANDBOX_PYTHON_REQUIREMENTS="[\"numpy>=2.1,<3\",\"scipy>=1.14,<2\",\"ase>=3.23,<4\",\"pymatgen>=2025.1\",\"matplotlib>=3.9,<4\"]"
 ```
 
 工厂校验 profile 身份，只加载核心、MatCreator、结构查看器和 SQLite 这几组批准的代码。
+profile ID 取自已验证的 worker 身份；新老用户共用基础配置，各自的存储、绑定和 VM 仍独立。
+无需为新增用户复制 API Key、模板或依赖清单。旧部署若保留 `OAW_ALIYUN_PROFILE_ID`，仍会检查其是否匹配，
+但不应把此变量放进公共文件。更新公共环境后在空闲时滚动重启 worker；这是部署操作，用户无需配置。
+新生成的 systemd 单元自动读取公共文件；升级旧部署时需更新其单元。公共配置优先于实例环境文件中的同名项。
 它不注册本机执行后端。`ecs` 模式不需要 Volume、OSS 或 AgenticFS；管理员启用前必须验证
-该部署的文件同步和用户隔离。远程命令以普通用户运行，文件传输助手在 VM 内以 root 运行。
+该部署的文件同步和用户隔离。远程命令以普通用户运行，文件传输和 Python 安装助手在 VM 内以 root 运行。
+
+`OAW_ALIYUN_SANDBOX_PYTHON_REQUIREMENTS` 的值是 JSON 数组；上面展示的是 systemd 环境文件的转义形式。
+未配置时不默认安装科学计算包。配置后，每台新 VM 在执行前通过[阿里 PyPI 公网镜像](https://developer.aliyun.com/mirror/pypi)
+的 HTTPS 地址准备 `/opt/oaw-python` 环境，复用所选阿里模板自带的库，只补齐缺少的包，
+`python3`、`python` 和 `pip` 使用该环境。`install_python_packages` 也能安装索引上的 wheel 包；
+安装请求与部署依赖一起保存为该用户的配方，下一台 VM 自动重建。依赖文件不进入 32 MiB 工作文件快照。
+仅支持二进制 wheel，不运行源码构建；不支持包 URL、私有索引凭据或安装系统软件。
+冷启动准备最多等待 240 秒，Sandbox 生命周期至少为 300 秒；网络关闭时无法准备新环境。
+安装结果未知时保留 PID 和远程 ID，先核对并停止对应 VM，再显式重试；不能自动重复提交。
+`base` 是裸 Python 模板；当前科学计算测试使用 `code-interpreter-v1`，减少基础库下载。
+已有绑定更换模板时，须先确认空闲并停止 VM、备份环境文件和绑定，然后同步修改配置中的模板名；
+不能只改环境变量，也不能删除整个 profile 来绕过绑定校验。工作文件和数据库保持原样。
 
 默认 `READY=0`：前端会显示云 Sandbox 不可用，启动或重新连接 VM 均被拒绝。
-只有为**该用户**配置独立存储，并验证写入、释放、重建、读取及跨用户访问拒绝后，
-才能设置 `READY=1` 并重启其后台。更改这个标志本身不会完成验证。
-本次测试实例验证通过后已设置为 `1`。
+只有验证该部署的独立存储、写入、释放、重建、读取及跨用户访问拒绝后，
+才能设置 `READY=1` 并重启后台。ECS 模式按每个 profile 自动创建独立目录；更改这个标志本身不会完成验证。
+本次部署验证通过后已统一设置为 `1`。Volume 模式仍需逐用户开通独立卷，不能以一个公共卷取代用户隔离。
 
 将来使用阿里持久卷时，明确设置 `OAW_ALIYUN_WORKSPACE_STORE=volume` 和
 `OAW_ALIYUN_WORKSPACE_VOLUME=oaw-<该 profile UUID>`。不要让多个 profile 使用同一个卷。
@@ -55,9 +71,15 @@ OAW_ALIYUN_SANDBOX_READY=0
   尚未成功收集的 VM 文件不属于已保存的 ECS 数据。
 - 传输或命令结果不确定时保留远程 ID 和操作记录，阻止后续执行。先核实远程状态、收集文件并停止，
   不得因超时重新提交任务。VM 到期或 ECS 崩溃可能使未回传的工作丢失。
-- 当前云命令关闭公网访问，不支持任意主机目录、私有运行时挂载或长期后台进程。
-- MatCreator 代码和原生依赖已安装；这不代表完整科研流程已验证。模型凭据、科学运行环境、
-  联网工具及耗时任务需要后续单独适配和验证。
+- 云端 Legion 默认开启公网出网，保留入站鉴权，拒绝访问私网及云元数据地址；仍可在卡片上关闭网络。
+  有 Execute + Start/Stop 权限的 Agent 调用执行工具时自动启动沙盒，无需单独调用 `start_sandbox`。
+  空闲/任务完成后释放执行 VM，后续命令再自动创建，不持续占用 VM。
+- Python 依赖在阿里 VM 内准备和运行，ECS 只保留配方和验证记录。只有 `/workspace` 内普通文件
+  持久保存；HOME、临时目录及手工安装在其他路径的依赖随 VM 释放。
+  每条命令后的 VM 释放意味着下一条命令仍有冷启动安装开销，当前方案用于小型 POC。
+  仍不支持任意主机目录、私有 Pack 运行时挂载或长期后台进程。
+- MatCreator 服务端代码和原生依赖已安装；科学计算环境的基础验证不代表完整科研流程已验证。
+  各项科研工具、私有 Pack 环境及耗时任务需要分别验收。
 
 2026-10-20 实测：旧的 `oaw-poc-workspace` 在 `base` 模板仍返回
 `Mount NFS:// command failed`；查询确认本次请求无残留 Sandbox。本次部署选择 ECS 文件快照，
@@ -70,6 +92,27 @@ OAW_ALIYUN_SANDBOX_READY=0
 三个测试账号均初始化了 MatCreator Legion，浏览器实际加载 51 张卡片并完成同步。
 基础登录/退出浏览器验证通过，阿里适配的 35 项本地回归测试通过。
 当前仍为画布模式，没有切换成仅 MatCreator 的入口。
+
+2026-10-20 联网验证：三个现有 Legion 的 Sandbox 均已开启网络。通过正式执行 API，
+从停止状态自动启动真实阿里 VM，普通用户进程访问阿里官网和 PyPI 均返回 HTTP 200；
+云元数据请求未成功。命令结束后 VM 释放，第二条命令自动创建新 VM 并读回之前的工作文件。
+验证文件已清理。这里的自动启动使用已有 Execute + Start/Stop 授权，不绕过启动权限；
+错误/未知执行状态仍须核对，不能自动重放。
+
+2026-10-20 科学环境验证：`test3` 的正式 `python/packages` API 安装成功；
+随后以 UID 1000 执行 NumPy/SciPy 线性方程求解、ASE 分子距离、pymatgen 晶体构建和 Matplotlib PNG 出图。
+本次版本为 NumPy 2.5.3、SciPy 1.18.1、ASE 3.29.0、pymatgen 2026.9.24、Matplotlib 3.11.2。
+第一台 VM 释放后，下一条命令自动在新 VM 准备同一依赖配方，并导入五个库、读回上一台生成的图片；
+验证文件已删除。首次准备约 124 秒，重建后约 114 秒；这是实测耗时，不是时延保证。
+SDK 会通过登录 shell 执行命令，适配器在其启动文件之后设置托管 Python 路径；
+调用方若再次显式打开登录 shell，应使用 `/opt/oaw-python/bin/python`。
+本次验证没有覆盖所有 MatCreator Skill、私有 Pack runtime 或完整长时科研任务。
+
+2026-10-20 统一配置验证：三个 worker 已改为读取同一个 `worker-common.env`，逐账号的重复云配置已移除。
+`test2` 在没有个人云配置、没有既有云绑定的情况下，直接执行命令就完成首次 VM 创建、自动安装、
+五库导入和 HTTPS 请求（HTTP 200），耗时约 96 秒；命令完成后 VM 已释放。
+各账号原有 51 张卡片及 8 条连线保留，未覆盖用户配置或文件。新增 profile 自动继承公共环境文件、
+并从可信身份派生独立云绑定的路径另有本地测试覆盖；新增账号仍需管理员按通用部署流程建号。
 
 ## 运维
 

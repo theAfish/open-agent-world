@@ -28,14 +28,13 @@ def hosted_matcreator(plugin):
         def register(self, registration):
             plugin.register(registration)
             registration.runtime_provider_factories["matcreator.native"] = HostedMatCreatorRuntime
-            # The current managed command backend has no network-grant adapter.
-            # Preserve the personal preset; use a cloud-specific copy whose
-            # requested policy is actually supported by this deployment.
+            # Keep personal defaults separate; cloud commands use authenticated
+            # VM access and public egress controlled by the managed firewall.
             definition = registration.legion_presets["matcreator.native-research"]
             registration.legion_presets[definition.id] = definition.model_copy(update={
-                "revision": definition.revision + 1,
+                "revision": definition.revision + 2,
                 "nodes": tuple(node.model_copy(update={"config": {
-                    **node.config, "network_enabled": False, "command_timeout": 60,
+                    **node.config, "network_enabled": True, "command_timeout": 60,
                 }})
                                if node.type == "sandbox" else node for node in definition.nodes),
             })

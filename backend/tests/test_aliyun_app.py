@@ -44,7 +44,8 @@ def cloud_client(tmp_path, monkeypatch):
             async def probe():
                 return True, None
             registry.register(SandboxRuntimeRegistration(
-                SandboxRuntime("aliyun.agent-sandbox", "Alibaba", "linux", ("/bin/sh", "-c"), supports_workspace=False),
+                SandboxRuntime("aliyun.agent-sandbox", "Alibaba", "linux", ("/bin/sh", "-c"), supports_workspace=False,
+                               supported_network_modes=("disabled", "enabled"), network_available=True),
                 lambda: backend, probe))
             return registry
         return build
@@ -106,15 +107,15 @@ def test_cloud_matcreator_legion_can_be_instantiated_with_supported_policy(cloud
     assert any(node["type"] == "matcreator.agent" for node in nodes)
     assert any(node["type"] == "matcreator.kdg" for node in nodes)
     sandbox = next(node for node in nodes if node["type"] == "sandbox")
-    assert sandbox["config"]["network_enabled"] is False
+    assert sandbox["config"]["network_enabled"] is True
     assert sandbox["config"]["command_timeout"] == 60
     assert not sdk.created
-    response = client.post(f"/api/sandboxes/{sandbox['id']}/start")
-    assert response.status_code == 200, response.text
+    # Execute goes through the real on-demand start path without a separate Start.
     response = client.post(f"/api/sandboxes/{sandbox['id']}/execute", json={"command": "printf hello"})
     assert response.status_code == 200, response.text
     assert response.json()["stdout"] == "hello from remote\n"
     assert sdk.killed == ["remote-1"]
+    assert sdk.created[0]["allow_internet_access"] is True
     from oaw_matcreator.preset import native_definition
     personal = next(node for node in native_definition().nodes if node.type == "sandbox")
     assert personal.config["network_enabled"] is True

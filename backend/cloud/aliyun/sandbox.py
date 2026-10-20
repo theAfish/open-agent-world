@@ -28,6 +28,22 @@ from backend.sandbox.models import (
 from backend.sandbox.registry import SandboxRuntime, SandboxRuntimeRegistration, SandboxRuntimeRegistry
 
 
+# Public egress does not grant access to private networks or cloud metadata.
+PRIVATE_EGRESS = ("0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
+                  "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16")
+NETWORK_REASON = "Alibaba-managed public egress; private networks and cloud metadata are denied. Inbound services require authentication."
+INSTALLATION_GUIDANCE = (
+    "Commands execute in an Alibaba Agent Sandbox VM. Deployment Python dependencies and packages requested "
+    "through install_python_packages are prepared automatically inside each new VM; the saved dependency recipe "
+    "survives VM replacement. Use python3 and inspect imports for actual availability. If explicitly invoking "
+    "a login shell, use /opt/oaw-python/bin/python so its startup files cannot reset the interpreter path. Preparation needs network "
+    "access and can take a few minutes on a cold VM. Private Pack runtime mounts remain unavailable. "
+    "This POC serializes commands and releases the VM after each command. Only regular files under /workspace "
+    "persist; HOME, /tmp and manually installed packages elsewhere do not. In ECS snapshot mode the workspace "
+    "is limited to 32 MiB and 2048 entries; managed packages live outside that workspace."
+)
+
+
 @dataclass(frozen=True)
 class AliyunSandboxSettings:
     region: str
@@ -39,8 +55,11 @@ class AliyunSandboxSettings:
     metadata: dict[str, str] = field(default_factory=dict, repr=False)
     unavailable_reason: str | None = None
     workspace_store: str = "volume"
+    python_requirements: tuple[str, ...] = ()
 
     def __post_init__(self):
+        from backend.sandbox.python_runtime import validate_requirements
+        validate_requirements(self.python_requirements)
         if not re.fullmatch(r"[a-z][a-z0-9-]{2,48}", self.region):
             raise ValueError("Invalid Alibaba Sandbox region")
         if self.workspace_store not in {"volume", "ecs"}:
@@ -62,6 +81,25 @@ class AliyunSandboxSettings:
 
 class AliyunSandboxBackend(SandboxBackend):
     supports_invocation_environment = True
+    supports_execution_policy = True
+
+    def validate_execution_policy(self, policy):
+        if set(policy) - {"network_enabled", "memory_bytes", "active_process_limit", "command_timeout"}:
+            raise SandboxValidationError("Unsupported Alibaba Sandbox execution policy")
+        if type(policy.get("network_enabled", False)) is not bool:
+            raise SandboxValidationError("network_enabled must be a boolean")
+        if any(policy.get(key, default) != default for key, default in
+               {"memory_bytes": 2147483648, "active_process_limit": 64}.items()):
+            raise SandboxValidationError("Alibaba Sandbox resource limits are controlled by its template")
+
+    def _apply_network_policy(self, value, policy):
+        self.validate_execution_policy(policy)
+        enabled = policy.get("network_enabled", False)
+        if value.get("network_enabled", False) != enabled:
+            if value["remote_id"] or value["command"] or value["state"] in {"creating", "uncertain"}:
+                raise SandboxStateError("Stop and reconcile the existing cloud Sandbox before changing its network policy")
+            value["network_enabled"] = enabled
+            self._write(value)
 
     def __init__(self, root: Path, settings: AliyunSandboxSettings, event_sink=None, *, sdk=None):
         if sdk is None:
@@ -71,6 +109,14 @@ class AliyunSandboxBackend(SandboxBackend):
         self.path = root / "aliyun-sandbox.json"
         self.lock = asyncio.Lock()
         self.execution = None
+        from .python_environment import CloudPython
+        self.python = CloudPython(self)
+
+    async def prepare_python(self, requirements=(), *, bootstrap_key=None):
+        return await self.python.prepare(requirements, bootstrap_key=bootstrap_key)
+
+    async def python_status(self):
+        return await self.python.status()
 
     def _read(self, sandbox_id):
         if not self.path.exists():
@@ -134,7 +180,12 @@ class AliyunSandboxBackend(SandboxBackend):
             shell=("/bin/sh", "-c"), available=state != SandboxState.ERROR and not self.settings.unavailable_reason,
             unavailable_reason=self.settings.unavailable_reason or (
                 "Remote state requires reconciliation; no command will be resubmitted" if state == SandboxState.ERROR else None),
-            network_reason="This POC disables internet access; network grants are not implemented")
+            network_enabled=value.get("network_enabled", False),
+            network_reason=NETWORK_REASON, supported_network_modes=("disabled", "enabled"),
+            network_available=True, network_transport="platform_firewall",
+            network_status="enabled" if value.get("network_enabled", False) else "disabled",
+            resource_limits_available=False, resource_limit_reason="Resource limits are set by the Alibaba template",
+            installation_guidance=INSTALLATION_GUIDANCE)
 
     async def get(self, sandbox_id):
         # A poll reports our durable receipt; it never creates/resumes a VM.
@@ -192,18 +243,23 @@ class AliyunSandboxBackend(SandboxBackend):
         sandbox = await self.sdk.create(template=self.settings.template, timeout=self.settings.lifetime_seconds,
             metadata={**self.settings.metadata, "oaw.profile": self.settings.profile_id, "oaw.request": value["request_key"]},
             volume_mounts={"/workspace": self.settings.volume} if self.settings.workspace_store == "volume" else {},
-            allow_internet_access=False,
-            network={"allow_public_traffic": False},
+            secure=True, allow_internet_access=value.get("network_enabled", False),
+            network={"allow_public_traffic": False, "deny_out": list(PRIVATE_EGRESS)},
             **self.settings.connection)
         value.update(remote_id=sandbox.sandbox_id, state="ready")
         self._write(value)
         return sandbox
 
     async def start(self, sandbox_id):
+        return await self.start_with_policy(sandbox_id, execution_policy={})
+
+    async def start_with_policy(self, sandbox_id, *, execution_policy):
+        self.validate_execution_policy(execution_policy)
         if self.lock.locked():
             raise SandboxStateError("This Sandbox is busy; this POC serializes remote operations")
         async with self.lock:
             value = self._read(sandbox_id)
+            self._apply_network_policy(value, execution_policy)
             try:
                 await self._start(value)
             except (SandboxStateError, SandboxSecurityError):
@@ -215,7 +271,7 @@ class AliyunSandboxBackend(SandboxBackend):
     async def _dispose(self, value):
         if value["remote_id"]:
             await self.sdk.kill(value["remote_id"], **self.settings.connection)
-        value.update(remote_id=None, state="stopped", command=None)
+        value.update(remote_id=None, state="stopped", command=None, python_setup=None)
         self._write(value)
 
     async def _join_dispose(self, value):
@@ -244,8 +300,9 @@ class AliyunSandboxBackend(SandboxBackend):
 
     async def execute(self, sandbox_id, argv, *, timeout_seconds=None, env=None, invocation_env=None,
                       runtime_mount=None, execution_policy=None, folder_mounts=()):
-        if runtime_mount is not None or folder_mounts or execution_policy:
-            raise SandboxValidationError("Remote runtime bundles, host folders and per-command resource policies are not implemented")
+        if runtime_mount is not None or folder_mounts:
+            raise SandboxValidationError("Remote runtime bundles and host folders are not implemented")
+        self.validate_execution_policy(execution_policy or {})
         if not argv or any(not isinstance(v, str) or "\0" in v for v in argv):
             raise SandboxValidationError("Expected nonempty NUL-free argv")
         environment = validate_command_environment(env or {})
@@ -260,7 +317,25 @@ class AliyunSandboxBackend(SandboxBackend):
             raise SandboxStateError("This POC permits only one remote operation at a time")
         async with self.lock:
             value = self._read(sandbox_id)
+            # Volume file operations may have created an idle offline VM before
+            # the first command. Replace only that confirmed idle VM; never
+            # change policy on an admitted command or an uncertain creation.
+            if (value["remote_id"] and value["state"] == "ready" and value["command"] is None
+                    and value.get("network_enabled", False) != (execution_policy or {}).get("network_enabled", False)):
+                await self._connect(value)
+                await self._join_dispose(value)
+            self._apply_network_policy(value, execution_policy or {})
             sandbox = await self._ensure_remote(value)
+            await self.python.ensure(sandbox, value)
+            command_argv = list(argv)
+            if self.python.requirements(value):
+                managed_env = {"PATH": "/opt/oaw-python/bin:/usr/local/bin:/usr/bin:/bin",
+                               "VIRTUAL_ENV": "/opt/oaw-python", "PYTHONNOUSERSITE": "1"}
+                environment.update(managed_env)
+                # E2B runs every command through bash -l -c, whose startup files
+                # reset PATH after envs are injected. Apply only these nonsecret
+                # runtime variables inside that shell, preserving argv quoting.
+                command_argv = ["/usr/bin/env", *(f"{k}={v}" for k, v in managed_env.items()), *argv]
             command_id = execution_command_id.get() or uuid4().hex
             value.update(state="running", command={"id": command_id, "state": "admitted"})
             self._write(value)
@@ -281,7 +356,7 @@ class AliyunSandboxBackend(SandboxBackend):
                     await self.event_sink(SandboxEvent(sandbox_id, kind, {"command_id": command_id, "text": text}))
             try:
                 async with asyncio.timeout(timeout):
-                    handle = await sandbox.commands.run(shlex.join(argv), background=True, envs=environment,
+                    handle = await sandbox.commands.run(shlex.join(command_argv), background=True, envs=environment,
                         cwd="/workspace", user="user", timeout=timeout,
                         on_stdout=lambda text: output(SandboxEventType.STDOUT, text),
                         on_stderr=lambda text: output(SandboxEventType.STDERR, text))
@@ -394,7 +469,11 @@ def registry_factory(settings: AliyunSandboxSettings):
 
         registry.register(SandboxRuntimeRegistration(
             SandboxRuntime("aliyun.agent-sandbox", "Alibaba Agent Sandbox (POC)", "linux", ("/bin/sh", "-c"),
-                           supports_workspace=False), lambda: backend, probe,
+                           supports_workspace=False, supported_network_modes=("disabled", "enabled"),
+                           network_available=True, network_status="available", network_transport="platform_firewall",
+                           network_reason=NETWORK_REASON, resource_limits_available=False,
+                           resource_limit_reason="Resource limits are set by the Alibaba template",
+                           installation_guidance=INSTALLATION_GUIDANCE), lambda: backend, probe,
         ))
         return registry
     return build

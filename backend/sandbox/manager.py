@@ -327,7 +327,7 @@ class SandboxManager(SandboxBackend):
             for attachment in binding.attachments.values():
                 await backend.attach_resource(sandbox_id, attachment.resource_id, attachment.source,
                                               attachment.relative_path, attachment.access)
-            info = await backend.start(sandbox_id)
+            info = await backend.start_with_policy(sandbox_id, execution_policy=dict(binding.policy))
             binding.network_error = None
             self._warm_python_after_start(runtime.id)
             return replace(info, **self._policy_info(binding, runtime), runtime_id=runtime.id, runtime_locked=True)
@@ -346,7 +346,8 @@ class SandboxManager(SandboxBackend):
             "network_status": status,
             "network_reason": (binding.network_error if runtime.network_available else None) or runtime.network_reason,
             "resource_limits_available": runtime.resource_limits_available,
-            "resource_limit_reason": runtime.resource_limit_reason}
+            "resource_limit_reason": runtime.resource_limit_reason,
+            "installation_guidance": runtime.installation_guidance}
 
     async def execute(self, sandbox_id: str, argv: Sequence[str], *, timeout_seconds: float | None = None,
                       env: Mapping[str, str] | None = None,

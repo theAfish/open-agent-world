@@ -268,3 +268,50 @@ async def test_failed_cleanup_retains_remote_receipt(remote, monkeypatch):
     with pytest.raises(SandboxStateError, match="cleanup outcome is uncertain"):
         await backend.start("s")
     assert len(sdk.created) == 1 and not sdk.commands
+
+
+@pytest.mark.asyncio
+async def test_network_policy_applies_at_creation_and_remains_private(remote):
+    backend, sdk, _ = remote
+    await backend.create("network")
+    policy = {"network_enabled": True, "command_timeout": 60}
+    await backend.start_with_policy("network", execution_policy=policy)
+    request = sdk.created[0]
+    assert request["allow_internet_access"] is True and request["secure"] is True
+    assert request["network"]["allow_public_traffic"] is False
+    assert "169.254.0.0/16" in request["network"]["deny_out"]
+    assert "100.64.0.0/10" in request["network"]["deny_out"]
+    assert "allow_out" not in request["network"]
+    assert (await backend.get("network")).network_enabled
+    await backend.execute("network", ["python3", "-c", "pass"], execution_policy=policy)
+    assert len(sdk.created) == 1 and sdk.killed == ["remote-1"]
+    await backend.start_with_policy("network", execution_policy={"network_enabled": False})
+    assert sdk.created[-1]["allow_internet_access"] is False
+
+
+@pytest.mark.asyncio
+async def test_network_change_cannot_replay_uncertain_command_or_ignore_limits(remote):
+    backend, sdk, _ = remote
+    await backend.create("network")
+    for policy in ({"network_enabled": "true"}, {"memory_bytes": 123}, {"unknown": True}):
+        with pytest.raises(SandboxValidationError):
+            await backend.start_with_policy("network", execution_policy=policy)
+    assert not sdk.created
+    sdk.fail_wait = True
+    with pytest.raises(SandboxStateError, match="uncertain"):
+        await backend.execute("network", ["once"], execution_policy={"network_enabled": True})
+    receipt = backend.path.read_bytes()
+    with pytest.raises(SandboxStateError, match="reconcile"):
+        await backend.execute("network", ["once"], execution_policy={"network_enabled": False})
+    assert backend.path.read_bytes() == receipt and len(sdk.commands) == 1
+
+
+@pytest.mark.asyncio
+async def test_networked_command_after_volume_file_read_replaces_only_idle_vm(remote):
+    backend, sdk, _ = remote
+    await backend.create("network")
+    await backend.file_operation("network", "list")
+    assert sdk.created[0]["allow_internet_access"] is False
+    await backend.execute("network", ["echo", "online"], execution_policy={"network_enabled": True})
+    assert sdk.created[1]["allow_internet_access"] is True
+    assert sdk.killed == ["remote-1", "remote-2"]

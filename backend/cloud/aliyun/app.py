@@ -75,6 +75,7 @@ def create_app():
         template=require_env("OAW_ALIYUN_SANDBOX_TEMPLATE"), volume=require_env("OAW_ALIYUN_WORKSPACE_VOLUME"),
         profile_id=workspace_id, lifetime_seconds=int(os.environ.get("OAW_ALIYUN_SANDBOX_LIFETIME", "600")),
         metadata=json.loads(os.environ.get("OAW_ALIYUN_SANDBOX_METADATA", "{}")),
+        python_requirements=tuple(json.loads(os.environ.get("OAW_ALIYUN_SANDBOX_PYTHON_REQUIREMENTS", "[]"))),
     )
     settings = replace(Settings.from_environment(), data_root=root, database_path=root / "database/world.sqlite3",
         storage_config_path=None, control_plane_token=None, tenant_scope=tenant,
