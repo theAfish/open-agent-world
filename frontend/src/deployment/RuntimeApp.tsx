@@ -1,12 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { LockKeyhole, LogOut } from 'lucide-react';
 import { t, useLocale } from '../i18n';
-import { configureWorkspaceApi, normalizeCard } from '../api/client';
+import { configureWorkspaceApi, normalizeCard, normalizeEdge } from '../api/client';
 import { WorkspaceWindow } from '../legions/LegionWorkspace';
 import { WorkspaceAccess, type PluginDeploymentAccess } from '../workspace/WorkspaceAccess';
 import { useWorldStore } from '../state/worldStore';
 import { ToastStack } from '../shell/ToastStack';
-import type { PluginCatalog, WorldCard } from '../types/world';
+import type { PluginCatalog, WorldCard, WorldEdge } from '../types/world';
 import { deploymentRequest } from './api';
 import './deployment.css';
 import { isHosted } from '../auth/hostedSession';
@@ -16,6 +16,7 @@ type PublishedWorkspace = {
   id: string; name: string; cards: WorldCard[]; legion: WorldCard;
   catalog: PluginCatalog; permissions: Record<string, string[]>;
   plugin_access?: Record<string, PluginDeploymentAccess>;
+  edges?: WorldEdge[];
 };
 
 /** Authentication and scoped data bootstrap; all workspace rendering stays shared. */
@@ -38,7 +39,7 @@ export function RuntimeApp({ name }: { name: string }) {
     configureWorkspaceApi(true);
     const legion = normalizeCard(value.legion);
     useWorldStore.setState({ cards: [legion, ...value.cards.map(normalizeCard)], catalog: value.catalog,
-      edges: [], events: [], socketState: 'closed', syncState: 'online' });
+      edges: (value.edges ?? []).map(normalizeEdge), events: [], socketState: 'closed', syncState: 'online' });
     setApp({ ...value, legion });
   };
   useEffect(() => {

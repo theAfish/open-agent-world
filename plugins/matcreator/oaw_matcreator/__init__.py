@@ -2,7 +2,7 @@ from importlib.resources import files
 import json
 from open_agent_world.plugin_api import (
     PackDefinition, PluginDescriptor, NodeTypeDefinition, NodeDocumentDefinition, NodeDocumentAction,
-    NodeDocumentTransformation, NodeDocumentDownload, CapabilityDefinition,
+    NodeDocumentTransformation, NodeDocumentDownload, NodeDeploymentDefinition, CapabilityDefinition,
     CapabilityGrantDefinition, RelationshipDefinition,
 )
 from open_agent_world.skill_packages import SkillPackage, register_skill_package, register_skill_node, SkillContainerDefinition, ToolboxConfig
@@ -12,7 +12,7 @@ from . import preset, native_card
 READ = "matcreator.kdg.read"
 
 class MatCreatorPlugin:
-    descriptor = PluginDescriptor(id="matcreator", version="0.9.0", plugin_api_version="1.35", name="MatCreator",
+    descriptor = PluginDescriptor(id="matcreator", version="0.10.0", plugin_api_version="1.36", name="MatCreator",
                                   requires_plugins=("science.structure-viewer",))
 
     def register(self, registration):
@@ -67,6 +67,7 @@ class MatCreatorPlugin:
             default_size=(1000, 650), default_status="available", statuses=frozenset({"available"}), config_model=ToolboxConfig,
             traits=frozenset({"knowledge.graph"}), surfaces={"preview": True, "inspector": True, "workspace": True}, templateable=True,
             frontend={"workspace": "workspace"},
+            deployment=NodeDeploymentDefinition.from_document(),
             container=SkillContainerDefinition(member_type="matcreator.kdg.skill", max_members=1000, member_display="workspace"),
             document=NodeDocumentDefinition(model=k.Graph, initial_value=k.Graph().model_dump(), actions=actions,
                 summarize=k.summary, validate_update=k.validate_update, capture=lambda value: {**value, "skills": []}, max_size_bytes=32 * 1024 * 1024,

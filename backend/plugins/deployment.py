@@ -1,9 +1,13 @@
 """Opt-in public surfaces for existing plugin views and business handlers."""
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class DeploymentSurface(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+    # Opt in to the existing document API as a whole. Resolved into a frozen
+    # action/download allowlist at publication, never inferred for legacy cards.
+    document: Literal["none", "read", "edit"] = "none"
     config_fields: frozenset[str] = frozenset()
     document_fields: frozenset[str] = frozenset()
     summary_fields: frozenset[str] = frozenset()
@@ -12,6 +16,12 @@ class DeploymentSurface(BaseModel):
     # Each resource action explicitly projects its top-level result fields.
     resource_actions: dict[str, frozenset[str]] = Field(default_factory=dict)
     execution: bool = False
+    file_preview: bool = False
+
+
+class DeploymentAccess(DeploymentSurface):
+    """Resolved release permissions, including the section presentation policy."""
+    shared_sections: bool = False
 
 
 class NodeDeploymentDefinition(BaseModel):
@@ -19,8 +29,23 @@ class NodeDeploymentDefinition(BaseModel):
     # None forbids publishing the whole card; individual sections can still be published.
     surface: DeploymentSurface | None = None
     sections: dict[str, DeploymentSurface] = Field(default_factory=dict)
+    # Whole-card business access shared by its ordinary layout sections.
+    # Use explicit sections for distinct permissions within one card.
+    shared_sections: bool = False
+
+    @classmethod
+    def from_document(cls, *, read_only: bool = False):
+        """Publish a document-backed view without repeating its API schema.
+
+        The author opts in to full document/action responses and exporters.
+        Config, resource handlers, execution and cross-card operations stay private.
+        Use explicit surfaces instead when only part of the document is public.
+        """
+        return cls(surface=DeploymentSurface(document="read" if read_only else "edit"), shared_sections=True)
 
     def validate_node(self, node):
+        if self.shared_sections and (self.surface is None or self.sections):
+            raise ValueError("Shared sections need a whole-card surface and no per-section overrides")
         if not node.frontend.get("workspace") and not node.frontend.get("body"):
             raise ValueError("Deployable plugin nodes need an existing body or workspace view")
         for name in self.sections:
@@ -29,7 +54,7 @@ class NodeDeploymentDefinition(BaseModel):
         for surface in ([self.surface] if self.surface is not None else []) + list(self.sections.values()):
             if not surface.config_fields <= node.config_model.model_fields.keys():
                 raise ValueError("Unknown public config field")
-            if surface.document_fields or surface.document_actions or surface.downloads or surface.summary_fields:
+            if surface.document != "none" or surface.document_fields or surface.document_actions or surface.downloads or surface.summary_fields:
                 if node.document is None:
                     raise ValueError("Public document operations require a node document")
                 if not surface.document_fields <= node.document.model.model_fields.keys():
@@ -42,6 +67,25 @@ class NodeDeploymentDefinition(BaseModel):
                 raise ValueError("Unknown public resource action")
             if surface.execution and node.execution is None:
                 raise ValueError("Public execution requires a node execution handler")
+            if surface.file_preview and "core.file-viewer" not in node.traits:
+                raise ValueError("Public file preview requires a file viewer")
+
+
+def resolve_surface(surface, node):
+    """Freeze shorthand against this version of the registered business API."""
+    if surface.document == "none":
+        return surface
+    document = node.document
+    if document is None:
+        raise ValueError("Public document operations require a node document")
+    return surface.model_copy(update={
+        "document_fields": surface.document_fields | frozenset(document.model.model_fields),
+        "document_actions": surface.document_actions | {
+            name for name, action in document.actions.items()
+            if surface.document == "edit" or action.read_only
+        },
+        "downloads": surface.downloads | frozenset(document.downloads),
+    })
 
 
 def merged_surfaces(surfaces):
@@ -53,10 +97,17 @@ def merged_surfaces(surfaces):
         for action, fields in value["resource_actions"].items():
             result["resource_actions"][action] = sorted(set(result["resource_actions"].get(action, [])) | set(fields))
         result["execution"] |= value["execution"]
+        result["file_preview"] |= value["file_preview"]
+        if value["document"] == "edit" or result["document"] == "none":
+            result["document"] = value["document"]
     return result
 
 
 def project_document(snapshot, access):
+    if access.get("document", "none") != "none":
+        # Read actions may return a search result or detail projection rather
+        # than the persisted document shape. Preserve their original contract.
+        return {key: snapshot[key] for key in ("revision", "value", "summary") if key in snapshot}
     return {"revision": snapshot["revision"],
             "value": {key: value for key, value in snapshot["value"].items() if key in access["document_fields"]},
             "summary": {key: value for key, value in snapshot.get("summary", {}).items() if key in access["summary_fields"]}}

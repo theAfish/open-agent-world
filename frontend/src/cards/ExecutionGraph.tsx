@@ -11,8 +11,8 @@ import { causalFocus, executionIndex, layoutGraph, laneMemory, nodeEdges, trackP
 import './executionGraph.css';
 
 export function ExecutionGraphCard({ card }: { card: WorldCard }) {
-  const { deployed } = useWorkspaceAccess();
-  return <ExecutionGraphView api={useExecutionSources(card.id, deployed)} />;
+  const { deployed, permissions } = useWorkspaceAccess();
+  return <ExecutionGraphView api={useExecutionSources(card.id, deployed && !permissions[card.id]?.includes('execution_graph'))} />;
 }
 
 /** Publish a coherent revision only after all its pages arrive. */

@@ -125,6 +125,9 @@ jobs:
       - name: Run deployment acceptance against production frontend
         working-directory: frontend
         run: npm run test:e2e:deployment
+      - name: Verify the published MatCreator workspace and shared card APIs
+        working-directory: frontend
+        run: npm run test:e2e:publication
       - name: Verify hosted login and independent user workspaces
         working-directory: frontend
         run: npm run test:e2e:hosting
@@ -138,6 +141,7 @@ jobs:
           name: deployment-browser-failure
           path: |
             .tmp/deployment-playwright/
+            .tmp/publication-playwright/
             .tmp/deployment-desktop.png
             .tmp/deployment-mobile.png
             .tmp/hosting-playwright/

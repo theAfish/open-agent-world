@@ -13,13 +13,14 @@ import './jobs.css';
 
 export function JobsCard({ card }: { card: WorldCard }) {
   const session = useCardStateSession(card.id);
-  const { deployed } = useWorkspaceAccess();
+  const { deployed, permissions } = useWorkspaceAccess();
+  const allowed = !deployed || !!permissions[card.id]?.includes('jobs');
   // Any grant change can revoke access to a job's Sandbox or Conversation.
   const connections = useWorldStore(state => state.edges.map(e => `${e.id}:${e.source}:${e.target}:${e.relationship}:${e.direction}:${!!e.missing_plugin}`).sort().join('|'));
-  const api = useMemo<JobsHost | undefined>(() => deployed ? undefined : {
+  const api = useMemo<JobsHost | undefined>(() => !allowed ? undefined : {
     list: () => worldApi.backgroundJobs(card.id, session ?? null),
     control: (job, action) => worldApi.controlBackgroundJob(card.id, job.id, action, job.revision, session ?? null),
-  }, [card.id, session, deployed, connections]);
+  }, [card.id, session, allowed, connections]);
   return <JobsBoard key={`${card.id}:${session}:${connections}`} api={api} />;
 }
 

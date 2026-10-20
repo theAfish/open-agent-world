@@ -15,6 +15,20 @@ const defaults = {
 const OwnerContext = createContext('missing');
 
 describe('workspace sections', () => {
+  it('reuses ordinary section IDs for a whole-document publication', () => {
+    function Probe() {
+      const { isInline, isDetached } = useWorkspaceSections();
+      return <output>{JSON.stringify([isInline('form'), isDetached('results'), isInline('hidden')])}</output>;
+    }
+    render(<WorkspaceAccess.Provider value={{ deployed: true, permissions: { 'card-one': [] }, plugin_access: {
+      'card-one': { config_fields: [], document_fields: ['text'], summary_fields: [], document_actions: ['save'],
+        downloads: [], resource_actions: {}, execution: false, shared_sections: true },
+    } }}><WorkspaceSectionProvider {...defaults} detachedSectionIds={new Set(['results'])} hiddenSectionIds={new Set(['hidden'])}>
+      <Probe /><WorkspaceSection id="form" title="Form"><input aria-label="Published form" /></WorkspaceSection>
+    </WorkspaceSectionProvider></WorkspaceAccess.Provider>);
+    expect(screen.getByRole('status').textContent).toBe('[true,true,false]');
+    expect(screen.getByLabelText('Published form')).toBeTruthy();
+  });
   it('reports detached presentation only for visible, permitted sections', () => {
     function Probe() {
       const sections = useWorkspaceSections();

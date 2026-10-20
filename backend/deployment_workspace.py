@@ -2,7 +2,7 @@
 from copy import deepcopy
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from backend.api import conversations, node_documents, resources, runtime
+from backend.api import artifacts, conversations, file_preview, job_board, node_documents, node_resources, resources, runtime
 from backend.api.dependencies import get_services
 from backend.api.knowledge_bridge import (
     ExperimentAssembleRequest, ProjectionRequest, run_experiment_assemble, run_projection,
@@ -77,8 +77,20 @@ def workspace_snapshot(manifest, services):
         if definition["id"] in plugin_types:
             node = services.plugins.node_type(definition["id"])
             definition["frontend"] = {key: value for key, value in node.frontend.items() if key in {"body", "workspace"}}
-    layout = {**deepcopy(manifest["layout"]), "hidden_sections": hidden}
-    return {"cards": cards, "plugin_access": manifest.get("plugin_access", {}), "legion": {"id": manifest["legion_id"], "name": manifest["name"],
+    layout = deepcopy(manifest["layout"])
+    layout["hidden_sections"] = hidden + layout.get("hidden_sections", [])
+    # File following needs its actual connection, not an inferred relationship.
+    # No hidden node or unrelated engineering edge enters the browser world.
+    edges = []
+    for node_id, access in manifest.get("plugin_access", {}).items():
+        if not access.get("file_preview"):
+            continue
+        for edge in services.world.list_edges_from(node_id):
+            if (not edge.missing_plugin and edge.relationship == "core.file-preview"
+                    and edge.direction in {"forward", "bidirectional"}
+                    and {"files", "preview", "conversation"}.intersection(manifest["permissions"].get(edge.target, []))):
+                edges.append({key: getattr(edge, key) for key in ("id", "source", "target", "relationship", "direction")})
+    return {"cards": cards, "edges": edges, "plugin_access": manifest.get("plugin_access", {}), "legion": {"id": manifest["legion_id"], "name": manifest["name"],
             "type": "legion", "finish": services.world.get_card(manifest["legion_id"]).finish,
             "config": {"workspace_layout": layout}},
             "catalog": {"node_types": definitions, "relationships": [], "packs": [],
@@ -88,7 +100,7 @@ def workspace_snapshot(manifest, services):
 def workspace_router(manifest):
     async def state_access(request: Request, services=Depends(get_services)):
         session_id = request.headers.get("X-OAW-State-Session") or request.query_params.get("state_session")
-        node_id = request.path_params.get("node_id")
+        node_id = request.path_params.get("node_id") or request.path_params.get("viewer_id")
         if not session_id or session_id == "default" or not node_id:
             return
         card = services.world.get_card(node_id)
@@ -104,6 +116,36 @@ def workspace_router(manifest):
     def require(node_id, *operations):
         if node_id in manifest.get("plugin_access", {}) or not set(operations).intersection(manifest["permissions"].get(node_id, [])):
             raise HTTPException(404, "This operation is not published")
+
+    def mount(source, names, parameter, operation):
+        """Reuse the exact editor handler, with a host-owned publication gate."""
+        def scope(request: Request):
+            require(request.path_params[parameter], operation)
+        for route in source.routes:
+            if route.endpoint.__name__ in names:
+                router.add_api_route(route.path, route.endpoint, methods=list(route.methods),
+                                     response_model=route.response_model, status_code=route.status_code,
+                                     dependencies=[Depends(scope)])
+
+    # These handlers already enforce connected source / job ownership, selected
+    # session, optimistic revisions, pagination and artifact version membership.
+    mount(node_resources.router, {"execution_sources", "execution_snapshot"}, "node_id", "execution_graph")
+    mount(job_board.router, {"jobs", "control"}, "node_id", "jobs")
+    mount(artifacts.router, {"listing", "preview", "content"}, "collection_id", "artifacts")
+
+    @router.post("/nodes/{viewer_id}/file-preview")
+    async def preview_file(viewer_id: str, reference: file_preview.FileReference, services=Depends(get_services)):
+        if not manifest.get("plugin_access", {}).get(viewer_id, {}).get("file_preview"):
+            raise HTTPException(404, "This operation is not published")
+        if reference.kind == "sandbox":
+            require(reference.source_id, "files", "preview")
+            if reference.root != "workspace":
+                raise HTTPException(404, "This root is not published")
+        else:
+            require(reference.source_id, "conversation")
+        # The ordinary handler also requires the viewer's direct file.preview
+        # grant and validates the path / attachment's conversation membership.
+        return await file_preview.file_preview(viewer_id, reference, services)
 
     def conversation_scope(request: Request):
         name = request.scope["endpoint"].__name__
@@ -160,7 +202,7 @@ def workspace_router(manifest):
     async def document(node_id: str, services=Depends(get_services), summary_only: bool = False):
         access = manifest.get("plugin_access", {}).get(node_id)
         if access is not None:
-            if not access["document_fields"] and not access["summary_fields"]:
+            if not access["document_fields"] and not access["summary_fields"] and access.get("document", "none") == "none":
                 raise HTTPException(404, "This operation is not published")
             projected = project_document(await node_documents.get_document(node_id, services), access)
             return {"revision": projected["revision"], "summary": projected["summary"]} if summary_only else projected

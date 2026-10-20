@@ -49,7 +49,7 @@ The runtime has its own password login; never proxy the engineering API or distr
 - The snapshot includes the entire source profile (including existing history, files and encrypted credentials) to preserve cross-Legion dependencies. Only published surfaces are projected through the operator API. Keep the deployment directory host-private.
 - Windows credentials remain account-bound. Prepare and run under the same host/account. Cross-host migration requires rebinding credentials, plugins and external dependencies.
 - Known external workspace bindings require `--allow-external-workspaces`. They remain shared external folders, outside the snapshot and rollback. Review plugin-specific dependencies separately.
-- Supported public surfaces: Conversation and its sections, Sandbox files/preview and explicitly allowed terminal, Text, Image, `oaw.tasks` task boards, and Agent status. Third-party and future plugins opt in through `NodeDeploymentDefinition`, reusing existing views and handlers; see [plugin deployment](plugin-deployment.md). Undeclared custom surfaces (including currently unadapted MatCreator views) fail publication and may remain as hidden backend dependencies.
+- Supported public surfaces: Conversation and its sections, Sandbox files/preview and explicitly allowed terminal, Text, Image, task boards, Agent status, Agent Graph, Jobs, and artifact listing/preview/download. The original MatCreator research layout also supports its knowledge graph and connected Structure Viewer. Third-party document cards can opt in with `NodeDeploymentDefinition.from_document()` without separate endpoints; precise permissions remain available. See [plugin deployment](plugin-deployment.md). The publish dialog checks all panes before release creation; undeclared custom surfaces remain private.
 - The deployed UI reuses Legion Workspace, WorkspaceSection and the existing business components. Layout splits are fixed; users can switch tabs without losing drafts. Only engineering controls are omitted. Text uses the original editor in read-only mode. Hidden/unplaced cards have no fallback inspector. Graph structure and configuration changes are rejected even through internal Agent graph operations.
 - Graph/configuration snapshots do not freeze normal business state: conversations, authorized documents, tasks and workspace files remain writable. Plugin versions are checked at startup. Preserve the release's code checkout/build as well as its data.
 
@@ -59,8 +59,14 @@ Stop the service before backing up the entire deployment directory, matching cod
 
 ```bash
 python -m pytest backend/tests/test_deployments.py backend/tests/test_control_plane.py
+python -m pytest backend/tests/test_workspace_publication.py backend/tests/test_hosted_worker.py
 npm --prefix frontend run build
 npm --prefix frontend run test:e2e:deployment
+npm --prefix frontend run test:e2e:publication
 ```
 
-The browser suite uses a disposable mock-Agent deployment. It validates UI and API boundaries, not native OS Sandbox isolation.
+The browser suites use disposable deployments. The research suite publishes the
+original MatCreator layout, saves knowledge, downloads an artifact and opens a
+Sandbox file in the existing 3D viewer. It uses an offline test Sandbox OS adapter
+and makes no model or cloud calls; it validates UI/API integration, not OS isolation
+or live research execution.

@@ -8,6 +8,11 @@ import './deployment.css';
 import { isHosted } from '../auth/hostedSession';
 
 interface Release { id: string; name: string; legion_id: string; source_path: string; created_at: string }
+interface Readiness {
+  ready: boolean;
+  panels: { card_id: string; name: string; section_id?: string }[];
+  issues: { card_id?: string; section_id?: string; message: string }[];
+}
 const quote = (value: string) => /^[A-Za-z]:/.test(value) ? `'${value.replaceAll("'", "''")}'` : `'${value.replaceAll("'", "'\"'\"'")}'`;
 
 export function PublishApplication({ card, disabled }: { card: WorldCard; disabled: boolean }) {
@@ -22,9 +27,23 @@ export function PublishApplication({ card, disabled }: { card: WorldCard; disabl
   const [release, setRelease] = useState<Release>();
   const [history, setHistory] = useState<Release[]>([]);
   const [copied, setCopied] = useState(false);
+  const [readiness, setReadiness] = useState<Readiness>();
+  const [checking, setChecking] = useState(false);
   useEffect(() => {
     if (open) void deploymentRequest<Release[]>('/deployments').then(items => setHistory(items.filter(item => item.legion_id === card.id).reverse())).catch(reason => setError(reason.message));
   }, [open, card.id]);
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    setReadiness(undefined); setChecking(true);
+    void deploymentRequest<Readiness>('/deployments/preview', {
+      method: 'POST', signal: controller.signal,
+      body: JSON.stringify({ legion_id: card.id, name: card.name, allow_terminal: terminal }),
+    }).then(value => { if (!controller.signal.aborted) setReadiness(value); }).catch(reason => {
+      if (!controller.signal.aborted) setError(reason.message);
+    }).finally(() => { if (!controller.signal.aborted) setChecking(false); });
+    return () => controller.abort();
+  }, [open, card.id, card.name, card.config.workspace_layout, terminal]);
   const command = release ? `${/^[A-Za-z]:/.test(release.source_path) ? 'python' : 'python3'} scripts/deploy.py --source ${quote(release.source_path)} --release ${release.id} --open` : '';
   const publish = async () => {
     setBusy(true); setError('');
@@ -44,9 +63,16 @@ export function PublishApplication({ card, disabled }: { card: WorldCard; disabl
         <label>{t('Application name')}<input value={name} onChange={event => setName(event.target.value)} maxLength={100} autoFocus /></label>
         <p>{t('Published pages')}: {paneViews(readWorkspaceLayout(card.config.workspace_layout).root).length}</p>
         <label className="publish-checkbox"><input type="checkbox" checked={terminal} onChange={event => setTerminal(event.target.checked)} />{t('Allow users to run Sandbox terminal commands')}</label>
-        <p className="publish-hint">{t('Conversations, files, text, images, task boards and agent status have public pages. Unsupported plugin pages must be removed from the layout before publication.')}</p>
+        <p className="publish-hint">{t('Published pages reuse their existing views and business APIs. Configuration and management access remain locked.')}</p>
+        <div className="publish-readiness" aria-live="polite">
+          {checking ? <p role="status">{t('Checking workspace…')}</p> : readiness && <>
+            <p>{t(readiness.ready ? 'Workspace is ready to publish' : 'Resolve these pages before publishing')}</p>
+            {readiness.issues.length > 0 && <ul>{readiness.issues.map((issue, index) => <li key={`${issue.card_id}:${issue.section_id}:${index}`}>{issue.message}</li>)}</ul>}
+            <ul>{readiness.panels.map(panel => <li key={`${panel.card_id}:${panel.section_id}`}>{panel.name}{panel.section_id ? ` · ${panel.section_id}` : ''}</li>)}</ul>
+          </>}
+        </div>
         {error && <p className="deployment-error" role="alert">{error}</p>}
-        <button className="primary-button" disabled={busy || !name.trim()} onClick={() => { void publish(); }}>{busy ? t('Publishing…') : t('Create release')}</button>
+        <button className="primary-button" disabled={busy || checking || !readiness?.ready || !name.trim()} onClick={() => { void publish(); }}>{busy ? t('Publishing…') : t('Create release')}</button>
         {!!history.length && <label>{t('Published versions')}<select value={release?.id ?? ''} onChange={event => { setRelease(history.find(item => item.id === event.target.value)); setCopied(false); }}><option value="" disabled>{t('Select a release')}</option>{history.map(item => <option key={item.id} value={item.id}>{item.name} · {new Date(item.created_at).toLocaleString()} · {item.id.slice(0, 8)}</option>)}</select></label>}
         {release && <div className="publish-next"><h3>{t('Deploy this release')}</h3>
           {hosted ? <><p>{copy('Open Administration → Build & deploy to select this release, its target accounts and their interface.', '进入管理后台 → 搭建与部署，选择此版本、使用账号和用户界面。')}</p><a href="/admin">{copy('Open administration', '前往管理后台')}</a></> : <>

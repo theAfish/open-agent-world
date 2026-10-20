@@ -208,7 +208,7 @@ def test_unbound_desktop_database_requires_explicit_migration(tmp_path):
         prepare_hosted_binding(tmp_path, profile_id=str(uuid4()), user_id=str(uuid4()), application_id="studio")
 
 
-def test_hosted_runtime_preserves_user_attribution_inside_router(tmp_path, monkeypatch):
+def test_hosted_runtime_preserves_user_attribution_inside_router(tmp_path, monkeypatch, caplog):
     from backend import deployment_workspace
     from backend.deployment_runtime import runtime_router
     worker = config(tmp_path)
@@ -231,4 +231,12 @@ def test_hosted_runtime_preserves_user_attribution_inside_router(tmp_path, monke
         assert context["actor"]["id"] == VerifiedIdentity(ISSUER, worker.user_id).actor_id
         assert context["tenant"] == asdict(scope)
         assert context["auth_method"] == "external_identity"
+        # A denied published operation must not break the middleware's context
+        # cleanup or the identity attached to the next request.
+        denied = client.get("/api/runtime-app/workspace/nodes/unpublished/jobs", headers=headers(worker))
+        assert denied.status_code == 404
+        again = client.get("/api/runtime-app", headers=headers(worker))
+        for key in ("actor", "tenant", "auth_method"):
+            assert again.json()["context"][key] == context[key]
     assert current_request_context() is None
+    assert "was created in a different Context" not in caplog.text

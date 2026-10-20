@@ -11,9 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.api.dependencies import get_services
 from backend.application import write_setting
-from backend.errors import ResourceValidationError
+from backend.errors import DomainError, ResourceValidationError
 from backend.legion_workspace import WorkspaceLayout
-from backend.plugins.deployment import merged_surfaces
+from backend.plugins.deployment import merged_surfaces, resolve_surface
 
 PREFIX = "deployment.release."
 MANIFEST = "deployment.json"
@@ -54,7 +54,7 @@ def panel_kind(services, card, section):
     definition = services.plugins.node_type(card.type)
     if definition.deployment is not None:
         contract = definition.deployment
-        if (section is None and contract.surface is not None) or section in contract.sections:
+        if ((section is None or contract.shared_sections) and contract.surface is not None) or section in contract.sections:
             return "plugin"
         raise ResourceValidationError(f"{card.name}: this plugin has not published this surface")
     if card.type == "conversation" and section in (None, "sessions", "conversation", "participants"):
@@ -64,6 +64,9 @@ def panel_kind(services, card, section):
     if definition.frontend.get("workspace") or definition.frontend.get("body"):
         raise ResourceValidationError(f"{card.name}: declare NodeDeploymentDefinition to publish this plugin view")
     if section is None:
+        if card.type in ("core.execution-graph", "core.jobs", "core.artifact-collection"):
+            return {"core.execution-graph": "execution_graph", "core.jobs": "jobs",
+                    "core.artifact-collection": "artifacts"}[card.type]
         if card.type in ("text", "image"):
             return card.type
         if services.plugins.has_trait(card.type, "ui.task-board.v1"):
@@ -76,7 +79,7 @@ def panel_kind(services, card, section):
     )
 
 
-def release_spec(services, request: PublishRequest):
+def inspect_workspace(services, request: PublishRequest):
     legion = services.world.get_card(request.legion_id)
     if legion.type != "legion":
         raise ResourceValidationError("Choose a Legion workspace")
@@ -85,16 +88,28 @@ def release_spec(services, request: PublishRequest):
     if not placed:
         raise ResourceValidationError("Save a nonempty workspace layout before publishing")
     panels = []
+    issues = []
     for view in placed:
-        card = services.world.get_card(view["card_id"])
-        if card.parent_id != legion.id:
-            raise ResourceValidationError("Published panes must belong to this Legion")
-        section = view.get("section_id")
-        kind = panel_kind(services, card, section)
-        if kind == "sandbox" and section == "terminal" and not request.allow_terminal:
-            raise ResourceValidationError("The layout includes Terminal. Enable terminal access or remove that section before publishing.")
-        panels.append({**view, "name": card.name, "kind": kind})
-    # Hidden sections are permissions as well as presentation. Never send hidden IDs.
+        try:
+            card = services.world.get_card(view["card_id"])
+            if card.parent_id != legion.id:
+                raise ResourceValidationError("Published panes must belong to this Legion")
+            section = view.get("section_id")
+            kind = panel_kind(services, card, section)
+            if kind == "sandbox" and section == "terminal" and not request.allow_terminal:
+                raise ResourceValidationError("The layout includes Terminal. Enable terminal access or remove that section before publishing.")
+            panels.append({**view, "name": card.name, "kind": kind})
+        except DomainError as error:
+            issues.append({**view, "message": str(error)})
+    return legion, layout, panels, issues
+
+
+def release_spec(services, request: PublishRequest):
+    legion, layout, panels, issues = inspect_workspace(services, request)
+    if issues:
+        raise ResourceValidationError("; ".join(issue["message"] for issue in issues))
+    # Explicit section contracts grant only visible access. Whole-card shared
+    # sections keep their presentation choices without changing business access.
     hidden = {tuple((v["card_id"], v.get("section_id"))) for v in layout.get("hidden_sections", [])}
     extracted = {(p["card_id"], p["section_id"]) for p in panels if p.get("section_id")}
     permissions = {}
@@ -105,23 +120,29 @@ def release_spec(services, request: PublishRequest):
         grants = permissions.setdefault(node_id, [])
         panel["sections"] = []
         if kind == "plugin":
-            contract = services.plugins.node_type(services.world.get_card(node_id).type).deployment
+            definition = services.plugins.node_type(services.world.get_card(node_id).type)
+            contract = definition.deployment
             selected = plugin_surfaces.setdefault(node_id, [])
-            if section is None:
-                selected.append(contract.surface)
+            if section is None or contract.shared_sections:
+                selected.append(resolve_surface(contract.surface, definition))
+            if contract.shared_sections and section is not None and section not in grants:
+                grants.append(section)
+                panel["sections"].append(section)
             for name, surface in contract.sections.items():
                 if (section is not None and name != section) or (node_id, name) in hidden:
                     continue
                 if section is None and (node_id, name) in extracted:
                     continue
-                selected.append(surface)
+                selected.append(resolve_surface(surface, definition))
                 if name not in grants:
                     grants.append(name)
                 panel["sections"].append(name)
             plugin_access[node_id] = merged_surfaces(selected)
+            plugin_access[node_id]["shared_sections"] = contract.shared_sections
             continue
         operations = {"conversation": ["sessions", "conversation", "participants"], "sandbox": ["files", "preview", "terminal"],
-                      "tasks": ["tasks"], "text": ["text"], "image": ["image"], "agent": ["status"]}[kind]
+                      "tasks": ["tasks"], "text": ["text"], "image": ["image"], "agent": ["status"],
+                      "execution_graph": ["execution_graph"], "jobs": ["jobs"], "artifacts": ["artifacts"]}[kind]
         for operation in operations:
             if kind in {"sandbox", "conversation"} and section and operation != section:
                 continue
@@ -132,7 +153,10 @@ def release_spec(services, request: PublishRequest):
             if operation not in grants:
                 grants.append(operation)
             panel["sections"].append(operation)
-    layout["hidden_sections"] = []
+    layout["hidden_sections"] = [
+        view for view in layout.get("hidden_sections", [])
+        if plugin_access.get(view["card_id"], {}).get("shared_sections")
+    ]
     return {"schema_version": 1, "id": str(uuid4()), "name": request.name.strip() or legion.name,
             "legion_id": legion.id, "created_at": datetime.now(UTC).isoformat(),
             "layout": layout, "panels": panels, "permissions": permissions, "plugin_access": plugin_access,
@@ -167,3 +191,14 @@ async def publish(request: PublishRequest, services=Depends(get_services)):
             spec["source_path"] = str(services.settings.data_root)
             write_setting(db, PREFIX + spec["id"], spec)
     return spec
+
+
+@router.post("/api/deployments/preview")
+async def preview(request: PublishRequest, services=Depends(get_services)):
+    """Read-only readiness report; publication revalidates under the same lock."""
+    async with services._node_mutation(read_only=True):
+        try:
+            _, _, panels, issues = inspect_workspace(services, request)
+        except (DomainError, ValueError) as error:
+            return {"ready": False, "panels": [], "issues": [{"message": str(error)}]}
+        return {"ready": not issues, "panels": panels, "issues": issues}

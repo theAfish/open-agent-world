@@ -60,6 +60,11 @@ Plugin-specific documentation can remain in its own package or repository. These
 
 ## Developing a plugin
 
+Plugin API 1.36 adds `NodeDeploymentDefinition.from_document()`, shared Workspace
+sections and connected file-preview publication. Existing views and business
+handlers work in the published Workspace without a second API implementation;
+see [plugin deployment](plugin-deployment.md).
+
 Plugin API 1.33 adds `BackgroundJobProvider`, a host-owned durable job ledger and
 model-free observation through the shared continuation loop. Providers submit or
 attach external work; the host retains identity, authorization and continuation

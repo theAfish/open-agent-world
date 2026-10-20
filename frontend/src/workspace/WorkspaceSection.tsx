@@ -36,7 +36,8 @@ export function useWorkspaceSections(): { isInline: (id: string) => boolean; isD
   const detached = context?.detachedSectionIds;
   const hidden = context?.hiddenSectionIds;
   const access = useWorkspaceAccess();
-  const restricted = !!(context && access.plugin_access?.[context.cardId]);
+  const policy = context ? access.plugin_access?.[context.cardId] : undefined;
+  const restricted = !!policy && !policy.shared_sections;
   const allowed = context ? access.permissions[context.cardId] : undefined;
   const isInline = useCallback((id: string) => (!restricted || !!allowed?.includes(id)) && !detached?.has(id) && !hidden?.has(id), [detached, hidden, allowed, restricted]);
   const isDetached = useCallback((id: string) => (!restricted || !!allowed?.includes(id)) && !!detached?.has(id) && !hidden?.has(id), [detached, hidden, allowed, restricted]);
@@ -57,7 +58,8 @@ export interface WorkspaceSectionProps {
 export function WorkspaceSection({ id, title, children, className, style, layout }: WorkspaceSectionProps) {
   const context = useContext(WorkspaceSectionContext);
   const access = useWorkspaceAccess();
-  const permitted = !context || !access.plugin_access?.[context.cardId] || access.permissions[context.cardId]?.includes(id);
+  const policy = context ? access.plugin_access?.[context.cardId] : undefined;
+  const permitted = !context || !policy || policy.shared_sections || access.permissions[context.cardId]?.includes(id);
   const { isInline } = useWorkspaceSections();
   const inline = isInline(id);
   const [contentReady, setContentReady] = useState(inline);

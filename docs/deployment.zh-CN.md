@@ -115,10 +115,13 @@ journalctl -u oaw-runtime -f
 | Text / Image | 阅读文本、显示图片 |
 | Task Board（`oaw.tasks`） | 查看/添加任务、更新状态、按已配置执行器启动/停止任务 |
 | Agent 整卡 | 仅显示运行状态，不显示指令、模型、连线和配置 |
+| Agent Graph / Jobs | 按原有连接与当前会话查看执行图、任务；Jobs 继续按连接授权检查任务控制 |
+| 成果文件集 | 列出、预览和下载已引用版本，不开放保留策略管理与全局文件浏览 |
+| MatCreator 知识图谱 / Structure Viewer | 原有知识读写与检索；读取已发布且已连接的会话附件或 Sandbox 工作目录文件 |
 
 部署页面直接复用 Legion Workspace、WorkspaceSection 和现有的 Conversation / Sandbox / Task Board / Text / Image 组件。分栏比例与布局固定，标签可切换，切换标签保留草稿；主题和语言也沿用原控件。只移除布局编辑、返回画布、设置、未放置卡片入口与组件内的工程配置。文本沿用原文本组件，以只读方式显示。
 
-第三方与新增插件可以通过 `NodeDeploymentDefinition` 声明公开字段、业务操作和原有 WorkspaceSection，部署时复用原组件和处理函数。未声明的自定义页面（包括尚未适配的 MatCreator 页面）会拒绝发布，但仍可作为后台依赖运行。详见[插件部署接入](plugin-deployment.md)，其中包含可保存、下载的完整示例。部署端通过 `/api/runtime-app/workspace` 调用原有业务处理函数，不挂载完整工程 API。
+第三方文档型卡片可用 `NodeDeploymentDefinition.from_document()` 直接复用原文档业务接口与 WorkspaceSection；含私有数据的卡片继续声明精细权限。无需单独编写 Workspace HTTP 接口。MatCreator 原有研究布局可以直接发布，未声明的其他自定义页面仍保持私有。发布面板会提前列出各页面的兼容性问题。详见[插件部署接入](plugin-deployment.zh-CN.md)。部署端通过 `/api/runtime-app/workspace` 调用原有业务处理函数，不挂载完整工程 API。
 
 ## 数据、凭证与执行边界
 
@@ -137,7 +140,7 @@ journalctl -u oaw-runtime -f
 | 数据目录正在使用 | 停止占用该 profile 的后端；仅关闭浏览器标签不会停止源码服务 |
 | 发布后配置已改变 | 回工程端重新发布，再复制新命令 |
 | 已存在目标目录 | 重启用 `--serve`；制作新版本用新的 `--output`，程序不会覆盖或合并 |
-| 不支持的公开页面 | 从发布布局中移除该页面，保留后台卡片，或实现对应的用户页面适配 |
+| 不支持的公开页面 | 按发布检查为原卡片声明业务权限，或将该页面移出布局、保留为后台依赖 |
 | 外部工作目录 | 使用部署专属目录，或明确接受共享后加 `--allow-external-workspaces` |
 | 模型 / Sandbox 不可用 | 查看部署目录 `logs/launcher.log`；确认服务账号、凭证环境、运行时与网络前提 |
 | 插件版本发生变化 | 使用原版本代码启动，或在新版本中重新验证和发布 |

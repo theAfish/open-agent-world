@@ -12,6 +12,8 @@
 .publish-dialog p, .publish-dialog li { line-height: 1.65; }
 .publish-dialog .publish-checkbox { display: flex; align-items: center; gap: 8px; }
 .publish-hint { font-size: 12px; color: var(--ink-soft); }
+.publish-readiness { font-size: 12px; color: var(--ink-soft); border-top: 1px solid var(--line); padding-top: 10px; }
+.publish-readiness ul { margin: 6px 0 0; padding-left: 20px; overflow-wrap: anywhere; }
 .publish-next { display: grid; gap: 12px; border-top: 1px solid var(--line); padding-top: 16px; }
 .publish-next pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: var(--surface-soft); border-radius: 8px; user-select: text; }
 @media (max-width: 760px) { .publish-dialog { padding: 16px; } }

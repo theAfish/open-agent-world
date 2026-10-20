@@ -8,6 +8,7 @@ import { FileText, Files, Eye, Download, Copy, RefreshCw } from "lucide-react";
 import "./artifacts.css";
 import { Modal } from '../components/Modal';
 import { WorkspaceEmptyState, WorkspaceToolbar } from '../workspace/WorkspacePrimitives';
+import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
 
 export interface ArtifactVersion {
   version_id: string; artifact_id: string; name: string; state: string; size_bytes: number;
@@ -103,6 +104,7 @@ function ArtifactEntry({ version: v, collectionId, busy, onPreview, onCopy, acti
   onCopy: () => void; action: (operation: () => Promise<unknown>) => Promise<void>;
 }) {
   const { locale } = useLocale();
+  const { deployed } = useWorkspaceAccess();
   const [expanded, setExpanded] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const files = v.manifest.filter(file => !file.directory);
@@ -136,19 +138,20 @@ function ArtifactEntry({ version: v, collectionId, busy, onPreview, onCopy, acti
       </dl><details className="artifact-manifest"><summary>{t('Content manifest (')}{v.manifest.length})</summary>
         {v.manifest.map(file => <div key={file.path}><strong>{file.path}{file.directory ? '/' : ''}</strong>{file.sha256 && <code>SHA-256 {file.sha256}</code>}</div>)}
       </details></details>
-      <button className="artifact-text-button artifact-copy-button" disabled={busy || v.state !== 'ready'} onClick={onCopy}><Copy size={14} aria-hidden="true" />{t('Copy into Sandbox')}</button>
+      {!deployed && <><button className="artifact-text-button artifact-copy-button" disabled={busy || v.state !== 'ready'} onClick={onCopy}><Copy size={14} aria-hidden="true" />{t('Copy into Sandbox')}</button>
       <details className="artifact-manage" onToggle={e => { if (!e.currentTarget.open) setConfirm(false); }}><summary>{t('Manage version')}</summary>
         <p>{t('Retained independently of producers. Removing a reference preserves its stored content.')}</p>
         <div className="artifact-manage-actions"><button className="secondary-button" disabled={busy} onClick={() => void action(() => worldApi.artifacts(collectionId, `references/${v.version_id}`, undefined, 'DELETE'))}>{t('Remove reference')}</button>
         {confirm ? <><button className="danger-button" disabled={busy} onClick={() => void action(() => worldApi.artifacts(collectionId, `versions/${v.version_id}`, undefined, 'DELETE'))}>{t('Confirm release and delete stored content')}</button><button className="secondary-button" disabled={busy} onClick={() => setConfirm(false)}>{t('Cancel')}</button></>
           : <button className="artifact-text-button artifact-release" disabled={busy || v.state === 'deleted'} onClick={() => setConfirm(true)}>{t('Release retained content…')}</button>}</div>
-      </details>
+      </details></>}
     </div>
   </article>;
 }
 
 export function ArtifactCollection({ card }: { card: WorldCard }) {
   useLocale();
+  const { deployed } = useWorkspaceAccess();
   const socket = useWorldStore(s => s.socketState);
   const event = useWorldStore(s => s.events.find(e => e.type === 'artifact_updated' && e.node_id === card.id)?.id);
   const cards = useWorldStore(s => s.cards);
@@ -169,10 +172,10 @@ export function ArtifactCollection({ card }: { card: WorldCard }) {
     return () => { live = false; };
   }, [card.id, socket, event]);
   useEffect(() => {
-    if (!versions.some(v => v.state === 'staging' || v.state === 'deleting')) return;
+    if (!deployed && !versions.some(v => v.state === 'staging' || v.state === 'deleting')) return;
     const timer = window.setInterval(() => void refresh().catch(e => setError(apiErrorMessage(e))), 2000);
     return () => window.clearInterval(timer);
-  }, [versions, card.id]);
+  }, [versions, card.id, deployed]);
   async function action(operation: () => Promise<unknown>) {
     setBusy(true); setError('');
     try { await operation(); await refresh(); }
@@ -198,11 +201,11 @@ export function ArtifactCollection({ card }: { card: WorldCard }) {
       description={loaded ? t('Publish selected files from a Sandbox to keep a version here.') : undefined} />}
     {[...versions].sort((a, b) => b.created_at.localeCompare(a.created_at)).map(v => <ArtifactEntry key={v.version_id} version={v} collectionId={card.id} busy={busy} onPreview={setPreview} action={action}
       onCopy={() => { setCopy(v); setDestination(''); setCopyError(''); setNotice(''); }} />)}
-    <details className="artifact-restore"><summary>{t('Restore retained references')}</summary>
+    {!deployed && <details className="artifact-restore"><summary>{t('Restore retained references')}</summary>
       <button className="secondary-button" disabled={busy} onClick={() => void action(async () => setRetained(await worldApi.retainedArtifacts<ArtifactVersion[]>()))}>{t('Browse retained versions')}</button>
       {retained.filter(v => v.retention.retained && !versions.some(r => r.version_id === v.version_id)).map(v => <p key={v.version_id}>{v.name} · {v.version_id}
         <button className="secondary-button" disabled={busy} onClick={() => void action(() => worldApi.artifacts(card.id, `references/${v.version_id}`, undefined, 'PUT'))}>{t('Add reference')}</button></p>)}
-    </details>
+    </details>}
     {preview && <ArtifactPreview collectionId={card.id} target={preview} onClose={() => setPreview(undefined)} />}
     {copy && <Modal title={t('Copy into Sandbox')} busy={busy} onClose={() => setCopy(undefined)} className="artifact-copy-dialog" actions={
       <button className="primary-button" disabled={busy || !sandbox || !destination.trim()} onClick={() => void materialize()}>{t('Copy version to workspace')}</button>

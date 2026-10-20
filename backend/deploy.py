@@ -40,11 +40,11 @@ def validate_manifest(value):
             raise ValueError("Incomplete deployment manifest")
     UUID(value["id"])
     WorkspaceLayout.model_validate(value["layout"])
-    from backend.plugins.deployment import DeploymentSurface
+    from backend.plugins.deployment import DeploymentAccess
     for node_id, access in value.get("plugin_access", {}).items():
         if node_id not in value["permissions"]:
             raise ValueError("Plugin deployment access must belong to a published node")
-        DeploymentSurface.model_validate(access)
+        DeploymentAccess.model_validate(access)
     if not hosted:
         try:
             password = value["password"]

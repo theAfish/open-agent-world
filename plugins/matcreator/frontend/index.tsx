@@ -119,12 +119,12 @@ function GraphWorkspace({ card, host }: PluginViewProps) {
         <p>{result?.total ?? 0} {t("matches ·")} {nodes.length} {t("visible")}</p>
         <a href={host.documentDownloadUrl("snapshots")}>{t("Download source snapshots")}</a>
         {result?.next_offset != null && <button onClick={() => void run(() => load([], true, result.next_offset!))}>{t("Load more")}</button>}
-        <details open={assimilating} onToggle={event => setAssimilating(event.currentTarget.open)}><summary>{t("Assimilate a Toolset")}</summary><p>{t("Consume its world card after committing knowledge and a recoverable package snapshot.")}</p>
+        {!host.deployment && <details open={assimilating} onToggle={event => setAssimilating(event.currentTarget.open)}><summary>{t("Assimilate a Toolset")}</summary><p>{t("Consume its world card after committing knowledge and a recoverable package snapshot.")}</p>
           <button onClick={() => void run(async () => { setToolsets(await host.listCards(["oaw.skill-package"])); })}>{t("Choose Toolset")}</button>
           <select aria-label={t("Toolset to assimilate")} value={toolset} onChange={e => { setToolset(e.target.value); setPreview(null); }}><option value="">{t("Choose…")}</option>{toolsets.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
           <button disabled={!toolset || busy} onClick={() => void run(async () => { const original = await host.readDocument(toolset); const current = await host.documentAction("statistics", {}); setPreview(await host.transform("assimilate", { source_id: toolset, source_revision: original.revision, expected_revision: current.revision })); })}>{t("Preview assimilation")}</button>
           {preview && <div role="dialog" aria-label={t("Confirm assimilation")}><p>{t("Assimilate “")}{String(preview.source_name)}{t("” and consume its card?")}</p><button disabled={busy} onClick={() => void run(async () => { await host.transform("assimilate", { source_id: toolset, source_revision: preview.source_revision, expected_revision: preview.revision, confirm: true }); setPreview(null); setToolset(""); setNotice(t("Toolset assimilated. Source package preserved in snapshots.")); await load(); })}>{t("Confirm assimilation")}</button><button onClick={() => setPreview(null)}>{t("Cancel")}</button></div>}
-        </details>
+        </details>}
       </aside>}
       <main className="kdg-canvas"><NetworkMap ref={map} graphKey={`matcreator:${card.id}`} data={network} selected={selectedIds} search={false}
         emptyState={<WorkspaceEmptyState icon={<Network size={26} />} title={filtered ? t("No matches") : t("Build your knowledge map")}

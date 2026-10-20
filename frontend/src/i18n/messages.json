@@ -1,4 +1,8 @@
 {
+  "Published pages reuse their existing views and business APIs. Configuration and management access remain locked.": ["Published pages reuse their existing views and business APIs. Configuration and management access remain locked.", "发布页面复用已有组件和业务接口，配置与管理功能保持锁定。"],
+  "Checking workspace…": ["Checking workspace…", "正在检查工作区…"],
+  "Workspace is ready to publish": ["Workspace is ready to publish", "工作区可以发布"],
+  "Resolve these pages before publishing": ["Resolve these pages before publishing", "发布前请处理以下页面"],
   "Show full activity": ["Show full activity", "查看完整执行记录"],
   "Some older activity was not recorded.": ["Some older activity was not recorded.", "部分早期执行记录当时未保存。"],
   "Loading activity…": ["Loading activity…", "正在加载执行记录…"],

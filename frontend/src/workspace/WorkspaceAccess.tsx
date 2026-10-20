@@ -4,6 +4,7 @@ import { createContext, useContext } from 'react';
 export type PluginDeploymentAccess = {
   config_fields: string[]; document_fields: string[]; summary_fields: string[];
   document_actions: string[]; downloads: string[]; resource_actions: Record<string, string[]>; execution: boolean;
+  document?: 'none' | 'read' | 'edit'; file_preview?: boolean; shared_sections?: boolean;
 };
 export const WorkspaceAccess = createContext<{ deployed: boolean; permissions: Record<string, string[]>; plugin_access?: Record<string, PluginDeploymentAccess> }>({
   deployed: false, permissions: {},
