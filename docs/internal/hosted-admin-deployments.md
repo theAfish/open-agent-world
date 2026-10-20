@@ -95,3 +95,12 @@ Existing releases and user workspaces are snapshots, not references to the lates
 preset. Updating application code does not rewrite their layout or account entry.
 Publish and deploy a new release to adopt the full layout; the admin chooses
 when each account switches and can switch back without replacing private data.
+
+The 2026-10-20 ECS rollout now assigns all three test accounts to independent
+full MatCreator Workspaces; admin remains in its engineering profile. Actual
+browser sign-in, Graph/Jobs/knowledge views, attachment structure rendering,
+cross-user rejection and admin-route rejection were checked. Shared model
+settings and original profile data were preserved. A real Alibaba Sandbox
+command imported the five configured scientific libraries, completed a small
+NumPy calculation, reached public HTTPS and released its VM. This does not
+establish an end-to-end research run with a real model.
