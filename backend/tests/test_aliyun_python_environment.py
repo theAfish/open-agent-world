@@ -1,5 +1,6 @@
 import json
 import shlex
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -49,6 +50,22 @@ def cloud(tmp_path):
     sdk = PythonSDK(tmp_path)
     settings = AliyunSandboxSettings("cn-hangzhou", "test-secret", "base", "volume", "profile", python_requirements=("numpy",))
     return AliyunSandboxBackend(tmp_path / "profile", settings, sdk=sdk), sdk
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("lifetime", "budget"), [(299, None), (300, 240), (600, 480)])
+async def test_python_preparation_budget_respects_vm_lifetime(cloud, lifetime, budget):
+    backend, sdk = cloud
+    backend.settings = replace(backend.settings, lifetime_seconds=lifetime)
+    await backend.create("s")
+    if budget is None:
+        with pytest.raises(SandboxPreparationError, match="at least 300 seconds"):
+            await backend.execute("s", ["business-command"], execution_policy={"network_enabled": True})
+        assert not sdk.setups and not sdk.commands
+    else:
+        await backend.execute("s", ["business-command"], execution_policy={"network_enabled": True})
+        assert sdk.setups[0][1]["timeout"] == budget
+        assert budget <= lifetime - 60 and len(sdk.commands) == 1
 
 
 @pytest.mark.asyncio

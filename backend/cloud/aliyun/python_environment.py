@@ -12,7 +12,7 @@ from backend.packs.requirements import aggregate_requirements
 from backend.sandbox.models import SandboxPreparationError, SandboxStateError, SandboxValidationError
 
 PYTHON_ROOT = "/opt/oaw-python"
-SETUP_SECONDS = 240
+SETUP_SECONDS = 480
 
 SETUP_SCRIPT = r'''
 import importlib.metadata, json, os, pathlib, subprocess, sys
@@ -122,7 +122,10 @@ class CloudPython:
             raise SandboxStateError("Cloud Python setup outcome is uncertain; stop and reconcile before retrying")
         if not value.get("network_enabled"):
             raise SandboxPreparationError("Cloud Python preparation needs networking enabled on this Sandbox")
-        if backend.settings.lifetime_seconds < SETUP_SECONDS + 60:
+        # Scientific wheel downloads can exceed four minutes on a fresh VM.
+        # Keep preparation bounded and reserve time within shorter VM leases.
+        setup_seconds = min(SETUP_SECONDS, backend.settings.lifetime_seconds - 60)
+        if setup_seconds < 240:
             raise SandboxPreparationError("Cloud Python needs a Sandbox lifetime of at least 300 seconds")
         # pip may partially change an existing environment before failing.
         # Never reuse its old verification after an attempted mutation.
@@ -135,8 +138,8 @@ class CloudPython:
             await self._renew_lifetime(sandbox, value)
             command = shlex.join(["python3", "-I", "-c", SETUP_SCRIPT, json.dumps(requirements)])
             phase = "installation"
-            async with asyncio.timeout(SETUP_SECONDS + 10):
-                handle = await sandbox.commands.run(command, user="root", cwd="/", background=True, timeout=SETUP_SECONDS)
+            async with asyncio.timeout(setup_seconds + 10):
+                handle = await sandbox.commands.run(command, user="root", cwd="/", background=True, timeout=setup_seconds)
                 value["python_setup"].update(pid=handle.pid, state="running")
                 backend._write(value)
                 from e2b.sandbox.commands.command_handle import CommandExitException
