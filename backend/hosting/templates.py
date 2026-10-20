@@ -123,6 +123,18 @@ async def capture_template(services, release_id: str) -> dict:
                 raise ValueError("Include external dependencies inside the published Legion before deploying")
             blueprint, node_keys = await services._capture_subgraph_locked(
                 LegionCapture(name=release["name"], node_ids=[node.id for node in nodes]))
+            captured = {node.key: node for node in blueprint.nodes}
+            for source_node in nodes:
+                if source_node.type == "sandbox":
+                    # Publishing an administrator's configured application is
+                    # different from acquiring a portable Legion. Keep its
+                    # approved execution policy, but never host paths/bindings.
+                    captured[node_keys[source_node.id]].config.update({
+                        key: source_node.config[key] for key in (
+                            "network_enabled", "memory_bytes",
+                            "active_process_limit", "command_timeout",
+                        ) if key in source_node.config
+                    })
             for node in blueprint.nodes:
                 node.initial_shared_state = None
             models = ModelConnectionStore(services.llm_settings).read().model_dump(mode="json")

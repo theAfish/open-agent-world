@@ -171,6 +171,40 @@ def workspace_router(manifest):
                                  response_model=route.response_model, status_code=route.status_code,
                                  dependencies=[Depends(conversation_scope)])
 
+    def run_scope(request: Request, services=Depends(get_services)):
+        # Conversation UI reads public activity, tool bodies and reasoning.
+        # Raw model requests contain private instructions and stay unpublished.
+        if request.path_params.get("kind", "tools") != "tools":
+            raise HTTPException(404, "This operation is not published")
+        run_id = request.path_params["run_id"]
+        visited = set()
+        while run_id and run_id not in visited:
+            visited.add(run_id)
+            run = services._require_run_manager().get_run(run_id)
+            with services.database.locked() as db:
+                visible = db.execute("""
+                    SELECT DISTINCT s.conversation_id FROM conversation_sessions s
+                    WHERE (s.id=? AND s.conversation_id=? AND ?='conversation')
+                       OR EXISTS (SELECT 1 FROM conversation_messages m
+                                  WHERE m.session_id=s.id AND m.conversation_id=s.conversation_id
+                                  AND m.run_id=?)
+                """, (run.context_id, run.caller_id, run.caller_kind, run_id)).fetchall()
+            if any({"conversation", "sessions"}.intersection(
+                    manifest["permissions"].get(row["conversation_id"], [])) for row in visible):
+                return
+            # Only recorded parentage carries a published conversation's
+            # visibility to its delegated work; shared Agent/context IDs do not.
+            run_id = run.parent_run_id
+        raise HTTPException(404, "This Run is not part of a published conversation")
+
+    for route in runtime.router.routes:
+        if route.endpoint.__name__ in {
+            "run_activity", "run_activity_detail", "run_reasoning", "run_reasoning_text",
+            "run_invocations", "run_invocation",
+        }:
+            router.add_api_route(route.path, route.endpoint, methods=list(route.methods),
+                                 dependencies=[Depends(run_scope)])
+
     @router.get("/conversations/{conversation_id}")
     def summary(conversation_id: str, services=Depends(get_services)):
         require(conversation_id, "conversation", "sessions", "participants")

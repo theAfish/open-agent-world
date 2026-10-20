@@ -123,3 +123,39 @@ def test_template_bootstrap_uses_operator_factory_and_preserves_requested_interf
             assert response.json()["source_release_id"] == release["id"]
     with pytest.raises(ValueError, match="overwrites"):
         asyncio.run(initialize_runtime(config, path, services_factory=factory))
+
+
+@pytest.mark.parametrize("network_enabled", [True, False])
+def test_hosted_publication_preserves_approved_sandbox_policy(tmp_path, network_enabled):
+    from backend.main import create_app
+    from backend.tests.test_deployments import node, settings
+    from backend.hosting.templates import initialize_runtime
+    from backend.hosting.worker import WorkerConfig
+    from backend.persistence.database import Database
+
+    source = tmp_path / "source"
+    records = prepare_source(source)
+    policy = {"network_enabled": network_enabled,
+              "memory_bytes": 2147483648, "active_process_limit": 64, "command_timeout": 137}
+    with TestClient(create_app(settings(source))) as client:
+        node(client, "sandbox", "Research", parent_id=records["legion"]["id"],
+             config={**policy, "environment_variables": {"PRIVATE_VALUE": "not-a-template-value"}})
+        response = client.post("/api/deployments", json={"legion_id": records["legion"]["id"], "name": "With compute"})
+        assert response.status_code == 201, response.text
+        release = response.json()
+    path = tmp_path / "template.json"
+    template = asyncio.run(export_template(source, release["id"], path))
+    sandbox = next(n for n in template["blueprint"]["nodes"] if n["type"] == "sandbox")
+    assert {key: sandbox["config"][key] for key in policy} == policy
+    assert not sandbox["config"].get("workspace_path")
+    assert "PRIVATE_VALUE" not in json.dumps(template)
+    worker = WorkerConfig(str(uuid4()), str(uuid4()), "research", "runtime", ORIGIN, "cd" * 32,
+                          tmp_path / "user", agent_runtime="core.mock")
+    asyncio.run(initialize_runtime(worker, path))
+    database = Database(worker.data_root / "database/world.sqlite3")
+    try:
+        with database.locked() as db:
+            restored = json.loads(db.execute("SELECT config_json FROM cards WHERE type='sandbox'").fetchone()[0])
+    finally:
+        database.close()
+    assert {key: restored[key] for key in policy} == policy

@@ -136,6 +136,15 @@ preset. Updating application code does not rewrite their layout or account entry
 Publish and deploy a new release to adopt the full layout; the admin chooses
 when each account switches and can switch back without replacing private data.
 
+Hosted publication retains the source Sandbox's explicit networking, memory,
+process and command timeout policy. This is separate from portable Legion
+acquisition, which still strips machine-specific settings. Host bindings and
+private environment values remain excluded from the published template.
+
+Published conversations reuse the normal Run activity, tool detail and public
+reasoning handlers. Access requires a published conversation or its recorded
+delegated Run ancestry. Raw model request logs and unrelated Runs remain private.
+
 The 2026-10-20 ECS rollout now assigns all three test accounts to independent
 full MatCreator Workspaces; admin remains in its engineering profile. Actual
 browser sign-in, Graph/Jobs/knowledge views, attachment structure rendering,

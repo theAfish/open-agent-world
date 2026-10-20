@@ -132,6 +132,59 @@ def test_full_research_workspace_reuses_handlers_and_scopes_cross_card_access(tm
         assert "Published review" in client.get(f"{ROOT}/nodes/{knowledge}/document").text
 
 
+def test_conversation_run_details_reuse_archives_without_exposing_unpublished_runs_or_model_requests(tmp_path):
+    from urllib.parse import quote
+    from backend.runs.history import RunActivityHistory
+    from backend.runs.invocation_logs import RunInvocationLogs
+    from backend.runs.reasoning import RunReasoning
+
+    source, target = tmp_path / "source", tmp_path / "runtime"
+    records = prepare_research_source(source)
+    create_deployment(source, target, records["release"]["id"], password=PASSWORD)
+    app = create_app(settings(target))
+    with TestClient(app) as client:
+        services = app.state.services
+        agent = records["nodes"]["matcreator.agent"]["id"]
+        store = services.run_manager.store
+        visible = store.create(agent_id=agent, runtime_provider_id="core.mock", caller_kind="conversation",
+                               caller_id=records["nodes"]["conversation"]["id"], context_id=records["session"])
+        child = store.create(agent_id=agent, runtime_provider_id="core.mock", caller_kind="agent",
+                             caller_id=agent, parent_run_id=visible.run_id)
+        hidden = store.create(agent_id=agent, runtime_provider_id="core.mock", caller_kind="conversation",
+                              caller_id=records["hidden"]["id"], context_id=records["hidden_session"])
+        unrelated = store.create(agent_id=agent, runtime_provider_id="core.mock", caller_kind="user",
+                                 context_id=records["session"])
+        logs = RunInvocationLogs(services.state, visible.run_id)
+        identity = logs.start_tool("research", "call/one", 0, "execute_command", {"command": "python probe.py"})
+        logs.finish_tool(identity, {"exit_code": 0, "stdout": "NETWORK_OK"})
+        history = RunActivityHistory(services.database, visible.run_id)
+        history.public("tool_completed", {"call_id": "public", "name": "inspect_sandbox",
+                       "response": {"network_enabled": True}}, "event", visible.created_at.isoformat())
+        public_id = next(row["id"] for row in history.page(0, 50)["items"] if row.get("activity_id"))
+        RunReasoning(services.state, visible.run_id).save({
+            "provider_message_id": "thought/one", "text": "Checking the result.", "streaming": False})
+        base = ROOT + "/runs/" + visible.run_id
+        assert client.get(base + "/activity").status_code == 401
+        sign_in(client)
+        assert client.get(base + "/activity").json()["total"] == 3
+        assert client.get(base + "/activity/" + quote(public_id, safe="")).json()["response"]["network_enabled"]
+        detail = client.get(base + "/invocations/tools/" + quote(identity, safe=""))
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["response"]["stdout"] == "NETWORK_OK"
+        assert client.get(base + "/invocations/tools").json()["total"] == 1
+        assert client.get(base + "/reasoning/thought%2Fone").json()["text"] == "Checking the result."
+        assert client.get(base + "/reasoning").json()["total"] == 1
+        assert client.get(ROOT + "/runs/" + child.run_id + "/activity").status_code == 200
+        for run in (hidden, unrelated):
+            assert client.get(ROOT + "/runs/" + run.run_id + "/activity").status_code == 404
+            assert client.get(ROOT + "/runs/" + run.run_id + "/invocations/tools").status_code == 404
+        for path in ("/invocations/models", "/invocations/models/any", "/invocations/unknown", "/cancel", ""):
+            assert client.get(base + path).status_code == 404
+        assert client.post(base + "/cancel").status_code == 404
+        assert client.get(ROOT + "/runs").status_code == 404
+        assert client.get(ROOT + "/runs/missing/activity").status_code == 404
+
+
 def test_document_shorthand_is_explicit_freezes_registered_operations_and_preserves_projections():
     class Document(BaseModel):
         text: str = ""
