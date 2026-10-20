@@ -19,3 +19,20 @@
 html.hosted-session-obscured body > :not(#oaw-auth-shield), html.hosted-session-obscured body > :not(#oaw-auth-shield) * { visibility: hidden !important; pointer-events: none !important; }
 html.hosted-session-obscured dialog, html.hosted-session-obscured dialog * { visibility: hidden !important; }
 #oaw-auth-shield { position: fixed; inset: 0; z-index: 2147483647; display: flex; flex-direction: column; gap: 20px; align-items: center; justify-content: center; padding: 24px; background: var(--canvas); color: var(--ink); }
+.hosted-admin { height: 100dvh; overflow-y: auto; padding: 24px max(24px, calc((100vw - 1160px) / 2)); box-sizing: border-box; }
+.hosted-admin-header, .hosted-admin-header > div { display: flex; align-items: center; gap: 16px; }
+.hosted-admin-header { justify-content: space-between; margin-bottom: 28px; flex-wrap: wrap; }
+.hosted-admin-header h1 { margin: 2px 0 0; font-size: 24px; }
+.hosted-admin-header small, .hosted-admin-intro small { color: var(--ink-soft); }
+.hosted-admin-header select, .hosted-admin .connection-add > select, .hosted-admin .connection-list > input { box-sizing: border-box; min-width: 0; max-width: 100%; padding: 9px 10px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-raised); font: inherit; font-size: 13px; }
+.hosted-admin .connection-list > input { width: 100%; }
+.hosted-admin-header select:focus-visible, .hosted-admin .connection-add > select:focus-visible, .hosted-admin .connection-list > input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hosted-admin-intro { margin-bottom: 24px; line-height: 1.7; }
+.hosted-admin h2 { font-size: 19px; margin-bottom: 8px; }
+.hosted-admin-form, .hosted-admin-users { background: var(--surface-solid); border: 1px solid var(--line); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+.hosted-admin-form footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; margin-top: 24px; border-top: 1px solid var(--line); padding-top: 20px; }
+.hosted-admin-users ul, .managed-models ul { list-style: none; margin: 0; padding: 0; }
+.hosted-admin-users li, .managed-models li { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.hosted-admin-users li span, .managed-models li span { color: var(--ink-soft); }
+.managed-models p { line-height: 1.7; }
+@media(max-width: 700px) { .hosted-admin { padding: 16px; } .hosted-admin-form { padding: 16px; } .hosted-admin .connections-layout { grid-template-columns: 1fr; } .hosted-admin .connection-fields, .hosted-admin .connection-model-row { grid-template-columns: 1fr; } }

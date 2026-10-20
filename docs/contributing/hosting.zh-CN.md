@@ -145,6 +145,39 @@ sudo systemctl restart oaw-hosted-gateway.service
 
 ## 管理和备份
 
+### 管理员和公共模型
+
+小规模托管可启用公共模型：管理员在 `/admin` 维护连接、密钥、可用模型及默认模型，
+普通用户的设置页只显示公共模型，无需逐个填写 API Key。管理员账号可以没有业务工作区；
+它不会因此获得其他用户的画布、数据库或文件访问权。
+
+首次启用由部署人员离线执行（先停止已有 target）：
+
+```bash
+sudo systemctl stop oaw-hosted.target
+sudo backend/.venv/bin/python scripts/hosted.py user-add --directory /srv/oaw-hosting --user admin --role admin
+sudo backend/.venv/bin/python scripts/hosted.py shared-models-enable --directory /srv/oaw-hosting --origin http://127.0.0.1:8080
+sudo backend/.venv/bin/python scripts/hosted.py systemd --directory /srv/oaw-hosting
+sudo backend/.venv/bin/python scripts/hosted.py install-systemd --directory /srv/oaw-hosting
+sudo systemctl start oaw-hosted.target
+```
+
+密码通过交互输入。已有账号可使用 `user-role --directory ... --user ... --role admin` 显式授权；
+更改角色会撤销该账号的现有会话，普通网页没有角色提升接口。
+
+管理员登录后添加连接，填写 Base URL 和 API Key，手动添加模型或读取服务端模型列表，选择默认模型后保存。
+密钥留空表示保留原值；修改密钥可直接填写新值；停用服务/模型使用禁用开关，保留已保存的模型 ID。
+模型列表查询不代表真实对话、工具调用或特定模型能力已验收。
+
+公共配置及加密密钥只持久保存在 `control/services`。工作进程通过专用的短期身份断言读取自己的加密副本，
+仅在内存中缓存两秒。浏览器、卡片、工作区数据库均不保存公共模型密钥；公共配置不能从任意环境变量取密钥。
+普通用户的公共模型写入和发现接口在后端拒绝，个人版和未启用共享的托管部署仍使用原配置方式。
+
+管理配置保存后无需重启。后续调用会读取新配置，已打开的画布每 15 秒或重新聚焦时刷新模型选择；
+既有 Agent 显式选择的模型不被覆盖，选择 `oaw:default` 的 Agent 跟随公共默认模型。
+此后通过 `profile-add` 创建的工作区自动继承。已有个人模型配置仍保留在原工作区，启用共享期间不参与模型解析。
+其他服务（例如 DeepL、外部计算平台）目前仍遵循各自配置接口，不会因为添加公共模型而自动共享其凭据。
+
 应用代码和 Pack 依赖属于运维管理的安装内容。安装和更新时执行完整校验；日常启动检查安装记录、版本兼容性和顶层加载路径，不再逐文件扫描全部依赖。生成的 systemd 服务保持应用文件系统只读，每个用户只得到自己的数据映射，普通用户不能调用 Pack 安装管理接口。不要把应用或依赖目录改为用户可写目录。
 
 需要排查安装内容损坏时，使用后端解释器执行 `python -m open_agent_world.pack verify --data-root /path/to/profile`。该命令执行完整校验，不导入插件工厂、不安装或修复代码。登录密码哈希、会话认证和用户数据隔离不受这项启动优化影响。

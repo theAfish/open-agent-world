@@ -144,6 +144,7 @@ class WorkerConfig:
     data_root: Path
     agent_runtime: str | None = "google.adk"
     sandbox_runtime: str | None = None
+    shared_models_origin: str | None = None
 
     def __post_init__(self):
         hosted_scope(self.user_id, self.application_id, self.profile_id)
@@ -157,6 +158,9 @@ class WorkerConfig:
             raise ValueError("Provide a remote Sandbox through services_factory; native host runtimes are disabled")
         if self.agent_runtime == "openai.codex":
             raise ValueError("Local Codex is not available in hosted workers")
+        if self.shared_models_origin is not None:
+            from .configuration import public_origin
+            public_origin(self.shared_models_origin, allow_local_http=True)
         object.__setattr__(self, "data_root", Path(self.data_root).resolve())
 
 
@@ -205,7 +209,14 @@ def create_worker_app(config: WorkerConfig | Mapping, *, frontend_directory=None
         VerifiedIdentity(ISSUER, config.user_id), tenant, config.public_origin,
         profile_id=config.profile_id, user_id=config.user_id, application_id=config.application_id,
     )
+    def composed_services(settings):
+        services = (services_factory or create_worker_services)(settings)
+        if config.shared_models_origin is not None:
+            from .shared_models import SharedModelSource
+            services.llm_settings.model_source = SharedModelSource(config)
+        return services
+
     app = create_app(settings, profile_access=access, frontend_directory=frontend_directory,
-                     services_factory=services_factory or create_worker_services)
-    app.add_middleware(HostedPolicyMiddleware)
+                     services_factory=composed_services)
+    app.add_middleware(HostedPolicyMiddleware, managed_models=config.shared_models_origin is not None)
     return app

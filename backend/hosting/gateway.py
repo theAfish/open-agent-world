@@ -51,8 +51,9 @@ class Gateway:
         user = await self.auth.user_from_scope(request.scope)
         profile = self.profiles.get(user["id"]) if user else None
         return JSONResponse({"hosted": True, "authenticated": user is not None,
-                             "user": {key: user[key] for key in ("id", "username", "display_name")} if user else None,
+                             "user": {key: user[key] for key in ("id", "username", "display_name", "role")} if user else None,
                              "login_methods": self.auth.login_methods,
+                             "shared_models": self.settings.shared_models_origin is not None,
                              "instance": profile.public() if profile else None})
 
     async def shell(self, request: Request):
@@ -223,6 +224,8 @@ def create_gateway(settings: GatewaySettings, frontend_directory: Path, *, oidc_
     auth = HostedAuth(store, settings.public_origin, allow_local_http=settings.allow_local_http,
                       oidc_settings=oidc_settings, transport=auth_transport)
     gateway = Gateway(settings, auth, Path(frontend_directory), transport=transport)
+    from .shared_models import SharedModelAdmin
+    admin = SharedModelAdmin(gateway)
 
     @asynccontextmanager
     async def lifespan(_):
@@ -239,7 +242,11 @@ def create_gateway(settings: GatewaySettings, frontend_directory: Path, *, oidc_
     from starlette.routing import Mount
     routes = [Route("/health/live", health), Route("/auth/me", gateway.me)]
     routes.extend(route for route in auth.routes if route.path != "/auth/me")
-    routes.extend([Route("/", gateway.shell), Route("/auth/login", gateway.shell),
+    routes.extend([Route("/hosting/admin/models", admin.models, methods=["GET", "PUT"]),
+                   Route("/hosting/admin/models/discover", admin.discover, methods=["POST"]),
+                   Route("/hosting/admin/status", admin.status),
+                   Route("/hosting/internal/models/{profile_id}", admin.worker_catalog),
+                   Route("/admin", gateway.shell), Route("/", gateway.shell), Route("/auth/login", gateway.shell),
                    Mount("/assets", StaticFiles(directory=Path(frontend_directory) / "assets", check_dir=False)),
                    WebSocketRoute("/ws/{path:path}", gateway.socket),
                    Route("/{path:path}", gateway.proxy, methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])])

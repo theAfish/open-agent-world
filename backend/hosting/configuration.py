@@ -80,9 +80,12 @@ class GatewaySettings:
     accounts_path: Path
     profiles: tuple[HostedProfile, ...] = ()
     allow_local_http: bool = False
+    shared_models_origin: str | None = None
 
     def __post_init__(self):
         public_origin(self.public_origin, self.allow_local_http)
+        if self.shared_models_origin is not None:
+            public_origin(self.shared_models_origin, allow_local_http=True)
         for key in ("profile_id", "user_id", "upstream", "secret"):
             values = [getattr(profile, key) for profile in self.profiles]
             if key == "secret":
@@ -99,6 +102,7 @@ def read_gateway_settings(path: Path) -> GatewaySettings:
         value["public_origin"], path.parent / "accounts.sqlite3",
         tuple(HostedProfile(**profile) for profile in value.get("profiles", [])),
         value.get("allow_local_http", False),
+        value.get("shared_models_origin"),
     )
 
 

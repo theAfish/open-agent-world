@@ -3,6 +3,7 @@ import { t, useLocale } from "../i18n";
 import { Plus, Server, Star, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { ModelDiscovery } from './ModelDiscovery';
+import type { worldApi } from '../api/client';
 import { availableModels, DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_OUTPUT_TOKENS, modelRef, type ModelCatalog, type ModelConnection } from "../state/modelConnections";
 
 const presets = {
@@ -18,8 +19,9 @@ function defaultEnvironmentVariable(adapter: ModelConnection["adapter"]): string
   return adapter === "typesafe" ? "TYPESAFE_API_KEY" : adapter === "anthropic" ? "ANTHROPIC_API_KEY" : adapter === "gemini" ? "GEMINI_API_KEY" : "OPENAI_API_KEY";
 }
 
-export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
+export function ModelConnectionsEditor({ value, onChange, saved, busy, discoverModels, allowEnvironment = true }: {
   value: ModelCatalog; onChange: (value: ModelCatalog) => void; saved: ModelCatalog; busy: boolean;
+  discoverModels?: typeof worldApi.discoverModels; allowEnvironment?: boolean;
 }) {
   useLocale();
   const [selected, setSelected] = useState(value.connections[0]?.id ?? "");
@@ -109,7 +111,7 @@ export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
             const auth_mode = e.target.value as ModelConnection["auth_mode"];
             update({ auth_mode, api_key: "" });
           }}>
-            <option value="api_key">{t("API key entered here")}</option><option value="none">{t("No API key")}</option><option value="environment">{t("Backend environment")}</option>
+            <option value="api_key">{t("API key entered here")}</option><option value="none">{t("No API key")}</option>{allowEnvironment && <option value="environment">{t("Backend environment")}</option>}
           </select>
             {connection.auth_mode === "environment" && <label className="field-label"><span>{t("Environment variable name")}</span><input aria-label={t("Backend environment variable")} aria-describedby="connection-environment-help" value={connection.environment_variable ?? ""} maxLength={128} spellCheck={false}
               placeholder={defaultEnvironmentVariable(connection.adapter)} onChange={e => update({ environment_variable: e.target.value || null })} />
@@ -118,7 +120,7 @@ export function ModelConnectionsEditor({ value, onChange, saved, busy }: {
           </div>}
         </div>
         <div data-tutorial="model-list">
-        <ModelDiscovery connection={connection} onSelect={model => onChange({ ...value,
+        <ModelDiscovery connection={connection} discoverModels={discoverModels} onSelect={model => onChange({ ...value,
           connections: value.connections.map(c => c.id === connection.id ? { ...c, models: [...c.models, { ...model, supports_images: false }] } : c),
           default_model: value.default_model ?? modelRef(model.id) })} />
         <div className="connection-model-heading"><h4>{t("Models")}</h4><button type="button" className="secondary-button" disabled={connection.models.length >= 100} onClick={() => update({ models: [...connection.models, { id: crypto.randomUUID(), name: "", model_id: "", enabled: true, supports_images: false, context_window: DEFAULT_CONTEXT_WINDOW, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS }] })}><Plus size={13} /> {t("Add model")}</button></div>

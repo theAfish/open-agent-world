@@ -63,7 +63,7 @@ def _user(row: sqlite3.Row | None) -> dict | None:
     if row is None:
         return None
     return {"id": row["id"], "username": row["username"], "display_name": row["display_name"],
-            "enabled": bool(row["enabled"]), "_credential_version": row["credential_version"]}
+            "enabled": bool(row["enabled"]), "role": row["role"], "_credential_version": row["credential_version"]}
 
 
 class AccountStore:
@@ -108,6 +108,8 @@ class AccountStore:
                     expires_at REAL NOT NULL
                 );
             """)
+            if "role" not in {row["name"] for row in db.execute("PRAGMA table_info(users)")}:
+                db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user','admin'))")
 
     @contextmanager
     def _db(self):
@@ -120,7 +122,9 @@ class AccountStore:
         finally:
             connection.close()
 
-    def create_user(self, username: str, display_name: str | None = None, password: str | None = None) -> dict:
+    def create_user(self, username: str, display_name: str | None = None, password: str | None = None, *, role="user") -> dict:
+        if role not in {"user", "admin"}:
+            raise ValueError("Role must be user or admin")
         username = username.strip().casefold() if isinstance(username, str) else ""
         if not _USERNAME.fullmatch(username):
             raise ValueError("Username must be 1–64 ASCII letters, digits or . _ @ + - and start with a letter or digit")
@@ -131,8 +135,8 @@ class AccountStore:
         user_id = str(uuid.uuid4())
         try:
             with self._db() as db:
-                db.execute("INSERT INTO users(id,username,display_name,password_hash,created_at) VALUES (?,?,?,?,?)",
-                           (user_id, username, display_name, password_hash, time.time()))
+                db.execute("INSERT INTO users(id,username,display_name,password_hash,created_at,role) VALUES (?,?,?,?,?,?)",
+                           (user_id, username, display_name, password_hash, time.time(), role))
         except sqlite3.IntegrityError as error:
             raise ValueError("Username is already registered") from error
         return self.get_user(user_id)
@@ -161,6 +165,15 @@ class AccountStore:
             changed = db.execute("UPDATE users SET enabled=?, credential_version=credential_version+1 WHERE id=?",
                                  (int(enabled), user_id)).rowcount
             if not changed:
+                raise ValueError("Unknown user")
+            db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+
+    def set_role(self, user_id: str, role: str) -> None:
+        """Operator-only promotion; existing sessions are revoked on role changes."""
+        if role not in {"user", "admin"}:
+            raise ValueError("Role must be user or admin")
+        with self._db() as db:
+            if not db.execute("UPDATE users SET role=?, credential_version=credential_version+1 WHERE id=?", (role, user_id)).rowcount:
                 raise ValueError("Unknown user")
             db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
 

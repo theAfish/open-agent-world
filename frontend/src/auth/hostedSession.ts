@@ -3,7 +3,8 @@ import { fetchWithRetry } from '../api/fetchWithRetry';
 export interface HostedSession {
   hosted: true;
   authenticated: boolean;
-  user: { id: string; username: string; display_name: string } | null;
+  user: { id: string; username: string; display_name: string; role?: 'user' | 'admin' } | null;
+  shared_models?: boolean;
   login_methods: ('password' | 'oidc')[];
   instance: { id: string; application_id: string; name: string; mode: 'builder' | 'runtime' } | null;
 }

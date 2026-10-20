@@ -36,6 +36,20 @@ describe("Application settings", () => {
     expect(screen.getByRole('button', { name: 'Save settings' })).toBeTruthy();
   });
 
+  it('shows shared choices without credential fields or save controls for managed workspaces', async () => {
+    vi.spyOn(hostedAuth, 'isHosted').mockReturnValue(true);
+    vi.spyOn(hostedAuth, 'currentHostedSession').mockReturnValue({ hosted: true, authenticated: true,
+      user: { id: 'user', username: 'test1', display_name: 'Test 1', role: 'user' },
+      login_methods: ['password'], instance: null, shared_models: true });
+    const save = vi.spyOn(worldApi, 'saveModelConnections');
+    render(<SettingsPanel />);
+    await screen.findByText('Shared models');
+    expect(screen.getByText('Assistant')).toBeTruthy();
+    expect(screen.queryByLabelText('API key')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save settings' })).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it.each(["folder", "file"] as const)("uses the shared %s picker and saves global permissions", async (kind) => {
     vi.mocked(worldApi.getSandboxSettings).mockResolvedValue({ workspace_root: null, runtime: "auto", environment_variables: {} });
     vi.spyOn(worldApi, kind === "file" ? "pickFile" : "pickFolder").mockResolvedValue({ path: "D:\\Models" });

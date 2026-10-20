@@ -18,6 +18,13 @@ async function start() {
   root.textContent = 'Open Agent World · 正在连接工作区 / Connecting to your workspace…';
   try {
     const session = await initializeHostedSession();
+    if (session?.authenticated && (location.pathname === '/admin' || (session.user?.role === 'admin' && !session.instance))) {
+      const { HostedAdmin } = await import('./auth/HostedAdmin');
+      root.classList.remove('application-startup');
+      view = ReactDOM.createRoot(root);
+      view.render(<HostedAdmin session={session} />);
+      return;
+    }
     if (session && (!session.authenticated || !session.instance)) {
       const { HostedSignIn } = await import('./auth/HostedSignIn');
       root.classList.remove('application-startup');

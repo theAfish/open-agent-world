@@ -41,8 +41,8 @@ def unsafe_host_configuration(value) -> bool:
 class HostedPolicyMiddleware:
     """Deny host management even when an authenticated user constructs requests."""
 
-    def __init__(self, app):
-        self.app = app
+    def __init__(self, app, *, managed_models=False):
+        self.app, self.managed_models = app, managed_models
 
     async def __call__(self, scope, receive, send):
         if scope["type"] not in {"http", "websocket"}:
@@ -65,6 +65,8 @@ class HostedPolicyMiddleware:
         blocked |= path.endswith(("/environment-folders", "/files/open-folder"))
         blocked |= bool(re.fullmatch(r"/api/sandboxes/[^/]+/diagnostics", path))
         blocked |= path == "/ws/visual"  # Desktop observation is an operator feature.
+        blocked |= (self.managed_models and method not in {"GET", "HEAD", "OPTIONS"}
+                    and (path == "/api/settings/llm" or path == "/api/settings/models" or path.startswith("/api/settings/models/")))
         if blocked:
             return await self._deny(scope, receive, send)
         # Inspect only configuration-bearing routes. Binary attachments and user

@@ -16,14 +16,17 @@ import type { SandboxRuntime } from "../types/world";
 import { FolderPathInput } from "./FolderPathInput";
 import { DeepLSettings } from "./DeepLSettings";
 import { EnvironmentVariablesEditor, environmentSecretUpdates, environmentFolderUpdates, environmentVariablesFromValue, environmentVariablesToValue, type EnvironmentVariableRow } from "../cards/ExecutionConfiguration";
-import { isHosted } from '../auth/hostedSession';
+import { currentHostedSession, isHosted } from '../auth/hostedSession';
+import { ManagedModels } from '../auth/ManagedModels';
 
 export function SettingsPanel() {
   const { locale, setLocale } = useLocale();
   const hosted = isHosted();
+  const managedModels = hosted && currentHostedSession()?.shared_models === true;
   const open = useWorldStore((state) => state.settingsOpen);
   const presence = useMotionPresence(open);
   const settings = useWorldStore((state) => state.modelSettings);
+  const liveCatalog = useWorldStore((state) => state.modelCatalog);
   const setOpen = useWorldStore((state) => state.toggleSettings);
   const [draft, setDraft] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
   const [savedCatalog, setSavedCatalog] = useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
@@ -72,7 +75,7 @@ export function SettingsPanel() {
       .then((value) => {
         if (!active) return;
         setSavedCatalog(value);
-        setDraft(importLegacyModels(value, settings));
+        setDraft(managedModels ? value : importLegacyModels(value, settings));
         setSimpleSetup(!value.connections.length && !settings.models.length && useTutorialStore.getState().view !== 'active');
         useWorldStore.setState(state => value.revision >= state.modelCatalog.revision ? { modelCatalog: value } : {});
         setModelLoaded(true);
@@ -81,7 +84,7 @@ export function SettingsPanel() {
         if (active) setModelError(cause instanceof Error ? cause.message : t("Could not load model settings."));
       });
     return () => { active = false; };
-  }, [open, settings, modelRetry]);
+  }, [open, settings, modelRetry, managedModels]);
 
   useEffect(() => {
     if (hosted || !open) return;
@@ -108,6 +111,7 @@ export function SettingsPanel() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (managedModels && section === 'model') return;
     if (section === "deepl") return;
     if (busy || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)) return;
     if (section === 'model' && simpleSetup && !draft.default_model) { setError(t('Choose a model before saving.')); return; }
@@ -170,11 +174,11 @@ export function SettingsPanel() {
         <div className="settings-content">
         {section === "deepl" ? <DeepLSettings /> : section === "model" ? <div className="settings-form">
           {!modelLoaded && !modelError && <p role="status">{t("Loading model settings…")}</p>}
-          {modelLoaded && <>
+          {modelLoaded && (managedModels ? <ManagedModels catalog={liveCatalog} /> : <>
             {draft.revision === 0 && draft.connections.some(connection => connection.id === 'legacy') && <p className="settings-description">{t("Previous models are included in this draft. Save to keep them on the backend.")}</p>}
             {simpleSetup ? <ConnectAI value={draft} onChange={setDraft} busy={busy} onAdvanced={() => setSimpleSetup(false)} />
               : <ModelConnectionsEditor value={draft} onChange={setDraft} saved={savedCatalog} busy={busy} />}
-          </>}
+          </>)}
         </div> : section === "storage" ? <div className="settings-form">
           <div className="settings-page-heading"><h3>{t("Storage")}</h3></div>
           {!storage && !error && <p role="status">{t("Loading storage settings?")}</p>}
@@ -234,7 +238,7 @@ export function SettingsPanel() {
         <footer>
           {section === "sandbox" && sandboxSaved && <span className="settings-save-status" role="status">{t("Settings saved")}</span>}
           <button type="button" className="secondary-button" onClick={setOpen} disabled={busy}>{t(section === "sandbox" && sandboxSaved ? "Close" : "Cancel")}</button>
-          {section !== "deepl" && <button data-tutorial={section === "model" ? "model-save" : undefined} type="submit" className="primary-button" disabled={busy || (section === "storage" && (!storage?.editable || !storagePath.trim() || storagePath.trim() === storage.pending_path)) || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)}>{saving ? t("Saving…") : t("Save settings")}</button>}
+          {section !== "deepl" && !(managedModels && section === 'model') && <button data-tutorial={section === "model" ? "model-save" : undefined} type="submit" className="primary-button" disabled={busy || (section === "storage" && (!storage?.editable || !storagePath.trim() || storagePath.trim() === storage.pending_path)) || (section === "sandbox" && !loaded) || (section === "model" && !modelLoaded)}>{saving ? t("Saving…") : t("Save settings")}</button>}
         </footer>
       </form>
     </div>,

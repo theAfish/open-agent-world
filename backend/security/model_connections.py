@@ -103,7 +103,20 @@ class ModelConnectionStore:
         self.secrets = secrets
         self.database = secrets.database
 
+    @property
+    def source(self):
+        return getattr(self.secrets, "model_source", None)
+
+    def _fernet(self, *, create: bool):
+        if self.source is not None:
+            if create:
+                raise ResourceValidationError("Shared models are managed by your administrator.")
+            return self.source.cipher
+        return self.secrets._fernet(create=create)
+
     def _read(self, db):
+        if self.source is not None:
+            return self.source.read()
         row = db.execute("SELECT value_json FROM application_settings WHERE key = ?", (_KEY,)).fetchone()
         if row:
             return json.loads(row["value_json"])
@@ -130,6 +143,8 @@ class ModelConnectionStore:
 
     def discovery_key(self, edit: ConnectionEdit) -> str | None:
         """Resolve a draft's credentials without saving it or retargeting a saved secret."""
+        if self.source is not None:
+            raise ResourceValidationError("Shared models are managed by your administrator.")
         if edit.api_key and not edit.clear_api_key:
             return edit.api_key
         if edit.auth_mode == "none":
@@ -144,7 +159,7 @@ class ModelConnectionStore:
         if previous and not edit.clear_api_key and previous.get("api_key_encrypted"):
             if (previous["adapter"], previous["base_url"]) != (edit.adapter, edit.base_url):
                 raise ResourceValidationError("Enter the API key again to check a changed service address or API format.")
-            return self.secrets._fernet(create=False).decrypt(previous["api_key_encrypted"].encode()).decode()
+            return self._fernet(create=False).decrypt(previous["api_key_encrypted"].encode()).decode()
         raise ResourceValidationError("Enter an API key to connect to this service.")
 
     def context_limits(self, reference: str) -> tuple[int, int] | None:
@@ -167,6 +182,8 @@ class ModelConnectionStore:
         raise ResourceValidationError("Selected model connection is missing on this backend. Choose a model in Settings.")
 
     def save(self, edit: CatalogEdit):
+        if self.source is not None:
+            raise ResourceValidationError("Shared models are managed by your administrator.")
         with self.database.transaction(immediate=True) as db:
             old = self._read(db)
             if old["revision"] != edit.revision:
@@ -211,7 +228,7 @@ class ModelConnectionStore:
                     options["api_base"] = connection["base_url"]
                 encrypted = connection.get("api_key_encrypted")
                 if encrypted and connection.get("auth_mode") == "api_key":
-                    options["api_key"] = self.secrets._fernet(create=False).decrypt(encrypted.encode()).decode()
+                    options["api_key"] = self._fernet(create=False).decrypt(encrypted.encode()).decode()
                 if connection.get("auth_mode") == "environment" and connection.get("environment_variable"):
                     variable = connection["environment_variable"]
                     key = os.environ.get(variable)
@@ -236,7 +253,7 @@ class ModelConnectionStore:
                     raise ResourceValidationError("Selected model or connection is disabled. Choose another model in Settings.")
                 auth_mode = connection.get("auth_mode", "api_key")
                 encrypted = connection.get("api_key_encrypted")
-                key = self.secrets._fernet(create=False).decrypt(encrypted.encode()).decode() if encrypted and auth_mode == "api_key" else None
+                key = self._fernet(create=False).decrypt(encrypted.encode()).decode() if encrypted and auth_mode == "api_key" else None
                 if auth_mode == "api_key" and not key:
                     raise ResourceValidationError("This connection needs an API key. Add one in Settings.")
                 if auth_mode == "environment":

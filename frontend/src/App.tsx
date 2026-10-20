@@ -20,10 +20,12 @@ import { useWorldStore } from "./state/worldStore";
 import { useLocale } from "./i18n";
 import './shell/motion.css';
 import { isHosted } from './auth/hostedSession';
+import { useSharedModels } from './auth/useSharedModels';
 
 const DevelopmentPanel = import.meta.env.DEV ? lazy(() => import("./debug/DevelopmentPanel")) : null;
 
 export function App() {
+  useSharedModels();
   const locale = useLocale(state => state.locale);
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
   const initialize = useWorldStore((state) => state.initialize);

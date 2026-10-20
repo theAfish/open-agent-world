@@ -3,13 +3,15 @@ import { apiErrorMessage, worldApi } from '../api/client';
 import { t, useLocale } from '../i18n';
 import type { ConfiguredModel, ModelConnection } from '../state/modelConnections';
 
-export function ModelDiscovery({ connection, onSelect, selectedModelId }: { connection: ModelConnection; onSelect: (model: ConfiguredModel) => void; selectedModelId?: string }) {
+type DiscoveryProps = { connection: ModelConnection; onSelect: (model: ConfiguredModel) => void; selectedModelId?: string; discoverModels?: typeof worldApi.discoverModels };
+
+export function ModelDiscovery({ connection, onSelect, selectedModelId, discoverModels }: DiscoveryProps) {
   // Credentials/address changes discard results and abort the previous request.
   const identity = JSON.stringify([connection.id, connection.adapter, connection.base_url, connection.api_key, connection.clear_api_key, connection.auth_mode, connection.environment_variable]);
-  return <ModelPicker key={identity} connection={connection} onSelect={onSelect} selectedModelId={selectedModelId} />;
+  return <ModelPicker key={identity} connection={connection} onSelect={onSelect} selectedModelId={selectedModelId} discoverModels={discoverModels} />;
 }
 
-function ModelPicker({ connection, onSelect, selectedModelId }: { connection: ModelConnection; onSelect: (model: ConfiguredModel) => void; selectedModelId?: string }) {
+function ModelPicker({ connection, onSelect, selectedModelId, discoverModels = worldApi.discoverModels }: DiscoveryProps) {
   useLocale();
   const [result, setResult] = useState<{ models: { id: string; name: string }[]; truncated: boolean }>();
   const [error, setError] = useState('');
@@ -24,7 +26,7 @@ function ModelPicker({ connection, onSelect, selectedModelId }: { connection: Mo
     const timeout = setTimeout(() => controller.abort(), 20000);
     setLoading(true); setError(''); setResult(undefined);
     try {
-      const found = await worldApi.discoverModels(connection, controller.signal);
+      const found = await discoverModels(connection, controller.signal);
       if (!controller.signal.aborted) setResult(found);
     } catch (cause) {
       if (!controller.signal.aborted) setError(apiErrorMessage(cause));
