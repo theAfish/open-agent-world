@@ -21,6 +21,31 @@ function runtimeEvent(
 }
 
 describe("conversation response activity", () => {
+  it('does not recount snapshot tools or replay starts older than its bounded trace', () => {
+    const done = runtimeEvent('done', 'tool_completed', 'atlas', 'session-a', { run_id: 'run-1', name: 'read' });
+    done.timestamp = '2026-09-03T00:00:00.000002Z';
+    const old = { ...runtimeEvent('old', 'tool_started', 'atlas', 'session-a', { run_id: 'run-1', name: 'read' }),
+      timestamp: '2026-09-03T00:00:00.000001Z' };
+    const fresh = { ...old, id: 'fresh', timestamp: '2026-09-03T00:00:00.000003Z' };
+    const snapshot = [{ run_id: 'run-1', agent_id: 'atlas', status: 'running', tool_count: 1,
+      tool_trace: [{ ...done.payload, id: done.id, timestamp: done.timestamp, type: done.type }] }];
+    const runs = activeConversationRuns([fresh, fresh, done, old], 'conversation-a', 'session-a', snapshot);
+    expect(runs[0].tool_count).toBe(2);
+    expect(runs[0].tool_trace.map(item => item.id)).toEqual(['done', 'fresh']);
+    expect(runs[0].awaiting).toBe('read');
+    const settled = activeConversationRuns([done, old], 'conversation-a', 'session-a', snapshot);
+    expect(settled[0].tool_count).toBe(1);
+    expect(settled[0].awaiting).toBeUndefined();
+  });
+  it("settles a stale active snapshot from the final operational event", () => {
+    const events = [runtimeEvent("finished", "agent_status_changed", "atlas", "session-a", {
+      status: "idle", run_id: "run-1", run: { run_id: "run-1", status: "succeeded", lifecycle: { execution: "finished" } },
+    })];
+    expect(activeConversationRuns(events, "conversation-a", "session-a", [{
+      run_id: "run-1", agent_id: "atlas", status: "running", tool_count: 0, tool_trace: [],
+    }])).toEqual([]);
+    expect(activeConversationAgentIds(events, "conversation-a", "session-a", ["atlas"])).toEqual([]);
+  });
   it("patches live output, progress, and tool activity without a REST snapshot", () => {
     const events = [
       runtimeEvent("4", "agent_progress", "atlas", "session-a", { run_id: "run-1", text: "Checking tests" }),

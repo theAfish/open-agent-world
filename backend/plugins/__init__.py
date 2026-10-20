@@ -1,4 +1,5 @@
 from backend.plugins.builtin import create_builtin_registry
+from backend.plugins.equipment import DefaultEquipment
 from backend.plugins.loader import ENTRY_POINT_GROUP, load_plugin_registry
 from backend.plugins.lifecycle import (
     AgentNodeLifecycle,
@@ -43,6 +44,7 @@ from backend.plugins.template import (
 )
 
 __all__ = [
+    "DefaultEquipment",
     "PackDefinition",
     "CapabilityGrantDefinition",
     "CapabilityDefinition",

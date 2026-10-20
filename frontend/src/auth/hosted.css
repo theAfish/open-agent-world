@@ -1,0 +1,21 @@
+.hosted-login { min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: radial-gradient(ellipse at top, var(--surface-raised), var(--canvas)); }
+.hosted-login-card { width: min(420px, 100%); box-sizing: border-box; display: grid; gap: 20px; padding: 34px; border: 1px solid var(--line); border-radius: 24px; background: var(--surface-solid); box-shadow: 0 16px 60px var(--shadow); }
+.hosted-login-card h1 { margin: 0; font-size: 26px; }
+.hosted-login-card p { margin: 0; line-height: 1.6; color: var(--ink-soft); }
+.hosted-login-card form, .hosted-login-card label { display: grid; gap: 10px; }
+.hosted-login-card form { gap: 18px; }
+.hosted-login-card input { width: 100%; box-sizing: border-box; padding: 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-raised); font: inherit; }
+.hosted-login-card small { color: var(--ink-soft); }
+.hosted-login-card .hosted-login-error { padding: 10px 12px; background: var(--danger-soft); border-radius: 8px; color: var(--danger); font-size: 13px; }
+.hosted-oidc-link { justify-content: center; text-decoration: none; }
+.hosted-account { display: inline-flex; gap: 10px; align-items: center; }
+.hosted-account > span { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.top-bar .hosted-account { grid-column: 1 / -1; justify-content: space-between; min-width: 0; }
+.top-bar .hosted-account > span { max-width: 130px; }
+@media (max-width: 1250px) {
+  .top-bar .hosted-account > span, .top-bar .hosted-signout-label { display: none; }
+  .top-bar .hosted-account button { width: 34px; height: 32px; min-width: 0; padding: 0; justify-content: center; }
+}
+html.hosted-session-obscured body > :not(#oaw-auth-shield), html.hosted-session-obscured body > :not(#oaw-auth-shield) * { visibility: hidden !important; pointer-events: none !important; }
+html.hosted-session-obscured dialog, html.hosted-session-obscured dialog * { visibility: hidden !important; }
+#oaw-auth-shield { position: fixed; inset: 0; z-index: 2147483647; display: flex; flex-direction: column; gap: 20px; align-items: center; justify-content: center; padding: 24px; background: var(--canvas); color: var(--ink); }

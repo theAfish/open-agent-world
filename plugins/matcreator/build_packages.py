@@ -75,7 +75,8 @@ def build(root):
             package["skills"].insert(0, {"id": "local-structure", "name": "Local structure demo", "description": "Build and verify copper supercells in CIF and extxyz with ASE, without GPU or remote services.",
                 "instructions": GUIDANCE + "\nRun scripts/build_structure.py with interpreter python and argv [--repeat, 2, --output, copper]. Requires ASE installed in the selected Sandbox runtime. Check exit code and report, then publish copper.cif, copper.extxyz and copper.json through OAW artifact publishing. Related task: repeat 3 and compare atom count (108 instead of 32).",
                 "files": {"scripts/build_structure.py": Path(__file__).with_name("demo_structure.py").read_text(encoding="utf-8")},
-                "defaults": {"runtime": {"python": ">=3.11", "dependencies": ["ase>=3.23,<4"]}, "metadata": {"tags": ["ASE", "structure", "copper", "supercell"]}, "upstream": {"repository": "OAW adaptation", "path": "local-structure"}}})
+                "runtime_requirements": [{"owner": "matcreator", "environment": "ase"}],
+                "defaults": {"metadata": {"tags": ["ASE", "structure", "copper", "supercell"]}, "upstream": {"repository": "OAW adaptation", "path": "local-structure"}}})
         (output / (group + ".json")).write_text(json.dumps(adapt_package(package), ensure_ascii=False, indent=2), encoding="utf-8")
     discovered = {p.parent.relative_to(skills_root).as_posix() for p in skills_root.rglob("SKILL.md")}
     assert covered == discovered, discovered - covered

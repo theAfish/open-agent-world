@@ -100,11 +100,17 @@ describe('Conversation execution segments', () => {
     expect(region.scrollTop).toBe(600);
   });
 
-  it('does not portray an interrupted tool as completed and labels truncated history', () => {
-    render(<ConversationExecution group={{ ...group, running: false, expanded: false, truncated: true }} agentName="Atlas" />);
+  it('loads earlier metadata from the existing group disclosure without a second work log', () => {
+    const load = vi.fn();
+    render(<ConversationExecution group={{ ...group, running: false, expanded: false, truncated: true }} agentName="Atlas"
+      earlier={{ loading: false, error: '', load }} />);
     expect(screen.getByLabelText('Stopped')).toBeTruthy();
+    expect(screen.queryByText('Load earlier activity')).toBeNull();
+    expect(load).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: /tool calls/ }));
-    expect(screen.getByText('Earlier activity is no longer in this live view')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Load earlier activity' }));
+    expect(load).toHaveBeenCalledOnce();
+    expect(screen.queryByText('Work log')).toBeNull();
   });
 
   it('retains one stop control per active Run independently of execution groups', () => {

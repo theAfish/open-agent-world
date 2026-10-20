@@ -1,0 +1,109 @@
+# Dependency intent only; installation and readiness are tracked separately.
+schema_version = 3
+runtime-resource-directories = ["oaw_matcreator_engine"]
+runtime-resources = [
+    "oaw_matcreator/native_worker.py",
+    "oaw_matcreator/native_events.py",
+    "oaw_matcreator/native_adapter.py",
+    "oaw_matcreator/native_context.py",
+]
+
+[compatibility]
+plugin_api = "1.35"
+oaw = ">=0.1.0,<1"
+
+[distribution]
+id = "matcreator.default"
+name = "MatCreator"
+
+[plugin]
+owner = "matcreator"
+packs = ["matcreator.default"]
+node_types = ["matcreator.agent","matcreator.ai","matcreator.ai.skill","matcreator.core","matcreator.core.skill","matcreator.kdg","matcreator.kdg.skill","matcreator.research","matcreator.research.skill","matcreator.simulation","matcreator.simulation.skill"]
+
+[components.backend]
+project = "pyproject.toml"
+mode = "host-adapter"
+
+[components.frontend]
+entry = "frontend/index.tsx"
+project = "frontend/package.json"
+mode = "pack-build"
+
+[[dependencies]]
+kind = "owner"
+id = "science.structure-viewer"
+
+[environments.native]
+target = "host-worker"
+provider = "python"
+requires_python = ">=3.12"
+prepare = "install"
+management = "managed"
+sources = [{ path = "oaw_matcreator/native-requirements.txt", kind = "requirements" }]
+verify_imports = ["litellm", "google.adk.runners", "json_repair", "tiktoken"]
+verify_script = "oaw_matcreator/native_environment.py"
+
+[prerequisites.model-connection]
+kind = "model-connection"
+description = "A configured model connection selected for the research Agent."
+
+[features.research]
+environments = ["native"]
+prerequisites = ["model-connection"]
+
+[environments.ase]
+target = "sandbox"
+provider = "python"
+requires_python = ">=3.11"
+python = ["ase>=3.23,<4"]
+verify_imports = ["ase"]
+
+[features.local-structure]
+environments = ["ase"]
+
+[environments.bohr]
+target = "sandbox"
+provider = "node"
+node = ["@dptech-corp/bohr-cli"]
+
+[environments.ssh]
+target = "sandbox"
+python = ["paramiko"]
+verify_imports = ["paramiko"]
+
+[environments.lammps-prepare]
+target = "sandbox"
+python = ["ase>=3.23,<4", "PyYAML", "python-dotenv"]
+verify_imports = ["ase", "yaml", "dotenv"]
+
+[environments.deepmd-prepare]
+target = "sandbox"
+python = ["ase>=3.23,<4", "numpy", "dpdata"]
+verify_imports = ["ase", "numpy", "dpdata"]
+
+[environments.vasp-prepare]
+target = "sandbox"
+python = ["ase>=3.23,<4", "numpy", "pymatgen"]
+verify_imports = ["ase", "numpy", "pymatgen"]
+
+[prerequisites.bohrium-credentials]
+kind = "credential"
+description = "Explicitly authorized Bohrium credentials and selected project ID are required for cloud submission."
+optional = true
+
+[prerequisites.scientific-calculators]
+kind = "executable"
+description = "Actual LAMMPS/DeepMD/VASP calculators belong to the chosen compute target; preparation profiles do not install them."
+optional = true
+
+[prerequisites.scientific-model-data]
+kind = "resource"
+description = "Model weights and licensed VASP pseudopotentials must be explicitly provided in the selected compute target."
+optional = true
+
+[features.remote-compute]
+environments = ["bohr"]
+prerequisites = ["bohrium-credentials"]
+optional = true
+

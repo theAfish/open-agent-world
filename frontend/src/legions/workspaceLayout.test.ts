@@ -96,7 +96,7 @@ describe('Legion workspace layout', () => {
     const root = dockPane(dockPane(pane('a'), b, a, 'right'), c, b, 'bottom')!;
     const resized = resizeSplit(root, '1', .2);
     expect(resized).toMatchObject({ ratio: .5, second: { ratio: .2 } });
-    expect(layoutMinimum(resized)).toEqual({ width: 485, height: 405 });
+    expect(layoutMinimum(resized)).toEqual({ width: 484, height: 404 });
     expect(layoutMinimum(resizeSplit(resized, '', .15))).toEqual(layoutMinimum(root));
     expect(layoutMinimum(resizeSplit(resized, '1', .85))).toEqual(layoutMinimum(root));
     expect(resizeSplit(root, '', 1)).toMatchObject({ ratio: .85 });

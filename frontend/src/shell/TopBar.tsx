@@ -4,6 +4,7 @@ import { useLocale, t } from "../i18n";
 import { HelpMenu } from './HelpMenu';
 import { useCardLibrary } from "../state/cardLibrary";
 import { useWorldStore } from "../state/worldStore";
+import { AccountButton } from '../auth/AccountButton';
 
 export function TopBar() {
   useLocale();
@@ -42,6 +43,7 @@ export function TopBar() {
       </div>
 
       <div className="top-actions">
+        <AccountButton />
         <button type="button" className="top-icon-button" data-tutorial="library" onClick={useCardLibrary.getState().show} aria-label={t("Open Pack and Card Library")} title={t("Packs, Cards and Decks")}><LibraryBig size={16} /></button>
         <SettingsButton />
         <button

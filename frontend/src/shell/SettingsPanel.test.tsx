@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type SandboxSettings, worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import { SettingsPanel } from "./SettingsPanel";
+import * as hostedAuth from '../auth/hostedSession';
 
 const savedCatalog = () => ({ revision: 1, default_model: null, connections: [{
   id: "work", name: "Work account", adapter: "openai" as const, base_url: "https://example.test/v1",
@@ -23,6 +24,17 @@ describe("Application settings", () => {
     ] });
   });
   afterEach(cleanup);
+
+  it('keeps personal model settings while hiding host paths and runtime management for hosted users', async () => {
+    vi.spyOn(hostedAuth, 'isHosted').mockReturnValue(true);
+    render(<SettingsPanel />);
+    await screen.findByLabelText('Model 1 context window');
+    expect(screen.queryByRole('button', { name: 'Sandbox' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Storage' })).toBeNull();
+    expect(worldApi.getSandboxSettings).not.toHaveBeenCalled();
+    expect(worldApi.getSandboxRuntimes).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Save settings' })).toBeTruthy();
+  });
 
   it.each(["folder", "file"] as const)("uses the shared %s picker and saves global permissions", async (kind) => {
     vi.mocked(worldApi.getSandboxSettings).mockResolvedValue({ workspace_root: null, runtime: "auto", environment_variables: {} });

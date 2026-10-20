@@ -50,6 +50,15 @@ while True:
         scope = {'threadId': 'thread-fixture', 'turnId': 'turn-fixture'}
         if prompt == 'crash':
             sys.exit(7)
+        if prompt == 'thinking':
+            assert request['params']['summary'] == 'concise'
+            for index, delta in [(0, 'Inspect '), (0, 'the files.'), (1, 'Check the result.')]:
+                send({'method': 'item/reasoning/summaryTextDelta', 'params': {**scope,
+                    'itemId': 'thought1', 'summaryIndex': index, 'delta': delta}})
+            send({'method': 'item/reasoning/textDelta', 'params': {**scope,
+                'itemId': 'thought1', 'delta': 'private reasoning'}})
+            send({'method': 'item/completed', 'params': {**scope, 'item': {'type': 'reasoning',
+                'id': 'thought1', 'summary': ['Inspect the files.', 'Verify the result.'], 'content': ['private reasoning']}}})
         if prompt in ('hang', 'reject-steer'):
             send({'method': 'item/started', 'params': {**scope, 'item': {'type': 'commandExecution', 'id': 'cmd1', 'command': 'sleep'}}})
             continue

@@ -8,9 +8,9 @@
 
 Run all commands from the repository root after cloning it.
 
-- Python 3.11 or newer, uv, and Node.js 20 or newer.
-- Windows 10/11 or Linux, including WSL2, for local Sandbox execution.
-- macOS can run the application, but has no local Sandbox runtime.
+- Python 3.11 or newer, uv, and Node.js 22 or newer.
+- Windows 10/11, Linux (including WSL2), or macOS 13+ for local Sandbox execution.
+- macOS uses built-in Seatbelt; macOS 26+ on Apple Silicon can install Apple Container 0.6.0+ for the preferred VM runtime.
 
 Windows PowerShell:
 
@@ -45,12 +45,14 @@ Application setup and Sandbox provisioning are separate. Placing a card does not
 For deterministic local debugging, use the mock runtime:
 
 ```powershell
+./scripts/setup.ps1 -Profile default -SkipBuild
 ./scripts/dev.ps1 -AgentRuntime mock
 ```
 
 Or with the portable launcher:
 
 ```bash
+bash scripts/setup.sh --profile default --skip-build
 bash scripts/dev.sh --agent-runtime core.mock
 ```
 
@@ -58,12 +60,12 @@ The mock runtime is a debugging substitute, not a language model. Real Agent res
 
 ## Startup and troubleshooting
 
-- Missing dependencies: run setup before launching. The portable launcher checks for the backend virtual environment, Vite, and Node.
+- Missing or stale dependencies: run setup for the selected profile before launching. Dev checks the persistent Python environment, source plugins, prepared Pack environments, and frontend dependencies. It never installs packages. Setup and dev both accept Node 22+; Node 22 displays a compatibility notice because `matterviz` declares Node 24+. Run setup again after dependency changes or when creating a new profile; normal source edits only require dev's rebuild/hot reload.
 - Model authentication or routing failures: check the connection's enabled state, credential source, endpoint, and exact model ID in [Configuration](configuration.md).
 - Empty tray: collect cards and select deck contents in [Card Library](card-library.md).
 - Unavailable Sandbox: inspect its runtime diagnostics, install the reported prerequisites, and refresh discovery. OAW does not substitute unisolated execution.
 - `dev` always uses `.open-agent-world/development/profiles/default`, independently of the formal user directory and `OPEN_AGENT_WORLD_DATA_ROOT`. Use `-Profile tutorial` / `--profile tutorial` for another development profile. F3 provides selective resets with backups.
-- Windows `scripts/dev.ps1` waits for backend readiness without a fixed deadline and reports progress. Use `-StartupTimeoutSeconds 300` for an explicit deadline. The portable launcher also waits for readiness or backend exit.
+- Dev waits for backend readiness without a fixed deadline and reports progress. Use `-StartupTimeoutSeconds 300` on Windows or `--startup-timeout-seconds 300` with the portable launcher for an explicit deadline.
 
 ## Development and verification
 

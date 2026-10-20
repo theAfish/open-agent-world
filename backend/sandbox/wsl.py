@@ -319,17 +319,25 @@ class WslSandboxBackend(SandboxBackend):
             return self._info(raw, workspace_path=workspace_path, preserve_workspace=False)
 
     async def file_operation(self, sandbox_id, operation, **options):
-        if os.name == 'nt' and operation in {'move', 'delete'}:
+        if os.name == 'nt' and (operation in {'move', 'delete'} or
+                               (operation == 'desktop_location' and options.get('root', 'workspace') == 'workspace')):
             # WSL workspaces live on Windows storage. DrvFS cannot perform
             # renameat2(RENAME_NOREPLACE); use the same pinned Win32 mutation
             # boundary as the Windows runtime, not a racy check-then-rename.
             # Ask the trusted worker for current authority, never cached UI info.
+            # Desktop navigation also uses the recorded Windows workspace:
+            # routing a DrvFS directory through the distro UNC share can fail.
             from .files import file_operation, run_file_operation
             async with self._lock(sandbox_id):
                 raw = await self._request(self._payload('get', sandbox_id))
                 workspace = Path(raw['workspace_path']) if raw.get('workspace_path') else self._managed_workspace_path(sandbox_id)
                 return await run_file_operation(file_operation, workspace, ResourceAccess(raw['workspace_access']), (), operation, **options)
-        return await self._request(self._payload("files", sandbox_id, file_operation=operation, options=options))
+        result = await self._request(self._payload("files", sandbox_id, file_operation=operation, options=options))
+        if operation == 'desktop_location':
+            # The trusted worker validates the target; Windows Explorer needs
+            # the corresponding distro UNC address, not a Linux absolute path.
+            result['path'] = str(PureWindowsPath('//wsl.localhost') / self._distribution / PurePosixPath(result['path']).relative_to('/'))
+        return result
 
     async def start(self, sandbox_id: str) -> SandboxInfo:
         async with self._lock(sandbox_id):

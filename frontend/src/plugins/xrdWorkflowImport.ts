@@ -32,4 +32,3 @@ export async function startXrdWorkflow(ownerId:string, canvasId:string, file:Fil
   resetWorkflowCanvas(ownerId);
   await useWorldStore.getState().refreshWorld();
 }
-

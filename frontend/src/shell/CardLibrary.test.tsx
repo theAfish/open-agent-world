@@ -8,11 +8,27 @@ import { useCardLibrary, type LibrarySnapshot } from "../state/cardLibrary";
 import { TEST_CATALOG } from "../state/catalog.fixture";
 import { worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
+import * as hostedAuth from '../auth/hostedSession';
 
 const originalRefresh = useCardLibrary.getState().refresh;
-beforeEach(() => { vi.spyOn(worldApi, 'getInstalledPacks').mockResolvedValue({ restart_required: false, versions: [] }); });
+beforeEach(() => {
+  vi.spyOn(worldApi, 'getInstalledPacks').mockResolvedValue({ restart_required: false, versions: [] });
+  vi.spyOn(worldApi, 'getPackUninstallPlan').mockImplementation(async id => ({ id, owner: id, can_uninstall: true, blockers: [], resources: [], restart_required: true, source: 'installed' }));
+});
 const installedContentPack = { id: 'local.research', name: 'Research kit', version: '1.0.0', selected: true, loaded: false,
   kind: 'content' as const, environment: null };
+
+it('keeps hosted collections available without exposing plugin installation or store controls', async () => {
+  vi.spyOn(hostedAuth, 'isHosted').mockReturnValue(true);
+  useCardLibrary.setState({ snapshot: snapshot(), open: true, tab: 'store', refresh: async () => {} });
+  useWorldStore.setState({ legions: [] });
+  await act(async () => { render(<CardLibrary />); });
+  expect(screen.queryByRole('button', { name: 'Store' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Install Pack from File...' })).toBeNull();
+  expect(screen.queryByLabelText('Pack file')).toBeNull();
+  expect(worldApi.getInstalledPacks).not.toHaveBeenCalled();
+  expect(screen.getByRole('heading', { name: 'Pack inventory' })).toBeTruthy();
+});
 
 it('adds an installed file to the inventory immediately and closes its installation panel', async () => {
   useCardLibrary.setState({ snapshot: snapshot(), open: true, tab: 'packs', refresh: async () => {} });
@@ -62,6 +78,88 @@ it('plays the opening animation for installed packs before allowing entry into t
   expect(screen.getByRole('button', { name: 'Uninstall Pack' })).toBeTruthy();
 });
 
+it('shows source Pack environments and previews source removal without assuming Sandbox readiness', async () => {
+  const state = packSnapshot();
+  const owner = state.packs.alpha.definition.plugin_id;
+  vi.mocked(worldApi.getInstalledPacks).mockResolvedValue({ restart_required: false, versions: [], inventory: [{
+    id: 'distribution.alpha', owner, name: 'Alpha pack', version: '1.0.0', source: 'development', enabled: true, loaded: true,
+    environments: [
+      { id: 'engine', target: 'host-worker', provider: 'python', management: 'managed', state: 'ready', python: ['numpy'], node: [] },
+      { id: 'analysis', target: 'sandbox', provider: 'python', management: 'managed', state: 'on_use', python: ['numpy'], node: ['bohr'] },
+    ], backend_requirements: [], frontend_dependencies: ['three'], warnings: [],
+    backend_libraries: [{ name: 'google-adk', version: '2.8.0', management: 'host-provided' },
+      { name: 'pymatgen', version: null, management: 'managed' }],
+  }] });
+  useCardLibrary.setState({ snapshot: state, open: true, tab: 'packs', refresh: async () => {} });
+  useWorldStore.setState({ legions: [] });
+  await act(async () => { render(<CardLibrary />); });
+  fireEvent.click(screen.getByRole('button', { name: 'View pack Alpha pack' }));
+  const dependencies = screen.getByRole('region', { name: 'Pack dependencies' });
+  expect(dependencies.textContent).toContain('Development source');
+  expect(within(dependencies).getByText('Ready')).toBeTruthy();
+  expect(within(dependencies).getByText('Prepared when used')).toBeTruthy();
+  expect(within(dependencies).getByText('Provided by OAW').parentElement?.textContent).toContain('google-adk 2.8.0');
+  expect(within(dependencies).getByText('Kept when this Pack is uninstalled.')).toBeTruthy();
+  expect(within(dependencies).getByText('Shared Pack libraries').parentElement?.textContent).toBe('Shared Pack libraries · pymatgen');
+  expect(within(dependencies).getByText('Removed when no Pack or running process needs them.')).toBeTruthy();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Uninstall Pack' })));
+  expect(worldApi.getPackUninstallPlan).toHaveBeenCalledWith('distribution.alpha');
+  expect(screen.queryByText('Retained version')).toBeNull();
+});
+
+it('shows a local installation plan and prevents installing with unresolved blockers', async () => {
+  useCardLibrary.setState({ snapshot: snapshot(), open: true, tab: 'packs', refresh: async () => {} });
+  useWorldStore.setState({ legions: [] });
+  vi.spyOn(worldApi, 'inspectPack').mockResolvedValue({ manifest: installedContentPack, sha256: 'digest', plan: {
+    pack_id: 'local.research', name: 'Research kit', version: '1.0.0', source: 'archive', restart_required: true,
+    dependencies: [], environments: [], warnings: [], blockers: ['A required engine is unsupported'],
+    backend_libraries: [{ name: 'litellm', version: '1.81.0', management: 'host-provided' }],
+  } });
+  const install = vi.spyOn(worldApi, 'installPack');
+  render(<CardLibrary />);
+  const file = new File(['zip'], 'research.oawpack');
+  vi.spyOn(file, 'slice').mockReturnValue({ arrayBuffer: async () => new Uint8Array([0x50, 0x4b, 3, 4]).buffer } as Blob);
+  await act(async () => fireEvent.change(screen.getByLabelText('Pack file'), { target: { files: [file] } }));
+  const plan = screen.getByRole('region', { name: 'Installation plan' });
+  expect(within(plan).getByText('Provided by OAW').parentElement?.textContent).toContain('litellm 1.81.0');
+  expect(within(plan).getByText('Kept when this Pack is uninstalled.')).toBeTruthy();
+  expect(screen.getByRole('alert').textContent).toContain('A required engine is unsupported');
+  expect((screen.getByRole('button', { name: 'Install Pack' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(install).not.toHaveBeenCalled();
+});
+
+it('shows uninstall resource ownership and blocks removal until dependencies permit it', async () => {
+  const state = packSnapshot();
+  const id = state.packs.alpha.definition.plugin_id;
+  vi.mocked(worldApi.getInstalledPacks).mockResolvedValue({ restart_required: false, versions: [{ ...installedContentPack, id, loaded: true }] });
+  vi.mocked(worldApi.getPackUninstallPlan).mockResolvedValue({ id, owner: id, can_uninstall: false, blockers: ['Another Pack requires this renderer'],
+    source: 'installed', restart_required: true, resources: [{ id: 'shared-science', kind: 'python', action: 'retain', reason: 'Used by XRD' }] });
+  const remove = vi.spyOn(worldApi, 'managePack');
+  useCardLibrary.setState({ snapshot: state, open: true, tab: 'packs', refresh: async () => {} });
+  await act(async () => { render(<CardLibrary />); });
+  fireEvent.click(screen.getByRole('button', { name: 'View pack Alpha pack' }));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Uninstall Pack' })));
+  expect(screen.getByRole('alert').textContent).toContain('Another Pack requires this renderer');
+  expect(screen.getByText('Used by XRD')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Confirm uninstall' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(remove).not.toHaveBeenCalled();
+});
+
+it('restores an unenrolled source Pack using its distribution identity', async () => {
+  const state = packSnapshot();
+  const source = { id: 'distribution.alpha', owner: state.packs.alpha.definition.plugin_id, name: 'Alpha pack', version: '1.0.0',
+    source: 'development' as const, enabled: false, loaded: false, enrolled: false,
+    environments: [], backend_requirements: [], frontend_dependencies: [], warnings: [] };
+  vi.mocked(worldApi.getInstalledPacks).mockResolvedValue({ restart_required: false, versions: [], inventory: [source] });
+  const restore = vi.spyOn(worldApi, 'managePack').mockResolvedValue({ restart_required: true, versions: [], inventory: [{ ...source, enrolled: true }] });
+  useCardLibrary.setState({ snapshot: state, open: true, tab: 'packs', refresh: async () => {} });
+  await act(async () => { render(<CardLibrary />); });
+  fireEvent.click(screen.getByRole('button', { name: 'View pack Alpha pack' }));
+  expect(screen.queryByRole('button', { name: 'Uninstall Pack' })).toBeNull();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Restore Pack' })));
+  expect(restore).toHaveBeenCalledWith('distribution.alpha/restore', 'POST', undefined);
+});
+
 it('keeps loaded local packs in the regular inventory without duplicates and manages them inside', async () => {
   const state = packSnapshot();
   const id = state.packs.alpha.definition.plugin_id;
@@ -74,7 +172,7 @@ it('keeps loaded local packs in the regular inventory without duplicates and man
   fireEvent.click(screen.getByRole('button', { name: 'View pack Alpha pack' }));
   expect(screen.getByRole('button', { name: 'View cards' })).toBeTruthy();
   const manage = vi.spyOn(worldApi, 'managePack').mockRejectedValueOnce(new Error('Pack is in use'));
-  fireEvent.click(screen.getByRole('button', { name: 'Uninstall Pack' }));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Uninstall Pack' })));
   expect(manage).not.toHaveBeenCalled();
   await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Confirm uninstall' })));
   expect(screen.getByRole('alert').textContent).toContain('Pack is in use');

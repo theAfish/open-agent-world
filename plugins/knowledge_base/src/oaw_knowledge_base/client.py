@@ -19,8 +19,8 @@ _clients: dict[str, object] = {}
 _lock = threading.Lock()
 
 INSTALL_HINT = (
-    "Knowledge base dependencies are missing. Run scripts/setup.ps1 (Windows) or "
-    "scripts/setup.sh, or install plugins/knowledge_base into the backend environment."
+    "Knowledge Base dependencies are not prepared. Restore or reinstall this Pack in Pack & Card Library, "
+    "then restart OAW. For a source checkout, run the project setup command to prepare its declared Pack dependencies."
 )
 
 

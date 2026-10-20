@@ -2,7 +2,7 @@
 
 [English documentation](../../plugins/matcreator/README.md) | **简体中文**
 
-MatCreator 卡包提供专属 **MatCreator Agent** 和 **MatCreator native research** Legion。
+MatCreator 卡包提供专属 **MatCreator Agent** 和 **MatCreator research** Legion。
 规划器、执行协调器和递归子 Agent 的源码由本项目的 MatCreator Pack 独立维护；计算、知识、产物和展示通过 OAW 卡片连接。
 原来的拼装式 Legion、专用研究任务板和示例创建脚本已移除，卡包不再依赖 Barracks。
 
@@ -17,7 +17,7 @@ MatCreator 卡包提供专属 **MatCreator Agent** 和 **MatCreator native resea
 原始来源和适配范围见 [Pack 内核说明](../../plugins/matcreator/oaw_matcreator_engine/UPSTREAM.md)。
 
 1. 重启后端并重建或重新加载前端。
-2. 在 Library 打开 MatCreator 卡包，将 **MatCreator native research** 加入牌组并放到画布。
+2. 在 Library 打开 MatCreator 卡包，将 **MatCreator research** 加入牌组并放到画布。
 3. 打开 Legion 的 **Workspace mode**。
 4. 在 **Settings → Models** 设置默认模型，并配置连接的 Sandbox。
 

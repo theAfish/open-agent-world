@@ -49,7 +49,7 @@ class JobContext:
             raise SandboxStateError("Background monitoring requires a running Sandbox or Start permission") from error
         self.service.authorize(self.job)
         result = await self.service.services.execute_sandbox(self.sandbox_id, argv,
-            agent_id=self.agent_id, timeout_seconds=timeout_seconds)
+            agent_id=self.agent_id, timeout_seconds=timeout_seconds, _background_job_id=self.job['id'])
         self.service.authorize(self.job)
         return asdict(result) if hasattr(result, "__dataclass_fields__") else result
 

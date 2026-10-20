@@ -35,6 +35,14 @@ def test_catalog_api_encrypts_keeps_and_clears_keys(client):
     assert cleared["connections"][1]["api_key_configured"]
 
 
+def test_runtime_connection_carries_the_explicit_image_capability(client):
+    payload = {"revision": 0, "connections": [connection()], "default_model": "oaw:model:work"}
+    payload["connections"][0]["models"][0]["supports_images"] = True
+    assert client.put("/api/settings/models", json=payload).status_code == 200
+    store = ModelConnectionStore(client.app.state.services.llm_settings)
+    assert store.resolve_runtime("oaw:model:work").supports_images is True
+
+
 def test_catalog_rejects_stale_edits_and_preserves_references(client):
     payload = dict(revision=0, connections=[connection()], default_model="oaw:model:work")
     saved = client.put("/api/settings/models", json=payload).json()

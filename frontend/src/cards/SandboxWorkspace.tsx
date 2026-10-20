@@ -20,7 +20,7 @@ import "./sandboxWorkspace.css";
 
 import { SandboxFileBrowser, type FileRoot as Root, type FileEntry as Entry, type FileSelection, type FileChange } from "./SandboxFileBrowser";
 interface Files { entries?: Entry[]; truncated?: boolean; next_cursor?: string; state?: string; text?: string; data?: string; media_type?: string; message?: string }
-interface Receipt { id: string; caller: string; state: string; argv: string[]; stdout?: string; stderr?: string; error?: string; exit_code?: number; duration_seconds?: number; skill_id?: string }
+interface Receipt { id: string; caller: string; state: string; argv: string[]; stdout?: string; stderr?: string; error?: string; exit_code?: number; duration_seconds?: number; skill_id?: string; operation_kind?: string }
 interface Bundle { cached?: boolean; current?: boolean; revision: number; files: string[]; status: string; note: string }
 
 function tabKeys(event: KeyboardEvent<HTMLElement>) {
@@ -35,6 +35,24 @@ function tabKeys(event: KeyboardEvent<HTMLElement>) {
 
 const boundedSize = (value: number, min: number, max: number, fallback: number) =>
   Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+
+function historyReceipt(value: unknown, index: number): Receipt | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const item = value as Record<string, unknown>;
+  const optionalText = (key: string) => typeof item[key] === "string" ? item[key] as string : undefined;
+  return {
+    id: optionalText("id") ?? `legacy-${index}`,
+    caller: optionalText("caller") ?? "unknown",
+    state: optionalText("state") ?? "unknown",
+    argv: Array.isArray(item.argv) ? item.argv.filter((part): part is string => typeof part === "string") : [],
+    stdout: optionalText("stdout"), stderr: optionalText("stderr"), error: optionalText("error"),
+    exit_code: typeof item.exit_code === "number" ? item.exit_code : undefined,
+    duration_seconds: typeof item.duration_seconds === "number" ? item.duration_seconds : undefined,
+    skill_id: optionalText("skill_id"), operation_kind: optionalText("operation_kind"),
+  };
+}
+
+const receiptLabel = (receipt: Receipt) => receipt.argv.at(-1) ?? receipt.operation_kind ?? "Sandbox operation";
 
 export function SandboxWorkspace({ card }: { card: WorldCard }) {
   useLocale();
@@ -95,6 +113,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const recalled = useRef(-1);
   const savedDraft = useRef("");
   const [commands, setCommands] = useSurfaceDraft<string[]>(draftKey('commands'), []);
+  const [managedPython, setManagedPython] = useState(false);
   const [terminalTab, setTerminalTab] = useSurfaceDraft(draftKey('terminal-tab'), 'terminal');
   const [selection, setSelection] = useSurfaceDraft<{ root: string; path: string; label: string } | undefined>(draftKey('selection'), undefined);
   const selectionRef = useRef(selection); selectionRef.current = selection;
@@ -145,14 +164,18 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
   const ready = !!info?.available && info.state !== "error" && !busy && !diagnosticBusy && !settingsDirty;
   const output = Array.isArray(card.config.output) && card.config.output.length
     ? card.config.output.map(String).slice(-250).join("\n")
-    : history.map(h => [`$ ${h.argv.at(-1) ?? h.argv.join(" ")}`, h.stdout, h.stderr, h.error].filter(Boolean).join("\n")).join("\n");
+    : history.map(h => [`$ ${receiptLabel(h)}`, h.stdout, h.stderr, h.error].filter(Boolean).join("\n")).join("\n");
   useEffect(() => {
     // An empty terminal starts at the top already. Reading scrollHeight while
     // many workspaces mount during canvas culling forces layout for each one.
     if (!output && !draft) return;
     if (followOutput.current && terminalScroll.current) terminalScroll.current.scrollTop = terminalScroll.current.scrollHeight;
   }, [output, draft, terminalTab, tab]);
-  async function refreshHistory() { if (card.ephemeral || !terminalAllowed) return; setHistory(await worldApi.sandboxWorkspace<Receipt[]>(card.id, "history")); }
+  async function refreshHistory() {
+    if (card.ephemeral || !terminalAllowed) return;
+    const records = await worldApi.sandboxWorkspace<unknown>(card.id, "history");
+    setHistory(Array.isArray(records) ? records.map(historyReceipt).filter((receipt): receipt is Receipt => !!receipt) : []);
+  }
   async function refreshFiles() {
     if (card.ephemeral || !filesAllowed) return;
     const current = fileRequest("roots");
@@ -278,7 +301,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
     recalled.current = -1;
     setCommands(current => [...current, command].slice(-100));
     setDraft(""); setError("");
-    try { await execute(card.id, command); await refreshHistory(); await refreshFiles(); }
+    try { await execute(card.id, command, managedPython ? "managed" : "auto"); await refreshHistory(); await refreshFiles(); }
     catch (e) { setError(apiErrorMessage(e)); }
     finally { submitting.current = false; }
   }
@@ -411,6 +434,10 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
                 onClick={() => setTerminalTab(view)}>{view === "terminal" ? <Terminal size={12} /> : <History size={12} />}{view === "terminal" ? t("Terminal") : t("History")}</button>)}
             </nav>
             <div className="sandbox-pane-actions">
+              {info?.runtime_id === "darwin" && <label className="sandbox-python-option" title={t("Prepare OAW's managed Python for commands that invoke Python inside a shell.")}>
+                <input type="checkbox" checked={managedPython} onChange={e => setManagedPython(e.target.checked)} />
+                {t("Managed Python")}
+              </label>}
               <span className="sandbox-shell-hint" title={t("Non-interactive commands. Each command starts in the working folder; cd and export do not persist. Interactive prompts are unsupported. Closing this window leaves execution running.")}>{t("Non-interactive")}</span>
               {activeCommands.length > 0 && <button type="button" onClick={() => setTerminalTab("history")}>{activeCommands.length} {t("running")}</button>}
               {running && <IconButton icon={Square} size="xs" quiet label={t("Cancel command")} onClick={() => void action(`cancel?command_id=${encodeURIComponent(running.id)}`)} />}
@@ -436,7 +463,7 @@ export function SandboxWorkspace({ card }: { card: WorldCard }) {
             {!history.length && <WorkspaceEmptyState title={t('No executions yet.')} description={t('Run a command to see its output and status here.')} actions={<button type="button" className="secondary-button" onClick={() => { setTerminalTab('terminal'); terminalInput.current?.focus(); }}>{t('Terminal')}</button>} />}
             {[...history].reverse().map(h => <article key={h.id}><header><strong>{h.caller} · {h.state}</strong><small>{t("Exit")} {h.exit_code ?? "—"} · {h.duration_seconds?.toFixed(2) ?? "—"}s</small></header>
               {h.state === "running" && <IconButton icon={Square} size="xs" quiet label={t("Cancel command")} onClick={() => void action(`cancel?command_id=${encodeURIComponent(h.id)}`)} />}
-              <code>{h.argv.join(" ")}</code><pre>{h.error || `${h.stdout ?? ""}${h.stderr ?? ""}`}</pre></article>)}
+              <code>{h.argv.join(" ") || h.operation_kind || t("Unknown command")}</code><pre>{h.error || `${h.stdout ?? ""}${h.stderr ?? ""}`}</pre></article>)}
           </div>
         </section>
         </WorkspaceSection>

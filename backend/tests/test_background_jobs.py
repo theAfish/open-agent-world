@@ -530,3 +530,87 @@ async def test_startup_rechecks_active_jobs_without_losing_user_pause(research):
     assert active['next_check_at'] == 0 and active['failures'] == 18
     assert paused['paused'] and paused['next_check_at'] == 10**15
     assert compute.submissions == 2 and not runtime.errors
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('revocation,phase', [(None, 'queue'), ('pack', 'queue'), ('profile', 'queue'),
+    ('permission', 'queue'), ('pack', 'bootstrap'), ('profile', 'bootstrap'), ('permission', 'bootstrap')])
+async def test_bohrium_profile_survives_run_and_rechecks_after_wait(research, monkeypatch, tmp_path, revocation, phase):
+    import json
+    from backend.background_jobs import JobContext
+    from backend.plugins.background_jobs import JobControl
+    from backend.sandbox.models import CommandResult, SandboxValidationError
+    from backend.tests.test_sandbox_manager import make_manager
+
+    services, ids, runtime, _, invoke, _ = setup(research)
+    manager, backend = make_manager(tmp_path / 'sandbox')
+    await manager.create(ids['sandbox'])
+    monkeypatch.setattr(services, 'sandbox_backend', manager)
+    commands, recipes = [], []
+    cancelled = False
+    async def execute(sandbox_id, argv, **options):
+        nonlocal cancelled
+        commands.append(argv)
+        recipe = json.loads(dict(options['runtime_mount'].bundle.files)['_oaw_profile/recipe.json'])
+        recipes.append(recipe)
+        logical = argv[5:]
+        assert logical[:2] == ['python3', '-c']
+        assert 'NODE_PATH' in logical[2] and 'batchjob' in logical[3:]
+        if 'kill' in logical[3:]:
+            cancelled = True
+            data = {'confirmed': True}
+        elif 'describe' in logical[3:]:
+            data = {'status_name': 'cancelled' if cancelled else 'running'}
+        else:
+            data = {'jobId': 'known-external-job'}
+        return CommandResult(sandbox_id, tuple(argv), 0, json.dumps({'ok': True, 'data': data}), '', .01)
+    monkeypatch.setattr(backend, 'execute', execute)
+    request = dict(provider='matcreator.bohrium-batch', sandbox_id=ids['sandbox'], request_key='stable-job',
+        specification=dict(name='fixture', image='selected-image', command='run', project_id='project',
+                           machine_type='machine', max_run_time='1h'))
+    captured = {}
+    async def script(context):
+        captured.update(await invoke('submit_background_job', **request))
+        assert (await invoke('submit_background_job', **request))['id'] == captured['id']
+    runtime.script = script
+    run = await services.run_manager.start_run(ids['agent'], 'Submit once')
+    await services.run_manager.wait_execution(run.run_id)
+    assert not runtime.errors and captured['external_id'] == 'known-external-job'
+    assert len(commands) == 2  # Preflight and one submission, despite the repeated key.
+    assert services.run_manager.current_context is None
+    job = services.background_jobs.get(captured['id'])
+    definition = services.plugins.background_job_provider(job['provider'])
+    context = JobContext(services.background_jobs, job)
+    if revocation:
+        async def revoke_after_wait(*args, **kwargs):
+            if revocation == 'pack':
+                services.plugins.enrolled_pack_owners.discard('matcreator')
+            elif revocation == 'profile':
+                services.plugins._background_job_providers[job['provider']] = replace(definition, sandbox_environments=())
+            else:
+                edge = next(e for e in services.world.list_edges() if e.source == ids['agent'] and e.target == ids['sandbox'])
+                services.world.delete_edge(edge.id)
+        if phase == 'queue':
+            monkeypatch.setattr(manager, 'wait_for_python_preparation', revoke_after_wait)
+        else:
+            monkeypatch.setattr(backend, 'prepare_python', revoke_after_wait, raising=False)
+        with pytest.raises((SandboxValidationError, PermissionDeniedError)):
+            await definition.inspect(context, job['external_id'])
+        assert len(commands) == 2
+        retained = services.background_jobs.get(job['id'])
+        assert retained['external_id'] == 'known-external-job' and retained['request_key'] == 'stable-job'
+    else:
+        assert (await definition.inspect(context, job['external_id'])).status == 'running'
+        result = await services.background_jobs.control_record(job, JobControl(job_id=job['id'], action='cancel'))
+        assert result['status'] == 'cancelled' and len(commands) == 5
+        assert all(recipe == recipes[0] for recipe in recipes)
+        assert recipes[0]['node'] == ['@dptech-corp/bohr-cli'] and recipes[0]['python'] == []
+        assert recipes[0]['sources'][0]['owner'] == 'matcreator'
+
+
+def test_background_job_profile_names_are_bounded_and_validated():
+    async def inspect(context, external_id):
+        return JobObservation(status='running')
+    for names in [('bohr', 'bohr'), ('../outside',), ('',), ('x',) * 21, (['invalid'],)]:
+        with pytest.raises(ValueError, match='unique identifiers'):
+            BackgroundJobProvider(specification=Spec, inspect=inspect, sandbox_environments=names)

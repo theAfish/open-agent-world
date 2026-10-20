@@ -17,11 +17,34 @@ from backend.plugins.registry import PluginDefinition, PluginDescriptor, PluginR
 from backend.sandbox.environment import validate_command_environment
 from backend.sandbox.linux import bubblewrap_command, minimal_linux_environment
 from backend.sandbox.models import ResourceAccess, SandboxValidationError
-from backend.sandbox.python_runtime import SharedPythonRuntime, mutation_lock, validate_requirements
+from backend.sandbox.python_runtime import (
+    DARWIN_MANAGED_PYTHON, SharedPythonRuntime, mutation_lock,
+    validate_requirements,
+)
+
+
+@pytest.mark.parametrize("version_key", ["version", "version_info"])
+def test_environment_versions_read_metadata_without_running_or_importing(tmp_path, monkeypatch, version_key):
+    runtime = SharedPythonRuntime(tmp_path)
+    runtime.venv.mkdir(parents=True)
+    (runtime.venv / "pyvenv.cfg").write_text(f"{version_key} = 3.12.14\n")
+    site = runtime.venv / "lib/python3.12/site-packages"
+    for name, version in (("numpy", "2.4.2"), ("ase", "3.29.0")):
+        folder = site / f"{name}-{version}.dist-info"
+        folder.mkdir(parents=True)
+        (folder / "METADATA").write_text(f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n\n")
+        package = site / name
+        package.mkdir()
+        (package / "__init__.py").write_text("raise AssertionError('must not import packages')")
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: pytest.fail("must not run Python"))
+    assert runtime.environment_metadata() == {"python_version": "3.12.14",
+        "package_versions": {"numpy": "2.4.2", "ase": "3.29.0"}, "versions_source": "installed_metadata"}
+    assert runtime.snapshot()["package_versions"]["numpy"] == "2.4.2"
 
 
 def test_timeout_preserves_live_progress_and_uses_package_deadline(tmp_path, monkeypatch):
     from backend.sandbox.python_runtime import PACKAGE_INSTALL_TIMEOUT
+    monkeypatch.setattr(sys, "platform", "linux")  # Exercise subprocess.run timeout handling.
     runtime = SharedPythonRuntime(tmp_path)
     runtime.root.mkdir(parents=True)
     def stalled(argv, **options):
@@ -65,6 +88,7 @@ def test_invocation_cannot_override_python_selection(name):
 
 
 def test_shared_mutations_and_bootstrap_receipts_are_serialized(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")  # Fake interpreter represents the Linux layout.
     active = 0
     peak = 0
     calls = []
@@ -107,6 +131,40 @@ def test_linux_runtime_mount_is_readonly_and_workspace_is_separate(tmp_path):
     assert 'PYTHONPATH' not in env
     assert env['PATH'].startswith(str(runtime.bin))
     assert command[-3] == str(runtime.python)
+
+
+def test_darwin_managed_python_is_private_and_uv_provisioned(tmp_path, monkeypatch):
+    runtime = SharedPythonRuntime(tmp_path, darwin_store=tmp_path / "shared-python")
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(runtime, "_ensure_uv", lambda: "/managed/uv")
+    calls = []
+
+    def run(argv):
+        calls.append([str(value) for value in argv])
+        if "install" in argv:
+            destination = Path(argv[argv.index("--install-dir") + 1])
+            interpreter = (destination /
+                f"cpython-{DARWIN_MANAGED_PYTHON}-macos-aarch64-none" /
+                "bin" / f"python{DARWIN_MANAGED_PYTHON}")
+            interpreter.parent.mkdir(parents=True)
+            interpreter.touch()
+            stdlib = interpreter.parent.parent / "lib" / f"python{DARWIN_MANAGED_PYTHON}" / "os.py"
+            stdlib.parent.mkdir(parents=True)
+            stdlib.touch()
+        else:
+            runtime.bin.mkdir(parents=True)
+            runtime.python.touch()
+            (runtime.venv / "pyvenv.cfg").touch()
+
+    monkeypatch.setattr(runtime, "_run", run)
+    runtime.root.mkdir(parents=True)
+    runtime._ensure()
+
+    assert calls[0][-2:] == ["--no-bin", DARWIN_MANAGED_PYTHON]
+    assert calls[1][-2:] == ["--clear", str(runtime.venv)]
+    assert str(runtime.installer_python).startswith(str(runtime.base))
+    metadata = json.loads((runtime.root / "ready.json").read_text())
+    assert metadata["base_python"] == str(runtime.installer_python)
 
 
 def test_lock_serializes_separate_backend_processes(tmp_path):
@@ -231,6 +289,7 @@ async def test_bootstrap_aggregates_all_owners_and_marks_them_failed_then_retrie
 
 
 def test_failed_preflight_never_mutates_working_packages(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")  # Fake interpreter represents the Linux layout.
     runtime = SharedPythonRuntime(tmp_path)
     def ensure():
         runtime.bin.mkdir(parents=True, exist_ok=True)

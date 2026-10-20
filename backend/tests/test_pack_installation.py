@@ -17,6 +17,7 @@ import pytest
 from backend.config import Settings
 from backend.main import create_app
 from backend.packs.archive import inspect_archive
+from backend.plugins.registry import PLUGIN_API_VERSION
 from backend.packs.installation import PackInstallationManager
 from backend.packs.manifest import PackManifest
 from backend.packs.requirements import aggregate_requirements

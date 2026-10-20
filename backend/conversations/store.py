@@ -497,6 +497,17 @@ class ConversationStore:
         trace = lifecycle.get("tool_trace")
         if not isinstance(trace, list):
             trace = []
+        # Timeline carries only a bounded directory. Large call bodies are read
+        # through the Run archive after the user opens a particular call.
+        from backend.runs.history import public_tool_identity, tool_failed
+        previews = []
+        for entry in trace[-50:]:
+            item = {key: value for key, value in entry.items() if key not in {'arguments', 'response', 'error'}}
+            if entry.get('type') in {'tool_started', 'tool_completed'} and not item.get('archive_id'):
+                item['activity_id'] = public_tool_identity(entry, entry.get('id', 'legacy'))
+            if tool_failed(entry):
+                item['success'] = False
+            previews.append(item)
         return ConversationRunSummary(
             run_id=str(row["run_id"]),
             agent_id=str(row["agent_id"]),
@@ -506,9 +517,18 @@ class ConversationStore:
             final_message_id=lifecycle.get('final_message_id'),
             awaiting=lifecycle.get("awaiting") if isinstance(lifecycle.get("awaiting"), str) else None,
             progress=lifecycle.get("progress") if isinstance(lifecycle.get("progress"), str) else None,
+            recovery_kind=lifecycle.get("recovery_kind") if isinstance(lifecycle.get("recovery_kind"), str) else None,
+            recovery_classification=(lifecycle.get("recovery_classification")
+                                     if isinstance(lifecycle.get("recovery_classification"), str) else None),
+            recovery_receipts=(lifecycle.get("recovery_receipts")[-20:]
+                               if isinstance(lifecycle.get("recovery_receipts"), list) else []),
+            confirmed_tool_count=(lifecycle.get("confirmed_tool_count")
+                                  if isinstance(lifecycle.get("confirmed_tool_count"), int) else None),
             tool_count=int(lifecycle.get("tool_count") or len(trace)),
-            tool_trace=trace[-50:],
-            tool_trace_truncated=bool(lifecycle.get('tool_trace_truncated')) or len(trace) > 50,
+            tool_trace=previews,
+            tool_trace_truncated=bool(lifecycle.get("tool_trace_truncated")) or len(trace) > 50,
+            structure_outcomes=lifecycle.get("structure_outcomes") or {},
+            delivery_state=lifecycle.get("delivery_state"),
         )
 
     @staticmethod

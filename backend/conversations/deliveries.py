@@ -141,4 +141,3 @@ class ConversationDeliveryStore:
                 )""",
                 (_now(),),
             )
-

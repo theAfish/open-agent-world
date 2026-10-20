@@ -1,0 +1,25 @@
+# Dependency intent only; installation and readiness are tracked separately.
+schema_version = 3
+
+[compatibility]
+plugin_api = "1.26"
+oaw = ">=0.1.0,<1"
+
+[distribution]
+id = "science.structure-viewer"
+name = "Structure Viewer"
+
+[plugin]
+owner = "science.structure-viewer"
+packs = ["science.structure-viewer.default"]
+node_types = ["science.structure-viewer"]
+
+[components.backend]
+project = "pyproject.toml"
+mode = "host-adapter"
+
+[components.frontend]
+entry = "frontend/index.tsx"
+project = "frontend/package.json"
+mode = "pack-build"
+

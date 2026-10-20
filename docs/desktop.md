@@ -17,7 +17,7 @@ On Windows, install the generated `Open Agent World_*_x64-setup.exe`, then open 
 
 The desktop shell shows startup progress, waits for backend readiness, and opens the world in a separate window. Opening the app again focuses its existing window. Closing the final window asks the backend to shut down; a Windows Job Object also owns the backend process tree for crash/forced-exit cleanup. Backend logs rotate at 5 MB. Formal launch logs use `%LOCALAPPDATA%\OpenAgentWorld.logs\launcher.log`, outside the relocatable data store; development and explicitly configured stores use `logs/launcher.log` inside their profile. The startup window reports the log path.
 
-Application installation and Sandbox provisioning remain separate. Scientific plugin dependencies and platform-specific execution prerequisites may still require a first-use download or OS configuration. macOS still has no local Sandbox runtime. The release pipeline targets **Windows x64**, **macOS Apple Silicon**, and **macOS Intel**; macOS packages are previews. Build macOS packages on a Mac with `bash scripts/build-desktop.sh`.
+Application installation and Sandbox provisioning remain separate. Scientific plugin dependencies and platform-specific execution prerequisites may still require a first-use download or OS configuration. macOS provides native Seatbelt isolation; Apple Silicon hosts on macOS 26+ can additionally install Apple Container for the preferred VM boundary. The release pipeline targets **Windows x64**, **macOS Apple Silicon**, and **macOS Intel**; macOS packages are previews. Build macOS packages on a Mac with `bash scripts/build-desktop.sh`.
 
 Formal data keeps its existing default location (`%LOCALAPPDATA%\OpenAgentWorld` on Windows), including any relocation already selected in Settings. An application upgrade does not replace this directory. Uninstalling the application leaves user data available for a later reinstall. Source launches continue to support `OPEN_AGENT_WORLD_DATA_ROOT`; the installed desktop uses the formal user location and its storage settings.
 
@@ -33,14 +33,18 @@ Setup now also builds the frontend. After later frontend edits, run `npm --prefi
 ## Development and F3
 
 ```powershell
+./scripts/setup.ps1 -Profile default -SkipBuild
 ./scripts/dev.ps1
+./scripts/setup.ps1 -Profile tutorial -SkipBuild
 ./scripts/dev.ps1 -AgentRuntime mock -Profile tutorial
 ```
 
 Portable equivalents:
 
 ```bash
+bash scripts/setup.sh --profile default --skip-build
 bash scripts/dev.sh
+bash scripts/setup.sh --profile tutorial --skip-build
 bash scripts/dev.sh --agent-runtime core.mock --profile tutorial
 ```
 

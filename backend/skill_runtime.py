@@ -27,7 +27,7 @@ class RunSkillScript(BaseModel):
     script_path: StrictStr = Field(validation_alias=AliasChoices("script", "script_path"),
         description="Relative bundled file, for example scripts/check.py.")
     argv: list[StrictStr] = Field(default_factory=list, description="Script arguments as an argv array. An explicitly selected shell interpreter applies its own argument rules.")
-    interpreter: list[StrictStr] = Field(default_factory=list, description="Optional installed interpreter argv prefix, e.g. [\"python3\"]. Omit for a directly executable file. Use the Sandbox inspect tool to choose its runtime tools.")
+    interpreter: list[StrictStr] = Field(default_factory=list, description="Optional installed interpreter argv prefix, e.g. [\"python3\"]. Python (.py) entries default to the Sandbox's python3; other entries must be directly executable when omitted.")
 
     @model_validator(mode="after")
     def validate_command(self):
@@ -49,7 +49,8 @@ def skill_script_schema():
     return schema
 
 
-def resolve_skill_mount(services, agent_id: str, sandbox_id: str, request: RunSkillScript):
+def resolve_skill_mount(services, agent_id: str, sandbox_id: str, request: RunSkillScript,
+                        *, runtime_requirements=()):
     """Called at command submission, never from saved equipment or tool state."""
     services.capabilities.require_sandbox_execute(agent_id, sandbox_id)
     skill_node = services.world.get_card(request.skill_id)
@@ -63,9 +64,15 @@ def resolve_skill_mount(services, agent_id: str, sandbox_id: str, request: RunSk
     files.extend((path, base64.b64decode(asset.data_base64, validate=True) if isinstance(asset, SkillAsset)
                   else asset.encode("utf-8")) for path, asset in skill.files.items())
     bundle = RuntimeBundle(f"skills/{skill_node.id}", tuple(files), tuple(skill.directories))
-    mount = RuntimeMount(bundle, len(request.interpreter))
-    argv = [*request.interpreter, request.script_path, *request.argv]
+    interpreter = request.interpreter or (["python3"] if request.script_path.endswith(".py") else [])
+    mount = RuntimeMount(bundle, len(interpreter))
+    argv = [*interpreter, request.script_path, *request.argv]
     # Membership is validated before any backend receives the request.
     from pathlib import PurePosixPath
     mount.command(argv, PurePosixPath("/.oaw") / bundle.key)
+    references = (*runtime_requirements, *skill.runtime_requirements)
+    if references:
+        from backend.sandbox.pack_profiles import bind_profiles
+        return bind_profiles(services.plugins, references, bundle,
+                             interpreter, request.script_path, request.argv)
     return argv, mount

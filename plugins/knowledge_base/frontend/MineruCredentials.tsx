@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { t } from "@oaw/plugin-api";
-import { deploymentApiBase } from "../../../frontend/src/deployment/api";
+import { hostApiBase as deploymentApiBase } from "@oaw/plugin-api";
 
 type Status = { configured: boolean; source: "card" | "external" | null };
 

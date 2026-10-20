@@ -95,6 +95,23 @@ For future button logic, `FaceButtonEvent` defines the stable `{ mode, element_i
 
 Presets use the profile preference store (local storage only in the backend-free development route), retain at most 12 named recipes, and replace an existing preset with the same name. They store design intent, accent colour and process masks (including embedded PNG masks), without card titles, descriptions or illustrations. The encoded preset list is limited to 1,000,000 bytes by profile preferences; an oversized save reports an error before replacing existing presets. This preference limit does not change the card's own save or print path.
 
+## Python plugin API
+
+Set the optional `card_face` on `NodeTypeDefinition`. Existing plugins work without changes; the frontend derives a default layout from the type and traits.
+
+```python
+from open_agent_world.plugin_api import CardFaceSpec, PluginAsset
+
+# During registration, publish the image bytes as an asset owned by this plugin.
+registration.register_asset(PluginAsset("landscape", image_bytes, "image/webp"))
+
+# Add to your NodeTypeDefinition(...):
+card_face=CardFaceSpec(variant="image", tone="sky", image_asset="landscape")
+```
+
+For an icon card, use `CardFaceSpec(variant="icon", tone="sand")`; its symbol uses the existing `icon` / `icon_asset` fields. Image assets must be registered by the same plugin with an image media type. The host publishes the resolved URL in `card_face.image_url`. Missing or failed images fall back to the card icon.
+
+
 ## Integration
 
 Existing plugins may use `CardFaceSpec` from the Python plugin API or the exported `CardStock` and `CardFace` components from `@oaw/plugin-api`. Existing calls with `finish` remain supported:

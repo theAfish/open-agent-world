@@ -7,12 +7,13 @@ import hashlib
 import importlib.metadata
 from collections.abc import AsyncIterator, Mapping
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from ._state import AgentRecord, validate_agent_config
 from .base import AgentCapabilityProvider, RuntimeProvider
 from .context import ContextBudget, ContextStore
+from .model_observation import ModelTrace, model_stream_disconnected, multiplex_adk_events
 from .models import (
     AgentConfig,
     AgentDependencyError,
@@ -20,10 +21,11 @@ from .models import (
     AgentEventType,
     AgentInfo,
     AgentNotFoundError,
+    AgentRuntimeError,
     AgentStateError,
     AgentStatus,
 )
-from .tools import build_scoped_tool_callables
+from .tools import build_scoped_adk_tools
 from .adk_tool_errors import on_tool_error
 from backend.runs.models import InvocationContext, RunStatus, RuntimeInput
 
@@ -84,6 +86,7 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
         self._litellm_connection: dict[str, str] = {}
         self.model_connections = model_connections
         self.context_store = context_store
+        self.reasoning_store = None
 
     def configure_litellm_connection(
         self, *, api_base: str | None = None, api_key: str | None = None
@@ -169,6 +172,7 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
         config: AgentConfig,
         context: InvocationContext,
         runtime_input: RuntimeInput,
+        _network_retry: int = 0,
     ) -> AsyncIterator[AgentEvent]:
         agent_id = context.agent_id
         prompt = runtime_input.prompt
@@ -180,10 +184,8 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
             # The durable OAW checkpoint owns replay. Keep ADK's transient event
             # log bounded between invocations without discarding session state.
             session_args = dict(app_name=self._app_name, user_id=self._user_id(agent_id), session_id=session_id)
-            previous = await self._sessions.get_session(**session_args)
-            if previous and previous.events:
-                await self._sessions.delete_session(**session_args)
-                await self._sessions.create_session(**session_args, state=previous.state)
+            from open_agent_world.context.adk import reset_transient_session
+            await reset_transient_session(self._sessions, **session_args)
 
         async with record.lock:
             record.config = config
@@ -209,9 +211,40 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
                             timestamp=event.timestamp, run_status=event.run_status,
                         )
                 return
-            tools = build_scoped_tool_callables(self._provider, agent_id, definitions)
+            capability_invocations = 0
+            database = getattr(self.context_store, "database", None) or getattr(self.reasoning_store, "database", None)
+            from backend.runs.tool_receipts import RunToolReceipts
+            receipt_baseline = (len(RunToolReceipts(database).list_run(run_id))
+                                if database is not None else 0)
+            provider = self._provider
+
+            class _TrackedProvider:
+                async def list_tools(self, selected_agent_id: str):
+                    return await provider.list_tools(selected_agent_id)
+
+                async def invoke_tool(self, selected_agent_id: str, capability_id: str,
+                                      arguments: Mapping[str, Any]):
+                    nonlocal capability_invocations
+                    capability_invocations += 1
+                    return await provider.invoke_tool(selected_agent_id, capability_id, arguments)
+
+            tools = build_scoped_adk_tools(_TrackedProvider(), agent_id, definitions)
             run_secret = getattr(selected_model, "_additional_args", {}).get("api_key")
-            context_options = {}
+            from backend.runs.model_checkpoints import RunModelCheckpoints
+            checkpoint_store = (RunModelCheckpoints(database, run_id, api_key=run_secret,
+                                                   state_store=self.reasoning_store)
+                                if database is not None else None)
+            trace_queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+            trace = ModelTrace(trace_queue, run_secret, run_attempt=_network_retry,
+                               checkpoint_store=checkpoint_store)
+            traced = trace.callbacks("agent")
+            from .request_window import RequestWindow, ContextCapabilities
+            resolved = getattr(selected_model, "model", record.config.model)
+            window = RequestWindow(self._context_budget(record.config.model, resolved), trace, "agent",
+                                   capabilities=ContextCapabilities.for_model(selected_model))
+            if trace.invocations is not None:
+                from google.adk.tools import FunctionTool
+                tools.append(FunctionTool(window.read_tool_result))
             if self.context_store is not None:
                 from google.adk.models import LLMRegistry
                 from .context import ManagedContext
@@ -220,32 +253,47 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
                 managed = ManagedContext(self.context_store, agent_id, context.context_id or "",
                                          run_id, model, prompt.strip(),
                                          budget=self._context_budget(record.config.model, model.model),
-                                         input_provider=self._provider if hasattr(self._provider, 'pending_conversation_input') else None)
-                context_options = {"before_model_callback": managed.before_model,
-                                   "after_model_callback": managed.after_model, "include_contents": "none"}
-            elif hasattr(self._provider, 'pending_conversation_input'):
-                injected = []
+                                         input_provider=self._provider if hasattr(self._provider, "pending_conversation_input") else None)
+                managed.trace, managed.trace_role = trace, "agent"
+                window.reducer = getattr(managed, "reduce_final_request", None)
+            injected = []
+            async def before_model(callback_context: Any, llm_request: Any) -> None:
+                if managed is not None:
+                    trace.begin("agent", llm_request, phase="context")
+                    await managed.before_model(callback_context, llm_request)
+                    if "agent" not in trace.context_windows:
+                        trace.model_ready("agent", llm_request)
+                else:
+                    if hasattr(self._provider, "pending_conversation_input"):
+                        pending = await self._provider.pending_conversation_input(agent_id, run_id)
+                        injected.extend(self._adk.types.Content(role="user", parts=[
+                            self._adk.types.Part.from_text(text=message["text"])]) for message in pending)
+                        llm_request.contents.extend(injected)
+                        if pending:
+                            await self._provider.acknowledge_conversation_input(
+                                agent_id, run_id, [message["id"] for message in pending])
+                    await trace.callbacks("agent", prepare_only="agent" in trace.context_windows)["before_model_callback"](callback_context, llm_request)
 
-                async def before_model(callback_context, llm_request):
-                    del callback_context
-                    pending = await self._provider.pending_conversation_input(agent_id, run_id)
-                    injected.extend(self._adk.types.Content(role='user', parts=[
-                        self._adk.types.Part.from_text(text=message['text'])]) for message in pending)
-                    # ADK rebuilds its request each step; retain all accepted
-                    # follow-ups for the remainder of this invocation.
-                    llm_request.contents.extend(injected)
-                    if pending:
-                        await self._provider.acknowledge_conversation_input(
-                            agent_id, run_id, [message['id'] for message in pending])
+            async def after_model(callback_context: Any, llm_response: Any) -> None:
+                if managed is not None:
+                    await managed.after_model(callback_context, llm_response)
+                await traced["after_model_callback"](callback_context, llm_response)
 
-                context_options = {'before_model_callback': before_model}
+            context_options = {"before_model_callback": before_model,
+                               "after_model_callback": after_model,
+                               "on_tool_error_callback": on_tool_error}
+            from .tool_observation import archived_tool_callbacks
+            context_options = archived_tool_callbacks(trace, "agent", context_options)
+            if managed is not None:
+                context_options["include_contents"] = "none"
+            from .request_recovery import recoverable_model
+            selected_model = recoverable_model(selected_model, trace, "agent", context_window=window)
             agent = self._adk.Agent(
                 name=self._adk_agent_name(agent_id),
                 description=record.config.name,
                 model=selected_model,
                 instruction=record.config.system_instruction,
                 tools=tools,
-                on_tool_error_callback=on_tool_error,
                 **context_options,
             )
             app = self._adk.App(name=self._app_name, root_agent=agent)
@@ -253,23 +301,116 @@ class GoogleAdkAgentRuntime(RuntimeProvider):
                 role="user",
                 parts=[self._adk.types.Part.from_text(text=prompt.strip())],
             )
+            pending_call_ids: dict[str, list[str]] = {}
+            completed_tool_count = 0
+            final_response_seen = False
+            auto_retry = False
             async with self._adk.Runner(
                 app=app, session_service=self._sessions
             ) as runner:
-                async with aclosing(runner.run_async(
-                    user_id=self._user_id(agent_id),
-                    session_id=session_id,
+                from google.adk.agents.run_config import RunConfig, StreamingMode
+
+                stream = runner.run_async(
+                    user_id=self._user_id(agent_id), session_id=session_id,
                     new_message=message,
-                )) as events:
+                    run_config=RunConfig(streaming_mode=StreamingMode.SSE),
+                )
+                try:
+                    async with aclosing(multiplex_adk_events(stream, trace_queue, trace)) as events:
+                        async for kind, item in events:
+                            if kind == "progress":
+                                yield AgentEvent(agent_id, run_id, AgentEventType.PROGRESS, item)
+                                continue
+                            if getattr(item, "partial", False):
+                                partial_content = getattr(item, "content", None)
+                                trace.note_activity("agent", partial_content)
+                                trace.observe_partial("agent", partial_content)
+                                continue
+                            if managed is not None:
+                                managed.observe(item)
+                            if item.is_final_response():
+                                final_response_seen = True
+                            trace.observe_tool_exchange("agent", getattr(item, "content", None))
+                            async for translated in self._translate_event(record, run_id, item):
+                                if translated.type in {AgentEventType.TOOL_STARTED, AgentEventType.TOOL_COMPLETED}:
+                                    from backend.runs.invocation_logs import tool_identity
+                                    identity = ({"archive_id": tool_identity("agent", translated.payload["call_id"], trace.run_attempt)}
+                                                if trace.invocations is not None and translated.payload.get("call_id") else {})
+                                    translated = replace(translated, payload={**translated.payload, "role": "agent",
+                                        "run_attempt": trace.run_attempt, **identity})
+                                if translated.type == AgentEventType.TOOL_STARTED:
+                                    call_id = translated.payload.get("call_id")
+                                    if isinstance(call_id, str) and call_id:
+                                        pending_call_ids.setdefault(str(translated.payload["name"]), []).append(call_id)
+                                elif translated.type == AgentEventType.TOOL_COMPLETED:
+                                    completed_tool_count += 1
+                                    candidates = pending_call_ids.get(str(translated.payload["name"]), [])
+                                    call_id = translated.payload.get("call_id")
+                                    if call_id in candidates:
+                                        candidates.remove(call_id)
+                                    elif not call_id and candidates:
+                                        candidates.pop(0)
+                                elif translated.type == AgentEventType.MESSAGE:
+                                    final_text = str(translated.payload.get("text", final_text))
+                                yield translated
+                except Exception as exc:
+                    waiting = trace.waiting()
+                    exhausted = getattr(exc, "request_recovery_exhausted", False)
+                    if waiting and waiting.get("phase") == "model" and (exhausted or model_stream_disconnected(exc)):
+                        preview = trace.interrupted_reasoning("agent")
+                        if preview is not None:
+                            yield AgentEvent(agent_id, run_id, AgentEventType.PROGRESS, preview)
+                        for tool_name, call_ids in pending_call_ids.items():
+                            for call_id in call_ids:
+                                yield AgentEvent(agent_id, run_id, AgentEventType.TOOL_COMPLETED, {
+                                    "name": tool_name, "call_id": call_id,
+                                    "success": False,
+                                    "response": {"error": "Interrupted before a confirmed tool result; outcome unknown"},
+                                })
+                        from backend.runs.recovery import recovery_state
+                        classification, recovery_receipts = await recovery_state(
+                            database, getattr(provider, "services", None), agent_id, run_id,
+                            receipt_baseline=receipt_baseline,
+                            capability_invocations=capability_invocations,
+                        )
+                        if not exhausted and classification == "read_only" and _network_retry == 0:
+                            auto_retry = True
+                            yield AgentEvent(agent_id, run_id, AgentEventType.PROGRESS, {
+                                "kind": "model_stream_retry", "role": "agent",
+                                "model_request": waiting["model_request"],
+                                "text": "Agent model connection interrupted; no mutating capability was dispatched. Restarting once from retained context.",
+                            })
+                        else:
+                            yield AgentEvent(agent_id, run_id, AgentEventType.PROGRESS, {
+                                "kind": "model_stream_interrupted", "role": "agent",
+                                "model_request": waiting["model_request"],
+                                "completed_tool_count": completed_tool_count,
+                                "recovery_classification": classification,
+                                "recovery_receipts": recovery_receipts,
+                                "text": "Agent model connection interrupted. Inspect completed actions before continuing.",
+                            })
+                            if exhausted:
+                                raise
+                            raise AgentRuntimeError(
+                                "Model stream disconnected after a partial response. Earlier tools may have changed resources; inspect current state before continuing."
+                            ) from exc
+                    else:
+                        raise
+
+            if auto_retry:
+                session_args = dict(app_name=self._app_name,
+                                    user_id=self._user_id(agent_id), session_id=session_id)
+                previous = await self._sessions.get_session(**session_args)
+                await self._sessions.delete_session(**session_args)
+                await self._sessions.create_session(**session_args,
+                                                    state=previous.state if previous else {})
+                async with aclosing(self._execute(config, context, runtime_input, _network_retry=1)) as events:
                     async for event in events:
-                        if managed is not None:
-                            managed.observe(event)
-                        async for translated in self._translate_event(
-                            record, run_id, event
-                        ):
-                            if translated.type == AgentEventType.MESSAGE:
-                                final_text = str(translated.payload.get("text", final_text))
-                            yield translated
+                        yield event
+                return
+
+            if not final_response_seen:
+                raise AgentRuntimeError(trace.missing_final_error())
 
             yield AgentEvent(
                 agent_id,
@@ -469,4 +610,3 @@ def _runtime_error_message(error: BaseException) -> str:
             if isinstance(nested, BaseException):
                 pending.append(nested)
     return messages[0] if messages else type(error).__name__
-

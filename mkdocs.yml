@@ -78,6 +78,7 @@ nav:
       - Packs and cards: user-guide/plugins.md
       - Create and share Packs: creator-packs.md
       - Card Factory: card-factory.md
+      - Card Factory (Chinese): card-factory.zh-CN.md
       - Troubleshooting: user-guide/troubleshooting.md
   - Build plugins:
       - developers/index.md
@@ -85,6 +86,7 @@ nav:
       - Your first plugin: developers/first-plugin.md
       - Give an Agent a tool: developers/agent-tools.md
       - Runtime context compaction: developers/context-compaction.md
+      - Execution graph: developers/execution-graph.md
       - Add a custom interface: developers/frontend.md
       - Workspace design system: developers/workspace-design.md
       - Connected data sources: developers/data-sources.md
@@ -116,16 +118,17 @@ nav:
           - Workspace: sandbox-workspace.md
           - Execution configuration: execution-configuration.md
           - Networking: sandbox-networking.md
+          - Future macOS direct networking: macos-seatbelt-network-extension.md
           - Shared Python: shared-python-runtime.md
           - Security: security.md
       - Canvas and rendering:
+          - Card design: developers/card-design.md
           - Canvas control: canvas-control.md
           - Canvas placement: layout.md
           - Canvas performance: canvas-performance.md
           - Relationship maps: graph-architecture.md
           - Terrain renderer: terrain-webgl.md
           - Card finishes: developers/card-finishes.md
-          - Card design: developers/card-design.md
   - Contribute to OAW:
       - contributing/index.md
       - Host development:
@@ -150,6 +153,7 @@ nav:
       - 从源码运行: getting-started.zh-CN.md
       - 交互教程与实现: tutorial.zh-CN.md
       - 工作区部署: deployment.zh-CN.md
+      - 多用户托管: contributing/hosting.zh-CN.md
       - 插件部署接入: plugin-deployment.zh-CN.md
       - 发布说明模板: release-notes.zh-CN.md
       - 文档编写规范: contributing/docs-checklist.zh-CN.md

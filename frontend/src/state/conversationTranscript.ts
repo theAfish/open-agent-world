@@ -1,23 +1,17 @@
 import type { ConversationMessage, ConversationRunSummary } from '../types/world';
-import { withoutFinalReply, type RunActivityItem, type RunActivityState } from './runActivity';
+import { visibleActivity, withoutFinalReply, type RunActivityItem, type RunActivityState } from './runActivity';
+import { compareTimestamp } from './activityTiming';
 
 type MessageEntry = { kind: 'message'; id: string; timestamp: string; message: ConversationMessage };
 type ActivityEntry = { kind: 'activity'; id: string; timestamp: string; run: ConversationRunSummary; item: RunActivityItem };
+type ArchiveEntry = { kind: 'archive'; id: string; timestamp: string; run: ConversationRunSummary; messages: ConversationMessage[] };
 export type ExecutionGroup = {
   kind: 'execution'; id: string; timestamp: string; run: ConversationRunSummary;
   items: RunActivityItem[]; running: boolean; expanded: boolean; truncated: boolean;
 };
-export type TranscriptEntry = MessageEntry | ActivityEntry | ExecutionGroup;
-export type TranscriptWindow = { hasBefore?: boolean; hasAfter?: boolean };
+export type TranscriptEntry = MessageEntry | ActivityEntry | ExecutionGroup | ArchiveEntry;
+export type TranscriptWindow = { hasBefore?: boolean; hasAfter?: boolean; archiveCompleted?: boolean };
 const isRunning = (run: ConversationRunSummary) => ['created', 'running', 'waiting'].includes(run.status);
-function compareTimestamp(a: string, b: string): number {
-  const milliseconds = (Date.parse(a) || 0) - (Date.parse(b) || 0);
-  if (milliseconds) return milliseconds;
-  // Backend records carry microseconds. Date.parse alone can move narration
-  // in front of a tool that started earlier within the same millisecond.
-  const fraction = (value: string) => (value.match(/\.(\d+)(?:Z|[+-]\d\d:\d\d)$/)?.[1] ?? '').padEnd(6, '0');
-  return fraction(a).localeCompare(fraction(b));
-}
 
 /** One projection for live and restored history. Groups are presentation only:
  * adjacent tool calls in the same Run, separated by every message/other actor.
@@ -25,36 +19,69 @@ function compareTimestamp(a: string, b: string): number {
 export function conversationTranscript(messages: ConversationMessage[], runs: ConversationRunSummary[],
   activities: Map<string, RunActivityState>, window: TranscriptWindow = {}): TranscriptEntry[] {
   const ids = new Set(messages.map(message => message.id));
-  const entries: (MessageEntry | ActivityEntry)[] = messages.map(message => ({ kind: 'message', id: message.id,
+  const finals = new Map<string, ConversationRunSummary>();
+  const entries: (MessageEntry | ActivityEntry | ArchiveEntry)[] = messages.map(message => ({ kind: 'message', id: message.id,
     timestamp: message.created_at, message }));
-  const first = Date.parse(messages[0]?.created_at ?? '') || 0;
-  const last = Date.parse(messages.at(-1)?.created_at ?? '') || Infinity;
+  const inWindow = (timestamp: string) => !messages.length ||
+    ((!window.hasBefore || compareTimestamp(timestamp, messages[0].created_at) >= 0) &&
+      (!window.hasAfter || compareTimestamp(timestamp, messages.at(-1)!.created_at) <= 0));
   for (const run of runs) {
     const replies = messages.filter(message => message.run_id === run.run_id && message.sender_kind === 'agent');
+    const final = replies.find(message => message.id === run.final_message_id);
     const activity = activities.get(run.run_id);
     // Legacy providers lack identity; only their final snapshot can be matched
     // by content, and only after the Run ends.
     const source = isRunning(run) ? activity : withoutFinalReply(activity,
-      replies.at(-1)?.is_final !== false ? replies.at(-1)?.content : undefined);
+      final?.content ?? (!run.final_message_id && replies.at(-1)?.is_final !== false ? replies.at(-1)?.content : undefined));
+    const completed = window.archiveCompleted !== false
+      && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(run.status);
+    let archived = false;
+    if (completed && final) {
+      finals.set(final.id, run);
+      archived = true;
+    } else if (completed && !run.final_message_id) {
+      // Legacy/stopped Runs have no final relation. Keep their ordinary
+      // messages inline and their durable history at the recorded Run start.
+      const timestamp = run.started_at || replies[0]?.created_at || run.finished_at || '';
+      if (inWindow(timestamp)) {
+        entries.unshift({ kind: 'archive', id: `archive:${run.run_id}`, timestamp, run, messages: [] });
+        archived = true;
+      }
+    }
     for (const item of source?.items ?? []) {
+      if (!visibleActivity(item)) continue;
+      if (archived && item.type !== 'agent_message') continue;
       if (item.conversation_message_id && ids.has(item.conversation_message_id)) continue;
       const timestamp = item.timestamp || run.started_at || replies[0]?.created_at || '';
-      const time = Date.parse(timestamp) || 0;
       // Run summaries cover whole Runs, whereas the message window is paged.
-      if ((window.hasBefore && time < first) || (window.hasAfter && time > last)) continue;
-      const id = item.type.startsWith('tool_') && item.call_id ? `call:${item.call_id}` : item.id;
-      entries.push({ kind: 'activity', id: `${run.run_id}:${id}`, timestamp, run, item });
+      if (!inWindow(timestamp)) continue;
+      entries.push({ kind: 'activity', id: `${run.run_id}:${item.id}`, timestamp, run, item });
     }
   }
   entries.sort((a, b) => {
-    if (a.kind === 'message' && b.kind === 'message' && a.message.sequence && b.message.sequence) {
+    if (a.kind === 'message' && b.kind === 'message' && a.message.sequence !== undefined && b.message.sequence !== undefined) {
       return a.message.sequence - b.message.sequence;
     }
     return compareTimestamp(a.timestamp, b.timestamp);
   });
   const result: TranscriptEntry[] = [];
-  const firstGroup = new Set<string>();
+  const latestExecution = new Map<string, ExecutionGroup>();
   for (const entry of entries) {
+    const completed = entry.kind === 'message' ? finals.get(entry.id) : undefined;
+    if (completed) {
+      const folded: ConversationMessage[] = [];
+      let previous = result.at(-1);
+      // Fold in place after sorting. Other messages, actors, and execution
+      // groups stay boundaries; the resulting Work log is never re-sorted.
+      while (completed.status === 'succeeded' && previous?.kind === 'message'
+        && previous.message.sender_kind === 'agent' && previous.message.run_id === completed.run_id) {
+        folded.unshift(previous.message);
+        result.pop();
+        previous = result.at(-1);
+      }
+      result.push({ kind: 'archive', id: `archive:${completed.run_id}`, timestamp: folded[0]?.created_at ?? entry.timestamp,
+        run: completed, messages: folded });
+    }
     if (entry.kind !== 'activity' || !entry.item.type.startsWith('tool_')) {
       result.push(entry);
       continue;
@@ -62,20 +89,17 @@ export function conversationTranscript(messages: ConversationMessage[], runs: Co
     const previous = result.at(-1);
     if (previous?.kind === 'execution' && previous.run.run_id === entry.run.run_id) {
       previous.items.push(entry.item);
+      previous.expanded ||= previous.running && entry.item.type === 'tool_started';
     } else {
-      result.push({ kind: 'execution', id: entry.id, timestamp: entry.timestamp, run: entry.run,
-        items: [entry.item], running: isRunning(entry.run), expanded: false,
-        truncated: !firstGroup.has(entry.run.run_id) && Boolean(activities.get(entry.run.run_id)?.truncated) });
-      firstGroup.add(entry.run.run_id);
+      const running = isRunning(entry.run);
+      const group: ExecutionGroup = { kind: 'execution', id: entry.id, timestamp: entry.timestamp, run: entry.run,
+        items: [entry.item], running, expanded: running && entry.item.type === 'tool_started',
+        truncated: !latestExecution.has(entry.run.run_id) && Boolean(activities.get(entry.run.run_id)?.truncated) };
+      result.push(group);
+      latestExecution.set(entry.run.run_id, group);
     }
   }
-  const latestExecution = new Map(result.filter(entry => entry.kind === 'execution').map(entry => [entry.run.run_id, entry.id]));
-  for (let index = 0; index < result.length; index += 1) {
-    const entry = result[index];
-    if (entry.kind !== 'execution' || !entry.running) continue;
-    // Retain the latest work while the Agent reports/awaits its next model turn.
-    // A new execution segment or Run termination archives it, not narration.
-    entry.expanded = entry.items.some(item => item.type === 'tool_started') || latestExecution.get(entry.run.run_id) === entry.id;
-  }
+  // Keep the latest work open while the Agent narrates or awaits its next turn.
+  for (const group of latestExecution.values()) if (group.running) group.expanded = true;
   return result;
 }

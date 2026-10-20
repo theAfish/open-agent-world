@@ -16,9 +16,11 @@ import type { SandboxRuntime } from "../types/world";
 import { FolderPathInput } from "./FolderPathInput";
 import { DeepLSettings } from "./DeepLSettings";
 import { EnvironmentVariablesEditor, environmentSecretUpdates, environmentFolderUpdates, environmentVariablesFromValue, environmentVariablesToValue, type EnvironmentVariableRow } from "../cards/ExecutionConfiguration";
+import { isHosted } from '../auth/hostedSession';
 
 export function SettingsPanel() {
   const { locale, setLocale } = useLocale();
+  const hosted = isHosted();
   const open = useWorldStore((state) => state.settingsOpen);
   const presence = useMotionPresence(open);
   const settings = useWorldStore((state) => state.modelSettings);
@@ -34,7 +36,7 @@ export function SettingsPanel() {
   const [storagePath, setStoragePath] = useState("");
   const [storageRetry, setStorageRetry] = useState(0);
   useEffect(() => {
-    if (!open || section !== "storage") return;
+    if (hosted || !open || section !== "storage") return;
     let active = true;
     setStorage(null);
     worldApi.getStorageSettings().then(value => {
@@ -43,7 +45,7 @@ export function SettingsPanel() {
       setStoragePath(value.pending_path ?? "");
     }).catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : t("Could not load storage settings.")); });
     return () => { active = false; };
-  }, [open, section, storageRetry]);
+  }, [hosted, open, section, storageRetry]);
   const [sandbox, setSandbox] = useState<SandboxSettings>({ workspace_root: null, runtime: "auto" });
   const [sandboxSaved, setSandboxSaved] = useState(false);
   const [environmentSecrets, setEnvironmentSecrets] = useState<Record<string, string>>({});
@@ -82,7 +84,7 @@ export function SettingsPanel() {
   }, [open, settings, modelRetry]);
 
   useEffect(() => {
-    if (!open) return;
+    if (hosted || !open) return;
     let active = true;
     setLoaded(false);
     setSandboxSaved(false);
@@ -100,7 +102,7 @@ export function SettingsPanel() {
         if (active) setError(cause instanceof Error ? cause.message : t("Could not load Sandbox settings."));
       });
     return () => { active = false; };
-  }, [open, retry]);
+  }, [hosted, open, retry]);
 
   if (!presence.present) return null;
 
@@ -160,8 +162,8 @@ export function SettingsPanel() {
         <nav className="settings-sections" aria-label={t("Settings sections")}>
           <label className="field-label"><span>{t('Language')}</span><select aria-label={t('Language')} value={locale} onChange={event => setLocale(event.target.value === 'zh-CN' ? 'zh-CN' : 'en')}><option value="zh-CN">简体中文</option><option value="en">English</option></select></label>
           <button type="button" className="secondary-button" data-tutorial="models-tab" aria-pressed={section === "model"} disabled={busy} onClick={() => { setSection("model"); setError(""); }}><Cpu size={16} /> {t("Models")}</button>
-          <button type="button" className="secondary-button" aria-pressed={section === "sandbox"} disabled={busy} onClick={() => { setSection("sandbox"); setError(""); }}><Box size={16} /> {t("Sandbox")}</button>
-          <button type="button" className="secondary-button" aria-pressed={section === "storage"} disabled={busy} onClick={() => { setSection("storage"); setError(""); }}><HardDrive size={16} /> {t("Storage")}</button>
+          {!hosted && <button type="button" className="secondary-button" aria-pressed={section === "sandbox"} disabled={busy} onClick={() => { setSection("sandbox"); setError(""); }}><Box size={16} /> {t("Sandbox")}</button>}
+          {!hosted && <button type="button" className="secondary-button" aria-pressed={section === "storage"} disabled={busy} onClick={() => { setSection("storage"); setError(""); }}><HardDrive size={16} /> {t("Storage")}</button>}
           <button type="button" className="secondary-button" aria-pressed={section === "deepl"} disabled={busy} onClick={() => { setSection("deepl"); setError(""); }}>{t("DeepL")}</button>
         </nav>
 

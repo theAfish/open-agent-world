@@ -12,8 +12,13 @@ import pytest
 from backend.sandbox.python_runtime import SharedPythonRuntime
 
 
+@pytest.fixture(scope="session")
+def shared_test_python_store(tmp_path_factory):
+    return tmp_path_factory.mktemp("shared-python")
+
+
 @pytest.fixture
-def installed_probe(tmp_path, monkeypatch):
+def installed_probe(tmp_path, monkeypatch, shared_test_python_store):
     if not shutil.which('uv'):
         pytest.skip('uv required for real environment acceptance')
     wheels = tmp_path / 'wheels'
@@ -35,17 +40,17 @@ def installed_probe(tmp_path, monkeypatch):
     original = SharedPythonRuntime._run
     installed_launchers = []
     def offline_run(self, argv):
-        if 'install' in argv:
+        if 'pip' in argv and 'install' in argv:
             argv = [*argv, '--no-index', '--find-links', str(wheels)]
         result = original(self, argv)
-        if 'install' in argv and '--dry-run' not in argv:
+        if 'pip' in argv and 'install' in argv and '--dry-run' not in argv:
             launcher = self.bin / ('oaw-shared-probe.exe' if os.name == 'nt' else 'oaw-shared-probe')
             installed_launchers.append((launcher, launcher.read_bytes()))
         return result
     monkeypatch.setattr(SharedPythonRuntime, '_run', offline_run)
-    first = SharedPythonRuntime(tmp_path / 'data with spaces')
+    first = SharedPythonRuntime(tmp_path / 'data with spaces', darwin_store=shared_test_python_store)
     first.prepare_sync(['oaw-shared-probe==1.0'])
-    second = SharedPythonRuntime(tmp_path / 'data with spaces')
+    second = SharedPythonRuntime(tmp_path / 'data with spaces', darwin_store=shared_test_python_store)
     second.prepare_sync()
     assert first.python == second.python
     return first, second, installed_launchers
@@ -87,11 +92,15 @@ def test_real_venv_persists_wheel_across_instances_and_workspaces(tmp_path, inst
     # Upgrade an existing environment without reinstalling or importing packages.
     launcher, original_bytes = installed_launchers[0]
     launcher.write_bytes(original_bytes)
-    (first.root / 'ready.json').write_text(json.dumps({'python': str(first.python)}))
+    metadata = json.loads((first.root / 'ready.json').read_text())
+    # This is a launcher-format migration, not a macOS interpreter migration.
+    metadata.pop('launcher_version', None)
+    (first.root / 'ready.json').write_text(json.dumps(metadata))
     count = len(installed_launchers)
     second.prepare_sync()
     assert len(installed_launchers) == count
     assert not marker.exists(), 'migration must not execute package startup hooks either'
+    # Remove the synthetic hook before exercising the CLI outside a Sandbox.
     (site / 'untrusted.pth').unlink()
     result = subprocess.run([str(launcher)], capture_output=True, text=True, check=True)
     assert Path(json.loads(result.stdout)[1]) == first.venv

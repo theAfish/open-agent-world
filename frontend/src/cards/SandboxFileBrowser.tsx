@@ -240,9 +240,13 @@ export function SandboxFileBrowser({ cardId, roots, tree, expanded, loading, sel
       </section>)}
     </div>
     <TransferList queue={transfers.queue} items={transfers.items} />
-    <footer className="sandbox-files-footer" title={workspacePath}><Folder size={11} /><span>{workspacePath}</span></footer>
     {confirmation && <ConfirmDialog confirmation={confirmation} onClose={() => setConfirmation(undefined)} />}
     {menu && <ContextMenu anchor={menu.anchor} label={t('File actions')} onClose={() => setMenu(undefined)}>
+      <button role="menuitem" onClick={async () => {
+        setFailure('');
+        try { await worldApi.sandboxWorkspace(cardId, 'files/open-folder', { root: menu.file.root, path: menu.file.path }); }
+        catch (reason) { if (live.current) setFailure(apiErrorMessage(reason)); }
+      }}><Folder size={13} />{t('Open in system folder')}</button>
       <button role="menuitem" onClick={() => void (menu.directory ? onExpand(menu.file.root, menu.file.path) : onSelect(menu.file.root, menu.file.path, menu.file.label))}><Eye size={13} />{menu.directory ? (expanded[`${menu.file.root}:${menu.file.path}`] ? t('Collapse folder') : t('Open folder')) : t('Preview')}</button>
       {!menu.directory && <button role="menuitem" onClick={() => void onDownload(menu.file)}><Download size={13} />{t('Download')}</button>}
       {selectedFiles.length > 1 && <button role="menuitem" onClick={downloadChosen}><Download size={13} />{t('Download selected files')}</button>}

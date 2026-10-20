@@ -33,6 +33,17 @@ it('keeps selected packs without duplicating older retained versions', () => {
   expect(inventory[1].versions).toHaveLength(2);
 });
 
+it('joins archive versions and source dependency metadata by runtime owner', () => {
+  const inventory = packInventory(snapshot(), { restart_required: false,
+    versions: [{ ...version, id: 'publisher.tools', owner: 'local.tools', selected: true }],
+    inventory: [{ id: 'publisher.tools', owner: 'local.tools', name: 'Tools', version: '1.0.0',
+      source: 'installed', enabled: true, loaded: true, environments: [], backend_requirements: [], frontend_dependencies: [], warnings: [] }],
+  });
+  expect(inventory.map(item => item.pack.definition.id)).toEqual(['core', 'local']);
+  expect(inventory[1].versions[0].id).toBe('publisher.tools');
+  expect(inventory[1].inventory?.owner).toBe('local.tools');
+});
+
 it('does not mark a new installation waiting for restart as missing', () => {
   const state = snapshot();
   expect(packIssue(state.packs.local, state, [{ ...version, selected: true }])).toBeUndefined();

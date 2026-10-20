@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { clamp, diffusionMask, READER_TRANSITION } from '../../library/frontend/readerTransition';
+import { clampTransitionProgress as clamp, diffusionMask, SURFACE_TRANSITION as READER_TRANSITION } from '@oaw/plugin-api';
 
 const pending = new Map<string, Set<string>>();
 const listeners = new Set<() => void>();

@@ -8,17 +8,25 @@ def is_conversation_author(event, *, child=False):
 
 
 def public_events(event, *, child=False):
-    """Keep all tool activity; publish only the planner's non-thought text.
+    """Publish tools and exposed thinking as activity; only planner text is a reply.
 
     The worker still persists the complete native event in its ADK session so
     internal reports remain available to the planner and checkpoint recovery.
     """
     for index, part in enumerate(getattr(getattr(event, "content", None), "parts", None) or []):
+        base = {"author": getattr(event, "author", "MatCreator"), "subagent": child}
         if getattr(part, "thought", False):
+            text = getattr(part, "text", None)
+            if text and text.strip():
+                # Native runners return complete model responses, not token deltas.
+                yield {"type": "event", "event": "agent_progress", "payload": {**base,
+                    "kind": "model_reasoning", "role": base["author"], "text": text,
+                    "provider_message_id": f"{event.id}:{index}", "streaming": False,
+                    "interrupted": bool(getattr(event, "error_code", None)
+                        or getattr(event, "finish_reason", None) == "MAX_TOKENS")}}
             continue
         call = getattr(part, "function_call", None)
         response = getattr(part, "function_response", None)
-        base = {"author": getattr(event, "author", "MatCreator"), "subagent": child}
         if call:
             yield {"type": "event", "event": "tool_started", "payload": {**base,
                 "name": call.name, "call_id": call.id, "arguments": call.args}}

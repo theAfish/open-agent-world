@@ -1,12 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { ArrowDown, ArrowDownRight, ArrowUpRight, Check, ChevronDown, Circle, Clock3, FileCode2, GitBranch, GitMerge, LoaderCircle, Play, Search, Wrench, X } from 'lucide-react';
+import { ArrowDown, ArrowDownRight, ArrowRight, ArrowUpRight, ChevronDown, Circle, FileCode2, GitBranch, GitMerge, Minus, Play, Search, Timer, Wrench, X } from 'lucide-react';
 import { t, useLocale } from '../i18n';
 import { WorkspaceEmptyState } from '../workspace/WorkspacePrimitives';
 import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
 import { useExecutionSources, type ExecutionEdge, type ExecutionNode, type ExecutionSourceHost, type ExecutionSnapshot } from '../plugins/executionSources';
 import type { WorldCard } from '../types/world';
-import { executionIndex, layoutGraph, laneMemory, nodeEdges, trackPath, isComplete, isPlanned, isInProgress } from './executionHistory';
+import { elapsedMilliseconds } from '../state/activityTiming';
+import { causalFocus, executionIndex, layoutGraph, laneMemory, nodeEdges, trackPath, statusKind, isPlanned, isInProgress } from './executionHistory';
 import './executionGraph.css';
 
 export function ExecutionGraphCard({ card }: { card: WorldCard }) {
@@ -45,7 +46,7 @@ export async function readProjectHistory(api: ExecutionSourceHost, sources: { id
     nodes: histories.flatMap(({ owner, value }) => value.nodes.map(node => ({ ...node,
       id: identity(owner.id, node.id), parent_id: node.parent_id ? identity(owner.id, node.parent_id) : undefined,
       execution_id: node.execution_id ? identity(owner.id, node.execution_id) : undefined,
-      actor_id: identity(owner.id, node.actor_id || owner.id), actor_label: node.actor_label || owner.name,
+      actor_id: node.actor_id ? identity(owner.id, node.actor_id) : undefined,
       workstream_id: node.workstream_id ? identity(owner.id, node.workstream_id) : undefined,
       realized_by: node.realized_by ? identity(owner.id, node.realized_by) : undefined,
       retry_of: node.retry_of ? identity(owner.id, node.retry_of) : undefined,
@@ -62,10 +63,26 @@ const edgeLabel = (kind: ExecutionEdge['kind'], incoming = true) => incoming ? (
   fork: t('Started from'), merge: t('Applied result'),
 })[kind] : ({ control: t('Required by'), data: t('Used by'), retry: t('Retried as'),
   replan: t('Replanned as'), fork: t('Launched task'), merge: t('Applied at') })[kind];
-function Status({ status }: { status: string }) {
-  const Icon = isComplete(status) ? Check : ['failed', 'error', 'blocked', 'cancelled'].includes(status) ? X
-    : status === 'running' ? LoaderCircle : ['waiting', 'interrupted', 'needs_replanning'].includes(status) ? Clock3 : Circle;
-  return <span className="execution-status" data-status={status} title={t(status)}><Icon size={12} aria-hidden="true" /></span>;
+function Status({ status, vertex = false, label = true }: { status: string; vertex?: boolean; label?: boolean }) {
+  const kind = statusKind(status);
+  const Icon = kind === 'failed' ? X : kind === 'stopped' ? Minus : Circle;
+  return <span className="execution-status" data-status={status} data-state={kind} title={t(status)}>
+    {kind === 'complete' ? <i className="execution-status-core" aria-hidden="true" />
+      : kind === 'running' ? <i className="execution-status-ring" aria-hidden="true" />
+      : kind === 'waiting' ? <svg className="execution-status-clock" width={vertex ? 18 : 12} height={vertex ? 18 : 12}
+        viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.7" strokeLinecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="10" fill={vertex ? 'var(--surface-solid)' : 'none'} />
+        <path className="execution-clock-hand execution-clock-hour" d="M12 12H16" />
+        <path className="execution-clock-hand execution-clock-minute" d="M12 12V6" />
+        <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none" />
+      </svg>
+      : kind === 'rework' ? <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+        <path d="M6 2.25V6.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        <circle cx="6" cy="9.5" r="1" fill="currentColor" />
+      </svg>
+      : <Icon size={12} strokeWidth={kind === 'failed' ? 3.5 : 2.7} aria-hidden="true" />}
+    {!vertex && label && kind === 'custom' && <small>{status}</small>}
+  </span>;
 }
 function Operation({ node }: { node: ExecutionNode }) {
   const Icon = node.operation === 'edit' ? FileCode2 : node.operation === 'merge' ? GitMerge
@@ -74,7 +91,39 @@ function Operation({ node }: { node: ExecutionNode }) {
   return <Icon size={12} aria-hidden="true" />;
 }
 const timeText = (value?: string | null) => value && Number.isFinite(Date.parse(value))
-  ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+
+function EventTiming({ node }: { node: ExecutionNode }) {
+  const locale = useLocale(state => state.locale);
+  const validDate = (value?: string | null) => value && Number.isFinite(Date.parse(value)) ? new Date(value) : undefined;
+  const start = validDate(node.started_at), end = validDate(node.finished_at);
+  if (!start && !end) return null;
+  const elapsed = elapsedMilliseconds(node.started_at, node.finished_at);
+  const seconds = elapsed === undefined ? undefined : elapsed / 1000;
+  const duration = seconds === undefined ? undefined : seconds < 60 ? t('{seconds}s', { seconds: Number(seconds.toFixed(1)) })
+    : seconds < 3600 ? t('{minutes}m {seconds}s', { minutes: Math.floor(seconds / 60), seconds: Math.floor(seconds % 60) })
+    : seconds < 86400 ? t('{hours}h {minutes}m', { hours: Math.floor(seconds / 3600), minutes: Math.floor(seconds % 3600 / 60) })
+    : t('{days}d {hours}h', { days: Math.floor(seconds / 86400), hours: Math.floor(seconds % 86400 / 3600) });
+  const date = (value: Date) => value.toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' });
+  const sameDay = start && end && start.toDateString() === end.toDateString();
+  const caption = start && end && !sameDay ? t('Execution timing') : date((start ?? end)!);
+  return <div className="execution-timing" aria-label={t('Execution timing')}>
+    <div className="execution-timing-caption"><span>{caption}</span>
+      {duration !== undefined && <span className="execution-duration" title={t('Elapsed time')}><Timer size={11} aria-hidden="true" />{duration}</span>}
+    </div>
+    <div className="execution-time-range">
+      {[{ label: t('Start time'), value: start, raw: node.started_at }, { label: t('End time'), value: end, raw: node.finished_at }].map((point, i) =>
+        <div className="execution-time-point" key={i}>
+          <span>{point.label}</span>
+          {point.value ? <time dateTime={point.raw!} title={point.value.toLocaleString(locale)}>
+            {point.value.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+          </time> : <span className="execution-time-unknown" title={t('Time not recorded')}>{i === 1 && !node.finished_at && isInProgress(node.status) ? t('In progress') : '—'}</span>}
+          {start && end && !sameDay && <small>{date(point.value!)}</small>}
+        </div>)}
+      <span className="execution-time-connector" aria-hidden="true"><ArrowRight size={12} /></span>
+    </div>
+  </div>;
+}
 
 function ToolSummary({ nodes }: { nodes: ExecutionNode[] }) {
   const groups = new Map<string, { node: ExecutionNode; count: number; notes: Set<string> }>();
@@ -95,6 +144,7 @@ function ToolSummary({ nodes }: { nodes: ExecutionNode[] }) {
 
 export function ExecutionGraphView({ api }: { api?: ExecutionSourceHost }) {
   useLocale();
+  const completedGapsId = useId();
   const [value, setValue] = useState<ExecutionSnapshot>();
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<string>();
@@ -204,7 +254,12 @@ export function ExecutionGraphView({ api }: { api?: ExecutionSourceHost }) {
     } else {
       const previous = priorRows.current.find(row => row.top + row.height > element.scrollTop);
       const current = previous && graph.ports.get(previous.id);
-      if (current) element.scrollTop += current.top - previous!.top;
+      if (current) {
+        const offset = element.scrollTop - previous!.top;
+        // A reader may be far inside a long detail when it collapses. Keep the
+        // same event in view rather than carrying that offset into later events.
+        element.scrollTop = current.top + (offset < current.height ? offset : 0);
+      }
     }
     priorRows.current = graph.rows;
     setScroll(previous => ({ ...previous, top: element.scrollTop }));
@@ -220,6 +275,7 @@ export function ExecutionGraphView({ api }: { api?: ExecutionSourceHost }) {
 
   const navigate = (id: string, toggle = false) => {
     if (!index.byId.has(id)) return;
+    setHovered(undefined);
     pendingNavigation.current = id;
     setSelected(current => toggle && current === id ? undefined : id);
   };
@@ -228,28 +284,32 @@ export function ExecutionGraphView({ api }: { api?: ExecutionSourceHost }) {
     const position = (next + graph.matchIds.length) % graph.matchIds.length;
     setMatch(position); navigate(graph.matchIds[position]);
   };
-  const related = nodeEdges(index, hovered ?? selected), selectedEdges = nodeEdges(index, selected);
-  const relatedIds = new Set(related.map(edge => edge.id));
-  const relatedNodes = new Set(related.flatMap(edge => [edge.source, edge.target]));
+  // Selection owns the lens until dismissed; hover cannot replace it.
+  const focused = selected ?? hovered;
+  const focus = useMemo(() => causalFocus(index, focused), [index, focused]);
+  const selectedEdges = nodeEdges(index, selected);
+  const relatedNodes = focus.nodes;
   const narrow = scroll.width < 380, gap = narrow ? 18 : scroll.width > 700 ? 30 : 24;
   const laneX = (lane: number) => 24 + lane * gap;
   const labelX = laneX(graph.lanes - 1) + (narrow ? 22 : 28);
   const firstY = Math.max(0, scroll.top - 108), lastY = Math.min(graph.height, scroll.top + scroll.height + 108);
   const visibleRows = graph.rows.filter(row => row.top + row.height >= firstY && row.top <= lastY);
-  const visibleTracks = graph.tracks.filter(track => Math.max(track.source.y, track.target.y) >= firstY && Math.min(track.source.y, track.target.y) <= lastY);
+  // Focus changes emphasis, never topology. Folded relations remain available
+  // through endpoint counts and detail navigation instead of appearing as new
+  // cables elsewhere in the selected event's transitive dependency chain.
+  const visibleTracks = graph.tracks.filter(track => !track.reference
+    && Math.max(track.source.y, track.target.y) >= firstY && Math.min(track.source.y, track.target.y) <= lastY);
   const active = selected ? index.byId.get(selected) : undefined;
+  const streamConnections = active ? graph.tracks.filter(track => track.kind === 'workstream'
+    && (track.source.id === active.id || track.target.id === active.id)) : [];
   const taskTools = active ? index.details.get(active.id) ?? [] : [];
   const plans = active ? index.nodes.filter(node => isPlanned(node) && node.parent_id === active.id) : [];
-  const referenceCount = new Map<string, number>();
-  for (const track of graph.tracks) if (track.edge && track.reference) referenceCount.set(track.target.id, (referenceCount.get(track.target.id) ?? 0) + 1);
-  for (const edge of graph.unavailable) referenceCount.set(edge.target, (referenceCount.get(edge.target) ?? 0) + 1);
+  const unavailableCount = new Map<string, number>();
+  for (const edge of graph.unavailable) for (const id of [edge.source, edge.target]) if (graph.ports.has(id))
+    unavailableCount.set(id, (unavailableCount.get(id) ?? 0) + 1);
 
   return <section className="execution-graph nodrag nopan nowheel" aria-label={t('Execution graph')} data-narrow={narrow}
     style={{ '--graph-label-x': labelX + 'px' } as CSSProperties}>
-    <header className="execution-graph-heading"><strong><GitBranch size={16} />{t('Project history')}</strong>
-      <span className="execution-phase" role="status" data-phase={value?.phase}>{['running', 'waiting'].includes(value?.phase ?? '') ? t(value!.phase) : ''}</span>
-    </header>
-    {value?.title && <p className="execution-project-title" title={value.title}>{value.title}</p>}
     {sources.length > 1 && <select className="execution-graph-source" aria-label={t('Execution source')} value={sources.some(item => item.id === source) ? source : ''} onChange={event => setSource(event.target.value)}>
       <option value="">{t('All connected agents')}</option>
       {sources.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -258,7 +318,7 @@ export function ExecutionGraphView({ api }: { api?: ExecutionSourceHost }) {
     {value?.truncated && <p className="execution-graph-notice">{t('Some history is unavailable from this source.')}</p>}
     {value?.previous_run_id && <p className="execution-graph-notice" role="status">{['created', 'running', 'waiting'].includes(value.phase) ? t('Waiting for this run’s graph…') : t('Showing the previous execution')}</p>}
     {graph.rows.length > 0 && <div className="execution-history-toolbar">
-      <span>{graph.rows.length} {t('events')} <span aria-hidden="true">↓</span></span>
+      <span title={t('Start time, then recorded order')}>{graph.rows.length} {t('events')} <span aria-hidden="true">↓</span></span>
       <form onSubmit={event => { event.preventDefault(); find(match + 1); }}><Search size={12} />
         <input aria-label={t('Find event')} placeholder={t('Find event')} value={query}
           onChange={event => { setQuery(event.target.value); setMatch(-1); }} onKeyDown={event => { if (event.key === 'Escape') { setQuery(''); setSelected(undefined); } }} />
@@ -269,8 +329,20 @@ export function ExecutionGraphView({ api }: { api?: ExecutionSourceHost }) {
       onPointerDownCapture={event => { gesture.current = { x: event.clientX, y: event.clientY, moved: false }; }}
       onPointerMoveCapture={event => { if (Math.hypot(event.clientX - gesture.current.x, event.clientY - gesture.current.y) > 4) gesture.current.moved = true; }}
       onClickCapture={event => { if (event.detail && gesture.current.moved) { event.preventDefault(); event.stopPropagation(); } }}
-      onKeyDown={event => { if (event.key === 'Escape') { setSelected(undefined); event.stopPropagation(); } }}
-      onClick={event => { if (event.target === event.currentTarget || (event.target as HTMLElement).classList?.contains('execution-graph-content')) setSelected(undefined); }}
+      onKeyDown={event => {
+        if (event.key === 'Escape') { setSelected(undefined); setHovered(undefined); event.stopPropagation(); }
+        // The viewport owns navigation across virtualized rows. Inline details
+        // keep native page scrolling and link/button keyboard behavior.
+        if ((event.target as HTMLElement).closest('.execution-inline') || event.altKey || event.ctrlKey || event.metaKey) return;
+        if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) && graph.rows.length) {
+          event.preventDefault(); event.stopPropagation();
+          const current = selected ? graph.ports.get(selected)?.ordinal ?? 0 : visibleRows[0]?.ordinal ?? 0;
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? graph.rows.length - 1
+            : Math.max(0, Math.min(graph.rows.length - 1, current + (event.key === 'ArrowDown' ? 1 : -1)));
+          viewport.current?.focus({ preventScroll: true }); navigate(graph.rows[next].id);
+        }
+      }}
+      onClick={event => { if (event.target === event.currentTarget || (event.target as HTMLElement).classList?.contains('execution-graph-content')) { setSelected(undefined); setHovered(undefined); } }}
       onScroll={event => {
         const element = event.currentTarget; setScroll(previous => ({ ...previous, top: element.scrollTop }));
         if (element.scrollTop + element.clientHeight >= element.scrollHeight - 8) setNewCount(0);
@@ -278,66 +350,96 @@ export function ExecutionGraphView({ api }: { api?: ExecutionSourceHost }) {
       {!graph.rows.length ? <WorkspaceEmptyState title={t('No execution yet')} description={sources.length ? t('No runtime activity for this session') : t('Connect an Agent or a callable library to observe its execution in this session.')} /> :
       <div className="execution-graph-content" style={{ height: graph.height }}>
         <svg className="execution-tracks" width={labelX} height={Math.max(0, lastY - firstY)} viewBox={'0 ' + firstY + ' ' + labelX + ' ' + Math.max(1, lastY - firstY)} style={{ top: firstY }} aria-label={t('Recorded dependency tracks')}>
+          <defs><mask id={completedGapsId} maskUnits="userSpaceOnUse" x="0" y={firstY} width={labelX} height={Math.max(1, lastY - firstY)}>
+            <rect x="0" y={firstY} width={labelX} height={Math.max(1, lastY - firstY)} fill="white" />
+            {visibleRows.filter(row => statusKind(row.node.status) === 'complete').map(row =>
+              <circle key={row.id} cx={laneX(row.lane)} cy={row.y} r="6" fill="black" />)}
+          </mask></defs>
+          <g mask={`url(#${completedGapsId})`}>
           {visibleTracks.map(track => {
-            const highlighted = !!track.edge && relatedIds.has(track.id);
-            return <path key={track.id} className={'execution-track execution-color-' + track.color}
+            const highlighted = track.edges.some(edge => focus.edges.has(edge.id));
+            return <path key={track.id} className={'execution-track execution-color-' + track.source.color}
               data-graph-edge={track.edge ? track.edge.source + ':' + track.edge.target : undefined}
+              data-source={track.source.id} data-target={track.target.id}
+              data-kinds={track.edges.map(edge => edge.kind).join(' ')}
               data-kind={track.kind} data-reference={track.reference} data-highlighted={highlighted}
-              data-muted={!!(hovered ?? selected) && !highlighted && track.source.id !== selected && track.target.id !== selected}
-              d={trackPath(track, laneX, highlighted)}>
-              <title>{track.edge ? edgeLabel(track.edge.kind) : track.kind === 'workstream' ? t('Task activity') : t('Time order')}: {track.source.node.label} → {track.target.node.label}</title>
+              data-muted={!!focused && !highlighted}
+              d={trackPath(track, laneX)}>
+              <title>{track.edges.length ? track.edges.map(edge => edgeLabel(edge.kind)).join(' · ') : t('Same workstream, not a dependency')}: {track.source.node.label} → {track.target.node.label}</title>
             </path>;
           })}
+          </g>
         </svg>
         {visibleRows.map(row => {
           const node = row.node, chosen = row.id === selected;
-          return <div key={row.id} className="execution-vertex" data-row-id={row.id} data-status={node.status} data-selected={chosen} data-related={relatedNodes.has(row.id)} data-pending={isInProgress(node.status)}
+          const references = graph.references.get(row.id) ?? [];
+          const referenceCount = references.length + (unavailableCount.get(row.id) ?? 0);
+          return <div key={row.id} className={'execution-vertex execution-color-' + row.color} data-row-id={row.id} data-status={node.status} data-state={statusKind(node.status)} data-selected={chosen} data-related={relatedNodes.has(row.id)} data-muted={!!focused && !relatedNodes.has(row.id)} data-pending={isInProgress(node.status)}
             style={{ top: row.top, height: row.height }}>
             <button className="execution-node-select" aria-label={node.label + ': ' + node.status} aria-pressed={chosen} aria-expanded={chosen}
-              data-simple={!node.actor_label && !node.workstream_label && !node.operation && !node.started_at && !referenceCount.get(row.id)}
               onClick={() => navigate(row.id, true)} onMouseEnter={() => setHovered(row.id)} onMouseLeave={() => setHovered(undefined)}>
-              <span className={'execution-vertex-dot execution-color-' + row.color} data-lane={row.lane} style={{ left: laneX(row.lane) }}><i /></span>
+              <span className={'execution-vertex-dot execution-color-' + row.color} data-lane={row.lane} style={{ left: laneX(row.lane) }}><Status status={node.status} vertex /></span>
               <span className="execution-vertex-label">
                 <span className="execution-operation-title"><strong title={node.label}>{node.label}</strong><Status status={node.status} /></span>
-                <span className="execution-operation-meta"><Operation node={node} /><span>{node.actor_label ? t(node.actor_label) : node.workstream_label || (node.role === 'planning' ? t('Planner') : '')}</span>
-                  {timeText(node.started_at) && <time dateTime={node.started_at!}>{timeText(node.started_at)}</time>}
-                  {!!referenceCount.get(row.id) && <span className="execution-reference-count">↖ {referenceCount.get(row.id)}</span>}
+                <span className="execution-operation-meta"><Operation node={node} /><span className={'execution-actor execution-color-' + row.color} title={node.actor_label || node.actor_id || t('Unknown agent')}>{node.actor_label ? t(node.actor_label) : node.actor_id || t('Unknown agent')}</span>
+                  <time dateTime={node.started_at || undefined} title={timeText(node.started_at) ? new Date(node.started_at!).toLocaleString() : t('Time not recorded')}>{timeText(node.started_at) || '—'}</time>
+                  {!!referenceCount && <span className="execution-reference-count" title={t('Folded connections: {count}', { count: referenceCount })}>↗{referenceCount}</span>}
                 </span>
               </span>
             </button>
             {chosen && <div ref={setInformation} className="execution-inline" aria-label={t('Event details')}>
-              <p className="execution-detail-status"><Status status={node.status} />{t(node.status)}
-                {node.started_at && <time>{new Date(node.started_at).toLocaleString()}
-                  {node.finished_at && <> → {new Date(node.finished_at).toLocaleString()}</>}</time>}</p>
-              {node.result && <p>{node.result}</p>}{node.detail && node.detail !== node.result && <p>{node.detail}</p>}
-              {!!selectedEdges.length && <div className="execution-anchors">{selectedEdges.map(edge => {
-                const incoming = edge.target === row.id, id = incoming ? edge.source : edge.target, other = index.byId.get(id);
-                return <button key={edge.id} disabled={!graph.ports.has(id)} onClick={() => navigate(id)}
-                  aria-label={edgeLabel(edge.kind, incoming) + ' ' + (other?.label ?? id)}>
-                  {incoming ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-                  <span><small>{edgeLabel(edge.kind, incoming)}</small>{other?.label ?? id}
-                    {edge.records.some(record => record.source !== edge.source || record.target !== edge.target) &&
-                      <small className="execution-edge-evidence">{[...new Set(edge.records.map(record =>
-                        (index.byId.get(record.source)?.label ?? record.source) + ' → ' + (index.byId.get(record.target)?.label ?? record.target)))].join('; ')}</small>}
-                  </span>
-                  {!other && <small>{t('Unavailable')}</small>}
-                </button>;
-              })}</div>}
-              {plans.length > 0 && <div className="execution-planned"><small>{t('Planned work')}</small>{plans.map(plan =>
+              <div className="execution-detail-tags">
+                <span className="execution-tag execution-detail-status" data-state={statusKind(node.status)}><Status status={node.status} label={false} />{t(node.status)}</span>
+                {!!node.attempt && <span className="execution-tag">{t('Attempt {count}', { count: node.attempt })}</span>}
+              </div>
+              <EventTiming node={node} />
+              {(node.result || node.detail) && <div className="execution-detail-summary">
+                <h4 className="execution-section-label">{t(node.result ? 'Outcome' : 'Details')}</h4>
+                <p>{node.result || node.detail}</p>
+                {node.result && node.detail && node.detail !== node.result && <p className="execution-detail-context">{node.detail}</p>}
+              </div>}
+              {!!selectedEdges.length && <section className="execution-relations" aria-label={t('Recorded relation')}>
+                <p className="execution-causal-summary">{t('{up} upstream · {down} downstream', { up: focus.upstream.size, down: focus.downstream.size })}</p>
+                {[true, false].map(incomingGroup => {
+                  const edges = selectedEdges.filter(edge => (edge.target === row.id) === incomingGroup);
+                  return edges.length > 0 && <div key={String(incomingGroup)} className="execution-relation-group">
+                    <h4 className="execution-section-label">{incomingGroup ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}{t(incomingGroup ? 'Upstream' : 'Downstream')}<span className="execution-section-count">{edges.length}</span></h4>
+                    <ul className="execution-anchors">{edges.map(edge => {
+                      const incoming = edge.target === row.id, id = incoming ? edge.source : edge.target, other = index.byId.get(id);
+                      return <li key={edge.id}><button disabled={!graph.ports.has(id)} onClick={() => navigate(id)}
+                        aria-label={edgeLabel(edge.kind, incoming) + ' ' + (other?.label ?? id)}>
+                        <span className="execution-relation-body">
+                          <span className="execution-relation-meta"><span className="execution-tag" data-kind={edge.kind}>{edgeLabel(edge.kind, incoming)}</span>
+                            {!graph.ports.has(id) && <span className="execution-tag">{other && isPlanned(other) ? t('Planned work') : t('Unavailable')}</span>}
+                          </span>
+                          <span className="execution-relation-title">{other?.label ?? id}</span>
+                          {edge.records.some(record => record.source !== edge.source || record.target !== edge.target) &&
+                            <small className="execution-edge-evidence">{[...new Set(edge.records.map(record =>
+                              (index.byId.get(record.source)?.label ?? record.source) + ' → ' + (index.byId.get(record.target)?.label ?? record.target)))].join('; ')}</small>}
+                          {edge.records.some(record => record.evidence || record.artifact_ref) && <small className="execution-edge-proof">{[...new Set(edge.records.flatMap(record => [record.evidence, record.artifact_ref].filter(Boolean)))].join(' · ')}</small>}
+                        </span>
+                        <ArrowUpRight className="execution-relation-jump" size={13} aria-hidden="true" />
+                      </button></li>;
+                    })}</ul>
+                  </div>;
+                })}
+              </section>}
+              {!!streamConnections.length && <div className="execution-continuity"><h4 className="execution-section-label">{t('Same workstream, not a dependency')}</h4><ul className="execution-anchors">{streamConnections.map(track => {
+                const other = track.source.id === row.id ? track.target : track.source;
+                return <li key={track.id}><button aria-label={t('Workstream') + ': ' + other.node.label} onClick={() => navigate(other.id)}>
+                  <span className="execution-relation-title">{other.node.label}</span><ArrowUpRight className="execution-relation-jump" size={13} aria-hidden="true" /></button></li>;
+              })}</ul></div>}
+              {plans.length > 0 && <div className="execution-planned"><h4 className="execution-section-label">{t('Planned work')}</h4>{plans.map(plan =>
                 <p key={plan.id}><Status status={plan.realized_by ? index.byId.get(plan.realized_by)?.status ?? plan.status : plan.status} />
                   {plan.realized_by && graph.ports.has(plan.realized_by) ? <button onClick={() => navigate(plan.realized_by!)}>{plan.label}<ArrowUpRight size={11} /></button> : plan.label}</p>)}</div>}
-              {!!node.artifact_refs?.length && <div className="execution-artifacts"><small>{t('Output artifacts')}</small>{node.artifact_refs.map(ref => <p key={ref}>{ref}</p>)}</div>}
+              {!!node.artifact_refs?.length && <div className="execution-artifacts"><h4 className="execution-section-label">{t('Output artifacts')}</h4>{node.artifact_refs.map(ref => <p key={ref}><code>{ref}</code></p>)}</div>}
               {taskTools.length > 0 && <ToolSummary nodes={taskTools} />}
-              {!node.detail && !node.result && !node.artifact_refs?.length && !selectedEdges.length && !plans.length && !taskTools.length && <p className="execution-empty-detail">{t('No additional details')}</p>}
+              {node.execution_id && <p className="execution-detail-identity"><span>{t('Execution')}:</span> <code>{node.execution_id}</code></p>}
+              {!node.detail && !node.result && !node.artifact_refs?.length && !selectedEdges.length && !streamConnections.length && !plans.length && !taskTools.length && <p className="execution-empty-detail">{t('No additional details')}</p>}
             </div>}
           </div>;
         })}
       </div>}
-      {!!graph.rows.length && <footer className="execution-graph-legend">
-        {graph.tracks.some(track => track.kind === 'workstream') && <span><i data-kind="workstream" />{t('Task activity')}</span>}
-        {index.edges.length > 0 && <span><i />{t('Dependency')}</span>}
-        {graph.tracks.some(track => track.kind === 'history') && <span><i data-kind="history" />{t('Time order')}</span>}
-      </footer>}
     </div>
     {newCount > 0 && <button className="execution-new-activity" onClick={() => {
       pendingNavigation.current = graph.rows.at(-1)?.id; setSelected(graph.rows.at(-1)?.id); setNewCount(0);

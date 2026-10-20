@@ -1,0 +1,127 @@
+# Dependency intent only; installation and readiness are tracked separately.
+schema_version = 3
+
+[compatibility]
+plugin_api = "1.35"
+oaw = ">=0.1.0,<1"
+
+[distribution]
+id = "atomsculptor.default"
+name = "AtomSculptor"
+
+[plugin]
+owner = "atomsculptor"
+packs = ["atomsculptor.default"]
+node_types = ["atomsculptor.agent","atomsculptor.skills","atomsculptor.skills.skill","atomsculptor.structure"]
+
+[components.backend]
+project = "pyproject.toml"
+mode = "host-adapter"
+
+[components.frontend]
+entry = "frontend/index.tsx"
+mode = "pack-build"
+project = "frontend/package.json"
+
+# Defaults for this Pack's runtime commands; Skill declarations compose with it.
+[environments.modelling]
+target = "sandbox"
+provider = "python"
+management = "managed"
+prepare = "on-use"
+verify_imports = ["ase", "matplotlib", "numpy", "pymatgen.core"]
+python = ["ase>=3.22", "matplotlib>=3.7", "numpy>=1.23", "pymatgen>=2024.0"]
+
+[prerequisites.model-connection]
+kind = "model-connection"
+description = "A configured model connection selected for the modelling Agent."
+
+[prerequisites.materials-project]
+kind = "credential"
+description = "A Materials Project API key configured for the skill."
+
+[features.agent]
+environments = ["modelling"]
+prerequisites = ["model-connection"]
+
+[environments.crystal-builder]
+target = "sandbox"
+provider = "python"
+sources = [{ path = "src/oaw_atomsculptor/skills/crystal-builder/requirements.txt", kind = "requirements" }]
+
+[features.crystal-builder]
+environments = ["crystal-builder"]
+
+[environments.interface-builder]
+target = "sandbox"
+provider = "python"
+sources = [{ path = "src/oaw_atomsculptor/skills/interface-builder/requirements.txt", kind = "requirements" }]
+
+[features.interface-builder]
+environments = ["interface-builder"]
+
+[environments.materials-project-search]
+target = "sandbox"
+provider = "python"
+sources = [{ path = "src/oaw_atomsculptor/skills/materials-project-search/requirements.txt", kind = "requirements" }]
+
+[features.materials-project-search]
+environments = ["materials-project-search"]
+prerequisites = ["materials-project"]
+
+[environments.molecular-structure-creation]
+target = "sandbox"
+provider = "python"
+sources = [{ path = "src/oaw_atomsculptor/skills/molecular-structure-creation/requirements.txt", kind = "requirements" }]
+
+[features.molecular-structure-creation]
+environments = ["molecular-structure-creation"]
+
+[environments.nanotube-builder]
+target = "sandbox"
+provider = "python"
+sources = [{ path = "src/oaw_atomsculptor/skills/nanotube-builder/requirements.txt", kind = "requirements" }]
+
+[features.nanotube-builder]
+environments = ["nanotube-builder"]
+
+[environments.structure-image]
+target = "sandbox"
+provider = "python"
+sources = [{ path = "src/oaw_atomsculptor/skills/structure-image/requirements.txt", kind = "requirements" }]
+
+[features.structure-image]
+environments = ["structure-image"]
+
+[environments.structure-inspect]
+target = "sandbox"
+provider = "python"
+sources = [{ path = "src/oaw_atomsculptor/skills/structure-inspect/requirements.txt", kind = "requirements" }]
+
+[features.structure-inspect]
+environments = ["structure-inspect"]
+
+[environments.structure-perturbation]
+target = "sandbox"
+provider = "python"
+sources = [{ path = "src/oaw_atomsculptor/skills/structure-perturbation/requirements.txt", kind = "requirements" }]
+
+[features.structure-perturbation]
+environments = ["structure-perturbation"]
+
+[environments.supercell-builder]
+target = "sandbox"
+provider = "python"
+sources = [{ path = "src/oaw_atomsculptor/skills/supercell-builder/requirements.txt", kind = "requirements" }]
+
+[features.supercell-builder]
+environments = ["supercell-builder"]
+
+[environments.surface-builder]
+target = "sandbox"
+provider = "python"
+sources = [{ path = "src/oaw_atomsculptor/skills/surface-builder/requirements.txt", kind = "requirements" }]
+
+[features.surface-builder]
+environments = ["surface-builder"]
+

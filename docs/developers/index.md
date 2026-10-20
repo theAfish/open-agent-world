@@ -16,6 +16,14 @@ A plugin is a Python package that registers cards and other contributions with O
 
 **Start with Python.** React and TypeScript are only needed for a custom interface. The first example uses OAW's standard card controls and needs no model credentials.
 
+For distribution, add `oaw.pack.toml` and keep Python dependencies in
+`pyproject.toml` and frontend dependencies in the Pack's `frontend/package.json`.
+Use the public Python and frontend SDKs; avoid imports from private host source
+directories. [The unified author/build/install guide](../pack-distribution.md)
+covers shared adapter wheels, isolated workers, explicit Sandbox dependency
+groups, independent frontend builds and the same lifecycle for checkout Packs
+and `.oawpack` releases.
+
 ## Find the right example
 
 | Example | Learn from it |

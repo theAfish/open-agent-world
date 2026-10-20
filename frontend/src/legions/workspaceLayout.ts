@@ -164,6 +164,8 @@ export function resizeSplit(node: WorkspaceNode, path: string, ratio: number): W
     : { ...node, second: resizeSplit(node.second, path.slice(1), ratio) };
 }
 
+export const WORKSPACE_DIVIDER_SIZE = 4;
+
 export function layoutMinimum(node: WorkspaceNode | null, preference?: (view: WorkspaceView) => WorkspaceLayoutMetadata | undefined): { width: number; height: number } {
   if (!node) return workspaceLayoutSize().minimum;
   if (node.kind !== 'split') {
@@ -175,8 +177,8 @@ export function layoutMinimum(node: WorkspaceNode | null, preference?: (view: Wo
   // Resizing redistributes the available space; it must not grow the workspace.
   // Each grid track enforces its subtree minimum independently of the ratio.
   return node.axis === 'horizontal'
-    ? { width: a.width + b.width + 5, height: Math.max(a.height, b.height) }
-    : { width: Math.max(a.width, b.width), height: a.height + b.height + 5 };
+    ? { width: a.width + b.width + WORKSPACE_DIVIDER_SIZE, height: Math.max(a.height, b.height) }
+    : { width: Math.max(a.width, b.width), height: a.height + b.height + WORKSPACE_DIVIDER_SIZE };
 }
 
 export function dropSide(x: number, y: number, width: number, height: number): DockSide {

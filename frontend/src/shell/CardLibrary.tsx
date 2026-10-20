@@ -18,9 +18,11 @@ import { usePackInstallations } from "../state/packInstallations";
 import type { PackInstallations } from "../types/packs";
 import { PackStore } from "./PackStore";
 import { PackCreator } from "./PackCreator";
+import { PackOperations } from './PackOperations';
 import { LibraryCard as PhysicalLibraryCard, LibraryCardPreview } from "./LibraryCard";
 import "./cardLibrary.css";
 import { startPalettePointerDrag } from "../palette/pointerDrag";
+import { isHosted } from '../auth/hostedSession';
 
 type Tab = "packs" | "cards" | "store";
 const PAGE_SIZE = 30;
@@ -29,11 +31,12 @@ const same = (a: DeckEntry, b: DeckEntry) => a.kind === b.kind && a.id === b.id;
 export function CardLibrary() {
   useLocale();
   const library = useCardLibrary();
+  const hosted = isHosted();
   const presence = useMotionPresence(library.open);
   const legions = useWorldStore(state => state.legions);
   const deleteLegion = useWorldStore(state => state.deleteLegion);
   const modal = useRef<HTMLDialogElement>(null);
-  const tab = library.tab;
+  const tab = hosted && library.tab === 'store' ? 'packs' : library.tab;
   const setTab = (tab: Tab) => useCardLibrary.setState({ tab });
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("");
@@ -51,10 +54,12 @@ export function CardLibrary() {
   const [installAction, setInstallAction] = useState<HTMLDivElement | null>(null);
   const [inspectedPack, setInspectedPack] = useState<string | null>(null);
   const [packNotice, setPackNotice] = useState('');
-  const installations = usePackInstallations(library.open);
+  const installations = usePackInstallations(library.open && !hosted);
   const acceptInstallations = (value: PackInstallations) => {
     const removed = installations.state?.versions.some(previous => previous.selected
-      && !value.versions.some(item => item.id === previous.id && item.selected));
+      && !value.versions.some(item => item.id === previous.id && item.selected))
+      || installations.state?.inventory?.some(previous => previous.enrolled !== false
+        && value.inventory?.some(item => item.id === previous.id && item.enrolled === false));
     setPackNotice(removed ? value.restart_required ? 'Pack removed. Restart OAW to finish uninstalling.' : 'Pack uninstalled.' : '');
     if (removed) setInspectedPack(null);
     installations.accept(value);
@@ -164,7 +169,7 @@ export function CardLibrary() {
       <button className="top-icon-button" aria-label={t("Close Library")} onClick={library.close}><X size={18} /></button></header>
     <div className="library-tab-row"><nav className="library-tabs" aria-label={t("Library sections")}>{([
       ["packs", t("Packs"), Archive], ["cards", t("Cards"), LibraryBig], ["store", t("Store"), Store],
-    ] as const).map(([id, label, Icon]) => <button key={id} data-tutorial={`library-tab-${id}`} className={tab === id ? "is-active" : ""} aria-pressed={tab === id} onClick={() => { setTab(id); setReveal(null); setInspectedPack(null); }}>
+    ] as const).filter(([id]) => !hosted || id !== 'store').map(([id, label, Icon]) => <button key={id} data-tutorial={`library-tab-${id}`} className={tab === id ? "is-active" : ""} aria-pressed={tab === id} onClick={() => { setTab(id); setReveal(null); setInspectedPack(null); }}>
       <Icon size={16} />{label}{id !== "store" && <small>{id === "packs" ? inventory.length : allCards.length}</small>}
     </button>)}</nav><div className="library-tab-actions" ref={setInstallAction} /></div>
     <div className="library-flow">{t("Open a pack")} <ChevronRight size={12} /> {t("Collect cards")} <ChevronRight size={12} /> {t("Build a deck")} <ChevronRight size={12} /> {t("Place in your world")}</div>
@@ -172,17 +177,18 @@ export function CardLibrary() {
     {!snapshot ? <div className="library-empty">{library.error ? t("Your collection could not be loaded.") : t("Loading your collection…")}</div> :
       <div className={`library-body${tab === "cards" ? " library-body--cards" : ""}`}>
         {tab === "packs" ? <>
-          {library.open ? <PackInstaller actionTarget={installAction} onInstalled={value => { acceptInstallations(value); setInspectedPack(null); setQuery(''); }} /> : null}
+          {library.open && !hosted ? <PackInstaller actionTarget={installAction} installations={installations.state} onInstalled={value => { acceptInstallations(value); setInspectedPack(null); setQuery(''); }} /> : null}
+          <PackOperations operations={installations.state?.operations} />
           {installations.error && <p className="pack-action-error" role="alert">{installations.error}</p>}
           {packNotice && <p className="pack-restart-note" role="status">{t(packNotice)}</p>}
           {packDetail ? <InstalledPackDetails key={packDetail.pack.definition.id} {...packDetail} snapshot={snapshot}
             onBack={() => setInspectedPack(null)} onBrowse={browsePack} onChanged={acceptInstallations} /> : <>
           <div className="library-section-heading"><div><h3>{t("Pack inventory")}</h3><p>{t("Open an owned pack to add its contents to your Card Library.")}</p></div>
             <label className="library-search"><Search size={15} /><input aria-label={t("Search packs")} placeholder={t("Search packs")} value={query} onChange={event => setQuery(event.target.value)} /></label></div>
-          <div className="pack-grid">{inventory.filter(({ pack }) => `${pack.definition.name} ${pack.definition.description} ${t(pack.definition.name)} ${t(pack.definition.description)} ${pack.definition.plugin_id}`.toLowerCase().includes(query.toLowerCase())).map(({ pack, versions, registered }) =>
+          <div className="pack-grid">{inventory.filter(({ pack }) => `${pack.definition.name} ${pack.definition.description} ${t(pack.definition.name)} ${t(pack.definition.description)} ${pack.definition.plugin_id}`.toLowerCase().includes(query.toLowerCase())).map(({ pack, versions, inventory: runtime, registered }) =>
             <LibraryPack key={pack.definition.id} pack={pack} snapshot={snapshot} onOpened={setReveal} onBrowse={browsePack}
-              onInspect={versions.length && (pack.opened || packIssue(pack, snapshot, versions) || !snapshot.available_pack_ids.includes(pack.definition.id)) ? () => setInspectedPack(pack.definition.id) : undefined}
-              versions={versions} status={versions.length ? installedPackStatus(versions) : undefined} contentCountKnown={registered} />
+              onInspect={(versions.length || runtime) && (pack.opened || packIssue(pack, snapshot, versions) || !snapshot.available_pack_ids.includes(pack.definition.id)) ? () => setInspectedPack(pack.definition.id) : undefined}
+              versions={versions} status={versions.length ? installedPackStatus(versions) : runtime?.enrolled === false ? runtime.loaded ? 'Uninstall pending restart' : 'Pack uninstalled' : undefined} contentCountKnown={registered} />
           )}</div>
           {reveal && snapshot.packs[reveal] ? <span className="library-announcement" role="status">{t(snapshot.packs[reveal].definition.name)} {t("opened. Click its empty wrapper to view cards.")}</span> : null}
           </>}
@@ -191,11 +197,12 @@ export function CardLibrary() {
           <div className="library-section-heading"><div><h3>{t("Card Library")}</h3><p>{allCards.length} {t("collected cards and saved formations · Grouped by source pack")}</p></div><span className="library-current-deck">{t("Drag cards into your deck below")}</span></div>
           {sourcePack ? <div className="library-source-actions" aria-label={t("Source pack controls")}>
             <span>{t(sourcePack.definition.name)} · {!sourcePlugin?.installed ? t("Pack uninstalled") : !sourcePlugin.enabled ? t("Pack disabled") : t("Installed · Enabled")}</span>
-            {installations.state?.versions.some(item => item.id === sourcePack.definition.plugin_id) && <button className="library-text-button"
+            {(installations.state?.versions.some(item => (item.owner ?? item.id) === sourcePack.definition.plugin_id)
+              || installations.state?.inventory?.some(item => item.owner === sourcePack.definition.plugin_id)) && <button className="library-text-button"
               onClick={() => { setInspectedPack(sourcePack.definition.id); setTab('packs'); }}>{t('Pack details')}</button>}
             {(!sourcePack.opened || newSourceCards > 0) ? <button className="secondary-button" disabled={library.busy || !sourcePack.owned || !snapshot.available_pack_ids.includes(sourcePack.definition.id)}
               onClick={() => void library.edit({ action: "open_pack", id: sourcePack.definition.id })}>{sourcePack.opened ? t("Collect {v0} new {v1}", { v0: String(newSourceCards), v1: t(newSourceCards === 1 ? "card" : "cards") }) : t("Open pack")}</button> : null}
-            {sourcePlugin?.installed && sourcePack.definition.plugin_id !== "open-agent-world.core" ? <button className="library-text-button" disabled={library.busy}
+            {!hosted && sourcePlugin?.installed && sourcePack.definition.plugin_id !== "open-agent-world.core" ? <button className="library-text-button" disabled={library.busy}
               onClick={() => void library.edit({ action: "set_plugin_enabled", id: sourcePack.definition.plugin_id, enabled: !sourcePlugin.enabled })}>{sourcePlugin.enabled ? t("Disable Pack") : t("Enable Pack")}</button> : null}
           </div> : null}
           <div className="library-tools"><label className="library-search"><Search size={15} /><input aria-label={t("Search cards")} value={query} onChange={event => setQuery(event.target.value)} placeholder={t("Search your cards")} /></label>
@@ -235,7 +242,7 @@ export function CardLibrary() {
             {detail.kind === "legion" && !legions.find(item => item.id === detail.id)?.preset ? <button className="library-text-button" onClick={() => { if (window.confirm(t("Remove {v0} from the Legion library?", { v0: String(detail.label) }))) void deleteLegion(detail.id); }}>{t("Delete saved formation")}</button> : null}
           </> : <><Layers3 size={30} /><h3>{t("Explore a card")}</h3><p>{t("Select a card to inspect its purpose and origin.")}</p><p>{t("Removing a card from a deck keeps it in your collection.")}</p></>}</aside></div></div>
         </> : null}
-        {tab === "store" && library.open ? <PackStore /> : null}
+        {tab === "store" && library.open ? <PackStore installations={installations.state} /> : null}
       </div>}
   </dialog></>;
 }

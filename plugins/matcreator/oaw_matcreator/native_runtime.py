@@ -47,6 +47,10 @@ class MatCreatorRuntime(RuntimeProvider):
             "system_instruction": config.system_instruction, "max_concurrent_runs": config.max_concurrent_runs})
         return values
 
+    def _read_environment(self):
+        root = getattr(self.provider, "managed_environment_root", None)
+        return read_environment(data_root=root()) if callable(root) else read_environment()
+
     async def create_agent(self, config):
         self._settings(config)
         if config.agent_id in self.records:
@@ -77,7 +81,7 @@ class MatCreatorRuntime(RuntimeProvider):
         record = self.records[agent_id]
         settings = self._settings(record.config)
         try:
-            executable, directory = read_environment()
+            executable, directory = self._read_environment()
             environment = {"status": "ready", "python": executable, "directory": str(directory)}
         except RuntimeError as exc:
             environment = {"status": "missing", "error": str(exc)}
@@ -130,7 +134,7 @@ class MatCreatorRuntime(RuntimeProvider):
         root.mkdir(parents=True, exist_ok=True)
         worker = Path(__file__).with_name("native_worker.py")
         try:
-            executable, managed = read_environment()
+            executable, managed = self._read_environment()
         except RuntimeError as exc:
             raise AgentDependencyError(str(exc)) from exc
         # Runtime-specific configuration is constructed inside the worker before

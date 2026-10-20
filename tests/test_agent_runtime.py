@@ -267,7 +267,8 @@ class GoogleAdkBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(texts, ["Answer"])
         runner = FakeRunner.instances[-1]
         self.assertIsInstance(runner.app, FakeApp)
-        self.assertEqual(runner.app.root_agent.model, "gemini-test")
+        self.assertEqual(runner.app.root_agent.model.model, "gemini-test")
+        self.assertTrue(callable(runner.app.root_agent.model.generate_content_async))
         self.assertEqual(len(runner.app.root_agent.tools), 1)
 
 

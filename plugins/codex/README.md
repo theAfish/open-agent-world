@@ -19,7 +19,7 @@ window. Tools supplied only by the desktop UI are not automatically inherited.
 
 ## Try it on Windows
 
-Requirements: the repository's backend/frontend dependencies, `uv`, Node.js,
+Requirements: the repository's prepared backend/frontend dependencies, Node.js,
 and a working native Codex CLI (`codex.exe`). Run `codex login` if needed.
 The plugin uses Codex's own login and configuration; do not paste tokens into
 an OAW card. Tested against Codex CLI **0.153.0** and desktop runtime **0.153.4**.
@@ -27,8 +27,12 @@ an OAW card. Tested against Codex CLI **0.153.0** and desktop runtime **0.153.4*
 From the repository root:
 
 ```powershell
+./scripts/setup.ps1 -SkipBuild # Once, or after dependency changes.
 ./plugins/codex/try.ps1
 ```
+
+The trial reuses `backend/.venv` and the shared incremental frontend preparation.
+Repeated launches do not run uv, editable installs, or npm install.
 
 Open the URL printed by the launcher (normally `http://127.0.0.1:5188`). It creates
 a **Codex** Agent, **Talk to Codex** Conversation, and **Codex notes** text card.

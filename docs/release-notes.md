@@ -26,8 +26,8 @@ service; some plugins and Sandbox environments download additional dependencies.
 
 ## Preview limitations
 
-- Unsigned Windows preview packages may trigger a publisher/reputation warning.
-- macOS preview packages use ad-hoc signing without Apple notarization. macOS may block opening them; it has no local Sandbox runtime.
-- Builds without automatic updates require downloading the new installer. Application data is stored separately from the installed app.
+- Windows packages are currently unsigned; Windows may show a publisher/reputation warning.
+- macOS packages have ad-hoc signing, without Apple notarization. macOS may block opening them. See the installation guide; these are preview builds. Seatbelt is available locally, while the preferred Container VM requires macOS 26+ on Apple Silicon and Apple Container 0.6.0+.
+- Updates are manual: download the new installer. Application data is stored separately from the installed app.
 
 [Installation guide](https://github.com/theAfish/open-agent-world/blob/dev/docs/install.md)

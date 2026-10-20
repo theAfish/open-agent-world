@@ -5,7 +5,10 @@ def test_plugin_preset_is_available_in_decks_and_disabled_with_its_plugin(client
     services = client.app.state.services
     library = services.card_library
     state = library.read()
+    assert 'core.jobs' in state.packs['matcreator.default'].definition.cards
     state = library.edit(LibraryEdit(action='open_pack', id='matcreator.default', expected_revision=state.revision))
+    assert state.collection['core.jobs'].plugin_id == 'open-agent-world.core'
+    assert library.assert_collected('core.jobs').source_pack_ids == ['matcreator.default']
     state = library.edit(LibraryEdit(action='update_deck', id=state.active_deck_id, expected_revision=state.revision,
         entries=[{'kind': 'legion', 'id': 'matcreator.native-research'}]))
     assert any(e.id == 'matcreator.native-research' for d in state.decks for e in d.entries)

@@ -59,3 +59,26 @@ it('bounds queued work and flushes the remainder on close and unmount', () => {
   expect(ingest).toHaveBeenCalledTimes(3);
   expect(Socket.instances).toHaveLength(2);
 });
+
+it('ignores late messages and errors from the socket replaced during reconnect', () => {
+  const ingest = vi.spyOn(useWorldStore.getState(), 'ingestEvents').mockImplementation(() => {});
+  const view = render(<RuntimeConnection />);
+  const previous = Socket.instances[0];
+  act(() => previous.close());
+  act(() => vi.advanceTimersByTime(2000));
+  const current = Socket.instances[1];
+  const close = vi.spyOn(current, 'close');
+  act(() => {
+    previous.message(99);
+    previous.dispatchEvent(new Event('error'));
+    previous.close();
+    current.message(1);
+    vi.advanceTimersByTime(16);
+  });
+  expect(close).not.toHaveBeenCalled();
+  expect(ingest).toHaveBeenCalledTimes(1);
+  expect(ingest.mock.calls[0][0].map(event => event.sequence)).toEqual([1]);
+  act(() => vi.advanceTimersByTime(12_000));
+  expect(Socket.instances).toHaveLength(2);
+  view.unmount();
+});

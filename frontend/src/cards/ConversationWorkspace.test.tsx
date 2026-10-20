@@ -541,7 +541,10 @@ describe("ConversationWorkspace snapshots", () => {
     });
   });
 
-  it("restores execution groups in the transcript with durable tool details collapsed", async () => {
+  it("restores the work log before its final reply with durable tool details collapsed", async () => {
+    const archive = vi.spyOn(worldApi, 'getRunActivity').mockResolvedValue({ items: [
+      { id: 'read', type: 'tool_completed', name: 'read_file', activity_id: 'read' },
+    ], total: 1, next_offset: null });
     const final: ConversationMessage = {
       ...historicalMessage, id: "final", sequence: 2, sender_kind: "agent",
       sender_name: "Atlas", run_id: "run-1", content: "Final answer",
@@ -551,6 +554,7 @@ describe("ConversationWorkspace snapshots", () => {
       run_summaries: {
         "run-1": {
           run_id: "run-1", agent_id: "atlas", status: "succeeded",
+          final_message_id: "final",
           tool_count: 1, tool_trace: [{ type: "tool_started", name: "read_file" }],
         },
       },
@@ -558,11 +562,13 @@ describe("ConversationWorkspace snapshots", () => {
     render(<ConversationWorkspace card={card} />);
     await screen.findByText("Final answer");
     expect(screen.queryByText("Checking the file")).toBeNull();
-    const summary = screen.getByRole('button', { name: /1 tool calls/ });
-    expect(summary.getAttribute('aria-expanded')).toBe('false');
-    fireEvent.click(summary);
-    expect(summary.getAttribute('aria-expanded')).toBe('true');
+    expect(archive).not.toHaveBeenCalled();
+    const disclosure = screen.getByText('Work log').closest('details')!;
+    const finalArticle = screen.getByText('Final answer').closest('article')!;
+    expect(disclosure.compareDocumentPosition(finalArticle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    act(() => { disclosure.open = true; fireEvent(disclosure, new Event('toggle')); });
     expect(await screen.findByText("read_file")).toBeTruthy();
+    expect(disclosure.compareDocumentPosition(finalArticle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("creates independent sessions within the selected group and renames them", async () => {

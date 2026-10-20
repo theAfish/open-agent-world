@@ -1,26 +1,15 @@
 [CmdletBinding()]
-param()
-
-$ErrorActionPreference = "Stop"
-$projectRoot = Split-Path -Parent $PSScriptRoot
-
-Push-Location $projectRoot
-try {
-    $uvArguments = @(
-        "sync", "--project", "backend", "--dev", "--inexact",
-        "--extra", "adk",
-        "--extra", "litellm"
-    )
-    & uv @uvArguments
-    if ($LASTEXITCODE -ne 0) { throw "Python environment setup failed." }
-    & backend/.venv/Scripts/python.exe scripts/install-plugins.py
-    if ($LASTEXITCODE -ne 0) { throw "Plugin dependency installation failed." }
-
-    & npm.cmd --prefix frontend ci --ignore-scripts --no-audit --no-fund
-    if ($LASTEXITCODE -ne 0) { throw "Frontend environment setup failed." }
-    & npm.cmd --prefix frontend run build
-    if ($LASTEXITCODE -ne 0) { throw "Production frontend build failed." }
-}
-finally {
-    Pop-Location
-}
+param(
+    [ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$')]
+    [string]$Profile,
+    [string[]]$PluginPath = @(),
+    [switch]$SkipBuild
+)
+$ErrorActionPreference = 'Stop'
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'Missing prerequisite: uv.' }
+$setupArguments = @('run', '--no-project', '--python', '>=3.11', (Join-Path $PSScriptRoot 'setup.py'))
+if ($Profile) { $setupArguments += @('--profile', $Profile) }
+foreach ($path in $PluginPath) { $setupArguments += @('--plugin-path', $path) }
+if ($SkipBuild) { $setupArguments += '--skip-build' }
+& uv @setupArguments
+if ($LASTEXITCODE -ne 0) { throw "Setup failed (exit code $LASTEXITCODE)." }

@@ -18,7 +18,7 @@ def deploy(client):
 def test_native_preset_is_the_only_research_legion_and_deploys_without_upstream(client):
     presets = {p['id']: p for p in client.get('/api/legions/presets').json()}
     assert 'matcreator.research' not in presets
-    assert presets['matcreator.native-research']['revision'] == 3
+    assert presets['matcreator.native-research']['revision'] == 4
     catalog = client.get('/api/catalog').json()
     assert 'matcreator.tasks' not in {node['id'] for node in catalog['node_types']}
     assert presets['matcreator.native-research']['compatible']
@@ -119,3 +119,51 @@ def test_runtime_model_connection_is_resolved_in_memory_and_directory_is_host_ow
     connection = provider.resolve_model('openai/test')
     assert connection.model == 'openai/test'
     assert 'api_key' not in repr(connection)
+
+
+@pytest.mark.asyncio
+async def test_native_thinking_reaches_run_history_and_survives_restart(tmp_path):
+    from google.adk.events import Event
+    from google.genai import types
+    from backend.agents import AgentEvent, AgentEventType
+    from backend.runs.history import RunActivityHistory
+    from backend.runs.reasoning import RunReasoning
+    from backend.tests.test_runs import RecordingProvider, _services
+    from backend.world.models import CardCreate
+    from plugins.matcreator.oaw_matcreator.native_events import public_events
+
+    actors = [('thinking_agent', False), ('execution_orchestrator', False), ('step_executor', True)]
+    text = 'Provider-exposed thinking. ' * 200
+
+    class Provider(RecordingProvider):
+        async def execute(self, config, context, runtime_input):
+            for index, (author, child) in enumerate(actors):
+                native = Event(id=f'response-{index}', author=author, content=types.Content(role='model', parts=[
+                    types.Part(text=text, thought=True)]))
+                for message in public_events(native, child=child):
+                    yield AgentEvent(context.agent_id, context.run_id, AgentEventType(message['event']), message['payload'])
+            yield AgentEvent(context.agent_id, context.run_id, AgentEventType.COMPLETED,
+                             {'text': 'Done'}, run_status='succeeded')
+
+    services = _services(tmp_path, Provider())
+    try:
+        agent = await services.create_card(CardCreate(type='agent', name='MatCreator event fixture'))
+        run = await services.run_manager.start_run(agent.id, 'Check thinking')
+        settled = await services.run_manager.wait_execution(run.run_id)
+        assert settled.status.value == 'succeeded'
+        assert services.run_manager.final_text(run.run_id) == 'Done'
+        assert text not in json.dumps(settled.lifecycle)
+    finally:
+        services.close()
+
+    restored = _services(tmp_path, RecordingProvider())
+    try:
+        directory = RunActivityHistory(restored.database, run.run_id).page()
+        assert directory['total'] == 3
+        assert all(row['kind'] == 'model_reasoning' and 'text' not in row for row in directory['items'])
+        assert [row['role'] for row in directory['items']] == [author for author, _ in actors]
+        for index, (author, _) in enumerate(actors):
+            row = RunReasoning(restored.state, run.run_id).get(f'response-{index}:0')
+            assert row['role'] == author and row['text'] == text and row['streaming'] is False
+    finally:
+        restored.close()

@@ -153,7 +153,15 @@ class CodexRuntime(RuntimeProvider):
         if self.server_command is not None:
             return list(self.server_command)
         connection = await self._discover(config)
-        return [connection["executable"], "app-server", "--listen", "stdio://"]
+        from open_agent_world.plugin_api import ExecutableEnvironmentManager, ExecutableEnvironmentSpec
+        get_root = getattr(self.capabilities, 'managed_environment_root', None)
+        manager = ExecutableEnvironmentManager(get_root() if get_root else None)
+        spec = ExecutableEnvironmentSpec('openai.codex', 'client', (), Path(__file__).parent,
+            ('codex',), ('--version',), '^codex-cli ', True)
+        # Adopt only during execution. Desktop/PATH/manual selection remains
+        # external ownership; status discovery never installs or creates state.
+        handle = await asyncio.to_thread(manager.external, spec, path=connection['executable'], verify=True)
+        return [handle.executable, "app-server", "--listen", "stdio://"]
 
     async def _tool(self, agent_id: str, name: str, arguments: dict) -> Any:
         if not isinstance(arguments, dict):
@@ -281,6 +289,7 @@ class CodexRuntime(RuntimeProvider):
             turn_params = {
                 "threadId": thread_id,
                 "input": [{"type": "text", "text": runtime_input.prompt, "text_elements": []}],
+                "summary": "concise",
             }
             effort = config.provider_config.get("reasoning_effort", "default")
             if effort != "default":
@@ -288,6 +297,7 @@ class CodexRuntime(RuntimeProvider):
             response = await server.request("turn/start", turn_params)
             turn_id = response["turn"]["id"]
             texts: dict[str, str] = {}
+            summaries: dict[str, dict[int, str]] = {}
             final_text = ""
             while True:
                 await steer_pending()
@@ -310,12 +320,30 @@ class CodexRuntime(RuntimeProvider):
                     item_id = data["itemId"]
                     texts[item_id] = texts.get(item_id, "") + data["delta"]
                     yield event(AgentEventType.MESSAGE, {"text": texts[item_id], "final": False, "provider_message_id": item_id})
+                elif method == "item/reasoning/summaryTextDelta":
+                    item_id = data["itemId"]
+                    parts = summaries.setdefault(item_id, {})
+                    index = data.get("summaryIndex", 0)
+                    parts[index] = parts.get(index, "") + data["delta"]
+                    yield event(AgentEventType.PROGRESS, {"kind": "model_reasoning", "role": "agent",
+                        "provider_message_id": f"codex-summary:{turn_id}:{item_id}", "streaming": True,
+                        "text": "\n\n".join(parts[index] for index in sorted(parts))})
                 elif method in {"item/started", "item/completed"}:
                     item = data.get("item", {})
                     kind = item.get("type")
                     if kind == "agentMessage" and method == "item/completed":
                         final_text = item.get("text", "")
                         yield event(AgentEventType.MESSAGE, {"text": final_text, "final": True, "provider_message_id": item.get("id")})
+                    elif kind == "reasoning" and method == "item/completed":
+                        item_id = item.get("id")
+                        parts = summaries.pop(item_id, {})
+                        summary = item.get("summary")
+                        text = "\n\n".join(part for part in summary if isinstance(part, str)) if isinstance(summary, list) and summary else "\n\n".join(parts[index] for index in sorted(parts))
+                        if item_id and text:
+                            # Only readable provider summaries cross this boundary;
+                            # raw reasoning content/textDelta stays provider-owned.
+                            yield event(AgentEventType.PROGRESS, {"kind": "model_reasoning", "role": "agent",
+                                "provider_message_id": f"codex-summary:{turn_id}:{item_id}", "streaming": False, "text": text})
                     elif kind in {"commandExecution", "fileChange", "mcpToolCall", "webSearch"}:
                         started = method == "item/started"
                         if started:
@@ -326,7 +354,8 @@ class CodexRuntime(RuntimeProvider):
                         yield event(AgentEventType.TOOL_STARTED if started else AgentEventType.TOOL_COMPLETED, {
                             "name": kind, "call_id": item.get("id"),
                             "arguments" if started else "response": {
-                                key: item[key] for key in ("command", "cwd", "status", "exitCode", "changes", "tool", "query")
+                                key: item[key] for key in ("command", "cwd", "status", "exitCode", "changes", "tool", "query",
+                                    "aggregatedOutput", "arguments", "result", "error")
                                 if key in item
                             },
                         })

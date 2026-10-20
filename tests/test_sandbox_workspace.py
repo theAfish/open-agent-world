@@ -48,7 +48,7 @@ class WindowsWorkspaceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temporary = TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         self.project = self.root / "project"
         self.project.mkdir()
         (self.project / "original.txt").write_text("keep", encoding="utf-8")

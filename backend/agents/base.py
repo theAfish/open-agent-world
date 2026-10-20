@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from .models import AgentConfig, AgentEvent, AgentInfo, ScopedToolDefinition, RuntimeModelConnection
+from .models import AgentConfig, AgentEvent, AgentInfo, RuntimeModelConnection, ScopedToolDefinition
 
 if TYPE_CHECKING:
     from backend.runs.models import InvocationContext, RuntimeInput
@@ -26,6 +26,10 @@ class AgentCapabilityProvider(Protocol):
     def resolve_model(self, model: str) -> RuntimeModelConnection: ...
 
     def runtime_state_directory(self, agent_id: str) -> Path: ...
+
+    def managed_environment_root(self) -> Path:
+        """Profile data root for host-managed, rebuildable Pack environments."""
+        ...
 
     async def publish_execution(self, agent_id: str, run_id: str, snapshot: Mapping[str, Any]) -> None:
         """Publish a bounded ExecutionSnapshot for this runtime's current Run."""
@@ -47,6 +51,12 @@ class AgentCapabilityProvider(Protocol):
         capability_id: str,
         arguments: Mapping[str, Any],
     ) -> Any: ...
+
+
+class ModelConnectionResolver(Protocol):
+    """Resolve a managed OAW model reference for a trusted runtime provider."""
+
+    def resolve_runtime(self, model_reference: str) -> RuntimeModelConnection: ...
 
 
 class RuntimeProvider(ABC):

@@ -31,6 +31,7 @@ class StateFieldDefinition:
     value_type: Any = Any
     allowed_scope_kinds: frozenset[str] = frozenset()
     read_visibility: str = "inherited"
+    host_only: bool = False
     write_permissions: frozenset[str] = frozenset({"*"})
     merge_policy: MergePolicy = MergePolicy.REPLACE
     default: Any = NO_DEFAULT
@@ -69,4 +70,3 @@ class StateSchema:
                 raise TypeError(f"state field {key!r} must be a StateFieldDefinition")
             normalized[key] = definition
         object.__setattr__(self, "fields", MappingProxyType(normalized))
-

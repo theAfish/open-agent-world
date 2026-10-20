@@ -13,6 +13,8 @@ from packaging.version import Version
 from pydantic import BaseModel, Field, field_validator
 
 from backend.packs.archive import MAX_ARCHIVE_BYTES
+from backend.packs.spec import EnvironmentSpec, FeatureSpec, PrerequisiteSpec
+from backend.packs.manifest import AdapterDependencies
 
 PACK_MIME = "application/vnd.oaw.pack"
 PackId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$", max_length=120)]
@@ -65,6 +67,7 @@ class Compatibility(BaseModel):
 class Dependency(BaseModel):
     id: str
     version: str = ""
+    distribution: str | None = None
 
 
 class Dependencies(BaseModel):
@@ -81,10 +84,26 @@ class Runtime(BaseModel):
 
 class DisplayManifest(BaseModel):
     id: str
+    name: str = ""
     version: str
+    owner: str | None = None
+    packs: tuple[str, ...] = ()
+    node_types: tuple[str, ...] | None = Field(default=None, max_length=1000)
     compatibility: Compatibility
     dependencies: Dependencies = Field(default_factory=Dependencies)
     runtime: Runtime = Field(default_factory=Runtime)
+    adapter: AdapterDependencies = Field(default_factory=AdapterDependencies)
+    environments: dict[str, "EnvironmentSpec"] = Field(default_factory=dict, max_length=100)
+    features: dict[str, "FeatureSpec"] = Field(default_factory=dict, max_length=100)
+    prerequisites: dict[str, "PrerequisiteSpec"] = Field(default_factory=dict, max_length=100)
+
+    @property
+    def owner_id(self):
+        return self.owner or self.id
+
+    @property
+    def provided_pack_ids(self):
+        return self.packs or (self.id,)
 
 
 class PackVersion(Identity):

@@ -8,9 +8,9 @@
 
 克隆仓库后，所有命令均在仓库根目录运行。
 
-- Python 3.11 或更新版本、uv，以及 Node.js 20 或更新版本。
-- 本地沙盒执行支持 Windows 10/11 或 Linux（包括 WSL2）。
-- macOS 可以运行应用，但没有本地沙盒运行时。
+- Python 3.11 或更新版本、uv，以及 Node.js 22 或更新版本。
+- 本地沙盒执行支持 Windows 10/11、Linux（包括 WSL2）以及 macOS 13 或更高版本。
+- macOS 可使用系统自带的 Seatbelt；macOS 26+ 的 Apple Silicon 设备可安装 Apple Container 0.6.0+，使用优先级更高的虚拟机沙盒。
 
 Windows PowerShell：
 
@@ -45,12 +45,14 @@ Windows 桌面安装包自带 Python 运行时，并在独立的 Tauri 窗口中
 需要结果可重复的本地调试时，可以使用 mock 运行时：
 
 ```powershell
+./scripts/setup.ps1 -Profile default -SkipBuild
 ./scripts/dev.ps1 -AgentRuntime mock
 ```
 
 也可以使用跨平台启动器：
 
 ```bash
+bash scripts/setup.sh --profile default --skip-build
 bash scripts/dev.sh --agent-runtime core.mock
 ```
 
@@ -58,12 +60,12 @@ mock 运行时是调试替代品，不是语言模型。真实的智能体回复
 
 ## 启动与问题排查
 
-- 缺少依赖：先运行安装脚本，再启动应用。跨平台启动器会检查后端虚拟环境、Vite 和 Node。
+- 缺少或过期依赖：先针对实际使用的 profile 运行 setup。各平台共用 `scripts/setup.py`，dev 检查后端固定虚拟环境、源码插件、Pack 环境和前端依赖。setup 和 dev 均接受 Node 22+；由于 `matterviz` 声明要求 Node 24+，Node 22 会显示兼容性提示后继续。普通 dev 启动不会安装包；新建 profile 或修改依赖后才需要再次运行 setup。`-SkipBuild` / `--skip-build` 会准备开发依赖和 SDK，跳过生产前端构建。源码修改仍会触发构建和热更新，这不是重装依赖。
 - 模型认证或路由失败：检查连接是否启用、凭据来源、服务地址和准确的模型 ID，见[配置（英文）](configuration.md)。
 - 底部托盘为空：在[卡牌库（英文）](card-library.md) 收集卡牌并选择牌组内容。
 - 沙盒不可用：查看运行时诊断，安装提示的前置依赖，再刷新发现结果。OAW 不会自动改用无隔离的执行方式。
 - `dev` 始终使用 `.open-agent-world/development/profiles/default`，独立于正式用户目录和 `OPEN_AGENT_WORLD_DATA_ROOT`。使用 `-Profile tutorial` / `--profile tutorial` 可切换到另一个开发配置目录。F3 支持带备份的选择性重置。
-- Windows 的 `scripts/dev.ps1` 会持续等待后端就绪并报告进度，默认没有固定期限。可用 `-StartupTimeoutSeconds 300` 指定期限。跨平台启动器也会等待后端就绪或退出。
+- dev 会持续等待后端就绪并报告进度，默认没有固定期限。Windows 可用 `-StartupTimeoutSeconds 300` 指定期限，跨平台启动器对应 `--startup-timeout-seconds 300`。
 
 ## 开发与验证
 

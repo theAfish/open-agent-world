@@ -34,7 +34,8 @@ class MatchDocument(BaseModel):
 
 
 def cache_root():
-    root = Path(os.environ.get('OAW_XRD_ROOT', str(Path(__file__).resolve().parents[5] / 'XRD')))
+    from .profile import roots
+    root, _ = roots()
     return Path(os.environ.get('OAW_XRD_STRUCTURE_ROOT', str(root / 'structures/cod'))).resolve()
 
 

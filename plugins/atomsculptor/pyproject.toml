@@ -1,0 +1,23 @@
+[project]
+name = "oaw-atomsculptor"
+version = "0.1.0"
+description = "Atomistic modelling cards and agent workflow for Open Agent World"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.11,<3",
+    "google-adk>=2.8,<3",
+    "litellm>=1.74,<2",
+]
+
+[project.entry-points."open_agent_world.plugins"]
+atomsculptor = "oaw_atomsculptor:create_plugin"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/oaw_atomsculptor"]
+
+[tool.hatch.build]
+include = ["src/oaw_atomsculptor/**"]

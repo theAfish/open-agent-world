@@ -1,0 +1,25 @@
+# Dependency intent only; installation and readiness are tracked separately.
+schema_version = 3
+
+[compatibility]
+plugin_api = "1.27"
+oaw = ">=0.1.0,<1"
+
+[distribution]
+id = "data.sqlite"
+name = "SQL Database"
+
+[plugin]
+owner = "data.sqlite"
+packs = ["data.sqlite.default"]
+node_types = ["data.sqlite"]
+
+[components.backend]
+project = "pyproject.toml"
+mode = "host-adapter"
+
+[components.frontend]
+entry = "frontend/index.tsx"
+project = "frontend/package.json"
+mode = "pack-build"
+

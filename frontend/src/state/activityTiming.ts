@@ -1,5 +1,13 @@
 import type { RunActivityItem } from './runActivity';
 
+export function compareTimestamp(a: string, b: string): number {
+  const milliseconds = (Date.parse(a) || 0) - (Date.parse(b) || 0);
+  if (milliseconds) return milliseconds;
+  // Backend records carry microseconds; Date.parse only retains milliseconds.
+  const fraction = (value: string) => (value.match(/\.(\d+)(?:Z|[+-]\d\d:\d\d)$/)?.[1] ?? '').padEnd(6, '0');
+  return fraction(a).localeCompare(fraction(b));
+}
+
 export function elapsedMilliseconds(start?: string | null, end?: string | number | null): number | undefined {
   if (!start || end == null) return undefined;
   const duration = (typeof end === 'number' ? end : Date.parse(end)) - Date.parse(start);

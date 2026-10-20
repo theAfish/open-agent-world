@@ -22,10 +22,14 @@ discovery and then refreshes Sandbox information; there is no discovery polling.
 | Windows | AppContainer `internetClient` plus fixed per-profile Windows Filtering Platform deny rules, with native DNS and certificate trust | Explicit denial of non-public IPv4, all host interfaces and IPv6, independent of Windows network-profile classification. No private/server capability or loopback exemption. |
 | Native Linux | slirp4netns, a private network namespace, nftables public IPv4 egress filter, retained seccomp and cgroup-v2 controls | Non-public IPv4 ranges and all enumerated host IPv4 interface addresses denied; IPv6 denied; virtual gateway and DNS forwarding aliases denied. |
 | WSL2 | The same Linux implementation, invoked through the existing frozen-source structured worker transport | Same Linux policy, plus retained WSL interop and host-filesystem exclusions. |
+| macOS Seatbelt | Per-command authenticated HTTP(S) and SOCKS5 proxies, with only their exact localhost ports admitted by Seatbelt | The trusted proxy resolves and dials public IPv4 TCP destinations only. Direct sockets, UDP, private/host addresses and IPv6 remain blocked. |
+| macOS Container VM | Dedicated Linux image with nftables public-IPv4 egress policy; the trusted guest bootstrap installs the policy before command admission, then drops root and all capabilities | Default remains `--network none`. Enabled mode blocks non-public IPv4, enumerated host addresses and IPv6. Requires an explicitly prepared image and a successful setup probe. |
 
-Enabled execution supports normal hostname resolution, certificate-verified
-HTTPS, and outbound TCP independent of HTTP proxy environment variables. Linux
-also permits public IPv4 UDP. Inbound forwarding and private-network access are
+Enabled direct-egress runtimes support normal hostname resolution,
+certificate-verified HTTPS and outbound TCP independent of HTTP proxy
+environment variables. Linux also permits public IPv4 UDP. Seatbelt instead
+sets command-scoped proxy variables; proxy-aware HTTP(S) and SOCKS5 TCP clients
+work, but programs opening direct public sockets do not. Inbound forwarding and private-network access are
 not configurable policies in this release. All bundled public-egress implementations
 currently reject IPv6.
 
@@ -99,6 +103,58 @@ The kernel must permit nested user/network namespaces and nftables in the privat
 namespace. Refresh the Sandbox runtime list after installation. Discovery probes
 offline availability separately from networking prerequisites and network setup.
 It does not contact an external service to declare prerequisites available.
+
+On a supported Mac with Apple `container` installed and its system service
+running, prepare the fixed Container VM public-egress image once from the
+repository root, then refresh the Sandbox runtime list:
+
+```sh
+python -m backend.sandbox.macos_container_network prepare
+```
+
+If the build reports that the Apple Container builder is stopped, start it
+with `container builder start` and retry preparation.
+
+This explicit setup downloads and builds a Linux image containing nftables,
+curl, and CA certificates. Offline commands continue to use the ordinary image.
+Enabled commands use the separate image and only start after its in-guest
+firewall and privilege-drop checks succeed. A missing image or failed check
+leaves the enabled mode unavailable; it does not fall back to unfiltered
+networking. If the probe reports that nftables cannot install its policy,
+the Apple Container guest kernel or its networking setup does not provide the
+required enforcement; continue offline rather than bypassing the probe.
+Seatbelt needs no separate image or signed extension for proxy-mediated TCP.
+Its enabled setup probe checks that an authenticated localhost proxy request
+can reach the per-command listener while a direct connection to another host
+service is denied. The proxy resolves hostnames on the trusted side and
+rejects non-public IPv4, host-interface addresses and IPv6 before dialing.
+This is intentionally narrower than the Container VM's direct-socket policy;
+for direct public sockets or UDP on macOS use Container VM. A future native
+[system-extension design](macos-seatbelt-network-extension.md) would be needed
+for direct-socket parity without the VM.
+
+After setup, the opt-in native check on the Mac is:
+
+```sh
+OAW_RUN_NATIVE_MACOS_SANDBOX_TESTS=1 python -m pytest backend/tests/test_macos_container.py
+```
+
+It checks offline execution, the enabled setup probe (including blocked
+loopback), and direct certificate-verified HTTPS. The wider saved-policy
+Manual/Agent/Skill/diagnostics contract can be exercised with
+`OAW_TEST_NETWORK_RUNTIME=macos-container` and
+`backend/tests/test_sandbox_network_contract.py`.
+
+Seatbelt's host-side proxy tests and native profile check are:
+
+```sh
+python -m pytest backend/tests/test_darwin_network_proxy.py backend/tests/test_darwin_seatbelt.py
+OAW_RUN_NATIVE_MACOS_SANDBOX_TESTS=1 python -m pytest backend/tests/test_darwin_seatbelt.py
+OAW_TEST_NETWORK_RUNTIME=darwin python -m pytest backend/tests/test_sandbox_network_contract.py -k seatbelt_proxy
+```
+
+The last check requires a reachable public HTTPS endpoint and confirms that
+proxy-aware access succeeds while a direct socket fails.
 
 ## Host management protection
 

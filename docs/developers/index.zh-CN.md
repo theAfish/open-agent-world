@@ -18,4 +18,6 @@
 
 查看 [扩展点导航（英文）](extension-points.md)，按你要实现的功能找到 API 和现有插件示例。Python 插件使用 `open_agent_world.plugin_api`，界面使用 `@oaw/plugin-api`；不要直接依赖宿主内部状态。
 
-前端插件在 OAW 构建时发现。只安装 Python wheel 不会把新界面加入现有桌面安装包，分发时应明确兼容版本与构建步骤。
+源码开发和发布统一使用 `oaw.pack.toml`：Python 依赖保留在原生项目文件中，前端依赖由 Pack 自己的 `package.json` 与锁文件管理。宿主适配器、独立 worker 和 Sandbox 环境分别声明，可以通过依赖组复用同一份版本约束。
+
+前端独立构建后随 `.oawpack` 交付，安装后由宿主动态加载。开发脚本、文件安装和 Store 使用相同的依赖与卸载规则；Python wheel 是构建输入，完整发行物应为 `.oawpack`。具体命令、公共 API 和依赖回收规则见 [Pack 开发与发行指南（英文）](../pack-distribution.md)。

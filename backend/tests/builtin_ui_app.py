@@ -88,6 +88,12 @@ async def install_conversation_activity_fixture(incremental: bool = False):
                 yield AgentEvent(context.agent_id, context.run_id, AgentEventType.MESSAGE,
                     {'text': 'I will read the project files, then check the changes.', 'provider_message_id': 'intro', 'final': True})
                 for phase, count in enumerate([12, 8]):
+                    # Real runtimes emit context/model lifecycle ticks without
+                    # display text between calls. These must not become bubbles.
+                    for tick in ({'phase': 'model', 'status': 'started'},
+                                 {'kind': 'status', 'text': ' \n\t'},
+                                 {'kind': 'context_usage', 'tokens': 2048}):
+                        yield AgentEvent(context.agent_id, context.run_id, AgentEventType.PROGRESS, tick)
                     if phase:
                         yield AgentEvent(context.agent_id, context.run_id, AgentEventType.PROGRESS,
                             {'text': 'The files agree. I am checking the implementation next.', 'kind': 'reasoning_summary', 'provider_message_id': 'plan'})

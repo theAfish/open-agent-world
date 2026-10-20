@@ -1,8 +1,9 @@
-"""Opt-in context policy; plugin storage and orchestration remain authoritative.
+"""Profile-scoped context supplied to opt-in Pack factories."""
+from dataclasses import dataclass
+from pathlib import Path
 
-Isolated workers can import ``open_agent_world.context`` directly without
-loading the host plugin registry. ADK helpers live in its ``adk`` submodule.
-"""
-from open_agent_world.context import ContextBudget, CompactionBudget, estimate, history_cut
 
-__all__ = ['ContextBudget', 'CompactionBudget', 'estimate', 'history_cut']
+@dataclass(frozen=True)
+class PluginContext:
+    data_root: Path
+    source_root: Path | None = None

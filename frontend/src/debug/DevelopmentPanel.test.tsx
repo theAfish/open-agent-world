@@ -8,7 +8,23 @@ vi.mock("../state/profileStorage", () => ({
   currentProfile: () => ({ mode: mocks.mode }), flushPreferences: mocks.flush,
   profileStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
 }));
-beforeEach(() => { mocks.mode = "development"; useLocale.getState().setLocale("en"); });
+beforeEach(() => {
+  mocks.mode = "development";
+  useLocale.getState().setLocale("en");
+  vi.stubGlobal("matchMedia", vi.fn().mockImplementation((media: string) => ({
+    media, matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+  })));
+  vi.stubGlobal("IntersectionObserver", class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
+  vi.stubGlobal("ResizeObserver", class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
+});
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 it("does not handle F3 or show controls on a production profile", () => {
@@ -38,7 +54,7 @@ it("requires reviewing a reset before submitting the exact profile and generatio
   fireEvent.click(screen.getByRole("button", { name: "Confirm and restart" }));
   await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
   expect(JSON.parse(request.mock.calls[1][1].body)).toEqual({ scopes: ["workspace"], profile_id: "dev-test", generation: "generation-7" });
-  expect((await screen.findByText(/Cleaning up and restarting/)).getAttribute('role')).toBe('status');
+  expect((await screen.findByText("Cleaning up and restarting. This page reloads when ready. Check the launcher log if startup fails.")).getAttribute("role")).toBe("status");
 });
 
 it("invalidates the confirmation when the scope changes", async () => {

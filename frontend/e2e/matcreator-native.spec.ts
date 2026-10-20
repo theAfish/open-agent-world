@@ -43,7 +43,7 @@ test('native research workspace renders plan and subagents and switches session 
   page.on('pageerror', error => errors.push(error.message));
   await page.clock.install();
   await page.goto('/');
-  const workspace = page.getByRole('dialog', { name: 'MatCreator native research workspace mode' });
+  const workspace = page.getByRole('dialog', { name: 'MatCreator research workspace mode' });
   await expect(workspace).toBeVisible({ timeout: 30_000 });
   await expect(workspace.getByRole('button', { name: 'Execution: running', exact: true })).toBeVisible();
   await expect(workspace.getByRole('textbox', { name: 'Conversation message', exact: true })).toBeVisible();

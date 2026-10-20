@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { PluginViewProps } from "@oaw/plugin-api";
-import { prepareStructure } from '../../structure_viewer/frontend/prepareStructure';
-import type { renderStructure } from '../../structure_viewer/frontend/render';
+import { loadPackFrontendService, type StructureRendererService, type StructureRendererHandle } from '@oaw/plugin-api';
 
 type Structure = {
   cod_id: string;
@@ -26,7 +25,7 @@ export function StructureCanvas({ structure, onReady }: { structure: Pick<Struct
   const target = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const renderer = useRef<ReturnType<typeof renderStructure>>();
+  const renderer = useRef<StructureRendererHandle>();
   const rendered = useRef('');
   const ready = useRef(onReady); ready.current = onReady;
   useEffect(()=>()=>{renderer.current?.();renderer.current=undefined;},[]);
@@ -43,10 +42,15 @@ export function StructureCanvas({ structure, onReady }: { structure: Pick<Struct
         const file = { name: structure.filename, data: structure.source_base64 };
         const key = `${file.name}\0${file.data}`;
         if (rendered.current !== key) {
-          const [prepared, module] = await Promise.all([prepareStructure(file), import('../../structure_viewer/frontend/render')]);
+          const service = await loadPackFrontendService<StructureRendererService>('science.structure-viewer', 'structure-renderer');
+          const prepared = await service.prepare(file);
           if (!active) return;
           if (renderer.current?.update) renderer.current.update(file, prepared);
-          else renderer.current = module.renderStructure(container, file, message => { setError(message); setLoading(false); ready.current?.(); }, prepared);
+          else {
+            const handle = await service.render(container, file, message => { if (active) { setError(message); setLoading(false); ready.current?.(); } }, prepared);
+            if (!active) { handle(); return; }
+            renderer.current = handle;
+          }
           rendered.current = key;
         }
         await renderer.current?.painted?.();

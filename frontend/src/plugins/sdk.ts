@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import type { PluginVisualCapture, PluginVisualCaptureRequest, PluginVisualCaptureResult } from "./visualCapture";
 import type { NodeSurfaceLevel, NodeTypeCatalogItem, WorldCard } from "../types/world";
 export type { TutorialDefinition, TutorialStep, TutorialText } from '../tutorials/types';
 export type { DataConsumer, DataSchema, DataQuery, Dataset, DataSourceHost } from './dataSources';
@@ -26,6 +27,14 @@ export { useWorkspaceNavigation } from '../workspace/WorkspaceNavigation';
 export type { WorkspaceNavigation } from '../workspace/WorkspaceNavigation';
 export { composeWorkspace } from "../legions/workspaceRecipes";
 export type { WorkspaceCompositionItem, WorkspaceCompositionOptions, WorkspaceRecipe } from "../legions/workspaceRecipes";
+export { useModelOptions, useConnectedCards, updateCardConfig, useReadingPreferences, setReadingPreferences } from './hostServices';
+export { deploymentApiBase as hostApiBase } from '../deployment/api';
+export { ModelSelect } from '../cards/ModelSelect';
+export { DocumentMarkdown } from '../cards/DocumentMarkdown';
+export { PackDesigner, FaceDesigner, FunctionDesigner, Printer, Packer } from '../factory/FactoryViews';
+export { loadPackFrontendService } from './frontendServices';
+export type { StructureRendererService, StructureRendererHandle } from './frontendServices';
+export { READER_TRANSITION as SURFACE_TRANSITION, clamp as clampTransitionProgress, diffusionMask, blurMix, featherOpacity } from '../workspace/surfaceTransition';
 
 export interface CardStateStore {
   get(): Promise<{ value: Record<string, unknown>; revision: number }>;
@@ -35,6 +44,15 @@ export interface CardStateStore {
 }
 
 export type PluginSlot = "preview" | "body" | "settings" | "workspace";
+
+/** A document mutation published by the authoritative backend. */
+export interface PluginDocumentChange {
+  nodeId: string;
+  revision: number;
+  actorId?: string;
+  runId?: string;
+}
+
 export interface XrdMultiphaseOptions {
   restart?: boolean;
   agent_node_id?: string;
@@ -180,6 +198,8 @@ export interface PluginViewProps {
     openResultsConversation?(): Promise<unknown>;
     updateConfig(patch: Record<string, unknown>): Promise<void>;
     getAgentInfo(nodeId?: string): Promise<{ session_id: string; details?: Record<string, unknown> }>;
+    /** Live graph-derived grants; card config hints never authorize a tool. */
+    getAgentCapabilities?(nodeId: string): Promise<{ kind: string; target_id?: string }[]>;
     openLinkedCanvas?(type: string, name: string): Promise<void>;
     documentAction(action: string, arguments_: Record<string, unknown>, expectedRevision?: number, nodeId?:string): Promise<{ value: unknown; revision: number }>;
     delegationAction(action: 'collect' | 'wait' | 'inspect' | 'stop' | 'cancel_defer', arguments_: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -187,15 +207,30 @@ export interface PluginViewProps {
     listCards(traits?: string[]): Promise<WorldCard[]>;
     readDocument(nodeId?: string): Promise<{ value: unknown; revision: number }>;
     transform(operation: string, request: Record<string, unknown>): Promise<Record<string, unknown>>;
-    documentDownloadUrl(name: string, nodeId?:string): string;
+    documentDownloadUrl(name: string, nodeId?: string): string;
+    /** Select a card and open its normal OAW workspace surface. */
+    openWorkspace(nodeId: string): void;
+    /** Start an Agent through the ordinary OAW run lifecycle. */
+    runAgent(nodeId: string, prompt: string): Promise<void>;
+    /** Observe future node-document mutations received by the OAW event stream. */
+    onDocumentChange(listener: (change: PluginDocumentChange) => void): () => void;
+    /**
+     * Register a transient capture of this card's active plugin workspace.
+     * The host sends it only after the backend has authorized a matching
+     * visual capability; image bytes are never persisted in the document.
+     */
+    registerVisualCapture(captureKind: string, capture: PluginVisualCapture): () => void;
     readFile(reference: import("../state/openFiles").FileReference, signal?: AbortSignal): Promise<{ name: string; size_bytes: number; data: string }>;
     openFile(reference: import("../state/openFiles").FileReference, name: string, options?: import('../state/openFiles').FileOpenOptions): void;
     clearOpenedFile(): void;
     openInputNode?(type: string, name: string, source: { filename: string; source_base64: string }, relationship?: string): Promise<void>;
   };
 }
+export type { PluginVisualCaptureRequest, PluginVisualCaptureResult };
 export interface FrontendPlugin {
   apiVersion: 1;
   views: Record<string, ComponentType<PluginViewProps>>;
+  /** Named extensions consumed through loadPackFrontendService. */
+  services?: Record<string, unknown>;
 }
 export {ArrowLeft,ArrowRight,Play,Pause,RotateCcw,Square,Link2,Settings2} from "lucide-react";

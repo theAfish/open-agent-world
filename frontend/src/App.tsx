@@ -19,6 +19,7 @@ import { CardLibrary } from "./shell/CardLibrary";
 import { useWorldStore } from "./state/worldStore";
 import { useLocale } from "./i18n";
 import './shell/motion.css';
+import { isHosted } from './auth/hostedSession';
 
 const DevelopmentPanel = import.meta.env.DEV ? lazy(() => import("./debug/DevelopmentPanel")) : null;
 
@@ -55,7 +56,7 @@ export function App() {
         <RuntimeConnection />
         <SettingsPanel />
         <CardLibrary />
-        {DevelopmentPanel && <Suspense fallback={null}><DevelopmentPanel /></Suspense>}
+        {DevelopmentPanel && !isHosted() && <Suspense fallback={null}><DevelopmentPanel /></Suspense>}
       </main>
     </ReactFlowProvider>
   );

@@ -181,6 +181,9 @@ def test_reachability_mask_equals_exhaustive_unmeasured_space():
 
 
 def test_start_prepares_evidence_without_spending_any_fit_budget(tmp_path, monkeypatch):
+    from contextlib import nullcontext
+    from oaw_xrd import runtime_environment
+    monkeypatch.setattr(runtime_environment, 'worker_command', lambda *args, **kwargs: (['fixture-python'], {}, nullcontext()))
     monkeypatch.setenv('OAW_XRD_RUN_ROOT', str(tmp_path))
     _, payload = fixture(2)
     payload.update(excluded_candidates=[], source_files_sha256={})

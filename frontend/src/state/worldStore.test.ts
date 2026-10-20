@@ -910,6 +910,31 @@ describe("authoritative world synchronization", () => {
     expect(useWorldStore.getState().edges).toEqual([]);
   });
 
+  it("loads default equipment immediately after placing an Agent", async () => {
+    const agent = card("owner", "agent");
+    const equipment = { ...card("tools", "sandbox"), equipment: { owner_id: agent.id, relationship: "execute" } };
+    useWorldStore.setState({ catalog: { ...TEST_CATALOG, node_types: TEST_CATALOG.node_types.map(node =>
+      node.id === "agent" ? { ...node, has_default_equipment: true } : node) } });
+    vi.spyOn(worldApi, "createNode").mockResolvedValue(agent);
+    vi.spyOn(worldApi, "getWorld").mockResolvedValue({ nodes: [agent, equipment], edges: [], chunks: [] });
+    await useWorldStore.getState().createCard("agent");
+    expect(useWorldStore.getState().cards).toContainEqual(equipment);
+  });
+
+  it("preserves initialized equipment slots when undo restores an Agent", async () => {
+    const agent = card("owner", "agent");
+    const slots = { equipment: { skills: { node_id: null, type: "test.skills", relationship: "test.skills.use" } } };
+    useWorldStore.setState({ cards: [agent], catalog: { ...TEST_CATALOG, node_types: TEST_CATALOG.node_types.map(node =>
+      node.id === "agent" ? { ...node, has_default_equipment: true } : node) } });
+    vi.spyOn(worldApi, "getNodeDefaults").mockResolvedValue(slots);
+    vi.spyOn(worldApi, "deleteNode").mockResolvedValue();
+    vi.spyOn(worldApi, "restoreNode").mockResolvedValue(agent);
+    const restore = vi.spyOn(worldApi, "restoreNodeDefaults").mockResolvedValue();
+    await useWorldStore.getState().deleteCard(agent.id);
+    await useWorldStore.getState().undo();
+    expect(restore).toHaveBeenCalledWith(agent.id, slots);
+  });
+
   it("deletes an Agent and its equipment atomically and restores the whole ownership tree", async () => {
     const agent = card("owner", "agent");
     const sandbox = { ...card("private", "sandbox"), equipment: { owner_id: agent.id, relationship: "execute" } };

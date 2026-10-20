@@ -24,6 +24,8 @@ function mount(result?: Record<string, unknown>, level: PluginViewProps["level"]
     updateConfig: vi.fn().mockResolvedValue(undefined), getAgentInfo: vi.fn().mockResolvedValue({ session_id: "", details: { result } }),
     listCards: vi.fn().mockResolvedValue([]), readDocument: vi.fn(), documentAction: vi.fn(), documentDownloadUrl: vi.fn(),
     transform: vi.fn(), readFile: vi.fn(), openFile: vi.fn(), clearOpenedFile: vi.fn(),
+    openWorkspace: vi.fn(), runAgent: vi.fn().mockResolvedValue(undefined),
+    onDocumentChange: vi.fn(() => () => {}), registerVisualCapture: vi.fn(() => () => {}),
   };
   Object.assign(host, overrides);
   const Settings = xrd.views.settings;

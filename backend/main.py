@@ -43,6 +43,7 @@ from backend.sandbox.models import SandboxNetworkError
 from backend.application import router as application_router
 from backend.health import router as health_router
 from backend.http_context import RequestIdMiddleware, error_response, request_id
+from backend.startup_progress import startup_stage
 
 
 def create_app(
@@ -61,25 +62,30 @@ def create_app(
         from backend.deploy import validate_manifest
         validate_manifest(deployment)
     if profile_access is not None:
-        if deployment is not None:
+        if deployment is not None and deployment.get("auth_mode") != "hosted":
             raise ValueError("Hosted profile identity cannot be combined with shared-password deployment")
         if profile_access.tenant != selected_settings.tenant_scope:
             raise ValueError("Hosted ingress and profile storage must use the same tenant scope")
+    elif deployment is not None and deployment.get("auth_mode") == "hosted":
+        raise ValueError("Hosted deployments require a verified profile identity boundary")
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         from backend.storage_location import prepare_storage
         with ExitStack() as stack:
             owned = services is None
-            effective_settings = prepare_storage(selected_settings, stack) if owned else selected_settings
+            with startup_stage("prepare profile storage"):
+                effective_settings = prepare_storage(selected_settings, stack) if owned else selected_settings
             if profile_access is not None:
                 profile_access.bind_storage(effective_settings.data_root)
             if deployment is None and (effective_settings.data_root / "deployment.json").exists():
                 raise RuntimeError("This storage pointer refers to a deployment. Start it with scripts/deploy.py --serve.")
-            active_services = services or (services_factory or create_services)(effective_settings)
+            with startup_stage("initialize application services"):
+                active_services = services or (services_factory or create_services)(effective_settings)
             application.state.services = active_services
             try:
-                await active_services.startup()
+                with startup_stage("restore application state"):
+                    await active_services.startup()
                 if deployment is not None:
                     versions = {p.id: p.version for p in active_services.plugins.catalog().plugins}
                     if versions != deployment["plugin_versions"]:
@@ -109,11 +115,12 @@ def create_app(
         title="Open Agent World",
         version=__version__,
         lifespan=lifespan,
-        docs_url=None if deployment else "/docs",
-        redoc_url=None if deployment else "/redoc",
-        openapi_url=None if deployment else "/openapi.json",
+        docs_url=None if deployment or profile_access else "/docs",
+        redoc_url=None if deployment or profile_access else "/redoc",
+        openapi_url=None if deployment or profile_access else "/openapi.json",
     )
-    if deployment is None:
+    application.state.hosted = profile_access is not None
+    if deployment is None and profile_access is None:
         application.add_middleware(
             CORSMiddleware,
             allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -123,9 +130,6 @@ def create_app(
     if deployment is None:
         if profile_access is None:
             application.add_middleware(ControlPlaneMiddleware, token=selected_settings.control_plane_token)
-        else:
-            from backend.hosting.identity import ProfileAccessMiddleware
-            application.add_middleware(ProfileAccessMiddleware, access=profile_access)
         application.include_router(api_router)
         application.include_router(application_router)
         from backend.deployments import router as deployments_router
@@ -135,7 +139,8 @@ def create_app(
         application.add_api_websocket_route("/ws/visual", visual_websocket)
     else:
         from backend.deployment_runtime import runtime_router
-        application.include_router(runtime_router(deployment, secure_cookie=deployment.get("secure_cookie", False)))
+        application.include_router(runtime_router(deployment, secure_cookie=deployment.get("secure_cookie", False),
+                                                  hosted=profile_access is not None))
 
         @application.middleware("http")
         async def runtime_headers(request: Request, call_next):
@@ -144,11 +149,16 @@ def create_app(
             response.headers["X-Content-Type-Options"] = "nosniff"
             response.headers["Referrer-Policy"] = "no-referrer"
             return response
+    if profile_access is not None:
+        from backend.hosting.identity import ProfileAccessMiddleware
+        application.add_middleware(ProfileAccessMiddleware, access=profile_access)
     application.add_middleware(RequestIdMiddleware)
     application.include_router(health_router)
     application.state.ready = False
     application.state.clean_shutdown = False
     if development is not None and deployment is None:
+        if profile_access is not None:
+            raise ValueError("Development controls are unavailable in hosted profiles")
         if selected_settings.application_mode != "development":
             raise ValueError("Development controls require development mode")
         development.install(application)

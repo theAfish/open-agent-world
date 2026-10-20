@@ -5,6 +5,7 @@ import re
 from typing import Literal, Self
 
 from packaging.specifiers import SpecifierSet
+from packaging.requirements import Requirement
 from packaging.version import Version
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -13,7 +14,7 @@ from backend.plugins.registry import _supports_plugin_api
 from backend.plugins.tutorials import Tutorials, validate_tutorials
 from backend.sandbox.python_runtime import validate_requirements
 
-PACK_ID = r"^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$"
+PACK_ID = r"^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$"
 FRONTEND_API_VERSION = 1
 
 
@@ -48,6 +49,7 @@ class Compatibility(Model):
 class PackDependency(Model):
     id: str = Field(pattern=r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$", max_length=128)
     version: str = Field(default="", max_length=100)
+    distribution: str | None = Field(default=None, pattern=PACK_ID, max_length=120)
 
     @field_validator("version")
     @classmethod
@@ -58,6 +60,63 @@ class PackDependency(Model):
 
 class Dependencies(Model):
     packs: tuple[PackDependency, ...] = Field(default=(), max_length=100)
+
+
+class AdapterWheel(Model):
+    path: str
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    name: str = Field(pattern=r"^[a-z0-9][a-z0-9.-]*$", max_length=160)
+    version: str
+    requires: tuple[str, ...] = ()
+    requires_python: str = ""
+    tags: tuple[str, ...]
+    roots: tuple[str, ...]
+    namespace_roots: tuple[str, ...] = ()
+    file_hashes: dict[str, str] = Field(default_factory=dict)
+    source: str | None = None
+
+    @field_validator("path")
+    @classmethod
+    def wheel_path(cls, value):
+        safe_path(value)
+        if not value.startswith("backend/dependencies/") or not value.endswith(".whl"):
+            raise ValueError("Adapter dependency wheels belong under backend/dependencies/")
+        return value
+
+    @model_validator(mode="after")
+    def metadata(self):
+        Version(self.version)
+        SpecifierSet(self.requires_python)
+        for requirement in self.requires:
+            Requirement(requirement)
+        if not self.tags or not self.roots or len(self.roots) != len(set(self.roots)):
+            raise ValueError("Adapter wheels require unique roots and compatibility tags")
+        for root in self.roots:
+            safe_path(root)
+            if "/" in root or root in {"backend", "open_agent_world"} or root.startswith("oaw_"):
+                raise ValueError("Adapter dependencies cannot claim host or Pack modules")
+        if not set(self.namespace_roots) <= set(self.roots):
+            raise ValueError("Namespace roots must belong to the dependency wheel")
+        for path, digest in self.file_hashes.items():
+            safe_path(path)
+            if path.split('/')[0] not in self.roots or not re.fullmatch(r'[a-f0-9]{64}', digest):
+                raise ValueError("Dependency file hashes must describe owned library files")
+        return self
+
+
+class AdapterDependencies(Model):
+    requirements: tuple[str, ...] = ()
+    wheels: tuple[AdapterWheel, ...] = Field(default=(), max_length=300)
+
+    @model_validator(mode="after")
+    def declarations(self):
+        for requirement in self.requirements:
+            Requirement(requirement)
+        if len({wheel.name for wheel in self.wheels}) != len(self.wheels):
+            raise ValueError("Adapter dependency distributions must be unique")
+        if len({wheel.path for wheel in self.wheels}) != len(self.wheels):
+            raise ValueError("Adapter dependency paths must be unique")
+        return self
 
 
 class SandboxRuntime(Model):
@@ -135,7 +194,7 @@ class CreatorMetadata(Model):
 
 
 class PackManifest(Model):
-    schema_version: Literal[1, 2]
+    schema_version: Literal[1, 2, 3]
     kind: Literal["plugin", "content"] = "plugin"
     id: str = Field(pattern=PACK_ID, max_length=120)
     name: str = Field(min_length=1, max_length=120)
@@ -146,15 +205,55 @@ class PackManifest(Model):
     entrypoints: Entrypoints | None = None
     content: Content | None = None
     creator: CreatorMetadata | None = None
+    # Version 3 separates the immutable distribution from persisted runtime IDs.
+    owner: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$", max_length=128)
+    packs: tuple[str, ...] = Field(default=(), max_length=100)
+    node_types: tuple[str, ...] | None = Field(default=None, max_length=1000)
+    backend_modules: tuple[str, ...] = Field(default=(), max_length=20)
+    environments: dict[str, "EnvironmentSpec"] = Field(default_factory=dict, max_length=100)
+    features: dict[str, "FeatureSpec"] = Field(default_factory=dict, max_length=100)
+    prerequisites: dict[str, "PrerequisiteSpec"] = Field(default_factory=dict, max_length=100)
+    adapter: AdapterDependencies = Field(default_factory=AdapterDependencies)
 
     @model_validator(mode="after")
     def pack_kind(self) -> Self:
         if self.kind == "plugin":
-            if self.schema_version != 1 or self.entrypoints is None or self.content is not None or self.creator is not None:
-                raise ValueError("Plugin Packs require schema 1 and code entrypoints")
+            if self.schema_version not in (1, 3) or self.entrypoints is None or self.content is not None or self.creator is not None:
+                raise ValueError("Plugin Packs require schema 1 or 3 and code entrypoints")
         elif (self.schema_version != 2 or self.entrypoints is not None or self.content is None
                 or self.creator is None or self.runtime.sandbox.python):
             raise ValueError("Content Packs require schema 2, content and creator metadata, without code entrypoints or runtime installs")
+        if self.schema_version != 3 and (self.owner is not None or self.packs or self.node_types is not None or self.backend_modules
+                or self.environments or self.features or self.prerequisites or self.adapter.requirements or self.adapter.wheels
+                or any(dependency.distribution for dependency in self.dependencies.packs)):
+            raise ValueError("Explicit ownership and environment declarations require code schema 3")
+        if self.schema_version == 3:
+            if self.node_types is not None and (len(set(self.node_types)) != len(self.node_types) or any(
+                    not re.fullmatch(r"[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*", value)
+                    or value == "core" or value.startswith("core.") for value in self.node_types)):
+                raise ValueError("Owned node types must be unique non-core identifiers")
+            if self.owner_id == "core" or self.owner_id.startswith("core."):
+                raise ValueError("External distributions cannot claim core ownership")
+            if not self.packs or len(set(self.packs)) != len(self.packs):
+                raise ValueError("Schema 3 requires unique provided Pack IDs")
+            if any(key != self.owner_id and not key.startswith(self.owner_id + ".") for key in self.packs):
+                raise ValueError("Provided Pack IDs must belong to the runtime owner")
+            if len(set(self.backend_modules)) != len(self.backend_modules) or any(
+                    not re.fullmatch(r"oaw_[a-z][a-z0-9_]*", name) for name in self.backend_modules):
+                raise ValueError("Backend modules must be unique private oaw_ package names")
+            for key in (*self.environments, *self.features, *self.prerequisites):
+                if not re.fullmatch(r"[a-z][a-z0-9_-]{0,79}", key):
+                    raise ValueError("Invalid environment, feature or prerequisite ID")
+            for feature in self.features.values():
+                if not set(feature.environments) <= self.environments.keys() or not set(feature.prerequisites) <= self.prerequisites.keys():
+                    raise ValueError("Feature references an undeclared environment or prerequisite")
+            for environment in self.environments.values():
+                if not set(environment.prerequisites) <= self.prerequisites.keys():
+                    raise ValueError("Environment references an undeclared prerequisite")
+            legacy = [environment for environment in self.environments.values() if environment.management == 'legacy-shared']
+            if legacy and {str(Requirement(item)) for environment in legacy for item in environment.python} != {
+                    str(Requirement(item)) for item in self.runtime.sandbox.python}:
+                raise ValueError("Legacy environment declarations must equal runtime.sandbox.python")
         return self
 
     @field_validator("version")
@@ -168,16 +267,34 @@ class PackManifest(Model):
     @model_validator(mode="after")
     def unique_dependencies(self) -> Self:
         ids = [d.id for d in self.dependencies.packs]
-        if self.id in ids or len(ids) != len(set(ids)):
+        if {self.id, *self.provided_pack_ids} & set(ids) or len(ids) != len(set(ids)) or any(
+                dependency.distribution == self.id for dependency in self.dependencies.packs):
             raise ValueError("Pack dependencies must be unique and cannot reference self")
         return self
 
     @property
     def module_name(self) -> str:
-        return "oaw_pack_" + self.id.replace(".", "_")
+        return self.backend_modules[0] if self.backend_modules else "oaw_pack_" + self.id.replace(".", "_").replace("-", "_")
+
+    @property
+    def module_names(self) -> tuple[str, ...]:
+        return self.backend_modules or (self.module_name,)
+
+    @property
+    def owner_id(self) -> str:
+        return self.owner or self.id
+
+    @property
+    def provided_pack_ids(self) -> tuple[str, ...]:
+        return self.packs or (self.id,)
 
     def check_compatibility(self) -> None:
         if Version(__version__) not in SpecifierSet(self.compatibility.oaw):
             raise ValueError(f"Pack {self.id} requires OAW {self.compatibility.oaw}; host is {__version__}")
         if not _supports_plugin_api(self.compatibility.plugin_api):
             raise ValueError(f"Unsupported Plugin API: {self.compatibility.plugin_api}")
+
+
+# Source and archive specifications use the same normalized runtime contract.
+from backend.packs.spec import EnvironmentSpec, FeatureSpec, PrerequisiteSpec
+PackManifest.model_rebuild()

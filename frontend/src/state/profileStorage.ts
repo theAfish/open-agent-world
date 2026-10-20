@@ -1,4 +1,5 @@
 import { fetchWithRetry } from '../api/fetchWithRetry';
+import { hostedSessionActive, isHosted } from '../auth/hostedSession';
 
 /** Hydrated before importing any persisted stores. The backend owns profile identity. */
 export interface ApplicationProfile {
@@ -14,6 +15,22 @@ let pending: Record<string, string | null> = {};
 let saving: Promise<void> | undefined;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let monitor: ReturnType<typeof setInterval> | undefined;
+let removePagehide: (() => void) | undefined;
+let generation = 0;
+
+export function discardProfile() {
+  generation++;
+  profile = undefined;
+  pending = {};
+  if (timer) clearTimeout(timer);
+  if (monitor) clearInterval(monitor);
+  timer = undefined;
+  monitor = undefined;
+  removePagehide?.();
+  removePagehide = undefined;
+}
+
+if (typeof window !== 'undefined') window.addEventListener('oaw-hosted-session-ended', discardProfile);
 
 export const currentProfile = () => profile;
 export const applicationUrl = (path = "") => `${API}/application${path}`;
@@ -25,6 +42,7 @@ export async function fetchProfile(): Promise<ApplicationProfile> {
 }
 
 export function configureProfile(value: ApplicationProfile) {
+  generation++;
   profile = value;
   pending = {};
 }
@@ -36,6 +54,7 @@ export async function flushPreferences(): Promise<void> {
   const changes = pending;
   pending = {};
   const selected = profile;
+  const savingGeneration = generation;
   saving = (async () => {
     try {
       const response = await fetch(applicationUrl("/preferences"), {
@@ -46,8 +65,10 @@ export async function flushPreferences(): Promise<void> {
       if (response.status === 409) { window.location.reload(); return; }
       if (!response.ok) throw new Error("Could not save application preferences");
     } catch (error) {
-      pending = { ...changes, ...pending };
-      timer = setTimeout(() => { void flushPreferences().catch(() => {}); }, 2000);
+      if (generation === savingGeneration && (!isHosted() || hostedSessionActive())) {
+        pending = { ...changes, ...pending };
+        timer = setTimeout(() => { void flushPreferences().catch(() => {}); }, 2000);
+      }
       throw error;
     }
   })().finally(() => { saving = undefined; });
@@ -62,16 +83,18 @@ function queue(key: string, value: string | null) {
 
 export const profileStorage = {
   getItem(key: string): string | null {
-    return profile ? profile.values[key] ?? null : typeof localStorage === "undefined" ? null : localStorage.getItem(key);
+    return profile ? profile.values[key] ?? null : isHosted() || typeof localStorage === "undefined" ? null : localStorage.getItem(key);
   },
   setItem(key: string, value: string) {
-    if (!profile) { if (typeof localStorage !== "undefined") localStorage.setItem(key, value); return; }
+    if (isHosted() && !hostedSessionActive()) return;
+    if (!profile) { if (!isHosted() && typeof localStorage !== "undefined") localStorage.setItem(key, value); return; }
     if (profile.values[key] === value) return;
     profile.values[key] = value;
     queue(key, value);
   },
   removeItem(key: string) {
-    if (!profile) { if (typeof localStorage !== "undefined") localStorage.removeItem(key); return; }
+    if (isHosted() && !hostedSessionActive()) return;
+    if (!profile) { if (!isHosted() && typeof localStorage !== "undefined") localStorage.removeItem(key); return; }
     delete profile.values[key];
     queue(key, null);
   },
@@ -82,7 +105,7 @@ export async function initializeProfile() {
   const browserRead = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
   // One-time production migration only. Development never imports daily-use browser state.
   const marker = `oaw-profile-imported:${profile!.profile_id}`;
-  if (profile!.mode === "production" && !Object.keys(profile!.values).length && !browserRead(marker)) {
+  if (!isHosted() && profile!.mode === "production" && !Object.keys(profile!.values).length && !browserRead(marker)) {
     for (const key of ["oaw-onboarding-v1", "oaw-canvas-viewport-v1", "oaw-glue-v1", "oaw-node-surfaces-v1",
       "oaw-library-preferences", "oaw-theme", "oaw.locale", "open-agent-world.decks.v2", "open-agent-world.custom-decks.v1"]) {
       const value = browserRead(key);
@@ -97,12 +120,15 @@ export async function initializeProfile() {
       if (next.profile_id !== profile?.profile_id || next.generation !== profile?.generation) window.location.reload();
     }).catch(() => {});
   }, 2000);
-  window.addEventListener("pagehide", () => {
+  removePagehide?.();
+  const pagehide = () => {
     if (profile && Object.keys(pending).length) {
       void fetch(applicationUrl("/preferences"), { method: "PATCH", keepalive: true,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profile_id: profile.profile_id, generation: profile.generation, changes: pending }),
       }).catch(() => {});
     }
-  });
+  };
+  window.addEventListener("pagehide", pagehide);
+  removePagehide = () => window.removeEventListener('pagehide', pagehide);
 }

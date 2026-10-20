@@ -42,14 +42,14 @@ def configure(request):
     activate_engine()
     root = Path(request["root"])
     model = request["model"]
-    model_id = model["model"]
+    model_id = model.get("model_id", model.get("model"))
     if model["adapter"] != "legacy" and not model_id.startswith(model["adapter"] + "/"):
         model_id = model["adapter"] + "/" + model_id
     os.environ.update({
         "MATCREATOR_HOME": str(root / "home"), "MATCLAW_WORKSPACE": str(root / "workspace"),
         "MATCLAW_SESSION_DIR": str(root / "workspace"),
         "LLM_MODEL": model_id,
-        "LLM_API_KEY": model["api_key"], "LLM_BASE_URL": model["base_url"],
+        "LLM_API_KEY": model["api_key"] or "", "LLM_BASE_URL": model["base_url"],
         "LITELLM_LOCAL_MODEL_COST_MAP": "True",
     })
     return root

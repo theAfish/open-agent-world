@@ -10,15 +10,22 @@ All XRD nodes and relationships declare template support. Runtime dependencies u
 
 `src/oaw_xrd/OAW_XRDfit` contains the modified engine, MIT attribution, example inputs, pinned Python requirements and a SHA256 manifest. Single-phase and joint fitting load this package, never an external PyWPEM checkout. Legacy `PyWPEM` configuration values and `pywpem_review` storage keys remain readable. The public name is OAW_XRDfit.
 
-The wheel contains engine source and dependency specifications, not an OS-specific Python executable or a copied virtual environment. On a new machine use Python 3.10 or 3.11:
+The wheel contains engine source and dependency specifications. OAW prepares the
+declared scientific environment on first use and chooses a compatible private
+Python automatically. To prepare it ahead of time with the host Python:
 
 ```powershell
-python plugins/xrd/src/oaw_xrd/install_engine_runtime.py --root <user-data-directory>
+python -m oaw_xrd.install_engine_runtime --data-root <OAW-profile-directory>
 ```
 
-Configure `OAW_XRD_ROOT` to that directory, or `OAW_XRD_PYTHON` to the installed interpreter. Installation requires package-index access. Existing configured scientific environments continue to work. QualX is a separate library-search dependency covered by `engines/README.md`; spectrum databases are user-mounted and never bundled.
+Installation requires package-index access unless the verified environment is
+already bundled or cached. `OAW_XRD_ROOT` controls retained scientific data only;
+`OAW_XRD_PYTHON` remains an optional externally managed interpreter override.
+QualX is separately declared as an executable and can adopt an existing compatible
+installation after checking its bridge flags; OAW does not redistribute its binary.
+Spectrum databases are user-mounted and never bundled or deleted by Pack uninstall.
 
-The integration targets OAW v0.3.0 and plugin API 1.23. Workspace layout v1 is read through the upstream v2 migration; adding result discussion preserves existing sections and hidden views.
+The integration requires plugin API 1.35 for managed environment preparation and profile binding. Workspace layout v1 is read through the upstream v2 migration; adding result discussion preserves existing sections and hidden views.
 
 ## Run history
 

@@ -3,6 +3,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from open_agent_world.plugin_api import BackgroundJobProvider, JobObservation, SubmissionUncertainError
+from .compatibility import BOHR_SCRIPT
 
 
 class BatchSpecification(BaseModel):
@@ -39,7 +40,9 @@ def arguments(spec, request_id):
 
 
 async def call(context, args, *, timeout=60):
-    result = await context.execute(["bohr", *args, "-o", "json", "--no-interactive", "-y"], timeout_seconds=timeout)
+    # The host binds this provider's bohr profile for submission and later
+    # observations. Resolve its private npm package, never a global CLI shim.
+    result = await context.execute(["python3", "-c", BOHR_SCRIPT, *args, "-o", "json", "--no-interactive", "-y"], timeout_seconds=timeout)
     if result.get("exit_code") != 0 or result.get("timed_out") or result.get("cancelled"):
         # Do not echo CLI output containing credentials into durable job metadata.
         raise RuntimeError("Bohrium CLI failed; inspect the Sandbox command receipt")
@@ -83,4 +86,4 @@ async def cancel(context, external_id):
 
 
 definition = BackgroundJobProvider(specification=BatchSpecification, submit=submit, prepare=prepare,
-    inspect=inspect, cancel=cancel, poll_interval_seconds=60)
+    inspect=inspect, cancel=cancel, poll_interval_seconds=60, sandbox_environments=('bohr',))

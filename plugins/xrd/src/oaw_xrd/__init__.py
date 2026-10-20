@@ -98,13 +98,20 @@ class CanvasConfig(BaseModel):
     source_node_id: str = ''
 
 class XRDPlugin:
-    descriptor = PluginDescriptor(id="research.xrd",version="0.3.0",plugin_api_version="1.23",
+    descriptor = PluginDescriptor(id="research.xrd",version="0.3.0",plugin_api_version="1.35",
+        requires_plugins=("science.structure-viewer",),
         name="XRD / OAW_XRDfit",description="Reference-card screening and candidate-CIF whole-pattern fitting")
+    def __init__(self, context=None):
+        from .profile import current_data_root
+        self.data_root = context.data_root if context is not None else current_data_root()
+
     async def read_input(self, context, capability, arguments):
         document = await context.node_document_action(capability, "read", arguments)
         return {"node_id": capability.target_id, "revision": document["revision"], "value": document["value"]}
 
     def register(self, registration):
+        from .profile import ProfileRegistration
+        registration = ProfileRegistration(registration, self.data_root)
         registration.register_runtime_provider("research.xrd",XRDRuntime)
         register_harness(registration)
         register_results_context(registration)
@@ -171,5 +178,5 @@ class XRDPlugin:
         registration.register_pack(PackDefinition(id='research.xrd.default', name='XRD analysis',
             description='Whole-pattern diffraction fitting.', cards=tuple(registration.nodes)))
 
-def create_plugin():
-    return XRDPlugin()
+def create_plugin(*, context=None):
+    return XRDPlugin(context)

@@ -55,11 +55,12 @@ def write_document(services, node_id, value, expected_revision, *, actor_id=None
     spec = definition(services, node_id)
     try:
         value = spec.model.model_validate(value).model_dump(mode="json")
+        encoded = json.dumps(value, allow_nan=False).encode("utf-8")
         if spec.validate_update is not None:
             spec.validate_update(read_document(services, node_id, state_identity=state_identity)["value"], value)
     except (ValidationError, ValueError) as exc:
         raise ResourceValidationError(validation_message(exc)) from exc
-    if len(json.dumps(value).encode("utf-8")) > spec.max_size_bytes:
+    if len(encoded) > spec.max_size_bytes:
         raise ResourceValidationError(f"This document is limited to {spec.max_size_bytes // 1024} KiB")
     scope = services.card_state.scope(node_id, state_identity)
     node = services.world.get_card(node_id)
@@ -81,6 +82,8 @@ def _authorize_action(services, node_id, action, capability):
         services.node_execution.assert_editable(node_id, allow_delegated=True)
     if capability is not None:
         live = services.capabilities.capability_for_id(capability.agent_id, capability.id)
+        for kind in services.plugins.capability_definition(live.kind).target_capabilities:
+            services.capabilities.capability_for_id(capability.agent_id, f"{kind}:{live.target_id}")
         if live.target_id != node_id or handler is None or handler.capability_kind != live.kind:
             raise PermissionDeniedError("This connection does not allow that document action")
     return handler

@@ -23,6 +23,7 @@ desktop/src-tauri/gen/
 .env.*
 !.env.example
 .open-agent-world/
+.oaw-hosting/
 data/
 logs/
 .outputs/

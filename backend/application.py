@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend import __version__
@@ -68,8 +68,8 @@ router = APIRouter(prefix="/api/application", tags=["application"])
 
 
 @router.get("")
-def get_application(services=Depends(get_services)):
-    return application_snapshot(services)
+def get_application(request: Request, services=Depends(get_services)):
+    return {**application_snapshot(services), "hosted": bool(getattr(request.app.state, "hosted", False))}
 
 
 @router.patch("/preferences")

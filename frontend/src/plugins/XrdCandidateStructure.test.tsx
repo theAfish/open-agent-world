@@ -8,6 +8,10 @@ import type { PluginViewProps } from "./sdk";
 
 vi.mock("../../../plugins/structure_viewer/frontend/render", () => ({ renderStructure: vi.fn(() => vi.fn()) }));
 vi.mock("../../../plugins/structure_viewer/frontend/prepareStructure", () => ({ prepareStructure: vi.fn().mockResolvedValue({ sites: [] }) }));
+vi.mock('./frontendServices', async () => ({
+  ...await vi.importActual('./frontendServices'),
+  loadPackFrontendService: vi.fn(async () => ({ prepare: prepareStructure, render: renderStructure })),
+}));
 const NativeURL = URL;
 const createObjectURL = vi.fn();
 const revokeObjectURL = vi.fn();

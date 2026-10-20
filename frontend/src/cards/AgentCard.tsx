@@ -10,6 +10,7 @@ import { useWorldStore } from "../state/worldStore";
 import type { WorldCard, WorldEdge } from "../types/world";
 import type { NodeSurfaceLevel } from "../state/nodeSurfaces";
 import { InstrumentOutput } from "./CardUtilities";
+import { AgentRunHistory } from "./AgentRunHistory";
 const NO_CARDS: WorldCard[] = [];
 const NO_EDGES: WorldEdge[] = [];
 
@@ -158,6 +159,7 @@ export function AgentCardBody({ card, level }: { card: WorldCard; level: NodeSur
       {level === "workspace" && !xrdMatch && <details className="agent-settings-details">
         <summary>{t("Runtime activity")}</summary>
         <InstrumentOutput lines={output} empty="Run output and tool activity will appear here." />
+        <AgentRunHistory agentId={card.id} active={activeRun} />
       </details>}
     </div>
   );

@@ -39,16 +39,20 @@ def native_definition():
                  view("sandbox", "preview"), view("artifacts"), view("sandbox")),
             split("vertical", .43, pane("conversation", "sessions"), pane("sandbox", "files"))))}
     nodes = (
-        PresetNode(key="group", type="legion", name="MatCreator native research", parent_key=None,
+        PresetNode(key="group", type="legion", name="MatCreator research", parent_key=None,
             presentation="preview", config={"mode": "group", "description": "Native MatCreator planner and subagents with OAW research tools.", "workspace_layout": layout}),
-        PresetNode(key="agent", type="matcreator.agent", name="MatCreator Agent", x=220, y=250),
-        PresetNode(key="conversation", type="conversation", name="Research conversation", x=850, y=450),
-        PresetNode(key="sandbox", type="sandbox", name="Research files & compute", x=1990, y=450, config={"network_enabled": True}),
-        PresetNode(key="execution", type="core.execution-graph", name="Agent graph", x=220, y=1200),
-        PresetNode(key="jobs", type="core.jobs", name="Research jobs", x=220, y=1850),
-        PresetNode(key="artifacts", type="core.artifact-collection", name="Research artifacts", x=220, y=2500),
-        PresetNode(key="structure", type="science.structure-viewer", name="Structure viewer", x=600, y=1200),
-        PresetNode(key="knowledge", type="matcreator.kdg", name="Skills & knowledge", x=1100, y=1200, initial_document=initial_knowledge()),
+        # Positions anchor the 96px node; preview/workspace surfaces expand
+        # around it. Conversation and Sandbox open as 1020x700 workspaces,
+        # flanking the 224x300 central cards. The knowledge container uses its
+        # own top-left position and 1000x650 size.
+        PresetNode(key="agent", type="matcreator.agent", name="MatCreator Agent", x=1204, y=654, presentation="preview"),
+        PresetNode(key="conversation", type="conversation", name="Research conversation", x=502, y=414, presentation="workspace"),
+        PresetNode(key="sandbox", type="sandbox", name="Research files & compute", x=1902, y=414, presentation="workspace", config={"network_enabled": True}),
+        PresetNode(key="execution", type="core.execution-graph", name="Agent graph", x=504, y=1174, presentation="preview"),
+        PresetNode(key="jobs", type="core.jobs", name="Research jobs", x=1204, y=1154, presentation="preview"),
+        PresetNode(key="artifacts", type="core.artifact-collection", name="Research artifacts", x=924, y=1234, presentation="preview"),
+        PresetNode(key="structure", type="science.structure-viewer", name="Structure viewer", x=1204, y=214, presentation="preview"),
+        PresetNode(key="knowledge", type="matcreator.kdg", name="Skills & knowledge", x=1440, y=892, initial_document=initial_knowledge()),
     )
     edges = [PresetEdge(source="agent", target=target, relationship=relationship) for target, relationship in (
         ("conversation", "participate"), ("sandbox", "execute_manage"),
@@ -56,6 +60,6 @@ def native_definition():
     edges.append(PresetEdge(source="execution", target="agent", relationship="core.execution-source"))
     edges.append(PresetEdge(source="jobs", target="agent", relationship="core.jobs-manage"))
     edges.extend(PresetEdge(source="structure", target=target, relationship="core.file-preview") for target in ("conversation", "sandbox"))
-    return LegionPresetDefinition(id="matcreator.native-research", name="MatCreator native research", revision=3,
+    return LegionPresetDefinition(id="matcreator.native-research", name="MatCreator research", revision=4,
         description="MatCreator devel planner, execution orchestrator and recursive subagents, with connected OAW tools and views.",
         nodes=nodes, edges=tuple(edges))

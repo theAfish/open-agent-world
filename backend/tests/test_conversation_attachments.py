@@ -8,7 +8,7 @@ from backend.main import create_app
 from backend.capabilities.provider import WorldAgentCapabilityProvider
 from backend.conversations.models import ConversationSessionCreate
 from backend.errors import PermissionDeniedError
-from backend.runs import InvocationCaller, InvocationContext
+from backend.runs import InvocationCaller, InvocationContext, RunStore
 from backend.runs.manager import _current_invocation
 from backend.tests.test_conversations import _create, _connect
 from backend.tests.test_skill_runtime import runtime_client, setup_skill
@@ -128,6 +128,9 @@ def test_agent_attachment_tools_publish_read_materialize_and_revocation(runtime_
     provider = WorldAgentCapabilityProvider(services)
     workspace = client.portal.call(backend.get, sandbox['id']).workspace
     (workspace / 'result.png').write_bytes(b'image result')
+
+    RunStore(services.database).create(agent_id=agent["id"], run_id="attachment-test",
+        runtime_provider_id="core.mock", caller_kind="conversation", context_id=session["id"])
 
     async def invoke(name, args, session_id=session['id']):
         token = _current_invocation.set(InvocationContext(run_id='attachment-test', agent_id=agent['id'],

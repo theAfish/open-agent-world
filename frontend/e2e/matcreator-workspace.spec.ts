@@ -19,11 +19,13 @@ test('MatCreator native preset opens from the deck with graph, central tabs and 
   // Presets are available in the Library but are not auto-equipped in new decks.
   let library = await (await request.get('/api/card-library')).json();
   const sourcePack = Object.values(library.packs).find((pack: any) => pack.definition.cards.includes('matcreator.agent')) as any;
+  expect(sourcePack.definition.cards).toContain('core.jobs');
   const opened = await request.post('/api/card-library/actions', { data: {
     expected_revision: library.revision, action: 'open_pack', id: sourcePack.definition.id,
   } });
   expect(opened.ok(), await opened.text()).toBe(true);
   library = await opened.json();
+  expect(library.collection['core.jobs'].plugin_id).toBe('open-agent-world.core');
   const equipped = await request.post('/api/card-library/actions', { data: {
     expected_revision: library.revision, action: 'update_deck', id: 'saved-legions',
     entries: [{ kind: 'legion', id: 'matcreator.native-research' }],
@@ -38,7 +40,7 @@ test('MatCreator native preset opens from the deck with graph, central tabs and 
     expect(dialog.message()).toContain('Open these owned packs and continue?');
     await dialog.accept();
   });
-  await page.getByRole('button', { name: 'Place MatCreator native research', exact: true }).click();
+  await page.getByRole('button', { name: 'Place MatCreator research', exact: true }).click();
   const response = await deployed;
   expect(response.status(), await response.text()).toBe(201);
   const instance = await response.json();
@@ -47,18 +49,40 @@ test('MatCreator native preset opens from the deck with graph, central tabs and 
   await expect(groupCard).toBeAttached();
   expect(instance.nodes.find((node: { id: string }) => node.id === instance.node_ids.artifacts).type).toBe('core.artifact-collection');
   await page.getByRole('button', { name: 'Fit view', exact: true }).click();
-  const toolsets = ['knowledge', 'sandbox'].map(key => page.locator(`[data-card-id="${instance.node_ids[key]}"]`));
-  for (const toolset of toolsets) await expect(toolset).toBeVisible();
-  const bounds = await Promise.all(toolsets.map(toolset => toolset.boundingBox()));
-  for (let i = 0; i < bounds.length; i++) for (let j = i + 1; j < bounds.length; j++) {
-    const a = bounds[i]!, b = bounds[j]!;
-    expect(a.x + a.width <= b.x + 1 || b.x + b.width <= a.x + 1 || a.y + a.height <= b.y + 1 || b.y + b.height <= a.y + 1).toBe(true);
-  }
-  await page.screenshot({ path: 'test-results/matcreator-formation.png' });
+  const checkFormation = async () => {
+    const keys = ['conversation', 'structure', 'agent', 'sandbox', 'execution', 'jobs', 'artifacts', 'knowledge'];
+    const cards = keys.map(key => page.locator(`[data-card-id="${instance.node_ids[key]}"]`));
+    for (const card of cards) await expect(card).toBeInViewport();
+    const bounds = await Promise.all(cards.map(card => card.boundingBox()));
+    for (let i = 0; i < bounds.length; i++) for (let j = i + 1; j < bounds.length; j++) {
+      const a = bounds[i]!, b = bounds[j]!;
+      expect(a.x + a.width <= b.x + 1 || b.x + b.width <= a.x + 1 || a.y + a.height <= b.y + 1 || b.y + b.height <= a.y + 1,
+        `${keys[i]} overlaps ${keys[j]}`).toBe(true);
+    }
+    const [conversation, structure, agent, sandbox, graph, jobs, artifacts, knowledge] = bounds.map(box => box!);
+    expect(conversation.x + conversation.width).toBeLessThan(agent.x);
+    expect(agent.x + agent.width).toBeLessThan(sandbox.x);
+    expect(structure.y + structure.height).toBeLessThan(agent.y);
+    expect(jobs.y).toBeGreaterThan(agent.y + agent.height);
+    expect(graph.y).toBeGreaterThan(conversation.y + conversation.height);
+    expect(artifacts.x + artifacts.width).toBeLessThan(jobs.x);
+    expect(knowledge.y).toBeGreaterThan(sandbox.y + sandbox.height);
+    expect(Math.abs(conversation.y - sandbox.y)).toBeLessThan(2);
+    expect(Math.abs(structure.x - agent.x)).toBeLessThan(2);
+    expect(Math.abs(jobs.x - agent.x)).toBeLessThan(2);
+    await expect(cards[0].getByRole('textbox', { name: 'Conversation message', exact: true })).toBeVisible();
+    await expect(cards[3].getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
+    await expect(groupCard.getByRole('button', { name: 'Workspace mode', exact: true })).toBeInViewport();
+  };
+  await checkFormation();
+  await page.reload();
+  await page.getByRole('button', { name: 'Fit view', exact: true }).click();
+  await checkFormation();
+  await page.screenshot({ path: '../.outputs/matcreator/default-formation.png' });
   const open = async () => {
     await page.getByRole('button', { name: 'Fit view', exact: true }).click();
     await groupCard.getByRole('button', { name: 'Workspace mode', exact: true }).click();
-    return page.getByRole('dialog', { name: 'MatCreator native research workspace mode' });
+    return page.getByRole('dialog', { name: 'MatCreator research workspace mode' });
   };
   const workspace = await open();
   await expect(workspace.getByRole('region', { name: 'Execution graph', exact: true })).toBeVisible();
@@ -96,7 +120,7 @@ test('MatCreator native preset opens from the deck with graph, central tabs and 
   await page.screenshot({ path: 'test-results/matcreator-structure-viewer.png' });
   // Switching tabs retains access to the Sandbox controls.
   await workspace.getByRole('tab', { name: 'Research files & compute', exact: true }).click();
-  await expect(workspace.getByRole('button', { name: 'Start', exact: true })).toBeVisible();
+  await expect(workspace.getByText('Ready on demand', { exact: true })).toBeVisible();
   await workspace.getByRole('tab', { name: /Research files & compute · File preview/ }).click();
   await workspace.getByRole('tab', { name: 'Skills & knowledge', exact: true }).click();
   await expect(workspace.getByRole('region', { name: 'Know-Do Graph workspace', exact: true })).toBeVisible();

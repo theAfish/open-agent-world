@@ -39,19 +39,27 @@ uv build ./examples/plugins/hello_world --out-dir .tmp/hello-dist
 
 For your own package, replace the input path. Include any declared package resources in the wheel. Check the built artifact in a clean compatible OAW checkout before sharing it.
 
-There are two backend installation paths:
+Source development and publication use the same `oaw.pack.toml` declaration:
 
-- Put the source package directly in the checkout's `plugins/` directory. Its additional dependencies must already be installed in the backend environment.
-- Install a wheel into the environment that runs the backend. On a Windows source checkout, for example: `uv pip install --python backend/.venv/Scripts/python.exe path/to/plugin.whl`. Linux/macOS use `backend/.venv/bin/python`.
+- Put the source package directly in `plugins/` and prepare its declared adapter
+  dependencies with the backend interpreter running
+  `scripts/install-plugins.py plugins/hello_world`. Startup itself never installs.
+- Build the wheel and any frontend bundle, then use
+  `python -m open_agent_world.pack build-project` to produce `.oawpack`. Include
+  additional adapter wheels resolved with `resolve-adapter`. Install that artifact
+  through the Pack Library or Store and restart OAW.
 
-Restart OAW after installation. These are source-checkout instructions. The
-production host accepts `.oawpack` files through the Pack Library, with runtime
-frontend loading; a bare wheel is not a complete Pack distribution.
+See [the complete author workflow](../pack-distribution.md). A bare Python wheel
+is a build input, not a complete Pack distribution. Test installation from the
+artifact in a clean profile to catch dependencies hidden by a developer environment.
 
 ## Write the plugin README
 
 Include its purpose, compatible OAW/API version, dependencies, installation path, pack/card names, the connections users should create, and a short working example. Explain storage, external services, and removal steps when relevant.
 
-Users must remove dependent world objects before uninstalling the package. Registration must not create resources as a side effect. Do not include credentials, generated user data, or private machine paths in a distribution.
+Users must remove active uses before uninstalling through the Pack Library. The
+host checks references and reclaims only unused managed dependencies. Registration
+must not create resources as a side effect. Do not include credentials, generated
+user data, or private machine paths in a distribution.
 
 Check licensing before publishing: OAW currently has no repository license file. A package manifest alone does not establish redistribution rights for code you copy.

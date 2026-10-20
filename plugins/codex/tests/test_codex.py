@@ -56,6 +56,20 @@ def test_packaged_discovery():
 
 
 @pytest.mark.asyncio
+async def test_reasoning_summaries_stream_and_settle_without_raw_content(tmp_path):
+    provider = runtime(tmp_path)
+    cfg = config(tmp_path)
+    await provider.create_agent(cfg)
+    events = await collect(provider, cfg, 'thinking')
+    thinking = [event.payload for event in events if event.payload.get('kind') == 'model_reasoning']
+    assert [row['text'] for row in thinking] == ['Inspect ', 'Inspect the files.',
+        'Inspect the files.\n\nCheck the result.', 'Inspect the files.\n\nVerify the result.']
+    assert [row['streaming'] for row in thinking] == [True, True, True, False]
+    assert len({row['provider_message_id'] for row in thinking}) == 1
+    assert 'private reasoning' not in str([event.payload for event in events])
+
+
+@pytest.mark.asyncio
 async def test_operation_selectors_survive_tool_bridge(tmp_path):
     schema = {"type": "object", "properties": {
         "target": {"type": "string", "enum": ["notes", "report"]},

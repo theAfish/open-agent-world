@@ -63,3 +63,75 @@ def adk_tool_result(result: Any) -> Any:
     return {"result": summary, "media": [
         types.Part.from_bytes(data=image.data, mime_type=image.media_type) for image in result.images
     ]}
+
+
+def durable_tool_media(value: Any) -> tuple[Any, list[str]]:
+    """Project JSON-shaped ADK tool observations to metadata for persistence.
+
+    User-supplied images, ordinary tool data and provider signatures are left
+    intact. Only native FunctionResponse image parts and OAW's pre-extraction
+    visual-result envelope contain transient tool observations. Never mutate the
+    live request; it still needs the real image bytes.
+    """
+    omitted: list[str] = []
+
+    def image_metadata(part):
+        if not isinstance(part, dict):
+            return None
+        blob = part.get("inline_data", part.get("inlineData"))
+        if not isinstance(blob, dict):
+            return None
+        mime = blob.get("mime_type", blob.get("mimeType", ""))
+        if not isinstance(mime, str) or not mime.startswith("image/") or blob.get("data") is None:
+            return None
+        data = blob["data"]
+        if isinstance(data, dict) and data.get("encoding") == "base64":
+            data = data.get("data")
+        size = len(data) if isinstance(data, bytes) else None
+        if isinstance(data, str):
+            try:
+                size = len(base64.b64decode(data, altchars=b"-_", validate=True))
+            except ValueError:
+                pass
+        return {"media_type": mime, "size_bytes": size, "omitted": True,
+                "reason": "Transient tool image; observe again if its pixels are needed."}
+
+    def filter_images(parts, path):
+        kept, metadata = [], []
+        for index, part in enumerate(parts):
+            location = f"{path}[{index}]"
+            info = image_metadata(part)
+            if info is None:
+                kept.append(walk(part, location))
+            else:
+                metadata.append(info)
+                omitted.append(location)
+        return kept, metadata
+
+    def walk(item, path):
+        if isinstance(item, list):
+            return [walk(child, f"{path}[{index}]") for index, child in enumerate(item)]
+        if not isinstance(item, dict):
+            return item
+        result = {}
+        for key, child in item.items():
+            location = path + "." + key
+            if key in {"function_response", "functionResponse"} and isinstance(child, dict):
+                response = walk(child, location)
+                if isinstance(child.get("parts"), list):
+                    kept, metadata = filter_images(child["parts"], location + ".parts")
+                    if metadata:
+                        response["parts"] = kept
+                        response["response"] = {**response.get("response", {}),
+                                                "oaw_omitted_tool_images": metadata}
+                result[key] = response
+            elif key == "media" and "result" in item and isinstance(child, list):
+                kept, metadata = filter_images(child, location)
+                result[key] = kept
+                if metadata:
+                    result["oaw_omitted_tool_images"] = metadata
+            else:
+                result[key] = walk(child, location)
+        return result
+
+    return walk(value, "$"), omitted

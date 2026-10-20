@@ -7,27 +7,38 @@ This is the detailed plugin contract reference. New authors should follow
 For everyday use, see [Plugins and packs](user-guide/plugins.md).
 
 For third-party installation in a production/desktop host, use the
-[`.oawpack` distribution contract](pack-distribution.md). It combines one Pack,
-one version and one runtime owner with a dynamically loaded frontend. The source
+[`.oawpack` distribution contract](pack-distribution.md). It combines a versioned
+distribution, explicit runtime ownership and a dynamically loaded frontend. The source
 plugin contracts below remain the internal runtime and development interface.
 
 ## Using plugins
 
 Plugins add cards, relationships, tools, and runtime integrations. The backend discovers packages under the repository's `plugins/` directory and installed Python entry points at startup. Install only reviewed code: plugins execute inside the trusted backend process.
 
-After installing a package and its dependencies, restart the backend, open **Pack & Card Library**, open the plugin's pack, and add its collected cards to your deck. Installation is separate from collection and deck selection. The Store tab is a placeholder, not an online marketplace.
+After installing a package and its dependencies, restart the backend, open **Pack & Card Library**, open the plugin's pack, and add its collected cards to your deck. Installation is separate from collection and deck selection. The Store provides a remote catalog and sends verified downloads through the same installer as local `.oawpack` files.
 
-Trusted checkout plugins can declare no-argument setup hooks under the Python
-entry-point group `open_agent_world.setup`. `scripts/install-plugins.py` invokes
-only hooks belonging to the selected distributions, after their dependencies
-install successfully, in the destination Python. Normal setup, development
-startup and desktop packaging all use this path; `--dry-run` never calls hooks.
-Hooks must be idempotent, keep dependencies owned by the Pack and support the
-desktop payload's relocation. MatCreator uses this for its isolated native
-runtime. These hooks are not executed by plugin discovery, an Agent Run, plain
-`pip install`, or the `.oawpack` upload API.
+Source projects declare dependencies and execution targets in `oaw.pack.toml`.
+Reuse named dependency groups explicitly between a Pack engine and Sandbox;
+Sandbox does not inherit the entire host environment. The Library shows source,
+loaded version and per-environment readiness separately. See the
+[source declaration and diagnostics guide](pack-distribution.md#source-declaration-and-schema-3)
+for `doctor`, `build-project` and compatibility with older Packs.
 
-To disable a plugin, first remove its world objects, relationships, dependent Agent runtimes, and pending cleanup; the Library enforces these constraints. Uninstall by removing the package and restarting after removing its world dependencies. Collection and deck references survive unavailability. See [Card Library](card-library.md#availability-and-remaining-boundaries).
+`scripts/install-plugins.py` reads each declared Pack without importing it,
+registers the Python adapter with `--no-deps`, and prepares its shared adapter
+libraries and install-time environments using the same managed providers as
+archive installation. MatCreator's native worker uses its declared private
+Python environment; XRD prepares its scientific worker on first use. Existing
+undeclared plugins retain their legacy `open_agent_world.setup` hook. Discovery
+does not run setup hooks or download dependencies, and `--dry-run` does neither.
+
+The Library previews removal and checks world objects, dependent Packs, Agent
+runtimes and active work. Source Pack uninstall changes this profile's enrollment
+without deleting the checkout; archive uninstall preserves retained versions for
+reinstallation. Shared managed resources are collected only after their final
+consumer and active process lease are released. Restart unloads active code.
+Collection, deck references and user data survive removal. See
+[Card Library](card-library.md#availability-and-remaining-boundaries).
 
 ## Bundled plugin guides
 
@@ -43,6 +54,7 @@ introduced in Plugin API 1.27.
 | [Codex](../plugins/codex/README.md) | A Codex runtime integration |
 | [Structure viewer](../plugins/structure_viewer/README.md) | Viewing connected structure files |
 | [MatCreator](../plugins/matcreator/README.md) | Materials-oriented graph and workflow tools |
+| [AtomSculptor](../plugins/atomsculptor/README.md) | Atomistic structure editing and modelling Agents |
 
 Plugin-specific documentation can remain in its own package or repository. These links are a directory, not a requirement to copy all plugin content into OAW's docs. Plugin API 1.26 adds optional [progressive tutorials and offline documents](developers/progressive-tutorials.md) on card and Pack definitions.
 
@@ -67,8 +79,10 @@ Barracks, Summoning and custom-card sources. Frontend operations can reveal thei
 content through [`host.workspace.activate()`](developers/workspace-design.md#activate-content-after-an-operation).
 
 Plugin API 1.29 adds two trusted runtime services on `AgentCapabilityProvider`:
-`resolve_model(model)` returns a run-local `RuntimeModelConnection` (model,
-adapter, base URL and a non-repr API key), and `runtime_state_directory(agent_id)`
+`resolve_model(model)` returns the same run-local `RuntimeModelConnection` as
+`ModelConnectionResolver.resolve_runtime`: adapter, `model_id`, base URL,
+non-repr API key, image support and saved context/output limits. The `model`
+property remains an alias for older adapters. `runtime_state_directory(agent_id)`
 returns an Agent-specific directory under the host data root. Resolve model
 connections at invocation time; never put credentials in card config, templates,
 events or process arguments. These services do not grant access to connected
@@ -100,8 +114,17 @@ Plugin API 1.21 adds opt-in deployment of existing plugin Workspace views and se
 
 Start with the installable [Greeter example](../examples/plugins/greeter/README.md), then consult [package discovery](#package-structure-and-discovery), [the public API](#public-plugin-api), and the contracts below.
 
+Plugin API 1.20 adds an opt-in, transient plugin visual-capture path. A trusted
+plugin may register an active workspace renderer with the frontend host; the
+backend sends its pixels to a model only through an explicitly granted visual
+capability. Screenshots are revision-checked and never stored in node documents
+or runtime logs.
+
 Plugin API 1.16 adds `NodePresentation` for supported surfaces, initial appearance,
-and compact-card opening behavior (see the node definition contract below).
+and compact-card opening behavior (see the node definition contract below). It also
+lets a trusted Agent runtime opt into an OAW-managed model connection resolver. The
+resolver is injected only in the backend and returns the selected adapter, model,
+base URL and secret without storing credentials in plugin card state or frontend code.
 Plugin API 1.15 adds optional pack artwork and accent colors through registered
 public image assets (see [Card Library](card-library.md#pack-appearance)).
 Plugin API 1.14 adds `PackDefinition` and `registration.register_pack(...)`.
@@ -109,6 +132,12 @@ Every card definition belongs to a pack. Opening an owned pack collects its card
 users then choose cards for persistent named decks. Registration alone never adds
 cards to a user's collection or tray. See [Packs, Card Library and Decks](card-library.md)
 for manifests, migration, persistence and disable semantics.
+
+Bundled Packs may include canonical host cards (for example `core.jobs` in
+MatCreator). Collection records keep the card's defining plugin as owner and
+track each opened Pack separately in `source_pack_ids`; including a host card
+does not transfer implementation or runtime ownership. Installed external Pack
+distributions still contain only their own cards.
 
 Plugin API 1.13 adds projected read-only document actions (`project=True`),
 document update validators and declarative `NodeDocumentTransformation`s.
@@ -205,7 +234,10 @@ Normal backend startup scans immediate package directories under the repository'
 `plugins/` folder. Each package declares the entry-point group above in its
 `pyproject.toml`; both `src` and flat Python package layouts are supported. No
 `-PluginPath` flag or editable installation is needed for these local packages.
-Dependencies must already be available in the backend environment.
+Declare installation intent in `oaw.pack.toml` and prepare additional adapter
+libraries with the backend interpreter running `scripts/install-plugins.py`.
+The shared adapter layer is separate from isolated host workers and Sandbox
+environments; [the distribution guide](pack-distribution.md) covers all three.
 
 The loader also discovers installed entry points. An installed entry with the
 same name and factory as a local declaration is loaded only once. Local packages
@@ -360,18 +392,23 @@ or render displays a local error instead of silently substituting another view.
 
 Views receive the current card, definition, surface level, and a card-scoped host
 adapter with `updateConfig` and `getAgentInfo`. Updates go through existing host
-actions and backend validation. `SchemaFields` is also exported for scalar schema
-controls. Import host contracts only from `@oaw/plugin-api`; React is shared with
-the host. Do not import host stores or internal components. UI extensions are
-trusted application code, not a security sandbox; error boundaries isolate
-rendering and module-load errors, not arbitrary asynchronous side effects.
+actions and backend validation. The adapter also provides document reads/actions,
+transforms, file-viewer access, `openWorkspace(nodeId)`, `runAgent(nodeId, prompt)`
+and `onDocumentChange(listener)`. The latter observes future authoritative
+`node_document` mutations and returns an unsubscribe function; it must not be
+used as a replacement for a plugin's own initial document load. `SchemaFields` is
+also exported for scalar schema controls. Import host contracts only from
+`@oaw/plugin-api`; React is shared with the host. Do not import host stores or
+internal components. UI extensions are trusted application code, not a security
+sandbox; error boundaries isolate rendering and module-load errors, not arbitrary
+asynchronous side effects.
 
-Vite discovers immediate `plugins/*/frontend` entries at startup/build time and
-loads their view modules on demand. Restart development servers after adding a
-plugin; rebuild the frontend for production. Existing sources support Vite HMR.
-Installing a Python wheel alone does not add its UI to an existing frontend
-bundle: place its frontend source under the local plugin directory and rebuild.
-This version does not load remote JavaScript or independently versioned React.
+Vite discovers immediate `plugins/*/frontend` projects at startup/build time.
+Each project owns `package.json`, a lockfile and a build script using the public
+SDK. Development and production both load that independent build artifact;
+source edits rebuild the Pack and reload the page. Restart Vite after adding a
+new project. Installed `.oawpack` frontends load from their immutable version
+without rebuilding the host. React and the public SDK always use host instances.
 
 See [Codex](../plugins/codex/frontend/index.tsx) for a working SDK-based settings
 view and its package-owned icon.
@@ -1177,8 +1214,8 @@ removal still use the existing discovery mechanism and require a restart.
   cancellation.
 - Never cache capability authorization. Re-derive it from the live graph for every
   privileged operation.
-- Plugin packages cannot inject arbitrary frontend code. Custom browser rendering
-  requires a separately reviewed core frontend contribution.
+- Plugin frontends execute trusted browser code. Import host services through
+  `@oaw/plugin-api`; rendering error boundaries are not a security sandbox.
 
 The Greeter integration test verifies editable entry-point discovery, descriptor
 ownership, independent runtime state across registries, lifecycle updates,
@@ -1245,6 +1282,19 @@ and their relationships. See the skill helper for this specialization.
 
 
 ## Agent equipment and Barracks (Plugin API 1.7)
+
+Plugin API 1.26 adds `NodeTypeDefinition.default_equipment`, a tuple of
+`DefaultEquipment(key="skills", type="example.tools", relationship="example.tools.use")`
+declarations. Only Agents can declare these slots. Targets and relationships
+belong to the declaring plugin; targets are inert document resources with an
+initial value, without lifecycle handlers, execution or scoped runtime state.
+The host creates ordinary private equipment and documents through native world
+and StateStore operations, with compensation on failed Agent initialization.
+Missing slots are seeded once for existing Agents on startup. Known slots are
+not reinstalled after unequipping/deletion. Existing shared resources are not
+adopted or removed. Duplicate/summon/Legion/desktop history preserve slot identities
+remapping internal node references on copy. Existing documents are not updated
+when the plugin changes; edit them manually or create new resources.
 
 World edges describe shared relationships. `Card.parent_id` describes spatial
 container membership. `Card.equipment = {owner_id, relationship}` describes

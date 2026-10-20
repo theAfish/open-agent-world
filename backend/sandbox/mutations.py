@@ -34,14 +34,19 @@ def _rename(source, destination, source_fd, source_parent, destination_parent):
         ctypes.memmove(ctypes.addressof(buffer) + RenameInfo.name.offset, name, len(name))
         _windows_information(source_fd, 3, buffer)
     else:
-        # Linux/WSL must fail atomically if a destination appears after validation.
+        # Never replace a destination that appears after validation. Linux/WSL
+        # and macOS expose different descriptor-relative exclusive rename APIs.
         libc = ctypes.CDLL(None, use_errno=True)
         rename = getattr(libc, 'renameat2', None)
+        flags = 1  # Linux RENAME_NOREPLACE.
+        if rename is None:
+            rename = getattr(libc, 'renameatx_np', None)
+            flags = 0x00000004  # Darwin RENAME_EXCL (sys/stdio.h).
         if rename is None:
             raise SandboxValidationError('This runtime does not support safe file moves')
         rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
         rename.restype = ctypes.c_int
-        if rename(source_parent, os.fsencode(source.name), destination_parent, os.fsencode(destination.name), 1):
+        if rename(source_parent, os.fsencode(source.name), destination_parent, os.fsencode(destination.name), flags):
             code = ctypes.get_errno()
             raise OSError(code, os.strerror(code))
 

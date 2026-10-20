@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import type { PluginViewProps } from "./sdk";
 import { useWorldStore } from "../state/worldStore";
+import { TEST_CATALOG } from '../state/catalog.fixture';
 import type { WorldCard, WorldEdge } from "../types/world";
 import { WorkspaceSectionProvider, type WorkspaceSectionProps, type WorkspaceSectionRegistration } from "../workspace/WorkspaceSection";
 import { WorkspaceAccess } from "../workspace/WorkspaceAccess";
@@ -12,6 +13,7 @@ import plugin from "../../../plugins/knowledge_base/frontend";
 vi.mock("@oaw/plugin-api", async () => {
   const sections = await import("../workspace/WorkspaceSection");
   return ({
+  ...await vi.importActual<typeof import('./sdk')>('./sdk'),
   WorkspaceEmptyState: (await import("../workspace/WorkspacePrimitives")).WorkspaceEmptyState,
   WorkspaceToolbar: (await import("../workspace/WorkspacePrimitives")).WorkspaceToolbar,
   t: (value: string, params?: Record<string, unknown>) => params
@@ -126,7 +128,7 @@ beforeEach(() => {
   vi.stubGlobal("ResizeObserver", class {
     observe() {} unobserve() {} disconnect() {}
   });
-  useWorldStore.setState({ modelCatalog: { revision: 1, default_model: null, connections: [{
+  useWorldStore.setState({ catalog: TEST_CATALOG, modelCatalog: { revision: 1, default_model: null, connections: [{
     id: "connection-1", name: "OpenAI", adapter: "openai", base_url: "", enabled: true,
     auth_mode: "api_key", api_key_configured: true,
     models: [{ id: "model-1", name: "gpt-4o", model_id: "gpt-4o", enabled: true }],

@@ -51,21 +51,21 @@ test('conditional sections retain geometry while missing, accept explicit new hi
   useWorldStore.setState({ cards: [team, owner, neighbor], catalog: { plugins: [], packs: [], relationships: [], node_types: [] }, updateCard });
   const view = render(<WorkspaceWindow card={team} />);
   const root = view.container.querySelector<HTMLElement>('.legion-layout-root')!;
-  expect(root.style.minWidth).toBe('910px');
+  expect(root.style.minWidth).toBe('908px');
   const tracks = view.container.querySelectorAll<HTMLElement>('.legion-layout-split')[1].style.gridTemplateColumns;
   fireEvent.click(screen.getByRole('button', { name: 'Toggle graph' }));
   expect(screen.getByText('This section is currently unavailable. Its layout is preserved.')).toBeTruthy();
-  expect(root.style.minWidth).toBe('910px');
+  expect(root.style.minWidth).toBe('908px');
   expect(view.container.querySelectorAll<HTMLElement>('.legion-layout-split')[1].style.gridTemplateColumns).toBe(tracks);
   fireEvent.click(screen.getByRole('button', { name: 'Toggle graph' }));
-  expect(root.style.minWidth).toBe('910px');
+  expect(root.style.minWidth).toBe('908px');
   fireEvent.click(screen.getByRole('button', { name: 'Change declared size' }));
-  expect(root.style.minWidth).toBe('1010px');
+  expect(root.style.minWidth).toBe('1008px');
   expect(useWorldStore.getState().cards[0].config.workspace_layout).toBe(layout);
   expect(updateCard).not.toHaveBeenCalled();
   act(() => useWorldStore.setState({ cards: [team, neighbor] }));
   act(() => useWorldStore.setState({ cards: [team, { ...owner, config: { hide_graph: true } }, neighbor] }));
-  expect(root.style.minWidth).toBe('730px');
+  expect(root.style.minWidth).toBe('728px');
 });
 
 test('operation activation reveals existing tabs without saving geometry or resetting their owner', () => {

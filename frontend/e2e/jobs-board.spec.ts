@@ -38,6 +38,7 @@ test('Jobs card presents generic providers and controls in standalone and narrow
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto('/');
+  await expect(page.locator(`[data-card-id="${board.id}"]`)).toBeAttached();
   await page.evaluate(async id => {
     // @ts-expect-error Vite development module used to open the production workspace.
     const { useNodeSurfaceStore } = await import('/src/state/nodeSurfaces.ts' /* @vite-ignore */);
@@ -45,11 +46,18 @@ test('Jobs card presents generic providers and controls in standalone and narrow
   }, board.id);
   let workspace = page.getByRole('dialog', { name: 'Research jobs workspace', exact: true });
   await expect(workspace.locator('.job-tile')).toHaveCount(6);
+  await expect(page.locator(`.react-flow__node[data-id="${board.id}"]`)).toHaveCSS('width', '1020px');
   await page.getByRole('button', { name: 'Fit view', exact: true }).click();
   await expect(workspace.getByRole('button', { name: 'Refresh jobs' })).toBeInViewport();
+  await expect(workspace.getByRole('textbox', { name: 'Search jobs' })).toHaveCount(0);
+  await expect(workspace.getByRole('article', { name: 'Training potential' }).getByText('Failed', { exact: true })).toBeVisible();
+  const compactRatio = await workspace.locator('.job-tile').first().evaluate(el => el.getBoundingClientRect().width / el.parentElement!.getBoundingClientRect().width);
+  expect(compactRatio).toBeLessThan(.5);
+  expect(compactRatio).toBeGreaterThan(.45);
   await page.screenshot({ path: '../.outputs/jobs/standalone-light.png' });
   await workspace.getByRole('button', { name: 'Show job details' }).first().click();
   await expect(workspace.locator('.job-metadata')).toContainText('external-0-abcdef0123456789abcdef0123456789');
+  expect(await workspace.locator('.job-tile').first().evaluate(el => el.getBoundingClientRect().width / el.parentElement!.getBoundingClientRect().width)).toBeCloseTo(1, 3);
   await workspace.getByRole('button', { name: 'Pause monitoring', exact: true }).click();
   await expect(workspace.getByRole('button', { name: 'Resume monitoring', exact: true })).toBeEnabled();
   expect(actions).toEqual(['pause']);
@@ -76,10 +84,44 @@ test('Jobs card presents generic providers and controls in standalone and narrow
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
     await page.setViewportSize({ width: 1000, height: 800 });
     expect(await workspace.locator('.jobs-board').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    const heights = await workspace.locator('.job-tile').evaluateAll(tiles => tiles.map(tile => tile.getBoundingClientRect().height));
+    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(1);
+    const lines = await workspace.locator('.job-tile').first().evaluate(tile => ({
+      title: tile.querySelector('.job-tile-title')!.getBoundingClientRect().bottom,
+      status: tile.querySelector('.job-tile-state')!.getBoundingClientRect().top,
+    }));
+    expect(lines.status).toBeGreaterThan(lines.title);
     await page.screenshot({ path: `../.outputs/jobs/composed-narrow-${theme}.png` });
   }
+  await workspace.getByRole('combobox', { name: 'Filter jobs' }).click();
+  await page.screenshot({ path: '../.outputs/jobs/composed-filter-dark.png' });
+  await page.getByRole('listbox', { name: 'Filter jobs' }).getByRole('option', { name: 'Needs attention · 4' }).click();
+  await expect(workspace.locator('.job-tile')).toHaveCount(4);
+  await workspace.getByRole('combobox', { name: 'Filter jobs' }).selectOption('all');
+  await workspace.getByRole('button', { name: 'Search jobs' }).click();
+  await expect(workspace.getByRole('textbox', { name: 'Search jobs' })).toBeFocused();
+  expect(await workspace.locator('.jobs-board').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  const filterBox = (await workspace.getByRole('combobox', { name: 'Filter jobs' }).boundingBox())!;
+  const searchBox = (await workspace.getByRole('textbox', { name: 'Search jobs' }).boundingBox())!;
+  expect(Math.abs((filterBox.y + filterBox.height / 2) - (searchBox.y + searchBox.height / 2))).toBeLessThan(2);
+  await page.screenshot({ path: '../.outputs/jobs/composed-search-dark.png' });
   await workspace.getByRole('textbox', { name: 'Search jobs' }).fill('no matching record');
   await expect(workspace.getByText('No matching jobs', { exact: true })).toBeVisible();
+  await workspace.getByRole('button', { name: 'Close job search' }).click();
+  await expect(workspace.locator('.job-tile')).toHaveCount(6);
+  await expect(workspace.getByRole('textbox', { name: 'Search jobs' })).toHaveCount(0);
+  const narrowTile = workspace.getByRole('article', { name: 'Training potential' });
+  // The card padding is clickable too; there is no separate expand control.
+  await narrowTile.click({ position: { x: 5, y: 5 } });
+  expect(await narrowTile.evaluate(el => el.getBoundingClientRect().width / el.parentElement!.getBoundingClientRect().width)).toBeCloseTo(1, 3);
+  await page.screenshot({ path: '../.outputs/jobs/composed-details-dark.png' });
+  await narrowTile.getByRole('button', { name: 'Hide job details' }).click();
+  expect(await narrowTile.evaluate(el => el.getBoundingClientRect().width / el.parentElement!.getBoundingClientRect().width)).toBeLessThan(.5);
+  await narrowTile.getByRole('button', { name: 'Show job details' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(narrowTile.getByRole('button', { name: 'Hide job details' })).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('Space');
+  await expect(narrowTile.getByRole('button', { name: 'Show job details' })).toHaveAttribute('aria-expanded', 'false');
   expect(errors).toEqual([]);
 });
 
@@ -97,7 +139,7 @@ test('MatCreator preset composes the real session-scoped Jobs card beneath its g
   // This checks composition, not the separate canvas fit/viewport gesture.
   await page.locator(`[data-card-id="${instance.node_ids.group}"]`).getByRole('button', { name: 'Workspace mode', exact: true })
     .evaluate((button: HTMLButtonElement) => button.click());
-  const workspace = page.getByRole('dialog', { name: 'MatCreator native research workspace mode', exact: true });
+  const workspace = page.getByRole('dialog', { name: 'MatCreator research workspace mode', exact: true });
   const jobs = workspace.getByRole('region', { name: 'Jobs', exact: true });
   await expect(jobs.getByText('No jobs in this session', { exact: true })).toBeVisible();
   const graph = workspace.getByRole('region', { name: 'Execution graph', exact: true });

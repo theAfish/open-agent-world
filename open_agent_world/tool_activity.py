@@ -83,11 +83,13 @@ def public_tool_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
             # These are named operation contracts, not opaque resource IDs.
             if capability.startswith(("operation:", "host:")):
                 result["tool_name"] = capability.split(":", 1)[1][:256]
-    for key in ("tool_name", "capability_id", "author", "response_visibility"):
+    for key in ("tool_name", "capability_id", "author", "response_visibility", "role", "archive_id"):
         if isinstance(payload.get(key), str):
             result[key] = payload[key][:512]
     if isinstance(payload.get("subagent"), bool):
         result["subagent"] = payload["subagent"]
+    if type(payload.get("run_attempt")) is int and payload["run_attempt"] >= 0:
+        result["run_attempt"] = payload["run_attempt"]
     if isinstance(payload.get("ok"), bool) and "success" not in payload:
         result["success"] = payload["ok"]
     call_id = payload.get("call_id")

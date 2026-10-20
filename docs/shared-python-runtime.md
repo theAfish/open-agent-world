@@ -3,8 +3,14 @@
 [Documentation](README.md)
 
 Normal sandbox backends select a persistent Python venv under the OAW data root:
-`runtime/python/venv`. Python commands, Skill scripts and the sandbox shell PATH
-use this environment. It excludes system site-packages, user site-packages,
+`runtime/python/venv`. Python commands and Skill scripts use this environment.
+On macOS Seatbelt, ordinary commands no longer prepare or mount it; direct
+`python`/`python3` argv commands and Skill scripts select it automatically.
+Shell commands that invoke Python indirectly must request
+`python_environment: "managed"` through the execute API/tool, or enable
+**Managed Python** in the Sandbox terminal. Without that choice a shell runs
+without OAW's managed Python environment. Other runtimes retain eager Python
+preparation for now. The managed environment excludes system site-packages, user site-packages,
 backend `PYTHONPATH`, and the backend project venv. Windows has a managed copy of
 the base interpreter and standard library in `runtime/python/base`; sandbox ACLs
 never grant access to the backend or host Python installation.
@@ -14,9 +20,41 @@ runtime is read-only inside each sandbox. Packages persist across commands,
 sandboxes, backend restarts and plugin removal. Existing Python processes may
 retain modules they have already imported; a new command sees installed packages.
 
-Windows and Linux venvs are not binary-compatible. WSL distributions each share
-one Linux venv under `runtime/platforms/<distribution-key>/runtime/python/venv`.
-There are no per-sandbox or per-plugin environments.
+Windows, Darwin and Linux venvs are not binary-compatible. WSL distributions each
+share one Linux venv under `runtime/platforms/<distribution-key>/runtime/python/venv`.
+Seatbelt uses an OAW-managed CPython 3.12; it does not assume `/usr/bin/python3`.
+One verified, architecture-specific distribution is kept under
+`~/Library/Application Support/OpenAgentWorld/shared-python/` and reused across
+source checkouts and development profiles. Each profile copies that base below
+its own `runtime/python/base` and creates a separate `runtime/python/venv`.
+Seatbelt can read only the profile copy, not the global distribution or the
+backend's Conda environment. A development runtime reset removes the profile
+copy/venv, but not the shared distribution; it therefore does not require
+another CPython download. Apple Container VM uses a separate Linux
+environment below `runtime/macos-container-python`, prepared inside its Python
+3.12 image and mounted at `/opt/oaw-python`. There are no per-sandbox or
+per-plugin environments.
+
+On Seatbelt, uv's wheel cache also lives in that shared directory. A new
+profile still creates its own venv and installs its required packages, but
+previously downloaded compatible wheels can be reused without fetching them
+again. Changing the Python version or CPU architecture uses a different
+distribution/cache directory.
+
+Starting a macOS Seatbelt Sandbox begins shared Python preparation in the
+background. `start_sandbox` and `inspect_sandbox` report `shared_python.ready`,
+`distribution_cached`, `preparing`, the current preparation `phase`, time since observable progress,
+and any warmup error. A direct Python command submitted during warmup keeps its
+own operation ID and reports `phase: "preparing_python"` with
+`command_started: false`; the phase changes to `executing` only after preparation.
+Starting an already running Sandbox again retries a failed warmup. Seatbelt's
+first managed CPython download is stopped if its output, cache, and staging files
+show no progress for 600 seconds. The failed installation is recorded in
+`install.log` and the command is not launched. The ordinary command timeout only
+starts after Python preparation and process dispatch.
+Other macOS Python package/installer downloads use a 300-second no-progress
+limit. Progress includes installation output and modified cache/runtime files;
+these are observations, not a claim that a download will succeed.
 
 Installed `.oawpack` manifests declare `runtime.sandbox.python`; discovery feeds
 the same bootstrap used by bundled plugins. All enabled Pack requirements are
@@ -40,13 +78,15 @@ need complete dependency declarations. The manual API is
 Start the sandbox once to select its execution platform before installing.
 
 The manager serializes mutations with an OS file lock, including across backend
-processes. A lock wait exceeding 60 seconds returns structured `resource_busy`
-feedback to the Agent, without failing its reasoning turn. Inspect the installation
+processes. A per-profile lock wait exceeding 60 seconds returns structured
+`resource_busy` feedback to the Agent. The shared macOS distribution lock can
+wait for another checkout's download rather than starting a duplicate one.
+Inspect the installation
 and wait before retrying the rejected command.
-Package installs have a 30-minute wall-clock limit; interpreter setup has a
-10-minute limit. The WSL transport budget covers lock acquisition, setup, installer
-bootstrap and package installation. uv retains its connect/read timeouts for
-stalled network I/O. Progress is written live to `runtime/python/install-output.log`;
+Package installs have a 30-minute wall-clock limit; most interpreter setup steps
+have a 10-minute limit. The macOS CPython download has a separate 600-second
+no-progress limit. The WSL transport budget covers lock acquisition, setup, installer
+bootstrap and package installation. Progress is written live to `runtime/python/install-output.log`;
 `runtime/python/install.log` retains outcomes, elapsed time and output tails,
 including failures and timeouts. Cancellation drains active
 mutations before releasing ownership. Commands check Python preparation before
@@ -100,8 +140,8 @@ startup hooks do not run in the backend during installation.
 
 This minimal implementation accepts index package names, extras and version
 constraints, and installs wheels only. Source builds, local paths, URLs and raw
-installer options are unsupported. Python commands and installed CLI entry points
-automatically use the shared venv, including calls inside shells and subprocesses.
+installer options are unsupported. Selected managed-Python commands and installed
+CLI entry points use the shared venv, including calls inside their shells and subprocesses.
 After installation the manager retargets launcher interpreter references without
 executing installed package code on the host. Existing environments are repaired
 on their next preparation/execution; no package reinstall or venv activation is

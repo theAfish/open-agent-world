@@ -1,4 +1,5 @@
 import type { ConversationRunSummary, RuntimeEvent } from "../types/world";
+import { compareTimestamp } from './activityTiming';
 
 function normalizedType(event: RuntimeEvent): string {
   return event.type.replace(/[.\s-]/g, "_").toLowerCase();
@@ -91,6 +92,12 @@ export function activeConversationRuns(
 ): ConversationRunSummary[] {
   if (!sessionId) return [];
   const runs = new Map(snapshot.map((run) => [run.run_id, { ...run, tool_trace: [...(run.tool_trace ?? [])] }]));
+  const checkpoints = new Map(snapshot.map(run => [run.run_id, {
+    ids: new Set((run.tool_trace ?? []).map(item => item.id).filter(Boolean)),
+    through: (run.tool_trace ?? []).map(item => item.timestamp).filter((value): value is string => typeof value === 'string')
+      .sort(compareTimestamp).at(-1),
+  }]));
+  const seen = new Set<string>();
   const ended = new Set<string>();
   for (const event of [...events].reverse()) {
     if (
@@ -100,7 +107,17 @@ export function activeConversationRuns(
     const id = runId(event);
     if (!id || !event.agent_id) continue;
     const type = normalizedType(event);
-    if (["run_succeeded", "run_failed", "run_cancelled", "run_interrupted"].includes(type)) {
+    if (seen.has(event.id)) continue;
+    seen.add(event.id);
+    const checkpoint = checkpoints.get(id);
+    // The snapshot count already includes its retained trace and earlier calls.
+    // Do not replay an old start over a completed tool or count it twice.
+    if ((type === 'tool_started' || type === 'tool_completed') && checkpoint &&
+      (checkpoint.ids.has(event.id) || (checkpoint.through && event.timestamp &&
+        compareTimestamp(event.timestamp, checkpoint.through) < 0))) continue;
+    const durable = eventRun(event);
+    if (["run_succeeded", "run_failed", "run_cancelled", "run_interrupted"].includes(type)
+      || (durable?.status && ["succeeded", "failed", "cancelled", "interrupted"].includes(durable.status))) {
       runs.delete(id);
       ended.add(id);
       continue;
@@ -108,7 +125,6 @@ export function activeConversationRuns(
     // Operational/status cleanup events must not resurrect a terminal Run.
     if (ended.has(id) || !["run_created", "run_started", "run_resumed", "run_waiting",
       "agent_started", "agent_message", "agent_progress", "tool_started", "tool_completed"].includes(type)) continue;
-    const durable = eventRun(event);
     const existing = runs.get(id);
     const current: ConversationRunSummary = {
       run_id: id,
@@ -118,8 +134,14 @@ export function activeConversationRuns(
       finished_at: durable?.finished_at ?? existing?.finished_at,
       awaiting: durable?.awaiting ?? existing?.awaiting,
       progress: durable?.progress ?? existing?.progress,
+      recovery_kind: durable?.recovery_kind ?? existing?.recovery_kind,
+      recovery_classification: durable?.recovery_classification ?? existing?.recovery_classification,
+      recovery_receipts: durable?.recovery_receipts ?? existing?.recovery_receipts,
+      confirmed_tool_count: durable?.confirmed_tool_count ?? existing?.confirmed_tool_count,
       tool_count: durable?.tool_count ?? existing?.tool_count ?? 0,
       tool_trace: [...(durable?.tool_trace ?? existing?.tool_trace ?? [])],
+      structure_outcomes: durable?.structure_outcomes ?? existing?.structure_outcomes,
+      delivery_state: durable?.delivery_state ?? existing?.delivery_state,
       tool_trace_truncated: durable?.tool_trace_truncated ?? existing?.tool_trace_truncated,
       live_text: existing?.live_text,
     };
@@ -128,8 +150,18 @@ export function activeConversationRuns(
     if (type === "agent_message" && typeof event.payload.text === "string") {
       current.live_text = event.payload.text;
       current.progress = undefined;
-    } else if (type === "agent_progress" && typeof event.payload.text === "string") {
+    } else if (type === "agent_progress" && event.payload.kind !== "model_reasoning"
+      && typeof event.payload.text === "string") {
       current.progress = event.payload.text;
+      if (event.payload.kind === "model_stream_interrupted") {
+        current.recovery_kind = "model_stream_interrupted";
+        current.recovery_classification = typeof event.payload.recovery_classification === "string"
+          ? event.payload.recovery_classification : undefined;
+        current.recovery_receipts = Array.isArray(event.payload.recovery_receipts)
+          ? event.payload.recovery_receipts as ConversationRunSummary["recovery_receipts"] : undefined;
+        current.confirmed_tool_count = typeof event.payload.completed_tool_count === "number"
+          ? event.payload.completed_tool_count : undefined;
+      }
     } else if (type === "tool_started") {
       const name = typeof event.payload.name === "string" ? event.payload.name : "tool";
       current.awaiting = name;

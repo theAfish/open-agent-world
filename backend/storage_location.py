@@ -186,6 +186,14 @@ def _entries(root: Path, *, exclude_metadata: bool = True):
     def fail(error):
         raise error
     for parent, directories, files in os.walk(root, followlinks=False, onerror=fail):
+        # Process locks carry no portable state. In particular Windows cannot
+        # read a byte held by a worker lease, even after a service has stopped
+        # while its interpreter still retains imported Pack modules.
+        transient = {'packs/resource-leases', 'packs/request-locks', 'packs/operation-locks',
+                     'packs/adapter-locks', 'packs/adapter-source-locks', 'runtime/locks'}
+        if exclude_metadata:
+            directories[:] = [name for name in directories
+                              if (Path(parent) / name).relative_to(root).as_posix() not in transient]
         # os.walk does not recognize WSL reparse points as links on Windows.
         names = sorted(directories + files)
         directories[:] = [name for name in directories if not _reparse(Path(parent) / name)]
@@ -342,7 +350,8 @@ def _rebase_managed_metadata(stage: Path, source: Path, target: Path):
 
 
 def _checkpoint(source: Path):
-    for path in (source / 'database/world.sqlite3', source / 'runtime/plugins.sqlite3', source / 'packs/installations.sqlite3'):
+    for path in (source / 'database/world.sqlite3', source / 'runtime/plugins.sqlite3',
+                 source / 'packs/installations.sqlite3', source / 'packs/resources.sqlite3'):
         if path.is_file():
             with closing(sqlite3.connect(path, timeout=1)) as database:
                 if database.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()[0]:

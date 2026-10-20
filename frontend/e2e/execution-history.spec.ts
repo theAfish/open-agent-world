@@ -53,7 +53,8 @@ test('complete history, live partial publication and reload retain old events', 
     source: 'agent:execution_' + n + ':step_1', target: 'agent:execution_20:step_9', kind: 'data',
     evidence: 'artifact_inspected', artifact_ref: 'oaw:artifact:outputs:' + n + '_1' }));
   await publish({ ...initial, run_id, revision: 2, edges: dependencies });
-  await expect(graph.locator('[data-graph-edge][data-kind="data"]')).toHaveCount(3);
+  await expect(graph.locator('.execution-anchors:not(.execution-continuity) button')).toHaveCount(3);
+  await expect(graph.locator('[data-graph-edge][data-kind="data"]')).toHaveCount(0);
   await graph.getByRole('button', { name: 'Uses result E01 step 1', exact: true }).click();
   await expect(graph.getByRole('button', { name: 'E01 step 1: success', exact: true })).toHaveAttribute('aria-expanded', 'true');
   await graph.getByRole('button', { name: 'Used by E20 step 9', exact: true }).click();

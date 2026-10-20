@@ -10,12 +10,11 @@ if (Test-Path -LiteralPath (Join-Path $packagedStore 'database/world.sqlite3')) 
     $env:OPEN_AGENT_WORLD_DATA_ROOT = $packagedStore
 }
 $env:OAW_XRD_ROOT = Join-Path (Split-Path -Parent $researchRoot) 'XRD'
-& uv pip install --python (Join-Path $researchRoot 'backend/.venv/Scripts/python.exe') -e (Join-Path $researchRoot 'plugins/library') -e (Join-Path $researchRoot 'plugins/xrd')
-if ($LASTEXITCODE -ne 0) { throw 'Plugin dependencies could not be installed' }
-# dev.ps1 calls uv run: retain local editable plugin dependencies.
+& (Join-Path $researchRoot 'backend/.venv/Scripts/python.exe') (Join-Path $PSScriptRoot 'check-source-environment.py')
+if ($LASTEXITCODE -ne 0) { throw 'Run setup.ps1 with this research data root before starting.' }
 # Research uses the persistent store, not the resettable development profile.
 # Serve the current built frontend and API together at the familiar address.
-& npm.cmd --prefix (Join-Path $researchRoot 'frontend') run build
-if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed' }
+& node (Join-Path $researchRoot 'frontend/scripts/build-source-frontend.mjs')
+if ($LASTEXITCODE -ne 0) { throw 'Frontend preparation failed. See the dependency or build error above.' }
 & (Join-Path $researchRoot 'backend/.venv/Scripts/python.exe') (Join-Path $PSScriptRoot 'start.py') --port 5173 --strict-port
 if ($LASTEXITCODE -ne 0) { throw 'Research application exited with an error' }

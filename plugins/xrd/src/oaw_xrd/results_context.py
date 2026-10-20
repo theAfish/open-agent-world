@@ -169,8 +169,8 @@ def register_results_context(registration):
     async def read(context, capability, arguments):
         if arguments:
             raise ResourceValidationError('结果读取工具不接受运行编号、路径或其他参数。')
-        root = Path(os.environ.get('OAW_XRD_ROOT', str(Path(__file__).resolve().parents[5] / 'XRD')))
-        root = Path(os.environ.get('OAW_XRD_RUN_ROOT', str(root / 'runs')))
+        from .profile import roots
+        _, root = roots()
         result = await asyncio.to_thread(read_results_context, root, capability.target_id)
         from .sql_history import report_contract
         result['output_contract'] = await asyncio.to_thread(report_contract, capability.target_id)

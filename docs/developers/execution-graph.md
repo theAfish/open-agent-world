@@ -9,12 +9,13 @@ never tools or execution control.
 
 ## Built-in graph presentation
 
-The viewer renders one chronological SVG graph, with a vertex for each Agent
-task attempt, similar to a commit. Tool calls explicitly owned by that attempt
+The viewer uses a **Temporal Braid**: a compact chronological graph with one
+vertex per Agent task attempt. Tool calls explicitly owned by that attempt
 are evidence inside its details, not additional vertices. Independent tasks,
 failed attempts and retries remain separate even when they share an Agent or
-workstream. A running attempt has one dashed placeholder which becomes the
-finished event in place; tool updates never add events or move the viewport.
+workstream. A running attempt has a gently animated ring and updates in place;
+tool updates never add events or move the viewport. This is a history of attempts
+with their current recorded states, not a fabricated log of state transitions.
 Activities from different tasks interleave by their start time (or
 recorded sequence when times are unavailable); containment never moves a child
 next to its parent. All connected sources appear together by default, with
@@ -25,19 +26,60 @@ session: this does not infer a Git repository or read other sessions.
 There is no automatic folding, container expansion or separate focus view.
 Clicking anywhere on an operation opens its inline details; clicking again or
 pressing Escape closes them. Search locates an operation in the original graph.
+Arrow keys and Home/End navigate the complete history, including unmounted rows.
 Updates preserve the reading position, selection and existing lane allocations;
 new operations have a jump-to-latest affordance. Paging and windowed mounting
 keep 1,200 operations immediately scrollable without expansion clicks.
 
-Four reusable rail positions bound the width. Explicit `workstream_id` keeps
-task operations on one rail. `actor_id` identifies the owner color separately
-from the status icon. Thin colored task trails represent succession, neutral
-dotted trails represent time order, and neither is a causal edge. Recorded
-control/data/retry/replan/fork/merge connections retain their own identities.
-When an occupied rail would pass through an unrelated operation, reference
-ports preserve the endpoints. Selecting the operation highlights the full
-connection in a separate gutter and provides direct endpoint navigation.
-No graph engine or additional dependency is required.
+Four reusable positions bound the routing width; positions do not identify
+Agents or permanent branches. Serial work can hand off between Agents on one
+lane, including a retry whose failure also triggers a later replan. Observed
+overlapping execution intervals use separate available lanes. Existing node
+allocations remain stable when late data adds conflicts; references handle those
+conflicts instead of moving old nodes. Missing actor identity stays unknown,
+including when multiple observation sources are combined.
+
+Color identifies the Agent at its node, label, status glyph and outgoing cables.
+Focus changes line weight and opacity while preserving that identity color.
+Completed nodes are 8px solid dots inside fixed 12px cable openings. Hovering the
+row or focusing its button grows the dot to fill that opening without rerouting
+the cable. Running nodes have a breathing ring,
+waiting nodes are a centered clock face with independently rotating hands
+(12s minute-hand and 144s hour-hand cycles). Paused and blocked clocks stay still.
+Failure/rework use bold cross and diamond/exclamation glyphs. Node glyphs and shapes show
+completion, running, waiting, failure, rework and stopped work; unknown statuses
+retain their original text with a neutral glyph. Motion respects reduced-motion
+settings. Time appears in each row, with the full date in its tooltip and details.
+Missing timestamps remain visibly unknown. Vertical order expresses time without
+drawing a connection between otherwise independent activities.
+
+Cables are continuous curves colored by their source Agent, with real endpoints. Thin guides connect
+successive records of an explicit workstream unless their recorded lifetimes
+overlap; these guides are not dependencies. Stronger cables represent recorded
+control/data/retry/replan/fork/merge relations. Multiple types between the same
+pair share a cable while retaining every typed relation and original evidence
+in details. Straight rails meet through tangent quarter-circle arcs with a
+consistent 14px maximum radius, reduced when space is tight. Cables leave forks
+early and approach joins smoothly. A cable can move inward through an S bend
+when an inner rail ends, or move outward before a later fork needs that space.
+Both event rows and intervening cable segments reserve their occupied positions;
+compaction cannot pass through unrelated vertices or occupied rails. Event
+positions remain stable, and these bends do not introduce dependency endpoints.
+Neither shared position nor shared color implies dependency.
+
+Selecting a node highlights its transitive upstream and downstream relations,
+dims unrelated nodes, and keeps that focus while the pointer moves. Workstream
+guides do not participate in causal traversal. Hover and selection only change
+the emphasis of existing cables; they never reveal or reroute folded relations.
+Connections spanning more than
+eight rows, crossing occupied lanes, or returning to an earlier-started event
+are folded into counted references at both ends. There are no dangling stubs.
+Folded relations remain endpoint counts and navigable entries in the selected
+event's details, even when both endpoints are visible. They do not introduce
+left-side bypass cables as focus or the viewport changes. Missing endpoints are
+explicitly unavailable. This keeps the
+graph bounded even when more than four tasks overlap. No graph engine, provider
+contract extension or second execution state store is required.
 
 Providers mark runtime-only containers `record_type: context` and unexecuted
 plan definitions `record_type: planned`. Containers are absent from the main
@@ -54,9 +96,13 @@ tool edges never become artificial event self-dependencies. The raw snapshot and
 persistence contract are unchanged. Its task launcher records observed forks. It does not
 claim that completing a task accepted changes into a project.
 
-Run `npm run test:e2e:graph` from `frontend` for the four visual scenarios at
+Run `npm run test:e2e:graph` from `frontend` for the six visual scenarios at
 300, 500 and 1000px in both themes, plus live updates, search, one-click details,
-Chinese UI and scrolling. A native-format fixture also passes through the real
+Chinese UI, scrolling, causal focus, keyboard navigation and reduced motion.
+The `braid` fixture spans three executions, concurrent tasks from the same Agent,
+an Agent handoff, retry, replan, three-way fan-in, custom states and unavailable
+history. The `compact` fixture exercises staggered joins that release an inner
+rail and a later fork that needs it again. A native-format fixture also passes through the real
 MatCreator adapter/projection before rendering. Evidence is saved under
 `.outputs/project-history`. `execution-history.spec.ts` and
 `matcreator-native.spec.ts` separately cover the local host API, durable Run

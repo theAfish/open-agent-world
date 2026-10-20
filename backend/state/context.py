@@ -122,7 +122,7 @@ class StateAPI:
         )
 
     def get(self, scope: StateScope | StateScopeRef, key: str) -> Any:
-        return self.store.get(scope, key)
+        return self.store.runtime_get(scope, key)
 
     def resolve(self, key: str) -> ResolvedStateValue:
         return self.store.resolve(self.context, key)

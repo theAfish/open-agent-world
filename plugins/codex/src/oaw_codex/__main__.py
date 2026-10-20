@@ -30,7 +30,7 @@ def api(base: str, path: str, payload: dict | None = None):
 def setup(base: str, workspace: Path, model: str):
     catalog = api(base, '/catalog')
     if not any(plugin['id'] == 'openai.codex' for plugin in catalog['plugins']):
-        raise RuntimeError('Backend has not loaded openai.codex. Start it with --with-editable ./plugins/codex.')
+        raise RuntimeError('Backend has not loaded openai.codex. Run scripts/setup.ps1 or scripts/setup.sh, then restart it.')
     existing = {node['id']: node for node in api(base, '/world')['nodes']}
     nodes = [
         {'id': 'codex-demo-agent', 'type': 'openai.codex.agent', 'name': 'Codex', 'position': {'x': 450, 'y': 350},
@@ -122,7 +122,10 @@ def demo(repo: Path, workspace: Path, model: str):
     vite = repo / 'frontend/node_modules/vite/bin/vite.js'
     node = shutil.which('node')
     if not node or not vite.is_file():
-        raise RuntimeError('Install Node.js and run npm --prefix frontend install first.')
+        raise RuntimeError('Install Node.js and run scripts/setup.ps1 or scripts/setup.sh --skip-build first.')
+    # Reuse the same dependency checks and incremental SDK build as ordinary dev.
+    # No installer or temporary Python overlay belongs in a trial launch.
+    subprocess.run([node, str(repo / 'frontend/scripts/prepare-dev.mjs')], cwd=repo, check=True)
     root = repo / '.open-agent-world/codex-card-demo'
     root.mkdir(parents=True, exist_ok=True)
     stop_file = root / 'stop.request'
@@ -185,7 +188,7 @@ def main():
             setup(args.api, workspace, args.model)
     except KeyboardInterrupt:
         pass
-    except (RuntimeError, URLError) as exc:
+    except (OSError, RuntimeError, URLError, subprocess.CalledProcessError) as exc:
         parser.exit(1, str(exc) + '\n')
 
 

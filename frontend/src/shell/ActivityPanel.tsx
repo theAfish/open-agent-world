@@ -21,6 +21,9 @@ export function ActivityPanel() {
   const socketState = useWorldStore((state) => state.socketState);
   const setOpen = useWorldStore((state) => state.setActivityOpen);
   const cardNames = new Map(cards.map((card) => [card.id, card.name]));
+  // Token-level thinking snapshots belong to the Run detail, not the global
+  // operational log: rendering every snapshot here would bury useful events.
+  const operationalEvents = events.filter((event) => event.payload.kind !== "model_reasoning");
 
   return (
     <aside className={`activity-panel ${open ? "is-open" : ""}`} aria-hidden={!open} aria-label={t("Runtime activity")}>
@@ -41,7 +44,7 @@ export function ActivityPanel() {
 
       <div className="event-list" role="log" aria-live="polite">
         {open && <LifecycleStatus />}
-        {events.length > 0 ? events.map((event) => (
+        {operationalEvents.length > 0 ? operationalEvents.map((event) => (
           <article key={event.id} className={event.type.toLowerCase().includes("error") ? "is-error" : ""}>
             <div className="event-rail"><CircleDot size={12} /><i /></div>
             <div className="event-copy">

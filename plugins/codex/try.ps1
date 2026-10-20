@@ -22,7 +22,9 @@ if (-not $env:OAW_CODEX_COMMAND) {
 }
 Push-Location $projectRoot
 try {
-    & uv run --project backend --with-editable $PSScriptRoot python -m oaw_codex demo --repo $projectRoot --workspace $workspace --model $Model
+    $python = Join-Path $projectRoot 'backend/.venv/Scripts/python.exe'
+    if (-not (Test-Path -LiteralPath $python)) { throw 'Run scripts/setup.ps1 -SkipBuild first.' }
+    & $python -m oaw_codex demo --repo $projectRoot --workspace $workspace --model $Model
     if ($LASTEXITCODE -ne 0) { throw "Codex trial exited with code $LASTEXITCODE" }
 }
 finally { Pop-Location }

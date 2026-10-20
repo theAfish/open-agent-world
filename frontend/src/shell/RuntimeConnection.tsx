@@ -44,9 +44,11 @@ export function RuntimeConnection() {
     const connect = () => {
       if (!active) return;
       setSocketState("connecting");
-      socket = new WebSocket(runtimeWebSocketUrl());
-      socket.addEventListener("open", () => {
-        if (!active) return;
+      const connection = new WebSocket(runtimeWebSocketUrl());
+      socket = connection;
+      const isCurrent = () => active && socket === connection;
+      connection.addEventListener("open", () => {
+        if (!isCurrent()) return;
         attempts = 0;
         lastMessageAt = Date.now();
         setSocketState("live");
@@ -64,8 +66,8 @@ export function RuntimeConnection() {
           socket.send("ping");
         }, HEARTBEAT_INTERVAL_MS);
       });
-      socket.addEventListener("message", (event) => {
-        if (!active) return;
+      connection.addEventListener("message", (event) => {
+        if (!isCurrent()) return;
         lastMessageAt = Date.now();
         try {
           const payload = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
@@ -81,15 +83,16 @@ export function RuntimeConnection() {
           // Malformed events are ignored; the typed stream remains operational.
         }
       });
-      socket.addEventListener("close", () => {
+      connection.addEventListener("close", () => {
+        if (!isCurrent()) return;
         flushEvents();
         stopHeartbeat();
-        if (!active) return;
+        socket = undefined;
         setSocketState("closed");
         attempts += 1;
         retryTimer = window.setTimeout(connect, Math.min(1000 * 2 ** attempts, 12000));
       });
-      socket.addEventListener("error", () => socket?.close());
+      connection.addEventListener("error", () => { if (isCurrent()) connection.close(); });
     };
 
     connect();

@@ -16,8 +16,10 @@ class XRDRuntime(RuntimeProvider):
         self.capability_provider = capability_provider
         self.records = {}
         self.processes = {}
-        self.root = Path(os.environ.get("OAW_XRD_ROOT", str(Path(__file__).resolve().parents[5] / "XRD")))
-        self.run_root = Path(os.environ.get("OAW_XRD_RUN_ROOT", str(self.root / "runs")))
+        from .profile import roots, current_data_root
+        get_root = getattr(capability_provider, 'managed_environment_root', None)
+        self.data_root = Path(get_root()) if get_root else current_data_root()
+        self.root, self.run_root = roots(self.data_root)
 
     async def create_agent(self, config):
         from .workflow import started_at_ms
@@ -161,10 +163,6 @@ class XRDRuntime(RuntimeProvider):
                     "intensity_csv": "\n".join(f"{x},{y}" for x, y in patterns[0]["value"]["points"])})
         if options.mode == "fit" and not options.demo and (not options.cif.strip() or not options.intensity_csv.strip()):
             raise ValueError("Upload intensity CSV and candidate CIF")
-        default_python = self.root / ".venv-xrd" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        python = Path(os.environ.get("OAW_XRD_PYTHON", str(default_python)))
-        if not python.is_file():
-            raise ValueError(f"XRD interpreter not found: {python}; configure OAW_XRD_ROOT or OAW_XRD_PYTHON")
         from .pipeline import run_directory, build_pipeline_input
         run = run_directory(self.run_root, context.run_id)
         run.mkdir(parents=True, exist_ok=False)
@@ -180,6 +178,7 @@ class XRDRuntime(RuntimeProvider):
         def event(kind, payload, status=None):
             return AgentEvent(config.agent_id,context.run_id,kind,payload,run_status=status)
         yield event(AgentEventType.MESSAGE,{"text":f"XRD {options.mode} started. Results: {run}"})
+        lease = None
         try:
             from .sql_history import capture
             await asyncio.to_thread(capture, run)
@@ -193,8 +192,14 @@ class XRDRuntime(RuntimeProvider):
                 options = options.model_copy(update={'wavelength': pipeline_input['wavelength']})
                 (run / 'input.json').write_text(options.model_dump_json(), encoding='utf-8')
             with (run / "console.log").open("wb") as log:
+                from .runtime_environment import worker_command
+                require_qualx = (options.mode == 'match' and not pipeline_stage and options.library_engine == 'qualx'
+                                and any(item['value'].get('kind') == 'library' for item in inputs))
+                command, environment, lease = await asyncio.to_thread(worker_command, 'worker.py', (self.root, run),
+                    data_root=self.data_root, require_qualx=require_qualx)
+                lease.__enter__()
                 process_options = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {'start_new_session': True}
-                process = await asyncio.create_subprocess_exec(str(python),"-u",str(Path(__file__).with_name("worker.py")),str(self.root),str(run),stdout=log,stderr=log, **process_options)
+                process = await asyncio.create_subprocess_exec(*command, env=environment, stdout=log,stderr=log, **process_options)
                 self.processes[context.run_id] = process
                 while process.returncode is None:
                     try:
@@ -235,6 +240,8 @@ class XRDRuntime(RuntimeProvider):
             raise
         finally:
             await self.stop(context.run_id)
+            if lease is not None:
+                lease.__exit__(None, None, None)
             self.processes.pop(context.run_id,None)
             ACTIVE_RUNS.discard(context.run_id)
             manifest["finished_at_ns"] = time.time_ns()

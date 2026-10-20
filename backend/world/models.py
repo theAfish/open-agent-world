@@ -70,6 +70,9 @@ class AgentConfig(BaseModel):
     status: AgentStatus = AgentStatus.IDLE
     runtime_provider_id: str | None = Field(default=None, json_schema_extra={"privileged": True})
     max_concurrent_runs: Annotated[int, Field(ge=1, le=64)] = 1
+    run_execution_deadline_seconds: float | None = Field(default=None, ge=0,
+        description="Total Run deadline in seconds; null uses the server default, zero disables it.",
+        json_schema_extra={"privileged": True})
     inherit_legion_model: bool = True
     legion_role: str = Field(default="", max_length=200, json_schema_extra={"agentReadable": True, "agentWritable": True})
 

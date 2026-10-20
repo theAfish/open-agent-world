@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { overlayHost } from './Modal';
 
 interface Item { index: number; label: string; disabled: boolean; group?: string; hidden: boolean }
 interface Menu {
@@ -203,5 +204,5 @@ export function SelectMenuLayer() {
         <span>{item.label || '\u00a0'}</span><span aria-hidden="true">{item.index === menu.select.selectedIndex ? '✓' : ''}</span>
       </div>
     </div>)}
-  </div>, document.body);
+  </div>, overlayHost(menu.select));
 }

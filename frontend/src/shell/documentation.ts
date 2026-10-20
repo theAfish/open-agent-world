@@ -34,7 +34,7 @@ const developerPages = ['developers/index.md', 'developers/setup.md', 'developer
   'developers/agent-tools.md', 'developers/frontend.md', 'developers/testing.md',
   'pack-distribution.md', 'pack-store.md', 'developers/extension-points.md'];
 const contributorPages = ['contributing/index.md', 'getting-started.md', 'architecture.md',
-  'enterprise-foundations.md', 'tutorial.md', 'desktop.md', 'deployment.md', 'releasing.md',
+  'enterprise-foundations.md', 'tutorial.md', 'desktop.md', 'deployment.md', 'contributing/hosting.zh-CN.md', 'releasing.md',
   'release-notes.md', 'developers/documentation.md', 'contributing/docs-checklist.md'];
 const canonicalPage = (path: string) => path.replace(/\.zh-CN\.md$/, '.md');
 

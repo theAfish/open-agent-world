@@ -28,7 +28,7 @@ shows cancellation only when the provider confirms it. Resuming monitoring after
 stopping an Agent does not restart its stopped turn. Success records the provider's
 execution outcome; inspect the outputs before accepting a scientific result.
 
-New MatCreator native research formations include this card beneath the Agent
+New MatCreator research formations include this card beneath the Agent
 graph. Existing formations retain their saved layout; add and connect a Jobs card
 to include the board. The board is currently available in editor workspaces.
 

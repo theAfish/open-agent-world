@@ -155,6 +155,9 @@ def test_native_agent_capabilities_are_object_scoped_and_revocable(client):
 
 @pytest.mark.parametrize('outcome', ['completed', 'failed', 'cancelled'])
 def test_manual_review_reuses_cancelled_search_without_rerunning_it(tmp_path, monkeypatch, outcome):
+    from contextlib import nullcontext
+    from oaw_xrd import runtime_environment
+    monkeypatch.setattr(runtime_environment, 'worker_command', lambda *args, **kwargs: (['fixture-python'], {}, nullcontext()))
     value, directory = state_fixture(tmp_path, monkeypatch)
     state = value['state']
     incumbent = {'candidate_ids': ['a', 'b'], 'score': 62.5, 'status': 'completed'}
@@ -213,6 +216,9 @@ def test_review_rejects_unmeasured_or_duplicate_selections(tmp_path, monkeypatch
 
 
 def test_review_preserves_completed_combination_when_later_fit_times_out(tmp_path, monkeypatch):
+    from contextlib import nullcontext
+    from oaw_xrd import runtime_environment
+    monkeypatch.setattr(runtime_environment, 'worker_command', lambda *args, **kwargs: (['fixture-python'], {}, nullcontext()))
     value, directory = state_fixture(tmp_path, monkeypatch)
     trials = [{'candidate_ids': [x], 'status': 'completed', 'score': 80} for x in ['a','b']]
     value['state'].update(status='completed', incumbent=trials[0], trials=trials)

@@ -46,11 +46,34 @@ it('displays requirements and installs an explicit version with restart state', 
 
 it('uses backend update decisions and contains a failed install', async () => {
   vi.spyOn(worldApi, 'getStorePacks').mockResolvedValue({ items: [{ ...pack, installed_version: '0.9.0', update_available: true }], next_cursor: null });
-  vi.spyOn(worldApi, 'installStorePack').mockRejectedValue(new Error('Pack requires missing dependency'));
+  vi.spyOn(worldApi, 'getStorePack').mockResolvedValue({ ...detail, installed_version: '0.9.0', update_available: true });
+  vi.spyOn(worldApi, 'getStoreVersion').mockResolvedValue(version);
+  const install = vi.spyOn(worldApi, 'installStorePack').mockRejectedValue(new Error('Pack requires missing dependency'));
   render(<PackStore />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Update' }));
+  expect(install).not.toHaveBeenCalled();
   fireEvent.click(await screen.findByRole('button', { name: 'Update' }));
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Pack requires missing dependency');
   expect((screen.getByRole('button', { name: 'Update' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('shows the same environment plan as local installs and blocks an unresolved dependency', async () => {
+  vi.spyOn(worldApi, 'getStorePacks').mockResolvedValue({ items: [pack], next_cursor: null });
+  vi.spyOn(worldApi, 'getStorePack').mockResolvedValue(detail);
+  vi.spyOn(worldApi, 'getStoreVersion').mockResolvedValue({ ...version, plan: {
+    pack_id: pack.id, name: pack.name, version: version.version, source: 'store', restart_required: true,
+    dependencies: [{ id: 'science.viewer', version: '>=1', state: 'missing' }],
+    environments: [{ id: 'analysis', target: 'sandbox', provider: 'python', management: 'managed', state: 'on_use', python: ['ase'], node: [] }],
+    warnings: [], blockers: ['Install science.viewer first'],
+  } });
+  const install = vi.spyOn(worldApi, 'installStorePack');
+  render(<PackStore />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Get' }));
+  expect(await screen.findByRole('region', { name: 'Installation plan' })).toBeTruthy();
+  expect(screen.getByText('Prepared when used')).toBeTruthy();
+  expect(screen.getByRole('alert').textContent).toContain('Install science.viewer first');
+  expect((screen.getByRole('button', { name: 'Get' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(install).not.toHaveBeenCalled();
 });
 
 it('offers Retry after offline failure and recovers the catalog', async () => {

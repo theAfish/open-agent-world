@@ -12,6 +12,39 @@ from backend.node_resources import ResourceActionRequest, invoke_resource_action
 from backend.plugins.deployment import project_document
 
 
+def frontend_catalog(manifest, services, catalog=None):
+    """Only published owners and their declared service providers reach the UI.
+
+    Dependencies may supply frontend services without publishing any cards. Their
+    identity and module location are needed by the shared loader, but their card
+    definitions, configuration and management metadata remain private.
+    """
+    if catalog is None:
+        catalog = services.plugins.catalog().model_dump(mode="json", by_alias=True)
+    types = {services.world.get_card(node_id).type for node_id in manifest["permissions"]}
+    descriptors = {plugin["id"]: plugin for plugin in catalog["plugins"]}
+    enabled = set(catalog.get("enabled_plugin_ids", []))
+    pending = [node["plugin_id"] for node in catalog["node_types"] if node["id"] in types]
+    owners = set()
+    while pending:
+        owner = pending.pop()
+        if owner in owners or owner not in enabled or owner not in descriptors:
+            continue
+        owners.add(owner)
+        pending.extend(descriptors[owner].get("requires_plugins", []))
+    identity_fields = {"id", "version", "plugin_api_version", "name", "description"}
+    module_fields = {"version", "api_version", "url", "distribution_id"}
+    return {
+        "plugins": [{key: value for key, value in plugin.items() if key in identity_fields}
+                    for plugin in catalog["plugins"] if plugin["id"] in owners],
+        "enabled_plugin_ids": sorted(owners),
+        "frontend_modules": {
+            owner: {key: value for key, value in module.items() if key in module_fields}
+            for owner, module in catalog.get("frontend_modules", {}).items() if owner in owners
+        },
+    }
+
+
 def workspace_snapshot(manifest, services):
     cards = []
     types = set()
@@ -48,7 +81,8 @@ def workspace_snapshot(manifest, services):
     return {"cards": cards, "plugin_access": manifest.get("plugin_access", {}), "legion": {"id": manifest["legion_id"], "name": manifest["name"],
             "type": "legion", "finish": services.world.get_card(manifest["legion_id"]).finish,
             "config": {"workspace_layout": layout}},
-            "catalog": {"node_types": definitions, "relationships": [], "plugins": [], "packs": []}}
+            "catalog": {"node_types": definitions, "relationships": [], "packs": [],
+                        **frontend_catalog(manifest, services, catalog)}}
 
 
 def workspace_router(manifest):

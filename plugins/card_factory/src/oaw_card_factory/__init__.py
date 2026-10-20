@@ -1,8 +1,7 @@
 """Bundled authoring tools; exported recipes contain data only."""
 from dataclasses import replace
 
-from backend.packs.factory_cards import recipe_definition
-from backend.packs.factory_models import CardRecipe, EmptyConfig, FaceDesign, FunctionDesign, PackDesign, PackerConfig, PrintedCard
+from open_agent_world.plugin_api.card_authoring import recipe_definition, CardRecipe, EmptyConfig, FaceDesign, FunctionDesign, PackDesign, PackerConfig, PrintedCard
 from open_agent_world.plugin_api import NodeTypeDefinition, NodePresentation, PackDefinition, PluginDefinition, PluginDescriptor, RelationshipDefinition
 from open_agent_world.plugin_api import LegionPresetDefinition, PresetNode, PresetEdge, NodeTemplateHandler
 
@@ -48,4 +47,4 @@ def register(registration):
 
 
 def create_plugin():
-    return PluginDefinition(PluginDescriptor(id=OWNER, name="卡包工厂", version="0.1.0", plugin_api_version="1.25"), register)
+    return PluginDefinition(PluginDescriptor(id=OWNER, name="卡包工厂", version="0.1.0", plugin_api_version="1.35"), register)

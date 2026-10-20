@@ -1,0 +1,17 @@
+{
+  "name": "@oaw/xrd-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@oaw/plugin-api": "file:../../../frontend/pack-sdk"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

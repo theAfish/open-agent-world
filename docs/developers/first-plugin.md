@@ -1,6 +1,6 @@
 # Your first plugin
 
-**Goal:** create a Hello card with a saved `message` field. You will make two files; the host supplies the card interface and persistence. Finish [development setup](setup.md) first and stop the development server before adding a package.
+**Goal:** create a Hello card with a saved `message` field. You will make three files; the host supplies the card interface and persistence. Finish [development setup](setup.md) first and stop the development server before adding a package.
 
 The complete [Hello World example](../../examples/plugins/hello_world/README.md) is included in the repository. You can copy it or create the files below yourself. Choose one approach so you only load one copy.
 
@@ -11,6 +11,7 @@ From the repository root, create this structure:
 ```text
 plugins/hello_world/
   pyproject.toml
+  oaw.pack.toml
   src/
     oaw_hello/
       __init__.py
@@ -36,7 +37,27 @@ build-backend = "hatchling.build"
 packages = ["src/oaw_hello"]
 ```
 
-The entry point tells OAW which factory to call. Packages directly inside `plugins/` are discovered at startup without an editable install. Additional Python dependencies still need to be installed in the backend environment.
+The entry point tells OAW which factory to call. The loader discovers packages directly inside `plugins/`; setup installs their editable metadata and prepares declared dependencies before dev starts. Add `oaw.pack.toml` to declare the same identities for source development and publication:
+
+```toml
+schema_version = 3
+[distribution]
+id = "community.hello"
+name = "Hello World"
+[compatibility]
+plugin_api = "1.35"
+oaw = ">=0.1.0,<1"
+[plugin]
+owner = "community.hello"
+packs = ["community.hello.starter"]
+node_types = ["community.hello.message"]
+```
+
+This example uses only the host's Pydantic dependency. Additional adapter libraries
+are prepared through `scripts/install-plugins.py --profile plugin-tutorial plugins/hello_world` using the
+backend interpreter. Scientific workers and Sandbox libraries belong in declared
+environments; see [Pack installation and distribution](../pack-distribution.md).
+Startup discovery reads declarations without downloading or installing anything.
 
 ## 2. Define the card and pack
 
@@ -58,7 +79,7 @@ class HelloPlugin:
     descriptor = PluginDescriptor(
         id="community.hello",
         version="0.1.0",
-        plugin_api_version="1.14",
+        plugin_api_version="1.35",
         name="Hello World",
         description="Your first OAW card.",
     )
@@ -91,7 +112,7 @@ def create_plugin() -> HelloPlugin:
     return HelloPlugin()
 ```
 
-The descriptor identifies the plugin. `version` versions your package; `plugin_api_version` is the API level it requires. This example uses the pack API introduced in 1.14, which the current host supports.
+The descriptor identifies the plugin. `version` versions your package; `plugin_api_version` is the API level it requires and matches the publication declaration.
 
 `HelloConfig` validates the editable message. `register_node_type` contributes the card and `register_pack` makes it collectible. The `deck_*` fields provide catalog category metadata; users still choose their own decks. The host persists the configuration without a lifecycle handler.
 
@@ -102,12 +123,14 @@ Keep registration deterministic: create no files, network connections, or backgr
 Windows:
 
 ```powershell
+./scripts/setup.ps1 -Profile plugin-tutorial -SkipBuild
 ./scripts/dev.ps1 -AgentRuntime mock -Profile plugin-tutorial
 ```
 
 Linux/macOS:
 
 ```sh
+bash scripts/setup.sh --profile plugin-tutorial --skip-build
 bash scripts/dev.sh --agent-runtime core.mock --profile plugin-tutorial
 ```
 
@@ -125,7 +148,9 @@ If startup fails, read the loader's error for the package name, identifier, or i
 
 Change the label, description, default message, or add another scalar configuration field. Restart after Python changes. When creating a separate plugin, choose your own stable namespace and rename its distribution, Python package, entry point, descriptor, node and pack IDs together. Do this before users persist instances of it.
 
-Delete your Hello cards before removing the package from the checkout. Persisted world objects retain their plugin ownership.
+Delete your Hello cards before uninstalling the Pack in the Library. The uninstall
+preview checks active uses and shared dependencies; source files and saved Deck
+references remain available for restoration.
 
 ## Next steps
 

@@ -1,5 +1,6 @@
 from pathlib import Path
 import asyncio
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,11 +9,28 @@ from backend.agents.models import AgentEventType
 from backend.capabilities.provider import WorldAgentCapabilityProvider
 from backend.config import Settings
 from backend.conversations import ConversationSessionCreate, ConversationPost
+from backend.conversations.store import ConversationStore
 from backend.main import create_app
 from backend.services import create_services
 from backend.world.models import CardCreate, EdgeCreate
 from backend.tests.test_conversations import _create
 from backend.tests.conversation_helpers import wait_for_conversation_delivery
+
+
+def test_interrupted_stream_recovery_metadata_survives_timeline_summary():
+    row = {
+        "run_id": "run-1", "agent_id": "agent-1", "status": "failed",
+        "started_at": None, "finished_at": None,
+        "lifecycle_json": json.dumps({
+            "progress": "provider stream interrupted",
+            "recovery_kind": "model_stream_interrupted",
+            "confirmed_tool_count": 2,
+        }),
+    }
+    summary = ConversationStore._run_summary(row)
+    assert summary.recovery_kind == "model_stream_interrupted"
+    assert summary.confirmed_tool_count == 2
+    assert summary.progress == "provider stream interrupted"
 
 
 def test_groups_sessions_naming_and_bidirectional_pages_survive_restart(data_root: Path):
@@ -63,6 +81,10 @@ class TranscriptRuntime(MockAgentRuntime):
         ]:
             yield AgentEvent(context.agent_id, context.run_id, kind, payload)
         if self.fail:
+            yield AgentEvent(context.agent_id, context.run_id, AgentEventType.PROGRESS, {
+                "kind": "model_stream_interrupted", "text": "model connection interrupted",
+                "completed_tool_count": 1,
+            })
             raise RuntimeError("test endpoint failed after output")
         yield AgentEvent(context.agent_id, context.run_id, AgentEventType.COMPLETED, run_status="succeeded")
 
@@ -139,7 +161,12 @@ async def test_public_activity_checkpoint_restores_boundaries_and_reports_trunca
         completion = summary.tool_trace[-2]
         assert completion['tool_name'] == 'read_file'
         assert completion['capability_id'] == 'operation:read_file'
-        assert completion['response'] == {'content': f'file-{count - 1}'}
+        assert 'response' not in completion and 'arguments' not in completion
+        from backend.runs.history import RunActivityHistory
+        archive = RunActivityHistory(services.database, summary.run_id)
+        assert archive.get(completion['activity_id'])['response'] == {'content': f'file-{count - 1}'}
+        assert archive.page(limit=100)['total'] == count * 2
+        assert not archive.page(limit=100)['incomplete']
         assert all(item.get('kind') != 'raw_reasoning' for item in summary.tool_trace)
         assert all(item['id'] and item['timestamp'] for item in summary.tool_trace)
         assert [item.content for item in page.items] == ['Start', 'Draft reply', 'Done']
@@ -149,6 +176,7 @@ async def test_public_activity_checkpoint_restores_boundaries_and_reports_trunca
     restored = create_services(settings)
     try:
         assert restored.conversations.page_messages(room.id, session.id).run_summaries[summary.run_id] == summary
+        assert RunActivityHistory(restored.database, summary.run_id).page(limit=100)['total'] == count * 2
     finally:
         restored.close()
 
@@ -179,6 +207,9 @@ async def test_provider_messages_and_terminal_history_are_durable(data_root: Pat
         assert history[-1].id == timeline[-1].id
         if fail:
             assert timeline[-1].sender_kind == 'system' and 'could not respond' in timeline[-1].content
+            summary = page.run_summaries[timeline[-1].run_id]
+            assert summary.recovery_kind == 'model_stream_interrupted'
+            assert summary.confirmed_tool_count == 1
             assert page.run_summaries[timeline[-1].run_id].final_message_id is None
         else:
             assert timeline[-1].sender_kind == 'agent' and timeline[-1].content == 'Done'

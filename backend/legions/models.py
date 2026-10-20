@@ -96,6 +96,8 @@ class LegionTemplateNode(BaseModel):
     state_scope: Literal["shared", "session"] | None = None
     initial_document: dict[str, Any] | None = None
     initial_shared_state: dict[str, Any] | None = None
+    # Initialized default equipment slots; resource IDs are portable node keys.
+    plugin_defaults: dict[str, Any] = Field(default_factory=dict)
     type: str
     finish: CardFinish = "normal"
     plugin_id: str
@@ -112,6 +114,8 @@ class LegionTemplateNode(BaseModel):
 
     @model_validator(mode="after")
     def require_payload_version_pair(self) -> "LegionTemplateNode":
+        if len(json.dumps(self.plugin_defaults, allow_nan=False).encode("utf-8")) > 64 * 1024:
+            raise ValueError("Default equipment metadata is limited to 64 KiB")
         if self.type == "legion":
             self.config = {"workspace_layout": None, **self.config}
         if self.type == "legion" and "mode" not in self.config:

@@ -9,6 +9,28 @@ from backend.node_execution import ExecutionRequest
 
 router = APIRouter(prefix="/nodes", tags=["node-documents"])
 
+from backend.plugin_defaults import RestoreDefaultsRequest, metadata, save_metadata
+from backend.errors import RevisionConflictError
+
+
+@router.get("/{node_id}/defaults")
+async def get_defaults(node_id: str, services: ApplicationServices = Depends(get_services)):
+    async with services._node_mutation(read_only=True):
+        services.world.require_available_card(services.world.get_card(node_id))
+        return metadata(services, node_id)
+
+
+@router.post("/{node_id}/defaults")
+async def restore_defaults(node_id: str, request: RestoreDefaultsRequest, services: ApplicationServices = Depends(get_services)):
+    async with services._node_mutation():
+        services.world.require_available_card(services.world.get_card(node_id))
+        services.node_execution.assert_editable(node_id, allow_delegated=True)
+        if metadata(services, node_id):
+            raise RevisionConflictError("Default equipment slots can only be restored to an empty node")
+        save_metadata(services, node_id, request.value.model_dump(mode="json", exclude_none=True, exclude_unset=True))
+        return {"restored": True}
+
+
 from backend.document_transformations import TransformationRequest, transform_document
 
 @router.post("/{node_id}/transformations/{operation}")

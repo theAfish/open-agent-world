@@ -10,6 +10,53 @@ export interface PackInspection {
   manifest: { id: string; name: string; version: string; kind?: 'plugin' | 'content'; creator?: CreatorMetadata | null;
     dependencies?: { packs: Array<{ id: string; version: string }> } };
   sha256: string;
+  plan?: PackInstallationPlan;
+}
+export interface PackEnvironmentStatus {
+  id: string;
+  target: 'host-worker' | 'sandbox';
+  provider: string;
+  management: 'managed' | 'legacy-shared' | 'external';
+  state: 'ready' | 'missing' | 'on_use' | 'needs_configuration' | 'unsupported' | 'preparing' | 'failed';
+  python: string[];
+  node: string[];
+  error?: string | null;
+  operation_id?: string | null;
+}
+export interface PackBackendLibrary {
+  name: string;
+  version: string | null;
+  management: 'host-provided' | 'managed';
+}
+export interface PackInstallationPlan {
+  pack_id: string; name: string; version: string;
+  source: 'archive' | 'store' | 'bundled' | 'development';
+  restart_required: boolean;
+  dependencies: Array<{ id: string; version: string; state: 'satisfied' | 'missing' | 'incompatible' | 'disabled' }>;
+  environments: PackEnvironmentStatus[];
+  backend_libraries?: PackBackendLibrary[];
+  warnings: string[];
+  blockers: string[];
+}
+export interface PackInventoryItem {
+  id: string; owner: string; name: string; version: string;
+  source: 'bundled' | 'development' | 'installed';
+  enabled: boolean; loaded: boolean; enrolled?: boolean;
+  environments: PackEnvironmentStatus[];
+  backend_requirements: string[];
+  backend_libraries?: PackBackendLibrary[];
+  frontend_dependencies: string[];
+  warnings: string[];
+}
+export interface PackUninstallPlan {
+  id: string; owner: string; can_uninstall: boolean; blockers: string[];
+  resources: Array<{ id: string; kind: string; action: 'remove' | 'retain' | 'defer'; reason: string }>;
+  restart_required: boolean; source: 'installed' | 'development' | 'bundled';
+}
+export interface PackOperation {
+  id: string; digest: string; pack_id: string; version: string;
+  state: 'preparing' | 'prepared' | 'selecting' | 'completed' | 'failed';
+  error: string | null; updated_at: number;
 }
 export interface CreatorInspection {
   manifest: PackInspection['manifest']; can_export: boolean;
@@ -18,7 +65,10 @@ export interface CreatorInspection {
 }
 export interface PackInstallations {
   restart_required: boolean;
+  inventory?: PackInventoryItem[];
+  operations?: PackOperation[];
   versions: Array<{ id: string; name: string; version: string; selected: boolean; loaded: boolean;
+    owner?: string; source?: string;
     kind?: 'plugin' | 'content'; creator?: CreatorMetadata | null;
     environment: { state: string; error: string | null } | null }>;
 }
@@ -38,6 +88,7 @@ export interface StorePack extends StoreState {
 export interface StorePage { items: StorePack[]; next_cursor: string | null }
 export interface StoreDetail extends StorePack { versions: string[]; versions_next_cursor: string | null }
 export interface StoreVersion extends StoreState {
+  plan?: PackInstallationPlan;
   pack_id: string; version: string; sha256: string; size_bytes: number;
   manifest: {
     id: string; version: string;

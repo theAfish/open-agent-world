@@ -34,6 +34,49 @@ def _identity(value: Any) -> Any:
     return value
 
 
+def tool_payload(value: Any) -> Mapping[str, Any]:
+    """Unwrap a successful mapping receipt without promoting scalar/errors."""
+    if not isinstance(value, Mapping) or value.get("ok") is False or value.get("error"):
+        return {}
+    result = value.get("result", value)
+    return result if isinstance(result, Mapping) else {}
+
+
+class OperationReceiptMismatch(RuntimeError):
+    def __init__(self, pending):
+        self.pending = pending
+        super().__init__("Wait returned another operation; retain the original pending receipt")
+
+
+async def collect_operation_result(result, wait, stopped, *, before_wait=None):
+    """Collect one native operation. Never submit work or switch operation IDs.
+
+    wait(operation_id, seconds) retains the caller's authorization and tracing
+    callbacks. Errors/unknown receipts return to the caller without retrying.
+    """
+    payload = tool_payload(result)
+    operation_id = payload.get("operation_id")
+    if not isinstance(operation_id, str) or not operation_id:
+        return result
+    while payload.get("status") == "running":
+        if stopped.is_set():
+            raise asyncio.CancelledError()
+        seconds = before_wait(operation_id) if before_wait is not None else 30
+        previous = result
+        result = await wait(operation_id, seconds)
+        payload = tool_payload(result)
+        returned_id = payload.get("operation_id")
+        if ((returned_id is not None or payload.get("status") == "running")
+                and returned_id != operation_id):
+            raise OperationReceiptMismatch(previous)
+        if payload.get("status") == "running":
+            # Native wait blocks; protect against adapters returning instantly.
+            await asyncio.sleep(.05)
+    if stopped.is_set():
+        raise asyncio.CancelledError()
+    return result
+
+
 def _error(code: str, kind: str, message: str, **details: Any) -> dict[str, Any]:
     return {"ok": False, "error": {"code": code, "type": kind, "message": message, **details}}
 

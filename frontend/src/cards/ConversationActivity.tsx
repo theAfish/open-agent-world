@@ -1,15 +1,16 @@
-import { memo, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { ArrowDown, Check, ChevronRight, CircleAlert, LoaderCircle, Square } from "lucide-react";
 import { t, useLocale } from "../i18n";
 import { toolFailed, type RunActivityItem } from "../state/runActivity";
 import type { ExecutionGroup } from '../state/conversationTranscript';
-import type { ConversationHistorySection } from '../state/conversationSections';
-import { elapsedMilliseconds, executionElapsed, toolElapsed } from '../state/activityTiming';
+import { executionElapsed, toolElapsed } from '../state/activityTiming';
 import { MarkdownMessage } from "./MarkdownMessage";
 import { hasToolData, ToolData } from './ToolData';
 import { toolPresentation } from '../state/toolPresentation';
+import { ReasoningActivity } from './RunReasoning';
+import { useInvocationDetail } from '../state/useInvocationDetail';
 
-function Duration({ milliseconds }: { milliseconds?: number }) {
+export function Duration({ milliseconds }: { milliseconds?: number }) {
   if (milliseconds === undefined) return null;
   const seconds = milliseconds / 1000;
   const label = seconds < 60 ? t('{seconds}s', { seconds: seconds.toFixed(1) })
@@ -28,26 +29,31 @@ function useActivityClock(active: boolean) {
   return now;
 }
 
-const ToolActivity = memo(function ToolActivity({ item, active, now, open, onOpen }: {
-  item: RunActivityItem; active: boolean; now: number; open: boolean; onOpen: (id: string, open: boolean) => void;
+export const ToolActivity = memo(function ToolActivity({ item, active, now, open, onOpen, runId }: {
+  item: RunActivityItem; active: boolean; now?: number; open: boolean; onOpen: (id: string, open: boolean) => void; runId?: string;
 }) {
   useLocale();
-  const failed = toolFailed(item);
+  const detail = useInvocationDetail(runId, item.archive_id ? 'tools' : 'activity', item.archive_id ?? item.activity_id, open, active);
+  const row = detail.row;
+  const observed = { ...item, arguments: row?.effective_arguments ?? row?.arguments ?? item.arguments,
+    response: row?.response ?? item.response, error: row?.error ?? item.error };
+  const failed = row?.state === 'failed' || row?.state === 'interrupted' || toolFailed(observed);
   const completed = item.type === "tool_completed";
   const pending = !completed && active;
   const status = failed ? t("Failed") : completed ? t("Completed") : pending ? t("Running") : t("Stopped");
   const Icon = failed ? CircleAlert : completed ? Check : pending ? LoaderCircle : Square;
-  const response = item.response;
-  const presentation = toolPresentation(item);
+  const clock = useActivityClock(now === undefined && pending);
+  const response = observed.response;
+  const presentation = toolPresentation(observed);
   const hasInput = hasToolData(presentation.input);
   const hasOutput = hasToolData(response);
-  const hasError = hasToolData(item.error);
-  const hasDetails = hasInput || hasOutput || hasError;
+  const hasError = hasToolData(observed.error);
+  const hasDetails = hasInput || hasOutput || hasError || Boolean(item.archive_id || item.activity_id);
   const className = `run-tool${failed ? ' is-error' : ''}`;
   const heading = <>
       <Icon size={12} className={pending ? "run-activity-spinner" : undefined} aria-label={status} />
       <span className="run-tool-name" title={presentation.name}>{presentation.name}</span>
-      <Duration milliseconds={toolElapsed(item, active, now)} />
+      <Duration milliseconds={toolElapsed(item, active, now ?? clock)} />
       {hasDetails && <ChevronRight size={12} className="run-tool-chevron" aria-hidden="true" />}
     </>;
   if (!hasDetails) return <div className={className} data-activity-id={item.id}>
@@ -57,19 +63,39 @@ const ToolActivity = memo(function ToolActivity({ item, active, now, open, onOpe
     onToggle={event => { if (event.target === event.currentTarget) onOpen(item.id, event.currentTarget.open); }}>
     <summary className="run-tool-summary">{heading}</summary>
     {open ? <div className="run-tool-details">
+      {(item.archive_id || item.activity_id) && !row && !detail.error && <p role="status">{t('Loading activity…')}</p>}
       {hasInput && <section aria-label={t('Input')}><span>{t('Input')}</span><ToolData value={presentation.input} /></section>}
       {hasOutput && <section aria-label={t('Output')}><span>{t('Output')}</span><ToolData value={response} /></section>}
-      {hasError && <section aria-label={t('Error')}><span>{t('Error')}</span><ToolData value={item.error} /></section>}
-      {item.truncated ? <small>{t("Details truncated")}</small> : null}
+      {hasError && <section aria-label={t('Error')}><span>{t('Error')}</span><ToolData value={observed.error} /></section>}
+      {(row ? row.truncated || row.response_complete === false : item.truncated) ? <small>{t("Details incomplete")}</small> : null}
+      {detail.error ? <p role="alert">{detail.error} <button type="button" className="conversation-activity-action" onClick={detail.retry}>{t("Retry")}</button></p> : null}
     </div> : null}
   </details>;
 });
 
-export const RunActivityText = memo(function RunActivityText({ item }: { item: RunActivityItem }) {
-  return <div className={item.type === "agent_progress" ? "run-activity-progress" : "run-activity-text"}>
-    {item.type === "agent_message" ? <MarkdownMessage content={item.text ?? ""} /> : <p>{item.text}</p>}
+export const RunActivityText = memo(function RunActivityText({ item, runId, active = false }: {
+  item: RunActivityItem; runId?: string; active?: boolean;
+}) {
+  if (item.kind === 'model_reasoning') return <ReasoningActivity item={item} runId={runId} active={active} />;
+  return <div className="conversation-message-bubble" data-activity-id={item.id}>
+    {item.activity_id && item.preview_truncated ? <ArchivedProgress item={item} runId={runId} active={active} />
+      : <div className={item.type === "agent_progress" ? "run-activity-progress" : "run-activity-text"}>
+        {item.type === "agent_message" ? <MarkdownMessage content={item.text ?? ""} /> : <p>{item.text}</p>}
+      </div>}
   </div>;
 });
+
+function ArchivedProgress({ item, runId, active }: { item: RunActivityItem; runId?: string; active: boolean }) {
+  useLocale();
+  const [open, setOpen] = useState(false);
+  const detail = useInvocationDetail(runId, 'activity', item.activity_id, open, active);
+  return <div className="run-activity-progress">
+    <p>{open ? detail.row?.text ?? item.text : item.text}</p>
+    <button type="button" className="conversation-activity-action" aria-expanded={open} onClick={() => setOpen(value => !value)}>{t(open ? 'Collapse' : 'Show full activity')}</button>
+    {open && !detail.row && !detail.error && <p role="status">{t('Loading activity…')}</p>}
+    {open && detail.error && <p role="alert">{detail.error} <button type="button" className="conversation-activity-action" onClick={detail.retry}>{t('Retry')}</button></p>}
+  </div>;
+}
 
 export function RunActivityStatus({ waiting = false, stopping = false, onStop }: {
   waiting?: boolean;
@@ -88,22 +114,11 @@ export function RunActivityStatus({ waiting = false, stopping = false, onStop }:
     </div>;
 }
 
-export function ConversationHistory({ section, children }: { section: ConversationHistorySection; children: ReactNode }) {
-  useLocale();
-  const [open, setOpen] = useState(false);
-  return <details className="conversation-history" open={open} data-history-run-id={section.run.run_id}
-    onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>
-      <span>{t('Work log')}</span>
-      <Duration milliseconds={elapsedMilliseconds(section.run.started_at, section.run.finished_at)} />
-      <ChevronRight size={12} className="conversation-history-chevron" aria-hidden="true" />
-    </summary>
-    {open && <div className="conversation-history-content">{children}</div>}
-  </details>;
-}
-
 /** A stable execution segment, with independent disclosure and scroll intent. */
-export function ConversationExecution({ group, agentName, history = false }: { group: ExecutionGroup; agentName: string; history?: boolean }) {
+export function ConversationExecution({ group, agentName, history = false, earlier }: {
+  group: ExecutionGroup; agentName: string; history?: boolean;
+  earlier?: { loading: boolean; error: string; load: () => void };
+}) {
   useLocale();
   const regionId = useId();
   // Explicit user choice applies to the current phase. A live segment closes
@@ -139,6 +154,10 @@ export function ConversationExecution({ group, agentName, history = false }: { g
       <ChevronRight size={12} className="conversation-execution-chevron" aria-hidden="true" />
     </button>
     {open && <div className="conversation-execution-body">
+      {earlier && <button type="button" className="conversation-activity-action" disabled={earlier.loading} onClick={earlier.load}>
+        {t(earlier.loading ? 'Loading activity…' : earlier.error ? 'Retry' : 'Load earlier activity')}
+      </button>}
+      {earlier?.error && <small className="run-activity-note" role="alert">{earlier.error}</small>}
       <div id={regionId} className={`conversation-execution-scroll${compact ? ' nowheel' : ''}`} data-compact={compact || undefined} ref={viewport} role="region"
         aria-label={t('Execution activity for {name}', { name: agentName })} tabIndex={0}
         onScroll={event => {
@@ -148,8 +167,7 @@ export function ConversationExecution({ group, agentName, history = false }: { g
           follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 24;
           setAway(!follow.current);
         }}>
-        {group.truncated && <small className="run-activity-note">{t('Earlier activity is no longer in this live view')}</small>}
-        {group.items.map(item => <ToolActivity key={item.id} item={item} active={group.running} now={now}
+        {group.items.map(item => <ToolActivity key={item.id} item={item} active={group.running} now={now} runId={group.run.run_id}
           open={openedTools.has(item.id)} onOpen={(id, expanded) => setOpenedTools(previous => {
             if (previous.has(id) === expanded) return previous;
             const next = new Set(previous);

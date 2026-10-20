@@ -98,6 +98,75 @@ async def observe(services, agent_id):
     }, (image,))
 
 
+async def observe_plugin_view(services, capability, *, capture_kind: str,
+                              required_capability_kind: str, capture_options: dict | None = None):
+    """Capture one explicitly authorized, mounted plugin view.
+
+    Plugin bodies remain excluded from the ordinary Minister canvas capture.
+    This separate path requires a plugin-specific capability plus the declared
+    read capability, asks the active frontend to capture only that card's view,
+    and rejects pixels if its persisted document changed while waiting.
+    """
+    if not capture_kind or len(capture_kind) > 120:
+        raise ResourceValidationError("Invalid plugin capture kind")
+    if capture_options is not None and (not isinstance(capture_options, dict) or len(json.dumps(capture_options, ensure_ascii=False).encode("utf-8")) > 4 * 1024):
+        raise ResourceValidationError("Invalid plugin capture options")
+    services.capabilities.capability_for_id(capability.agent_id, capability.id)
+    services.capabilities.capability_for_id(
+        capability.agent_id, f"{required_capability_kind}:{capability.target_id}"
+    )
+    from backend.node_documents import read_document
+    before = read_document(services, capability.target_id)
+    request = {
+        "kind": "plugin_capture",
+        "node_id": capability.target_id,
+        "capture_kind": capture_kind,
+        "document_revision": before["revision"],
+        "max_image_dimension": 1280,
+        "capture_options": capture_options or {},
+    }
+    result = await services.visual_observers.capture(request)
+    # The browser is not a persistence authority.  Recheck both graph grants
+    # and document revision after the asynchronous capture completes.
+    services.capabilities.capability_for_id(capability.agent_id, capability.id)
+    services.capabilities.capability_for_id(
+        capability.agent_id, f"{required_capability_kind}:{capability.target_id}"
+    )
+    after = read_document(services, capability.target_id)
+    if before["revision"] != after["revision"]:
+        raise ConflictError("The structure changed during visual capture; retry the observation")
+    if result.get("error"):
+        raise RuntimeUnavailableError(str(result["error"])[:300])
+    if (result.get("kind") != "plugin_capture" or result.get("node_id") != capability.target_id
+            or result.get("capture_kind") != capture_kind or result.get("document_revision") != before["revision"]):
+        raise ResourceValidationError("Invalid plugin capture response")
+    encoded = result.get("data_base64", "")
+    if not isinstance(encoded, str) or len(encoded) > 12 * 1024 * 1024:
+        raise ResourceValidationError("Invalid plugin capture")
+    try:
+        image = ToolImage(base64.b64decode(encoded, validate=True), "image/png")
+    except (ValueError, TypeError):
+        raise ResourceValidationError("Invalid plugin capture image") from None
+    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    try:
+        if len(json.dumps(metadata, ensure_ascii=False).encode("utf-8")) > 16 * 1024:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ResourceValidationError("Invalid plugin capture metadata") from None
+    from backend.resources.manager import ManagedResourceStore
+    _, width, height = ManagedResourceStore._inspect_image(image.data)
+    return VisualToolResult({
+        "node_id": capability.target_id,
+        "capture_kind": capture_kind,
+        "document_revision": before["revision"],
+        "document_summary": before["summary"],
+        "image_width": width,
+        "image_height": height,
+        "capture_metadata": metadata,
+        "limitations": "This is a transient rendering of the currently open plugin workspace. Use the linked inspect tool for exact persisted coordinates and retry if the document changes.",
+    }, (image,))
+
+
 async def visual_websocket(websocket: WebSocket):
     await websocket.accept()
     observers = websocket.app.state.services.visual_observers

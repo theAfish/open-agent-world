@@ -25,18 +25,57 @@ def test_internal_text_stays_private_but_tool_evidence_is_published(author, chil
     assert event.content.parts[0].text == "Please approve this internal report."
 
 
-def test_planner_reply_preserves_identity_and_excludes_thoughts():
+def test_planner_reply_preserves_identity_and_keeps_thinking_in_activity():
     event = Event(id="planner-message", author="thinking_agent", content=types.Content(role="model", parts=[
-        types.Part(text="private thought", thought=True),
+        types.Part(text="Provider-exposed thinking", thought=True),
         types.Part.from_text(text="Revised plan ready. Please confirm."),
     ]))
     emitted = list(public_events(event))
-    assert len(emitted) == 1
-    assert emitted[0]["event"] == "agent_message"
-    assert emitted[0]["payload"]["provider_message_id"] == "planner-message:1"
-    assert emitted[0]["payload"]["text"] == "Revised plan ready. Please confirm."
-    assert emitted[0]["payload"]["final"] is True
+    assert [item["event"] for item in emitted] == ["agent_progress", "agent_message"]
+    assert emitted[0]["payload"]["kind"] == "model_reasoning"
+    assert emitted[0]["payload"]["provider_message_id"] == "planner-message:0"
+    assert emitted[1]["payload"]["provider_message_id"] == "planner-message:1"
+    assert emitted[1]["payload"]["text"] == "Revised plan ready. Please confirm."
+    assert emitted[1]["payload"]["final"] is True
     assert is_conversation_author(event)
+
+
+@pytest.mark.parametrize("author,child", [
+    ("thinking_agent", False), ("execution_orchestrator", False),
+    ("step_executor", True), ("thinking_agent", True),
+])
+def test_thinking_precedes_tools_with_stable_identity_and_actor(author, child):
+    event = Event(id="model-response", author=author, content=types.Content(role="model", parts=[
+        types.Part(text="Check the existing result first.", thought=True),
+        types.Part(function_call=types.FunctionCall(id="inspect", name="oaw_list_tools", args={})),
+    ]))
+    emitted = list(public_events(event, child=child))
+    assert [item["event"] for item in emitted] == ["agent_progress", "tool_started"]
+    assert emitted[0]["payload"] == {
+        "author": author, "subagent": child, "role": author, "kind": "model_reasoning",
+        "provider_message_id": "model-response:0", "text": "Check the existing result first.",
+        "streaming": False, "interrupted": False,
+    }
+    assert list(public_events(event, child=child)) == emitted
+    event.id = "another-response"
+    assert list(public_events(event, child=child))[0]["payload"]["provider_message_id"] != "model-response:0"
+
+
+def test_empty_thinking_and_opaque_signatures_do_not_create_activity():
+    event = Event(author="thinking_agent", content=types.Content(role="model", parts=[
+        types.Part(text=" \n\t", thought=True), types.Part(thought=True, thought_signature=b"opaque"),
+    ]))
+    assert list(public_events(event)) == []
+
+
+@pytest.mark.parametrize("termination", [{"finish_reason": "MAX_TOKENS"}, {"error_code": "provider_error"}])
+def test_failed_model_response_retains_thinking_as_incomplete_activity(termination):
+    event = Event(author="thinking_agent", **termination, content=types.Content(role="model", parts=[
+        types.Part(text="Received before termination", thought=True)]))
+    [emitted] = public_events(event)
+    assert emitted["event"] == "agent_progress"
+    assert emitted["payload"]["text"] == "Received before termination"
+    assert emitted["payload"]["interrupted"] and emitted["payload"]["streaming"] is False
 
 
 def test_internal_tool_failure_does_not_publish_its_raw_report():

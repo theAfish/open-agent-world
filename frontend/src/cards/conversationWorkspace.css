@@ -68,8 +68,9 @@
 /* Share a centered column; bubbles sit just inside the composer edges.
    Reserve outer space for the scrollbar and avatars. Only set the start margin: symmetric fixed margins overflow when a scrollbar takes space. */
 .conversation-thread > :is(.conversation-transcript-region, .workspace-composer) { --conversation-avatar-gutter: 40px; --conversation-bubble-inset: 12px; --conversation-column-width: min(80ch, calc(100cqw - 2 * var(--conversation-avatar-gutter) - 32px)); }
-.conversation-thread .workspace-transcript { padding: 12px 0 20px; }
-.conversation-thread .conversation-transcript-content { width: calc(var(--conversation-column-width) - 2 * var(--conversation-bubble-inset)); min-height: 100%; margin-left: calc((100cqw - var(--conversation-column-width)) / 2 + var(--conversation-bubble-inset)); margin-right: 0; }
+.conversation-thread .workspace-transcript { padding: 0 0 20px; isolation: isolate; }
+.conversation-thread [data-sticky-disclosure] { position: sticky; top: var(--disclosure-top, 0px); z-index: calc(100 - var(--disclosure-depth, 0)); box-sizing: border-box; width: 100%; background: var(--surface-solid); }
+.conversation-thread .conversation-transcript-content { width: calc(var(--conversation-column-width) - 2 * var(--conversation-bubble-inset)); min-height: 100%; padding-top: 12px; margin-left: calc((100cqw - var(--conversation-column-width)) / 2 + var(--conversation-bubble-inset)); margin-right: 0; }
 .conversation-thread .conversation-transcript-content > button { font-size: var(--font-size-small, 12px); }
 .conversation-thread .conversation-transcript-content[data-empty] { display: grid; align-content: center; }
 .conversation-empty { min-height: 0; padding-block: 24px; }
@@ -164,6 +165,10 @@
 .conversation-history[open] > summary .conversation-history-chevron { transform: rotate(90deg); }
 .conversation-history > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .conversation-history-content { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
+.conversation-activity-action { align-self: flex-start; width: fit-content; border: 0; padding: 4px 0; background: transparent; color: var(--ink-soft); font: inherit; font-size: 11px; cursor: pointer; }
+.conversation-activity-action:hover:not(:disabled) { color: var(--ink); text-decoration: underline; }
+.conversation-activity-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.conversation-activity-action:disabled { cursor: default; color: var(--ink-faint); }
 .conversation-duration { flex-shrink: 0; color: var(--ink-faint); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .conversation-execution { min-width: 0; color: var(--ink-soft); }
 .conversation-execution-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; max-width: 100%; padding: 5px 0; border: 0; background: transparent; color: inherit; font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
@@ -178,6 +183,16 @@
 .conversation-execution-summary:focus-visible, .conversation-execution-scroll:focus-visible, .conversation-execution-latest:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .run-activity-progress { color: var(--ink-soft); font-size: var(--conversation-font-size, 12px); }
 .conversation-thread .run-activity-progress > p { margin: 0; padding: 0; border: 0; background: transparent; font: inherit; color: inherit; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+
+.run-model-reasoning { min-width: 0; color: var(--ink-soft); }
+.run-model-reasoning > summary { display: flex; align-items: center; gap: 6px; width: fit-content; max-width: 100%; padding: 5px 0; list-style: none; cursor: pointer; font-size: 11px; }
+.run-model-reasoning > summary::-webkit-details-marker { display: none; }
+.run-model-reasoning > summary > span { min-width: 0; overflow-wrap: anywhere; }
+.run-model-reasoning > summary > svg { flex-shrink: 0; }
+.run-model-reasoning[open] > summary > svg { transform: rotate(90deg); }
+.run-model-reasoning > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.run-model-reasoning > pre { margin: 4px 0 0; padding: 2px 0 2px 12px; border-left: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: var(--conversation-font-size, 12px); line-height: 1.65; }
+.run-model-reasoning > small { display: block; padding: 4px 0 0 12px; color: var(--ink-faint); }
 .run-activity-text { min-width: 0; }
 .run-activity-footer { display: flex; align-items: center; gap: 10px; }
 .run-activity-footer > span { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-faint); font-size: 11px; }

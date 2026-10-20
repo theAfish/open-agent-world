@@ -6,9 +6,10 @@
   "types": "./types/plugins/sdk.d.ts",
   "exports": {
     ".": { "types": "./types/plugins/sdk.d.ts", "default": "./host-only.mjs" },
-    "./build": "./build.mjs"
+    "./build": "./build.mjs",
+    "./build-vite": "./build-vite.mjs"
   },
-  "files": ["types", "build.mjs", "host-only.mjs", "README.md"],
-  "dependencies": { "esbuild": "^0.24.2" },
+  "files": ["types", "build.mjs", "build-vite.mjs", "sdk-exports.mjs", "host-only.mjs", "README.md"],
+  "dependencies": { "esbuild": "^0.25.12", "vite": "^6.4.3", "autoprefixer": "10.4.21" },
   "peerDependencies": { "react": "^18.3.1", "react-dom": "^18.3.1", "@types/react": "^18.3.0", "@types/react-dom": "^18.3.0", "@xyflow/react": "^12.8.5", "zustand": "^5.0.2" }
 }

@@ -1,0 +1,498 @@
+"""AtomSculptor's OAW plugin entry point.
+
+This first contribution establishes the durable Structure card.  Agent-team,
+SkillPackage, file exchange and the complete editor are layered on this public
+document contract rather than on the retired AtomSculptor Sandbox APIs.
+"""
+
+from __future__ import annotations
+
+from collections import Counter
+import json
+from typing import Literal
+from uuid import uuid4
+
+from pydantic import BaseModel, ConfigDict, Field
+from open_agent_world.plugin_api import RevisionConflictError
+from open_agent_world.plugin_api import CapabilitySelector
+
+from open_agent_world.plugin_api import (
+    CapabilityDefinition,
+    CapabilityGrantDefinition,
+    AgentNodeBehavior,
+    DefaultEquipment,
+    NodeDocumentAction,
+    NodeDocumentDefinition,
+    NodeTypeDefinition,
+    PackDefinition,
+    PluginDescriptor,
+    RelationshipDefinition,
+)
+from open_agent_world.skill_packages import register_skill_package
+
+from . import structure
+from .skill_package import atomsculptor_skills
+from .runtime import AtomSculptorRuntime
+from .harness import HarnessLimits
+
+
+READ = "atomsculptor.structure.read"
+WRITE = "atomsculptor.structure.write"
+RECORD_CANDIDATES = "atomsculptor.structure.record_interface_candidates"
+OBSERVE = "atomsculptor.structure.observe"
+STAGE_FILE = "atomsculptor.structure.stage_file"
+IMPORT_FILE = "atomsculptor.structure.import_file"
+BUILD_SUPERCELL = "atomsculptor.structure.build_supercell"
+_SANDBOX_SELECTOR = CapabilitySelector(
+    parameter="sandbox", argument="sandbox_id",
+    capability_kinds=frozenset({"sandbox.execute"}),
+    target_traits=frozenset({"core.sandbox"}),
+)
+WRITE_INPUT_SCHEMA = structure.ReplaceStructure.model_json_schema()
+WRITE_INPUT_SCHEMA["properties"]["expected_revision"] = {
+    "type": "integer",
+    "minimum": 0,
+    "description": "Revision returned by inspect_atom_structure. Re-inspect after a conflict.",
+}
+WRITE_INPUT_SCHEMA["required"].append("expected_revision")
+BUILD_SUPERCELL_INPUT_SCHEMA = structure.BuildSupercell.model_json_schema()
+BUILD_SUPERCELL_INPUT_SCHEMA["properties"]["repetitions"] = {
+    "type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 100},
+    "minItems": 3, "maxItems": 3,
+    "description": "Cell repetitions along a, b and c.",
+}
+BUILD_SUPERCELL_INPUT_SCHEMA["properties"]["expected_revision"] = {
+    "type": "integer", "minimum": 0,
+    "description": "Revision returned by inspect_atom_structure. Re-inspect after a conflict.",
+}
+BUILD_SUPERCELL_INPUT_SCHEMA.setdefault("required", []).append("expected_revision")
+RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA = structure.RecordInterfaceCandidates.model_json_schema()
+RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA["properties"]["expected_revision"] = {
+    "type": "integer",
+    "minimum": 0,
+    "description": "Revision returned by inspect_atom_structure. Re-inspect after a conflict.",
+}
+RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA.setdefault("required", []).append("expected_revision")
+
+
+class StructureConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Explicit UI links only.  They neither grant capabilities nor carry
+    # credentials; OAW relationships remain the authorization source.
+    agent_id: str | None = None
+    sandbox_id: str | None = None
+    skill_id: str | None = None
+
+
+class AtomSculptorAgentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # OAW persists status in legacy-compatible card configuration as well as
+    # host metadata.  Accept every lifecycle state because AgentNodeBehavior
+    # transitions this value while a Run is active.
+    status: Literal["idle", "running", "waiting", "error"] = "idle"
+    runtime_provider_id: Literal["atomsculptor.adk-team"] = "atomsculptor.adk-team"
+    model: str = "oaw:default"
+    max_concurrent_runs: Literal[1] = 1
+    # Disable the native outer deadline as well as the plugin total budget.
+    run_execution_deadline_seconds: float | None = Field(default=0, ge=0,
+        json_schema_extra={"privileged": True})
+    inherit_legion_model: Literal[False] = False
+    system_instruction: str = "Coordinate atomistic modelling through the connected OAW resources."
+    harness: HarnessLimits = Field(default_factory=HarnessLimits)
+    execution_mode: Literal["team", "builder"] = "team"
+
+
+class ObserveStructure(BaseModel):
+    """A bounded, non-persistent camera request for a visual observation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # ``current`` preserves the researcher\'s active orbit.  The other values
+    # are fixed, canonical views which the frontend captures transiently and
+    # then restores, rather than exposing arbitrary browser-camera control.
+    view: Literal["current", "iso", "x", "y", "z"] = "current"
+
+
+OBSERVE_INPUT_SCHEMA = ObserveStructure.model_json_schema()
+
+
+class InspectStructure(BaseModel):
+    """Bound the document data returned to a model after an inspection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    detail: Literal["summary", "atoms"] = "summary"
+    atom_offset: int = Field(default=0, ge=0)
+    atom_limit: int = Field(default=100, ge=1, le=200)
+
+
+INSPECT_INPUT_SCHEMA = InspectStructure.model_json_schema()
+
+
+class StageStructureFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=0)
+
+
+class ImportStructureFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    file_name: str = Field(min_length=1, max_length=4096)
+    expected_revision: int = Field(ge=0)
+
+
+
+
+
+def _structure_overview(document: dict, *, revision: int, detail: str, offset: int, limit: int) -> dict:
+    """Return a model-sized inspection result without mutating its document."""
+
+    atoms = document.get("atoms") if isinstance(document.get("atoms"), list) else []
+    selected_ids = document.get("selected_atom_ids") if isinstance(document.get("selected_atom_ids"), list) else []
+    selected_set = set(selected_ids)
+    selection_limit = 500
+    selected = [
+        {key: atom.get(key) for key in ("id", "symbol", "x", "y", "z", "layer_id")}
+        for atom in atoms
+        if isinstance(atom, dict) and atom.get("id") in selected_set
+    ][:selection_limit]
+    formula = " ".join(
+        f"{symbol}{count if count != 1 else ''}"
+        for symbol, count in sorted(Counter(
+            atom.get("symbol") for atom in atoms if isinstance(atom, dict) and isinstance(atom.get("symbol"), str)
+        ).items())
+    )
+    coordinates = [
+        (atom.get("x"), atom.get("y"), atom.get("z"))
+        for atom in atoms if isinstance(atom, dict)
+        and all(isinstance(atom.get(axis), (int, float)) for axis in ("x", "y", "z"))
+    ]
+    bounds = None if not coordinates else {
+        "min": [min(point[index] for point in coordinates) for index in range(3)],
+        "max": [max(point[index] for point in coordinates) for index in range(3)],
+    }
+    metadata = document.get("source_metadata") if isinstance(document.get("source_metadata"), dict) else {}
+    compact_metadata = {
+        str(key)[:120]: str(item)[:256] if isinstance(item, str) else item
+        for key, item in list(metadata.items())[:20]
+    }
+    layers = document.get("layers") if isinstance(document.get("layers"), list) else []
+    value = {
+        "format_version": document.get("format_version"),
+        "atom_count": len(atoms),
+        "formula": formula,
+        "coordinate_bounds": bounds,
+        "cell": document.get("cell"),
+        "pbc": document.get("pbc"),
+        "layers": [{**layer, "metadata": str(layer.get("metadata", ""))[:512]}
+                   for layer in layers[:64] if isinstance(layer, dict)],
+        "layer_count": len(layers),
+        "layers_truncated": len(layers) > 64,
+        "active_layer_ids": document.get("active_layer_ids", []),
+        "selected_atom_ids": selected_ids[:selection_limit],
+        "selected_atoms": selected,
+        "selected_atom_count": len(selected_ids),
+        "selection_truncated": len(selected_ids) > selection_limit,
+        "source_name": document.get("source_name", ""),
+        "source_metadata": compact_metadata,
+        "source_metadata_truncated": len(metadata) > 20,
+        "interface_candidates": document.get("interface_candidates", []),
+    }
+    response = {
+        "revision": revision,
+        "summary": {
+            "atom_count": len(atoms),
+            "formula": formula,
+            "layer_count": len(layers),
+            "selected_atom_count": len(selected_ids),
+            "source_name": value["source_name"],
+        },
+        "value": value,
+    }
+    if detail == "atoms":
+        start = min(offset, len(atoms))
+        end = min(start + limit, len(atoms))
+        response["atom_window"] = {
+            "offset": start,
+            "limit": limit,
+            "returned": end - start,
+            "total": len(atoms),
+            "atoms": [
+                {key: atom.get(key) for key in ("id", "symbol", "x", "y", "z", "layer_id")}
+                for atom in atoms[start:end] if isinstance(atom, dict)
+            ],
+        }
+    return response
+
+
+async def _read(context, capability, arguments):
+    request = InspectStructure.model_validate(arguments)
+    result = await context.node_document_action(capability, "inspect", {})
+    return _structure_overview(
+        result["value"], revision=result["revision"], detail=request.detail,
+        offset=request.atom_offset, limit=min(request.atom_limit, 200),
+    )
+
+
+async def _write(context, capability, arguments):
+    payload = dict(arguments)
+    expected_revision = payload.pop("expected_revision", None)
+    updated = await context.node_document_action(
+        capability, "replace_structure", payload, expected_revision=expected_revision
+    )
+    return {"revision": updated["revision"], "summary": updated["summary"]}
+
+
+async def _build_supercell(context, capability, arguments):
+    payload = dict(arguments)
+    expected_revision = payload.pop("expected_revision", None)
+    updated = await context.node_document_action(
+        capability, "build_supercell", payload, expected_revision=expected_revision,
+    )
+    return {"revision": updated["revision"], "summary": updated["summary"]}
+
+
+async def _observe(context, capability, arguments):
+    request = ObserveStructure.model_validate(arguments)
+    return await context.capture_plugin_view(
+        capability,
+        capture_kind="atomsculptor.structure-viewport",
+        required_capability_kind=READ,
+        capture_options={"view": request.view},
+    )
+
+
+async def _record_interface_candidates(context, capability, arguments):
+    payload = dict(arguments)
+    expected_revision = payload.pop("expected_revision", None)
+    updated = await context.node_document_action(
+        capability, "record_interface_candidates", payload, expected_revision=expected_revision
+    )
+    return {"revision": updated["revision"], "summary": updated["summary"]}
+
+
+async def _stage_structure_file(context, capability, arguments):
+    request = StageStructureFile.model_validate({key: value for key, value in arguments.items() if key != "sandbox_id"})
+    sandbox_id = arguments["sandbox_id"]
+    snapshot = await context.node_document_action(capability, "stage_snapshot", {})
+    if snapshot["revision"] != request.expected_revision:
+        raise RevisionConflictError("Structure changed; inspect it again before staging a Sandbox file")
+    raw = json.dumps(snapshot["value"], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    file_name = f"atomsculptor-{uuid4().hex}.json"
+    await context.write_sandbox_workspace_file(capability, sandbox_id, file_name, raw)
+    return {"file_name": file_name, "sandbox_id": sandbox_id,
+            "revision": snapshot["revision"], "atom_count": len(snapshot["value"].get("atoms", [])),
+            "size_bytes": len(raw)}
+
+
+async def _import_structure_file(context, capability, arguments):
+    request = ImportStructureFile.model_validate({key: value for key, value in arguments.items() if key != "sandbox_id"})
+    sandbox_id = arguments["sandbox_id"]
+    raw = await context.read_sandbox_workspace_file(capability, sandbox_id, request.file_name)
+    try:
+        parsed = json.loads(raw)
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("Sandbox file must contain a valid Atom Structure JSON document") from exc
+    updated = await context.node_document_action(
+        capability, "import_structure_file", {"structure": parsed}, expected_revision=request.expected_revision,
+    )
+    return {"file_name": request.file_name, "sandbox_id": sandbox_id,
+            "revision": updated["revision"], "summary": updated["summary"]}
+
+
+class AtomSculptorPlugin:
+    descriptor = PluginDescriptor(
+        id="atomsculptor",
+        version="0.1.0",
+        plugin_api_version="1.35",
+        name="AtomSculptor",
+        description="Agent-assisted atomistic structure modelling.",
+        # Ordinary runtime commands and Skill scripts use the same declared
+        # private Sandbox profile, prepared on use inside that Sandbox.
+        sandbox_environments=("modelling",),
+    )
+
+    def register(self, registration) -> None:
+        registration.register_runtime_provider(
+            "atomsculptor.adk-team",
+            AtomSculptorRuntime,
+            needs_model_connection_resolver=True,
+            needs_context_store=True,
+        )
+        register_skill_package(
+            registration,
+            node_type="atomsculptor.skills",
+            package=atomsculptor_skills(),
+        )
+        registration.register_capability(
+            CapabilityDefinition(
+                kind=READ,
+                tool_name="inspect_atom_structure",
+                read_only=True,
+                description="Inspect a structure with a bounded summary, revision and selected atom coordinates. The default never returns every atom. Request detail='atoms' with atom_offset and atom_limit (at most 200) only for a necessary coordinate window.",
+                input_schema=INSPECT_INPUT_SCHEMA,
+            ),
+            _read,
+        )
+        registration.register_capability(
+            CapabilityDefinition(
+                kind=WRITE,
+                tool_name="replace_atom_structure",
+                description="Replace an AtomSculptor structure using stable atom IDs and a complete validated document. Inspect first and pass its revision as expected_revision.",
+                input_schema=WRITE_INPUT_SCHEMA,
+            ),
+            _write,
+        )
+        registration.register_capability(
+            CapabilityDefinition(
+                kind=BUILD_SUPERCELL,
+                tool_name="build_atom_supercell",
+                description="Expand the current periodic Atom Structure deterministically without relaying its atoms through the model. Inspect first; pass repetitions and the returned revision.",
+                input_schema=BUILD_SUPERCELL_INPUT_SCHEMA,
+                target_capabilities=frozenset({WRITE}),
+            ),
+            _build_supercell,
+        )
+        registration.register_capability(
+            CapabilityDefinition(
+                kind=RECORD_CANDIDATES,
+                tool_name="record_interface_candidates",
+                description="Record structured interface candidates for a current Atom Structure after generating their Sandbox files. Inspect first and pass its revision.",
+                input_schema=RECORD_INTERFACE_CANDIDATES_INPUT_SCHEMA,
+            ),
+            _record_interface_candidates,
+        )
+        registration.register_capability(
+            CapabilityDefinition(
+                kind=OBSERVE,
+                tool_name="observe_atom_structure",
+                read_only=True,
+                description="Capture an open 3D Atom Structure workspace as a transient image. Set view to current, iso, x, y, or z; fixed views are captured briefly and never alter the researcher\'s camera. Use only when visual geometry or visible selection materially helps; inspect the structure document for exact coordinates.",
+                input_schema=OBSERVE_INPUT_SCHEMA,
+            ),
+            _observe,
+        )
+        registration.register_capability(
+            CapabilityDefinition(
+                kind=STAGE_FILE,
+                tool_name="stage_atom_structure_file",
+                description="Copy the exact revisioned Atom Structure document into an authorized Sandbox workspace file without sending atom coordinates through the model. Inspect first and pass expected_revision; use the returned file_name with structure-inspect's from_atomsculptor_document.",
+                input_schema=StageStructureFile.model_json_schema(),
+                selectors=(_SANDBOX_SELECTOR,),
+                target_capabilities=frozenset({READ}),
+            ),
+            _stage_structure_file,
+        )
+        registration.register_capability(
+            CapabilityDefinition(
+                kind=IMPORT_FILE,
+                tool_name="import_atom_structure_file",
+                description="Replace the Atom Structure from a validated JSON file in an authorized Sandbox without returning its atoms to the model. Generate that file with structure-inspect's to_atomsculptor_document --output-name; inspect the current Structure and pass expected_revision.",
+                input_schema=ImportStructureFile.model_json_schema(),
+                selectors=(_SANDBOX_SELECTOR,),
+                target_capabilities=frozenset({WRITE}),
+            ),
+            _import_structure_file,
+        )
+        registration.register_node_type(
+            NodeTypeDefinition(
+                id="atomsculptor.agent",
+                label="AtomSculptor Agent",
+                description="A Planner, Structure Builder and Materials Project team using OAW resources.",
+                icon="bot",
+                color="#b07f53",
+                deck_id="agents",
+                deck_label="Agents",
+                deck_icon="bot",
+                default_name="AtomSculptor",
+                default_size=(320, 210),
+                default_status="idle",
+                statuses=frozenset({"idle", "running", "waiting", "error"}),
+                config_model=AtomSculptorAgentConfig,
+                traits=frozenset({"core.agent", "ui.schema-agent.v1"}),
+                surfaces={"preview": True, "inspector": True, "workspace": True},
+                lifecycle=AgentNodeBehavior(),
+                default_equipment=(DefaultEquipment(key="skills", type="atomsculptor.skills",
+                    relationship="atomsculptor.skills.use"),),
+                templateable=True,
+                template_status="idle",
+            )
+        )
+        registration.register_node_type(
+            NodeTypeDefinition(
+                id="atomsculptor.structure",
+                label="Atom Structure",
+                description="A versioned atomistic structure with stable atom identities and layers.",
+                icon="atom",
+                color="#4d8c9c",
+                deck_id="science",
+                deck_label="Science",
+                deck_icon="atom",
+                default_name="Untitled Structure",
+                default_size=(520, 420),
+                default_status="ready",
+                statuses=frozenset({"ready"}),
+                config_model=StructureConfig,
+                # ``core.file-viewer`` opts into the host's built-in
+                # "Follow opened files" relationship, so a connected Sandbox's
+                # native file tree can feed this document without new routes.
+                traits=frozenset({"atomsculptor.structure", "core.file-viewer"}),
+                surfaces={"preview": True, "inspector": True, "workspace": True},
+                frontend={"preview": "preview", "body": "workspace", "workspace": "workspace"},
+                templateable=True,
+                document=NodeDocumentDefinition(
+                    model=structure.StructureDocument,
+                    initial_value=structure.StructureDocument().model_dump(mode="json"),
+                    summarize=structure.summary,
+                    actions={
+                        "inspect": NodeDocumentAction(lambda value, arguments: value, capability_kind=READ, read_only=True),
+                        "replace_structure": NodeDocumentAction(structure.replace, capability_kind=WRITE),
+                        "select_atoms": NodeDocumentAction(structure.select),
+                        "select_layers": NodeDocumentAction(structure.select_layers),
+                        "build_supercell": NodeDocumentAction(structure.build_supercell, capability_kind=BUILD_SUPERCELL),
+                        "stage_snapshot": NodeDocumentAction(lambda value, arguments: value, capability_kind=STAGE_FILE, read_only=True),
+                        "import_preflight": NodeDocumentAction(lambda value, arguments: value, capability_kind=IMPORT_FILE, read_only=True),
+                        "import_structure_file": NodeDocumentAction(structure.replace, capability_kind=IMPORT_FILE),
+                        "record_interface_candidates": NodeDocumentAction(structure.record_interface_candidates, capability_kind=RECORD_CANDIDATES),
+                    },
+                    max_size_bytes=16 * 1024 * 1024,
+                ),
+            )
+        )
+        registration.register_relationship(
+            RelationshipDefinition(
+                id="atomsculptor.structure.inspect",
+                label="Inspect structure",
+                short_label="inspect",
+                description="Allow an Agent to inspect the current structure and stable selected atom IDs, and, for Vision-capable models, observe the currently open 3D view.",
+                source_traits=frozenset({"core.agent"}),
+                target_types=frozenset({"atomsculptor.structure"}),
+                capabilities=(CapabilityGrantDefinition(READ), CapabilityGrantDefinition(OBSERVE), CapabilityGrantDefinition(STAGE_FILE)),
+                templateable=True,
+            )
+        )
+        registration.register_relationship(
+            RelationshipDefinition(
+                id="atomsculptor.structure.modify",
+                label="Modify structure",
+                short_label="modify",
+                description="Allow an Agent to inspect and atomically replace a validated structure revision, and, for Vision-capable models, observe the currently open 3D view.",
+                source_traits=frozenset({"core.agent"}),
+                target_types=frozenset({"atomsculptor.structure"}),
+                capabilities=(CapabilityGrantDefinition(READ), CapabilityGrantDefinition(WRITE), CapabilityGrantDefinition(BUILD_SUPERCELL), CapabilityGrantDefinition(RECORD_CANDIDATES), CapabilityGrantDefinition(OBSERVE), CapabilityGrantDefinition(STAGE_FILE), CapabilityGrantDefinition(IMPORT_FILE)),
+                templateable=True,
+            )
+        )
+        registration.register_pack(
+            PackDefinition(
+                id="atomsculptor.default",
+                name="AtomSculptor",
+                description="Atomistic structure modelling cards and agents.",
+                cards=tuple(registration.nodes),
+            )
+        )
+
+
+def create_plugin() -> AtomSculptorPlugin:
+    return AtomSculptorPlugin()

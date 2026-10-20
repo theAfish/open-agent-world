@@ -6,6 +6,7 @@ resubmit an uncertain submission. Specifications must reference credentials
 through the authorized Sandbox, never contain credential values.
 """
 from dataclasses import dataclass
+import re
 from typing import Awaitable, Callable, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -37,6 +38,14 @@ class BackgroundJobProvider:
     cancel: Callable[[BackgroundJobContext, str], Awaitable[None]] | None = None
     prepare: Callable[[BackgroundJobContext, BaseModel], Awaitable[None]] | None = None
     poll_interval_seconds: float = 60
+    sandbox_environments: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        if (not isinstance(self.sandbox_environments, tuple) or len(self.sandbox_environments) > 20
+                or any(not isinstance(value, str) or not re.fullmatch(r'[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*', value)
+                       for value in self.sandbox_environments)
+                or len(set(self.sandbox_environments)) != len(self.sandbox_environments)):
+            raise ValueError('Background job Sandbox environments must be at most 20 unique identifiers')
 
 
 class JobSubmit(BaseModel):

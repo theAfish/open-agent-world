@@ -16,6 +16,16 @@ def test_tool_arguments_results_and_errors_are_retained():
     assert "runtime_config" not in payload
 
 
+def test_native_archive_identity_survives_the_shared_public_projection():
+    payload = public_tool_payload({"name": "read", "call_id": "same", "role": "builder",
+        "run_attempt": 2, "archive_id": "tool-call:2:builder:same", "arguments": {"api_key": "secret"}})
+    assert payload["role"] == "builder"
+    assert payload["run_attempt"] == 2
+    assert payload["archive_id"] == "tool-call:2:builder:same"
+    assert "secret" not in json.dumps(payload)
+    assert public_tool_payload(payload) == payload
+
+
 def test_sensitive_fields_are_masked_recursively():
     payload = public_tool_payload({"name": "request", "arguments": {
         "headers": {"Authorization": "Bearer secret", "content-type": "application/json"},

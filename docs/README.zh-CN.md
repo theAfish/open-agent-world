@@ -30,6 +30,8 @@
 
 [技术参考（英文）](reference/index.md) 面向开发者，包含 API、运行时和架构说明。[从源码运行](getting-started.zh-CN.md)、[交互教程与实现](tutorial.zh-CN.md)、[工作区部署](deployment.zh-CN.md) 保留中文版本。
 
+需要在服务器上提供独立账号、画布或部署页面时，参见[多用户托管](contributing/hosting.zh-CN.md)。
+
 ## 参与维护
 
 修改宿主或准备发布时，从[贡献者指南（英文）](contributing/index.md)进入。

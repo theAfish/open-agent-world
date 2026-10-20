@@ -387,6 +387,9 @@ async def test_agent_requesting_own_turn_is_recoverable_and_does_not_recurse(
                 {"conversation": conversation.id, "agent_id": atlas.id, "message": "Continue"},
             )
 
+        from backend.runs import RunStore
+        RunStore(services.database).create(agent_id=atlas.id, run_id="test-run",
+            runtime_provider_id="core.mock", caller_kind="conversation", context_id=session.id)
         token = _current_invocation.set(InvocationContext(
             run_id="test-run",
             agent_id=atlas.id,
@@ -517,12 +520,14 @@ class _QueuedConversationRuntime(MockAgentRuntime):
         self.release_first = asyncio.Event()
         self.started = asyncio.Event()
         self.prompts: list[str] = []
+        self.task_prompts: list[str | None] = []
 
     async def execute(self, config, context, runtime_input):
         from backend.agents import AgentEvent, AgentEventType
         from backend.runs import RunStatus
 
         self.prompts.append(runtime_input.prompt)
+        self.task_prompts.append(runtime_input.task_prompt)
         self.started.set()
         if len(self.prompts) == 1:
             await self.release_first.wait()
@@ -601,6 +606,9 @@ async def test_busy_conversation_agent_queues_and_batches_later_messages(
         assert "Additional messages received while you were working" in runtime.prompts[1]
         assert "Do not change the schema" in runtime.prompts[1]
         assert "Also add tests" in runtime.prompts[1]
+        assert "Do not change the schema" in runtime.task_prompts[1]
+        assert "Also add tests" in runtime.task_prompts[1]
+        assert "Current speaker:" not in runtime.task_prompts[1]
         await wait_for_conversation_delivery(services, conversation.id, session.id)
         assert services.conversations.page_messages(
             conversation.id, session.id

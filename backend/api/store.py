@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
-from functools import partial
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from packaging.version import InvalidVersion, Version
 
 from backend.api.dependencies import get_services
-from backend.api.packs import checked, mutation_request
+from backend.api.packs import checked, mutation_request, prepare_and_install
 from backend.packs.marketplace import Identity, MarketplaceError, PackId
 
 router = APIRouter(prefix="/store/packs", tags=["store"])
@@ -34,7 +33,7 @@ def local_state(services, pack_id, available_version, snapshot=None):
     bundled = False
     if not rows:
         pack = next((p for p in services.plugins.catalog(include_disabled=True).packs if p.id == pack_id), None)
-        if pack and pack.plugin_id not in services.plugins.installed_packs:
+        if pack and not any(m.owner_id == pack.plugin_id for m in services.plugins.installed_packs.values()):
             loaded = selected = next(p.version for p in services.plugins.plugins() if p.id == pack.plugin_id)
             bundled = True
     installed = selected or loaded
@@ -104,7 +103,15 @@ async def versions(pack_id: PackId, cursor: Cursor = None, limit: Limit = 20, se
 async def version(target=Depends(identity), services=Depends(get_services)):
     with remote_errors():
         metadata = await services.marketplace.get_version(target.pack_id, target.version)
-    return {**metadata.model_dump(), **local_state(services, target.pack_id, target.version)}
+    from backend.packs.planning import plan
+    try:
+        installation_plan = plan(services.pack_installations, metadata.manifest, source='store')
+    except ValueError:
+        installation_plan = {'pack_id': target.pack_id, 'name': metadata.manifest.name or target.pack_id,
+            'version': target.version, 'source': 'store', 'restart_required': True, 'dependencies': [],
+            'environments': [], 'warnings': [], 'blockers': ['Store dependency metadata is invalid']}
+    installation_plan['warnings'].append('Store metadata is preliminary; the downloaded archive is verified before preparation')
+    return {**metadata.model_dump(), **local_state(services, target.pack_id, target.version), 'plan': installation_plan}
 
 
 @router.post("/{pack_id}/versions/{version}/install", dependencies=[Depends(mutation_request)])
@@ -113,18 +120,26 @@ async def install(request: Request, target=Depends(identity), services=Depends(g
     # state. Keep network waiting outside the world's mutation transaction.
     with remote_errors():
         metadata = await while_connected(request, services.marketplace.get_version(target.pack_id, target.version))
-    async with services._node_mutation():
-        rows = services.pack_installations.status()["versions"]
-        retained = next((r for r in rows if (r["id"], r["version"]) == (target.pack_id, target.version)), None)
-        if retained:
-            if retained["digest"] != metadata.sha256:
-                raise HTTPException(409, "Store artifact differs from the installed immutable version.")
-            if not retained["selected"]:
-                await checked(services.pack_installations.activate, target.pack_id, target.version)
-            return local_state(services, target.pack_id, target.version)
+    rows = services.pack_installations.status()["versions"]
+    retained = next((r for r in rows if (r["id"], r["version"]) == (target.pack_id, target.version)), None)
+    if retained:
+        if retained["digest"] != metadata.sha256:
+            raise HTTPException(409, "Store artifact differs from the installed immutable version.")
+        if not retained["selected"]:
+            # Reinstallation can need dependency downloads after automatic GC.
+            # Preparation must settle outside the world's mutation transaction.
+            from functools import partial
+            from backend.sandbox.python_runtime import finish_thread
+            try:
+                await checked(services.pack_installations.prepare_activation, target.pack_id, target.version)
+                async with services._node_mutation():
+                    await checked(partial(services.pack_installations.activate, target.pack_id, target.version, prepare=False))
+                    services.card_library.restore_plugin(services.pack_installations.selected()[target.pack_id].owner_id)
+            finally:
+                await finish_thread(services.pack_installations.interrupt_activation, target.pack_id, target.version)
+        return local_state(services, target.pack_id, target.version)
     with remote_errors():
         data = await while_connected(request, services.marketplace.download(metadata))
-    async with services._node_mutation():
-        await checked(partial(services.pack_installations.install, data,
-            expected_id=target.pack_id, expected_version=target.version, expected_sha256=metadata.sha256))
+    await prepare_and_install(services, data, expected_id=target.pack_id,
+                              expected_version=target.version, expected_sha256=metadata.sha256)
     return local_state(services, target.pack_id, target.version)

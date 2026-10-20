@@ -21,21 +21,40 @@ function host(jobs = [job('one')]): JobsHost {
 it('filters real provider observations and expands complete identities without fabricated progress', async () => {
   const api = host([job('one'), job('two', { status: 'unknown', provider: 'other.compute', actions: [] })]);
   render(<JobsBoard api={api} />);
-  await screen.findByRole('article', { name: 'Compute one' });
+  const running = await screen.findByRole('article', { name: 'Compute one' });
   expect(screen.queryByRole('progressbar')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Needs attention 1' }));
+  expect(within(running).getByText('Running')).toBeTruthy();
+  expect(within(running).queryByText('Processing data')).toBeNull();
+  expect(within(running).queryByText('Researcher')).toBeNull();
+  expect(within(running).queryByText('external-one')).toBeNull();
+  expect(screen.queryByRole('textbox', { name: 'Search jobs' })).toBeNull();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Filter jobs' }), { target: { value: 'attention' } });
   expect(screen.queryByRole('article', { name: 'Compute one' })).toBeNull();
   const tile = screen.getByRole('article', { name: 'Compute two' });
   expect(within(tile).queryByRole('button', { name: 'Cancel external job' })).toBeNull();
   fireEvent.click(within(tile).getByRole('button', { name: 'Show job details' }));
   expect(within(tile).getByText('Not observed yet')).toBeTruthy();
+  expect(within(tile).getByText('external-two')).toBeTruthy();
+  expect(within(tile).getByText('Researcher')).toBeTruthy();
+  expect(within(tile).getByText('Processing data')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Search jobs' }));
+  expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Search jobs' }));
   fireEvent.change(screen.getByRole('textbox', { name: 'Search jobs' }), { target: { value: 'absent' } });
   expect(screen.getByText('No matching jobs')).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole('textbox', { name: 'Search jobs' }), { key: 'Escape' });
+  expect(screen.queryByRole('textbox', { name: 'Search jobs' })).toBeNull();
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Search jobs' }));
+  expect(screen.getByRole('article', { name: 'Compute two' })).toBeTruthy();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Filter jobs' }), { target: { value: 'all' } });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Job provider' }), { target: { value: 'test.compute' } });
+  expect(screen.getByRole('article', { name: 'Compute one' })).toBeTruthy();
+  expect(screen.queryByRole('article', { name: 'Compute two' })).toBeNull();
 });
 
 it('separates monitoring from explicit cancellation and sends the observed revision', async () => {
   const api = host();
   render(<JobsBoard api={api} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Show job details' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Pause monitoring' }));
   await waitFor(() => expect(api.control).toHaveBeenCalledWith(expect.objectContaining({ id: 'one', revision: 2 }), 'pause'));
   await waitFor(() => expect((screen.getByRole('button', { name: 'Cancel external job' }) as HTMLButtonElement).disabled).toBe(false));

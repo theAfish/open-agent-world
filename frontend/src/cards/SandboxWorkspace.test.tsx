@@ -62,6 +62,23 @@ describe("Sandbox workspace interaction", () => {
   });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+  it('opens files and folders in the system file manager and reports failures', async () => {
+    const { container } = render(<Workspace />);
+    const file = await screen.findByRole('button', { name: 'first.txt' });
+    expect(container.querySelector('.sandbox-files-footer')).toBeNull();
+    vi.mocked(worldApi.sandboxWorkspace).mockResolvedValue({ opened: true });
+    fireEvent.contextMenu(file);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open in system folder' }));
+    await waitFor(() => expect(worldApi.sandboxWorkspace).toHaveBeenCalledWith(card.id, 'files/open-folder', { root: 'workspace', path: 'first.txt' }));
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Workspace' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open in system folder' }));
+    await waitFor(() => expect(worldApi.sandboxWorkspace).toHaveBeenCalledWith(card.id, 'files/open-folder', { root: 'workspace', path: '' }));
+    vi.mocked(worldApi.sandboxWorkspace).mockRejectedValue(new Error('Folder is unavailable'));
+    fireEvent.contextMenu(file);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Open in system folder' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Folder is unavailable');
+  });
+
   it('reveals its detached file preview on a direct file selection', async () => {
     const activate = vi.fn(() => true);
     render(<WorkspaceNavigationContext.Provider value={{ activate }}><Workspace /></WorkspaceNavigationContext.Provider>);
@@ -440,6 +457,36 @@ describe("Sandbox workspace interaction", () => {
     expect((command as HTMLTextAreaElement).value).toBe("printf second");
     fireEvent.keyDown(command, { key: "ArrowDown" });
     expect((command as HTMLTextAreaElement).value).toBe("unfinished");
+  });
+
+  it("renders incomplete historical receipts without blanking the workspace", async () => {
+    vi.mocked(worldApi.sandboxWorkspace).mockImplementation(async <T,>(_id: string, action: string): Promise<T> => {
+      if (action === "history") return [{ id: "failed-command", caller: "user", state: "error",
+        error: "Command failed before dispatch" }] as T;
+      if (action === "files") return [] as T;
+      if (action === "configuration") return { ready: true, variables: [] } as T;
+      return { entries: [] } as T;
+    });
+    render(<Workspace />);
+    await waitFor(() => expect(screen.getByRole("log").textContent).toContain("Command failed before dispatch"));
+    fireEvent.click(screen.getByRole("tab", { name: "History" }));
+    expect(screen.getAllByText("Command failed before dispatch").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("tab", { name: "Terminal" }));
+    expect(screen.getByRole("textbox", { name: "Command" })).toBeTruthy();
+  });
+
+  it("lets Seatbelt terminal commands opt into managed Python", async () => {
+    const darwinInfo = { ...info, runtime_id: "darwin", platform: "macos", shell: ["/bin/zsh", "-c"] };
+    useWorldStore.setState({ sandboxInfo: { [card.id]: darwinInfo } });
+    vi.spyOn(worldApi, "getSandbox").mockResolvedValue(darwinInfo);
+    const execute = vi.spyOn(worldApi, "executeSandbox").mockResolvedValue({ stdout: "ok", exit_code: 0 });
+    render(<Workspace />);
+    const checkbox = await screen.findByRole("checkbox", { name: "Managed Python" });
+    fireEvent.click(checkbox);
+    const command = screen.getByRole("textbox", { name: "Command" });
+    fireEvent.change(command, { target: { value: "python script.py" } });
+    fireEvent.keyDown(command, { key: "Enter" });
+    await waitFor(() => expect(execute).toHaveBeenCalledWith(card.id, "python script.py", "managed"));
   });
 
   it("accepts a command while stopped and blocks execution with unsaved settings", async () => {

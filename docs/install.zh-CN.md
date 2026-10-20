@@ -27,7 +27,7 @@ macOS 当前没有本地 Sandbox 运行时。桌面预览版不代表支持依�
 
 ## Linux / WSL2
 
-目前通过源码安装，在浏览器中使用。先安装 Git、Python 3.11 或更新版本、uv，以及包含 npm 的 Node.js 20 或更新版本，再运行：
+目前通过源码安装，在浏览器中使用。先安装 Git、Python 3.11 或更新版本、uv，以及包含 npm 的 Node.js 22 或更新版本，再运行：
 
 ```bash
 git clone https://github.com/theAfish/open-agent-world.git

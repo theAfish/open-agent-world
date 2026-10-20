@@ -98,6 +98,10 @@ class InvocationContext:
 @dataclass(frozen=True, slots=True)
 class RuntimeInput:
     prompt: str
+    # Optional task text provided by the host, separate from Conversation's
+    # roster/transcript/delivery instructions. Never extract it with a regex
+    # over user-controlled prompt text.
+    task_prompt: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -30,6 +30,14 @@ class SkillAsset(BaseModel):
     media_type: str = "application/octet-stream"
 
 
+class SkillRuntimeRequirement(BaseModel):
+    """Reference an installed Pack's Sandbox recipe; never host installation code."""
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    owner: str = Field(min_length=1, max_length=120, pattern=r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
+    environment: str = Field(min_length=1, max_length=120, pattern=r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
+    digest: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+
 class Skill(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(default_factory=lambda: uuid4().hex, min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9_-]+$")
@@ -40,6 +48,7 @@ class Skill(BaseModel):
     files: dict[str, str | SkillAsset] = Field(default_factory=dict)
     directories: list[str] = Field(default_factory=list)
     defaults: dict[str, Any] = Field(default_factory=dict)
+    runtime_requirements: tuple[SkillRuntimeRequirement, ...] = Field(default=(), max_length=20)
 
     @model_validator(mode="after")
     def file_tree(self):
@@ -90,8 +99,9 @@ class ToolboxConfig(BaseModel):
 
 class ReadSkill(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    skill_id: str | None = Field(default=None, description="Omit to list skills; supply an ID to read its full instructions and text files.")
+    skill_id: str | None = Field(default=None, description="Omit to list skills; use a listed node ID or a unique Skill ID to read one member.")
     file_path: str | None = Field(default=None, description="Optional path within the selected skill, such as scripts/build.py or assets/logo.png, to read that file. Binary files return base64 and media_type.")
+    include_file_contents: bool = Field(default=False, description="Set false to read instructions and a file manifest without injecting bundled script contents into the model context. file_path still reads one requested file.")
 
     @model_validator(mode="after")
     def file_needs_skill(self):
@@ -243,23 +253,37 @@ def register_skill_package(registration, *, node_type: str, package: SkillPackag
         current = snapshot["value"]
         result = {key: current[key] for key in ("name", "description", "instructions", "author", "version", "source")}
         if request.skill_id is None:
-            result["skills"] = [{**{key: skill[key] for key in ("name", "description")}, "id": skill.get("node_id") or skill["id"]} for skill in current["skills"]]
+            result["skills"] = [{**{key: skill[key] for key in ("name", "description")},
+                                 "id": skill.get("node_id") or skill["id"],
+                                 "skill_id": skill["id"]} for skill in current["skills"]]
         else:
-            skill = next((skill for skill in current["skills"] if (skill.get("node_id") or skill["id"]) == request.skill_id), None)
-            if skill is None:
-                raise ResourceValidationError("Skill no longer exists; list the toolbox again")
+            matches = [skill for skill in current["skills"] if skill.get("node_id") == request.skill_id]
+            if not matches:
+                matches = [skill for skill in current["skills"] if skill["id"] == request.skill_id]
+            if not matches:
+                exact = next((skill["id"] for skill in current["skills"]
+                              if skill["id"].replace("-", "_") == request.skill_id), None)
+                hint = f" Use exact Skill ID {exact!r}." if exact else " List the toolbox for exact IDs."
+                raise ResourceValidationError(f"Unknown Skill ID {request.skill_id[:120]!r}.{hint}")
+            if len(matches) > 1:
+                raise ResourceValidationError("Skill ID is ambiguous; use a listed node ID")
+            skill = matches[0]
             if request.file_path is not None:
                 if request.file_path not in skill["files"]:
                     raise ResourceValidationError("File no longer exists; read the skill again")
                 result["file"] = {"path": request.file_path, "content": skill["files"][request.file_path]}
             else:
-                result["skill"] = {**skill, "files": {path: asset if isinstance(asset, str) else {
-                    "media_type": asset["media_type"], "size_bytes": len(base64.b64decode(asset["data_base64"]))
-                } for path, asset in skill["files"].items()}}
+                result["skill"] = {**skill, "files": {
+                    path: (asset if request.include_file_contents else {
+                        "media_type": "text/plain", "size_bytes": len(asset.encode("utf-8"))
+                    }) if isinstance(asset, str) else {
+                        "media_type": asset["media_type"], "size_bytes": len(base64.b64decode(asset["data_base64"]))
+                    } for path, asset in skill["files"].items()}}
         return result
 
     registration.register_capability(CapabilityDefinition(kind=kind, tool_name="read_skills", target_parameter="toolbox",
-        description="List a toolbox's current skills and shared conventions. Supply skill_id to read one member, or skill_id and file_path to read a bundled file. Execution requires an independently authorized Sandbox.",
+        read_only=True,
+        description="List a toolbox's skills. Use a listed node ID or unique Skill ID to read one member; files are metadata by default; use file_path to read one needed file. Execution requires an independently authorized Sandbox.",
         input_schema=ReadSkill.model_json_schema()), invoke)
     registration.register_node_type(NodeTypeDefinition(
         id=node_type, label=package.name, description=package.description or "A portable toolbox of skills and shared working instructions.",
@@ -305,12 +329,20 @@ def register_skill_node(registration, *, node_type: str, user_creatable: bool = 
             if path not in skill["files"]:
                 raise ResourceValidationError("File no longer exists; read the skill again")
             return {"file": {"path": path, "content": skill["files"][path]}}
-        return {"skill": {**skill, "files": {path: asset if isinstance(asset, str) else {
-            "media_type": asset["media_type"], "size_bytes": len(base64.b64decode(asset["data_base64"]))
-        } for path, asset in skill["files"].items()}}}
+        include_file_contents = arguments.get("include_file_contents", False)
+        return {"skill": {**skill, "files": {
+            path: (asset if include_file_contents else {
+                "media_type": "text/plain", "size_bytes": len(asset.encode("utf-8"))
+            }) if isinstance(asset, str) else {
+                "media_type": asset["media_type"], "size_bytes": len(base64.b64decode(asset["data_base64"]))
+            } for path, asset in skill["files"].items()}}}
     registration.register_capability(CapabilityDefinition(kind=kind, tool_name="read_skill", target_parameter="skill",
-        description="Read one independently authorized Skill. Supply file_path for a bundled file. Access does not include its parent toolbox or siblings.",
-        input_schema={"type": "object", "properties": {"file_path": {"type": "string", "description": "Optional file path inside this skill."}}, "additionalProperties": False}), invoke)
+        description="Read one independently authorized Skill. Files are metadata by default; supply file_path to read one bundled file. Access does not include its parent toolbox or siblings.",
+        input_schema={"type": "object", "properties": {
+            "file_path": {"type": "string", "description": "Optional file path inside this skill."},
+            "include_file_contents": {"type": "boolean", "default": False,
+                                      "description": "Set false to omit bundled text file contents from the Skill summary."}},
+            "additionalProperties": False}), invoke)
     registration.register_node_type(NodeTypeDefinition(id=node_type, label="Skill", description="One independently connected skill, with its own files and settings.",
         icon="wrench", color="#ac8b57", deck_id="tools", deck_label="Tools", deck_icon="boxes", default_name="New skill",
         default_size=(360, 235), default_status="available", statuses=frozenset({"available"}), config_model=ToolboxConfig,

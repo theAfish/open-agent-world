@@ -1,0 +1,188 @@
+# Dependency intent only; installation and readiness are tracked separately.
+schema_version = 3
+runtime-resources = [
+    "src/oaw_xrd/OAW_XRDfit/LICENSE",
+    "src/oaw_xrd/__init__.py",
+    "src/oaw_xrd/documents.py",
+    "src/oaw_xrd/engine.py",
+    "src/oaw_xrd/frames.py",
+    "src/oaw_xrd/history.py",
+    "src/oaw_xrd/install_engine_runtime.py",
+    "src/oaw_xrd/library.py",
+    "src/oaw_xrd/matching.py",
+    "src/oaw_xrd/multiphase_components.py",
+    "src/oaw_xrd/multiphase_decision.py",
+    "src/oaw_xrd/multiphase_harness.py",
+    "src/oaw_xrd/multiphase_object.py",
+    "src/oaw_xrd/multiphase_science.py",
+    "src/oaw_xrd/multiphase_snapshot.py",
+    "src/oaw_xrd/multiphase_structures.py",
+    "src/oaw_xrd/multiphase_worker.py",
+    "src/oaw_xrd/multiphase_wpem.py",
+    "src/oaw_xrd/OAW_XRDfit/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/demo/intensity.csv",
+    "src/oaw_xrd/OAW_XRDfit/demo/Mn2O3.cif",
+    "src/oaw_xrd/OAW_XRDfit/manifest.json",
+    "src/oaw_xrd/OAW_XRDfit/requirements.txt",
+    "src/oaw_xrd/OAW_XRDfit/src/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Amorphous/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Amorphous/fitting/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Amorphous/fitting/AmorphousFitting.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Amorphous/QuantitativeCalculation/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Amorphous/QuantitativeCalculation/AmorphousRDF.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Background/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Background/BacDeduct.py",
+    "src/oaw_xrd/OAW_XRDfit/src/DecomposePlot/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/DecomposePlot/plot.py",
+    "src/oaw_xrd/OAW_XRDfit/src/EMBraggOpt/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/EMBraggOpt/bounded_cell.py",
+    "src/oaw_xrd/OAW_XRDfit/src/EMBraggOpt/BraggLawDerivation.py",
+    "src/oaw_xrd/OAW_XRDfit/src/EMBraggOpt/EMBraggSolver.py",
+    "src/oaw_xrd/OAW_XRDfit/src/EMBraggOpt/WPEMFuns/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/EMBraggOpt/WPEMFuns/SolverFuns.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/CifReader.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/callbacks.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/cli.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/config.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/graph/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/graph/_batch.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/graph/_compute.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/graph/_converters.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/graph/_structure.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/graph/_types.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/layers/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/layers/_aggregate.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/layers/_atom.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/layers/_atom_ref.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/layers/_base.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/layers/_basis.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/layers/_bond.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/layers/_core.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/layers/_cutoff.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/layers/_gn.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/layers/_readout.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/layers/_state.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/layers/_three_body.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/layers/_two_body.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/models/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/models/_base.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/models/_dynamics.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/models/_m3gnet.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/models/MP-2021.2.8-EFS/checkpoint",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/models/MP-2021.2.8-EFS/m3gnet.data-00000-of-00001",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/models/MP-2021.2.8-EFS/m3gnet.index",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/models/MP-2021.2.8-EFS/m3gnet.json",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/trainers/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/trainers/_metrics.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/trainers/_potential.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/trainers/_property.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/type.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/utils/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/utils/_general.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/utils/_math.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/utils/_tf.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/m3gnet/utils/sb_roots.txt",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/Relaxer.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/wyckoff/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/wyckoff/wyckoff_dict.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Extinction/XRDpre.py",
+    "src/oaw_xrd/OAW_XRDfit/src/GraphStructure/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/GraphStructure/graph.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Plot/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Plot/UnitCell.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Refinement/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/Refinement/VolumeFractionDertermination.py",
+    "src/oaw_xrd/OAW_XRDfit/src/StructureOpt/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/StructureOpt/SiteOpt.py",
+    "src/oaw_xrd/OAW_XRDfit/src/StructureSolver/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/StructureSolver/solver.py",
+    "src/oaw_xrd/OAW_XRDfit/src/WPEM.py",
+    "src/oaw_xrd/OAW_XRDfit/src/WPEMXAS/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/WPEMXAS/EXAFS.py",
+    "src/oaw_xrd/OAW_XRDfit/src/WPEMXPS/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/WPEMXPS/XPSEM.py",
+    "src/oaw_xrd/OAW_XRDfit/src/XRDSimulation/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/XRDSimulation/DiffractionGrometry/__init__.py",
+    "src/oaw_xrd/OAW_XRDfit/src/XRDSimulation/DiffractionGrometry/atom.py",
+    "src/oaw_xrd/OAW_XRDfit/src/XRDSimulation/Simulation.py",
+    "src/oaw_xrd/pipeline.py",
+    "src/oaw_xrd/profile.py",
+    "src/oaw_xrd/qualx.py",
+    "src/oaw_xrd/refinement.py",
+    "src/oaw_xrd/results_context.py",
+    "src/oaw_xrd/runtime.py",
+    "src/oaw_xrd/runtime_environment.py",
+    "src/oaw_xrd/sql_history.py",
+    "src/oaw_xrd/structures.py",
+    "src/oaw_xrd/templates.py",
+    "src/oaw_xrd/verify_environment.py",
+    "src/oaw_xrd/worker.py",
+    "src/oaw_xrd/worker_launcher.py",
+    "src/oaw_xrd/workflow.py",
+]
+
+[compatibility]
+plugin_api = "1.35"
+oaw = ">=0.1.0,<1"
+
+[distribution]
+id = "research.xrd"
+name = "XRD Analysis"
+
+[plugin]
+owner = "research.xrd"
+packs = ["research.xrd.default"]
+node_types = ["xrd.analysis","xrd.cif","xrd.library","xrd.match","xrd.multiphase-harness","xrd.pattern","xrd.reference","xrd.spectrum-canvas","xrd.structure-canvas"]
+
+[components.backend]
+project = "pyproject.toml"
+mode = "host-adapter"
+
+[components.frontend]
+entry = "frontend/index.tsx"
+project = "frontend/package.json"
+mode = "pack-build"
+
+[environments.scientific]
+target = "host-worker"
+provider = "python"
+requires_python = ">=3.10,<3.12"
+prepare = "on-use"
+management = "managed"
+sources = [{ path = "src/oaw_xrd/OAW_XRDfit/requirements.txt", kind = "requirements" }]
+verify_imports = ["numpy", "scipy", "pandas", "pymatgen", "tensorflow"]
+verify_script = "src/oaw_xrd/verify_environment.py"
+
+[environments.qualx]
+target = "host-worker"
+provider = "executable"
+prepare = "manual"
+accept_external = true
+executable_names = ["qualx"]
+verify_argv = ["--help"]
+verify_pattern = '(?s)(?=.*--settings-dir)(?=.*--database)(?=.*--wavelength)'
+
+[prerequisites.qualx]
+kind = "executable"
+description = "Optional patched QualX executable discovered on PATH or explicitly configured with OAW_XRD_QUALX_EXECUTABLE."
+optional = true
+
+[prerequisites.pow-cod]
+kind = "resource"
+description = "Optional local POW_COD database configured through the XRD card."
+optional = true
+
+[features.fitting]
+environments = ["scientific"]
+
+[[dependencies]]
+kind = "owner"
+id = "science.structure-viewer"
+
+[features.full-library-search]
+environments = ["qualx", "scientific"]
+prerequisites = ["qualx", "pow-cod"]
+optional = true
+

@@ -1,12 +1,26 @@
 # MatCreator on OAW
 
-This plugin publishes **MatCreator native research**, a dedicated **MatCreator
-Agent**, four portable Toolsets and a Know-Do Graph. Its Legion connects the
-host's reusable **Agent graph** card to the native Agent.
+This plugin publishes **MatCreator research**, a dedicated **MatCreator
+Agent**, four portable Toolsets, a Know-Do Graph and the host's reusable **Jobs**
+card. If you opened an older version, browse the MatCreator Pack in the Library
+and choose **Collect new cards** to collect Jobs. Jobs retains its canonical
+`core.jobs` identity and can also be collected
+from Core essentials.
+
+New research Legions open Conversation on the left, the Agent and Structure
+viewer in the center, and Sandbox on the right. Agent graph, artifacts and Jobs
+sit below, alongside the knowledge graph. Existing formations keep their saved
+positions; Workspace mode retains its composed panes and tabs.
+
+**Jobs → Agent** selects the submitting Agent's jobs in the current session.
+**Observe jobs** grants read-only access; **Manage jobs** also allows status
+refresh, monitoring controls and explicit external cancellation. A job records
+its Sandbox separately as the execution environment. One Jobs card can connect
+to several Agents; grouping cards into a Legion does not grant access to jobs.
 
 ## Native MatCreator Agent
 
-Use **MatCreator native research** for the Pack-owned planner, execution
+Use **MatCreator research** for the Pack-owned planner, execution
 orchestrator and recursive step executors. Their maintained Python source lives
 in `oaw_matcreator_engine/` and is included in the Pack wheel alongside the
 `oaw_matcreator/` host adapter. Editing that source takes effect in the next
@@ -27,19 +41,22 @@ this is historical attribution, not a runtime lock. See
 [engine ownership](oaw_matcreator_engine/UPSTREAM.md) for the retained modules
 and the OAW adaptations.
 
-Normal OAW setup and development startup prepare third-party orchestration
-libraries through the Pack's `open_agent_world.setup` hook. Desktop packaging
-uses the same hook. Google ADK, LiteLLM and JSON Repair are declared in
-`oaw_matcreator/native-requirements.txt` and installed in an isolated directory
-under the destination Python's `oaw-runtimes/matcreator/`. Scientific libraries
-remain in connected Sandboxes. These dependencies are not added to OAW core.
+Source setup, desktop packaging and schema 3 `.oawpack` installation use the
+same declared environment and host-owned preparation provider. In
+[`oaw.pack.toml`](oaw.pack.toml), `native` is an install-time Python worker
+environment; its Google ADK, LiteLLM, JSON Repair and tokenizer requirements
+come from `oaw_matcreator/native-requirements.txt`. OAW installs and verifies
+these libraries under the active application's data root, separately from host
+site packages. Desktop builds can supply the same verified environment as an
+offline runtime bundle. The legacy setup entry point delegates to this provider.
 
-Setup reuses verified installations, serializes concurrent calls and retries
-partial installs. Hosts older than Python 3.12 receive a managed interpreter.
-Workers use `-I -S` and explicitly load the Pack source plus its third-party
-libraries. Execution never downloads dependencies. The dependency cache identity
-is independent of engine source edits. Previous runtime caches are left intact;
-new setup installs only the current third-party requirements.
+Preparation records durable operation receipts, serializes concurrent installs
+and publishes verified environment generations. A compatible interpreter is
+prepared when needed. Workers use `-I -S` and explicitly load Pack source plus
+the selected private libraries; worker startup never downloads dependencies.
+Engine source edits alone do not invalidate the dependency environment. Valid
+pre-migration environments remain readable during migration. Managed dependency
+cleanup follows Pack references and active workers; session data is kept.
 
 Existing `matcreator.agent` cards, the `matcreator.native` provider ID, session
 storage paths and checkpoint format are retained. Obsolete `python_executable`
@@ -48,14 +65,20 @@ engine/interpreter override paths are no longer exposed or executed. Existing
 saved workspace layouts remain user-owned.
 
 On Windows, `scripts/dev.ps1` prepares and launches the persistent
-`backend/.venv/Scripts/python.exe`, matching normal setup. A `uv run
---with-editable` overlay has its own installation prefix and cannot see that
-runtime. Missing-runtime errors report the backend interpreter and expected
-directory; Agent details expose the managed environment's availability.
+`backend/.venv/Scripts/python.exe`, matching normal setup. Runtime selection uses
+the active OAW data profile. Missing-runtime errors report the backend interpreter
+and expected directory; Agent details expose the managed environment's availability.
 
-Only orchestration dependencies are installed in this environment. Materials
-libraries, CLI tools, remote-compute credentials and licensed programs belong to
-the connected Sandbox. The native runtime supports ADK/LiteLLM model connections
+Only orchestration dependencies are installed in this worker environment.
+Executable Skills explicitly select Sandbox profiles for ASE, SSH support,
+scientific input preparation and the Bohrium `bohr` CLI. OAW prepares their Python
+libraries or private npm prefix within the authorized Sandbox command, subject
+to its network policy and deadline. Node/npm must already be available in a
+Sandbox that uses the Bohr profile. Model connections, cloud credentials,
+project IDs, actual LAMMPS/DeepMD/VASP calculators, model weights and licensed
+pseudopotentials remain explicit prerequisites on the selected compute target;
+installing preparation libraries does not supply those resources. The native
+runtime supports ADK/LiteLLM model connections
 (OpenAI, Anthropic, Gemini and legacy); the host's TypeSafe-only adapter is not
 supported by this ADK execution engine.
 
@@ -70,6 +93,11 @@ The planner owns user communication in both normal and Flash modes. Execution
 orchestrators and recursive step executors return internal reports and artifact
 references to their caller. Their text remains in native checkpoints for review;
 only planner text becomes Conversation replies, while tool activity stays visible.
+Provider-exposed thinking from the planner, orchestrator and child executors is
+published as `model_reasoning` activity using native event/part identities. OAW
+owns its Run history and loads each full text on expansion. Native model calls
+are non-streaming: thinking appears when each model response arrives, before its
+tool calls, without becoming a Conversation reply.
 `to_planner` ends the execution stream after its tool response, before another
 executor model round. The planner then reviews the report and, when needed,
 presents a revised plan for confirmation. Internal executors cannot send
@@ -137,9 +165,12 @@ and the old standalone knowledge stack, and checks dependency joins, recovery,
 artifact references and revoked access. This is not a real-model or scientific
 calculation benchmark.
 
-The source-plugin setup hook and `.oawpack` archive installation are distinct
-host mechanisms. This change packages the engine in the wheel and validates
-source setup; it does not add a new generic archive runtime installer.
+Source Packs and published archives share the same dependency declaration and
+managed installation providers. Archive builds include the engine, worker files
+and declared verification resources, so Store installation prepares the same
+native environment. See [Pack distribution](../../docs/pack-distribution.md) for
+build, install, readiness and uninstall behavior. Installing a Pack does not
+run scientific calculations or configure its external prerequisites.
 
 ## Workspace layout (revision 2)
 
@@ -174,7 +205,7 @@ user-owned; redeploy the preset or arrange its tabs with **Edit layout**.
 
 ## Execution history and dependency evidence
 
-Pack 0.9 requires OAW plugin API 1.33. The Pack records immutable Step attempts,
+Pack 0.9 requires OAW plugin API 1.35. The Pack records immutable Step attempts,
 plan identities, timestamps, retry/replan links and versioned artifact producers.
 The host stores a full read-only projection with each Run and exposes authorized,
 revision-consistent pages. A completed Conversation turn does not turn unfinished
@@ -213,8 +244,10 @@ When external work settles, the host starts a bounded continuation that restores
 the same approved plan, inspects the existing jobs, and collects outputs. A changed
 plan still needs approval. Known jobs are supplied to the resumed step explicitly.
 
-Discover `matcreator.bohrium-batch` with `inspect_background_jobs`. It submits
-through the installed `bohr batchjob` CLI in the connected Sandbox, performs a
+Discover `matcreator.bohrium-batch` with `inspect_background_jobs`. Its declared
+`bohr` profile prepares a private npm package in the connected Sandbox; submission,
+monitoring and cancellation resolve that package's CLI directly, including after
+the submitting Run ends. No global `bohr` installation is needed. It performs a
 dry run, requires explicit project/image/machine and compute budget, and records
 a searchable `oaw-<host-job-id>` in the remote job name. A lost submission response
 requires inspecting existing provider jobs and attaching the matching ID; it is
@@ -309,6 +342,7 @@ backend/.venv/Scripts/python.exe plugins/matcreator/build_packages.py path/to/Ma
 ```
 
 The maintainer importer requires PyYAML. Check out the skill-package source
-revision first; normal startup reads generated JSON and does not install science
-dependencies. `provision_science.py` remains an optional helper for preparing ASE
-inside an explicitly configured Sandbox workspace.
+revision first; normal startup reads generated JSON. Migrated executable Skills
+prepare their declared dependencies when run in an authorized Sandbox.
+`provision_science.py` remains an optional helper for older manually configured
+Sandbox workspaces; it is not required for the declared ASE profile.

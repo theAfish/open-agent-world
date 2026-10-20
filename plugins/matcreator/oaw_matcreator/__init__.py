@@ -12,7 +12,7 @@ from . import preset, native_card
 READ = "matcreator.kdg.read"
 
 class MatCreatorPlugin:
-    descriptor = PluginDescriptor(id="matcreator", version="0.9.0", plugin_api_version="1.33", name="MatCreator",
+    descriptor = PluginDescriptor(id="matcreator", version="0.9.0", plugin_api_version="1.35", name="MatCreator",
                                   requires_plugins=("science.structure-viewer",))
 
     def register(self, registration):
@@ -90,7 +90,8 @@ class MatCreatorPlugin:
         native_card.register(registration)
         registration.register_legion_preset(preset.native_definition())
         registration.register_pack(PackDefinition(id='matcreator.default', name='MatCreator',
-            description='Native research Agent, scientific skills, execution views and a Know-Do Graph.', cards=tuple(registration.nodes)))
+            description='Native research Agent, scientific skills, Jobs and a Know-Do Graph.',
+            cards=(*registration.nodes, 'core.jobs')))
 
 def create_plugin():
     return MatCreatorPlugin()

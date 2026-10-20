@@ -127,9 +127,15 @@ class ConversationRunSummary(BaseModel):
     final_message_id: str | None = None
     awaiting: str | None = None
     progress: str | None = None
+    recovery_kind: str | None = None
+    recovery_classification: str | None = None
+    recovery_receipts: list[dict[str, Any]] = Field(default_factory=list)
+    confirmed_tool_count: int | None = None
     tool_count: int = 0
     tool_trace: list[dict[str, Any]] = Field(default_factory=list)
     tool_trace_truncated: bool = False
+    structure_outcomes: dict[str, Any] = Field(default_factory=dict)
+    delivery_state: str | None = None
 
 
 class ConversationDeliveryState(BaseModel):

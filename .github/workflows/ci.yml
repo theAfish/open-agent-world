@@ -19,6 +19,27 @@ env:
   PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
+  source-launchers:
+    name: Source startup (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-14]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Test source launchers without installing application dependencies
+        run: python scripts/test-source-launchers.py
+      - name: Test npm discovery and build receipts
+        run: node --test frontend/scripts/source-startup.test.mjs
+
   backend:
     name: Backend tests
     runs-on: ubuntu-24.04
@@ -83,19 +104,30 @@ jobs:
           python-version: '3.12'
       - uses: astral-sh/setup-uv@v10.2.0
       - name: Install locked deployment backend
-        run: uv sync --project backend --locked --dev --python 3.12
+        run: uv sync --project backend --locked --dev --extra hosting --extra adk --extra litellm --python 3.12
+      - name: Install operator-approved plugin dependencies for hosted workers
+        run: >-
+          backend/.venv/bin/python -c "from pathlib import Path; import subprocess, sys;
+          subprocess.run(['uv', 'pip', 'install', '--python', sys.executable,
+          *[str(p.parent) for p in sorted(Path('plugins').glob('*/pyproject.toml'))]], check=True)"
       - name: Run frontend tests
         working-directory: frontend
         run: npm test
       - name: Type-check and build frontend
         working-directory: frontend
         run: npm run build
+      - name: Verify Pack build dependency boundaries
+        working-directory: frontend
+        run: npm run test:pack-sdk
       - name: Install UI acceptance browsers
         working-directory: frontend
         run: npx --no-install playwright install --with-deps chromium webkit
       - name: Run deployment acceptance against production frontend
         working-directory: frontend
         run: npm run test:e2e:deployment
+      - name: Verify hosted login and independent user workspaces
+        working-directory: frontend
+        run: npm run test:e2e:hosting
       - name: Verify shared UI in Chromium and WebKit
         working-directory: frontend
         run: npm run test:e2e:ui
@@ -108,6 +140,9 @@ jobs:
             .tmp/deployment-playwright/
             .tmp/deployment-desktop.png
             .tmp/deployment-mobile.png
+            .tmp/hosting-playwright/
+            .tmp/hosting-login.png
+            .tmp/hosting-canvas.png
             .tmp/ui-playwright/
           include-hidden-files: true
           retention-days: 7
@@ -123,14 +158,24 @@ jobs:
           python-version: '3.12'
       - uses: astral-sh/setup-uv@v10.2.0
       - name: Install locked backend dependencies
-        run: uv sync --project backend --locked --dev --python 3.12
+        run: uv sync --project backend --locked --dev --extra hosting --python 3.12
+      - name: Check Windows source setup and dev launch contracts
+        run: |
+          ./scripts/test-dev-environment.ps1
+          ./scripts/test-dev-startup.ps1
       - name: Check startup, access boundaries, deployment, persistence and migration
         run: >-
           backend/.venv/Scripts/python.exe .github/run-backend-tests.py
           backend/tests/test_application_launch.py
+          backend/tests/test_source_scripts.py
+          backend/tests/test_plugin_setup.py
           backend/tests/test_control_plane.py
           backend/tests/test_http_foundations.py
           backend/tests/test_request_context.py
+          backend/tests/test_hosted_accounts.py
+          backend/tests/test_hosted_auth.py
+          backend/tests/test_hosted_profile.py
+          backend/tests/test_hosting_oidc.py
           backend/tests/test_idempotency.py
           backend/tests/test_deployments.py
           backend/tests/test_persistence_and_events.py

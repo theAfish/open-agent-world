@@ -679,12 +679,17 @@ class ApplicationServices:
         raise TimeoutError("plugin lifecycle cleanup exceeded its deadline")
 
     async def startup(self) -> None:
-        await self.resources.artifacts.recover()
+        from backend.startup_progress import startup_stage
+        with startup_stage("recover managed artifacts"):
+            await self.resources.artifacts.recover()
         from backend.node_containers import migrate_collections
         migrate_collections(self)
+        from backend.plugin_defaults import migrate_equipment
+        migrate_equipment(self)
         manager = self._require_run_manager()
         manager.admission_check = self.summoning.assert_admission
-        await manager.startup()
+        with startup_stage("recover interrupted runs"):
+            await manager.startup()
         for run in manager.list_runs():
             conversation_id, session_id = manager._conversation_scope(run)
             if (
@@ -745,11 +750,13 @@ class ApplicationServices:
         for card in self.world.list_cards():
             lifecycle = self.plugins.node_type(card.type).lifecycle if not card.missing_plugin else None
             if lifecycle is not None:
-                await lifecycle.on_startup(context, card)
+                with startup_stage(f"restore card runtime ({card.type})"):
+                    await lifecycle.on_startup(context, card)
         await self.summoning.recover()
         from backend.sandbox.history import recover as recover_commands
         await recover_commands(self)
-        await self.background_jobs.startup()
+        with startup_stage("recover background jobs"):
+            await self.background_jobs.startup()
 
         self.node_execution.continuation_closed = False
         self.node_execution.signal_continuations()
@@ -766,6 +773,8 @@ class ApplicationServices:
         await self.node_execution.shutdown()
         await self.background_jobs.shutdown()
         await self.sandbox_operations.shutdown()
+        if isinstance(self.sandbox_backend, SandboxManager):
+            await self.sandbox_backend.shutdown()
         context = self._node_lifecycle_context()
         for card in self.world.list_cards():
             lifecycle = self.plugins.node_type(card.type).lifecycle if not card.missing_plugin else None
@@ -810,7 +819,7 @@ class ApplicationServices:
         """Restore a previously captured node, including managed node types."""
         if request.id is None:
             raise GraphValidationError("restoring a node requires its original id")
-        return await self._create_card(request, _skip_collection_seed=True)
+        return await self._create_card(request, _skip_collection_seed=True, _skip_default_equipment=True)
 
     async def _create_card(
         self,
@@ -822,6 +831,7 @@ class ApplicationServices:
         _creation_receipts: dict[str, tuple[NodeLifecycleTransaction, ...]] | None = None,
         _publish_event: bool = True,
         _skip_collection_seed: bool = False,
+        _skip_default_equipment: bool = False,
     ) -> Card:
         async with self._node_mutation():
             if request.id is not None and self._has_pending_node_deletion(request.id):
@@ -883,16 +893,21 @@ class ApplicationServices:
                         workspace_created = True
                     except OSError as exc:
                         raise ResourceValidationError(f"Cannot create Sandbox workspace: {exc}") from exc
-                card = self.world.create_card(request, card_id=preview.id)
-                if definition.document is not None and definition.document.initial_value is not None and definition.state is None:
-                    from backend.node_documents import write_document
-                    initial = dict(definition.document.initial_value)
-                    if _skip_collection_seed and definition.container and definition.container.document_field:
-                        initial[definition.container.document_field] = []
-                    write_document(self, card.id, initial, 0)
+                from backend.plugin_defaults import ensure_equipment
+                with self.events.committed_batch(), self.database.transaction(immediate=True):
+                    card = self.world.create_card(request, card_id=preview.id)
+                    if definition.document is not None and definition.document.initial_value is not None and definition.state is None:
+                        from backend.node_documents import write_document
+                        initial = dict(definition.document.initial_value)
+                        if _skip_collection_seed and definition.container and definition.container.document_field:
+                            initial[definition.container.document_field] = []
+                        write_document(self, card.id, initial, 0)
                 for transaction in transactions:
                     attempted_transactions.append(transaction)
                     await transaction.commit()
+                if not _skip_default_equipment:
+                    with self.events.committed_batch(), self.database.transaction(immediate=True):
+                        ensure_equipment(self, card.id)
                 card = self.enrich_card(self.world.get_card(card.id))
                 if _publish_event:
                     await self._publish_card_created(card)
@@ -904,7 +919,8 @@ class ApplicationServices:
                         cleanup_errors.append(rollback_error)
                 if card is not None:
                     try:
-                        self.world.delete_card(card.id)
+                        if self.world.maybe_get_card(card.id):
+                            self.world.delete_cards([card.id, *[item.id for item in self.world.owned_descendants(card.id)]])
                     except BaseException as cleanup_error:
                         cleanup_errors.append(cleanup_error)
                 for cleanup_error in cleanup_errors:
@@ -1846,7 +1862,9 @@ class ApplicationServices:
                     )
                 payload_version = definition.template_handler.payload_version
                 definition.template_handler.validate_payload(payload, payload_version)
+            from backend.plugin_defaults import capture_metadata
             template_node = LegionTemplateNode(
+                plugin_defaults=capture_metadata(self, card.id, node_keys),
                 key=node_keys[card.id],
                 parent_key=node_keys.get(card.parent_id),
                 owner_key=node_keys.get(card.equipment.owner_id) if card.equipment else None,
@@ -2055,6 +2073,7 @@ class ApplicationServices:
                     _creation_receipts=creation_receipts,
                     _publish_event=False,
                     _skip_collection_seed=node.initial_document is not None,
+                    _skip_default_equipment=True,
                 ))
                 if node.initial_document is not None and definition.state is not None:
                     scoped_document_seeds.append(node)
@@ -2075,6 +2094,16 @@ class ApplicationServices:
                 identity = (kind, self.card_state.default_session(new_id) if kind == "session" else "*")
                 revision = read_document(self, new_id, state_identity=identity)["revision"]
                 write_document(self, new_id, spec.remap_references(node.initial_document, node_ids), revision, state_identity=identity)
+            from backend.plugin_defaults import restore_metadata, ensure_equipment, adopt_equipment
+            with self.events.committed_batch(), self.database.transaction(immediate=True):
+                for node in template_nodes:
+                    restore_metadata(self, node_ids[node.key], node.plugin_defaults, node_ids)
+                for node in template_nodes:
+                    adopt_equipment(self, node_ids[node.key])
+                    added = ensure_equipment(self, node_ids[node.key])
+                    created_nodes.extend(added)
+                    for item in added:
+                        created_nodes.extend(self.world.list_members(item.id))
             for edge in record.blueprint.edges:
                 if edge.source in removed_keys or edge.target in removed_keys:
                     continue
@@ -2644,6 +2673,12 @@ class ApplicationServices:
         message_ids: list[str],
         max_sequence: int,
     ) -> str:
+        latest = self._conversation_delivery_task(message_ids)
+        return self._conversation_prompt(
+            conversation_id, session, agent_id, latest, max_sequence=max_sequence
+        )
+
+    def _conversation_delivery_task(self, message_ids: list[str]) -> str:
         messages = [self.conversations.get_message(message_id) for message_id in message_ids]
         if len(messages) == 1:
             latest = messages[0].content
@@ -2661,9 +2696,7 @@ class ApplicationServices:
                 "Additional messages received while you were working:\n\n"
                 + "\n".join(chunks)
             )
-        return self._conversation_prompt(
-            conversation_id, session, agent_id, latest, max_sequence=max_sequence
-        )
+        return latest
 
     async def _drain_conversation_agent(self, agent_id: str) -> None:
         """Start at most one queued Conversation burst for an Agent.
@@ -2743,6 +2776,7 @@ class ApplicationServices:
                     caller_id=conversation_id,
                     context_id=session_id,
                     run_id=run_id,
+                    task_prompt=self._conversation_delivery_task(claimed),
                     initial_lifecycle={
                         "delivery_message_ids": claimed,
                         "conversation_max_sequence": max_sequence,
@@ -2859,6 +2893,7 @@ class ApplicationServices:
                 caller_kind="agent",
                 caller_id=source_agent_id,
                 context_id=session_id,
+                task_prompt=message,
             )
             await self._await_synchronous_turn(manager, run.run_id, target.name)
             final_text = manager.final_text(run.run_id)
@@ -2992,6 +3027,8 @@ class ApplicationServices:
         info = await backend.get(sandbox_id)
         if info.state in {SandboxState.READY, SandboxState.RUNNING}:
             # Start means ensure-running, not reconfigure/rebind a shared environment.
+            if isinstance(backend, SandboxManager):
+                await backend.start(sandbox_id)
             return info
         for edge in self.world.list_edges_to(sandbox_id):
             if edge.relationship in {
@@ -3030,11 +3067,15 @@ class ApplicationServices:
         timeout_seconds: float | None = None,
         agent_id: str | None = None,
         _skill_request: RunSkillScript | None = None,
+        _background_job_id: str | None = None,
         _keep_on_disconnect: bool = False,
         _operation_id: str | None = None,
         environment_id: str | None = None,
         target_id: str | None = None,
+        python_environment: str = "auto",
     ) -> CommandResult:
+        if not isinstance(python_environment, str) or python_environment not in {"auto", "managed", "none"}:
+            raise SandboxValidationError("python_environment must be auto, managed, or none")
         if timeout_seconds is not None:
             import math
             if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)) or not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= 36000:
@@ -3049,7 +3090,7 @@ class ApplicationServices:
             backend = self._require_sandbox_backend()
             if (argv is None) == (command is None):
                 raise SandboxValidationError("provide exactly one of command or argv")
-            from backend.sandbox.commands import require_noninteractive
+            from backend.sandbox.commands import needs_managed_python, require_noninteractive
             require_noninteractive(argv if _skill_request is None else None, command)
             await self.ensure_sandbox_running(sandbox_id, agent_id=agent_id)
             if command is not None:
@@ -3081,12 +3122,30 @@ class ApplicationServices:
                                 kind = "sandbox.run_skill_script"
                             authorize_invocation(self, agent_id, f"{kind}:{sandbox_id}", values)
 
+                        from backend.sandbox.pack_profiles import execution_profile_references, bind_command_profiles
+                        runtime_requirements = execution_profile_references(self, agent_id, sandbox_id,
+                            background_job_id=_background_job_id)
                         if _skill_request is not None:
                             from backend.skill_runtime import resolve_skill_mount
                             if agent_id is None:
                                 raise ResourceValidationError("Skill execution requires an Agent")
-                            execution_argv, mount = resolve_skill_mount(self, agent_id, sandbox_id, _skill_request)
+                            execution_argv, mount = resolve_skill_mount(self, agent_id, sandbox_id, _skill_request,
+                                                                      runtime_requirements=runtime_requirements)
                             options["runtime_mount"] = mount
+                        elif runtime_requirements:
+                            execution_argv, mount = bind_command_profiles(self.plugins, runtime_requirements, execution_argv)
+                            options['runtime_mount'] = mount
+                        if python_environment == 'none' and execution_argv[:4] == ['python3', '-I', '-S', '_oaw_profile/runner.py']:
+                            raise SandboxValidationError('Declared Pack environments require Sandbox Python; use auto or managed')
+                        if getattr(backend, "supports_optional_python_runtime", False):
+                            if isinstance(backend, SandboxManager):
+                                options["python_environment"] = python_environment
+                            else:
+                                options["managed_python"] = needs_managed_python(execution_argv,
+                                    python_environment, skill=_skill_request is not None)
+                        elif python_environment == "none":
+                            raise SandboxValidationError(
+                                "This Sandbox runtime cannot omit its managed Python environment")
                         from backend.execution_config import resolve_sandbox_configuration
                         from backend.execution_config import effective_variables
                         _, pending_variables = effective_variables(self, sandbox_id, environment_id)
@@ -3110,20 +3169,76 @@ class ApplicationServices:
                         self._require_card_type(sandbox_id, CardType.SANDBOX)
                         from backend.sandbox.history import save, key as command_history_key
                         from backend.security.redaction import redact
-                        receipt = self._sandbox_commands.get(command_id, {}) if _operation_id else {}
-                        receipt.update({"id": command_id, "caller": agent_id or "user", "state": "running",
+                        # Build the complete journal entry before exposing it.
+                        # A validation error here must not persist a half-filled
+                        # receipt that later crashes Sandbox history rendering.
+                        receipt_data = {"id": command_id, "caller": agent_id or "user", "state": "running",
                             "sandbox_id": sandbox_id,
+                            "python_environment": python_environment,
                             "history_key": command_history_key(self, sandbox_id),
                             "run_id": self.run_manager.current_context.run_id if self.run_manager.current_context else None,
                             "started_at": datetime.now(UTC).isoformat(), "argv": redact(list(execution_argv), secrets),
-                            "skill_id": _skill_request.skill_id if _skill_request else None})
+                            "phase": "preparing_python" if isinstance(backend, SandboxManager)
+                                and needs_managed_python(execution_argv, python_environment,
+                                                         skill=_skill_request is not None)
+                                else "dispatching",
+                            "skill_id": _skill_request.skill_id if _skill_request else None}
+                        receipt = self._sandbox_commands.get(command_id, {}) if _operation_id else {}
+                        receipt.update(receipt_data)
                         peers = tuple({key: item.get(key) for key in ("id", "caller", "run_id", "argv", "started_at")}
                             for item in self._sandbox_commands.values() if item["sandbox_id"] == sandbox_id and item["id"] != command_id)
                         self._sandbox_commands[command_id] = receipt
                         self._sandbox_tasks[command_id] = asyncio.current_task()
                         save(self, sandbox_id, receipt)
-                    await self._emit_sandbox_event(SandboxEvent(sandbox_id, SandboxEventType.COMMAND_STARTED,
-                        {"command_id": command_id, "argv": receipt["argv"], "concurrent_commands": peers}))
+                    async def recheck_admission() -> None:
+                        # Any asynchronous queue or interpreter preparation can
+                        # outlive the grants and dependency bindings it observed.
+                        async with self._node_mutation(read_only=True):
+                            self._require_card_type(sandbox_id, CardType.SANDBOX)
+                            if agent_id is not None:
+                                from backend.capabilities.projection import authorize_invocation
+                                values = {key: value for key, value in {
+                                    "environment_id": environment_id, "target_id": target_id,
+                                    "skill_id": _skill_request.skill_id if _skill_request else None,
+                                }.items() if value is not None}
+                                kind = "sandbox.run_skill_script" if _skill_request else "sandbox.execute"
+                                authorize_invocation(self, agent_id, f"{kind}:{sandbox_id}", values)
+                            # Re-resolve Pack enablement, declarations and Skill
+                            # contents after asynchronous interpreter preparation.
+                            current_requirements = execution_profile_references(self, agent_id, sandbox_id,
+                                background_job_id=_background_job_id)
+                            if _skill_request is not None:
+                                current_argv, current_mount = resolve_skill_mount(self, agent_id, sandbox_id, _skill_request,
+                                    runtime_requirements=current_requirements)
+                            elif current_requirements:
+                                current_argv, current_mount = bind_command_profiles(self.plugins, current_requirements, argv)
+                            else:
+                                current_argv, current_mount = argv, None
+                            if current_argv != execution_argv or current_mount != options.get('runtime_mount'):
+                                raise SandboxValidationError('Pack environment or Skill changed while this command was preparing; retry the command')
+                            self.resources.artifacts.assert_source_idle(sandbox_id)
+                            self.summoning.assert_admission(sandbox_id)
+                            if sandbox_id in self._sandbox_stopping:
+                                raise SandboxStateError('Sandbox admission is closed while termination cleanup is pending')
+                    if isinstance(backend, SandboxManager):
+                        await backend.wait_for_python_preparation(
+                            sandbox_id, execution_argv, python_environment,
+                            skill=_skill_request is not None,
+                        )
+                        await recheck_admission()
+                    async def mark_command_started() -> None:
+                        # SandboxManager may prepare a new base interpreter after
+                        # the queue wait. Reauthorize at its final dispatch hook.
+                        await recheck_admission()
+                        receipt["phase"] = "executing"
+                        from backend.sandbox.history import save
+                        save(self, sandbox_id, receipt)
+                        await self._emit_sandbox_event(SandboxEvent(sandbox_id, SandboxEventType.COMMAND_STARTED,
+                            {"command_id": command_id, "argv": receipt["argv"], "concurrent_commands": peers}))
+                    if isinstance(backend, SandboxManager):
+                        options["on_command_start"] = mark_command_started
+                    else:
+                        await mark_command_started()
                     result = await backend.execute(
                         sandbox_id, execution_argv, timeout_seconds=timeout_seconds or self.world.get_card(sandbox_id).config.get("command_timeout", 6000), **options
                     )
@@ -3880,8 +3995,11 @@ def create_services(
     for directory in ("projects", "assets", "sandboxes", "database", "logs"):
         (settings.data_root / directory).mkdir(parents=True, exist_ok=True)
     new_world = not settings.database_path.exists()
-    database = Database(settings.database_path)
-    plugin_registry = plugins or load_plugin_registry(plugin_directories=settings.plugin_directories, data_root=settings.data_root)
+    from backend.startup_progress import startup_stage
+    with startup_stage("open profile database"):
+        database = Database(settings.database_path)
+    with startup_stage("load Pack registry"):
+        plugin_registry = plugins or load_plugin_registry(plugin_directories=settings.plugin_directories, data_root=settings.data_root)
     world = WorldStore(database, plugin_registry, chunk_size=settings.chunk_size, new_world=new_world)
     try:
         card_library = CardLibraryStore(database, plugin_registry)
@@ -3969,6 +4087,7 @@ def create_services(
     services.background_jobs = BackgroundJobs(services)
     services.summoning = SummoningService(services)
     from backend.security.model_connections import ModelConnectionStore
+    model_connections = ModelConnectionStore(services.llm_settings)
     services.run_manager = RunManager(
         store=RunStore(database),
         world=world,
@@ -3985,12 +4104,17 @@ def create_services(
             else settings.agent_runtime
         ),
         provider_options={
-            "google.adk": {"app_name": "open-agent-world", "model_connections": ModelConnectionStore(services.llm_settings),
-                           "context_store": contexts},
+            "google.adk": {
+                "app_name": "open-agent-world",
+                "model_connections": model_connections,
+                "context_store": contexts,
+            },
             "openai.codex": {
                 "workspace_root": SandboxSettingsStore(database, settings.data_root).resolve_workspace_root,
             },
         },
+        model_connection_resolver=model_connections,
+        context_store=contexts,
         inactivity_timeout_seconds=settings.run_inactivity_timeout_seconds,
         execution_deadline_seconds=settings.run_execution_deadline_seconds,
         cleanup_timeout_seconds=settings.run_cleanup_timeout_seconds,
@@ -4002,7 +4126,8 @@ def create_services(
         (saved_llm.base_url or saved_llm.api_key)
         and services.run_manager.default_runtime_provider_id is not None
     ):
-        default_provider = services.run_manager.default_provider()
+        with startup_stage("initialize default Agent provider"):
+            default_provider = services.run_manager.default_provider()
     else:
         default_provider = None
     if isinstance(default_provider, GoogleAdkAgentRuntime):
@@ -4023,6 +4148,9 @@ def create_services(
         services.sandbox_backend.pack_requirements = services.plugin_bootstrap.requirements
     from backend.packs.installation import PackInstallationManager
     services.pack_installations = PackInstallationManager(settings.data_root, plugin_registry)
+    with startup_stage("reconcile Pack resources"):
+        services.pack_installations.pin_loaded_resources()
+        services.pack_installations.reconcile_resources(collect=True)
     from backend.packs.marketplace import MarketplaceClient
     services.marketplace = MarketplaceClient(settings.marketplace_url)
     return services

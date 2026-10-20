@@ -15,11 +15,13 @@ from backend.agents.context import ContextBudget, ContextStatus, ManagedContext,
 from backend.config import Settings
 from backend.conversations import ConversationSessionCreate, ConversationPost
 from backend.runs import InvocationCaller, InvocationContext, RuntimeInput
+from backend.runs.store import RunStore
 from backend.services import create_services
 from backend.security.model_connections import CatalogEdit
 from backend.world.models import CardCreate, EdgeCreate
 from backend.tests.test_agent_runtime import MutableCapabilityProvider
 from backend.tests.conversation_helpers import wait_for_conversation_run, wait_for_conversation_delivery
+from open_agent_world.context import SUMMARY_INSTRUCTION as PUBLIC_SUMMARY_INSTRUCTION
 
 
 class ScriptedModel(BaseLlm):
@@ -33,7 +35,7 @@ class ScriptedModel(BaseLlm):
 
     async def generate_content_async(self, request, stream=False):
         wire = encoded([content.model_dump(mode="json", exclude_none=True) for content in request.contents])
-        if request.config.system_instruction == SUMMARY_INSTRUCTION:
+        if request.config.system_instruction in {SUMMARY_INSTRUCTION, PUBLIC_SUMMARY_INSTRUCTION}:
             self._summaries.append(wire)
             assert estimate(wire) < 8192
             if self._block:
@@ -49,7 +51,7 @@ class ScriptedModel(BaseLlm):
             if self._tool_rounds > 0:
                 self._tool_rounds -= 1
                 yield LlmResponse(content=types.Content(role="model", parts=[types.Part.from_function_call(
-                    name="replace_notes", args={"content": "cobalt-731 " + "tool data " * 1800})]))
+                    name="replace_notes", args={"content": "cobalt-731 " + "tool data " * 4000})]))
                 return
             text = "The confirmed code is cobalt-731." if "cobalt-731" in wire else "No code available."
         yield LlmResponse(content=types.Content(role="model", parts=[types.Part.from_text(text=text)]))
@@ -80,7 +82,10 @@ async def setup_context(services, monkeypatch):
     return agent, peer, room, session, model, runtime, config
 
 
-def invocation(agent_id, session_id, run_id="run-1"):
+def invocation(services, agent_id, session_id, run_id="run-1"):
+    # Model checkpoints reference a real persisted Run, as they do in production.
+    RunStore(services.database).create(agent_id=agent_id, run_id=run_id, context_id=session_id,
+        runtime_provider_id="google.adk", caller_kind="test")
     return InvocationContext(run_id=run_id, agent_id=agent_id, parent_run_id=None,
         root_run_id=run_id, caller=InvocationCaller("test"), context_id=session_id,
         task_id=None, runtime_provider_id="google.adk")
@@ -93,17 +98,31 @@ async def test_host_continuation_input_reaches_managed_conversation_model(servic
     run = services.run_manager.store.create(agent_id=agent.id, runtime_provider_id="google.adk",
         caller_kind="delegation", caller_id="board", context_id=session.id)
     services.run_manager.store.update_lifecycle(run.run_id, work_continuation=True)
-    result = [event async for event in runtime.execute(config, invocation(agent.id, session.id, run.run_id),
-        RuntimeInput("OAW notification: inspect completed probe 456 before relaxation"))]
+    context = InvocationContext(run_id=run.run_id, agent_id=agent.id, parent_run_id=None,
+        root_run_id=run.run_id, caller=InvocationCaller("delegation", "board"), context_id=session.id,
+        task_id=None, runtime_provider_id="google.adk")
+    prompt = "OAW notification: inspect completed probe 456 before relaxation"
+    result = [event async for event in runtime.execute(config, context, RuntimeInput(prompt))]
     assert result and "completed probe 456" in model._requests[-1]
     assert "cobalt-731" in model._requests[-1]
+    # Rebuilding managed context during a retry must not append the same host
+    # notification again. A completed Run itself is not submitted for execution.
+    checkpoint = services.contexts.load(agent.id, session.id)
+    assert checkpoint.input_run_id == run.run_id
+    assert encoded(checkpoint.contents).count(prompt) == 1
+    resumed = ManagedContext(services.contexts, agent.id, session.id, run.run_id, model, prompt)
+    assert encoded(resumed.checkpoint.contents).count(prompt) == 1
+    later = invocation(services, agent.id, session.id, "next-continuation")
+    services.run_manager.store.update_lifecycle(later.run_id, work_continuation=True)
+    next_turn = ManagedContext(services.contexts, agent.id, session.id, later.run_id, model, prompt)
+    assert encoded(next_turn.checkpoint.contents).count(prompt) == 2
 
 
 @pytest.mark.asyncio
 async def test_private_delegation_context_does_not_replay_parent_conversation(services, monkeypatch):
     agent, _, room, session, model, runtime, config = await setup_context(services, monkeypatch)
     add_history(services, room, session, count=2)
-    private = invocation(agent.id, "summon:isolated-task")
+    private = invocation(services, agent.id, "summon:isolated-task")
     result = [event async for event in runtime.execute(config, private, RuntimeInput("Inspect only the assigned file"))]
     assert result
     assert "cobalt-731" not in model._requests[-1]
@@ -120,7 +139,7 @@ async def test_saved_limits_drive_pressure_output_and_next_run_compaction(servic
     draft = runtime.model_connections.read().model_dump()
     draft["connections"][0]["models"][0].update(context_window=128000, max_output_tokens=16384)
     runtime.model_connections.save(CatalogEdit.model_validate(draft))
-    result = [event async for event in runtime.execute(config, invocation(agent.id, session.id), RuntimeInput("Continue"))]
+    result = [event async for event in runtime.execute(config, invocation(services, agent.id, session.id), RuntimeInput("Continue"))]
     assert result[-1].run_status == "succeeded"
     assert model._output_limits[-1] == 16384  # Not silently capped to the former 8K policy.
     assert not model._summaries
@@ -129,7 +148,7 @@ async def test_saved_limits_drive_pressure_output_and_next_run_compaction(servic
     draft = runtime.model_connections.read().model_dump()
     draft["connections"][0]["models"][0].update(context_window=8192, max_output_tokens=2048)
     runtime.model_connections.save(CatalogEdit.model_validate(draft))
-    result = [event async for event in runtime.execute(config, invocation(agent.id, session.id, "next"), RuntimeInput("Continue"))]
+    result = [event async for event in runtime.execute(config, invocation(services, agent.id, session.id, "next"), RuntimeInput("Continue"))]
     assert result[-1].run_status == "succeeded"
     assert model._output_limits[-1] == 2048
     assert services.contexts.statuses(room.id)[session.id][agent.id].context_limit == 8192
@@ -140,7 +159,7 @@ async def test_saved_limits_drive_pressure_output_and_next_run_compaction(servic
 def add_history(services, room, session, count=65):
     for index in range(count):
         services.conversations.add_message(room.id, session.id, sender_kind="user", sender_id=None,
-            sender_name="You", content=("Confirmed code: cobalt-731; sandbox://lab/result.csv. " if index == 0 else "") + f"Entry {index}. " + "historical detail " * 28)
+            sender_name="You", content=("Confirmed code: cobalt-731; sandbox://lab/result.csv. " if index == 0 else "") + f"Entry {index}. " + "historical detail " * 160)
 
 
 @pytest.mark.asyncio
@@ -149,7 +168,7 @@ async def test_real_adk_long_conversation_compacts_and_continues_without_losing_
     add_history(services, room, session)
     before = services.conversations.list_messages(room.id, session.id, limit=100)
     async with services.events.subscribe() as queue:
-        result = [event async for event in runtime.execute(config, invocation(agent.id, session.id), RuntimeInput("What is the confirmed code?"))]
+        result = [event async for event in runtime.execute(config, invocation(services, agent.id, session.id), RuntimeInput("What is the confirmed code?"))]
         statuses = []
         while not queue.empty():
             event = queue.get_nowait()
@@ -167,7 +186,7 @@ async def test_real_adk_long_conversation_compacts_and_continues_without_losing_
     assert services.contexts.load(peer.id, session.id).compaction_count == 0
     assert services.contexts.load(agent.id, "other-session").compaction_count == 0
     # The next run ingests only new canonical messages, never replaying 40 messages.
-    result = [event async for event in runtime.execute(config, invocation(agent.id, session.id, "run-2"), RuntimeInput("Repeat the code."))]
+    result = [event async for event in runtime.execute(config, invocation(services, agent.id, session.id, "run-2"), RuntimeInput("Repeat the code."))]
     assert result[-1].payload["text"] == "The confirmed code is cobalt-731."
     assert model._requests[-1].count("Entry 64") == 1
 
@@ -176,7 +195,7 @@ async def test_real_adk_long_conversation_compacts_and_continues_without_losing_
 async def test_real_adk_long_tool_run_compacts_repeatedly_and_preserves_pairs(services, monkeypatch):
     agent, _, _, session, model, runtime, config = await setup_context(services, monkeypatch)
     model._tool_rounds = 3
-    result = [event async for event in runtime.execute(config, invocation(agent.id, session.id), RuntimeInput("Use the notes and finish the analysis."))]
+    result = [event async for event in runtime.execute(config, invocation(services, agent.id, session.id), RuntimeInput("Use the notes and finish the analysis."))]
     assert result[-1].payload["text"] == "The confirmed code is cobalt-731."
     assert len(runtime._provider.invocations) == 3
     assert services.contexts.load(agent.id, session.id).compaction_count >= 2
@@ -188,7 +207,7 @@ async def test_real_adk_long_tool_run_compacts_repeatedly_and_preserves_pairs(se
 async def test_restart_restores_checkpoint_tail_count_and_session_projection(data_root, services, monkeypatch):
     agent, peer, room, session, model, runtime, config = await setup_context(services, monkeypatch)
     add_history(services, room, session)
-    _ = [event async for event in runtime.execute(config, invocation(agent.id, session.id), RuntimeInput("What is the code?"))]
+    _ = [event async for event in runtime.execute(config, invocation(services, agent.id, session.id), RuntimeInput("What is the code?"))]
     before = services.contexts.load(agent.id, session.id)
     # Separate service container/SQLite connection models a backend restart.
     restored = create_services(Settings.for_data_root(data_root), default_runtime_provider_id="google.adk")
@@ -198,7 +217,7 @@ async def test_restart_restores_checkpoint_tail_count_and_session_projection(dat
         new_runtime = GoogleAdkAgentRuntime(MutableCapabilityProvider(), context_store=restored.contexts)
         monkeypatch.setattr(new_runtime, "_adk_model", lambda model_id: model)
         await new_runtime.create_agent(config)
-        result = [event async for event in new_runtime.execute(config, invocation(agent.id, session.id, "after-restart"), RuntimeInput("Repeat the code."))]
+        result = [event async for event in new_runtime.execute(config, invocation(restored, agent.id, session.id, "after-restart"), RuntimeInput("Repeat the code."))]
         assert result[-1].payload["text"] == "The confirmed code is cobalt-731."
         assert len(restored.conversations.list_messages(room.id, session.id, limit=100)) == 65
     finally:
@@ -283,8 +302,13 @@ async def test_interrupted_tool_call_is_repaired_without_reexecution(services, m
     assert "Outcome is unknown" in repaired["response"]["error"]
 
 
-def test_unknown_model_has_conservative_internal_budget():
-    assert ContextBudget.for_model("unlisted/private-model").limit == 32768
+def test_unknown_model_has_no_invented_window(monkeypatch):
+    import litellm
+    # The installed vendor catalog can retire old model IDs. Exercise known
+    # and unknown entries using controlled metadata, not a moving catalog.
+    monkeypatch.setattr(litellm, "model_cost", {name: {"max_input_tokens":32768,"max_output_tokens":8192}
+        for name in ("openai/gpt-4o","anthropic/claude-sonnet-4-20250514")})
+    assert ContextBudget.for_model("unlisted/private-model").limit == 0
     assert not ContextBudget.for_model("unlisted/private-model").known
     assert ContextBudget.for_model("openai/gpt-4o").limit > 8192
     assert ContextBudget.for_model("anthropic/claude-sonnet-4-20250514").limit > 8192
@@ -319,8 +343,8 @@ async def test_fresh_conversation_with_large_tool_catalog_uses_real_model_window
     config = replace(config, model=model.model)
     # Real ADK runner assembles a schema-heavy request (~16K estimated input).
     runtime._provider.definition = replace(runtime._provider.definition,
-        description="Available resource instructions. " * 1000)
-    result = [event async for event in runtime.execute(config, invocation(agent.id, fresh.id), RuntimeInput("Hello"))]
+        description="Available resource instructions. " * 3000)
+    result = [event async for event in runtime.execute(config, invocation(services, agent.id, fresh.id), RuntimeInput("Hello"))]
     assert result[-1].run_status == "succeeded"
     assert not model._summaries
     assert "cobalt-731" not in model._requests[-1]
@@ -395,7 +419,7 @@ class BudgetedSummaryModel(ScriptedModel):
 @pytest.mark.asyncio
 async def test_window_relative_summary_accepts_complete_checkpoint_above_old_fixed_cap(services, monkeypatch):
     agent, _, _, session, _, _, _ = await setup_context(services, monkeypatch)
-    summary = "Confirmed research result and artifact reference. " * 240
+    summary = "Confirmed research result and artifact reference. " * 600
     assert estimate(summary) > 4096
     model = BudgetedSummaryModel(replies=[summary])
     managed = ManagedContext(services.contexts, agent.id, session.id, "run", model, "Continue",
@@ -403,11 +427,11 @@ async def test_window_relative_summary_accepts_complete_checkpoint_above_old_fix
     managed.checkpoint.contents = [text_content("Historical research evidence. " * 4000)]
     await managed.compact()
     assert managed.checkpoint.summary == summary.strip()
-    assert managed.tokens() <= managed.compaction_budget().target
+    assert managed.tokens() <= managed.budget.input
     assert len(model._summaries) == 1
 
 
-@pytest.mark.parametrize("first", ["", "Overly verbose findings. " * 1000])
+@pytest.mark.parametrize("first", ["", "Overly verbose findings. " * 2500], ids=["empty", "too_verbose"])
 @pytest.mark.asyncio
 async def test_invalid_summary_retry_keeps_source_and_respects_request_budget(services, monkeypatch, first):
     agent, _, _, session, _, _, _ = await setup_context(services, monkeypatch)
@@ -421,7 +445,7 @@ async def test_invalid_summary_retry_keeps_source_and_respects_request_budget(se
     assert "cobalt-731" in managed.checkpoint.summary
 
 
-@pytest.mark.parametrize("reply,reason", [("", "empty checkpoint"), ("verbose " * 3000, "exceeds its budget")])
+@pytest.mark.parametrize("reply,reason", [("", "empty checkpoint"), ("verbose " * 9000, "exceeds its budget")], ids=["empty", "too_verbose"])
 @pytest.mark.asyncio
 async def test_invalid_summary_exhaustion_is_diagnostic_and_atomic(services, monkeypatch, reply, reason):
     from copy import deepcopy
@@ -452,7 +476,7 @@ async def test_smaller_window_rechunks_old_summary_and_escaped_unicode_history(s
     # checkpoint larger than the new model's entire input window.
     assert "".join(r.contents[0].parts[0].text.split("Next transcript fragment:\n", 1)[1]
                    for r in model._summaries) == source
-    assert managed.tokens() <= managed.compaction_budget().target
+    assert managed.tokens() <= managed.budget.input
 
 
 @pytest.mark.asyncio
@@ -461,39 +485,66 @@ async def test_existing_summary_alone_can_be_compacted_after_window_change(servi
     model = BudgetedSummaryModel(window=8192)
     managed = ManagedContext(services.contexts, agent.id, session.id, "run", model, "Continue",
                              budget=ContextBudget(8192, 1024, max_output=1024))
-    managed.checkpoint.summary = "Old model checkpoint. " * 900
+    managed.checkpoint.summary = "Old model checkpoint. " * 2000
     assert not managed.checkpoint.contents
     await managed.before_model(None, LlmRequest())
     assert managed.checkpoint.compaction_count == 1
-    assert managed.tokens() < managed.compaction_budget().target
+    assert managed.tokens() < managed.budget.input
 
 
 @pytest.mark.asyncio
-async def test_compaction_triggers_before_input_limit_with_fixed_context_reserved(services, monkeypatch):
+async def test_compaction_triggers_only_when_input_no_longer_fits(services, monkeypatch):
     agent, _, _, session, _, _, _ = await setup_context(services, monkeypatch)
     model = BudgetedSummaryModel(window=8192)
     managed = ManagedContext(services.contexts, agent.id, session.id, "run", model, "Continue",
                              budget=ContextBudget(8192, 1024, max_output=1024))
-    managed.checkpoint.contents = [text_content("evidence " * 1180)]
-    assert managed.compaction_budget().trigger < managed.tokens() < managed.budget.input
+    managed.checkpoint.contents = [text_content("evidence " * 6500)]
+    assert managed.tokens() < managed.budget.input
+    await managed.before_model(None, LlmRequest())
+    assert managed.checkpoint.compaction_count == 0
+    managed.checkpoint.contents.append(text_content("more evidence " * 4000))
     await managed.before_model(None, LlmRequest())
     assert managed.checkpoint.compaction_count == 1
-    assert managed.tokens() <= managed.compaction_budget().target
+    assert managed.tokens() <= managed.budget.input
 
 
 @pytest.mark.asyncio
-async def test_unknown_model_rolls_history_even_when_static_context_exceeds_fallback(services, monkeypatch):
+async def test_final_request_window_owns_compaction_after_host_frames_are_assembled(services, monkeypatch):
+    from backend.agents.model_observation import ModelTrace
+    from backend.agents.request_window import RequestWindow
+    agent, _, _, session, _, _, _ = await setup_context(services, monkeypatch)
+    model = BudgetedSummaryModel(window=8192)
+    managed = ManagedContext(services.contexts, agent.id, session.id, "run", model, "Continue",
+                             budget=ContextBudget(8192, 1024, max_output=1024))
+    managed.checkpoint.contents = [text_content("earlier executed evidence " * 9000)]
+    managed.trace = trace = ModelTrace(asyncio.Queue())
+    protected = lambda c: any((p.text or "").startswith("HOST current") for p in c.parts or [])
+    window = RequestWindow(managed.budget, trace, "agent",
+                           reducer=lambda req: managed.reduce_final_request(req, protected=protected))
+    trace.context_windows["agent"] = window
+    request = LlmRequest()
+    await managed.before_model(None, request)
+    assert managed.checkpoint.compaction_count == 0 and not model._summaries
+    request.contents.append(types.Content(role="user", parts=[types.Part(text="HOST current: preserve native fact 42")]))
+    stats = await window.prepare(request)
+    assert managed.checkpoint.compaction_count == 1 and stats["reduced_window"]
+    assert "HOST current: preserve native fact 42" in encoded([c.model_dump() for c in request.contents])
+    await window.prepare(request)
+    assert managed.checkpoint.compaction_count == 1
+
+
+@pytest.mark.asyncio
+async def test_unknown_model_does_not_compact_against_an_invented_quota(services, monkeypatch):
     agent, _, _, session, _, _, _ = await setup_context(services, monkeypatch)
     model = BudgetedSummaryModel(window=8192)
     managed = ManagedContext(services.contexts, agent.id, session.id, "run", model, "Continue",
                              budget=ContextBudget(8192, 1024, known=False, max_output=1024))
     request = LlmRequest(config=types.GenerateContentConfig(system_instruction="Static instructions. " * 1000))
-    managed.checkpoint.contents = [text_content("Historical evidence. " * 1200)]
+    managed.checkpoint.contents = [text_content("Historical evidence. " * 12000)]
     await managed.before_model(None, request)
-    assert managed.checkpoint.compaction_count == 1
-    assert managed.tokens() > managed.budget.input
-    assert managed.status.context_limit == 0
-    assert managed.tokens() <= managed.compaction_budget().target
+    assert managed.checkpoint.compaction_count == 0 and not model._summaries
+    assert managed.status.context_limit == 0 and managed.status.pressure == 0
+    assert "Historical evidence" in encoded(managed.rendered())
 
 
 @pytest.mark.asyncio
@@ -585,7 +636,7 @@ async def test_scope_lock_serializes_same_pair_without_blocking_other_sessions(s
     add_history(services, room, session)
     model._block = asyncio.Event()
     async def execute(scope, run):
-        return [event async for event in runtime.execute(config, invocation(agent.id, scope, run), RuntimeInput("Continue"))]
+        return [event async for event in runtime.execute(config, invocation(services, agent.id, scope, run), RuntimeInput("Continue"))]
     first = asyncio.create_task(execute(session.id, "run-1"))
     for _ in range(100):
         if model._summaries:
@@ -613,13 +664,32 @@ async def test_oversized_current_input_fails_explicitly_without_destroying_histo
 async def test_closing_adk_stream_releases_scope_and_does_not_replay_interrupted_tool(services, monkeypatch):
     agent, _, _, session, model, runtime, config = await setup_context(services, monkeypatch)
     model._tool_rounds = 1
-    stream = runtime.execute(config, invocation(agent.id, session.id), RuntimeInput("Inspect notes"))
-    started = await anext(stream)
+    entered, cancelled = asyncio.Event(), asyncio.Event()
+    original_invoke = runtime._provider.invoke_tool
+
+    async def unfinished_tool(*args, **kwargs):
+        # ADK can dispatch ahead of the event consumer. Keep this tool in flight
+        # so Stop deterministically interrupts it before the simulated write.
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return await original_invoke(*args, **kwargs)
+
+    monkeypatch.setattr(runtime._provider, "invoke_tool", unfinished_tool)
+    stream = runtime.execute(config, invocation(services, agent.id, session.id), RuntimeInput("Inspect notes"))
+    async for started in stream:
+        if started.type == "tool_started":
+            break
     assert started.type == "tool_started"
+    await asyncio.wait_for(entered.wait(), timeout=2)
     await stream.aclose()
+    assert cancelled.is_set()
     assert not services.contexts.lock(agent.id, session.id).locked()
     assert not runtime._provider.invocations
-    result = [event async for event in runtime.execute(config, invocation(agent.id, session.id, "after-stop"), RuntimeInput("Continue after Stop"))]
+    result = [event async for event in runtime.execute(config, invocation(services, agent.id, session.id, "after-stop"), RuntimeInput("Continue after Stop"))]
     assert result[-1].run_status == "succeeded"
     assert "Outcome is unknown" in model._requests[-1]
     assert not runtime._provider.invocations

@@ -28,6 +28,8 @@ def test_deployment_example(tmp_path):
         notes = next(card for card in app["cards"] if card["type"] == "example.deployment-notes")
         definition = next(node for node in app["catalog"]["node_types"] if node["id"] == notes["type"])
         assert definition["frontend"] == {"body": "notes", "workspace": "notes"}
+        assert definition["plugin_id"] in app["catalog"]["enabled_plugin_ids"]
+        assert definition["plugin_id"] in {plugin["id"] for plugin in app["catalog"]["plugins"]}
         assert notes["config"] == {"heading": "Workspace notes"}
         note_base = f"/api/runtime-app/workspace/nodes/{notes['id']}"
         snapshot = client.get(note_base + "/document").json()

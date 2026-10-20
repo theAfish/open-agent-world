@@ -25,7 +25,7 @@ class Provider:
         self.available = True
 
     def resolve_model(self, model):
-        return RuntimeModelConnection('native-test', 'openai', self.url, 'test-secret')
+        return RuntimeModelConnection('openai', 'native-test', self.url, 'test-secret')
 
     def runtime_state_directory(self, agent):
         return self.root / agent
@@ -272,6 +272,8 @@ def scripted_model(request):
                     reply = {'role': 'assistant', 'content': 'Step complete.'}
             else:
                 reply = {'role': 'assistant', 'content': 'Conversation summary.'}
+            if layer:
+                reply.setdefault('reasoning_content', f'{layer} thinking for request {len(calls)}.')
             base = {'id': 'chatcmpl-test', 'model': 'native-test', 'created': 1}
             finish_reason = forced_finish_reason or ('tool_calls' if reply.get('tool_calls') else 'stop')
             if request.get('stream'):
@@ -310,7 +312,7 @@ async def test_native_model_token_limit_fails_without_empty_success_or_tool_repl
     from open_agent_world.plugin_api import AgentDependencyError
     url, calls = scripted_model
     provider = Provider(tmp_path, url)
-    provider.resolve_model = lambda _: RuntimeModelConnection('native-test', 'openai', url, 'test-secret',
+    provider.resolve_model = lambda _: RuntimeModelConnection('openai', 'native-test', url, 'test-secret',
         context_window=1_000_000, max_output_tokens=32768)
     runtime = MatCreatorRuntime(provider)
     config = AgentConfig('agent-a', 'Native')
@@ -325,7 +327,9 @@ async def test_native_model_token_limit_fails_without_empty_success_or_tool_repl
     assert not runtime.active
     assert not provider.calls
     assert not any(event.type.value == 'agent_completed' for event in events)
-    assert not any('unfinished reasoning' in str(dict(event.payload)) for event in events)
+    [unfinished] = [event for event in events if 'unfinished reasoning' in event.payload.get('text', '')]
+    assert unfinished.type.value == 'agent_progress' and unfinished.payload['kind'] == 'model_reasoning'
+    assert unfinished.payload['interrupted'] and unfinished.payload['streaming'] is False
     assert all(request.get('max_completion_tokens', request.get('max_tokens')) == 32768 for request in calls)
     saved = json.loads(next(tmp_path.rglob('session.json')).read_text(encoding='utf-8'))
     errors = [event for event in saved['events'] if event.get('error_code') == 'MAX_TOKENS']
@@ -493,6 +497,15 @@ async def test_pack_engine_planner_checkpoint_executor_recursive_child_and_oaw_t
         ('agent-a', 'inspect', {'collection': 'outputs', 'version_id': 'v1'}),
     ]
     assert any(e.payload.get('subagent') for e in finished)
+    thinking = [e for e in finished if e.payload.get('kind') == 'model_reasoning']
+    assert {e.payload['role'] for e in thinking} == {'thinking_agent', 'execution_orchestrator', 'step_executor'}
+    assert all(e.type.value == 'agent_progress' and e.payload['streaming'] is False for e in thinking)
+    assert any(e.payload['subagent'] and 'recursive thinking' in e.payload['text'] for e in thinking)
+    assert len({e.payload['provider_message_id'] for e in thinking}) == len(thinking)
+    assert not {e.payload['provider_message_id'] for e in planned if e.payload.get('kind') == 'model_reasoning'} & {
+        e.payload['provider_message_id'] for e in thinking}
+    assert not any('thinking for request' in e.payload.get('text', '') for e in finished
+                   if e.type.value in {'agent_message', 'agent_completed'})
     resource_results = [e.payload for e in finished if e.type.value == 'tool_completed'
                         and e.payload.get('name') == 'oaw_invoke_tool']
     assert any(p.get('response', {}).get('result', {}).get('verified') == 'native-child'
@@ -573,6 +586,7 @@ async def test_native_tool_start_is_delivered_while_the_real_worker_is_waiting_f
             # Start must be observable before releasing any tool result.
             await asyncio.wait_for(started.wait(), 5)
             assert not task.done()
+            assert any(event.payload.get('kind') == 'model_reasoning' for event in observed)
             assert not any(event.type.value == 'tool_completed' and event.payload.get('name') == 'oaw_invoke_tool'
                 and event.payload.get('ok') is True for event in observed)
             release.set()
@@ -633,7 +647,7 @@ while sys.stdin.readline(): pass
 async def test_managed_worker_compacts_only_over_budget_context_and_keeps_native_history(tmp_path, scripted_model):
     url, calls = scripted_model
     provider = Provider(tmp_path, url)
-    provider.resolve_model = lambda _: RuntimeModelConnection('native-test', 'openai', url, 'test-secret',
+    provider.resolve_model = lambda _: RuntimeModelConnection('openai', 'native-test', url, 'test-secret',
         context_window=32768, max_output_tokens=1024)
     runtime = MatCreatorRuntime(provider)
     config = AgentConfig('agent-a', 'Native')

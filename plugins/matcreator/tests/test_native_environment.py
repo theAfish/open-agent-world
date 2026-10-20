@@ -1,160 +1,104 @@
-"""Installation ownership, retry and discovery without network downloads."""
+"""Pack-specific discovery, compatibility and launch; lifecycle is host-owned."""
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import subprocess
 import sys
-import threading
 from types import SimpleNamespace
 
 import pytest
 
+from backend.packs.environments import PackEnvironmentManager, PythonEnvironmentSpec
 from open_agent_world.plugin_api import AgentConfig, AgentDependencyError, RuntimeInput, RuntimeModelConnection
 from plugins.matcreator.oaw_matcreator import native_environment as environment
 from plugins.matcreator.oaw_matcreator.native_runtime import MatCreatorRuntime
 
 
-def test_runtime_discovery_does_not_depend_on_windows_architecture_environment(monkeypatch):
-    expected = environment.environment_root()
+@pytest.fixture
+def installer(tmp_path, monkeypatch):
+    profile = tmp_path / "profile"
+    monkeypatch.setenv("OPEN_AGENT_WORLD_DATA_ROOT", str(profile))
+    monkeypatch.delenv("OPEN_AGENT_WORLD_RUNTIME_BUILD_ROOT", raising=False)
+    monkeypatch.setattr(environment.sys, "prefix", str(tmp_path / "host"))
+    monkeypatch.setattr(environment, "environment_spec", lambda: PythonEnvironmentSpec("matcreator", "native", verify_imports=("json",)))
+    return environment.environment_root(), [], None
+
+
+def test_discovery_uses_profile_and_not_host_interpreter_prefix(installer, monkeypatch):
+    expected, _, _ = installer
+    monkeypatch.setattr(environment.sys, "prefix", "D:/different-host")
     for key in ("PROCESSOR_ARCHITECTURE", "PROCESSOR_ARCHITEW6432"):
         monkeypatch.delenv(key, raising=False)
     assert environment.environment_root() == expected
 
 
-def test_missing_environment_reports_the_actual_backend_interpreter_and_path(tmp_path, monkeypatch):
-    prefix = tmp_path / "uv-overlay"
-    python = prefix / "Scripts" / "python.exe"
-    monkeypatch.setattr(environment.sys, "prefix", str(prefix))
-    monkeypatch.setattr(environment.sys, "executable", str(python))
+def test_missing_environment_reports_actual_backend_and_profile(installer):
+    root, _, _ = installer
     with pytest.raises(RuntimeError) as error:
         environment.read_environment()
-    assert str(python) in str(error.value)
-    assert str(environment.environment_root()) in str(error.value)
-    assert "same Python" in str(error.value)
+    assert sys.executable in str(error.value)
+    assert str(root) in str(error.value)
+    assert "Pack installation" in str(error.value)
 
 
-@pytest.fixture
-def installer(tmp_path, monkeypatch):
-    root = tmp_path / "runtime"
-    monkeypatch.setattr(environment, "environment_root", lambda: root)
-    monkeypatch.setattr(environment.shutil, "which", lambda _: "uv")
-    calls = []
-
-    def run(args, *, env):
-        calls.append(list(map(str, args)))
-        if "--target" in args:
-            for name in ("google/adk", "litellm", "json_repair"):
-                package = root / "packages" / name
-                package.mkdir(parents=True, exist_ok=True)
-                (package / "__init__.py").write_text("")
-
-    monkeypatch.setattr(environment, "run", run)
-    return root, calls, run
-
-
-def test_normal_setup_publishes_only_verified_runtime_and_reuses_it_offline(installer, monkeypatch):
-    root, calls, _ = installer
-    environment.install()
-    assert len(calls) == 2
-    assert calls[0][-2:] == ["-r", str(environment.REQUIREMENTS)]
-    assert "--check" in calls[1]
-    assert not any("git+" in arg for call in calls for arg in call)
-    assert not (root / "packages" / "matcreator").exists()
-    assert environment.read_environment() == (sys.executable, root)
-    assert json.loads((root / "ready.json").read_text())["python"] == "host"
-    monkeypatch.setattr(environment.shutil, "which", lambda _: None)
-    environment.install()
-    assert len(calls) == 3
-    assert "--check" in calls[-1]  # Local validation only; no uv/network.
-
-
-def test_failed_install_is_not_discoverable_and_next_setup_repairs_it(installer, monkeypatch):
-    root, calls, original = installer
-
-    def fail(args, *, env):
-        original(args, env=env)
-        if "--check" in args:
-            raise subprocess.CalledProcessError(1, args)
-
-    monkeypatch.setattr(environment, "run", fail)
-    with pytest.raises(subprocess.CalledProcessError):
-        environment.install()
-    with pytest.raises(RuntimeError, match="same Python"):
-        environment.read_environment()
-    assert not (root / "ready.json").exists()
-    monkeypatch.setattr(environment, "run", original)
-    environment.install()
-    assert environment.read_environment()[1] == root
-    assert len(list(root.glob("packages.incomplete-*"))) == 1
-
-
-def test_setup_repairs_a_corrupt_cached_environment(installer, monkeypatch):
-    root, _, original = installer
-    environment.install()
-    checks = 0
-
-    def corrupt_once(args, *, env):
-        nonlocal checks
-        if "--check" in args:
-            checks += 1
-            if checks == 1:
-                raise subprocess.CalledProcessError(1, args)
-        original(args, env=env)
-
-    monkeypatch.setattr(environment, "run", corrupt_once)
-    environment.install()
-    assert checks == 2
-    assert environment.read_environment()[1] == root
-
-
-def test_concurrent_setup_installs_only_once(installer, monkeypatch):
-    _, calls, original = installer
-    entered, release = threading.Event(), threading.Event()
-
-    def slow(args, *, env):
-        if "--target" in args and not entered.is_set():
-            entered.set()
-            assert release.wait(5)
-        original(args, env=env)
-
-    monkeypatch.setattr(environment, "run", slow)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(environment.install)
-        assert entered.wait(5)
-        second = pool.submit(environment.install)
-        release.set()
-        first.result(timeout=5)
-        second.result(timeout=5)
-    assert sum("--target" in call for call in calls) == 1  # Third-party dependencies only; engine ships with the Pack.
-    assert sum("--check" in call for call in calls) == 2
-
-
-def test_receipt_relocates_with_payload_and_cannot_escape_it(installer):
+def test_setup_publishes_managed_receipt_and_reuses_offline(installer, monkeypatch):
+    from backend.packs import environments
     root, _, _ = installer
+    monkeypatch.setattr(environments.shutil, "which", lambda _: None)
+    environment.install()
+    assert environment.read_environment() == (sys.executable, root)
+    assert json.loads((root / "ready.json").read_text())["format"] == 1
     environment.install()
     relocated = root.with_name("relocated")
     root.rename(relocated)
     assert environment.read_environment(relocated) == (sys.executable, relocated)
-    (relocated / "ready.json").write_text(json.dumps({"format": 2, "python": "../outside.exe"}))
-    with pytest.raises(RuntimeError, match="setup is incomplete"):
-        environment.read_environment(relocated)
 
 
-def test_older_host_gets_pack_owned_python_and_relative_receipt(installer, monkeypatch):
-    root, calls, _ = installer
-    executable = root / "python" / "cpython-3.12" / "python.exe"
-    executable.parent.mkdir(parents=True)
-    executable.touch()
-    monkeypatch.setattr(environment.sys, "version_info", (3, 11, 0))
-    monkeypatch.setattr(environment.subprocess, "check_output", lambda *args, **kwargs: str(executable))
+def test_legacy_runtime_is_read_only_fallback_and_setup_migrates_offline(installer, monkeypatch):
+    from backend.packs import environments
+    root, _, _ = installer
+    legacy = environment.legacy_environment_root()
+    for module in ("google/adk", "litellm", "json_repair"):
+        package = legacy / "packages" / module
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("")
+    (legacy / "ready.json").write_text(json.dumps({"format": 2, "python": "host"}))
+    assert environment.read_environment() == (sys.executable, legacy)
+    monkeypatch.setattr(environments.shutil, "which", lambda _: pytest.fail("legacy migration must not download"))
     environment.install()
-    assert calls[0] == ["uv", "python", "install", "3.12"]
-    assert calls[1][calls[1].index("--python") + 1] == str(executable)
-    assert json.loads((root / "ready.json").read_text())["python"] == "python/cpython-3.12/python.exe"
-    relocated = root.with_name("relocated")
-    root.rename(relocated)
-    assert environment.read_environment(relocated)[0] == str(relocated / "python/cpython-3.12/python.exe")
+    assert environment.read_environment() == (sys.executable, root)
+    assert json.loads((legacy / "ready.json").read_text())["format"] == 2
+
+
+def test_explicit_desktop_build_root_is_available_offline_after_relocation(installer, monkeypatch, tmp_path):
+    from backend.packs import environments
+    build_root = Path(sys.prefix) / "oaw-runtime-bundle"
+    monkeypatch.setenv("OPEN_AGENT_WORLD_RUNTIME_BUILD_ROOT", str(build_root))
+    environment.install()
+    monkeypatch.delenv("OPEN_AGENT_WORLD_RUNTIME_BUILD_ROOT")
+    relocated = tmp_path / "relocated-python"
+    Path(sys.prefix).rename(relocated)
+    monkeypatch.setattr(environment.sys, "prefix", str(relocated))
+    monkeypatch.setattr(environments.shutil, "which", lambda _: pytest.fail("bundle launch must not download"))
+    executable, root = environment.read_environment()
+    assert executable == sys.executable
+    assert root.is_relative_to(relocated / "oaw-runtime-bundle")
+
+
+@pytest.mark.asyncio
+async def test_runtime_uses_host_profile_accessor(monkeypatch, tmp_path):
+    from plugins.matcreator.oaw_matcreator import native_runtime
+    observed = []
+    def read(*, data_root):
+        observed.append(data_root)
+        return sys.executable, data_root / "runtime"
+    monkeypatch.setattr(native_runtime, "read_environment", read)
+    provider = SimpleNamespace(managed_environment_root=lambda: tmp_path)
+    runtime = MatCreatorRuntime(provider)
+    await runtime.create_agent(AgentConfig("agent", "Native"))
+    info = await runtime.get_agent("agent")
+    assert info.details["environment"]["status"] == "ready"
+    assert observed == [tmp_path]
 
 
 def test_worker_dependency_path_excludes_host_site_packages(tmp_path):
@@ -180,7 +124,7 @@ print(json.dumps({'value': private_probe.value, 'paths': sys.path}))
 async def test_missing_runtime_never_falls_back_to_host_or_installs_during_run(installer, monkeypatch):
     _, calls, _ = installer
     provider = SimpleNamespace(
-        resolve_model=lambda _: RuntimeModelConnection("test", "openai", "http://127.0.0.1", "secret"),
+        resolve_model=lambda _: RuntimeModelConnection("openai", "test", "http://127.0.0.1", "secret"),
         runtime_state_directory=lambda _: environment.environment_root().parent / "state",
     )
     runtime = MatCreatorRuntime(provider)
@@ -193,7 +137,7 @@ async def test_missing_runtime_never_falls_back_to_host_or_installs_during_run(i
         pytest.fail("An incomplete installation must not start a worker")
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", no_worker)
-    with pytest.raises(AgentDependencyError, match="same Python"):
+    with pytest.raises(AgentDependencyError, match="Pack installation"):
         async for _ in runtime.execute(config, SimpleNamespace(context_id="session", run_id="run"), RuntimeInput("hello")):
             pass
     assert calls == []
@@ -213,7 +157,7 @@ print(json.dumps({'type': 'completed', 'text': '\\u4f60\\u597d'}, ensure_ascii=F
     monkeypatch.setattr(runtime_module, "__file__", str(tmp_path / "native_runtime.py"))
     monkeypatch.setattr(runtime_module, "read_environment", lambda: (sys.executable, tmp_path / "managed"))
     provider = SimpleNamespace(
-        resolve_model=lambda _: RuntimeModelConnection("test", "openai", "http://127.0.0.1", "secret"),
+        resolve_model=lambda _: RuntimeModelConnection("openai", "test", "http://127.0.0.1", "secret"),
         runtime_state_directory=lambda _: tmp_path / "state",
     )
     runtime = MatCreatorRuntime(provider)

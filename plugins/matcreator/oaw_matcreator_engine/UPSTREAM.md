@@ -47,8 +47,20 @@ import does not infer or assign a license to that upstream code.
 
 OAW core continues to own generic Run lifecycle, capability authorization,
 Sandbox operations, Artifact versions, state and read-only execution projections.
-This Pack owns the research workflow. Third-party libraries are installed by the
-Pack setup hook; engine changes do not invalidate that dependency cache.
+This Pack owns the research workflow. Its `native` environment in `oaw.pack.toml`
+declares third-party worker libraries and verification. Source setup, desktop
+packaging and archive/Store installation use OAW's managed environment provider
+to install them privately, verify readiness and track references and active use.
+The legacy setup entry point delegates to that provider; engine source changes
+alone do not invalidate the dependency cache. The worker never installs into
+host site packages or downloads dependencies on startup.
+
+Scientific Skills use explicitly declared profiles inside an authorized Sandbox.
+Those profiles install preparation libraries and CLI packages, not external
+services or scientific calculators. Model connections, cloud credentials,
+licensed executables, pseudopotentials and model data remain prerequisites of
+the selected model or compute target. Pack installation does not submit jobs or
+prove that those external resources are usable.
 
 The execution-history extension records stable plan/attempt identities, immutable
 retry attempts, explicit replan relations, timestamps and atomic history snapshots.

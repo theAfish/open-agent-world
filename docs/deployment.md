@@ -4,6 +4,8 @@ Try the ready-to-run, key-free example with `python examples/deployed-workspace/
 
 [Documentation](README.md) · [简体中文 / complete deployment guide](deployment.zh-CN.md)
 
+For separate accounts, conversations and files with direct entry to a published page, use the native Linux systemd [hosted multi-user setup (Chinese)](contributing/hosting.zh-CN.md); Docker is not required. This page describes shared-password access to an individual deployment.
+
 Publish a saved Legion workspace as a locked application. The operator service runs an independent profile copy and exposes a small authenticated business API. It does not mount the editor, management APIs, model settings, or world event stream. Source-profile edits do not affect an existing deployment.
 
 ## Quick start

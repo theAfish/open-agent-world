@@ -46,14 +46,15 @@ class HarnessConfig(BaseModel):
 
 _review_tasks = {}
 _processes = {}
+_environment_leases = {}
 _locks = {}
 _source_runs = {}
 _initializing = set()
 
 
 def _root():
-    root = Path(os.environ.get('OAW_XRD_ROOT', str(Path(__file__).resolve().parents[5] / 'XRD')))
-    return root, Path(os.environ.get('OAW_XRD_RUN_ROOT', str(root / 'runs')))
+    from .profile import roots
+    return roots()
 
 
 def _read(value):
@@ -118,6 +119,9 @@ async def _kill(run_id):
                     pass
             await process.wait()
         log.close()
+    lease = _environment_leases.pop(run_id, None)
+    if lease is not None:
+        lease.__exit__(None, None, None)
 
 
 async def _rpc(run_id, command, **arguments):
@@ -250,14 +254,16 @@ async def prepare_start(value, args):
         state['source_files_sha256'] = payload['source_files_sha256']
         state['search_space_size'] = sum(math.comb(len(state['pool']), n) for n in range(1, min(options.max_phases, len(state['pool']))+1))
         state['cloud_request_limit'] = min(options.budget, state['search_space_size'])*min(options.max_phases, len(state['pool']))
-        root, _ = _root()
-        python = Path(os.environ.get('OAW_XRD_PYTHON', str(root / '.venv-xrd' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python'))))
+        from .runtime_environment import worker_command
+        command, environment, lease = await asyncio.to_thread(worker_command, 'multiphase_worker.py', (run,))
+        lease.__enter__()
+        _environment_leases[run_id] = lease
         log = (run / 'console.log').open('wb')
         process_options = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {'start_new_session': True}
         try:
-            process = await asyncio.create_subprocess_exec(str(python), '-u', str(Path(__file__).with_name('multiphase_worker.py')), str(run),
+            process = await asyncio.create_subprocess_exec(*command,
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=log, limit=4*1024*1024,
-                env={**os.environ, 'PYTHONIOENCODING': 'utf-8'}, **process_options)
+                env=environment, **process_options)
         except BaseException:
             log.close()
             raise
@@ -463,13 +469,15 @@ async def prepare_review(value, args):
 
     async def execute():
         try:
-            root, _ = _root()
-            python = Path(os.environ.get('OAW_XRD_PYTHON', str(root / '.venv-xrd' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python'))))
+            from .runtime_environment import worker_command
+            command, environment, lease = await asyncio.to_thread(worker_command, 'multiphase_worker.py', (run,))
+            lease.__enter__()
+            _environment_leases[run_id] = lease
             log = (run / 'console.log').open('ab')
             try:
-                process = await asyncio.create_subprocess_exec(str(python), '-u', str(Path(__file__).with_name('multiphase_worker.py')), str(run),
+                process = await asyncio.create_subprocess_exec(*command,
                     stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=log, limit=4*1024*1024,
-                    env={**os.environ, 'PYTHONIOENCODING': 'utf-8'},
+                    env=environment,
                     **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {'start_new_session': True}))
             except BaseException:
                 log.close()

@@ -105,7 +105,7 @@ def read(value, args):
 
 class LibraryPlugin:
     descriptor = PluginDescriptor(id="research.library", version="0.2.0",
-        plugin_api_version="1.25", name="Library", description="PDF reading and native research spaces")
+        plugin_api_version="1.35", name="Library", description="PDF reading and native research spaces")
 
     async def read_paper(self, context, capability, arguments):
         document = await context.node_document_action(capability, "read", arguments)

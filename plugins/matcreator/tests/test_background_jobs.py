@@ -2,7 +2,7 @@
 import json
 
 import pytest
-from plugins.matcreator.oaw_matcreator.background_jobs import BatchSpecification, prepare, submit, inspect, cancel
+from plugins.matcreator.oaw_matcreator.background_jobs import BatchSpecification, prepare, submit, inspect, cancel, definition
 from open_agent_world.plugin_api import SubmissionUncertainError
 
 
@@ -26,6 +26,8 @@ async def test_batch_preflight_identity_and_confirmed_cancellation():
     ctx.data = {"jobId": "external-123"}
     assert await submit(ctx, spec, "durable-request") == "external-123"
     dry, actual = [c[0] for c in ctx.calls]
+    assert definition.sandbox_environments == ('bohr',)
+    assert actual[:2] == ['python3', '-c'] and 'NODE_PATH' in actual[2]
     assert "--dry-run" in dry and "--dry-run" not in actual
     assert actual[actual.index("--name") + 1] == "md-oaw-durable-request"
     assert actual[actual.index("--max-run-time") + 1] == "72h" and actual.count("--out-file") == 2

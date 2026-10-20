@@ -28,28 +28,23 @@ backend running.
 
 ## Install the engines
 
-MKB, the PDF reader and the spreadsheet reader are declared in this plugin's
-`pyproject.toml`, independently of the host dependencies. `scripts/setup.ps1` /
-`scripts/setup.sh` install the bundled plugins and their dependencies automatically;
-the desktop builder also includes them. To install only this plugin into an existing
-backend environment:
+MKB, the PDF reader and the spreadsheet reader are declared in this Pack's
+`pyproject.toml`. Its `oaw.pack.toml` uses the same managed adapter layer for
+source development and `.oawpack`/Store installation. Adapter libraries share
+OAW's Python process, so versions and package ownership must be compatible;
+they are stored outside host site-packages and tracked for shared use and removal.
 
-```sh
-uv pip install --python backend/.venv/bin/python -e plugins/knowledge_base
-```
+For a source checkout, run `scripts/install-plugins.py plugins/knowledge_base`
+with the backend interpreter (`backend/.venv/Scripts/python.exe` on Windows,
+`backend/.venv/bin/python` on Linux/macOS). Setup scripts prepare all bundled
+Pack declarations. Source discovery itself never installs dependencies.
+Published schema 3 archives include verified dependency wheels and use the same
+preparation checks. See [Pack installation and distribution](../../docs/pack-distribution.md)
+for building, dependency resolution and uninstall behavior.
 
-Without MKB the card loads but every action reports that `mat-know-base` is
-missing. Without `pymupdf4llm` everything else still works and PDFs fall back to
-the remote engine or fail with a named missing engine. Without `openpyxl`, `.xlsx`
-uploads fail the same way — text, markdown, CSV, TSV and JSON never need either
-package.
-
-On Windows use `backend/.venv/Scripts/python.exe`. After manually running
-`uv sync`, use `--inexact` to retain installed plugins, or rerun
-`scripts/install-plugins.py` with the backend Python. Source discovery itself
-never installs packages. Distributed `.oawpack` v1 files automatically provision
-**Sandbox** requirements; their backend dependencies must already be satisfied
-by the host. That is a different installation path from this bundled plugin.
+A missing or incompatible declared adapter dependency is an installation/startup
+error. The card's named missing-engine errors remain a diagnostic for legacy or
+incomplete environments, not the normal installation workflow.
 
 For the optional remote PDF engine, open the card's **Settings**, set the
 **MinerU base URL**, enter **MinerU token** and choose **Save token**. The token is

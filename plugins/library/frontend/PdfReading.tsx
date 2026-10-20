@@ -5,9 +5,7 @@ import { PdfPageSurface } from "./PdfPageSurface";
 import { decodePdf } from "./decodePdf";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "pdfjs-dist/web/pdf_viewer.css";
-import { useLibrarySettings } from "../../../frontend/src/state/librarySettings";
-import { useWorldStore } from "../../../frontend/src/state/worldStore";
-import { availableModels } from "../../../frontend/src/state/modelConnections";
+import { useReadingPreferences, setReadingPreferences, useModelOptions } from "@oaw/plugin-api";
 import { StudyCanvas } from "./StudyCanvas";
 
 GlobalWorkerOptions.workerSrc = workerUrl;
@@ -48,10 +46,8 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
   const [popupPosition,setPopupPosition]=useState<{left:number;top:number;visible:boolean}>();
   const selectionEpoch=useRef(0);
   function dismissSelection(){selectionEpoch.current++;setSelection(undefined);setPopupPosition(undefined);}
-  const {provider,model:selectedModel,target}=useLibrarySettings();
-  const catalog=useWorldStore(state=>state.modelCatalog);
-  const legacyModels=useWorldStore(state=>state.modelSettings.models);
-  const models=catalog.revision>0?availableModels({...catalog,connections:catalog.connections.filter(c=>c.adapter==="openai"||c.adapter==="legacy")}):legacyModels.map(value=>({value,label:value}));
+  const {provider,model:selectedModel,target}=useReadingPreferences();
+  const models=useModelOptions(["openai","legacy"]);
   const model=models.some(item=>item.value===selectedModel)?selectedModel:(models[0]?.value||"");
   const [sidebarOpen,setSidebarOpen]=useState(false);
   const [annotating,setAnnotating]=useState(false);
@@ -198,9 +194,9 @@ export function PdfReading({value,save,fullscreen=false,settingsOpen,setSettings
       {settingsOpen&&<section className="library-settings-popover" role="dialog" aria-label={t("Library 设置")}>
         <header><strong>{t("Library 设置")}</strong><button aria-label={t("关闭 Library 设置")} onClick={()=>setSettingsOpen(false)}>×</button></header>
         <p>{t("对所有文献生效。API 地址和密钥统一在 OAW 总设置中管理。")}</p>
-        <label>{t("翻译服务")}<select value={provider} onChange={e=>useLibrarySettings.setState({provider:e.target.value})}><option value="openai">{t("OAW 模型连接")}</option><option value="deepl">{t("DeepL Free")}</option></select></label>
-        {provider==="openai"&&<label>{t("翻译模型")}<select value={model} onChange={e=>useLibrarySettings.setState({model:e.target.value})}>{models.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}</select></label>}
-        <label>{t("目标语言")}<input value={target} onChange={e=>useLibrarySettings.setState({target:e.target.value})}/></label>
+        <label>{t("翻译服务")}<select value={provider} onChange={e=>setReadingPreferences({provider:e.target.value})}><option value="openai">{t("OAW 模型连接")}</option><option value="deepl">{t("DeepL Free")}</option></select></label>
+        {provider==="openai"&&<label>{t("翻译模型")}<select value={model} onChange={e=>setReadingPreferences({model:e.target.value})}>{models.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}</select></label>}
+        <label>{t("目标语言")}<input value={target} onChange={e=>setReadingPreferences({target:e.target.value})}/></label>
         <small>{t("连接配置：返回窗口后，打开 OAW 设置 → Models / DeepL。此处修改不影响 Agent 的模型选择。")}</small>
       </section>}
     {studyOpen&&<StudyCanvas name={value.study_title??t("学习画布")} rename={study_title=>save({study_title})} title={value.filename??t("文章")} linked={value.study_layout??false} layout={positions=>save({study_positions:positions})} items={(value.annotations??[]).filter(a=>a.learning)} move={storeAnnotation} open={setEditing} onBack={()=>setStudyOpen(false)} locate={p=>{setStudyOpen(false);void go(p);}}/>}

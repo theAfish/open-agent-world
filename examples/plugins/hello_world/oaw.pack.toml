@@ -1,0 +1,14 @@
+schema_version = 3
+
+[distribution]
+id = "community.hello"
+name = "Hello World"
+
+[compatibility]
+plugin_api = "1.35"
+oaw = ">=0.1.0,<1"
+
+[plugin]
+owner = "community.hello"
+packs = ["community.hello.starter"]
+node_types = ["community.hello.message"]

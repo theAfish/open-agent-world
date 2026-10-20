@@ -82,6 +82,99 @@ def run(client, agent, sandbox, skill, **arguments):
          "interpreter": ["python"], **arguments})
 
 
+def test_python_entry_without_shebang_defaults_to_sandbox_python(runtime_client):
+    client, _, native = runtime_client
+    agent, sandbox, skill, _, _ = setup_skill(client)
+    result = run(client, agent, sandbox, skill, interpreter=[])
+    assert result["exit_code"] == 0
+    assert native.last_argv[0] == "python3"
+    assert Path(native.last_argv[1]).read_text() == "print('ok')"
+
+
+def test_declared_profile_remains_in_authorized_sandbox_mount(runtime_client):
+    import json
+    client, _, native = runtime_client
+    agent, sandbox, skill, _, edges = setup_skill(client)
+    value = client.get(f"/api/nodes/{skill['id']}/document").json()["value"]
+    value["runtime_requirements"] = [{"owner": "matcreator", "environment": "ase"}]
+    edit(client, skill, "replace", value)
+    result = run(client, agent, sandbox, skill)
+    assert result["exit_code"] == 0
+    assert native.last_argv[:3] == ("python3", "-I", "-S")
+    runner = Path(native.last_argv[3])
+    assert runner.name == "runner.py"
+    recipe = json.loads(runner.with_name("recipe.json").read_text())
+    assert recipe["python"] == ["ase<4,>=3.23"]
+    assert recipe["sources"][0]["owner"] == "matcreator"
+    assert client.delete(f"/api/edges/{edges[0]['id']}").status_code == 200
+    with pytest.raises(PermissionDeniedError):
+        run(client, agent, sandbox, skill)
+
+
+def test_runtime_defaults_bind_ordinary_commands_compose_skills_and_preserve_grants(runtime_client):
+    import json
+    client, backend, native = runtime_client
+    agent, sandbox, skill, _, edges = setup_skill(client)
+    services = client.app.state.services
+    updated = client.patch(f"/api/nodes/{agent['id']}", json={'config': {'runtime_provider_id': 'atomsculptor.adk-team'}})
+    assert updated.status_code == 200, updated.text
+    provider = WorldAgentCapabilityProvider(services)
+    def ordinary(argv):
+        return client.portal.call(provider.invoke_tool, agent['id'], 'operation:execute_command',
+                                  {'sandbox': sandbox['id'], 'argv': argv})
+    assert ordinary(['python3', '-m', 'workspace_module', 'literal argument'])['exit_code'] == 0
+    assert native.last_argv[:3] == ('python3', '-I', '-S')
+    assert native.last_argv[5:] == ('python3', '-m', 'workspace_module', 'literal argument')
+    runner = Path(native.last_argv[3])
+    recipe = json.loads(runner.with_name('recipe.json').read_text())
+    assert recipe['mode'] == 'command' and recipe['sources'][0]['owner'] == 'atomsculptor'
+    assert recipe['python'] == ['ase>=3.22', 'matplotlib>=3.7', 'numpy>=1.23', 'pymatgen>=2024.0']
+    assert native.last_cwd == backend._sandboxes_root / sandbox['id'] / 'workspace'
+    value = client.get(f"/api/nodes/{skill['id']}/document").json()['value']
+    value['runtime_requirements'] = [{'owner': 'matcreator', 'environment': 'ase'}]
+    edit(client, skill, 'replace', value)
+    assert run(client, agent, sandbox, skill)['exit_code'] == 0
+    recipe = json.loads(Path(native.last_argv[3]).with_name('recipe.json').read_text())
+    assert recipe['mode'] == 'python'
+    assert {source['owner'] for source in recipe['sources']} == {'atomsculptor', 'matcreator'}
+    assert 'ase<4,>=3.23' in recipe['python']
+    from functools import partial
+    with pytest.raises(SandboxValidationError, match='require Sandbox Python'):
+        client.portal.call(partial(services.execute_sandbox, sandbox['id'], ['python3', '-V'],
+                                  agent_id=agent['id'], python_environment='none'))
+    with pytest.raises(ResourceValidationError, match='Custom Python'):
+        ordinary(['/custom/python', '-V'])
+    assert client.delete(f"/api/edges/{edges[0]['id']}").status_code == 200
+    with pytest.raises(PermissionDeniedError):
+        ordinary(['python3', '-V'])
+
+
+@pytest.mark.parametrize('change', ['defaults', 'uninstall', 'permission'])
+def test_runtime_defaults_rechecked_after_python_preparation(tmp_path, monkeypatch, change):
+    from backend.tests.test_sandbox_manager import make_manager
+    manager, backend = make_manager(tmp_path)
+    settings = replace(Settings.for_data_root(tmp_path / 'profile'), agent_runtime='core.mock')
+    services = create_services(settings, sandbox_backend=manager, plugins=load_plugin_registry())
+    with TestClient(create_app(settings, services=services)) as client:
+        agent, sandbox, _, _, edges = setup_skill(client)
+        assert client.patch(f"/api/nodes/{agent['id']}", json={
+            'config': {'runtime_provider_id': 'atomsculptor.adk-team'}}).status_code == 200
+        async def while_preparing(*args, **kwargs):
+            if change == 'defaults':
+                current = services.plugins._plugins['atomsculptor']
+                services.plugins._plugins['atomsculptor'] = current.model_copy(update={'sandbox_environments': ()})
+            elif change == 'uninstall':
+                services.plugins.enrolled_pack_owners.discard('atomsculptor')
+            else:
+                services.world.delete_edge(edges[0]['id'])
+        monkeypatch.setattr(manager, 'wait_for_python_preparation', while_preparing)
+        provider = WorldAgentCapabilityProvider(services)
+        with pytest.raises((ResourceValidationError, PermissionDeniedError)):
+            client.portal.call(provider.invoke_tool, agent['id'], 'operation:execute_command',
+                               {'sandbox': sandbox['id'], 'argv': ['python3', '-V']})
+        assert backend.commands == []
+
+
 @pytest.mark.parametrize("equipment,toolbox", [(False, False), (False, True), (True, False), (True, True)])
 def test_lazy_current_bundle_uses_normal_native_backend_and_workspace(runtime_client, equipment, toolbox):
     client, backend, native = runtime_client

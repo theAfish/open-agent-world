@@ -19,7 +19,7 @@ class HelloPlugin:
     descriptor = PluginDescriptor(
         id="community.hello",
         version="0.1.0",
-        plugin_api_version="1.14",
+        plugin_api_version="1.35",
         name="Hello World",
         description="Your first OAW card.",
     )

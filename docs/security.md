@@ -2,7 +2,7 @@
 
 [Documentation](README.md)
 
-The Sandbox card represents an operating-system security boundary. Windows, Linux and WSL2 runtimes refuse execution if their required isolation cannot be established. The backend never falls back to an unrestricted host subprocess.
+The Sandbox card represents an operating-system security boundary. Windows, Linux, WSL2 and macOS runtimes refuse execution if their required isolation cannot be established. The backend never falls back to an unrestricted host subprocess.
 
 ## Runtime and workspace ownership
 
@@ -36,6 +36,13 @@ Discovery probes are cached for the application lifetime so status polling does 
 - Commands run headlessly and cannot request an interactive desktop.
 - An external NTFS folder receives only the selected AppContainer identity's grants while active. Stop/reload/destroy revoke those grants without resetting host ownership or other ACLs. Reparse points and hard links in an external tree are rejected; cleanup does not follow links into unrelated folders. Temporary files and resource attachments stay in managed storage.
 
+## macOS controls
+
+- Container VM is preferred when Apple Container 0.6.0+ is available on macOS 26+ Apple Silicon. Every command runs in a named lightweight Linux VM with a read-only root, non-root workload UID, memory and process limits, and only the selected workspace, home and attachments mounted. Offline commands use `--network none`; discovery proves the offline interface set. Opt-in public-IPv4 commands use a separately prepared image: a trusted temporary-root bootstrap installs an nftables deny policy, sets no-new-privileges, drops all capability sets and the root identity, and only then admits the workload. The setup probe must also reject a loopback self-connection. Scoped names and force-delete recovery remove VMs left by an interrupted transport.
+- Container Python is created inside Linux and mounted read-only during workloads; it never reuses Darwin wheels. Trusted dependency preparation is a separate validated operation accepting index package names and binary wheels only.
+- Seatbelt is the native fallback. It uses a deny-default profile, selected workspace access, read-only runtime/attachment views and a liveness watchdog. It has no safe cgroup/Job Object equivalent for aggregate memory/PID limits, so non-default values are rejected instead of silently ignored. Enabled networking allows only exact command-scoped localhost proxy ports; an authenticated host proxy permits public IPv4 TCP while blocking private/host destinations and IPv6. Direct sockets and UDP remain denied.
+- Both runtimes fail closed when their functional containment probes fail. Neither runs user commands as an ordinary unsandboxed host subprocess.
+
 ## Fail-closed rules
 
 Sandbox execution is refused when any of the following occurs:
@@ -45,6 +52,8 @@ Sandbox execution is refused when any of the following occurs:
 - ACL application or attachment materialization fails;
 - the restricted process cannot be created suspended and assigned to the Job Object;
 - Job Object limits cannot be applied;
+- a requested Seatbelt memory/process policy cannot be enforced;
+- Apple Container cannot prove `--network none` isolation or apply its VM controls;
 - a path does not resolve below the managed root;
 - an Agent lacks a current `execute` edge;
 - an attachment edge is missing or grants insufficient access.

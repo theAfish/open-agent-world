@@ -9,6 +9,8 @@ import { ToastStack } from '../shell/ToastStack';
 import type { PluginCatalog, WorldCard } from '../types/world';
 import { deploymentRequest } from './api';
 import './deployment.css';
+import { isHosted } from '../auth/hostedSession';
+import { AccountButton } from '../auth/AccountButton';
 
 type PublishedWorkspace = {
   id: string; name: string; cards: WorldCard[]; legion: WorldCard;
@@ -70,6 +72,10 @@ export function RuntimeApp({ name }: { name: string }) {
     finally { setBusy(false); }
   };
   if (!ready) return <main className="deployment-login">{t('Connecting…')}</main>;
+  if (!app && isHosted()) return <main className="deployment-login"><section>
+    <h1>{name}</h1><p role="alert">{t('The workspace is not ready. Try again or contact your administrator.')}</p>
+    <button className="secondary-button" onClick={() => window.location.reload()}>{t('Retry')}</button><AccountButton />
+  </section></main>;
   if (!app) return <main className="deployment-login"><form onSubmit={event => { void login(event); }}>
     <LockKeyhole size={28} /><h1>{name}</h1><p>{t('Enter the access password provided by your administrator.')}</p>
     <label>{t('Access password')}<input type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required maxLength={1024} /></label>
@@ -77,7 +83,7 @@ export function RuntimeApp({ name }: { name: string }) {
     <button className="primary-button" disabled={busy}>{busy ? t('Signing in…') : t('Open application')}</button>
   </form></main>;
   return <WorkspaceAccess.Provider value={{ deployed: true, permissions: app.permissions, plugin_access: app.plugin_access }}>
-    <WorkspaceWindow key={app.id} card={app.legion} locked actions={<button className="secondary-button" onClick={() => {
+    <WorkspaceWindow key={app.id} card={app.legion} locked actions={isHosted() ? <AccountButton /> : <button className="secondary-button" onClick={() => {
       void deploymentRequest('/runtime-app/session', { method: 'DELETE' }).then(clear)
         .catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: reason.message }));
     }}><LogOut size={14} />{t('Sign out')}</button>} />

@@ -4,6 +4,10 @@ The smallest card used in [Your first plugin](../../../docs/developers/first-plu
 The host supplies configuration editing and persistence. There are no Agent tools,
 custom UI, external resources, or lifecycle callbacks in this example.
 
+`oaw.pack.toml` declares the same distribution, owner and card identities used
+when publishing with `python -m open_agent_world.pack build-project`; see the
+[distribution guide](../../../docs/pack-distribution.md).
+
 From the repository root, copy this package into an immediate child of `plugins/`:
 
 ```powershell

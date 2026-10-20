@@ -39,7 +39,7 @@ class NativeContexts:
                 # build the full request; corrupt summaries never replace them.
                 saved = {}
             model = agent.canonical_model
-            configured = self.connection['model']
+            configured = self.connection.get('model_id', self.connection.get('model'))
             adapter = self.connection['adapter']
             if adapter != 'legacy' and not configured.startswith(adapter + '/'):
                 configured = adapter + '/' + configured

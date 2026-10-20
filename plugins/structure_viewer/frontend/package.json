@@ -1,0 +1,26 @@
+{
+  "name": "@oaw/structure-viewer-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "matterviz": "0.7.0",
+    "svelte": "5.57.0"
+  },
+  "devDependencies": {
+    "@oaw/plugin-api": "file:../../../frontend/pack-sdk",
+    "@sveltejs/vite-plugin-svelte": "5.1.1"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "overrides": {
+    "matterviz": {
+      "svelte-widgets": "1.6.1"
+    }
+  }
+}

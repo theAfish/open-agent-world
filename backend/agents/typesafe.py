@@ -191,11 +191,22 @@ async def request_choice(client: httpx.AsyncClient, model: TypeSafeModel, instru
     if len(serialized) > 24000:
         raise AgentStateError("Jev 紧凑输入超过 24 KB 保守预算；未发送请求，请减少历史预算或简化 Agent 指令。")
     started = time.monotonic()
-    try:
-        response = await client.post(model.endpoint, headers={"Authorization": "Bearer " + model.api_key}, json=request)
-    except httpx.RequestError as exc:
-        # Provider errors may embed request bodies/headers. Report only type.
-        raise AgentStateError(f"Jev 请求失败（{type(exc).__name__}）；已停止本轮，不会自动重试或替换优化器。") from None
+    for attempt in range(3):
+        try:
+            response = await client.post(model.endpoint, headers={"Authorization": "Bearer " + model.api_key}, json=request)
+        except httpx.RequestError as exc:
+            # Jev makes a choice only: no OAW capability or optimizer action
+            # occurs inside this HTTP request. A bounded retry is safe here.
+            if attempt < 2:
+                await asyncio.sleep(0.5 * (2 ** attempt))
+                continue
+            # Provider errors may embed request bodies/headers. Report only type.
+            raise AgentStateError(f"Jev 请求失败（{type(exc).__name__}）；已重试两次，本轮停止。") from None
+        if response.status_code in {408, 429} or 500 <= response.status_code < 600:
+            if attempt < 2:
+                await asyncio.sleep(0.5 * (2 ** attempt))
+                continue
+        break
     if response.status_code != 200:
         try:
             detail = response.json().get('detail', {})

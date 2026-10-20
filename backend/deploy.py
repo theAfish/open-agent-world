@@ -26,9 +26,16 @@ from backend.storage_location import (
 
 def validate_manifest(value):
     from backend.legion_workspace import WorkspaceLayout
-    if not isinstance(value, dict) or value.get("schema_version") != 1:
+    if not isinstance(value, dict) or value.get("schema_version") not in {1, 2}:
         raise ValueError("Unsupported deployment manifest")
-    for key in ("id", "name", "created_at", "plugin_versions", "permissions", "panels", "password", "runtime_settings"):
+    hosted = value.get("schema_version") == 2 and value.get("auth_mode") == "hosted"
+    if value.get("schema_version") == 2 and not hosted:
+        raise ValueError("Version 2 deployments require hosted authentication")
+    if value.get("schema_version") == 1 and value.get("auth_mode", "shared_password") != "shared_password":
+        raise ValueError("Version 1 deployments require shared-password authentication")
+    if hosted and "password" in value:
+        raise ValueError("Hosted deployments must not include a shared password")
+    for key in ("id", "name", "created_at", "plugin_versions", "permissions", "panels", "runtime_settings"):
         if key not in value:
             raise ValueError("Incomplete deployment manifest")
     UUID(value["id"])
@@ -38,9 +45,13 @@ def validate_manifest(value):
         if node_id not in value["permissions"]:
             raise ValueError("Plugin deployment access must belong to a published node")
         DeploymentSurface.model_validate(access)
-    password = value["password"]
-    if len(bytes.fromhex(password["salt"])) != 16 or len(bytes.fromhex(password["hash"])) != 32:
-        raise ValueError("Invalid deployment password record")
+    if not hosted:
+        try:
+            password = value["password"]
+            if len(bytes.fromhex(password["salt"])) != 16 or len(bytes.fromhex(password["hash"])) != 32:
+                raise ValueError("Invalid deployment password record")
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("Invalid deployment password record") from error
 
 
 def _rebase_database(stage, source, target):

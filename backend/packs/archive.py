@@ -67,10 +67,10 @@ def inspect_wheel(data: bytes, manifest: PackManifest) -> str:
         files = zip_files(wheel)
     roots = {name.split("/")[0] for name in files}
     info = [name for name in roots if name.endswith(".dist-info")]
-    if len(info) != 1 or roots != {manifest.module_name, info[0]}:
+    if len(info) != 1 or roots != {*manifest.module_names, info[0]}:
         raise ValueError(f"Backend wheel must contain only {manifest.module_name}/ and one .dist-info/")
     prefix = info[0]
-    if f"{manifest.module_name}/__init__.py" not in files:
+    if any(f"{module}/__init__.py" not in files for module in manifest.module_names):
         raise ValueError("Backend wheel is missing its package __init__.py")
     for name in files:
         if name.endswith((".pth", ".pyd", ".so", ".dll", ".pyc")):
@@ -81,13 +81,41 @@ def inspect_wheel(data: bytes, manifest: PackManifest) -> str:
     package = BytesParser().parsebytes(files[f"{prefix}/METADATA"])
     if package.get("Version") != manifest.version:
         raise ValueError("Backend wheel version differs from manifest")
-    if package.get("Requires-Python"):
-        import platform
-        if Version(platform.python_version()) not in SpecifierSet(package["Requires-Python"]):
-            raise ValueError("Backend wheel requires a different host Python version")
-    # No pip installation into the host. Existing public host dependencies may
-    # be declared, additional pure-Python helpers belong inside the private module.
-    for value in package.get_all("Requires-Dist", []):
+    requires_python = package.get("Requires-Python", '')
+    requirements = tuple(package.get_all("Requires-Dist", []))
+    if manifest.schema_version == 3:
+        from backend.packs.adapters import check_adapter_dependencies
+        declared = {str(Requirement(value)) for value in requirements
+                    if not (Requirement(value).marker and 'extra' in str(Requirement(value).marker))}
+        if declared != {str(Requirement(value)) for value in manifest.adapter.requirements}:
+            raise ValueError("Adapter dependency declaration differs from wheel metadata")
+        check_adapter_dependencies([manifest.adapter])
+        requirements = ()
+    check_backend_requirements(requires_python, requirements)
+    declarations = ConfigParser(interpolation=None)
+    declarations.optionxform = str
+    try:
+        declarations.read_string(files[f"{prefix}/entry_points.txt"].decode("utf-8"))
+    except ConfigParserError as exc:
+        raise ValueError("Invalid backend entry point metadata") from exc
+    if declarations.sections() != ["open_agent_world.plugins"]:
+        raise ValueError("Backend wheel must declare only one OAW factory")
+    entries = list(declarations["open_agent_world.plugins"].items())
+    if len(entries) != 1 or entries[0][0] != manifest.owner_id:
+        raise ValueError("Backend entry point name must equal Pack ID")
+    entry = entries[0][1]
+    import re
+    if not re.fullmatch(re.escape(manifest.module_name) + r"(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*", entry):
+        raise ValueError("Backend factory must belong to its Pack module")
+    return entry
+
+
+def check_backend_requirements(requires_python: str, requirements) -> None:
+    """Runtime compatibility uses installed metadata, without reading wheel bytes."""
+    import platform
+    if Version(platform.python_version()) not in SpecifierSet(requires_python):
+        raise ValueError("Backend wheel requires a different host Python version")
+    for value in requirements:
         requirement = Requirement(value)
         if requirement.url:
             raise ValueError("Backend dependency URLs are unsupported")
@@ -99,22 +127,6 @@ def inspect_wheel(data: bytes, manifest: PackManifest) -> str:
             raise ValueError(f"Backend dependency is not supplied by host: {requirement.name}") from exc
         if Version(version) not in requirement.specifier:
             raise ValueError(f"Backend dependency incompatible with host: {requirement}")
-    declarations = ConfigParser(interpolation=None)
-    declarations.optionxform = str
-    try:
-        declarations.read_string(files[f"{prefix}/entry_points.txt"].decode("utf-8"))
-    except ConfigParserError as exc:
-        raise ValueError("Invalid backend entry point metadata") from exc
-    if declarations.sections() != ["open_agent_world.plugins"]:
-        raise ValueError("Backend wheel must declare only one OAW factory")
-    entries = list(declarations["open_agent_world.plugins"].items())
-    if len(entries) != 1 or entries[0][0] != manifest.id:
-        raise ValueError("Backend entry point name must equal Pack ID")
-    entry = entries[0][1]
-    import re
-    if not re.fullmatch(re.escape(manifest.module_name) + r"(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*", entry):
-        raise ValueError("Backend factory must belong to its Pack module")
-    return entry
 
 
 @dataclass(frozen=True)
@@ -125,14 +137,14 @@ class InspectedPack:
     backend_entry: str | None
 
 
-def inspect_archive(data: bytes) -> InspectedPack:
+def inspect_archive(data: bytes, *, check_host_libraries: bool = True) -> InspectedPack:
     if len(data) > MAX_ARCHIVE_BYTES:
         raise ValueError("Pack archive is too large")
     with ZipFile(io.BytesIO(data)) as archive:
         files = zip_files(archive)
     if "manifest.json" not in files or "checksums.json" not in files:
         raise ValueError("Pack must contain manifest.json and checksums.json")
-    if len(files["manifest.json"]) > 64 * 1024 or len(files["checksums.json"]) > 1024 * 1024:
+    if len(files["manifest.json"]) > 2 * 1024 * 1024 or len(files["checksums.json"]) > 1024 * 1024:
         raise ValueError("Pack metadata is too large")
     manifest = PackManifest.model_validate(json_object(files["manifest.json"]))
     manifest.check_compatibility()
@@ -141,7 +153,8 @@ def inspect_archive(data: bytes) -> InspectedPack:
         if manifest.kind == "content":
             allowed = allowed or name in manifest.content.paths
         else:
-            allowed = allowed or name.startswith(("backend/", "frontend/", "assets/"))
+            allowed = allowed or name.startswith(("backend/", "frontend/", "assets/")) or (
+                manifest.schema_version == 3 and name.startswith("runtime/"))
         if not allowed:
             raise ValueError(f"Unexpected Pack file: {name}")
     checksums = json_object(files["checksums.json"])
@@ -163,5 +176,33 @@ def inspect_archive(data: bytes) -> InspectedPack:
     for entry in (manifest.entrypoints.backend, manifest.entrypoints.frontend):
         if entry not in files:
             raise ValueError(f"Missing Pack artifact: {entry}")
+    for environment in manifest.environments.values():
+        resources = (*environment.resources, *environment.requirement_files,
+                     *(item for item in (environment.verify_script, environment.entrypoint, environment.lock) if item))
+        for resource in resources:
+            safe_path(resource)
+            if not resource.startswith("runtime/") or resource not in files:
+                raise ValueError(f"Missing or unsafe runtime resource: {resource}")
+        if environment.lock_digest and (not environment.lock or
+                hashlib.sha256(files[environment.lock]).hexdigest() != environment.lock_digest):
+            raise ValueError("Environment lock digest does not match its artifact")
+        for resource, digest in environment.artifact_hashes.items():
+            if resource not in resources or hashlib.sha256(files[resource]).hexdigest() != digest:
+                raise ValueError(f"Environment artifact digest does not match: {resource}")
+        for artifact in environment.artifacts:
+            if artifact.path is not None:
+                safe_path(artifact.path)
+                if not artifact.path.startswith('runtime/') or artifact.path not in files:
+                    raise ValueError(f"Missing executable artifact: {artifact.path}")
+                payload = files[artifact.path]
+                if (hashlib.sha256(payload).hexdigest() != artifact.sha256
+                        or artifact.size_bytes is not None and len(payload) != artifact.size_bytes):
+                    raise ValueError(f"Executable artifact checksum/size mismatch: {artifact.path}")
+    if manifest.schema_version == 3:
+        from backend.packs.adapters import verify_wheel
+        for wheel in manifest.adapter.wheels:
+            if wheel.path not in files:
+                raise ValueError(f"Missing adapter dependency wheel: {wheel.path}")
+            verify_wheel(wheel, files[wheel.path], check_host=check_host_libraries)
     backend_entry = inspect_wheel(files[manifest.entrypoints.backend], manifest)
     return InspectedPack(manifest, files, hashlib.sha256(data).hexdigest(), backend_entry)

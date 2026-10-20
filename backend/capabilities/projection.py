@@ -78,7 +78,7 @@ def selector_schema(targets):
     aliases = target_aliases(targets)
     return {"type": "string", "enum": list(aliases),
             "description": "Current authorized targets: " + "; ".join(
-                f"{alias} ({targets[node_id].name})" for alias, node_id in aliases.items()
+                f"{alias} ({targets[node_id].name}{'; equipped' if getattr(targets[node_id], 'equipment', None) else ''})" for alias, node_id in aliases.items()
             ) + ". Use a listed alias; an exact unambiguous name or node ID is also accepted. Selectors are rechecked on every invocation."}
 
 

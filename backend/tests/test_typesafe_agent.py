@@ -342,7 +342,7 @@ async def test_invalid_choice_never_evaluates_and_stops_worker(corruption):
 
 
 @pytest.mark.asyncio
-async def test_timeout_not_retried_or_leaked_and_worker_stops():
+async def test_timeout_retries_are_bounded_and_redacted_and_worker_stops():
     harness = FakeHarness(status="running")
     requests = []
 
@@ -353,7 +353,8 @@ async def test_timeout_not_retried_or_leaked_and_worker_stops():
     async with httpx.AsyncClient(transport=httpx.MockTransport(fail)) as client:
         with pytest.raises(AgentStateError, match="ReadTimeout") as raised:
             await collect(harness, client)
-    assert len(requests) == 1
+    assert len(requests) == 3
+    assert len({request.content for request in requests}) == 1
     assert "secret-jev" not in str(raised.value)
     assert "private spectrum" not in str(raised.value)
     assert harness.calls[-1][0] == "stop"
@@ -425,6 +426,25 @@ async def test_http_error_body_is_not_exposed():
             await collect(harness, client)
     assert "secret-jev" not in str(raised.value)
     assert "private data" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_retryable_jev_http_failure_retries_decision_only(monkeypatch):
+    attempts = 0
+
+    async def no_sleep(_seconds):
+        return None
+
+    def respond(_request):
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(503) if attempts < 3 else httpx.Response(200, json=response_body())
+
+    monkeypatch.setattr("backend.agents.typesafe.asyncio.sleep", no_sleep)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        audit = await request_choice(client, MODEL, CONFIG.system_instruction, FakeHarness().decision())
+    assert attempts == 3
+    assert audit["choice"] == "add:A"
 
 
 @pytest.mark.asyncio
@@ -561,7 +581,10 @@ def test_post_search_recommends_three_without_starting_science(failed):
     asyncio.run(run())
     assert [a for a, _ in provider.calls] == ['read', 'finish']
     assert provider.recommendation['status'] == ('failed' if failed else 'completed')
-    assert len(calls) == (1 if failed else 3)
+    # Failed transport retries the same question; success selects three candidates.
+    assert len(calls) == 3
+    if failed:
+        assert calls[1:] == [calls[0], calls[0]]
     if not failed:
         assert len({tuple(c) for c in provider.recommendation['combinations']}) == 3
         assert len(provider.recommendation['audit']) == 3

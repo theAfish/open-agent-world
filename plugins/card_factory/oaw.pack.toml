@@ -1,0 +1,25 @@
+# Dependency intent only; installation and readiness are tracked separately.
+schema_version = 3
+
+[compatibility]
+plugin_api = "1.35"
+oaw = ">=0.1.0,<1"
+
+[distribution]
+id = "oaw.factory"
+name = "Card Factory"
+
+[plugin]
+owner = "oaw.factory"
+packs = ["oaw.factory"]
+node_types = ["oaw.factory.card","oaw.factory.face","oaw.factory.function","oaw.factory.pack","oaw.factory.packer","oaw.factory.printer"]
+
+[components.backend]
+project = "pyproject.toml"
+mode = "host-adapter"
+
+[components.frontend]
+entry = "frontend/index.tsx"
+project = "frontend/package.json"
+mode = "pack-build"
+

@@ -1,175 +1,149 @@
 # Default Agent context management
 
-The OAW-owned `google.adk` runtime automatically manages context without exposing
-compaction controls. Model window/output limits live in Settings > Models. A provider ID, registry ownership and the installed runtime
-implementation select this path; the `core.agent` trait does not. Other runtime
-providers retain their existing continuation behavior.
+OAW manages working context for its `google.adk` runtime. Other runtime providers
+retain ownership of their continuation behavior. The default runtime and all
+AtomSculptor roles use the same final-request accounting and compaction machinery.
 
-`agent_contexts` in the existing SQLite database stores private checkpoints by
-`(agent_id, context_id)`. Conversation context IDs are session IDs. Each checkpoint
-contains a rolling summary, a recent structured content tail (including tools),
-the canonical conversation cursor, usage calibration and compaction count.
-Foreign keys clean up deleted Agents and sessions. An additive table creation
-upgrades existing databases. None of this is Agent Card configuration or exposed
-through the state tools. ConversationStore remains the canonical message history.
+## Window and token accounting
 
-Before **every model call**, including calls within a long tool loop, the runtime
-renders the checkpoint, unseen conversation messages, current task and fresh
-instructions/tools. It no longer appends a repeated 40-message transcript. ADK's
-transient event log is reset between invocations while retaining ADK session state.
-One Agent/session serializes checkpoint mutations; different pairs are independent.
-ADK 2 can assemble a later model request before its public tool events are consumed.
-The model hook reconciles that actual request with observed events, retaining each
-part once even after compaction. Usage is calibrated in the model response callback.
+Settings > Models stores each connection/model's `context_window` and
+`max_output_tokens` in the existing versioned catalog. Saved values take precedence
+without provider discovery. New runs read current settings; running invocations
+retain their configuration. The actual requested output cap is reserved:
 
-Each configured model stores `context_window` (default 128,000) and
-`max_output_tokens` (default 8,192) in the existing versioned model catalog. The
-fields appear under the model's collapsible **Context & output limits** section.
-They are positive integer settings; the window is at least 1,024 and output must
-be smaller than the window. Old catalog rows receive these defaults when read,
-and saving persists the values alongside the model. No new database table or
-destructive migration is needed. Values are scoped to the connection's stable
-model reference, so identical model IDs on different connections remain separate.
-The configured default model resolves through the same reference.
+```
+input capacity = configured context window - requested max output tokens
+```
 
-Configured limits take precedence without model-name matching or provider
-discovery. New runs read the latest saved values; in-flight runs retain their
-budget. The output value is sent as the model generation cap and reserved when
-calculating input space. Safe input is `floor((context_window - max_output_tokens)
-* 0.85)`, with a one-token lower bound. Thus even an unusually large output
-reservation cannot make input plus output exceed the configured window. Settings
-cannot expand an endpoint's actual capacity. Other plugin runtimes retain ownership
-of their own generation/continuation settings.
+There is no percentage reserve, early percentage trigger, checkpoint percentage,
+recent-tail percentage, or fixed prose-length quota. Configuring a larger window
+does not expand the provider's real capacity. Normal task generation keeps the
+selected output cap.
 
-For legacy raw runtime model strings with no catalog reference, the previous
-installed LiteLLM metadata fallback still supplies the model input limit and output cap.
-Resolution preserves exact provider entries, then matches compatible adapter
-prefixes and model-name casing. A small verified fallback covers newly released
-DeepSeek V4.1 Flash names missing from the installed map; its published window is
-[1M tokens](https://api-docs.deepseek.com/quick_start/pricing/). It does not change
-the model ID sent to the configured endpoint. Unknown/private model names use a
-32,768-token rolling compaction target, not a claimed provider limit: the API's
-`context_limit` is zero and fixed request overhead cannot cause a local rejection
-against this provisional target. The provider still enforces its own limits.
-In that legacy path only, output reserve is the smaller of the model output cap,
-8,192 and one eighth of the input limit. A further 15% of the remaining input
-space leaves tool/runtime growth and safety headroom. Pressure is
-rendered input divided by this safe input budget, clamped to 0–1. Provider prompt
-usage takes precedence, with estimated deltas for subsequent growth; otherwise a
-conservative UTF-8 estimate includes instructions and tool schemas. This is
-**context pressure**, not an exact context-window utilization percentage.
+Local accounting uses `cl100k_base` BPE data already bundled with LiteLLM, without
+runtime tokenizer downloads. It tokenizes rendered contents and instruction/tool
+configuration, rather than dividing UTF-8 bytes by a guessed constant. This is a
+**reference tokenizer count**, not the exact count for an arbitrary compatible
+endpoint. Native Run records label it `local_cl100k_base_reference`, with
+`tokenizer_matches_provider=false`, and store provider usage separately. Returned
+prompt usage calibrates subsequent deltas. Checkpoints from the former estimator
+retain their history but discard incompatible calibration anchors.
 
-At 85% of the safe input budget the state becomes `high`. Compaction uses a
-single window-relative allocation: subtract the rendered current task and fixed
-instructions/tool schemas from safe input to obtain available history space.
-Trigger at fixed input plus 85% of that space; target fixed input plus 50% after
-compaction. Allocate at most 20% to the checkpoint and 30% to the recent tail.
-These are OAW policy ratios, not claimed Codex/Copilot implementation constants.
-For unknown model aliases, the provisional safe-input amount is a rolling history
-allocation added beside fixed instructions, not a hard cap on those instructions.
-A generic compaction pass folds older contents and the prior snapshot using the same
-configured ADK model adapter and connection, without tools. It preserves goals,
-facts, decisions, uncertainties, execution outcomes and artifact/resource paths.
-A token-sized recent tail is retained, after allowing for the fixed instructions
-and tool schemas, with tool call/result groups kept together.
-Oversized histories/tool bodies and even an oversized prior checkpoint are folded
-in chunks sized against the complete serialized summary request, including JSON
-escaping, instruction, previous fold and output reservation. Summary text has no
-fixed 2K/4K ceiling: acceptance uses the window-relative checkpoint allocation.
-The prose target is half that allocation or half the configured generation budget,
-whichever is smaller. Generation tokens also pay for reasoning, so they are not
-treated as a checkpoint-length measure. Checkpoints commit only after reduction
-and verification that the complete rendered continuation fits the target.
+Legacy raw model strings can resolve limits from installed LiteLLM metadata.
+Unknown/private aliases have no fabricated hard limit or rolling quota: their
+reported `context_limit` and pressure are zero until real limits are configured.
+The provider enforces its actual limits. Client compaction requires a configured
+or known window to size its own requests safely.
 
-`MAX_TOKENS` (including ADK's error-code representation) and empty output can
-retry with a doubled generation allowance within the provider output cap and
-remaining window. Empty output can retry at the cap; oversized prose retries with
-a concision instruction and the original source. All retries are bounded to three
-attempts and fit the configured window. Failure distinguishes empty, oversized,
-rejected and truncated results, includes applicable budget sizes, and preserves
-the entire old checkpoint. No agent tools are replayed. A later turn can retry.
-Interrupted tool calls get an explicit unknown-outcome result so
-continuation cannot assume either success or permission to repeat a side effect.
+## Request preparation and compaction
 
-This adopts the lifecycle described in the
-[OpenAI compaction guide](https://developers.openai.com/api/docs/guides/compaction):
-grow, measure, compact, continue, repeat. It uses a **generic rolling snapshot**,
-not OpenAI encrypted/native compaction or a separate Responses API transport.
-The [Codex configuration reference](https://developers.openai.com/codex/config-reference/)
-exposes model-specific automatic compaction thresholds; the
-[Copilot CLI context guide](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/context-management)
-describes background compaction near 80% and waiting near 95%. OAW compacts
-synchronously at its serialized model-call boundary, preserving its existing
-per-session ownership and cancellation contract rather than adding a background
-writer. Explicit connection limits remain authoritative; this change does not
-increase a proxy's configured window based only on its model name.
+Before dispatch, normalize unsigned text-only streamed thought chunks and project
+large archived tool outputs into bounded previews. Neither operation changes the
+original Run archives. A preview requires a uniquely matched complete native tool
+invocation. Call IDs and names remain intact; `read_tool_result` retrieves needed
+slices with offsets and JSON pointers. Access is restricted to references
+issued into the current Run/role/delegation. Missing archives cannot produce an
+invented receipt. Signed prefixes bypass client normalization and projection.
 
-REST conversation summaries expose only session/Agent `ContextStatus` projections.
-The existing event hub publishes `context_status` invalidations on 5% pressure
-buckets and state/count changes. The Conversation participant avatar reads the
-selected session's projection; message avatars have no rings. Hover gives pressure
-and count, with no token counters, settings or compaction toast. Reconnect reloads
-the authoritative snapshot; reduced-motion preferences disable animation.
+Previews retain a JSON structure rather than cutting serialized JSON. Omitted
+subtrees supply a `read_pointer` rooted at the original archived result;
+`preview`, `text_preview`, `items_preview` and `fields_preview` are working-view
+wrappers and are not added to the archive. Character paging applies directly to
+the original string. Invalid paths return bounded information about the nearest
+accessible parent so the Agent can correct the read. Unknown references reveal
+no result structure. Reads use the existing tool failure/cancellation boundary:
+bad arguments are tool feedback, while stopping the Run still cancels the read.
 
-Limitations: summarization is lossy and adds model calls/latency. Scripted-model
-tests exercise the real ADK runner and tools, not live-model factual retention.
-Metadata can be missing or inaccurate for a proxy/private alias, and an endpoint
-may impose a smaller window than its upstream model. For a known window, a current message
-or tool schema larger than the remaining safe budget fails explicitly instead of
-silently truncating it. Provider-native hidden continuation, ADK process-local
-session state and interrupted Run resumption remain subject to existing runtime
-limitations; OAW checkpoints and raw tails survive restart. Existing execution
-deadlines and inactivity policies still apply to compaction calls.
+The completed request includes current instructions, late HOST frames, selected
+tools, arguments/results and the actual output reservation. When it no longer
+fits, an explicitly supplied adapter-native reducer takes precedence. Current
+compatible Chat Completions adapters do not implement OpenAI Responses encrypted
+compaction or Claude server-side compaction. OAW uses a client summary fallback
+for unsigned history, through the same model adapter and connection.
 
-Validation: 15 new backend tests cover the real ADK runner with a scripted model,
-repeated in-turn tool compaction, continuation, history retention, independent
-scope/status, restart, failure/cancellation, usage/event buckets, plugin exclusion,
-session deletion, interrupted tools, peer-stream updates, scope locks and oversized
-current input, ADK event ordering and Stop/continue cleanup. The final related
-Conversation/Run/streaming/persistence group passes 78 tests. The broader backend
-suite (before the last two added cases) reports 863 passed, 26 skipped and three recursive
-summoning result-text failures; all three also reproduce with the changed backend
-modules loaded from unmodified HEAD `756dc6d`. The frontend suite passes 451 tests
-(before the added ring test), and the final focused UI/store/timeline/i18n group
-passes 69. Production build and final TypeScript checks pass. An isolated Chrome
-test verifies ring geometry, session switching, pressure reduction, reduced motion
-and missing-status fallback; its REST pressure projection is controlled test data.
+The fallback summarizes settled history and the previous checkpoint. It keeps the
+latest complete exchange where it fits, and never splits a tool-call/result group.
+An oversized settled exchange can be folded; a currently open exchange stays
+intact. The current user task and protected HOST facts remain verbatim. Summaries
+retain goals, confirmed facts, decisions, uncertainties, execution outcomes and
+artifact/resource paths. Reported evidence does not become an acceptance receipt.
+Acceptance requires an actual reduction and a complete continuation fitting the
+input capacity, rather than separate allocations for summary and recent history.
 
-Follow-up regression coverage adds compatible model-name resolution, exact
-provider limit precedence, a fresh Conversation with a large ADK tool schema and
-no inherited checkpoint, provisional unknown-model budgets, reasoning-exhausted
-summary retries, output-cap enforcement and retained checkpoints on exhaustion
-or rejection. Read-only inspection of the reported MatCreator failures confirmed
-separate contexts: the fresh Conversation retained one message, while the older
-one retained 384. Both were mistakenly budgeted at 8K under
-`openai/DeepSeek-V4.1-Flash`. Live checks through the configured adapter used only
-synthetic input: a 1,024-token summary budget produced `MAX_TOKENS`, no text and
-1,024 reasoning tokens; an 8,192-token budget returned a complete text summary.
-No real conversation was replayed and no agent tools were executed by the check.
-The final related backend regression group passes 85 tests. Loading this fix in
-an already running backend requires restarting that process; persisted histories
-and checkpoints need no reset or manual migration.
+Oversized transcripts are folded in bounded fragments. Each summary request
+includes its instructions, preceding fold and output reservation in accounting.
+Reasoning shares the generation cap with prose. Empty, oversized or truncated
+summary responses use bounded read-only retries. When a larger generation cap or
+correction instruction requires more room, the transcript fragment is repacked;
+the unconsumed suffix remains for subsequent folds. No transcript suffix is
+silently discarded. A failed or cancelled pass preserves the previous checkpoint
+and request; original messages and tools are never replayed by compaction.
 
-Configured-limit validation: 110 related backend tests pass, including catalog
-defaults, old JSON compatibility, persistence/restart, invalid values, connection
-isolation and a real ADK runner applying changed limits on the next invocation.
-All 454 frontend tests pass with two workers, and the production build passes.
-The isolated Chrome model-settings test verifies default values, editing, saving,
-reload, connection isolation, Chinese labels and narrow layouts; rendered screenshots
-were inspected. This is isolated browser coverage, not a live-model conversation
-or embedded-browser check. Configured model limits require no metadata requests.
+Because a reference tokenizer may underestimate a gateway's usage, an explicit
+provider/SDK context-overflow rejection can trigger **one** compaction and retry
+of the unpublished model request. It has a separate allowance from network
+recovery. A generic HTTP 400, invalid schema or authentication error is not a
+compaction signal. Repeated overflow stops explicitly. Agent execution and
+completed tools are not restarted. Without suitable reduction support, the error
+asks for actual endpoint limits or adapter-native compaction.
 
-Window-relative budget verification (2026-09-20): 90 related backend tests cover
-the runtime, model catalog and conversation paths, including complete summaries
-above the old 4K ceiling, empty/oversized recovery, bounded escaped Unicode input,
-smaller-window checkpoint folding, early compaction and unknown-model history
-rolling. With explicit user authorization, a read-only copy of the failed
-MatCreator checkpoint was summarized through its configured adapter. At the
-currently configured 1M window, a forced pass produced a 4,168-token estimated
-summary and reduced total estimated input from 427,035 to 265,697. At the original
-128K window, five summary calls reduced the same estimated input to 39,028, below
-the 58,875 continuation target, in 166 seconds. These conservative local estimates
-are not provider token counts. The probes did not execute tools or write the
-canonical database; they verify budget recovery, not comprehensive factual
-retention or a resumed live Agent run. Restart an already running backend to load
-the implementation; no checkpoint reset or data migration is required.
+Signed reasoning requires an explicitly supplied native reducer or a fresh
+assignment from saved facts. Provider-native opaque compaction state must be
+handled by its adapter; model-name matching never implies support.
+
+The public references informing this lifecycle are the
+[OpenAI compaction guide](https://developers.openai.com/api/docs/guides/compaction),
+[Claude compaction documentation](https://platform.claude.com/docs/en/build-with-claude/compaction)
+and [Claude Code context lifecycle](https://code.claude.com/docs/en/how-claude-code-works).
+OAW implements the applicable client fallback, not either product's undisclosed
+internals or unsupported provider interfaces.
+
+## Persistence and ownership
+
+The existing SQLite `agent_contexts` table stores private checkpoints keyed by
+`(agent_id, context_id)`: summary, structured tail, conversation cursor, usage
+anchor, estimator identity and compaction count. ConversationStore remains the
+canonical message history; native Run invocation records retain full model
+requests, reasoning, tool calls/results and provider usage. Working projections
+and compaction do not overwrite those records or create another database.
+
+Transient visual tool observations are an explicit exception to full-body
+persistence: live requests receive the pixels; Run logs and private checkpoints
+retain observation metadata and omission markers. User-supplied images retain
+their ordinary persistence behavior. An exact recovery checkpoint is unavailable
+if redaction or image omission changes its request. When restoring a signed
+prefix whose transient images were omitted, OAW starts from its public tool/text
+facts as historical data rather than replaying altered provider signatures.
+The Agent can re-observe when current pixels are needed.
+
+ADK model hooks reconcile assembled requests with public events without retaining
+parts twice. Interrupted tool calls receive an explicit unknown-outcome result,
+so continuation must inspect state before repeating a side effect. ADK transient
+events reset between invocations while session state and OAW checkpoints remain.
+Scope locks serialize one Agent/session without blocking unrelated sessions.
+
+AtomSculptor specialist scopes follow the Run and ADK delegation branch. Exact
+current HOST frames stay pinned; no previous specialist transcript enters a new
+assignment. Coordinator checkpoint scope and Conversation attribution remain
+separate. Summary calls use ordinary native invocation records with phase
+`context_compaction`, usage accounting and request-level network recovery.
+
+The host and opt-in plugin request compactor share
+`open_agent_world.context.adk.AdkContextCompactor` for transcript chunking,
+summary generation and candidate validation. The host adapter supplies its token
+estimator, configured input capacity, private checkpoint store and traced model
+calls. Plugins may keep their own persistence and the public default allocation;
+these adapters do not maintain separate summary executors.
+
+Builder HOST plans reference existing requirement IDs; the complete acceptance
+text appears once in the stable frame's `requirements`. Current plans and stage
+indexes resolve against that same mapping. This changes only the working view,
+not committed plans, acceptance checks or receipts. Identical source head/error
+excerpts are also included once. A stable frame is one copy in working history;
+it still contributes to every API request's input, even when prefix caching helps.
+
+Conversation context status exposes pressure, state and compaction count.
+Pressure uses the input capacity; `high` means that capacity is reached.
+Invalidations are coalesced into UI buckets, which are not execution budgets.
+Checkpoint persistence and original archives survive restart. Summarization is
+lossy and adds model calls; local reference counts are not provider guarantees.

@@ -57,4 +57,3 @@ export function coreButtonWarnings(face: FaceDesign, studio: FaceStudio = face.s
     return warnings;
   });
 }
-

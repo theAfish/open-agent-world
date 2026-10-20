@@ -14,7 +14,7 @@ import { useLegionWorkspace } from '../state/legionWorkspace';
 import { useWorldStore } from '../state/worldStore';
 import type { WorldCard } from '../types/world';
 import { WorkspaceSectionProvider, type WorkspaceSectionRegistration } from '../workspace/WorkspaceSection';
-import { activateTab, activePaneView, dockPane, dropSide, layoutMinimum, leafForView, paneViews, readWorkspaceLayout, removePane, resizeSplit, retainPanes, stackPane, viewKey,
+import { WORKSPACE_DIVIDER_SIZE, activateTab, activePaneView, dockPane, dropSide, layoutMinimum, leafForView, paneViews, readWorkspaceLayout, removePane, resizeSplit, retainPanes, stackPane, viewKey,
   type DockSide, type WorkspaceLayout, type WorkspaceLeaf, type WorkspaceNode, type WorkspaceView } from './workspaceLayout';
 import './legionWorkspace.css';
 import { PublishApplication } from '../deployment/PublishApplication';
@@ -369,7 +369,7 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
         <CardFinishLayer finish={member.finish} quality="thumbnail" />
       </button>)}
     </nav>}
-      <span className="legion-footer-hint">{locked ? t('Published application') : editing ? t('Drag dividers to resize. Removing a pane keeps its card in the Legion.') : t('Drag dividers to resize; sizes save automatically. Use Edit layout to move cards.')}</span>
+      {(locked || editing) && <span className="legion-footer-hint">{locked ? t('Published application') : t('Drag dividers to resize. Removing a pane keeps its card in the Legion.')}</span>}
     </footer>
     {members.filter(member => mountedIds.current.has(member.id)).map(member => <CardWorkspaceOwner key={member.id}
       member={member} host={surfaceHosts.current.get(viewKey({ card_id: member.id }))!} workspace={nodeSurfaceSupport(member.type, catalog).workspace}
@@ -402,7 +402,7 @@ function LayoutRegion(props: RegionProps) {
   const dimension = horizontal ? 'width' : 'height';
   // Keep each flex factor >= 1: after a track freezes at its minimum,
   // a remaining factor below 1 would leave part of the free space unused.
-  const template = `minmax(${firstMinimum[dimension]}px, ${node.ratio * 100}fr) 5px minmax(${secondMinimum[dimension]}px, ${(1 - node.ratio) * 100}fr)`;
+  const template = `minmax(${firstMinimum[dimension]}px, ${node.ratio * 100}fr) ${WORKSPACE_DIVIDER_SIZE}px minmax(${secondMinimum[dimension]}px, ${(1 - node.ratio) * 100}fr)`;
   return <div ref={splitRef} className="legion-layout-split" data-split-axis={node.axis}
     style={horizontal ? { gridTemplateColumns: template } : { gridTemplateRows: template }}>
     <LayoutRegion {...props} node={node.first} path={`${path}0`} />
@@ -416,8 +416,8 @@ function LayoutRegion(props: RegionProps) {
       }} onPointerMove={event => {
         const start = resizeStart.current;
         if (!start) return;
-        const ratio = horizontal ? (event.clientX - start.bounds.left - 2.5) / (start.bounds.width - 5)
-          : (event.clientY - start.bounds.top - 2.5) / (start.bounds.height - 5);
+        const ratio = horizontal ? (event.clientX - start.bounds.left - WORKSPACE_DIVIDER_SIZE / 2) / (start.bounds.width - WORKSPACE_DIVIDER_SIZE)
+          : (event.clientY - start.bounds.top - WORKSPACE_DIVIDER_SIZE / 2) / (start.bounds.height - WORKSPACE_DIVIDER_SIZE);
         resize(path, ratio);
       }} onPointerUp={event => {
         const started = resizeStart.current;

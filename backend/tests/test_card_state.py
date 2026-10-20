@@ -244,6 +244,7 @@ def test_background_execution_and_agent_tools_are_pinned_to_origin_session(clien
 def test_agent_invocation_overrides_browser_context_and_revoked_grants_stay_revoked(client):
     from backend.capabilities.provider import WorldAgentCapabilityProvider
     from backend.runs import InvocationCaller, InvocationContext
+    from backend.runs.store import RunStore
     from backend.runs.manager import _current_invocation
     services = client.app.state.services
     board = create_node(client, "oaw.tasks")
@@ -252,6 +253,8 @@ def test_agent_invocation_overrides_browser_context_and_revoked_grants_stay_revo
     edge = client.post("/api/edges", json={"source": agent["id"], "target": board["id"], "relationship": "oaw.tasks.edit"}).json()
     capability = next(c for c in services.capabilities.derive(agent["id"]).capabilities if c.kind == "oaw.tasks.upsert")
     provider = WorldAgentCapabilityProvider(services)
+    RunStore(services.database).create(agent_id=agent["id"], run_id="test-run", context_id=a["id"],
+        runtime_provider_id="core.mock", caller_kind="conversation", caller_id="chat")
     async def invoke():
         context = InvocationContext(run_id="test-run", agent_id=agent["id"], parent_run_id=None, root_run_id="test-run",
             caller=InvocationCaller("conversation", "chat"), context_id=a["id"], task_id=None, runtime_provider_id="core.mock")

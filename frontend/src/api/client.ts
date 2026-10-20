@@ -2,6 +2,7 @@ import { cardStateSession, stateSessionHeaders } from "../state/cardState";
 import type { BackgroundJob, JobAction, JobsSnapshot } from '../cards/jobTypes';
 import { normalizeCardFinish } from '../cards/cardFinish';
 import { fetchWithRetry } from './fetchWithRetry';
+import { hostedInstanceUrl, isHosted } from '../auth/hostedSession';
 import type { SummoningSnapshot, SummonedInstance } from "../cards/Barracks";
 import type {
   CardConfig,
@@ -38,11 +39,11 @@ export function configureWorkspaceApi(deployed: boolean) {
 }
 
 export function conversationAttachmentUrl(conversationId: string, sessionId: string, file: { version_id: string; path: string }, preview = false): string {
-  return `${API_BASE}/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(file.version_id)}?${new URLSearchParams({ path: file.path, preview: String(preview) })}`;
+  return hostedInstanceUrl(`${API_BASE}/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(file.version_id)}?${new URLSearchParams({ path: file.path, preview: String(preview) })}`);
 }
 
 export function nodeDocumentDownloadUrl(id: string, name: string, sessionId: string | null = cardStateSession(id) ?? null): string {
-  return `${API_BASE}/nodes/${encodeURIComponent(id)}/document/downloads/${encodeURIComponent(name)}${sessionId ? `?state_session=${encodeURIComponent(sessionId)}` : ""}`;
+  return hostedInstanceUrl(`${API_BASE}/nodes/${encodeURIComponent(id)}/document/downloads/${encodeURIComponent(name)}${sessionId ? `?state_session=${encodeURIComponent(sessionId)}` : ""}`);
 }
 
 export class ApiError extends Error {
@@ -345,6 +346,9 @@ export const worldApi = {
       { method: 'POST', headers: { 'X-OAW-Pack-Install': '1' }, signal });
   },
   getInstalledPacks(): Promise<import('../types/packs').PackInstallations> { return request('/packs'); },
+  getPackUninstallPlan(id: string): Promise<import('../types/packs').PackUninstallPlan> {
+    return request(`/packs/${encodeURIComponent(id)}/uninstall-plan`);
+  },
   inspectPack(file: File): Promise<import('../types/packs').PackInspection> {
     return request('/packs/inspect', { method: 'POST', headers: { 'Content-Type': 'application/vnd.oaw.pack', 'X-OAW-Pack-Install': '1' }, body: file });
   },
@@ -422,6 +426,13 @@ export const worldApi = {
 
   async getNodeDocumentSummary(id: string, sessionId: string | null = cardStateSession(id) ?? null): Promise<{ revision: number; summary: Record<string, unknown> }> {
     return request(`/nodes/${encodeURIComponent(id)}/document?summary_only=true`, { headers: stateSessionHeaders(sessionId) });
+  },
+
+  getNodeDefaults(id: string): Promise<Record<string, unknown>> {
+    return request(`/nodes/${encodeURIComponent(id)}/defaults`);
+  },
+  restoreNodeDefaults(id: string, value: Record<string, unknown>): Promise<void> {
+    return request(`/nodes/${encodeURIComponent(id)}/defaults`, { method: 'POST', body: JSON.stringify({ value }) });
   },
 
   async nodeResourceAction(id: string, action: string, args: Record<string, unknown>, confirm = false, sessionId: string | null = cardStateSession(id) ?? null): Promise<Record<string, unknown>> {
@@ -792,12 +803,34 @@ export const worldApi = {
   },
   retainedArtifacts<T>(): Promise<T> { return request("/artifacts/retained"); },
   artifactDownloadUrl(collectionId: string, versionId: string, path: string): string {
-    return `${API_BASE}/artifact-collections/${encodeURIComponent(collectionId)}/versions/${encodeURIComponent(versionId)}/content?${new URLSearchParams({ path })}`;
+    return hostedInstanceUrl(`${API_BASE}/artifact-collections/${encodeURIComponent(collectionId)}/versions/${encodeURIComponent(versionId)}/content?${new URLSearchParams({ path })}`);
   },
   lifecycle<T>(retry = false): Promise<T> {
     return request(`/lifecycle${retry ? "/retry-cleanup" : ""}`, retry ? { method: "POST" } : undefined);
   },
   cancelRun(runId: string): Promise<unknown> { return request(`/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" }); },
+  getRunReasoning(runId: string, offset = 0): Promise<{ items: import("../types/world").SavedModelThinking[]; next_offset: number | null }> {
+    return request(`/runs/${encodeURIComponent(runId)}/reasoning?offset=${offset}&limit=50`);
+  },
+  getRunActivity(runId: string, offset = 0, latest = false): Promise<{ items: import('../state/runActivity').RunActivityItem[]; total: number; incomplete?: boolean; next_offset: number | null }> {
+    return request(`/runs/${encodeURIComponent(runId)}/activity?offset=${offset}&limit=50&latest=${latest}`);
+  },
+  getRunActivityDetail(runId: string, identity: string): Promise<Partial<import('../types/world').SavedInvocation> & { text?: string }> {
+    return request(`/runs/${encodeURIComponent(runId)}/activity/${encodeURIComponent(identity)}`);
+  },
+  getRunReasoningText(runId: string, identity: string): Promise<import("../types/world").SavedModelThinking> {
+    return request(`/runs/${encodeURIComponent(runId)}/reasoning/${encodeURIComponent(identity)}`);
+  },
+  getRunInvocations(runId: string, kind: "models" | "tools", offset = 0): Promise<{ items: import("../types/world").SavedInvocation[]; next_offset: number | null }> {
+    return request(`/runs/${encodeURIComponent(runId)}/invocations/${kind}?offset=${offset}&limit=50`);
+  },
+  getRunInvocation(runId: string, kind: "models" | "tools", identity: string): Promise<import("../types/world").SavedInvocation> {
+    return request(`/runs/${encodeURIComponent(runId)}/invocations/${kind}/${encodeURIComponent(identity)}`);
+  },
+  agentRuns(agentId: string): Promise<{ run_id: string; agent_id: string; status: string; started_at?: string;
+    finished_at?: string; lifecycle: Record<string, unknown> }[]> {
+    return request(`/runs?agent_id=${encodeURIComponent(agentId)}`);
+  },
 
   stopAgent(nodeId: string): Promise<Record<string, unknown>> {
     return request<Record<string, unknown>>(`/agents/${encodeURIComponent(nodeId)}/stop`, {
@@ -998,10 +1031,10 @@ export const worldApi = {
     });
   },
 
-  executeSandbox(nodeId: string, command: string): Promise<Record<string, unknown>> {
+  executeSandbox(nodeId: string, command: string, pythonEnvironment: "auto" | "managed" = "auto"): Promise<Record<string, unknown>> {
     return request<Record<string, unknown>>(`/sandboxes/${encodeURIComponent(nodeId)}/execute`, {
       method: "POST",
-      body: JSON.stringify({ command }),
+      body: JSON.stringify({ command, ...(pythonEnvironment === "managed" ? { python_environment: "managed" } : {}) }),
     });
   },
 };
@@ -1019,13 +1052,13 @@ export interface SandboxSettings {
 
 export function runtimeWebSocketUrl(): string {
   const configured = import.meta.env.VITE_WS_URL as string | undefined;
-  if (configured) return configured;
+  if (configured && !isHosted()) return configured;
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/ws/events`;
+  return hostedInstanceUrl(`${protocol}//${window.location.host}/ws/events`);
 }
 
 export function resourceContentUrl(nodeId: string): string {
-  return `${API_BASE}/resources/${encodeURIComponent(nodeId)}/content`;
+  return hostedInstanceUrl(`${API_BASE}/resources/${encodeURIComponent(nodeId)}/content`);
 }
 
 export function normalizeRuntimeEvent(input: unknown): RuntimeEvent {

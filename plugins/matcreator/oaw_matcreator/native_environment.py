@@ -1,59 +1,80 @@
-"""Pack-owned, isolated dependencies prepared by OAW's plugin installation.
+﻿"""MatCreator verification and worker activation for OAW-managed environments.
 
-The host's site-packages are never modified. A -I -S worker uses this private
-dependency directory and the host's standard library (or a managed Python 3.12
-when the host is older). Relative receipts also survive desktop relocation.
-This module deliberately uses only the standard library.
+Host setup delegates lifecycle to OAW. The isolated worker uses only the small
+stdlib activation helpers below; it never imports host packages or installs.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
-import errno
 import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
-import subprocess
 import sys
 import sysconfig
-import time
-from uuid import uuid4
 
 PACKAGE = Path(__file__).resolve().parent
 REQUIREMENTS = PACKAGE / "native-requirements.txt"
 ENGINE = PACKAGE.parent / "oaw_matcreator_engine"
-REPAIR = "MatCreator plugin setup is incomplete. Use the same Python for OAW setup and startup."
+REPAIR = "MatCreator plugin setup is incomplete. Prepare its native environment using OAW Pack installation."
 
 
-def environment_root() -> Path:
-    # ABI changes require fresh wheels. Patch upgrades can reuse the same files.
+def environment_spec():
+    # Lazy host-only imports: native_worker runs this module under -I -S.
+    from open_agent_world.plugin_api import PythonEnvironmentSpec
+    from packaging.requirements import Requirement
+    requirements = tuple(str(Requirement(line.strip())) for line in REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+                         if line.strip() and not line.lstrip().startswith("#"))
+    return PythonEnvironmentSpec("matcreator", "native", requirements, ">=3.12",
+        ("litellm", "google.adk.runners", "json_repair", "tiktoken"), Path(__file__).resolve())
+
+
+def _manager(data_root=None):
+    from open_agent_world.plugin_api import PackEnvironmentManager
+    return PackEnvironmentManager(Path(data_root) if data_root is not None else None)
+
+
+def environment_root(data_root: Path | None = None) -> Path:
+    return _manager(data_root).environment_root(environment_spec())
+
+
+def legacy_environment_root() -> Path:
+    """Read-only compatibility with verified pre-migration desktop/source installs."""
     identity = b"oaw-matcreator-dependencies-v2\n" + REQUIREMENTS.read_bytes()
-    # Use the interpreter's build target; platform.machine() depends on mutable
-    # Windows environment variables and can be empty in isolated launchers.
     identity += f"{sys.implementation.cache_tag}:{sysconfig.get_platform()}".encode()
     return Path(sys.prefix) / "oaw-runtimes" / "matcreator" / hashlib.sha256(identity).hexdigest()[:20]
 
 
-def read_environment(root: Path | None = None) -> tuple[str, Path]:
-    root = root or environment_root()
-    try:
-        receipt = json.loads((root / "ready.json").read_text(encoding="utf-8"))
-        if receipt["format"] != 2:
-            raise ValueError("Unknown runtime receipt")
-        relative = receipt["python"]
-        executable = Path(sys.executable) if relative == "host" else root / relative
-        if relative != "host" and (Path(relative).is_absolute() or not executable.resolve().is_relative_to(root.resolve())):
-            raise ValueError("Runtime interpreter escapes installation")
-        if not executable.is_file() or not all((root / "packages" / module / "__init__.py").is_file()
-                for module in ("google/adk", "litellm", "json_repair")):
-            raise ValueError("Incomplete runtime")
-        return str(executable), root
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise RuntimeError(
-            f"{REPAIR} Backend Python: {sys.executable}. Expected runtime: {root}. "
-            f"Reason: {exc}"
-        ) from exc
+def bundled_environment_root() -> Path:
+    return _manager(Path(sys.prefix) / "oaw-runtime-bundle").environment_root(environment_spec())
+
+
+def _read_legacy(root: Path) -> tuple[str, Path]:
+    receipt = json.loads((root / "ready.json").read_text(encoding="utf-8"))
+    if receipt["format"] != 2:
+        raise ValueError("Unknown legacy runtime receipt")
+    relative = receipt["python"]
+    executable = Path(sys.executable) if relative == "host" else root / relative
+    if relative != "host" and (Path(relative).is_absolute() or not executable.resolve().is_relative_to(root.resolve())):
+        raise ValueError("Runtime interpreter escapes installation")
+    if not executable.is_file() or not all((root / "packages" / module / "__init__.py").is_file()
+            for module in ("google/adk", "litellm", "json_repair")):
+        raise ValueError("Incomplete legacy runtime")
+    return str(executable), root
+
+
+def read_environment(root: Path | None = None, *, data_root: Path | None = None) -> tuple[str, Path]:
+    manager, spec = _manager(data_root), environment_spec()
+    expected = root or manager.environment_root(spec)
+    candidates = (root,) if root is not None else (expected, bundled_environment_root(), legacy_environment_root())
+    for candidate in candidates:
+        try:
+            if candidate == legacy_environment_root():
+                return _read_legacy(candidate)
+            handle = manager.read_python(spec, root=candidate)
+            return handle.python, handle.root
+        except (RuntimeError, OSError, ValueError, KeyError, TypeError):
+            continue
+    raise RuntimeError(f"{REPAIR} Backend Python: {sys.executable}. Expected runtime: {expected}.")
 
 
 def activate(root: Path) -> None:
@@ -61,7 +82,6 @@ def activate(root: Path) -> None:
     import site
     site.addsitedir(str(root / "packages"))
     # LiteLLM owns a bundled cache and otherwise overrides TIKTOKEN_CACHE_DIR.
-    # Pin both variables so ambient settings cannot redirect the managed worker.
     cache = str(root / "packages" / "litellm" / "litellm_core_utils" / "tokenizers")
     os.environ["TIKTOKEN_CACHE_DIR"] = cache
     os.environ["CUSTOM_TIKTOKEN_CACHE_DIR"] = cache
@@ -69,7 +89,6 @@ def activate(root: Path) -> None:
 
 
 def activate_engine() -> None:
-    """Load maintained Pack source, independent of dependency installation/cache."""
     if sys.version_info < (3, 12):
         raise RuntimeError("MatCreator requires Python 3.12+. " + REPAIR)
     if not (ENGINE / "agent.py").is_file():
@@ -81,85 +100,13 @@ def activate_engine() -> None:
         raise RuntimeError("MatCreator must load the engine shipped in this Pack.")
 
 
-@contextmanager
-def installation_lock(root: Path):
-    root.mkdir(parents=True, exist_ok=True)
-    with (root / "install.lock").open("a+b") as stream:
-        if stream.tell() == 0:
-            stream.write(b"0")
-            stream.flush()
-        deadline = time.monotonic() + 1800
-        while True:
-            try:
-                stream.seek(0)
-                if os.name == "nt":
-                    import msvcrt
-                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError as exc:
-                if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
-                    raise
-                if time.monotonic() >= deadline:
-                    raise RuntimeError("Another MatCreator plugin installation is still running.") from exc
-                time.sleep(.2)
-        try:
-            yield
-        finally:
-            stream.seek(0)
-            if os.name == "nt":
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(stream, fcntl.LOCK_UN)
-
-
-def run(arguments, *, env):
-    subprocess.run([str(arg) for arg in arguments], check=True, env=env,
-                   stdin=subprocess.DEVNULL, timeout=1800,
-                   **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}))
-
-
-def install() -> None:
-    root = environment_root()
-    with installation_lock(root):
-        try:
-            executable, _ = read_environment(root)
-            run([executable, "-I", "-S", Path(__file__), "--check", root], env=os.environ.copy())
-            print("MatCreator native runtime is ready.", flush=True)
-            return
-        except (RuntimeError, OSError, subprocess.SubprocessError):
-            pass
-        # Never publish a failed/partial install as ready. Preserve failed files
-        # for diagnosis; the next normal setup retries in a fresh directory.
-        (root / "ready.json").unlink(missing_ok=True)
-        packages = root / "packages"
-        if packages.exists():
-            packages.rename(root / ("packages.incomplete-" + uuid4().hex[:8]))
-        uv = shutil.which("uv")
-        if not uv:
-            raise RuntimeError("OAW plugin setup requires uv on PATH.")
-        env = {k: v for k, v in os.environ.items() if not k.upper().startswith("PYTHON") and k.upper() not in {"VIRTUAL_ENV", "CONDA_PREFIX"}}
-        env.update(PYTHONUTF8="1", LITELLM_LOCAL_MODEL_COST_MAP="True")
-        executable = Path(sys.executable)
-        relative = "host"
-        if sys.version_info < (3, 12):
-            env["UV_PYTHON_INSTALL_DIR"] = str(root / "python")
-            print("Preparing MatCreator Python 3.12...", flush=True)
-            run([uv, "python", "install", "3.12"], env=env)
-            executable = Path(subprocess.check_output([uv, "python", "find", "--managed-python", "3.12"],
-                              env=env, text=True, timeout=60).strip()).resolve()
-            relative = executable.relative_to(root.resolve()).as_posix()
-        print("Installing MatCreator orchestration dependencies...", flush=True)
-        run([uv, "pip", "install", "--python", executable, "--target", root / "packages",
-             "-r", REQUIREMENTS], env=env)
-        print("Verifying MatCreator and preparing tokenizers...", flush=True)
-        run([executable, "-I", "-S", Path(__file__), "--check", root], env=env)
-        temporary = root / "ready.tmp"
-        temporary.write_text(json.dumps({"format": 2, "python": relative}), encoding="utf-8")
-        temporary.replace(root / "ready.json")
-        print("MatCreator native runtime is ready.", flush=True)
+def install(*, data_root: Path | None = None) -> None:
+    # Build roots are explicit and carry the same relocatable receipt as user
+    # profiles. Ordinary setup never writes under the backend interpreter.
+    build_root = os.environ.get("OPEN_AGENT_WORLD_RUNTIME_BUILD_ROOT")
+    manager = _manager(data_root if data_root is not None else build_root)
+    manager.prepare_python(environment_spec(), seed_roots=(bundled_environment_root(), legacy_environment_root()))
+    print("MatCreator native runtime is ready.", flush=True)
 
 
 if __name__ == "__main__":

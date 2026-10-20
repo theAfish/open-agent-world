@@ -17,7 +17,9 @@ const api: ExecutionSourceHost = {
   read: async (_source, page) => {
     const offset = Number(page?.cursor ?? 0), limit = page?.limit ?? 1000;
     const nodes = snapshot.nodes.slice(offset, offset + limit), ids = new Set(nodes.map(node => node.id));
-    return { ...snapshot, nodes, edges: snapshot.edges?.filter(edge => ids.has(edge.target)), next_cursor: offset + limit < snapshot.nodes.length ? String(offset + limit) : null };
+    const last = offset + limit >= snapshot.nodes.length;
+    const allIds = new Set(snapshot.nodes.map(node => node.id));
+    return { ...snapshot, nodes, edges: snapshot.edges?.filter(edge => ids.has(edge.target) || (last && !allIds.has(edge.target))), next_cursor: last ? null : String(offset + limit) };
   },
   subscribe: listener => { invalidate = listener; return () => { invalidate = undefined; }; },
 };

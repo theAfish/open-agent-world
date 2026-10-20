@@ -1,11 +1,10 @@
 import { t, useLocale, useWorkspaceSections, WorkspaceEmptyState, WorkspaceSection, WorkspaceToolbar } from "@oaw/plugin-api";
 import type { FrontendPlugin, PluginViewProps } from "@oaw/plugin-api";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useWorldStore } from "../../../frontend/src/state/worldStore";
-import { availableModels } from "../../../frontend/src/state/modelConnections";
-import { deploymentApiBase } from "../../../frontend/src/deployment/api";
-import { ModelSelect } from "../../../frontend/src/cards/ModelSelect";
-import { DocumentMarkdown } from "../../../frontend/src/cards/DocumentMarkdown";
+import { useModelOptions, useConnectedCards, updateCardConfig } from "@oaw/plugin-api";
+import { hostApiBase as deploymentApiBase } from "@oaw/plugin-api";
+import { ModelSelect } from "@oaw/plugin-api";
+import { DocumentMarkdown } from "@oaw/plugin-api";
 import { BookOpen, FlaskConical, Settings2, Plus, RefreshCw, MoreHorizontal, FileText, Network, X } from "lucide-react";
 import { MineruCredentials } from "./MineruCredentials";
 import { GraphMap } from "./GraphMap";
@@ -191,23 +190,15 @@ export function Workspace({ host, card }: PluginViewProps) {
   // section — never a value the deployed viewer can change.
   const deployed = !!host.deployment;
   const defaultModel = (card.config?.default_model as string | undefined) ?? "";
-  const catalog = useWorldStore(state => state.modelCatalog);
-  const legacyModels = useWorldStore(state => state.modelSettings.models);
-  const models = catalog.revision > 0
-    ? availableModels({ ...catalog, connections: catalog.connections.filter(c => c.adapter === "openai" || c.adapter === "legacy") })
-    : legacyModels.map(value => ({ value, label: value }));
+  const models = useModelOptions(["openai", "legacy"]);
   const [model, setModel] = useState("");
   const selectedModel = deployed ? defaultModel
     : models.some(item => item.value === model) ? model : (models[0]?.value ?? "");
   // A deployment never carries edges (only the flattened permissions grant), and
   // this is engineering-only anyway, so an empty list there is both correct and safe.
-  const worldEdges = useWorldStore(state => state.edges);
-  const worldCards = useWorldStore(state => state.cards);
-  const updateCard = useWorldStore(state => state.updateCard);
-  const connectedAgents = deployed ? [] : worldEdges
-    .filter(edge => edge.target === card.id && edge.relationship.startsWith("knowledge.base."))
-    .map(edge => worldCards.find(item => item.id === edge.source && item.type === "agent"))
-    .filter((item): item is NonNullable<typeof item> => !!item);
+  const connectedCards = useConnectedCards(card.id, { direction: "incoming", relationshipPrefix: "knowledge.base.", trait: "core.agent" });
+  const connectedAgents = deployed ? [] : connectedCards;
+
 
   const call = useCallback((action: string, args: Record<string, unknown> = {}, confirm?: boolean) =>
     host.resourceAction(action, args, confirm), [host]);
@@ -661,7 +652,7 @@ export function Workspace({ host, card }: PluginViewProps) {
               <span>{agent.name}</span>
               <ModelSelect label={t("{v0}’s model", { v0: agent.name })}
                 value={String(agent.config?.model ?? "oaw:default")}
-                onChange={value => void updateCard(agent.id, { config: { model: value } })} />
+                onChange={value => void updateCardConfig(agent.id, { model: value })} />
             </div>)}
         </section>
         </div>

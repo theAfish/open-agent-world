@@ -4,6 +4,30 @@ from open_agent_world.plugin_api import AgentRuntimeError
 from oaw_codex import discovery
 
 
+def test_execution_adopts_selected_client_as_external_runtime(tmp_path, monkeypatch):
+    import asyncio
+    from pathlib import Path
+    from types import SimpleNamespace
+    from oaw_codex.runtime import CodexRuntime
+    from open_agent_world.plugin_api import ExecutableEnvironmentManager, ExecutableEnvironmentSpec
+    from backend.packs.spec import read_source_pack
+    runtime = CodexRuntime(SimpleNamespace(managed_environment_root=lambda: tmp_path), state_directory=tmp_path / 'state')
+    async def selected(config):
+        return {'executable': 'selected-codex.exe'}
+    captured = []
+    def adopt(manager, spec, *, path, verify):
+        captured.append((spec, path, verify))
+        return SimpleNamespace(executable=path, management='external')
+    monkeypatch.setattr(runtime, '_discover', selected)
+    monkeypatch.setattr(ExecutableEnvironmentManager, 'external', adopt)
+    assert asyncio.run(runtime._command(None)) == ['selected-codex.exe', 'app-server', '--listen', 'stdio://']
+    spec, path, verified = captured[0]
+    assert path == 'selected-codex.exe' and verified
+    root = Path(__file__).resolve().parents[1]
+    declared = read_source_pack(root).environments['client']
+    assert spec.fingerprint == ExecutableEnvironmentSpec.from_declaration('openai.codex', 'client', declared, root).fingerprint
+
+
 def test_auto_prefers_desktop_over_path(tmp_path, monkeypatch):
     desktop = tmp_path / 'desktop' / 'codex.exe'
     desktop.parent.mkdir()

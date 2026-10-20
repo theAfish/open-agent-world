@@ -16,14 +16,14 @@ function source(value = history()): ExecutionSourceHost {
   return { list: vi.fn().mockResolvedValue({ sources: [{ id: 'a', name: 'Researcher', type: 'agent' }] }),
     read: vi.fn().mockResolvedValue(value), subscribe: vi.fn(() => () => {}) };
 }
-it('connects independent history with a noncausal guide, without fabricating dependencies', async () => {
+it('leaves independent events unconnected; chronology does not fabricate threads', async () => {
   const index = executionIndex(history()), graph = layoutGraph(index, laneMemory());
-  expect(graph.tracks.map(track => track.kind)).toEqual(['history', 'history']);
+  expect(graph.tracks).toEqual([]);
   expect(graph.height).toBeLessThan(200);
   const view = render(<ExecutionGraphView api={source()} />);
   await screen.findByRole('button', { name: 'A: success' });
   expect(view.container.querySelectorAll('[data-graph-edge]')).toHaveLength(0);
-  expect(view.container.querySelectorAll('[data-kind="history"]')).toHaveLength(3); // two rails + key
+  expect(view.container.querySelectorAll('[data-kind="history"]')).toHaveLength(0);
   const nodes = [node('A'), node('B', { parent_id: 'A', dependency_ids: ['A'] })];
   expect(executionIndex({ ...history(nodes), edges: undefined }).edges.map(edge => edge.kind)).toEqual(['control']);
   expect(executionIndex(history(nodes)).edges).toEqual([]);
@@ -44,7 +44,7 @@ it('draws real forks and joins and keeps distant sources in the same graph', () 
   const graph = layoutGraph(executionIndex(history(nodes, edges)), laneMemory());
   expect(graph.rows[1].lane).not.toBe(graph.rows[2].lane);
   expect(graph.tracks.filter(track => track.edge)).toHaveLength(4);
-  expect(graph.tracks.some(track => trackPath(track, lane => 24 + lane * 24).includes('C'))).toBe(true);
+  expect(graph.tracks.some(track => trackPath(track, lane => 24 + lane * 24).includes('A'))).toBe(true);
   const many = Array.from({ length: 20 }, (_, i) => node('E' + (i + 1)));
   const sparse = layoutGraph(executionIndex(history(many, [edge('E1','E20'),edge('E9','E20'),edge('E17','E20')])), laneMemory());
   expect(sparse.rows).toHaveLength(20);
@@ -89,7 +89,7 @@ it('makes 120 task events from 1200 records without merging tasks, retries or or
   expect(index.details.get('task0')).toHaveLength(9);
   expect(layoutGraph(index, laneMemory(), undefined, 0, 'Read file').matchIds).toHaveLength(120);
   const independent = layoutGraph(executionIndex(history([node('A', { workstream_id: 'task-a' }), node('B', { workstream_id: 'task-b' })])), laneMemory());
-  expect(independent.tracks.map(track => track.kind)).toEqual(['history']);
+  expect(independent.tracks).toEqual([]);
   expect(independent.tracks.every(track => !track.edge)).toBe(true);
   const extra = executionIndex(history([node('failed', { status: 'failed', workstream_id: 'task' }),
     node('retry', { status: 'running', retry_of: 'failed', workstream_id: 'task' }),
@@ -150,7 +150,8 @@ it('never folds 1200 operations or draws a shared rail through an unrelated node
   expect(graph.tracks.filter(track => track.edge)).toHaveLength(edges.length);
   expect(graph.tracks.some(track => track.reference)).toBe(true);
   for (const track of graph.tracks.filter(track => track.edge && !track.reference)) {
-    expect(graph.rows.some(row => row.id !== track.source.id && row.id !== track.target.id && row.lane === track.source.lane
+    const lane = track.route === 'fork' ? track.target.lane : track.source.lane;
+    expect(graph.rows.some(row => row.id !== track.source.id && row.id !== track.target.id && row.lane === lane
       && row.y > track.source.y && row.y < track.target.y)).toBe(false);
   }
 });
@@ -165,6 +166,27 @@ it('opens details from the whole row and closes with the same click or Escape', 
   fireEvent.keyDown(screen.getByLabelText('Execution history'), { key: 'Escape' });
   expect(screen.queryByText('Changed the parser.')).toBeNull();
   expect(view.container.querySelector('.execution-expand, .execution-close-selection, .execution-selection-actions')).toBeNull();
+});
+it.each([
+  { start: '2026-10-15T10:45:35', end: '2026-10-15T10:45:57', duration: '22s', times: ['10:45:35', '10:45:57'] },
+  { start: '2026-10-15T23:59:35', end: '2026-10-16T00:00:57', duration: '1m 22s', times: ['23:59:35', '00:00:57'], crossDay: true },
+  { start: '2026-10-15T10:45:35', end: '2026-10-18T11:45:35', duration: '3d 1h', times: ['10:45:35', '11:45:35'], crossDay: true },
+  { start: '2026-10-15T10:45:35', end: null, status: 'running', times: ['10:45:35'], active: true },
+  { start: '2026-10-15T10:45:35', end: null, times: ['10:45:35'] },
+  { start: null, end: '2026-10-15T10:45:57', times: ['10:45:57'] },
+  { start: 'invalid', end: '2026-10-15T10:45:57', times: ['10:45:57'] },
+  { start: '2026-10-15T10:45:57', end: '2026-10-15T10:45:35', times: ['10:45:57', '10:45:35'] },
+  { start: 'invalid', end: null, times: [] },
+])('shows recorded times without inventing a finished interval: $start / $end', async ({ start, end, duration, times, status = 'success', crossDay, active }) => {
+  const view = render(<ExecutionGraphView api={source(history([node('Archive', { started_at: start, finished_at: end, status })]))} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Archive: ' + status }));
+  const timing = view.container.querySelector('.execution-timing');
+  expect([...timing?.querySelectorAll('time') ?? []].map(time => time.textContent)).toEqual(times);
+  expect(timing?.querySelector('.execution-duration')?.textContent).toBe(duration);
+  expect(timing?.textContent ?? '').not.toContain('Invalid Date');
+  if (crossDay) expect(timing?.querySelectorAll('.execution-time-point small')).toHaveLength(2);
+  if (active) expect(timing?.textContent).toContain('In progress');
+  else expect(timing?.textContent ?? '').not.toContain('In progress');
 });
 it('retains planned definitions as planning context and reveals actual attempts directly', async () => {
   const nodes = [
@@ -186,6 +208,35 @@ it('shows exact dependency endpoints, including unavailable ones, without a sepa
   expect(screen.getByRole('button', { name: 'A: success' }).getAttribute('aria-expanded')).toBe('true');
   expect(view.container.querySelectorAll('.execution-tracks')).toHaveLength(1);
 });
+it('keeps folded descendants off the canvas during hover and selection while retaining navigation', async () => {
+  const nodes = ['Planner', 'Sandbox', 'Unrelated', 'Replan', 'Consumer'].map(id => node(id));
+  const edges = [edge('Planner', 'Sandbox'), edge('Sandbox', 'Replan'), edge('Replan', 'Consumer'),
+    edge('Sandbox', 'Consumer', 'data'), edge('Consumer', 'Replan', 'data'), edge('Sandbox', 'Sandbox', 'data')];
+  const view = render(<ExecutionGraphView api={source(history(nodes, edges))} />);
+  const planner = await screen.findByRole('button', { name: 'Planner: success' });
+  const paths = () => [...view.container.querySelectorAll('path.execution-track')].map(path => [path.getAttribute('data-graph-edge'), path.getAttribute('d')]);
+  const before = paths();
+  fireEvent.mouseEnter(planner);
+  expect(paths()).toEqual(before);
+  expect(view.container.querySelectorAll('path[data-highlighted="true"]').length).toBeGreaterThan(0);
+  expect(view.container.querySelector('[data-row-id="Unrelated"]')?.getAttribute('data-muted')).toBe('true');
+  fireEvent.click(planner);
+  fireEvent.mouseEnter(screen.getByRole('button', { name: 'Unrelated: success' }));
+  expect(view.container.querySelector('path[data-reference="true"]')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Sandbox: success' }));
+  expect(screen.getByRole('button', { name: 'Used by Consumer' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Used by Consumer' }));
+  expect(screen.getByRole('button', { name: 'Consumer: success' }).getAttribute('aria-expanded')).toBe('true');
+  expect(view.container.querySelector('path[data-reference="true"]')).toBeNull();
+});
+it('explains and navigates local workstream guides without calling them dependencies', async () => {
+  const view = render(<ExecutionGraphView api={source(history([node('A', { workstream_id: 'task' }), node('B', { workstream_id: 'task' })]))} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'B: success' }));
+  expect(screen.getByText('Same workstream, not a dependency')).toBeTruthy();
+  expect(view.container.querySelector('.execution-causal-summary')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Workstream: A' }));
+  expect(screen.getByRole('button', { name: 'A: success' }).getAttribute('aria-expanded')).toBe('true');
+});
 it('assembles all pages atomically and rejects mixed revisions and repeated cursors', async () => {
   const api = source();
   api.read = vi.fn().mockResolvedValueOnce({ ...history([node('A')]), next_cursor: 'page2' }).mockResolvedValueOnce(history([node('B')], [edge('A','B')]));
@@ -200,7 +251,7 @@ it('combines connected agents without colliding identities or manufacturing cros
   const api = source(history([node('a'), node('b')], [edge('a','b')]));
   const result = await readProjectHistory(api, [{ id: 'builder', name: 'Builder' }, { id: 'tester', name: 'Tester' }]);
   expect(new Set(result.nodes.map(node => node.id)).size).toBe(4);
-  expect(result.nodes.map(node => node.actor_label)).toEqual(['Builder', 'Builder', 'Tester', 'Tester']);
+  expect(result.nodes.every(node => !node.actor_id && !node.actor_label)).toBe(true); // An observation source is not proof of who executed each task.
   expect(result.edges).toHaveLength(2);
   expect(result.edges!.every(edge => JSON.parse(edge.source)[0] === JSON.parse(edge.target)[0])).toBe(true);
 });

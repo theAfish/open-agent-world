@@ -837,3 +837,89 @@ async def test_silent_stream_exhaustion_is_a_provider_protocol_error(
         assert services.get_card(agent.id).status == "idle"
     finally:
         services.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("configured,unlimited", [(0, True), (None, False), (0.05, False)])
+async def test_native_execution_deadline_override_retains_default_and_stop(tmp_path, configured, unlimited):
+    provider = RecordingProvider(mode="tool")
+    services = _services(tmp_path, provider)
+    try:
+        agent = await services.create_card(CardCreate(type="agent", name="Atlas",
+            config={"run_execution_deadline_seconds": configured, "run_inactivity_timeout_seconds": 0}))
+        manager = services._require_run_manager()
+        manager.execution_deadline_seconds = 0.05
+        assert manager._execution_deadline(agent) == (None if unlimited else 0.05)
+        run = await manager.start_run(agent.id, "long operation")
+        await asyncio.wait_for(provider.tool_started.wait(), 2)
+        if unlimited:
+            await asyncio.sleep(0.15)
+            assert manager.get_run(run.run_id).status is RunStatus.RUNNING
+            await manager.cancel_run(run.run_id)
+            assert (await manager.wait_terminal(run.run_id)).status is RunStatus.CANCELLED
+        else:
+            record = await asyncio.wait_for(manager.wait_terminal(run.run_id), 2)
+            assert record.status is RunStatus.FAILED
+            assert "deadline" in record.error
+        assert "run_execution_deadline_seconds" not in provider.configs[agent.id].provider_config
+        await asyncio.wait_for(manager.wait_execution(run.run_id), 2)
+        assert not manager.holds_agent_slot(run.run_id)
+    finally:
+        services.close()
+
+
+def test_native_deadline_uses_atomsculptor_default_for_existing_card(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from oaw_atomsculptor import AtomSculptorAgentConfig
+    services = _services(tmp_path, RecordingProvider())
+    try:
+        manager = services._require_run_manager()
+        monkeypatch.setattr(manager.plugins, "node_type", lambda _: SimpleNamespace(config_model=AtomSculptorAgentConfig))
+        assert manager._execution_deadline(SimpleNamespace(type="atomsculptor.agent", config={})) is None
+        assert manager._execution_deadline(SimpleNamespace(type="atomsculptor.agent",
+            config={"run_execution_deadline_seconds": 90})) == 90
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_provider_timeout_with_both_host_watchdogs_disabled_reports_failure(tmp_path):
+    class TimeoutProvider(RecordingProvider):
+        async def execute(self, config, context, input):
+            raise TimeoutError("remote request expired")
+            yield  # async generator protocol
+
+    services = _services(tmp_path, TimeoutProvider())
+    try:
+        agent = await services.create_card(CardCreate(type="agent", name="Atlas", config={
+            "run_execution_deadline_seconds": 0, "run_inactivity_timeout_seconds": 0}))
+        manager = services._require_run_manager()
+        run = await manager.start_run(agent.id, "request")
+        result = await asyncio.wait_for(manager.wait_terminal(run.run_id), 2)
+        assert result.status is RunStatus.FAILED and "no activity" in result.error
+        assert "None seconds" not in result.error and "NoneType" not in result.error
+        await asyncio.wait_for(manager.wait_execution(run.run_id), 2)
+        assert not manager.holds_agent_slot(run.run_id)
+    finally:
+        services.close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_failed_provider_outcome_retains_report_and_error_detail(tmp_path):
+    class FailedProvider(RecordingProvider):
+        async def execute(self, config, context, input):
+            yield AgentEvent(context.agent_id, context.run_id, AgentEventType.COMPLETED,
+                {"text": "Task unfinished; inspect saved sample.py before continuing.",
+                 "error": "Budget exhausted; saved execution checkpoint."}, run_status="failed")
+    services = _services(tmp_path, FailedProvider())
+    try:
+        agent = await services.create_card(CardCreate(type="agent", name="Atlas"))
+        manager = services._require_run_manager()
+        run = await manager.start_run(agent.id, "request")
+        result = await manager.wait_terminal(run.run_id)
+        assert result.status is RunStatus.FAILED and result.error == "Budget exhausted; saved execution checkpoint."
+        assert "sample.py" in manager.final_text(run.run_id)
+        await asyncio.wait_for(manager.wait_execution(run.run_id), 2)
+        assert not manager.holds_agent_slot(run.run_id)
+    finally:
+        services.close()

@@ -1,48 +1,88 @@
-import { lazy, type ComponentType, type LazyExoticComponent } from "react";
+import { createElement, lazy, type ComponentType, type LazyExoticComponent } from "react";
 import type { FrontendPlugin, PluginViewProps } from "./sdk";
 import type { RuntimeFrontendModule } from "../types/world";
 import { providePackRuntime } from "./sharedRuntime";
+import { useWorldStore } from '../state/worldStore';
 
 interface Manifest { pluginId: string; apiVersion: number }
 const manifests = import.meta.glob<Manifest>(["../../../plugins/*/frontend/plugin.json", "../../../examples/deployed-workspace/plugins/*/frontend/plugin.json"], { eager: true, import: "default" });
-const modules = import.meta.glob<{ default: FrontendPlugin }>(["../../../plugins/*/frontend/index.tsx", "../../../examples/deployed-workspace/plugins/*/frontend/index.tsx"]);
 const loaders = new Map<string, () => Promise<{ default: FrontendPlugin }>>();
 for (const [path, manifest] of Object.entries(manifests)) {
   if (manifest.apiVersion !== 1 || !/^[a-z][a-z0-9._-]*$/.test(manifest.pluginId)) throw new Error(`Invalid frontend plugin manifest: ${path}`);
   if (loaders.has(manifest.pluginId)) throw new Error(`Duplicate frontend plugin: ${manifest.pluginId}`);
-  const load = modules[path.replace(/plugin\.json$/, "index.tsx")];
-  if (!load) throw new Error(`Missing frontend entry: ${path}`);
-  loaders.set(manifest.pluginId, load);
+  loaders.set(manifest.pluginId, async () => {
+    providePackRuntime();
+    const url = `${import.meta.env.BASE_URL}assets/packs/${manifest.pluginId}/index.js`;
+    return import(/* @vite-ignore */ url) as Promise<{ default: FrontendPlugin }>;
+  });
 }
 
-export async function loadRuntimePlugin(pluginId: string, module: RuntimeFrontendModule) {
-  const prefix = `/api/packs/${encodeURIComponent(pluginId)}/versions/${encodeURIComponent(module.version)}/frontend/`;
+export function runtimeFrontendUrl(pluginId: string, module: RuntimeFrontendModule) {
+  const distribution = module.distribution_id ?? pluginId;
+  const prefix = `/api/packs/${encodeURIComponent(distribution)}/versions/${encodeURIComponent(module.version)}/frontend/`;
   if (module.api_version !== 1 || !module.url.startsWith(prefix)
       || /[?#\\]/.test(module.url) || module.url.split('/').some(part => part === '..' || part === '.')) {
     throw new Error(`Invalid installed frontend location for ${pluginId}`);
   }
-  providePackRuntime();
-  return await import(/* @vite-ignore */ module.url) as { default: FrontendPlugin };
+  return module.url;
 }
 
-export function createViewRegistry(sources: typeof loaders, runtimeLoader = loadRuntimePlugin) {
+export async function loadRuntimePlugin(pluginId: string, module: RuntimeFrontendModule) {
+  const url = runtimeFrontendUrl(pluginId, module);
+  assertFrontendAvailable(pluginId, module);
+  providePackRuntime();
+  return await import(/* @vite-ignore */ url) as { default: FrontendPlugin };
+}
+
+/** Artifact presence is not enrollment. Only the live runtime catalog can
+ * authorize loading an owner, including source artifacts retained on disk.
+ */
+export function assertFrontendAvailable(owner: string, runtime?: RuntimeFrontendModule) {
+  const catalog = useWorldStore.getState().catalog;
+  if (!catalog.plugins.some(plugin => plugin.id === owner)
+      || catalog.enabled_plugin_ids && !catalog.enabled_plugin_ids.includes(owner)) {
+    throw new Error(`Required Pack ${owner} is not loaded or enabled`);
+  }
+  if (runtime) {
+    const current = catalog.frontend_modules?.[owner];
+    if (!current || current.version !== runtime.version || current.url !== runtime.url
+        || current.distribution_id !== runtime.distribution_id) throw new Error(`Frontend for ${owner} is no longer active`);
+  } else if (catalog.frontend_modules?.[owner]) {
+    throw new Error(`Source frontend for ${owner} is no longer active`);
+  }
+}
+
+export async function loadFrontendPlugin(pluginId: string, runtime?: RuntimeFrontendModule): Promise<FrontendPlugin> {
+  assertFrontendAvailable(pluginId, runtime);
+  const load = loaders.get(pluginId);
+  if (!runtime && !load) throw new Error(`Frontend for ${pluginId} is unavailable. Check its Pack installation and restart OAW.`);
+  const { default: plugin } = runtime ? await loadRuntimePlugin(pluginId, runtime) : await load!();
+  assertFrontendAvailable(pluginId, runtime);
+  if (plugin?.apiVersion !== 1) throw new Error(`Unsupported frontend API for ${pluginId}`);
+  return plugin;
+}
+
+export function createViewRegistry(sources: typeof loaders, runtimeLoader = loadRuntimePlugin,
+  assertAvailable: (owner: string, runtime?: RuntimeFrontendModule) => void = () => {}) {
   const cache = new Map<string, LazyExoticComponent<ComponentType<PluginViewProps>>>();
   return (pluginId: string, view: string, runtime?: RuntimeFrontendModule) => {
     const key = `${pluginId}:${view}:${runtime?.version ?? 'bundled'}:${runtime?.url ?? ''}`;
     if (!cache.has(key)) cache.set(key, lazy(async () => {
-      if (runtime && sources.has(pluginId)) throw new Error(`Conflicting frontend ownership for ${pluginId}`);
+      assertAvailable(pluginId, runtime);
       if (runtime) {
         const { default: plugin } = await runtimeLoader(pluginId, runtime);
         if (plugin?.apiVersion !== 1 || typeof plugin.views?.[view] !== "function") throw new Error(`Unsupported or missing Pack view: ${key}`);
-        return { default: plugin.views[view] };
+        const View = plugin.views[view];
+        return { default: (props: PluginViewProps) => { assertAvailable(pluginId, runtime); return createElement(View, props); } };
       }
       const load = sources.get(pluginId);
       if (!load) throw new Error(`Frontend for ${pluginId} is unavailable. Check its Pack installation and restart OAW.`);
       const { default: plugin } = await load();
       if (plugin.apiVersion !== 1 || typeof plugin.views?.[view] !== "function") throw new Error(`Unsupported or missing plugin view: ${key}`);
-      return { default: plugin.views[view] };
+      const View = plugin.views[view];
+      return { default: (props: PluginViewProps) => { assertAvailable(pluginId, runtime); return createElement(View, props); } };
     }));
     return cache.get(key)!;
   };
 }
-export const pluginView = createViewRegistry(loaders);
+export const pluginView = createViewRegistry(loaders, loadRuntimePlugin, assertFrontendAvailable);

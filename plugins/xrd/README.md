@@ -38,14 +38,17 @@ frontend build includes its UI. No additional web service or alternate port is
 required. New cards are available from OAW's XRD card pack after rebuilding the
 frontend and restarting the existing application against its existing data store.
 
-`OAW_XRD_ROOT` points to the scientific runtime/data directory with
-`.venv-xrd/Scripts/python.exe` on Windows or `.venv-xrd/bin/python` elsewhere.
-`OAW_XRD_PYTHON` can override the scientific interpreter location. The modified
-OAW_XRDfit source is bundled in the plugin; install its scientific dependencies
-using the runtime installer described in [TEMPLATE_CONTRACT.md](TEMPLATE_CONTRACT.md).
-Matching uses NumPy/SciPy in that environment, without adding scientific
-dependencies to the OAW backend. `OAW_XRD_RUN_ROOT` optionally isolates result
-directories (default: `<OAW_XRD_ROOT>/runs`). Run archives contain result JSON and
+The declared `scientific` environment is prepared automatically before the first
+worker starts. OAW selects a private Python 3.10/3.11 and installs the pinned
+dependencies under the active profile's managed runtime directory. A packaged
+desktop may provide the same verified environment offline. Source and `.oawpack`
+installations use the same recipe; the host backend never imports this stack.
+
+Scientific data defaults to `<profile>/packs-data/research.xrd`, independent from
+the removable dependency cache. Existing users can retain `OAW_XRD_ROOT` and
+`OAW_XRD_RUN_ROOT` data paths. `OAW_XRD_PYTHON` remains an optional explicit external
+interpreter override; normal use requires no manual Python configuration.
+Run directories default to `<OAW_XRD_ROOT>/runs`. Run archives contain result JSON and
 full input snapshots; individual history-file downloads are limited to 30 MiB.
 
 
@@ -56,6 +59,8 @@ OAW store and should set `OAW_XRD_RUN_ROOT` to a test output directory.
 Scientific-runtime tests explicitly skip when no configured interpreter exists;
 document and capability tests still run. Real experimental files and local result
 directories are not distributed with the plugin or used as required CI fixtures.
+Managed runtime tests separately install a local fixture wheel and exercise the
+actual isolated worker protocol without downloading the scientific stack.
 # Local reference-library search
 
 Add **XRD PDF / 参考谱库**, enter the main `.sq` file path, and click **加载谱库**.

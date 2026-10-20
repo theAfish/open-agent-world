@@ -1,0 +1,25 @@
+# Dependency intent only; installation and readiness are tracked separately.
+schema_version = 3
+
+[compatibility]
+plugin_api = "1.35"
+oaw = ">=0.1.0,<1"
+
+[distribution]
+id = "research.library"
+name = "Research Library"
+
+[plugin]
+owner = "research.library"
+packs = ["research.library.default"]
+node_types = ["library.paper","library.region"]
+
+[components.backend]
+project = "pyproject.toml"
+mode = "host-adapter"
+
+[components.frontend]
+entry = "frontend/index.tsx"
+project = "frontend/package.json"
+mode = "pack-build"
+

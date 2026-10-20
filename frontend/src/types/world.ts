@@ -37,9 +37,12 @@ export interface SandboxRuntime {
   shell: string[];
   supports_workspace: boolean;
   supported_network_modes?: string[];
+  network_transport?: string;
   network_reason?: string;
   network_available?: boolean;
   network_status?: string;
+  resource_limits_available?: boolean;
+  resource_limit_reason?: string;
 }
 
 export interface SandboxRuntimeCatalog {
@@ -62,10 +65,13 @@ export interface SandboxInfo {
   resources_path: string | null;
   security_boundary: string | null;
   network_enabled?: boolean;
+  network_transport?: string;
   supported_network_modes?: string[];
   network_reason?: string;
   network_available?: boolean;
   network_status?: string;
+  resource_limits_available?: boolean;
+  resource_limit_reason?: string;
 }
 export type CardStatus = AgentStatus | SandboxStatus | "available" | "modified" | string;
 
@@ -198,6 +204,7 @@ export interface NodeTypeCatalogItem {
   /** Whether a user may create this node directly from the card library. */
   user_creatable: boolean;
   has_document?: boolean;
+  has_default_equipment?: boolean;
   deletion_warning?: string | null;
   transformations?: Record<string, { label: string; source_traits: string[] }>;
   has_execution?: boolean;
@@ -234,8 +241,10 @@ export interface PackDefinition {
   packaging?: PackPackaging;
 }
 
-export interface RuntimeFrontendModule { version: string; api_version: number; url: string }
+export interface RuntimeFrontendModule { version: string; api_version: number; url: string; distribution_id?: string }
 export interface PluginCatalog {
+  /** Enabled owners, including service-only providers without visible cards. */
+  enabled_plugin_ids?: string[];
   frontend_modules?: Record<string, RuntimeFrontendModule>;
   packs: PackDefinition[];
   plugins: Array<{
@@ -422,6 +431,51 @@ export interface ConversationToolTrace {
   call_id?: string;
 }
 
+export interface SavedInvocation {
+  id: string;
+  run_id: string;
+  role: string;
+  state: "started" | "returned" | "interrupted" | "failed";
+  started_at: string;
+  updated_at: string;
+  run_attempt: number;
+  model_request?: number;
+  model_attempt?: number;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  finish_reason?: string | null;
+  call_id?: string;
+  name?: string;
+  arguments_preview?: string;
+  arguments?: unknown;
+  effective_arguments?: unknown;
+  request?: unknown;
+  response?: unknown;
+  error?: unknown;
+  truncated?: boolean;
+  request_complete?: boolean;
+  response_complete?: boolean;
+}
+
+export interface SavedModelThinking {
+  run_id: string;
+  provider_message_id: string;
+  kind: "model_reasoning";
+  role?: string;
+  model_request?: number;
+  model_attempt?: number;
+  run_attempt?: number;
+  text: string;
+  text_length: number;
+  streaming: boolean;
+  interrupted: boolean;
+  truncated: boolean;
+  preview_truncated: boolean;
+  created_at: string;
+  updated_at: string;
+  revision: number;
+}
+
 export interface ConversationRunSummary {
   run_id: string;
   agent_id: string;
@@ -431,9 +485,16 @@ export interface ConversationRunSummary {
   final_message_id?: string | null;
   awaiting?: string | null;
   progress?: string | null;
+  recovery_kind?: string | null;
+  recovery_classification?: string | null;
+  recovery_receipts?: { capability_kind: string; target_id: string; state: string;
+    read_only: boolean; result_hints?: Record<string, unknown> }[];
+  confirmed_tool_count?: number | null;
   tool_count: number;
   tool_trace: ConversationToolTrace[];
-    tool_trace_truncated?: boolean;
+  tool_trace_truncated?: boolean;
+  structure_outcomes?: Record<string, { phase: string; revision?: number }>;
+  delivery_state?: string | null;
   live_text?: string;
 }
 

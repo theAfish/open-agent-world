@@ -1,0 +1,233 @@
+"""Portable, revisioned atom-structure document contracts.
+
+The structure document is deliberately independent of a Sandbox path.  A
+Sandbox can import or export a structure only through an explicit OAW tool;
+the browser editor never receives ambient filesystem access.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class Atom(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    id: int = Field(ge=0)
+    symbol: str = Field(min_length=1, max_length=3, pattern=r"^[A-Z][a-z]?$" )
+    x: float
+    y: float
+    z: float
+    layer_id: str = Field(default="atoms", min_length=1, max_length=120)
+    # Format-specific values are structured rather than discarded on import.
+    # They remain optional so the canonical atom model stays useful for agents.
+    label: str = Field(default="", max_length=120)
+    occupancy: float | None = None
+    selective_dynamics: tuple[bool, bool, bool] | None = None
+    metadata: dict[str, str | float | bool | None] = Field(default_factory=dict)
+
+
+class Bond(BaseModel):
+    """An explicit connection imported from a chemistry format."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    first_atom_id: int = Field(ge=0)
+    second_atom_id: int = Field(ge=0)
+    order: str = Field(default="1", min_length=1, max_length=16)
+    metadata: dict[str, str | float | bool | None] = Field(default_factory=dict)
+
+
+class Layer(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    id: str = Field(min_length=1, max_length=120)
+    name: str = Field(min_length=1, max_length=120)
+    # ``lattice`` plus the per-layer fields below are part of AtomSculptor's
+    # original LXYZ model.  Keeping them in the canonical OAW document means
+    # importing an existing AtomSculptor project cannot silently flatten it to
+    # one global cell.
+    kind: Literal["atoms", "lattice", "selection", "annotation"] = "atoms"
+    visible: bool = True
+    cell: list[list[float]] | None = None
+    pbc: tuple[bool, bool, bool] | None = None
+    metadata: str = Field(default="", max_length=8_192)
+
+
+class InterfaceCandidate(BaseModel):
+    """A selectable interface result backed by a Sandbox output file."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    id: int = Field(ge=1, le=1000)
+    file_name: str = Field(min_length=1, max_length=1_024)
+    formula: str = Field(default="", max_length=255)
+    atom_count: int = Field(default=0, ge=0, le=20_000)
+    von_mises_strain: float | None = None
+    area: float | None = Field(default=None, ge=0)
+    termination_index: int | None = Field(default=None, ge=0)
+    registration_status: Literal["unverified"] = Field(default="unverified",
+        description="Catalogue entry only; independent file validation is a separate native receipt required before import.")
+
+
+class StructureDocument(BaseModel):
+    """The canonical editable model for one AtomSculptor Structure card."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    format_version: Literal[1] = 1
+    atoms: list[Atom] = Field(default_factory=list, max_length=20_000)
+    bonds: list[Bond] = Field(default_factory=list, max_length=100_000)
+    cell: list[list[float]] | None = None
+    pbc: tuple[bool, bool, bool] = (False, False, False)
+    layers: list[Layer] = Field(default_factory=lambda: [Layer(id="atoms", name="Atoms")], max_length=256)
+    active_layer_ids: list[str] = Field(default_factory=lambda: ["atoms"], max_length=256)
+    selected_atom_ids: list[int] = Field(default_factory=list, max_length=20_000)
+    source_name: str = Field(default="", max_length=255)
+    source_metadata: dict[str, str | float | bool | None] = Field(default_factory=dict)
+    interface_candidates: list[InterfaceCandidate] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_structure(self) -> "StructureDocument":
+        ids = [atom.id for atom in self.atoms]
+        atom_ids = set(ids)
+        if len(ids) != len(atom_ids):
+            raise ValueError("atom ids must be unique")
+        layer_ids = [layer.id for layer in self.layers]
+        declared_layers = set(layer_ids)
+        if len(layer_ids) != len(declared_layers):
+            raise ValueError("layer ids must be unique")
+        if any(atom.layer_id not in declared_layers for atom in self.atoms):
+            raise ValueError("every atom must belong to a declared layer")
+        if any(layer_id not in declared_layers for layer_id in self.active_layer_ids):
+            raise ValueError("active_layer_ids must refer to declared layers")
+        if any(atom_id not in atom_ids for atom_id in self.selected_atom_ids):
+            raise ValueError("selected_atom_ids must refer to existing atoms")
+        if any(bond.first_atom_id not in atom_ids or bond.second_atom_id not in atom_ids or bond.first_atom_id == bond.second_atom_id for bond in self.bonds):
+            raise ValueError("every bond must connect two distinct existing atoms")
+        if self.cell is not None and (len(self.cell) != 3 or any(len(row) != 3 for row in self.cell)):
+            raise ValueError("cell must be a 3 by 3 matrix")
+        if any(layer.cell is not None and (len(layer.cell) != 3 or any(len(row) != 3 for row in layer.cell)) for layer in self.layers):
+            raise ValueError("layer cell must be a 3 by 3 matrix")
+        return self
+
+
+class ReplaceStructure(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    structure: StructureDocument
+
+
+class SelectAtoms(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    atom_ids: list[int] = Field(default_factory=list, max_length=20_000)
+
+
+class SelectLayers(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    layer_ids: list[str] = Field(default_factory=list, max_length=256)
+
+
+class RecordInterfaceCandidates(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: list[InterfaceCandidate] = Field(default_factory=list, max_length=100)
+
+
+class BuildSupercell(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    repetitions: tuple[int, int, int]
+
+    @model_validator(mode="after")
+    def validate_repetitions(self) -> "BuildSupercell":
+        if any(value < 1 or value > 100 for value in self.repetitions):
+            raise ValueError("supercell repetitions must be between 1 and 100")
+        return self
+
+
+def replace(value: dict, arguments: dict) -> dict:
+    request = ReplaceStructure.model_validate(arguments)
+    return request.structure.model_dump(mode="json")
+
+
+def select(value: dict, arguments: dict) -> dict:
+    request = SelectAtoms.model_validate(arguments)
+    document = StructureDocument.model_validate(value)
+    available = {atom.id for atom in document.atoms}
+    if any(atom_id not in available for atom_id in request.atom_ids):
+        raise ValueError("selected atoms must be present in the current structure")
+    return document.model_copy(update={"selected_atom_ids": request.atom_ids}).model_dump(mode="json")
+
+
+def select_layers(value: dict, arguments: dict) -> dict:
+    request = SelectLayers.model_validate(arguments)
+    document = StructureDocument.model_validate(value)
+    available = {layer.id for layer in document.layers}
+    if any(layer_id not in available for layer_id in request.layer_ids):
+        raise ValueError("active layers must be declared in the current structure")
+    return document.model_copy(update={"active_layer_ids": request.layer_ids}).model_dump(mode="json")
+
+
+def record_interface_candidates(value: dict, arguments: dict) -> dict:
+    request = RecordInterfaceCandidates.model_validate(arguments)
+    document = StructureDocument.model_validate(value)
+    ids = [candidate.id for candidate in request.candidates]
+    if len(ids) != len(set(ids)):
+        raise ValueError("interface candidate ids must be unique")
+    return document.model_copy(update={"interface_candidates": request.candidates}).model_dump(mode="json")
+
+
+def build_supercell(value: dict, arguments: dict) -> dict:
+    """Expand a diagonal supercell without an LLM or Sandbox round trip."""
+    request = BuildSupercell.model_validate(arguments)
+    document = StructureDocument.model_validate(value)
+    if document.cell is None:
+        raise ValueError("supercell requires a 3×3 unit cell")
+    nx, ny, nz = request.repetitions
+    copies = nx * ny * nz
+    if not document.atoms:
+        raise ValueError("supercell requires at least one atom")
+    if copies > 20_000:
+        raise ValueError("supercell repetition count is too large")
+    if len(document.atoms) * copies > 20_000 or len(document.bonds) * copies > 100_000:
+        raise ValueError("supercell exceeds Atom Structure document limits")
+    old_atoms = document.atoms
+    next_id = max((atom.id for atom in old_atoms), default=-1) + 1
+    atoms: list[Atom] = []
+    bonds: list[Bond] = []
+    for i in range(nx):
+        for j in range(ny):
+            for k in range(nz):
+                offset = [sum(multiplier * document.cell[axis][coordinate]
+                              for axis, multiplier in enumerate((i, j, k))) for coordinate in range(3)]
+                ids = {atom.id: atom.id if (i, j, k) == (0, 0, 0) else next_id + index
+                       for index, atom in enumerate(old_atoms)}
+                if (i, j, k) != (0, 0, 0):
+                    next_id += len(old_atoms)
+                atoms.extend(atom.model_copy(update={"id": ids[atom.id], "x": atom.x + offset[0],
+                                              "y": atom.y + offset[1], "z": atom.z + offset[2]})
+                             for atom in old_atoms)
+                bonds.extend(bond.model_copy(update={"first_atom_id": ids[bond.first_atom_id],
+                                              "second_atom_id": ids[bond.second_atom_id]})
+                             for bond in document.bonds)
+    repeats = request.repetitions
+    cell = [[component * repeats[axis] for component in row] for axis, row in enumerate(document.cell)]
+    layers = [layer.model_copy(update={"cell": [[component * repeats[axis] for component in row]
+                                                    for axis, row in enumerate(layer.cell)]})
+              if layer.cell is not None else layer for layer in document.layers]
+    expanded = document.model_copy(update={"atoms": atoms, "bonds": bonds, "cell": cell,
+                                           "layers": layers, "interface_candidates": []})
+    return StructureDocument.model_validate(expanded.model_dump(mode="json")).model_dump(mode="json")
+
+
+def summary(value: dict) -> dict:
+    document = StructureDocument.model_validate(value)
+    return {
+        "atom_count": len(document.atoms),
+        "layer_count": len(document.layers),
+        "active_layer_count": len(document.active_layer_ids),
+        "selected_atom_count": len(document.selected_atom_ids),
+        "source_name": document.source_name,
+        "interface_candidate_count": len(document.interface_candidates),
+    }

@@ -36,7 +36,10 @@ def main():
                     request_path = run / 'pywpem-request.json'
                     request_path.write_text(json.dumps({'combinations': request['combinations'],
                         'iterations': request.get('iterations', 20), 'drop_one': request.get('drop_one', False), 'root': str(root)}), encoding='utf-8')
-                    subprocess.run([sys.executable, '-u', str(Path(__file__).with_name('multiphase_wpem.py')), str(run)],
+                    environment = os.environ.get('OAW_XRD_ENVIRONMENT', '-')
+                    flags = ['-I', '-S'] if environment != '-' else ['-I']
+                    subprocess.run([sys.executable, *flags, '-X', 'utf8', '-u', str(Path(__file__).with_name('worker_launcher.py')),
+                                    environment, 'multiphase_wpem.py', str(run)],
                                    stdin=subprocess.DEVNULL, stdout=sys.stderr, stderr=sys.stderr, check=True)
                     value = json.loads((run / 'pywpem-review/review.json').read_text(encoding='utf-8'))
                 else:

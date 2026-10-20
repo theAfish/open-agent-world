@@ -139,7 +139,7 @@ class KnowledgeConfig(BaseModel):
 
 
 class KnowledgeBasePlugin:
-    descriptor = PluginDescriptor(id=PREFIX, version="0.2.0", plugin_api_version="1.28",
+    descriptor = PluginDescriptor(id=PREFIX, version="0.2.0", plugin_api_version="1.35",
         name="Knowledge base",
         description="Embedded research knowledge base: documents to markdown, markdown to structured JSON, and a review-gated knowledge graph.")
 

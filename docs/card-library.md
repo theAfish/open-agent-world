@@ -2,8 +2,8 @@
 
 [Documentation](README.md)
 
-A Plugin installs trusted runtime code. A Pack distributes references to that
-plugin's canonical card definitions. Opening a Pack collects those cards. A Deck
+A Plugin installs trusted runtime code. A Pack distributes references to
+canonical card definitions. Opening a Pack collects those cards. A Deck
 selects collected cards for the bottom tray. World instances remain separate
 objects with their existing lifecycle, relationships and permissions.
 
@@ -49,9 +49,12 @@ def register(self, registration):
 
 Register more than one pack when a plugin has multiple distribution bundles. Pack
 IDs are stable, globally unique registry identifiers; use your plugin namespace.
-Only that plugin's card IDs are valid references, and every registered type must
-appear in at least one pack. A card may appear in multiple packs. Opening either
+Bundled Packs may reference their plugin's card IDs and canonical host cards;
+installed external distributions contain only their own cards. Every registered
+type must appear in at least one pack. A card may appear in multiple packs. Opening either
 collects one reusable card; collection provenance records all opened source packs.
+The collection entry's plugin owner always comes from the card definition, even
+when collected through another Pack (for example Jobs through MatCreator).
 Single-card plugins follow the same contract. For an all-content pack,
 `cards=tuple(registration.nodes)` avoids repeating the node list; call it after
 registering all node types. Bundled plugins use explicit pack definitions.

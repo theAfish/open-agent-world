@@ -209,6 +209,22 @@ class CardLibraryStore:
     def read(self) -> LibraryState:
         return self.reconcile()
 
+    def restore_plugin(self, owner: str) -> None:
+        """Restore the saved enabled intent after an explicit Pack reinstall.
+
+        The factory may load only at next startup. Keeping the retained card and
+        Deck metadata lets that startup restore availability without re-granting
+        cards or changing Deck contents.
+        """
+        with self.database.transaction(immediate=True) as db:
+            state = self._read(db)
+            if state is not None and owner in state.plugins:
+                state.plugins[owner].enabled = True
+                state.revision += 1
+                self._write(db, state)
+        if self.registry.has_plugin(owner):
+            self.registry.set_enabled(owner, True)
+
     def card_available(self, state: LibraryState, card_id: str) -> bool:
         card = state.card_definitions.get(card_id)
         if not card or not self.registry.is_enabled(card.plugin_id):
@@ -238,7 +254,7 @@ class CardLibraryStore:
                     entry.source_pack_ids.append(pack.definition.id)
                 entry.unlocked = True
             else:
-                state.collection[cid] = CollectionEntry(card_id=cid, plugin_id=pack.definition.plugin_id,
+                state.collection[cid] = CollectionEntry(card_id=cid, plugin_id=state.card_definitions[cid].plugin_id,
                     source_pack_ids=[pack.definition.id], unlocked_at=timestamp,
                     finish=roll_card_finish() if roll_finishes else "normal")
 

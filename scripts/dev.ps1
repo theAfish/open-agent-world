@@ -62,7 +62,24 @@ function Stop-RecordedProcessTree {
 
     # Python may launch child workers. Stop the whole tree so Ctrl+C
     # cannot leave the actual listener behind on the next run.
-    & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null
+    # The process can exit after the identity check. Windows PowerShell turns
+    # taskkill's stderr into a terminating error under Stop, even with 2>$null.
+    # Cleanup must not mask the original build/startup failure in that race.
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null
+        $stopExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($stopExitCode -ne 0) {
+        $remaining = Get-ProcessRecord $process.Id
+        if ($null -ne $remaining -and [int64]$remaining.startTimeTicks -eq [int64]$Record.startTimeTicks) {
+            Write-Warning "Unable to stop backend process $($process.Id) (taskkill exit code $stopExitCode)."
+        }
+    }
 }
 
 function Get-BackendListener {
@@ -125,7 +142,7 @@ function Test-BackendReady {
     param([int]$Port)
 
     try {
-        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/api/catalog" -UseBasicParsing -TimeoutSec 1
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health/ready" -UseBasicParsing -TimeoutSec 1
         return $response.StatusCode -eq 200
     }
     catch {
@@ -161,7 +178,8 @@ function Wait-BackendListener {
                 Write-Host $detail
                 $lastDetail = $detail
             } else {
-                Write-Host ("Backend is still starting ({0:n0}s elapsed)." -f $started.Elapsed.TotalSeconds)
+                $activity = if ($lastDetail) { " Last activity: $lastDetail" } else { "" }
+                Write-Host ("Backend is still starting ({0:n0}s elapsed).{1}" -f $started.Elapsed.TotalSeconds, $activity)
             }
             $nextNotice = $started.Elapsed.TotalSeconds + 5
         }
@@ -198,19 +216,16 @@ function Remove-OwnedBackendState {
 }
 
 function Initialize-BackendEnvironment {
-    param([string]$Root, [string[]]$AdditionalPlugins = @())
+    param([string]$Root, [string]$DevelopmentProfile = "default", [string[]]$AdditionalPlugins = @())
 
-    # Installation hooks and the server must use the same persistent interpreter.
-    # uv run --with-editable creates a temporary overlay with a different prefix.
-    & uv sync --project (Join-Path $Root 'backend') --dev --extra adk --extra litellm --inexact | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw 'Backend dependency installation failed.' }
     $python = Join-Path $Root 'backend/.venv/Scripts/python.exe'
-    if (-not (Test-Path -LiteralPath $python)) { throw "Backend Python is missing: $python" }
-    $plugins = @(Get-ChildItem -LiteralPath (Join-Path $Root 'plugins') -Directory |
-        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'pyproject.toml') } |
-        ForEach-Object { $_.FullName })
-    & $python (Join-Path $Root 'scripts/install-plugins.py') @plugins @AdditionalPlugins | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw 'Plugin dependency installation failed.' }
+    if (-not (Test-Path -LiteralPath $python)) { throw "Backend Python is missing. Run scripts/setup.ps1 -Profile $DevelopmentProfile -SkipBuild first." }
+    $checkArguments = @((Join-Path $Root 'scripts/check-source-environment.py'), '--profile', $DevelopmentProfile)
+    foreach ($path in $AdditionalPlugins) { $checkArguments += @('--plugin-path', $path) }
+    & $python @checkArguments | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Source environment check failed. Run setup for this profile; see the error above.' }
+    & node (Join-Path $Root 'frontend/scripts/prepare-dev.mjs') | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Frontend preparation failed. See the dependency or build error above.' }
     return $python
 }
 
@@ -236,6 +251,7 @@ try {
         }
         $resolved.Path
     })
+    $backendPython = Initialize-BackendEnvironment -Root $projectRoot -DevelopmentProfile $Profile -AdditionalPlugins $resolvedPluginPaths
     # Recover a backend left by an earlier invocation. The recorded start time
     # prevents a recycled PID from causing an unrelated process to be killed.
     $previousState = Read-BackendState
@@ -248,7 +264,6 @@ try {
         }
         Remove-OwnedBackendState $previousState
     }
-    $backendPython = Initialize-BackendEnvironment -Root $projectRoot -AdditionalPlugins $resolvedPluginPaths
 
     $backendPort = Get-AvailableLocalPort -PreferredPort 8000
     $frontendPort = Get-AvailableLocalPort -PreferredPort 5173
@@ -311,7 +326,10 @@ try {
         Write-Host "Backend plugins: $($resolvedPluginPaths -join ', ')"
     }
     Write-Host "Backend activity: $backendOut"
-    & npm.cmd --prefix frontend run dev -- --port $frontendPort --strictPort
+    # Shared predev preparation already completed. Start Vite directly, without
+    # repeating npm hooks or passing ignore-scripts into Pack build children.
+    & node (Join-Path $projectRoot 'frontend/node_modules/vite/bin/vite.js') (Join-Path $projectRoot 'frontend') --host 127.0.0.1 --port $frontendPort --strictPort
+    if ($LASTEXITCODE -ne 0) { throw "Frontend development server failed (exit code $LASTEXITCODE). See the build error above." }
 }
 finally {
     if ($null -ne $backendState) {

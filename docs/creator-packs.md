@@ -1,7 +1,7 @@
 # Share a Legion as a content Pack
 
 For visual card design and multi-item composition, use the bundled
-[Card Factory / 卡包工厂](card-factory.md). Its connected designers, printer and
+[Card Factory](card-factory.md). Its connected designers, printer and
 packer export standalone declarative cards together with Legion templates.
 
 You can create and share a useful formation without writing a plugin or signing

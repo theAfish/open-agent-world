@@ -46,7 +46,9 @@ async def diagnostics(services, sandbox_id, destination=None):
             raise ResourceValidationError("Use an HTTP(S) destination without credentials, query or fragment")
         if not info.network_enabled:
             raise ResourceValidationError("Networking is disabled; enable a supported mode in settings first")
-        argv = ["curl", "--disable", "--noproxy", "*", "--silent", "--show-error", "--output",
+        argv = ["curl", "--disable",
+            *([] if info.network_transport == "proxy_tcp" else ["--noproxy", "*"]),
+            "--silent", "--show-error", "--output",
             "NUL" if info.platform == "windows" else "/dev/null", "--max-time", "8",
             "--write-out", "%{http_code}", "--", destination]
         try:

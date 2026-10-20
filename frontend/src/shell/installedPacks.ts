@@ -34,7 +34,8 @@ export function installedPackStatus(versions: InstalledPack[]) {
 export function packInventory(snapshot: LibrarySnapshot, installations?: PackInstallations) {
   const byPlugin = new Map<string, InstalledPack[]>();
   for (const item of installations?.versions ?? []) {
-    byPlugin.set(item.id, [...(byPlugin.get(item.id) ?? []), item]);
+    const owner = item.owner ?? item.id;
+    byPlugin.set(owner, [...(byPlugin.get(owner) ?? []), item]);
   }
   const packs = Object.values(snapshot.packs).filter(pack => {
     const versions = byPlugin.get(pack.definition.plugin_id);
@@ -54,6 +55,12 @@ export function packInventory(snapshot: LibrarySnapshot, installations?: PackIns
       description: item.creator?.description ?? '', accent_color: item.creator?.accent_color || undefined, packaging: item.creator?.packaging, cards: [] },
       owned: true, opened: false, opened_at: null });
   }
+  for (const item of installations?.inventory ?? []) {
+    if (item.source === 'installed' || packs.some(pack => pack.definition.plugin_id === item.owner)) continue;
+    packs.push({ definition: { id: `source:${item.owner}`, plugin_id: item.owner, name: item.name,
+      description: '', cards: [], source: 'bundled' }, owned: true, opened: false, opened_at: null });
+  }
   return packs.map(pack => ({ pack, versions: byPlugin.get(pack.definition.plugin_id) ?? [],
+    inventory: installations?.inventory?.find(item => item.owner === pack.definition.plugin_id),
     registered: Boolean(snapshot.packs[pack.definition.id]) }));
 }

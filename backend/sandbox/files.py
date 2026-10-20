@@ -48,7 +48,7 @@ def parts(relative):
 
 
 @contextmanager
-def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlink=False, runtime_pinned_root=None, create_parents_from=None, create_directory=False, delete=False):
+def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlink=False, runtime_pinned_root=None, create_parents_from=None, create_directory=False, delete=False, read_write=False):
     """Yield an fd; all ancestors remain pinned until it closes."""
     path = Path(path)
     if not path.is_absolute():
@@ -95,8 +95,8 @@ def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlin
                 # A second deny-delete handle would conflict with that handle's
                 # access. Keep its existing pin under the backend record lock.
                 share = 7 if runtime_pinned_root is not None and current == runtime_pinned_root else 3
-                handle = create(str(current), ((0x40000000 if write else 0x80000000) | (0x10000 if delete else 0)) if last else 0x80,
-                    share, None, (1 if exclusive else 4) if last and write else 3, 0x02200000, None)
+                handle = create(str(current), ((0xC0000000 if read_write else 0x40000000 if write else 0x80000000) | (0x10000 if delete else 0)) if last else 0x80,
+                    share, None, (1 if exclusive else 4) if last and write and not read_write else 3, 0x02200000, None)
                 if handle == wintypes.HANDLE(-1).value:
                     error = ctypes.WinError(ctypes.get_last_error())
                     error.filename = str(current)
@@ -114,7 +114,7 @@ def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlin
             kernel.DuplicateHandle.argtypes = [wintypes.HANDLE, wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.HANDLE), wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
             if not kernel.DuplicateHandle(process, handle, process, ctypes.byref(duplicate), 0, False, 2):
                 raise ctypes.WinError(ctypes.get_last_error())
-            fd = msvcrt.open_osfhandle(duplicate.value, os.O_BINARY | (os.O_WRONLY if write else os.O_RDONLY))
+            fd = msvcrt.open_osfhandle(duplicate.value, os.O_BINARY | (os.O_RDWR if read_write else os.O_WRONLY if write else os.O_RDONLY))
             stack.callback(os.close, fd)
         else:
             fd = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -129,7 +129,7 @@ def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlin
                     except FileExistsError:
                         pass
                 flags = os.O_NOFOLLOW | os.O_NONBLOCK
-                flags |= (os.O_WRONLY | os.O_CREAT | (os.O_EXCL if exclusive else 0)) if last and write else os.O_RDONLY
+                flags |= (os.O_RDWR if read_write else os.O_WRONLY | os.O_CREAT | (os.O_EXCL if exclusive else 0)) if last and write else os.O_RDONLY
                 if not last or directory:
                     flags |= os.O_DIRECTORY
                 fd = os.open(part, flags, 0o600, dir_fd=fd)
@@ -142,16 +142,16 @@ def pinned(path, *, directory=False, write=False, exclusive=False, allow_hardlin
         yield fd
 
 
-def operate(root: Path, relative: str, operation: str, *, read_only=False, data=None, overwrite=False, allow_hardlink=False, runtime_pinned_root=None, create_parents=False, cursor='', query=''):
+def operate(root: Path, relative: str, operation: str, *, read_only=False, data=None, overwrite=False, allow_hardlink=False, runtime_pinned_root=None, create_parents=False, cursor='', query='', edits=None):
     """Normalize write failures before crossing runtime transports."""
-    if operation not in {"write", "mkdir"}:
+    if operation not in {"write", "mkdir", "edit"}:
         return _operate(root, relative, operation, read_only=read_only, data=data,
                         overwrite=overwrite, allow_hardlink=allow_hardlink,
-                        runtime_pinned_root=runtime_pinned_root, create_parents=create_parents, cursor=cursor, query=query)
+                        runtime_pinned_root=runtime_pinned_root, create_parents=create_parents, cursor=cursor, query=query, edits=edits)
     try:
         return _operate(root, relative, operation, read_only=read_only, data=data,
                         overwrite=overwrite, allow_hardlink=allow_hardlink,
-                        runtime_pinned_root=runtime_pinned_root, create_parents=create_parents, cursor=cursor, query=query)
+                        runtime_pinned_root=runtime_pinned_root, create_parents=create_parents, cursor=cursor, query=query, edits=edits)
     except FileNotFoundError as exc:
         hint = ("Check that the Sandbox workspace is still available, then retry." if create_parents else
                 "Create the destination parent directory in this Sandbox workspace before copying, then retry.")
@@ -164,11 +164,16 @@ def operate(root: Path, relative: str, operation: str, *, read_only=False, data=
         raise SandboxValidationError(f"Access to Sandbox path {relative!r} was denied. Choose an accessible path within the authorized root.") from exc
 
 
-def _operate(root: Path, relative: str, operation: str, *, read_only=False, data=None, overwrite=False, allow_hardlink=False, runtime_pinned_root=None, create_parents=False, cursor='', query=''):
+def _operate(root: Path, relative: str, operation: str, *, read_only=False, data=None, overwrite=False, allow_hardlink=False, runtime_pinned_root=None, create_parents=False, cursor='', query='', edits=None):
     target = root.joinpath(*parts(relative))
-    if operation in {"write", "mkdir"} and read_only:
+    if operation == 'desktop_location':
+        directory = stat.S_ISDIR(target.lstat().st_mode)
+        with pinned(target, directory=directory, allow_hardlink=allow_hardlink,
+                    runtime_pinned_root=runtime_pinned_root):
+            return {'path': str(target if directory else target.parent)}
+    if operation in {"write", "mkdir", "edit"} and read_only:
         raise SandboxSecurityError("This root is read-only")
-    if operation not in {"list", "preview", "download", "write", "mkdir"}:
+    if operation not in {"list", "preview", "download", "write", "mkdir", "edit"}:
         raise SandboxValidationError("Unsupported file operation")
     if operation == 'list':
         from .listing import list_directory
@@ -177,12 +182,26 @@ def _operate(root: Path, relative: str, operation: str, *, read_only=False, data
         content = base64.b64decode(data, validate=True)
         if len(content) > DOWNLOAD_LIMIT:
             raise SandboxValidationError("File exceeds 16 MiB copy limit")
-    with pinned(target, directory=operation in {"list", "mkdir"}, write=operation == "write", exclusive=not overwrite,
+    with pinned(target, directory=operation in {"list", "mkdir"}, write=operation in {"write", "edit"}, exclusive=operation == "write" and not overwrite,
                 allow_hardlink=allow_hardlink, runtime_pinned_root=runtime_pinned_root,
                 create_parents_from=root if (create_parents and operation == "write") or operation == "mkdir" else None,
-                create_directory=operation == "mkdir") as fd:
+                create_directory=operation == "mkdir", read_write=operation == "edit") as fd:
         if operation == "mkdir":
             return {"created": True}
+        if operation == "edit":
+            from .text_edits import TEXT_LIMIT, apply_text_edits
+            if os.fstat(fd).st_size > TEXT_LIMIT:
+                raise SandboxValidationError("Text file exceeds the 256 KiB edit limit")
+            with os.fdopen(os.dup(fd), "rb") as source:
+                raw = source.read(TEXT_LIMIT + 1)
+            content = apply_text_edits(raw, edits)
+            # Validate every edit before truncation; use the same pinned fd for
+            # reading and writing, never resolve the user path a second time.
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.ftruncate(fd, 0)
+            with os.fdopen(os.dup(fd), "wb") as output:
+                output.write(content)
+            return {"written": len(content), "edits_applied": len(edits)}
         if operation == "write":
             os.ftruncate(fd, 0)
             with os.fdopen(os.dup(fd), "wb") as output:

@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { Archive, ArrowLeft, Search } from 'lucide-react';
 import { apiErrorMessage, worldApi } from '../api/client';
 import { t } from '../i18n';
-import type { StoreDetail, StorePack, StorePage, StoreState, StoreVersion } from '../types/packs';
+import type { PackInstallations, StoreDetail, StorePack, StorePage, StoreState, StoreVersion } from '../types/packs';
+import { PackPlanDetails } from './PackDependencies';
+import { packOperationPending, PackOperations } from './PackOperations';
 import './packStore.css';
 
 function InstallationStatus({ state }: { state: StoreState }) {
@@ -12,7 +14,7 @@ function InstallationStatus({ state }: { state: StoreState }) {
   </span>;
 }
 
-export function PackStore() {
+export function PackStore({ installations }: { installations?: PackInstallations }) {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState<StorePage>();
   const [loading, setLoading] = useState(false);
@@ -52,8 +54,9 @@ export function PackStore() {
         const result = await worldApi.getStorePack(selected, controller.signal);
         if (controller.signal.aborted) return;
         setDetail(result);
-        if (result.latest_version) {
-          const metadata = await worldApi.getStoreVersion(selected, result.latest_version, controller.signal);
+        const candidate = result.available_version ?? result.latest_version;
+        if (candidate) {
+          const metadata = await worldApi.getStoreVersion(selected, candidate, controller.signal);
           if (!controller.signal.aborted) setVersion(metadata);
         }
       } catch (cause) { if (!controller.signal.aborted) setDetailError(apiErrorMessage(cause)); }
@@ -84,11 +87,16 @@ export function PackStore() {
     finally { if (!controller.signal.aborted) { setInstalling(undefined); installRequest.current = undefined; } }
   };
   const merged = (pack: StorePack): StorePack => ({ ...pack, ...installed[pack.id] });
-  const action = (pack: StorePack) => <button className="secondary-button" disabled={Boolean(installing) || !pack.can_install}
-    onClick={() => void install(pack)}>{installing === pack.id ? t('Installing') : !pack.can_install && pack.installed_version ? t('Installed') : pack.update_available ? t('Update') : t('Get')}</button>;
+  const action = (pack: StorePack, reviewed = false) => {
+    const pending = installations?.operations?.some(item => item.pack_id === pack.id && packOperationPending(item));
+    const selectedVersion = installations?.versions.some(item => item.id === pack.id && item.version === pack.available_version && item.selected);
+    return <button className="secondary-button" disabled={Boolean(installing) || pending || selectedVersion || !pack.can_install || (reviewed && Boolean(version?.plan?.blockers.length))}
+      onClick={() => reviewed ? void install(pack) : setSelected(pack.id)}>{installing === pack.id || pending ? t('Installing') : selectedVersion || !pack.can_install && pack.installed_version ? t('Installed') : pack.update_available ? t('Update') : t('Get')}</button>;
+  };
   const shown = detail && merged(detail);
 
   return <section className="pack-store" aria-label={t('Pack Store')}>
+    <PackOperations operations={installations?.operations} />
     {selected ? <>
       <button className="library-text-button" onClick={() => setSelected(undefined)}><ArrowLeft size={15} />{t('Back to Store')}</button>
       {shown && <article className="store-detail" aria-label={t('Pack details')}>
@@ -99,11 +107,11 @@ export function PackStore() {
         {version && <><dl className="store-requirements">
           <dt>{t('Version')}</dt><dd>{version.version}</dd>
           <dt>{t('OAW compatibility')}</dt><dd>{version.manifest.compatibility.oaw}</dd>
-          <dt>{t('Pack dependencies')}</dt><dd>{version.manifest.dependencies.packs.length
+          {!version.plan && <><dt>{t('Pack dependencies')}</dt><dd>{version.manifest.dependencies.packs.length
             ? version.manifest.dependencies.packs.map(item => <div key={item.id}>{item.id} {item.version}</div>) : t('None')}</dd>
           <dt>{t('Sandbox Python requirements')}</dt><dd>{version.manifest.runtime.sandbox.python.length
-            ? version.manifest.runtime.sandbox.python.map(item => <div key={item}>{item}</div>) : t('None')}</dd>
-        </dl>{action(shown)}</>}
+            ? version.manifest.runtime.sandbox.python.map(item => <div key={item}>{item}</div>) : t('None')}</dd></>}
+        </dl>{version.plan && <PackPlanDetails plan={version.plan} />}{action(shown, true)}</>}
         {!version && !detailError && shown.latest_version && <p role="status">{t('Loading…')}</p>}
         {!shown.latest_version && <p>{t('No version available')}</p>}
       </article>}

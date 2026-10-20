@@ -31,6 +31,8 @@ describe('bundled manual', () => {
     }
     expect(localizedPage('user-guide/index.md', 'zh-CN')).toBe('user-guide/index.zh-CN.md');
     expect(localizedPage('user-guide/models.md', 'zh-CN')).toBe('user-guide/models.md');
+    expect(documentationGroups('zh-CN').find(group => group.title === 'Contribute to OAW')?.pages)
+      .toContain('contributing/hosting.zh-CN.md');
   });
 
   it('keeps relative pages, published URLs, translated pages and anchors local', () => {

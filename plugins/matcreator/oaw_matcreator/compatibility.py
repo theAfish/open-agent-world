@@ -2,8 +2,8 @@
 from copy import deepcopy
 import hashlib
 
-REVISION = 2
-RUNTIME_NOTES = """# OAW runtime compatibility (reviewed 2026-10-14)
+REVISION = 4
+RUNTIME_NOTES = """# OAW runtime compatibility (reviewed 2026-10-16)
 
 These notes adapt the imported examples; the scientific procedures are not
 certified for every model, calculator or CLI version. Read installed command
@@ -11,10 +11,12 @@ help and inspect actual model metadata before executing an example.
 
 ## Bohrium CLI
 
-Check `node --version`, `npm --version` and an existing `bohr version` first.
-If installation is required, use `npm install -g @dptech-corp/bohr-cli` in the
-persistent Sandbox HOME prefix. Verify the installed executable with
-`bohr version` and `bohr doctor --offline`. Record its version in the task report.
+Select the Bohrium or remote-job Skill and use run_skill_script with interpreter
+`python`, path `scripts/oaw_bohr.py`,
+and argv `["version"]` or `["doctor", "--offline"]`. The Skill's declared bohr
+environment installs the CLI into a private prefix inside the selected Sandbox.
+Node.js and npm must be available in that Sandbox. No host or global npm install
+is needed. Use the same wrapper for other CLI arguments and record its version.
 The imported curl-to-shell download endpoint is obsolete for this adaptation.
 
 CLI flags are version-specific. Read `bohr project list --help` before querying.
@@ -88,11 +90,66 @@ appropriate. A missing retrieval key does not disable all Sandbox networking.
 """
 
 
+BOHR_SCRIPT = '''"""Run the CLI from this Skill's declared private Sandbox profile."""
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+for directory in os.environ.get("NODE_PATH", "").split(os.pathsep):
+    package = Path(directory) / "@dptech-corp" / "bohr-cli"
+    metadata = package / "package.json"
+    if not metadata.is_file():
+        continue
+    entry = json.loads(metadata.read_text(encoding="utf-8"))["bin"]
+    if isinstance(entry, dict):
+        entry = entry.get("bohr")
+    if not isinstance(entry, str):
+        raise RuntimeError("The installed bohr package has no bohr entrypoint")
+    executable = (package / entry).resolve()
+    if not executable.is_relative_to(package.resolve()) or not executable.is_file():
+        raise RuntimeError("Invalid bohr package entrypoint")
+    node = shutil.which("node")
+    if not node:
+        raise RuntimeError("Node.js is unavailable in this Sandbox")
+    raise SystemExit(subprocess.call([node, str(executable), *sys.argv[1:]], stdin=subprocess.DEVNULL))
+raise RuntimeError("Run this Skill through OAW with its declared bohr environment")
+'''
+
+SCIENTIFIC_PROFILES = {
+    'local-structure': 'ase', 'structure-conversion': 'ase', 'database': 'ase',
+    'paramiko': 'ssh', 'lammps': 'lammps-prepare', 'deepmd': 'deepmd-prepare',
+    'vasp-pymatgen': 'vasp-prepare',
+}
+BOHR_FAMILIES = {'bohrium', 'remote-job'}
+
+
 def adapt_package(source):
     package = deepcopy(source)
     changed = False
     for skill in package["skills"]:
         family = skill["id"].split("--", 1)[0]
+        profiles = [SCIENTIFIC_PROFILES[family]] if family in SCIENTIFIC_PROFILES else []
+        if family in BOHR_FAMILIES:
+            profiles.append('bohr')
+            skill.setdefault('files', {})['scripts/oaw_bohr.py'] = BOHR_SCRIPT
+        elif family in {'lammps', 'deepmd', 'mattersim', 'mattergen', 'vasp-pymatgen'}:
+            # Remote submission is a separate Skill. Local scientific preparation
+            # must not require Node or a cloud CLI merely to read/write structures.
+            skill.get('files', {}).pop('scripts/oaw_bohr.py', None)
+            if 'runtime_requirements' in skill:
+                skill['runtime_requirements'] = [reference for reference in skill['runtime_requirements']
+                    if reference != {'owner': 'matcreator', 'environment': 'bohr'}]
+        if profiles:
+            references = skill.setdefault('runtime_requirements', [])
+            for environment in profiles:
+                reference = {'owner': 'matcreator', 'environment': environment}
+                if reference not in references:
+                    references.append(reference)
+                    changed = True
+            skill.setdefault('defaults', {}).pop('runtime', None)
         if family not in {"bohrium", "remote-job", "lammps", "deepmd", "mattersim", "mattergen", "vasp-pymatgen", "tavily"}:
             continue
         defaults = skill.setdefault("defaults", {})
@@ -102,7 +159,8 @@ def adapt_package(source):
         # Upstream hashes retain their original meaning. Adapted content has its
         # own hashes and revision rather than pretending to be unchanged upstream.
         def update(text):
-            return (text.replace("curl -fsSL https://bohrium.com/download/bohr | sh", "npm install -g @dptech-corp/bohr-cli")
+            return (text.replace("curl -fsSL https://bohrium.com/download/bohr | sh", "Run scripts/oaw_bohr.py through OAW to prepare the declared Sandbox profile")
+                .replace("npm install -g @dptech-corp/bohr-cli", "Run scripts/oaw_bohr.py through OAW to prepare the declared Sandbox profile")
                 .replace("bohr project list --json", "bohr project list -o json")
                 .replace("User specified `BOHRIUM_PROJECT_ID` > The first project ID in `bohr project list -o json`",
                          "Use the explicitly selected `BOHRIUM_PROJECT_ID`; never default to the first accessible project"))
@@ -115,10 +173,10 @@ def adapt_package(source):
             if isinstance(content, str) and name.endswith(".md"):
                 files[name] = update(content)
         files["references/oaw-runtime.md"] = RUNTIME_NOTES
-        defaults["compatibility"] = {"oaw_revision": REVISION, "reviewed_at": "2026-10-14",
+        defaults["compatibility"] = {"oaw_revision": REVISION, "reviewed_at": "2026-10-16",
             "verification_scope": "CLI documentation and OAW contracts; scientific execution remains unverified",
             "instruction_sha256": hashlib.sha256(skill["instructions"].encode()).hexdigest(),
             "runtime_notes_sha256": hashlib.sha256(RUNTIME_NOTES.encode()).hexdigest()}
     if changed:
-        package["version"] = "0.1.2"
+        package["version"] = "0.1.3"
     return package

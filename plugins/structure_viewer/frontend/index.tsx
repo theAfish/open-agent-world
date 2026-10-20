@@ -73,4 +73,12 @@ function Viewer({ card, host, level }: PluginViewProps) {
   </section>;
 }
 
-export default { apiVersion: 1, views: { preview: Preview, viewer: Viewer } } satisfies FrontendPlugin;
+export default { apiVersion: 1, views: { preview: Preview, viewer: Viewer }, services: {
+  'structure-renderer': {
+    async prepare(file: { name: string; data: string }) { return (await import('./prepareStructure')).prepareStructure(file); },
+    async render(target: HTMLElement, file: { name: string; data: string }, onError: (message: string) => void, prepared?: unknown) {
+      const { renderStructure } = await import('./render');
+      return renderStructure(target, file, onError, prepared as Parameters<typeof renderStructure>[3]);
+    },
+  },
+} } satisfies FrontendPlugin;
