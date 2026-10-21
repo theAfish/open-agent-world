@@ -65,6 +65,8 @@ export interface CreatorInspection {
 }
 export interface PackInstallations {
   restart_required: boolean;
+  failures?: Array<{ id: string; owner: string | null; source: string; state: 'unavailable';
+    phase: string; error: string; retry: 'repair_and_restart' }>;
   inventory?: PackInventoryItem[];
   operations?: PackOperation[];
   versions: Array<{ id: string; name: string; version: string; selected: boolean; loaded: boolean;

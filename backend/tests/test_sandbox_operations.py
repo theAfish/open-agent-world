@@ -161,13 +161,16 @@ def test_cancel_cleanup_timeout_returns_conflict_and_keeps_the_run_alive(runtime
         raise TimeoutError('plugin lifecycle cleanup exceeded its deadline')
 
     monkeypatch.setattr(backend, 'execute', execute)
-    monkeypatch.setattr(type(services), '_run_bounded_lifecycle_cleanup', cleanup_deadline)
 
     async def scenario():
         pending = await tools['execute_command'](sandbox=sandbox['id'], argv=['work'], wait_seconds=0)
         # A cleanup that outlives its 5-second budget must surface as a
         # retryable tool conflict, never as an exception that ends the Run.
-        result = await tools['cancel_command'](sandbox=sandbox['id'], command_id=pending['command_id'])
+        # Inject only this cancellation failure. Application shutdown now also
+        # uses bounded cleanup and must run the real drain after the assertion.
+        with monkeypatch.context() as fault:
+            fault.setattr(type(services), '_run_bounded_lifecycle_cleanup', cleanup_deadline)
+            result = await tools['cancel_command'](sandbox=sandbox['id'], command_id=pending['command_id'])
         assert result['ok'] is False
         assert result['error']['code'] == 'conflict'
         assert 'draining' in result['error']['message']

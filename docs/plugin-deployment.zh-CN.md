@@ -110,7 +110,7 @@ deployment = NodeDeploymentDefinition(
 ## 安装、构建与升级
 
 1. 按[现有插件安装流程](plugins.md#package-structure-and-discovery)安装 Python 包及依赖，声明需要的 `requires_plugins`，在工程端验证原 Workspace。
-2. 有前端的外部插件将源码置于 `plugins/<package>/frontend/`，保留 `plugin.json` 与 `index.tsx`。执行 `npm --prefix frontend run build`。仅安装 Python wheel 不会自动带入浏览器组件；新增前端插件需要重新构建。示例目录的前端也由构建器发现，普通工程未加载示例后端时不会出现示例卡片。
+2. 发布带前端的外部插件时，独立构建卡包 UI，将编译产物放入 [`.oawpack`](pack-distribution.md)，并在发布 Workspace 前安装到工程配置中，无需重新构建宿主前端。仅安装 Python wheel 不会带入浏览器组件。开发 OAW 源码工程本身时，`npm --prefix frontend run build` 也会准备工程内的源码卡包前端。
 3. 保存 Legion 布局并按[部署流程](deployment.zh-CN.md)发布、复制到新目录。复制的是数据，交付时同时保留匹配的源码、前端构建、Python 依赖和插件外部资源。
 4. 版本与公开权限在发布时固定。插件升级或开放范围改变后，更新插件版本号，在工程端重新验证并发布新副本；不要给正在运行的部署热装插件。启动会拒绝插件版本不匹配。
 

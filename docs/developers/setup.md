@@ -38,8 +38,12 @@ bash scripts/dev.sh --agent-runtime core.mock --profile plugin-tutorial
 Open the URL printed by the launcher. Ports can change when the usual ones are occupied. Keep the launcher running and stop it with Ctrl+C.
 
 Setup is the installation entrypoint on every platform, backed by `scripts/setup.py`.
-Run it when creating a profile or changing dependencies. `--skip-build` / `-SkipBuild`
-prepares the SDK and Pack dependencies without building the production frontend.
+Run it when creating a profile or changing dependencies. Default setup prepares
+Core and its development tools. Add `--with-plugins` / `-WithPlugins` to prepare
+all official Packs and optional Agent SDKs, or `--plugin-path` / `-PluginPath` for
+specific projects. `--core-only` is a compatibility alias for the default.
+`--skip-build` / `-SkipBuild` prepares the SDK and selected dependencies without
+building the production frontend.
 Ordinary `dev` launches only check the environment and build source assets; they do
 not run uv sync, editable installs, setup hooks, or npm ci. Missing or stale
 dependencies produce an error pointing back to setup. The launchers and `npm run dev`
@@ -77,7 +81,7 @@ inside `.open-agent-world`.
 
 Additional trusted plugins use `-PluginPath @('path/to/plugin')` on PowerShell or
 repeatable `--plugin-path path/to/plugin` on the portable scripts. Pass them to setup
-and dev; setup includes the repository plugins as well. Both use the persistent
+and dev; repository-wide preparation requires `--with-plugins`. Both use the persistent
 `backend/.venv` interpreter. The bare setup command prepares production data for
 `start`; development Pack environments belong to the explicitly selected profile.
 
@@ -93,3 +97,17 @@ The mock runtime is for deterministic debugging; it is not a language model. The
 Application internals are useful for debugging the host, but plugin implementation should use these public imports. Integration tests can use host services to verify discovery and persistence.
 
 Continue with [Your first plugin](first-plugin.md). For host development and broader checks, see [Run from source](../getting-started.md#development-and-verification).
+
+## Setup results
+
+Core-only setup prints `Core ready` and `Optional Packs: not requested`.
+With `--with-plugins` (or explicit plugin paths), setup reports each Pack and a
+ready/failed count. Backend preparation and frontend build failures appear in
+the final summary with their cause and a retry command. Core preparation still
+finishes when an optional Pack fails.
+
+Exit code `0` means the requested setup completed; `3` means optional Packs
+failed while Core remains usable; other nonzero exits indicate setup did not
+reach confirmed Core readiness. `install-plugins.py --continue-on-error` also
+returns `3` after attempting the remaining Packs when any preparation fails.
+After repairing a Pack, restart OAW to activate it.

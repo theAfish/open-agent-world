@@ -10,7 +10,8 @@ import { startFakeMarketplace } from './fake-marketplace.mjs';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const frontend = path.join(root, 'frontend');
 const official = process.argv.includes('--store-official');
-const build = official ? {} : JSON.parse(await readFile(path.join(root, '.outputs/pack-acceptance/build.json'), 'utf8'));
+const declarative = process.argv.includes('--declarative');
+const build = official ? {} : JSON.parse(await readFile(path.join(root, `.outputs/${declarative ? 'declarative-acceptance' : 'pack-acceptance'}/build.json`), 'utf8'));
 const source = official ? 'store-official' : process.argv.includes('--store-real') ? 'store-real' : process.argv.includes('--store-fake') ? 'store-fake' : 'local';
 if (official && Object.hasOwn(process.env, 'OPEN_AGENT_WORLD_MARKETPLACE_URL')) {
   throw new Error('Official acceptance forbids OPEN_AGENT_WORLD_MARKETPLACE_URL, including an empty override');
@@ -25,6 +26,7 @@ const url = `http://127.0.0.1:${port}`;
 const env = { ...process.env, OPEN_AGENT_WORLD_MODE: 'production', OPEN_AGENT_WORLD_DATA_ROOT: dataRoot,
   OPEN_AGENT_WORLD_AGENT_RUNTIME: 'mock', OAW_E2E_BASE_URL: url, OAW_PACK_ARTIFACT: build.artifact,
   OAW_PACK_E2E_DATA_ROOT: dataRoot, OAW_PACK_SOURCE: source, OAW_PACK_HOST_ONLY: build.host_only ? '1' : '0' };
+env.OAW_PACK_DECLARATIVE = declarative ? '1' : '0';
 delete env.OPEN_AGENT_WORLD_PLUGIN_DIRS;
 for (const key of Object.keys(env)) if (/^(?:GH_|GITHUB_|MARKETPLACE_)/.test(key)) delete env[key];
 const payload = process.env.OAW_PACK_DESKTOP_PAYLOAD;
@@ -65,7 +67,7 @@ let logs = '';
 async function start() {
   const entry = payload ? ['-I', '-B', path.join(payload, 'launch.py')] : ['-m', 'backend.launcher'];
   host = spawn(python, [...entry, '--mode', 'production', '--port', String(port), '--strict-port',
-    '--frontend', path.join(payload ?? root, 'frontend/dist'), '--desktop'], { cwd: payload ?? root, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    '--frontend', process.env.OAW_PACK_FRONTEND ?? path.join(payload ?? root, 'frontend/dist'), '--desktop'], { cwd: payload ?? root, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   host.stdout.on('data', data => { logs += data; });
   host.stderr.on('data', data => { logs += data; });
   const deadline = Date.now() + 60000;
@@ -95,9 +97,8 @@ async function run(phase) {
 try {
   await start();
   await run(source === 'local' ? 'install local' : 'install remote');
-  await stop();
-  await start();
-  await run('restart activates');
+  if (!declarative) { await stop(); await start(); await run('restart activates'); }
+  if (declarative) { await stop(); await start(); await run('saved note'); }
   if (marketplace) { await marketplace.stop(); marketplace = undefined; await run('Store offline'); }
   const receipt = { status: 'passed', source, productionEndpoint, marketplaceOverride: official ? false : Boolean(env.OPEN_AGENT_WORLD_MARKETPLACE_URL), desktopPayload: payload ?? null, ...build, dataRoot, url, sha256: expectedSha };
   await writeFile(path.join(dataRoot, 'receipt.json'), JSON.stringify(receipt, null, 2));

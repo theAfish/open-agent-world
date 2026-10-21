@@ -110,13 +110,17 @@ The key is the host slot; the value names your exported view. Supported slots ar
 
 Restart both development servers after adding the package or manifest. Reopen the card's settings, save a message, and verify it after reload. Existing frontend source changes support Vite hot reload.
 
-For a production build:
+For distribution, build the Pack's frontend independently with the public
+`@oaw/plugin-api` SDK and include the compiled assets in a `.oawpack`; see
+[Pack distribution](../pack-distribution.md#frontend-contract-and-shared-react). Install that archive
+through the Library or Store in an existing desktop/production app. The host loads
+the Pack's frontend dynamically, without rebuilding the host. A Python wheel alone
+does not deliver browser components.
 
-```sh
-npm --prefix frontend run build
-```
-
-OAW discovers frontend entries in immediate `plugins/*/frontend` directories at build time. Installing a Python wheel by itself does not add UI to an existing desktop app; distribute compatible frontend source and rebuild, or include it in a compatible OAW build.
+The first installation of a pure declarative or content Pack activates immediately.
+Advanced Python plugins and updates to already loaded Packs require a backend
+restart. `npm --prefix frontend run build` builds the OAW source checkout itself;
+it is not a step users need when installing a distributed Pack.
 
 ## Grow the interface
 

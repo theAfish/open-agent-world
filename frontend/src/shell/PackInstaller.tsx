@@ -65,7 +65,7 @@ export function PackInstaller({ actionTarget, onInstalled, installations }: {
         {operation && (pending || installed || operation.state === 'failed') && <PackOperationStatus operation={operation} />}
         {inspection && file && <>
           <p>{t(inspection.manifest.kind === 'content'
-            ? 'Adds Legion templates. Restart to use this Pack.'
+            ? 'Adds reusable cards or Legion templates.'
             : 'Runs application code. Install only from a trusted source.')}</p>
           {inspection.manifest.creator && <details><summary>{t('Pack guide')}</summary><PackGuide creator={inspection.manifest.creator} /></details>}
           {inspection.plan && <PackPlanDetails plan={inspection.plan} />}

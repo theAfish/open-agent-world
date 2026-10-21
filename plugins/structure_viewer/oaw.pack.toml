@@ -2,21 +2,22 @@
 schema_version = 3
 
 [compatibility]
-plugin_api = "1.36"
+plugin_api = "1.38"
 oaw = ">=0.1.0,<1"
 
 [distribution]
 id = "science.structure-viewer"
 name = "Structure Viewer"
 
-[plugin]
-owner = "science.structure-viewer"
-packs = ["science.structure-viewer.default"]
-node_types = ["science.structure-viewer"]
-
-[components.backend]
-project = "pyproject.toml"
-mode = "host-adapter"
+[[contributions.cards]]
+name = "Structure viewer"
+description = "Follow crystal and molecule files opened in connected windows."
+icon = "atom"
+color = "#67a69b"
+deck_id = "science"
+deck_name = "Science"
+size = [340, 240]
+frontend = { preview = "preview", body = "viewer", workspace = "viewer" }
 
 [components.frontend]
 entry = "frontend/index.tsx"

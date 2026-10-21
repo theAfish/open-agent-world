@@ -309,7 +309,7 @@ def test_runtime_rejects_distribution_ownership_mismatch(tmp_path):
     manager = PackInstallationManager(tmp_path, create_builtin_registry())
     manager.install(artifact(files=files))
     with pytest.raises(RuntimeError, match='exactly one Pack'):
-        load_installed_packs(manager.registry, tmp_path)
+        load_installed_packs(manager.registry, tmp_path, strict=True)
     assert not manager.registry.has_plugin('test.greeter')
 
 

@@ -15,7 +15,7 @@ plugin contracts below remain the internal runtime and development interface.
 
 Plugins add cards, relationships, tools, and runtime integrations. The backend discovers packages under the repository's `plugins/` directory and installed Python entry points at startup. Install only reviewed code: plugins execute inside the trusted backend process.
 
-After installing a package and its dependencies, restart the backend, open **Pack & Card Library**, open the plugin's pack, and add its collected cards to your deck. Installation is separate from collection and deck selection. The Store provides a remote catalog and sends verified downloads through the same installer as local `.oawpack` files.
+After installation, open **Pack & Card Library**, open the plugin's pack, and add its collected cards to your deck. New pure declarative and content Packs activate immediately through the running Library installer. Python plugins and upgrades to loaded Packs require backend restart; the Library distinguishes selected and loaded versions. Installation is separate from collection and deck selection. The Store provides a remote catalog and sends verified downloads through the same installer as local `.oawpack` files.
 
 Source projects declare dependencies and execution targets in `oaw.pack.toml`.
 Reuse named dependency groups explicitly between a Pack engine and Sandbox;
@@ -25,9 +25,10 @@ loaded version and per-environment readiness separately. See the
 for `doctor`, `build-project` and compatibility with older Packs.
 
 `scripts/install-plugins.py` reads each declared Pack without importing it,
-registers the Python adapter with `--no-deps`, and prepares its shared adapter
+prepares its shared adapter
 libraries and install-time environments using the same managed providers as
-archive installation. MatCreator's native worker uses its declared private
+archive installation. Schema 3 source discovery needs no editable package install;
+desktop assembly still installs adapter code into its target directory. MatCreator's native worker uses its declared private
 Python environment; XRD prepares its scientific worker on first use. Existing
 undeclared plugins retain their legacy `open_agent_world.setup` hook. Discovery
 does not run setup hooks or download dependencies, and `--dry-run` does neither.
@@ -59,6 +60,11 @@ introduced in Plugin API 1.27.
 Plugin-specific documentation can remain in its own package or repository. These links are a directory, not a requirement to copy all plugin content into OAW's docs. Plugin API 1.26 adds optional [progressive tutorials and offline documents](developers/progressive-tutorials.md) on card and Pack definitions.
 
 ## Developing a plugin
+
+Plugin API 1.37 adds [declarative cards](developers/declarative-packs.md) using
+Schema 3 contributions compiled into the existing registry. Passive cards can
+omit Python factories and repeated owner/Pack/card identities. Advanced plugins
+keep their existing lifecycle, capability and runtime contracts.
 
 Plugin API 1.36 adds `NodeDeploymentDefinition.from_document()`, shared Workspace
 sections and connected file-preview publication. Existing views and business
@@ -236,8 +242,9 @@ packages = ["src/acme_oaw_plugin"]
 ```
 
 Normal backend startup scans immediate package directories under the repository's
-`plugins/` folder. Each package declares the entry-point group above in its
-`pyproject.toml`; both `src` and flat Python package layouts are supported. No
+`plugins/` folder. Advanced packages declare the entry-point group above in their
+`pyproject.toml`; pure declarative cards need only Schema 3 contributions. Both
+`src` and flat Python package layouts are supported. No
 `-PluginPath` flag or editable installation is needed for these local packages.
 Declare installation intent in `oaw.pack.toml` and prepare additional adapter
 libraries with the backend interpreter running `scripts/install-plugins.py`.
@@ -249,25 +256,30 @@ same name and factory as a local declaration is loaded only once. Local packages
 are ordered by directory name, and entry points by name. The loader calls each
 factory once per registry and installs the returned plugin. Import, construction, and registration must be
 deterministic and free of network calls, threads, or external resource creation.
-An import, compatibility, validation, or identifier collision error prevents host
-startup.
+Optional import, compatibility, validation and registration failures make the
+affected owner and dependent plugins **Unavailable**. Independent plugins and Core
+can continue. Registration publishes atomically. Strict `pack check` and CI fail
+on these errors. Core initialization and unsafe persistence/security failures
+still block startup; the host does not silently replace their behavior.
 
-For packages outside `plugins/`, mount an editable package without changing
+For packages outside `plugins/`, discover a source project without changing
 backend dependency files:
 
 ```powershell
 ./scripts/dev.ps1 -AgentRuntime mock -PluginPath ./path/to/my-plugin
 ```
 
-Test the actual packaging and discovery path the same way:
+Prepare explicit dependencies through setup's `--plugin-path` first. For a strict
+check of this project and a disposable card recovery test:
 
 ```powershell
-uv run --project backend --with-editable ./path/to/my-plugin `
-  python -m pytest -p no:cacheprovider ./path/to/my-plugin/tests
+./backend/.venv/Scripts/python.exe scripts/oaw-pack.py check ./path/to/my-plugin `
+  --lifecycle --card acme.card
 ```
 
-The repository's [Greeter plugin](../examples/plugins/greeter/README.md) is the
-canonical compact example.
+Start with [declarative Notes](developers/declarative-packs.md). The
+[Greeter plugin](../examples/plugins/greeter/README.md) demonstrates advanced Python
+lifecycle and legacy entry-point compatibility.
 
 ## Native file resources
 
@@ -1186,23 +1198,41 @@ plugin runtime explicitly creates and manages scopes. See [Runtime state](state.
 
 ## Installation and removal constraints
 
-For a checkout-local permanent installation:
+Use `.oawpack` installation or explicit source paths with a separate development
+profile. Do not add third-party dependencies to the host's project file. Existing
+installed Python entry points remain supported for legacy projects.
 
-```powershell
-uv add --project backend --editable ./path/to/my-plugin
-```
-
-Restart after installing or removing plugins. Before removal, export or migrate
-plugin-owned data and delete every node owned by that plugin. Node deletion removes
-its edges and immediately revokes derived capabilities. If persisted nodes or edges
-remain, startup fails with an ownership-aware unavailable-plugin diagnostic. The
-host never loads an unknown object under a generic fallback behavior.
+If an optional plugin disappears or fails, retained cards and connections become
+unavailable placeholders with their IDs, configuration, layout and data preserved.
+They cannot grant capabilities. Restoring the compatible implementation and
+restarting restores their behavior. Intentional removal still checks world and
+active-work blockers; it does not silently delete those objects.
 
 The Pack Library can disable an installed plugin after its world instances,
 relationships and dependent Agent runtimes have been removed. Pack ownership,
 collected cards and deck references survive disable and uninstall. Re-enabling or
-reinstalling the same stable IDs restores availability. Installation and package
-removal still use the existing discovery mechanism and require a restart.
+reinstalling the same stable IDs restores availability. New passive owners can
+activate immediately; Python code, loaded-version changes and unloads require
+restart. No running Agent or Sandbox task is automatically interrupted.
+
+## Recovery callbacks (API 1.38)
+
+`on_startup` restores transient resources for saved cards. Finish durable writes
+atomically and make `on_shutdown` idempotent even after partial startup. Optional
+restore failure first revokes the owner and dependent contributions, then calls
+bounded cleanup for its attempted and restored cards. Only successful cleanup
+permits Core startup to continue. Shutdown attempts other handlers before reporting
+an aggregate failure. User data is never rollback scratch space.
+
+Raise `PluginIntegrityError` when plugin persistence or compensation is uncertain.
+Database errors, unfinished host transactions, unresolved deletion journals,
+security violations and failed cleanup remain fatal. Factories must clean resources
+they create before returning an instance. The host cannot recover arbitrary global
+Python mutation, an uncooperative callback, a native crash or process termination.
+These are trusted in-process plugins, without an Extension Host crash boundary.
+
+Manifest contributions can be combined with advanced registration in one atomic
+collector; see [mixed contributions](developers/declarative-packs.md#mixed-contributions-api-138).
 
 ## Trust and security boundary
 

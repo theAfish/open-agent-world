@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url';
 // Shared by npm dev and both launchers. No installation is permitted here.
 export async function prepareDev() {
   await checkProject(frontendRoot);
-  for (const pack of await sourcePacks()) await preparePack(pack, { install: false });
+  for (const pack of await sourcePacks({ strict: false })) {
+    try { await preparePack(pack, { install: false }); }
+    catch (error) { console.error(`Optional Pack ${pack.owner} unavailable: ${error.message}`); }
+  }
   await buildPackSdk();
 }
 

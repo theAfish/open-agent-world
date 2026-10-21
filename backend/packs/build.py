@@ -141,6 +141,8 @@ def _rewrite_wheel(data: bytes, spec: PackSpec, source: Path) -> tuple[bytes, tu
             if any(module == "backend" or module.startswith("backend.") for module in imports):
                 raise ValueError(f"{name} imports private host backend code; migrate it to the public Plugin API before publishing")
     files[f"{prefix}/entry_points.txt"] = f"[open_agent_world.plugins]\n{spec.owner} = {entry}\n".encode()
+    if spec.contributions.cards:
+        files[f'{prefix}/oaw.pack.json'] = spec.model_dump_json().encode()
     # RECORD must describe the rewritten wheel, never retain upstream signatures.
     for name in (f"{prefix}/RECORD.jws", f"{prefix}/RECORD.p7s"):
         files.pop(name, None)
@@ -183,7 +185,64 @@ def _dependencies(spec: PackSpec, source: Path) -> list[dict]:
     return result
 
 
-def build_project(source: Path, output: Path, *, backend_wheel: Path, frontend_dir: Path | None = None, dependency_wheels: Path | None = None,
+def _declarative_wheel(spec: PackSpec) -> tuple[bytes, tuple[str, ...]]:
+    """A conventional adapter wheel; installation still uses the same ABI."""
+    module = 'oaw_declarative_' + hashlib.sha256(spec.owner.encode()).hexdigest()[:20]
+    prefix = f'{module}-{spec.version}.dist-info'
+    source = '''import json
+from pathlib import Path
+from open_agent_world.plugin_api import declarative_plugin
+def create_plugin():
+    return declarative_plugin(json.loads(Path(__file__).with_name('contributions.json').read_text(encoding='utf-8')))
+'''
+    files = {
+        module + '/__init__.py': source.encode(),
+        module + '/contributions.json': spec.model_dump_json().encode(),
+        prefix + '/METADATA': ('Metadata-Version: 2.1\nName: ' + module.replace('_', '-') + '\nVersion: ' + spec.version + '\n'
+            + ('Requires-Python: ' + spec.backend.requires_python + '\n' if spec.backend.requires_python else '')
+            + ''.join('Requires-Dist: ' + item + '\n' for item in spec.backend.python)).encode(),
+        prefix + '/WHEEL': b'Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n',
+        prefix + '/entry_points.txt': f'[open_agent_world.plugins]\n{spec.owner}={module}:create_plugin\n'.encode(),
+    }
+    record = io.StringIO(newline='')
+    writer = csv.writer(record, lineterminator='\n')
+    for name, content in sorted(files.items()):
+        writer.writerow((name, 'sha256=' + base64.urlsafe_b64encode(hashlib.sha256(content).digest()).rstrip(b'=').decode(), len(content)))
+    writer.writerow((prefix + '/RECORD', '', ''))
+    files[prefix + '/RECORD'] = record.getvalue().encode()
+    return _zip(files), (module,)
+
+
+def passive_wheel_spec(data: bytes, manifest) -> PackSpec | None:
+    """Recognize only our generated adapter, by all uncompressed file bytes.
+
+    No author-provided Python is executed or treated as passive by declaration.
+    This runs at the installation boundary, not on every application startup.
+    """
+    if manifest.schema_version != 3 or not manifest.module_name.startswith('oaw_declarative_'):
+        return None
+    with ZipFile(io.BytesIO(data)) as wheel:
+        files = zip_files(wheel)
+    raw = files.get(manifest.module_name + '/contributions.json')
+    if raw is None:
+        return None
+    spec = PackSpec.model_validate_json(raw)
+    if (spec.entrypoints or not spec.contributions.cards or spec.dependencies or spec.backend.python
+            or spec.environments or spec.features or spec.prerequisites or spec.legacy_python_requirements):
+        return None
+    if (spec.owner, spec.distribution_id, spec.version, spec.packs, spec.node_types) != (
+            manifest.owner_id, manifest.id, manifest.version, manifest.provided_pack_ids, manifest.node_types):
+        return None
+    if spec.compatibility is None or spec.compatibility.model_dump() != manifest.compatibility.model_dump():
+        return None
+    expected, modules = _declarative_wheel(spec)
+    with ZipFile(io.BytesIO(expected)) as wheel:
+        if files != zip_files(wheel) or modules != manifest.module_names:
+            return None
+    return spec
+
+
+def build_project(source: Path, output: Path, *, backend_wheel: Path | None = None, frontend_dir: Path | None = None, dependency_wheels: Path | None = None,
                   plugin_api: str | None = None, oaw: str | None = None) -> Path:
     """Compile static metadata around an author's already-built wheel and UI."""
     source, output = Path(source).resolve(), Path(output).resolve()
@@ -201,7 +260,23 @@ def build_project(source: Path, output: Path, *, backend_wheel: Path, frontend_d
         raise ValueError("Declare compatibility.plugin_api or pass --plugin-api matching the runtime descriptor")
     compatibility.setdefault("oaw", ">=0.1.0,<1")
     compatibility.setdefault("frontend_api", 1)
-    wheel, modules = _rewrite_wheel(Path(backend_wheel).read_bytes(), spec, source)
+    if spec.contributions.cards and not spec.entrypoints:
+        if backend_wheel is not None:
+            raise ValueError('Declarative cards generate their adapter; omit --backend-wheel')
+        # Validate the same registration before producing an artifact. This only
+        # executes Core's compiler, never third-party Python or build hooks.
+        from backend.plugins.declarative import declarative_plugin
+        from backend.plugins.registry import PluginRegistry
+        from backend.packs.spec import CompatibilitySpec
+        if Version(compatibility['plugin_api']) < Version('1.37'):
+            raise ValueError('Declarative cards require Plugin API 1.37 or newer')
+        spec = spec.model_copy(update={'compatibility': CompatibilitySpec.model_validate(compatibility)})
+        PluginRegistry().install(declarative_plugin(spec), source_spec=spec)
+        wheel, modules = _declarative_wheel(spec)
+    else:
+        if backend_wheel is None:
+            raise ValueError('Advanced Plugin API projects require --backend-wheel')
+        wheel, modules = _rewrite_wheel(Path(backend_wheel).read_bytes(), spec, source)
     files = {"backend/adapter.whl": wheel}
     from backend.packs.adapters import collect_wheels
     adapter, dependency_files = collect_wheels(spec.backend.python, dependency_wheels)

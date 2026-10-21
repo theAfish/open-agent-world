@@ -285,15 +285,16 @@ def to_markdown(data, filename, media_type, *, engine="auto", mineru_base_url=No
                     text = _text_markdown(data, filename)
                 else:
                     raise KnowledgeError(f"Unknown PDF engine {candidate!r}")
-            except ImportError:
-                errors.append(f"{candidate}: not installed")
+            except ImportError as error:
+                errors.append(f"{candidate}: unavailable ({error})")
             except KnowledgeError as error:
                 errors.append(f"{candidate}: {error}")
             else:
                 return _truncate(text, candidate, filename)
         raise KnowledgeError(
             "No PDF engine could convert this file (" + "; ".join(errors) + "). "
-            "Install pymupdf4llm into the backend environment or configure MinerU.")
+            "Prepare or repair the Knowledge Base Pack dependencies and restart OAW, "
+            "or configure MinerU. For standalone use, install the project's declared PDF dependencies.")
 
     suffix = Path(filename).suffix.lower()
     if _is_image(filename, media_type):

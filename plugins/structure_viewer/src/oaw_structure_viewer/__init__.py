@@ -1,28 +1,20 @@
-from pydantic import BaseModel, ConfigDict
-from open_agent_world.plugin_api import NodeTypeDefinition, PackDefinition, PluginDescriptor, StatelessStateSpec, DeploymentSurface, NodeDeploymentDefinition
+from dataclasses import replace
+from open_agent_world.plugin_api import PackDefinition, PluginDescriptor, StatelessStateSpec, DeploymentSurface, NodeDeploymentDefinition
 from .tutorials import TUTORIALS
 
 
-class ViewerConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
 class StructureViewerPlugin:
-    descriptor = PluginDescriptor(id="science.structure-viewer", version="0.2.0", plugin_api_version="1.36",
+    descriptor = PluginDescriptor(id="science.structure-viewer", version="0.2.0", plugin_api_version="1.38",
                                   name="Structure viewer", description="MatterViz crystal and molecule rendering")
 
     def register(self, registration):
-        registration.register_node_type(NodeTypeDefinition(
-            id="science.structure-viewer", label="Structure viewer", description="Follow crystal and molecule files opened in connected windows.",
-            icon="atom", color="#67a69b", deck_id="science", deck_label="Science", deck_icon="atom",
-            default_name="Structure viewer", default_size=(340, 240), default_status="ready", statuses=frozenset({"ready"}),
+        card_id = self.descriptor.id
+        registration.nodes[card_id] = replace(registration.nodes[card_id],
             state=StatelessStateSpec(), tutorials=TUTORIALS,
-            config_model=ViewerConfig, traits=frozenset({"core.file-viewer", "ui.content-surface.v1"}), templateable=True,
-            frontend={"preview": "preview", "body": "viewer", "workspace": "viewer"},
+            traits=frozenset({"core.file-viewer", "ui.content-surface.v1"}), templateable=True,
             deployment=NodeDeploymentDefinition(surface=DeploymentSurface(file_preview=True)),
-            surfaces={"preview": True, "inspector": True, "workspace": True},
-        ))
-        registration.register_pack(PackDefinition(id="science.structure-viewer.default", name="Structure viewer",
+        )
+        registration.register_pack(PackDefinition(id=card_id + ".default", name="Structure viewer",
                                                  description="Interactive crystal and molecule visualization.", cards=tuple(registration.nodes)))
 
 

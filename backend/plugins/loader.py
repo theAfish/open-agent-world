@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import logging
+import os
 import tomllib
 from importlib.metadata import EntryPoint, entry_points
 from pathlib import Path
@@ -24,140 +26,195 @@ def create_plugin(factory, *, data_root=None, source_root=None):
     return factory()
 
 
-def load_plugin_registry(plugin_directory: Path | None = None, *, plugin_directories: tuple[Path, ...] = (), data_root: Path | None = None, load_installed: bool = True, load_unenrolled_sources: bool = False) -> PluginRegistry:
-    """Load trusted packages in the project's plugins folder, then installed plugins.
+def _failure(registry, identifier, origin, phase, exc, *, owner=None):
+    # Storage corruption and resource exhaustion are host failures, including
+    # when surfaced through plugin code. Never turn them into optional warnings.
+    from backend.plugins.failures import raise_if_unsafe
+    raise_if_unsafe(exc)
+    if phase == 'accounting':
+        raise exc
+    logging.getLogger(__name__).error("Plugin %s unavailable during %s (%s): %s", identifier, phase, origin, exc)
+    registry.load_failures.append(dict(id=identifier, owner=owner, source=str(origin),
+        state="unavailable", phase=phase, error=str(exc), retry="repair_and_restart"))
 
-    Each entry point exposes a zero-argument plugin factory. Loading is
-    fail-closed: a broken, incompatible, or duplicate plugin prevents startup.
+
+def _check_strict(registry, strict):
+    if strict and registry.load_failures:
+        raise RuntimeError("Optional plugin checks failed: " + "; ".join(
+            f"{row['id']} from {row['source']} ({row['phase']}): {row['error']}" for row in registry.load_failures))
+
+
+def load_plugin_registry(plugin_directory: Path | None = None, *, plugin_directories: tuple[Path, ...] = (),
+                         data_root: Path | None = None, load_installed: bool = True,
+                         load_unenrolled_sources: bool = False, strict: bool = False,
+                         core_only: bool = False, load_entry_points: bool = True) -> PluginRegistry:
+    """Discover metadata first; isolate optional activation failures per owner.
+
+    Core registration and host persistence errors remain fatal. Strict mode is
+    for CI/release validation, and reports every failed optional contribution.
+    Nothing here installs dependencies or repairs prepared artifacts.
     """
-
     registry = create_builtin_registry()
-    directory = (
-        plugin_directory
-        if plugin_directory is not None
-        else Path(__file__).resolve().parents[2] / "plugins"
-    )
-    local: list[tuple[EntryPoint, Path]] = []
-    from backend.packs.spec import read_source_pack
-    source_specs = {}
+    if core_only or os.environ.get("OPEN_AGENT_WORLD_CORE_ONLY") == "1":
+        registry.source_discovery_complete = False
+        return registry
+    from backend.packs.spec import read_source_pack, _requirements
     from backend.packs.installation import PackInstallationManager
+    directory = plugin_directory if plugin_directory is not None else Path(__file__).resolve().parents[2] / "plugins"
     enrollment = PackInstallationManager(data_root) if data_root is not None else None
     bundled_directory = directory.resolve()
+    local, source_specs, source_identities = [], {}, {}
+    seen_roots = set()
     for directory in dict.fromkeys((directory, *plugin_directories)):
         if not directory.is_dir():
             continue
-        for package in sorted(directory.iterdir()):
+        for package in ([directory] if (directory / 'pyproject.toml').is_file() else sorted(directory.iterdir())):
             manifest = package / "pyproject.toml"
-            if not package.is_dir() or not manifest.is_file():
+            if not package.is_dir() or not manifest.is_file() or package.resolve() in seen_roots:
                 continue
+            seen_roots.add(package.resolve())
             try:
                 with manifest.open("rb") as stream:
                     project = tomllib.load(stream).get("project", {})
                 declarations = project.get("entry-points", {}).get(ENTRY_POINT_GROUP, {})
                 if not isinstance(declarations, dict):
                     raise TypeError(f"{ENTRY_POINT_GROUP} must be a table")
-                if declarations:
-                    source_specs[manifest] = read_source_pack(package)
-                    spec = source_specs[manifest]
+                if not declarations and not (package / 'oaw.pack.toml').is_file():
+                    continue
+                # Reserve discovered entrypoints even when static validation fails:
+                # an editable distribution must not bypass a broken declaration.
+                entries = [EntryPoint(name=name, value=value, group=ENTRY_POINT_GROUP)
+                           for name, value in sorted(declarations.items()) if isinstance(value, str)]
+                local.extend((entry, manifest) for entry in entries)
+                if not entries:
+                    local.append((None, manifest))
+                spec = read_source_pack(package)
+                if spec.compatibility:
+                    from backend import __version__
+                    from backend.plugins.registry import _supports_plugin_api
+                    from packaging.specifiers import SpecifierSet
+                    from packaging.version import Version
+                    if not _supports_plugin_api(spec.compatibility.plugin_api) or Version(__version__) not in SpecifierSet(spec.compatibility.oaw):
+                        raise ValueError('Source Pack requires an incompatible OAW or Plugin API version')
+                identities = {value for value in (spec.owner, spec.distribution_id, *spec.packs) if value}
+                conflicts = [path for path, previous in source_identities.items() if identities & previous]
+                # Keep conflicting identities reserved so a third declaration
+                # cannot become authoritative just because the first two failed.
+                source_identities[manifest] = identities
+                if conflicts:
+                    for path in conflicts:
+                        previous = source_specs[path]
+                        if previous is None:
+                            continue
+                        source_specs[path] = None
+                        _failure(registry, previous.distribution_id, path, "discovery",
+                                 ValueError("Ambiguous source Pack identity"), owner=previous.owner)
+                    raise ValueError("Ambiguous source Pack identity")
+                source_specs[manifest] = spec
+                if spec.owner:
                     registry.pack_specs[spec.owner] = spec
                     registry.pack_roots[spec.owner] = package
                     registry.pack_sources[spec.owner] = "bundled" if package.parent.resolve() == bundled_directory else "development"
-                for name, value in sorted(declarations.items()):
-                    if not isinstance(value, str):
-                        raise TypeError(f"entry point {name!r} must be a string")
-                    local.append((EntryPoint(name=name, value=value, group=ENTRY_POINT_GROUP), manifest))
-                if declarations:
-                    source = str((package / "src" if (package / "src").is_dir() else package).resolve())
-                    if source not in sys.path:
-                        sys.path.insert(0, source)
-            except Exception as exc:
-                raise RuntimeError(f"Cannot discover plugin in {manifest}: {exc}") from exc
-    discovered = entry_points()
-    selected = (
-        discovered.select(group=ENTRY_POINT_GROUP)
-        if hasattr(discovered, "select")
-        else discovered.get(ENTRY_POINT_GROUP, ())
-    )
-    local_keys = {(entry.name, entry.value) for entry, _ in local}
-    candidates = local + [
-        (entry, "installed distribution")
-        for entry in sorted(selected, key=lambda item: item.name)
-        if (entry.name, entry.value) not in local_keys
-    ]
+            except (Exception, SystemExit) as exc:
+                source_specs[manifest] = None
+                _failure(registry, package.name, manifest, "discovery", exc)
+    discovered = entry_points() if load_entry_points else ()
+    selected = discovered.select(group=ENTRY_POINT_GROUP) if hasattr(discovered, "select") else discovered.get(ENTRY_POINT_GROUP, ()) if isinstance(discovered, dict) else ()
+    local_keys = {(entry.name, entry.value) for entry, _ in local if entry is not None}
+    candidates = list(local)
+    for entry in sorted(selected, key=lambda item: item.name):
+        if (entry.name, entry.value) in local_keys:
+            continue
+        try:
+            # Editable distribution metadata can outlive a broken/changed source
+            # manifest. Its recorded source is authoritative; never activate its
+            # stale entrypoint as an independent installed distribution.
+            import json
+            from urllib.parse import urlsplit
+            from urllib.request import url2pathname
+            direct = entry.dist.read_text('direct_url.json') if entry.dist else None
+            if direct:
+                location = urlsplit(json.loads(direct)['url'])
+                if location.scheme == 'file' and Path(url2pathname(location.path)).resolve() in seen_roots:
+                    continue
+            candidates.append((entry, "installed distribution"))
+        except (Exception, SystemExit) as exc:
+            _failure(registry, entry.name, 'installed distribution metadata', 'discovery', exc)
     pending = []
-    for entry_point, origin in candidates:
+    for entry, origin in candidates:
         spec = source_specs.get(origin)
+        if isinstance(origin, Path) and spec is None:
+            continue
         if spec is not None and enrollment and not load_unenrolled_sources and not enrollment.source_enrolled(spec.distribution_id):
             continue
-        if spec is not None and data_root is not None:
-            from backend.packs.lifecycle import ManagedResourceLedger, environment_resources
-            from backend.packs.adapters import activate_source_adapter, source_adapter_resource_ids
-            ManagedResourceLedger(data_root).pin_process(
-                environment_resources(spec, origin.parent) | source_adapter_resource_ids(spec, data_root), label=spec.owner)
-            with startup_stage(f"check Pack installation ({spec.owner})"):
-                activate_source_adapter(spec, data_root)
+        phase, previous_path = "environment", list(sys.path)
         try:
-            factory = entry_point.load()
-            if not callable(factory):
-                raise TypeError("entry point must expose a plugin factory")
-            plugin = create_plugin(factory, data_root=data_root,
-                                   source_root=origin.parent if isinstance(origin, Path) else None)
+            if spec is not None and data_root is not None:
+                from backend.packs.lifecycle import ManagedResourceLedger, environment_resources
+                from backend.packs.adapters import activate_source_adapter, source_adapter_resource_ids
+                resources = environment_resources(spec, origin.parent) | source_adapter_resource_ids(spec, data_root)
+                phase = 'accounting'
+                ManagedResourceLedger(data_root).pin_process(resources, label=spec.owner)
+                phase = 'environment'
+                with startup_stage(f"check Pack installation ({spec.owner})"):
+                    activate_source_adapter(spec, data_root)
+            if isinstance(origin, Path):
+                package = origin.parent
+                source = str((package / "src" if (package / "src").is_dir() else package).resolve())
+                if source not in sys.path:
+                    sys.path.insert(0, source)
+            phase = "import"
+            if entry is None:
+                from backend.plugins.declarative import declarative_plugin
+                plugin = declarative_plugin(spec)
+            else:
+                factory = entry.load()
+                if not callable(factory):
+                    raise TypeError("entry point must expose a plugin factory")
+                plugin = create_plugin(factory, data_root=data_root, source_root=origin.parent if isinstance(origin, Path) else None)
             if not isinstance(getattr(plugin, "descriptor", None), PluginDescriptor):
                 raise TypeError("plugin descriptor must be a PluginDescriptor")
-            pending.append((plugin, entry_point, origin))
-        except Exception as exc:
-            raise RuntimeError(f"Cannot load plugin {entry_point.name!r} from {origin}: {exc}") from exc
-    # Resolve declared dependencies before registration so cross-plugin presets
-    # are validated atomically against their actual node/relationship owners.
-    ordered = []
-    available = {plugin.id for plugin in registry.plugins()}
+            descriptor = plugin.descriptor
+            if spec is not None and not spec.legacy and (spec.owner != descriptor.id or spec.version != descriptor.version):
+                raise ValueError("Plugin descriptor disagrees with its static Pack identity/version")
+            requirements = _requirements(descriptor.python_requirements)
+            if spec is not None:
+                declared = spec.legacy_python_requirements
+                if requirements and requirements != _requirements(declared) and not spec.legacy:
+                    raise ValueError("Legacy Sandbox requirements disagree with the static Pack declaration")
+                requirements = (declared or requirements) if spec.legacy else declared
+            pending.append((plugin, entry, origin, requirements))
+        except (Exception, SystemExit) as exc:
+            sys.path[:] = previous_path
+            _failure(registry, spec.distribution_id if spec else entry.name, origin, phase, exc, owner=spec.owner if spec else None)
+    # Only successfully committed registrations satisfy downstream dependencies.
     while pending:
+        available = {p.id for p in registry.plugins() if registry.is_enabled(p.id)}
         ready = [item for item in pending if set(item[0].descriptor.requires_plugins) <= available]
         if not ready:
-            details = "; ".join(
-                f"{plugin.descriptor.id} from {origin} requires {', '.join(sorted(set(plugin.descriptor.requires_plugins) - available))}"
-                for plugin, _, origin in pending
-            )
-            raise RuntimeError(f"Missing or cyclic plugin dependencies: {details}")
-        for item in ready:
-            pending.remove(item)
-            ordered.append(item)
-            available.add(item[0].descriptor.id)
-    for plugin, entry_point, origin in ordered:
-        try:
-            source_spec = source_specs.get(origin)
-            if source_spec is not None and not source_spec.legacy:
-                if (source_spec.owner != plugin.descriptor.id or source_spec.version != plugin.descriptor.version):
-                    raise ValueError("Plugin descriptor disagrees with its static Pack identity/version")
-            registry.install(plugin, source_spec=source_spec)
-            if source_spec is not None:
-                owner = plugin.descriptor.id
-                actual_packs = tuple(p.id for p in registry.catalog(include_disabled=True).packs if p.plugin_id == owner)
-                if source_spec.packs and set(actual_packs) != set(source_spec.packs):
-                    raise ValueError("Plugin registration disagrees with its static provided Pack IDs")
-                updates = {"owner": owner, "packs": actual_packs}
-                if source_spec.legacy:
-                    updates.update(distribution_id=owner, version=plugin.descriptor.version,
-                        name=plugin.descriptor.name or owner)
-                registry.pack_specs[owner] = source_spec.model_copy(update=updates)
+            for plugin, entry, origin, _ in pending:
+                missing = sorted(set(plugin.descriptor.requires_plugins) - available)
+                _failure(registry, plugin.descriptor.id, origin, "dependency",
+                         ValueError("Missing or cyclic plugin dependencies: " + ", ".join(missing)), owner=plugin.descriptor.id)
+            break
+        for plugin, entry, origin, requirements in ready:
+            pending.remove((plugin, entry, origin, requirements))
+            spec = source_specs.get(origin)
+            try:
+                registry.install(plugin, source_spec=spec)
+            except (Exception, SystemExit) as exc:
+                _failure(registry, spec.distribution_id if spec else entry.name, origin, "registration", exc, owner=plugin.descriptor.id)
+                continue
+            owner = plugin.descriptor.id
+            registry.runtime_requirements[owner] = tuple(requirements)
+            if spec is not None:
+                if spec.legacy:
+                    spec = spec.model_copy(update=dict(owner=owner, distribution_id=owner, version=plugin.descriptor.version,
+                        name=plugin.descriptor.name or owner,
+                        packs=tuple(p.id for p in registry.catalog(include_disabled=True).packs if p.plugin_id == owner)))
+                registry.pack_specs[owner] = spec
                 registry.pack_roots[owner] = origin.parent
                 registry.pack_sources[owner] = "bundled" if origin.parent.parent.resolve() == bundled_directory else "development"
-            if isinstance(origin, Path):
-                with origin.open("rb") as stream:
-                    manifest = tomllib.load(stream)
-                requirements = manifest.get("tool", {}).get("open-agent-world", {}).get("runtime", {}).get("python")
-                if requirements is not None:
-                    from backend.sandbox.python_runtime import validate_requirements
-                    registry.runtime_requirements[plugin.descriptor.id] = tuple(validate_requirements(requirements))
-                if source_spec is not None and not source_spec.legacy:
-                    requirements = source_spec.legacy_python_requirements
-                    from backend.packs.spec import _requirements
-                    previous = registry.runtime_requirements.get(plugin.descriptor.id, plugin.descriptor.python_requirements)
-                    if previous and _requirements(previous) != _requirements(requirements):
-                        raise ValueError("Legacy Sandbox requirements disagree with the static Pack declaration")
-                    registry.runtime_requirements[plugin.descriptor.id] = tuple(requirements)
-        except Exception as exc:
-            raise RuntimeError(f"Cannot load plugin {entry_point.name!r} from {origin}: {exc}") from exc
     if data_root is not None:
         if load_installed:
             with startup_stage("load installed Packs"):
@@ -165,40 +222,79 @@ def load_plugin_registry(plugin_directory: Path | None = None, *, plugin_directo
         manager = PackInstallationManager(data_root, registry)
         manager.pin_loaded_resources()
         manager.reconcile_resources()
+    _check_strict(registry, strict)
     return registry
 
 
-def load_installed_packs(registry: PluginRegistry, data_root: Path) -> None:
+def _record_installed(registry, manager, manifest):
+    from urllib.parse import quote
+    from backend.packs.planning import manifest_spec
+    registry.installed_packs[manifest.id] = manifest
+    registry.runtime_requirements[manifest.owner_id] = manifest.runtime.sandbox.python
+    registry.pack_specs[manifest.owner_id] = manifest_spec(manifest)
+    registry.pack_roots[manifest.owner_id] = manager.version_path(manifest.id, manifest.version)
+    registry.pack_sources[manifest.owner_id] = 'installed'
+    if manifest.entrypoints:
+        registry.frontend_modules[manifest.owner_id] = {
+            'version': manifest.version, 'api_version': manifest.compatibility.frontend_api,
+            'distribution_id': manifest.id,
+            'url': f"/api/packs/{manifest.id}/versions/{quote(manifest.version, safe='!')}/{quote(manifest.entrypoints.frontend)}",
+        }
+
+
+def load_installed_packs(registry: PluginRegistry, data_root: Path, *, strict: bool = False, safe_only: bool = False) -> None:
     """Discover immutable wheels from user data; never install into host Python."""
     import importlib.util
-    from urllib.parse import quote
     from backend.packs.installation import PackInstallationManager
 
     manager = PackInstallationManager(data_root, registry)
     pending = manager.selected()
+    if safe_only:
+        # Never replace a loaded owner, run author Python, or touch live work.
+        pending = {key: manifest for key, manifest in pending.items() if not registry.has_plugin(manifest.owner_id)
+            and (manifest.kind == 'content' or (manager._startup_receipt(manifest) or {}).get('passive_spec'))}
     # Persisted enable/disable state is reconciled by CardLibraryStore next.
     # Environment bootstrap validates that enabled set, before any mutation.
-    manager._check_selection(pending, check_requirements=False)
-    # Resolve metadata first. No user code runs during inspection or validation.
-    entries = {key: manager.startup_entrypoint(manifest) for key, manifest in pending.items()}
+    from backend.packs.planning import manifest_spec
+    for manifest in pending.values():
+        # Preserve static diagnostics even for an unimportable selected release.
+        if manifest.owner_id not in registry.pack_specs:
+            registry.pack_specs[manifest.owner_id] = manifest_spec(manifest)
+            registry.pack_roots[manifest.owner_id] = manager.version_path(manifest.id, manifest.version)
+            registry.pack_sources[manifest.owner_id] = "installed"
     providers = {pack: manifest.id for manifest in pending.values() for pack in manifest.provided_pack_ids}
     while pending:
         ready = [m for m in pending.values() if not any(providers.get(d.id) in pending for d in m.dependencies.packs)]
         if not ready:
-            raise RuntimeError("Cyclic installed Pack dependencies")
+            for manifest in pending.values():
+                _failure(registry, manifest.id, manager.version_path(manifest.id, manifest.version), "dependency",
+                         ValueError("Cyclic installed Pack dependencies"), owner=manifest.owner_id)
+            break
         for manifest in ready:
+            del pending[manifest.id]
+            from backend.packs.lifecycle import ManagedResourceLedger
+            ledger = ManagedResourceLedger(data_root)
+            ledger.pin_process(manager.resource_ids(manifest), label=manifest.owner_id)
+            phase, previous_path = "dependency", list(sys.path)
             try:
-                from backend.packs.lifecycle import ManagedResourceLedger
-                ledger = ManagedResourceLedger(data_root)
-                ledger.pin_process(manager.resource_ids(manifest), label=manifest.owner_id)
-                if manifest.kind == "content":
-                    from backend.packs.content import content_plugin
-                    root = manager.version_path(manifest.id, manifest.version)
-                    plugin = content_plugin(manifest, {name: (root / name).read_bytes() for name in manifest.content.paths}, registry)
+                manager._check_selection({**registry.installed_packs, manifest.id: manifest}, check_requirements=False)
+                phase = "environment"
+                entrypoint = manager.startup_entrypoint(manifest)
+                passive_spec = (manager._startup_receipt(manifest) or {}).get('passive_spec')
+                if manifest.kind == "content" or passive_spec:
+                    if passive_spec:
+                        from backend.plugins.declarative import declarative_plugin
+                        plugin = declarative_plugin(passive_spec)
+                        if (plugin.descriptor.id, plugin.descriptor.version, plugin.descriptor.plugin_api_version) != (
+                                manifest.owner_id, manifest.version, manifest.compatibility.plugin_api):
+                            raise ValueError('Passive declaration differs from installed ownership or compatibility')
+                    else:
+                        from backend.packs.content import content_plugin
+                        root = manager.version_path(manifest.id, manifest.version)
+                        plugin = content_plugin(manifest, {name: (root / name).read_bytes() for name in manifest.content.paths}, registry)
+                    phase = "registration"
                     registry.install(plugin, distribution=manifest)
-                    registry.installed_packs[manifest.id] = manifest
-                    registry.runtime_requirements[manifest.id] = ()
-                    del pending[manifest.id]
+                    _record_installed(registry, manager, manifest)
                     continue
                 origin = manager.version_path(manifest.id, manifest.version) / manifest.entrypoints.backend
                 if manifest.schema_version == 3:
@@ -207,7 +303,9 @@ def load_installed_packs(registry: PluginRegistry, data_root: Path) -> None:
                     from backend.packs.modules import prepared_modules
                     origin = prepared_modules(manifest, manager.root / "cache" / "modules",
                         expected_digest=manager._checksums(manifest.id, manifest.version)[manifest.entrypoints.backend])
+                    phase = 'accounting'
                     ledger.register('modules:' + origin.name, origin, 'modules')
+                    phase = 'environment'
                 for module_name in manifest.module_names:
                     existing = importlib.util.find_spec(module_name)
                     if existing is None:
@@ -218,12 +316,13 @@ def load_installed_packs(registry: PluginRegistry, data_root: Path) -> None:
                         raise ValueError("Backend module ownership conflict; restart OAW to change versions")
                 if str(origin) not in sys.path:
                     sys.path.append(str(origin))
+                phase = "import"
                 # Keep the installed backend tree free of host bytecode writes.
                 previous_bytecode = sys.dont_write_bytecode
                 try:
                     if manifest.schema_version == 3:
                         sys.dont_write_bytecode = True
-                    plugin = create_plugin(EntryPoint(name=manifest.id, value=entries[manifest.id], group=ENTRY_POINT_GROUP).load(),
+                    plugin = create_plugin(EntryPoint(name=manifest.id, value=entrypoint, group=ENTRY_POINT_GROUP).load(),
                         data_root=data_root, source_root=manager.version_path(manifest.id, manifest.version))
                 finally:
                     sys.dont_write_bytecode = previous_bytecode
@@ -234,18 +333,14 @@ def load_installed_packs(registry: PluginRegistry, data_root: Path) -> None:
                         or set(descriptor.requires_plugins) != set(dependencies)
                         or (descriptor.python_requirements and descriptor.python_requirements != manifest.runtime.sandbox.python)):
                     raise ValueError("Backend descriptor disagrees with distribution identity, compatibility or dependencies")
-                registry.install(plugin, distribution=manifest)
-                registry.installed_packs[manifest.id] = manifest
-                registry.runtime_requirements[manifest.owner_id] = manifest.runtime.sandbox.python
-                from backend.packs.planning import manifest_spec
-                registry.pack_specs[manifest.owner_id] = manifest_spec(manifest)
-                registry.pack_roots[manifest.owner_id] = manager.version_path(manifest.id, manifest.version)
-                registry.pack_sources[manifest.owner_id] = "installed"
-                registry.frontend_modules[manifest.owner_id] = {
-                    "version": manifest.version, "api_version": manifest.compatibility.frontend_api,
-                    "distribution_id": manifest.id,
-                    "url": f"/api/packs/{manifest.id}/versions/{quote(manifest.version, safe='!')}/{quote(manifest.entrypoints.frontend)}",
-                }
-                del pending[manifest.id]
-            except Exception as exc:
-                raise RuntimeError(f"Cannot load installed Pack {manifest.id}@{manifest.version}: {exc}. Select a retained version with the Pack recovery CLI.") from exc
+                phase = "registration"
+                contribution = (manager._startup_receipt(manifest) or {}).get('contribution_spec')
+                if contribution:
+                    from backend.packs.spec import PackSpec
+                    contribution = PackSpec.model_validate(contribution)
+                registry.install(plugin, distribution=manifest, source_spec=contribution)
+                _record_installed(registry, manager, manifest)
+            except (Exception, SystemExit) as exc:
+                sys.path[:] = previous_path
+                _failure(registry, manifest.id, manager.version_path(manifest.id, manifest.version), phase, exc, owner=manifest.owner_id)
+    _check_strict(registry, strict)

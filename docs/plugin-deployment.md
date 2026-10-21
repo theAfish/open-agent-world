@@ -151,10 +151,12 @@ Keep card-wide reads/actions separate from access intended for a private section
 
 1. Follow [plugin installation](plugins.md#package-structure-and-discovery), declare
    `requires_plugins`, install dependencies, and verify the original workspace in the editor.
-2. For source-checkout plugins with a frontend, retain `plugin.json` and `index.tsx`
-   under `plugins/<package>/frontend/` and run `npm --prefix frontend run build`.
-   A Python wheel alone does not install browser components. The builder also discovers
-   example frontends; their cards do not appear without the corresponding backend plugin.
+2. For distributed plugins with a frontend, build the Pack's UI independently and
+   include its compiled assets in a [`.oawpack`](pack-distribution.md). Install it
+   in the editor profile before publication; no host frontend rebuild is required.
+   A Python wheel alone does not install browser components. When developing the
+   OAW source checkout itself, `npm --prefix frontend run build` also prepares its
+   source-Pack frontends.
 3. Save the Legion layout, follow the [deployment procedure](deployment.md), and copy
    to a new directory. The copy contains data; distribute matching source, frontend
    build, Python dependencies, and external plugin resources as well.

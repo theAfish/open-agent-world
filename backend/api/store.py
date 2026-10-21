@@ -135,6 +135,7 @@ async def install(request: Request, target=Depends(identity), services=Depends(g
                 async with services._node_mutation():
                     await checked(partial(services.pack_installations.activate, target.pack_id, target.version, prepare=False))
                     services.card_library.restore_plugin(services.pack_installations.selected()[target.pack_id].owner_id)
+                    await services.activate_passive_packs()
             finally:
                 await finish_thread(services.pack_installations.interrupt_activation, target.pack_id, target.version)
         return local_state(services, target.pack_id, target.version)

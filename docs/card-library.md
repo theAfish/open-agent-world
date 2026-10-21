@@ -26,13 +26,16 @@ An existing target entry is kept once; membership in other decks is unchanged.
 Dragging a saved formation from the virtual Legions tab adds it to the chosen
 deck while preserving the saved formation.
 
-The **Store** tab is a placeholder. Installation remains repository-folder or
-Python-entry-point discovery followed by restarting the backend. No online
-acquisition, payments, random drops, duplicates, rarity or trading are implemented.
+The **Store** tab browses the configured remote catalog and sends verified downloads
+through the same installer as local `.oawpack` files. A newly installed content or
+pure declarative Pack becomes available immediately. Python extensions and updates
+to already loaded Packs remain pending until backend restart. Payments, random
+drops, duplicates, rarity and trading are not implemented.
 
 ## Plugin manifests
 
-Use the existing Python registration mechanism (Plugin API **1.14**):
+Start with [Schema 3 declarative cards](developers/declarative-packs.md).
+Advanced plugins can still use the existing Python registration mechanism:
 
 ```python
 from open_agent_world.plugin_api import PackDefinition

@@ -44,10 +44,12 @@ def test_setup_routes_all_platforms_through_persistent_interpreter(scripts, monk
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
+        if "--report" in command:
+            Path(command[command.index("--report") + 1]).write_text("[]")
         return SimpleNamespace(returncode=0 if ready or "--check-host" not in command else 1)
 
     monkeypatch.setattr(setup.subprocess, "run", run)
-    args = ["--plugin-path", "external plugin"]
+    args = ["--with-plugins", "--plugin-path", "external plugin"]
     if profile:
         args += ["--profile", profile]
     if skip_build:
@@ -57,7 +59,7 @@ def test_setup_routes_all_platforms_through_persistent_interpreter(scripts, monk
     assert commands[0][:2] == ["uv", "sync"]
     assert "--locked" in commands[0] and "--inexact" in commands[0]
     assert commands[1][:2] == [str(python), str(root / "scripts/install-plugins.py")]
-    assert commands[1][-2:] == ["--additional-path", str(extra)]
+    assert commands[1][commands[1].index("--additional-path") + 1] == str(extra)
     assert ("--profile" in commands[1]) == bool(profile)
     assert any("ci" in command for command in commands) == (not ready)
     assert [command[-1] for command in commands if command[:2] == ["npm", "run"]] == (
@@ -78,6 +80,67 @@ def test_setup_stops_after_host_failure(scripts, monkeypatch):
     with pytest.raises(subprocess.CalledProcessError):
         setup.main([])
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize('mode', ['core', 'ready', 'backend-failed', 'frontend-failed'])
+def test_setup_summary_preserves_core_and_reports_partial_failure(scripts, monkeypatch, tmp_path, capsys, mode):
+    setup, _, _ = scripts
+    python = tmp_path / 'python'
+    python.touch()
+    monkeypatch.setattr(setup, 'backend_python', lambda: python)
+    monkeypatch.setattr(setup, 'prerequisites', lambda **kw: {key: key for key in ('uv', 'node', 'npm')})
+    commands = []
+    def run(command, **kwargs):
+        commands.append(command)
+        if '--report' in command:
+            Path(command[command.index('--report') + 1]).write_text(json.dumps([
+                {'id': 'knowledge.base', 'path': 'plugins/knowledge_base', 'ready': mode != 'backend-failed',
+                 'error': 'dependency incompatible' if mode == 'backend-failed' else ''}]))
+            return SimpleNamespace(returncode=3 if mode == 'backend-failed' else 0)
+        if mode == 'frontend-failed' and command[-1] == 'prepare:packs':
+            Path(kwargs['env']['OAW_PACK_FAILURE_REPORT']).write_text(json.dumps(
+                {'id': 'knowledge.base', 'error': 'frontend dependency missing'}) + '\n')
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(setup.subprocess, 'run', run)
+    result = setup.main(['--skip-build', *(['--with-plugins'] if mode != 'core' else [])])
+    output = capsys.readouterr()
+    assert 'Core ready' in output.out
+    assert any(command[-1] == 'prepare:packs' for command in commands)
+    if mode.endswith('failed'):
+        assert result == 3
+        assert '0 ready, 1 failed' in output.out
+        assert 'Core remains usable' in output.err
+        assert 'Setup complete (' not in output.out
+        assert ('dependency incompatible' if mode == 'backend-failed' else 'frontend dependency missing') in output.err
+    else:
+        assert result is None
+        assert ('not requested (Core-only setup)' if mode == 'core' else '1 ready, 0 failed') in output.out
+
+
+@pytest.mark.parametrize('explicit', [False, True])
+def test_setup_defaults_to_core_or_only_requested_project(scripts, monkeypatch, tmp_path, explicit):
+    setup, _, _ = scripts
+    python = tmp_path / 'python'
+    python.touch()
+    project = tmp_path / 'external'
+    project.mkdir()
+    (project / 'pyproject.toml').touch()
+    monkeypatch.setattr(setup, 'backend_python', lambda: python)
+    monkeypatch.setattr(setup, 'prerequisites', lambda **kw: {key: key for key in ('uv', 'node', 'npm')})
+    calls = []
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        if "--report" in command:
+            Path(command[command.index("--report") + 1]).write_text("[]")
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(setup.subprocess, 'run', run)
+    setup.main(['--skip-build', *(['--plugin-path', str(project)] if explicit else [])])
+    assert '--extra' not in calls[0][0]
+    installs = [command for command, _ in calls if any('install-plugins.py' in value for value in command)]
+    assert len(installs) == int(explicit)
+    if explicit:
+        assert str(project) in installs[0] and '--additional-path' not in installs[0]
+    assert all(kw['env']['OPEN_AGENT_WORLD_CORE_ONLY'] == '1' for cmd, kw in calls if cmd[:2] == ['npm', 'run'])
 
 
 @pytest.mark.parametrize("install", [False, True])

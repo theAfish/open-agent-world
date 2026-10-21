@@ -86,8 +86,12 @@ def test_missing_prepared_code_is_an_error_not_an_implicit_reinstall(tmp_path, m
     package = manager.root / 'cache/modules' / digest / manifest.module_name
     package.rename(package.with_name('missing-package'))
     monkeypatch.setattr(modules, 'materialize_modules', forbidden)
-    with pytest.raises(RuntimeError, match='Cannot load installed Pack'):
-        load_installed_packs(create_builtin_registry(), tmp_path)
+    registry = create_builtin_registry()
+    load_installed_packs(registry, tmp_path)
+    assert not registry.has_plugin('module.fixture')
+    assert registry.load_failures[0]['phase'] == 'environment'
+    with pytest.raises(RuntimeError, match='Optional plugin checks failed'):
+        load_installed_packs(create_builtin_registry(), tmp_path, strict=True)
     assert not package.exists()
 
 

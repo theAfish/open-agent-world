@@ -70,6 +70,7 @@ async def prepare_and_install(services, data, **expected):
         await checked(partial(services.pack_installations.prepare, data, **expected))
         async with services._node_mutation():
             await checked(partial(services.pack_installations.install, data, **expected, prepare_environments=False))
+            await services.activate_passive_packs()
     except BaseException:
         await finish_thread(services.pack_installations.interrupt_preparation, data)
         raise
@@ -85,9 +86,9 @@ async def inspect(request: Request, services=Depends(get_services)):
     data = await archive_body(request)
     from backend.packs.archive import inspect_archive
     pack = await checked(inspect_archive, data)
+    plan = await checked(services.pack_installations.plan, data)
     return {"manifest": pack.manifest.model_dump(mode="json"), "sha256": pack.digest,
-            "plan": await checked(services.pack_installations.plan, data),
-            "restart_required": True, "trusted_code": pack.manifest.kind == "plugin"}
+            "plan": plan, "restart_required": plan['restart_required'], "trusted_code": pack.manifest.kind == "plugin"}
 
 
 @router.post("/creator/inspect", dependencies=[Depends(mutation_request)])
@@ -131,6 +132,7 @@ async def activate(pack_id: str, request: VersionRequest, services=Depends(get_s
             await checked(partial(services.pack_installations.activate, pack_id, request.version, prepare=False))
             if not previously_selected:
                 services.card_library.restore_plugin(services.pack_installations.selected()[pack_id].owner_id)
+            await services.activate_passive_packs()
     finally:
         await finish_thread(services.pack_installations.interrupt_activation, pack_id, request.version)
     return status(services)

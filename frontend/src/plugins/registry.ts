@@ -5,11 +5,20 @@ import { providePackRuntime } from "./sharedRuntime";
 import { useWorldStore } from '../state/worldStore';
 
 interface Manifest { pluginId: string; apiVersion: number }
-const manifests = import.meta.glob<Manifest>(["../../../plugins/*/frontend/plugin.json", "../../../examples/deployed-workspace/plugins/*/frontend/plugin.json"], { eager: true, import: "default" });
+const manifests = import.meta.glob<string>(["../../../plugins/*/frontend/plugin.json", "../../../examples/deployed-workspace/plugins/*/frontend/plugin.json"], { eager: true, query: '?raw', import: "default" });
 const loaders = new Map<string, () => Promise<{ default: FrontendPlugin }>>();
-for (const [path, manifest] of Object.entries(manifests)) {
-  if (manifest.apiVersion !== 1 || !/^[a-z][a-z0-9._-]*$/.test(manifest.pluginId)) throw new Error(`Invalid frontend plugin manifest: ${path}`);
-  if (loaders.has(manifest.pluginId)) throw new Error(`Duplicate frontend plugin: ${manifest.pluginId}`);
+const duplicateOwners = new Set<string>();
+for (const [path, raw] of Object.entries(manifests)) {
+  let manifest: Manifest;
+  try {
+    manifest = JSON.parse(raw) as Manifest;
+    if (!manifest || manifest.apiVersion !== 1 || !/^[a-z][a-z0-9._-]*$/.test(manifest.pluginId)) throw new Error(`Invalid frontend plugin manifest: ${path}`);
+    if (loaders.has(manifest.pluginId) || duplicateOwners.has(manifest.pluginId)) {
+      duplicateOwners.add(manifest.pluginId);
+      loaders.delete(manifest.pluginId);
+      throw new Error(`Duplicate frontend plugin: ${manifest.pluginId}`);
+    }
+  } catch (error) { console.error('Optional frontend plugin unavailable', path, error); continue; }
   loaders.set(manifest.pluginId, async () => {
     providePackRuntime();
     const url = `${import.meta.env.BASE_URL}assets/packs/${manifest.pluginId}/index.js`;

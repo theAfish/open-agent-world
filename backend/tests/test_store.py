@@ -7,7 +7,12 @@ import pytest
 
 from backend.config import Settings
 from backend.main import create_app
+from backend.packs.archive import inspect_archive
+from backend.packs.build import build_project
 from backend.packs.marketplace import MarketplaceClient
+from backend.plugins.builtin import create_builtin_registry
+from backend.services import create_services
+from backend.tests.test_declarative_packs import project
 from backend.tests.test_marketplace import FakeMarketplace
 from backend.tests.test_pack_installation import MANIFEST, artifact, isolate_modules
 
@@ -82,6 +87,42 @@ def test_pep440_update_and_retained_version_selection(store):
     assert not older['update_available'] and not older['can_install']
     assert client.post(URL.replace('0.1.0', '0.9.0'), headers=HEADERS).status_code == 200
     assert len([r for r in fake.calls if r.url.path.endswith('/download')]) == 2
+
+
+@pytest.mark.parametrize('passive', [True, False])
+def test_store_reenables_retained_version_with_existing_activation_policy(tmp_path, passive):
+    data = build_project(project(tmp_path), tmp_path / 'note.oawpack').read_bytes() if passive else artifact()
+    manifest = inspect_archive(data).manifest
+    fake = FakeMarketplace(manifest.model_dump(mode='json'), data)
+    settings = Settings.for_data_root(tmp_path / 'profile')
+    url = f'/api/store/packs/{manifest.id}/versions/{manifest.version}/install'
+    for initial in (True, False):
+        services = create_services(settings, plugins=create_builtin_registry())
+        with TestClient(create_app(settings, services=services)) as client:
+            services.marketplace = MarketplaceClient('https://marketplace.test', transport=httpx.MockTransport(fake))
+            if not initial:
+                retained = client.get('/api/packs').json()['versions'][0]
+                assert not retained['selected'] and not retained['loaded']
+                # A changed remote artifact must not reselect or activate retained code.
+                fake.data = data + b'changed'
+                assert client.post(url, headers=HEADERS).status_code == 409
+                assert not client.get('/api/packs').json()['versions'][0]['selected']
+                fake.data = data
+            result = client.post(url, headers=HEADERS)
+            assert result.status_code == 200, result.text
+            assert result.json()['restart_required'] is not passive
+            assert result.json()['loaded_version'] == (manifest.version if passive else None)
+            if initial:
+                assert client.delete(f'/api/packs/{manifest.id}', headers=HEADERS).status_code == 200
+            elif passive:
+                card = client.post('/api/nodes', json={'type': 'test.notes', 'config': {'message': 'Reenabled'}})
+                assert card.status_code == 201, card.text
+                assert card.json()['config']['message'] == 'Reenabled'
+                assert client.get(f'/api/packs/{manifest.id}/versions/{manifest.version}/frontend/index.js').status_code == 200
+            else:
+                assert not services.plugins.has_plugin(manifest.owner_id)
+        services.close()
+    assert len([r for r in fake.calls if r.url.path.endswith('/download')]) == 1
 
 
 @pytest.mark.parametrize('failure', ['archive', 'identity', 'version', 'dependency', 'compatibility', 'python'])

@@ -23,15 +23,18 @@ export async function frontendBuildFingerprint(root, packs) {
 export async function buildSourceFrontend({ force = false } = {}) {
   const started = performance.now();
   await prepareDev();
-  const packs = await sourcePacks();
-  for (const pack of packs) await buildSourcePack(pack);
+  const packs = [];
+  for (const pack of await sourcePacks({ strict: false })) {
+    try { await buildSourcePack(pack); packs.push(pack); }
+    catch (error) { console.error(`Optional Pack ${pack.owner} unavailable: ${error.message}`); }
+  }
   const built = await cachedBuild({
     receiptFile: path.join(frontendRoot, 'node_modules/.cache/oaw/frontend.json'), force,
     inputs: () => frontendBuildFingerprint(frontendRoot, packs),
     outputs: () => treeFingerprint(path.join(frontendRoot, 'dist')),
     build: async () => {
       // Shared preparation already completed; prebuild can install dependencies.
-      await runNpm(['--ignore-scripts', 'run', 'build'], frontendRoot, { ...process.env, NODE_ENV: 'production' });
+      await runNpm(['--ignore-scripts', 'run', 'build'], frontendRoot, { ...process.env, NODE_ENV: 'production', OAW_ALLOW_PACK_FAILURES: '1' });
       await access(path.join(frontendRoot, 'dist/index.html'));
     },
   });

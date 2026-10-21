@@ -19,9 +19,10 @@ def plugin_usage(services: ApplicationServices, plugin_id: str) -> list[str]:
     """Keep the existing lifecycle intact: no hot unload of objects or providers."""
     usages = []
     for card in services.world.list_cards():
-        if services.plugins.node_type_owner_id(card.type) == plugin_id:
+        owner = card.missing_plugin.plugin_id if card.missing_plugin else services.plugins.node_type_owner_id(card.type)
+        if owner == plugin_id:
             usages.append(f"card {card.name}")
-        elif services.plugins.has_trait(card.type, "core.agent"):
+        elif not card.missing_plugin and services.plugins.has_trait(card.type, "core.agent"):
             provider = services.run_manager.provider_id_for_card(card)
             if provider:
                 try:

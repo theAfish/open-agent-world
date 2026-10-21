@@ -1,5 +1,6 @@
 """Real host persistence/permissions with controlled compute and model providers."""
 import asyncio
+import sqlite3
 from dataclasses import replace
 
 import pytest
@@ -57,6 +58,33 @@ def setup(research):
         return await WorldAgentCapabilityProvider(services).invoke_tool(ids["agent"], "host:" + name, args)
     request = dict(provider="test.compute", sandbox_id=ids["sandbox"], request_key="plan:md", specification={})
     return services, ids, runtime, compute, invoke, request
+
+
+@pytest.mark.asyncio
+async def test_unsafe_probe_stops_monitoring_without_rewriting_durable_job(research, monkeypatch):
+    services, ids, runtime, compute, invoke, request = setup(research)
+    captured = {}
+    async def submit(context):
+        captured.update(await invoke('submit_background_job', **request))
+    runtime.script = submit
+    run = await services.run_manager.start_run(ids['agent'], 'submit')
+    await services.run_manager.wait_execution(run.run_id)
+    before = services.background_jobs.get(captured['id'])
+    async def corrupt(*args):
+        raise sqlite3.DatabaseError('fault injected in provider observation')
+    definition = services.plugins.background_job_provider('test.compute')
+    monkeypatch.setattr(services.plugins, 'background_job_provider', lambda _: replace(definition, inspect=corrupt))
+    await services.background_jobs.tick()
+    await asyncio.gather(*services.background_jobs.probes.values(), return_exceptions=True)
+    with pytest.raises(sqlite3.DatabaseError):
+        await services.background_jobs.tick()
+    assert services.background_jobs.get(captured['id']) == before
+    services.node_execution.continuation_closed = False
+    with pytest.raises(sqlite3.DatabaseError):
+        await services.node_execution._continue_work()
+    assert services.node_execution.continuation_closed
+    with pytest.raises(sqlite3.DatabaseError):
+        await services.background_jobs.shutdown()
 
 
 @pytest.mark.asyncio

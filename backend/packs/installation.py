@@ -110,13 +110,18 @@ class PackInstallationManager:
         with self.connect(write=True) as db:
             manifests = self.selected(db)
             selected = {'selected:' + key: self.resource_ids(manifest) for key, manifest in manifests.items()}
-            sources = {'source:' + key: self.source_resource_ids(spec) for key, spec in self.source_specs().items()
-                       if self.source_enrolled(key)}
+            # A partial discovery has no authority to release retained source
+            # resources. A healthy restart reconciles this snapshot normally.
+            discovery_complete = not (self.registry and (self.registry.load_failures
+                or not getattr(self.registry, 'source_discovery_complete', True)))
+            sources = ({'source:' + key: self.source_resource_ids(spec) for key, spec in self.source_specs().items()
+                       if self.source_enrolled(key)} if discovery_complete else {})
             ledger.replace_claims('selected:', selected)
             # A recovery manager without source discovery has no authority to
             # release source references established by an active application.
             if self.registry is not None:
-                ledger.replace_claims('source:', sources)
+                if discovery_complete:
+                    ledger.replace_claims('source:', sources)
                 self.registry.enrolled_pack_owners = {manifest.owner_id for manifest in manifests.values()} | {
                     spec.owner for key, spec in self.source_specs().items() if self.source_enrolled(key)}
                 self.registry.pack_profile_id = hashlib.sha256(str(self.root.parent).encode()).hexdigest()
@@ -124,7 +129,7 @@ class PackInstallationManager:
             terminal = [row['digest'] for row in db.execute("SELECT digest FROM operations WHERE state IN ('failed','completed')")]
             for digest in terminal:
                 ledger.release_consumer('pending:' + digest)
-        return ledger.collect() if collect else []
+        return ledger.collect() if collect and discovery_complete else []
 
     def _begin_request(self, key):
         from backend.packs.environments import installation_lock
@@ -242,7 +247,7 @@ class PackInstallationManager:
                 adapters = [item.adapter for item in selected.values()]
                 adapters.extend(source_adapter_declaration(candidate, self.root.parent)
                                 for key, candidate in self.source_specs().items()
-                                if key == pack_id or self.source_enrolled(key))
+                                if key == pack_id or (self.registry.has_plugin(candidate.owner) and self.source_enrolled(key)))
                 check_adapter_dependencies(adapters, allow_existing=True)
                 db.execute('INSERT INTO source_states VALUES (?,1) ON CONFLICT(id) DO UPDATE SET enrolled=1', (pack_id,))
             self.reconcile_resources()
@@ -373,7 +378,7 @@ class PackInstallationManager:
             adapters.extend(manifest.adapter for manifest in registry.installed_packs.values()
                             if manifest.schema_version == 3 and selected.get(manifest.id) != manifest)
             for owner, spec in registry.pack_specs.items():
-                if (owner not in {manifest.owner_id for manifest in registry.installed_packs.values()}
+                if (registry.has_plugin(owner) and registry.pack_sources.get(owner) != 'installed'
                         and self.source_enrolled(spec.distribution_id)):
                     adapters.append(source_adapter_declaration(spec, self.root.parent))
         check_adapter_dependencies(adapters, allow_existing=True)
@@ -457,6 +462,11 @@ class PackInstallationManager:
         from backend.packs.planning import plan
         pack = inspect_archive(data)
         result = plan(self, pack.manifest, source=source)
+        from backend.packs.build import passive_wheel_spec
+        passive = pack.manifest.kind == 'content' or passive_wheel_spec(
+            pack.files[pack.manifest.entrypoints.backend], pack.manifest) is not None
+        result['restart_required'] = not (passive and self.registry is not None
+            and not self.registry.has_plugin(pack.manifest.owner_id))
         result['sha256'] = pack.digest
         try:
             self.inspect(data)
@@ -723,8 +733,25 @@ class PackInstallationManager:
         with ZipFile(io.BytesIO(wheel)) as archive:
             metadata_path = next(name for name in archive.namelist() if name.endswith('.dist-info/METADATA'))
             metadata = BytesParser().parsebytes(archive.read(metadata_path))
+            declaration = metadata_path.removesuffix('METADATA') + 'oaw.pack.json'
+            if declaration in archive.namelist():
+                from backend.packs.spec import PackSpec
+                spec = PackSpec.model_validate_json(archive.read(declaration))
+                if (spec.owner, spec.version, spec.distribution_id, spec.packs, spec.node_types) != (
+                        manifest.owner_id, manifest.version, manifest.id, manifest.provided_pack_ids, manifest.node_types):
+                    raise ValueError('Wheel contributions differ from distribution ownership')
+                if not spec.entrypoints or not spec.contributions.cards:
+                    raise ValueError('Expected advanced entrypoint with declarative contributions')
+                if (tuple(spec.entrypoints.values()) != (entry,)
+                        or spec.compatibility.plugin_api != manifest.compatibility.plugin_api):
+                    raise ValueError('Wheel contribution entrypoint/API differs from the distribution')
+                receipt['contribution_spec'] = spec.model_dump(mode='json')
         receipt.update(requires_python=metadata.get('Requires-Python', ''),
                        requires=metadata.get_all('Requires-Dist', []))
+        from backend.packs.build import passive_wheel_spec
+        passive = passive_wheel_spec(wheel, manifest)
+        if passive is not None:
+            receipt['passive_spec'] = passive.model_dump(mode='json')
         return receipt
 
     def _materialize_backend(self, manifest, wheel, digest, *, consumer):
@@ -776,7 +803,7 @@ class PackInstallationManager:
                             db.execute('INSERT OR REPLACE INTO startup_receipts VALUES (?,?,?)',
                                        (manifest.id, manifest.version, json.dumps(receipt)))
         if (not isinstance(receipt, dict) or type(receipt.get('schema')) is not int or receipt['schema'] != 1
-                or set(receipt) != {'schema', 'entrypoint', 'backend_sha256', 'requires_python', 'requires'}
+                or set(receipt) - {'passive_spec', 'contribution_spec'} != {'schema', 'entrypoint', 'backend_sha256', 'requires_python', 'requires'}
                 or not isinstance(receipt['requires_python'], str) or not isinstance(receipt['requires'], list)
                 or any(not isinstance(value, str) for value in receipt['requires'])):
             raise ValueError('Unsupported Pack startup receipt; verify or restore the installation')
@@ -802,8 +829,12 @@ class PackInstallationManager:
         if manifest.kind == 'plugin':
             files[manifest.entrypoints.backend] = (self.version_path(manifest.id, manifest.version) / manifest.entrypoints.backend).read_bytes()
         receipt = self._startup_receipt(manifest)
-        if receipt is not None and receipt != self._startup_metadata(manifest, files, entry):
-            raise ValueError('Pack startup receipt differs from verified archive metadata')
+        if receipt is not None:
+            verified = self._startup_metadata(manifest, files, entry)
+            if 'passive_spec' not in receipt:
+                verified.pop('passive_spec', None)  # Older verified receipts remain valid.
+            if receipt != verified:
+                raise ValueError('Pack startup receipt differs from verified archive metadata')
         from backend.packs.adapters import prepared_adapter_paths
         prepared_adapter_paths(manifest.adapter, self.root.parent, read_only=True)
         if manifest.kind == 'plugin' and manifest.schema_version == 3:
@@ -876,5 +907,7 @@ class PackInstallationManager:
                        installation="installed", selected=selected.get(row['id']) == manifest,
                        loaded=loaded.get(row['id']) == manifest)
         source_restart = any(self.source_enrolled(key) != self.registry.has_plugin(spec.owner)
+                             and not self.registry.unavailable_reason(spec.owner)
                              for key, spec in self.source_specs().items())
-        return {"versions": versions, "restart_required": selected != loaded or source_restart}
+        return {"versions": versions, "restart_required": selected != loaded or source_restart,
+                "failures": self.registry.load_failures if self.registry else []}

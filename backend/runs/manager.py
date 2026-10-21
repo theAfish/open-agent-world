@@ -656,6 +656,65 @@ class RunManager:
         await provider.create_agent(self._agent_config(card))
         self._agent_provider_ids[card.id] = provider_id
 
+    def unavailable_runtime(self, provider_id, error):
+        from backend.plugins.failures import raise_if_unsafe
+        raise_if_unsafe(error)
+        try:
+            owner = self.plugins.runtime_provider_owner_id(provider_id)
+        except ValueError:
+            owner = None
+        if owner == 'open-agent-world.core' and provider_id == 'core.mock':
+            # Unlike the optional Google SDK adapter, this runtime is Core code.
+            raise error
+        affected = set()
+        if owner and owner != 'open-agent-world.core':
+            affected = self.plugins.mark_unavailable(owner, 'runtime', error, source='runtime_provider')
+        if not any(row['source'] == 'runtime_provider' and row['id'] == provider_id for row in self.plugins.load_failures):
+            self.plugins.load_failures.append(dict(id=provider_id, owner=None, source='runtime_provider',
+                state='unavailable', phase='runtime', error=str(error), retry='repair_and_restart'))
+        logger.error('Runtime provider %s unavailable: %s', provider_id, error)
+        return affected
+
+    async def restore_agent(self, card: Card) -> None:
+        """Restore local provider records without letting an optional runtime stop Core."""
+        from backend.errors import PluginUnavailableError
+        from backend.plugins.failures import PluginIntegrityError, raise_if_unsafe
+        provider_id = card.config.get('runtime_provider_id') or self.default_runtime_provider_id
+        if provider_id is None:
+            await self.register_agent(card)
+            return
+        try:
+            self.plugins.assert_runtime_provider_enabled(provider_id)
+        except PluginUnavailableError:
+            return  # Already diagnosed; don't recreate a failed provider.
+        try:
+            await self.register_agent(card)
+        except Exception as error:
+            raise_if_unsafe(error)
+            affected = self.unavailable_runtime(provider_id, error)
+            for runtime_id, provider in self._providers.items():
+                try:
+                    owner = self.plugins.runtime_provider_owner_id(runtime_id)
+                except ValueError:
+                    owner = None
+                if runtime_id != provider_id and owner not in affected:
+                    continue
+                agents = [key for key, value in self._agent_provider_ids.items() if value == runtime_id]
+                for agent_id in dict.fromkeys(([card.id] if runtime_id == provider_id else []) + list(reversed(agents))):
+                    try:
+                        cleanup = asyncio.create_task(provider.delete_agent(agent_id))
+                        done, _ = await asyncio.wait({cleanup}, timeout=self.cleanup_timeout_seconds)
+                        if not done:
+                            cleanup.cancel()
+                            cleanup.add_done_callback(lambda task: None if task.cancelled() else task.exception())
+                            raise PluginIntegrityError(f'Runtime provider {provider_id} restore cleanup timed out')
+                        cleanup.result()
+                    except AgentNotFoundError:
+                        pass
+                    except Exception as cleanup_error:
+                        raise PluginIntegrityError(f'Runtime provider {provider_id} restore cleanup failed') from cleanup_error
+                    self._agent_provider_ids.pop(agent_id, None)
+
     async def update_agent(self, card: Card) -> None:
         previous_id = self._agent_provider_ids.get(card.id)
         provider_id = self._optional_provider_id(card)

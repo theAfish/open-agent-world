@@ -60,6 +60,12 @@ jobs:
       - name: Sync locked backend dependencies
         working-directory: backend
         run: uv sync --locked --all-extras --group dev
+      - name: Verify startup with only locked Core dependencies
+        run: |
+          uv venv .tmp/core-only
+          uv export --project backend --locked --no-dev --no-emit-project --no-hashes --output-file .tmp/core-requirements.txt
+          uv pip install --python .tmp/core-only/bin/python -r .tmp/core-requirements.txt
+          .tmp/core-only/bin/python scripts/check-core-startup.py
       - name: Install repository plugins
         working-directory: backend
         shell: bash
@@ -76,6 +82,8 @@ jobs:
             install_args+=(--editable "$plugin_root")
           done
           uv pip install --python .venv/bin/python "${install_args[@]}"
+      - name: Strict optional plugin activation
+        run: backend/.venv/bin/python -c "from backend.plugins.loader import load_plugin_registry; load_plugin_registry(strict=True)"
       - name: Run backend and public SDK test suites
         run: backend/.venv/bin/python .github/run-backend-tests.py tests backend/tests --junitxml=.tmp/backend-linux.xml
       - name: Upload backend results
@@ -134,6 +142,18 @@ jobs:
         env:
           PLAYWRIGHT_CHANNEL: chromium
         run: npm run test:e2e:packs
+      - name: Upload the versioned public Pack SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: oaw-plugin-api-1.0.0-${{ github.sha }}
+          path: .outputs/oaw-plugin-api-1.0.0.tgz
+          if-no-files-found: error
+      - name: Build and install an external declarative Pack
+        env:
+          PLAYWRIGHT_CHANNEL: chromium
+        run: |
+          backend/.venv/bin/python scripts/build-external-notes.py
+          node frontend/scripts/run-pack-e2e.mjs --declarative
       - name: Run deployment acceptance against production frontend
         working-directory: frontend
         run: npm run test:e2e:deployment
