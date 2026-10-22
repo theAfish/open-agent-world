@@ -61,8 +61,13 @@ def test_cloud_catalog_keeps_assets_and_removes_host_administration(cloud_client
     assert [r["id"] for r in runtimes["runtimes"]] == ["aliyun.agent-sandbox"]
     assert not sdk.created
     plugins = client.app.state.services.plugins
-    assert {p.id for p in plugins.plugins()} == {
-        "open-agent-world.core", "matcreator", "science.structure-viewer", "data.sqlite"}
+    from pathlib import Path
+    from backend.packs.spec import read_source_pack
+    expected = {read_source_pack(p.parent).owner for p in
+                (Path(__file__).resolve().parents[2] / "plugins").glob("*/oaw.pack.toml")}
+    reported = {p.id for p in plugins.plugins()} | {f.get("owner") for f in plugins.load_failures}
+    assert expected | {"open-agent-world.core"} == reported
+    assert not plugins.is_enabled("openai.codex")
     for path in ("/api/packs/install", "/api/store/packs/fake/versions/1/install", "/api/desktop/inspect-path"):
         assert client.post(path, json={}).status_code == 403
     assert client.put("/api/settings/storage", json={}).status_code == 403
