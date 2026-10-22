@@ -279,11 +279,11 @@ class GoogleAdkBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 for number in (1, 2):
                     call_id = f"call-{number}"
                     yield FakeEvent([FakePart(function_call=SimpleNamespace(
-                        name=tool.__name__, id=call_id, args={"line": number},
+                        name=tool.name, id=call_id, args={"line": number},
                     ))])
-                    response = await tool(line=number)
+                    response = await tool.run_async(args={"line": number}, tool_context=None)
                     yield FakeEvent([FakePart(function_response=SimpleNamespace(
-                        name=tool.__name__, id=call_id, response=response,
+                        name=tool.name, id=call_id, response=response,
                     ))])
                 yield FakeEvent([FakePart(text="Recovered answer")], final=True)
 

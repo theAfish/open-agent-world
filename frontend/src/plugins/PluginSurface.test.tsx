@@ -39,6 +39,16 @@ function install(pluginId: string, frontend: { settings?: string } = {}) {
 
 it("loads the actual local plugin entry and saves through the scoped host SDK", async () => {
   const update = install("openai.codex", { settings: "settings" });
+  useWorldStore.setState({ catalog: { ...useWorldStore.getState().catalog,
+    plugins: [{ id: 'openai.codex', name: 'Codex', version: '0.1.0', plugin_api_version: '1', description: null }],
+    enabled_plugin_ids: ['openai.codex'],
+  } });
+  // Source-component integration uses the real registry and availability gate.
+  // Production artifact URLs are exercised by browser Pack acceptance.
+  const view = registry.createViewRegistry(new Map([
+    ['openai.codex', () => import('../../../plugins/codex/frontend')],
+  ]), undefined, registry.assertFrontendAvailable);
+  vi.spyOn(registry, 'pluginView').mockImplementation(view);
   vi.spyOn(worldApi, "getAgentInfo").mockResolvedValue({ session_id: "session-one", details: { source: "desktop" } });
   render(<PluginSurface card={card} slot="settings" level="inspector"><p>Fallback</p></PluginSurface>);
   expect(await screen.findByText("Advanced settings")).toBeTruthy();

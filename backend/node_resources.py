@@ -9,7 +9,7 @@ from backend.errors import PermissionDeniedError, ResourceValidationError
 from backend.node_documents import validation_message
 from backend.plugins.resources import NodeResourceAction, NodeResourceContext
 from backend.plugins.data_sources import DataQuery
-from backend.security.resource_credentials import resource_secret_resolver
+from backend.security.resource_credentials import resource_model_resolver, resource_secret_resolver
 from backend.world.models import EdgeDirection
 
 
@@ -66,7 +66,8 @@ async def invoke_resource_action(services, node_id, action, request, *, capabili
         context = NodeResourceContext(node_id, services.resources.node_storage_path(node_id), Event(),
             actor_id=capability.agent_id if capability else None, confirmed=request.confirm,
             state=services.card_state.bind(node_id),
-            resolve_secret=resource_secret_resolver(services, node))
+            resolve_secret=resource_secret_resolver(services, node),
+            resolve_model=resource_model_resolver(services, node))
         task = asyncio.create_task(asyncio.to_thread(operation.handler, context, request.arguments))
         try:
             return await asyncio.shield(task)

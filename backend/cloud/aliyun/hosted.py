@@ -42,7 +42,7 @@ def create_hosted_services(settings):
     )
     settings = replace(settings, sandbox_runtime="aliyun.agent-sandbox",
                        plugin_directories=(), storage_config_path=None, inherit_runtime_environment=False)
-    services = create_services(settings, plugins=approved_plugins(),
+    services = create_services(settings, plugins=approved_plugins(settings.data_root),
                                sandbox_registry_factory=registry_factory(remote))
     if any(unsafe_host_configuration({"type": card.type, "config": card.config})
            for card in services.world.list_cards()):

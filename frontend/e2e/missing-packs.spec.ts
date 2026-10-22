@@ -45,9 +45,12 @@ test('missing and failed packs use the checker material and retain recovery cont
   await missing.getByRole('button').hover();
   await expect(missing.locator('.pack-touch-area')).toHaveAttribute('data-tilting');
   await page.screenshot({ path: testInfo.outputPath('missing-packs.png') });
+  expect(await library.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
   await failed.getByRole('button', { name: 'View pack failed pack' }).click();
   await expect(library.getByText('Fixture environment preparation failed')).toBeVisible();
   await expect(library.getByRole('button', { name: 'Uninstall Pack', exact: true })).toBeVisible();
+  expect(await library.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('pack-management.png') });
   await library.getByRole('button', { name: 'Retry environment preparation' }).click();
   await expect(library.getByText('Fixture environment preparation failed')).toHaveCount(0);
   await library.getByRole('button', { name: 'Back to packs' }).click();

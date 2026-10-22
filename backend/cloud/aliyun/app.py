@@ -4,11 +4,9 @@ One owner, process, data volume and remote Sandbox volume per deployment. This
 composition is never selected by desktop configuration or OS auto-discovery.
 """
 from dataclasses import replace
-from importlib import import_module
 import json
 import os
 from pathlib import Path
-import sys
 
 from starlette.responses import JSONResponse
 
@@ -16,7 +14,7 @@ from backend.config import Settings
 from backend.hosting.identity import ProfileAccess, VerifiedIdentity
 from backend.hosting.oidc import OidcSessionIdentity
 from backend.main import create_app as core_app
-from backend.plugins.builtin import create_builtin_registry
+from backend.plugins.loader import load_plugin_registry
 from backend.request_context import TenantScope
 from backend.services import create_services
 
@@ -41,8 +39,8 @@ class CloudSurfaceMiddleware:
         await self.app(scope, receive, send)
 
 
-def approved_plugins():
-    # Do not scan user-installed wheels or arbitrary installed entry points.
+def approved_plugins(data_root: Path | None = None):
+    """Use the normal Pack lifecycle for operator-installed source code only."""
     from pydantic import Field
     from backend.world.models import SandboxConfig
 
@@ -50,14 +48,12 @@ def approved_plugins():
         # Apply the provider default to every Sandbox, regardless of its Pack.
         command_timeout: float = Field(default=60, gt=0, le=36000)
 
-    registry = create_builtin_registry(sandbox_config_model=CloudSandboxConfig)
-    plugins = Path(__file__).resolve().parents[3] / "plugins"
-    for directory, module in (("structure_viewer", "oaw_structure_viewer"),
-                               ("matcreator", "oaw_matcreator"), ("sqlite", "oaw_sqlite")):
-        package_root = plugins / directory
-        sys.path.insert(0, str(package_root / "src" if (package_root / "src").is_dir() else package_root))
-        plugin = import_module(module).create_plugin()
-        registry.install(plugin)
+    registry = load_plugin_registry(data_root=data_root, load_installed=False,
+        load_entry_points=False, load_unenrolled_sources=True,
+        sandbox_config_model=CloudSandboxConfig)
+    if registry.has_plugin("openai.codex"):
+        registry.mark_unavailable("openai.codex", "hosting_policy",
+            ValueError("Local Codex execution is not available in hosted workspaces"), source="hosting_policy")
     return registry
 
 
@@ -87,7 +83,8 @@ def create_app():
         inherit_runtime_environment=False)
 
     def services_factory(settings):
-        return create_services(settings, plugins=approved_plugins(), sandbox_registry_factory=registry_factory(remote))
+        return create_services(settings, plugins=approved_plugins(settings.data_root),
+                                   sandbox_registry_factory=registry_factory(remote))
 
     frontend = Path(__file__).resolve().parents[3] / "frontend/dist"
     application = core_app(settings, profile_access=access, services_factory=services_factory,

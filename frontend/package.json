@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit -p tsconfig.app.json && vite build",
+    "build": "node scripts/typecheck.mjs && vite build",
     "build:pack-sdk": "node scripts/build-pack-sdk.mjs",
     "test:pack-sdk": "node --test pack-sdk/build.test.mjs",
     "test": "vitest run src",

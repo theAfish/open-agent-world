@@ -23,10 +23,10 @@ function iconImage(element: Element | null) {
 
 /** The production pack surface, also used by the isolated developer design sheet. */
 export function PackSurface({ definition, edition, cards, count, opened, phase = 'idle', finishVisible = false,
-  issue, status, label, title, sealLabel, disabled, onClick, onSettled }: {
+  issue, status, label, title, sealLabel, disabled, onClick, onSettled, actions }: {
   definition: PackDefinition; edition: string; cards: PackPreviewCard[]; count: number | null;
   opened: boolean; phase?: PackPhase; finishVisible?: boolean; issue?: 'missing' | 'error'; status?: string;
-  label: string; title?: string; sealLabel: string; disabled?: boolean; onClick: () => void; onSettled?: () => void;
+  actions?: ReactNode; label: string; title?: string; sealLabel: string; disabled?: boolean; onClick: () => void; onSettled?: () => void;
 }) {
   useLocale();
   const tilt = useSurfaceTilt(9);
@@ -165,5 +165,6 @@ export function PackSurface({ definition, edition, cards, count, opened, phase =
     </button>
     <span className="pack-edition">{edition}</span>
     {status && <span className="pack-inventory-status">{status}</span>}
+    {actions}
   </article>;
 }

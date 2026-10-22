@@ -5,10 +5,48 @@ import sys
 root = Path(__file__).resolve().parent
 sys.path.insert(0, str(root))
 
+
+def prepare_self_test(data_root: Path) -> None:
+    import json
+    import google.adk
+    import litellm
+    from backend.config import Settings
+    from backend.services import create_services
+    from backend.sandbox.python_runtime import SharedPythonRuntime
+
+    settings = Settings.for_data_root(data_root)
+    services = create_services(settings)
+    try:
+        catalog = services.plugins.catalog()
+        assert len(catalog.plugins) > 1, "Bundled plugins are missing"
+        # The loader activates Library's managed adapter; it is not a host
+        # site-packages dependency in a clean desktop payload.
+        import pymupdf
+        with pymupdf.open() as pdf:
+            pdf.new_page().insert_text((50, 50), "Bundled Library self-test")
+            with pymupdf.open(stream=pdf.tobytes(), filetype="pdf") as restored:
+                assert "Bundled Library self-test" in restored[0].get_text()
+        assert (root / "frontend/dist/index.html").is_file()
+        sandbox_status = "unsupported" if sys.platform == "darwin" else "ready"
+        if sys.platform != "darwin":
+            runtime = SharedPythonRuntime(data_root.parent)
+            runtime.prepare_sync()
+            assert runtime.python.is_file(), "Sandbox Python could not be prepared"
+        services.llm_settings.save(base_url='https://example.invalid', api_key='package-test-only')
+        (settings.data_root / 'backup-test.txt').write_text('saved document')
+        (data_root.parent / 'prepared.json').write_text(json.dumps({
+            "plugins": [plugin.id for plugin in catalog.plugins], "sandbox_python": sandbox_status,
+        }), encoding="utf-8")
+    finally:
+        services.close()
+
+
 if "--backup-for-update" in sys.argv:
     from backend.config import Settings
     from backend.desktop_backup import backup_for_update
     print(backup_for_update(Settings.from_environment()), flush=True)
+elif "--self-test-prepare" in sys.argv:
+    prepare_self_test(Path(sys.argv[sys.argv.index("--self-test-prepare") + 1]).resolve())
 elif "--self-test" in sys.argv:
     from contextlib import closing
     import json
@@ -16,36 +54,18 @@ elif "--self-test" in sys.argv:
     import shutil
     import subprocess
     import tempfile
-    import google.adk
-    import litellm
-    import pymupdf
-    # Plugin modules can load lazily; exercise Library's native host dependency.
-    with pymupdf.open() as pdf:
-        pdf.new_page().insert_text((50, 50), "Bundled Library self-test")
-        with pymupdf.open(stream=pdf.tobytes(), filetype="pdf") as restored:
-            assert "Bundled Library self-test" in restored[0].get_text()
     from backend.config import Settings
     from backend.persistence.database import Database
     from backend.security.llm_settings import LlmSettingsStore
-    from backend.services import create_services
-    from backend.sandbox.python_runtime import SharedPythonRuntime
     with tempfile.TemporaryDirectory(prefix="oaw-package-test-") as temporary:
         temporary_root = Path(temporary).resolve()
         settings = Settings.for_data_root(temporary_root / 'data')
-        services = create_services(settings)
-        try:
-            catalog = services.plugins.catalog()
-            assert len(catalog.plugins) > 1, "Bundled plugins are missing"
-            assert (root / "frontend/dist/index.html").is_file()
-            sandbox_status = "unsupported" if sys.platform == "darwin" else "ready"
-            if sys.platform != "darwin":
-                runtime = SharedPythonRuntime(Path(temporary))
-                runtime.prepare_sync()
-                assert runtime.python.is_file(), "Sandbox Python could not be prepared"
-            services.llm_settings.save(base_url='https://example.invalid', api_key='package-test-only')
-            (settings.data_root / 'backup-test.txt').write_text('saved document')
-        finally:
-            services.close()
+        # Loaded modules retain process-lifetime Pack leases. A real update
+        # stops that interpreter before backup/restore; closing its database
+        # alone does not release those locks, particularly on Windows.
+        subprocess.run([sys.executable, '-I', '-B', str(Path(__file__).resolve()),
+                        '--self-test-prepare', str(settings.data_root)], check=True)
+        prepared = json.loads((temporary_root / 'prepared.json').read_text(encoding="utf-8"))
         # Exercise the actual installed backup entry point with synthetic data.
         # This also checks native credential encryption (including Windows DPAPI).
         backup = Path(subprocess.check_output(
@@ -60,8 +80,7 @@ elif "--self-test" in sys.argv:
         with closing(Database(settings.database_path)) as database:
             assert LlmSettingsStore(database, settings.data_root).read().api_key == 'package-test-only'
         assert (settings.data_root / 'backup-test.txt').read_text() == 'saved document'
-        print(json.dumps({"status": "ok", "plugins": [plugin.id for plugin in catalog.plugins],
-                          "sandbox_python": sandbox_status, "backup_restore": "ok"}))
+        print(json.dumps({"status": "ok", **prepared, "backup_restore": "ok"}))
 else:
     # Installed applications cannot opt into the development reset server.
     if "--mode" in sys.argv and sys.argv[sys.argv.index("--mode") + 1] != "production":

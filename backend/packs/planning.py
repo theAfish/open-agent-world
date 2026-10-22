@@ -85,8 +85,13 @@ def inventory(manager, legacy=None):
             except (OSError, ValueError, TypeError):
                 pass
         source = registry.pack_sources.get(owner, 'bundled')
-        adapter = (selected[spec.distribution_id].adapter if source == 'installed' and spec.distribution_id in selected
-                   else source_adapter_declaration(spec, manager.root.parent))
+        try:
+            adapter = (selected[spec.distribution_id].adapter if source == 'installed' and spec.distribution_id in selected
+                       else source_adapter_declaration(spec, manager.root.parent))
+        except (ValueError, OSError):
+            # Broken optional receipts are reported by activation diagnostics.
+            from backend.packs.manifest import AdapterDependencies
+            adapter = AdapterDependencies(requirements=spec.backend.python)
         result.append({'id': spec.distribution_id, 'owner': owner, 'name': spec.name,
             'version': spec.version, 'source': source,
             'loaded': loaded, 'enabled': loaded and registry.is_enabled(owner),

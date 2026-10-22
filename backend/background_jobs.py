@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from backend.agents import ScopedToolDefinition
 from backend.errors import ConflictError, NotFoundError, PermissionDeniedError, ResourceValidationError, RuntimeUnavailableError, PluginUnavailableError
 from backend.plugins.background_jobs import JobAttach, JobControl, JobInspect, JobObservation, JobSubmit, JobWait
+from backend.plugins.failures import raise_if_unsafe
 from backend.runs.models import RunStatus, TERMINAL_RUN_STATUSES
 from backend.sandbox.models import SandboxStateError
 
@@ -182,7 +183,8 @@ class BackgroundJobs:
                 except asyncio.CancelledError:
                     self.update(job["id"], status="interrupted", detail="Preflight interrupted before submission.")
                     raise
-                except Exception:
+                except Exception as error:
+                    raise_if_unsafe(error, allow_revocation=True)
                     job = self.update(job["id"], status="failed", detail="Preflight failed before submission; inspect provider requirements.")
                     return self.public(job)
             self.authorize(job)
@@ -196,7 +198,8 @@ class BackgroundJobs:
             except asyncio.CancelledError:
                 self.update(job["id"], status="unknown", detail="Submission outcome is uncertain. Reconcile existing work; do not resubmit.")
                 raise
-            except Exception:
+            except Exception as error:
+                raise_if_unsafe(error, allow_revocation=True)
                 job = self.update(job["id"], status="unknown", detail="Submission outcome is uncertain. Reconcile existing work; do not resubmit.")
             self.authorize(job)
             return self.public(job)
@@ -336,6 +339,9 @@ class BackgroundJobs:
         return False
 
     async def tick(self):
+        for task in self.probes.values():
+            if task.done() and not task.cancelled():
+                task.result()  # Critical errors must stop this monitoring pass.
         self.probes = {key: task for key, task in self.probes.items() if not task.done()}
         for job in self.records():
             if job["paused"]:
@@ -369,6 +375,9 @@ class BackgroundJobs:
         except asyncio.CancelledError:
             raise
         except Exception as error:
+            # Revocation is an expected monitor outcome: retain the job without
+            # publishing completion. Persistence/security faults still escape.
+            raise_if_unsafe(error, allow_revocation=True)
             failures = job["failures"] + 1
             detail = (
                 "Sandbox is unavailable for background checks. Start the connected Sandbox or grant the Agent Start permission."
@@ -424,5 +433,8 @@ class BackgroundJobs:
     async def shutdown(self):
         for task in self.probes.values():
             task.cancel()
-        await asyncio.gather(*self.probes.values(), return_exceptions=True)
+        results = await asyncio.gather(*self.probes.values(), return_exceptions=True)
         self.probes.clear()
+        for result in results:
+            if isinstance(result, Exception):
+                raise result

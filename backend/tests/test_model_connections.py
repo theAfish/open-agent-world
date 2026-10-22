@@ -339,3 +339,39 @@ def test_agent_defaults_follow_saved_model(client):
         runtime._adk_model("oaw:default")
     store.save(CatalogEdit(revision=0, connections=[connection()], default_model="oaw:model:work"))
     assert runtime._adk_model("oaw:default").model == "openai/same-model"
+
+
+def test_resource_handlers_resolve_models_only_for_the_node_that_still_owns_the_call(tmp_path):
+    """``resource_model_resolver`` is the plugin-facing twin of the secret resolver:
+    it hands a trusted handler the connection for a model reference (``oaw:default``
+    included) and refuses once the node it was created for has been replaced."""
+    from types import SimpleNamespace
+
+    from backend.security.resource_credentials import resource_model_resolver
+
+    db = Database(tmp_path / "models.db")
+    try:
+        store = ModelConnectionStore(LlmSettingsStore(db, tmp_path))
+        store.save(CatalogEdit.model_validate(dict(revision=0, connections=[connection()], default_model=None)))
+        cards = {"node-1": SimpleNamespace(id="node-1", created_at="2026-01-01T00:00:00Z")}
+        services = SimpleNamespace(llm_settings=store.secrets,
+                                   world=SimpleNamespace(get_card=lambda node_id: cards[node_id]))
+        resolve = resource_model_resolver(services, cards["node-1"])
+
+        explicit = resolve("oaw:model:work")
+        assert (explicit.adapter, explicit.model_id, explicit.base_url, explicit.api_key) == \
+            ("openai", "same-model", "https://work.example/v1", "secret-work")
+        # No default model chosen yet: the host's own validation error comes through.
+        with pytest.raises(ResourceValidationError):
+            resolve("oaw:default")
+        draft = store.read().model_dump()
+        draft["default_model"] = "oaw:model:work"
+        store.save(CatalogEdit.model_validate(draft))
+        assert resolve("").model_id == "same-model"  # blank means the default
+
+        # A replacement node must not inherit the connection through an older resolver.
+        cards["node-1"] = SimpleNamespace(id="node-1", created_at="2026-02-01T00:00:00Z")
+        with pytest.raises(ValueError):
+            resolve("oaw:model:work")
+    finally:
+        db.close()

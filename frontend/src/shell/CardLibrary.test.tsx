@@ -47,12 +47,12 @@ it('adds an installed file to the inventory immediately and closes its installat
   expect(container.querySelector('.pack-installer')).toBeNull();
   expect(screen.getByRole('button', { name: 'Install Pack from File...' }).hasAttribute('disabled')).toBe(false);
   expect(screen.queryByRole('button', { name: 'Uninstall Pack' })).toBeNull();
-  fireEvent.click(within(pack).getByRole('button'));
+  fireEvent.click(within(pack).getByRole('button', { name: /^(Tear open|View pack)/ }));
   expect(screen.getByRole('button', { name: 'Uninstall Pack' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Open pack' })).toBeNull();
 });
 
-it('plays the opening animation for installed packs before allowing entry into their details', async () => {
+it('opens installed packs and browses their cards before entering secondary management', async () => {
   const state = packSnapshot();
   state.packs.alpha.opened = false;
   state.available_pack_ids = ['alpha'];
@@ -67,14 +67,18 @@ it('plays the opening animation for installed packs before allowing entry into t
   await act(async () => { render(<CardLibrary />); });
   const pack = screen.getByRole('article', { name: 'Alpha pack' });
   expect(within(pack).getByRole('button', { name: 'Tear open Alpha pack' })).toBeTruthy();
-  await act(async () => fireEvent.click(within(pack).getByRole('button')));
+  await act(async () => fireEvent.click(within(pack).getByRole('button', { name: 'Tear open Alpha pack' })));
   expect(pack.classList.contains('is-revealing')).toBe(true);
   expect(screen.queryByRole('region', { name: 'Pack details' })).toBeNull();
-  expect(within(pack).getByRole('button').hasAttribute('disabled')).toBe(true);
+  expect(within(pack).getByRole('button', { name: 'View cards in Alpha pack' }).hasAttribute('disabled')).toBe(true);
   const animationEnd = new Event('animationend', { bubbles: true });
   Object.defineProperty(animationEnd, 'animationName', { value: 'packDeflate' });
   fireEvent(pack.querySelector('.pack-object')!, animationEnd);
-  fireEvent.click(within(pack).getByRole('button', { name: 'View pack Alpha pack' }));
+  fireEvent.click(within(pack).getByRole('button', { name: 'View cards in Alpha pack' }));
+  expect((screen.getByLabelText('Source pack') as HTMLSelectElement).value).toBe('pack:alpha');
+  expect(screen.queryByRole('button', { name: 'Uninstall Pack' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Pack details' }));
+  expect(screen.getByRole('button', { name: 'View cards' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Uninstall Pack' })).toBeTruthy();
 });
 
@@ -94,6 +98,9 @@ it('shows source Pack environments and previews source removal without assuming 
   useWorldStore.setState({ legions: [] });
   await act(async () => { render(<CardLibrary />); });
   fireEvent.click(screen.getByRole('button', { name: 'View pack Alpha pack' }));
+  const disclosure = screen.getByText('Pack dependencies').closest('details')!;
+  expect(disclosure.open).toBe(false);
+  fireEvent.click(disclosure.querySelector('summary')!);
   const dependencies = screen.getByRole('region', { name: 'Pack dependencies' });
   expect(dependencies.textContent).toContain('Development source');
   expect(within(dependencies).getByText('Ready')).toBeTruthy();
@@ -193,6 +200,42 @@ function snapshot(revision = 1): LibrarySnapshot {
     decks: [{ id: "test", name: "My deck", icon: "layers", entries: [] }], active_deck_id: "test",
     available_card_ids: definitions.map(card => card.id), available_pack_ids: [] };
 }
+
+it('scopes failures to their owner and repairs source environments from secondary management', async () => {
+  const state = packSnapshot();
+  const owner = state.packs.alpha.definition.plugin_id;
+  state.packs.beta.definition.plugin_id = 'other.owner';
+  state.plugins['other.owner'] = { ...state.plugins[owner] };
+  state.available_pack_ids = ['beta'];
+  const runtime = { id: 'distribution.alpha', owner, name: 'Alpha pack', version: '1.0.0',
+    source: 'development' as const, enabled: true, loaded: false,
+    environments: [], backend_requirements: [], frontend_dependencies: [], warnings: [] };
+  const failure = { id: runtime.id, owner, source: 'source', state: 'unavailable' as const,
+    phase: 'activation', error: 'Unique PDF dependency conflict', retry: 'repair_and_restart' as const };
+  vi.mocked(worldApi.getInstalledPacks).mockResolvedValue({ restart_required: false, versions: [],
+    inventory: [runtime, { ...runtime, id: 'distribution.beta', owner: 'other.owner', name: 'Beta pack' }], failures: [failure] });
+  const repair = vi.spyOn(worldApi, 'managePack').mockResolvedValue({ restart_required: true, versions: [], inventory: [runtime] });
+  useCardLibrary.setState({ snapshot: state, open: true, tab: 'packs', refresh: async () => {} });
+  await act(async () => { render(<CardLibrary />); });
+  const alpha = screen.getByRole('article', { name: 'Alpha pack' });
+  expect(alpha.dataset.packIssue).toBe('error');
+  expect(within(alpha).getByText('Environment failed')).toBeTruthy();
+  expect(screen.queryByText(failure.error)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'View pack Beta pack' }));
+  expect(screen.queryByText(failure.error)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Back to packs' }));
+  fireEvent.click(screen.getByRole('button', { name: 'View cards in Alpha pack' }));
+  expect(screen.getByRole('alert').textContent).toBe(failure.error);
+  fireEvent.change(screen.getByLabelText('Source pack'), { target: { value: 'pack:beta' } });
+  expect(screen.queryByText(failure.error)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /^Packs/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'View pack Alpha pack' }));
+  expect(screen.getByRole('alert').textContent).toBe(failure.error);
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Retry environment preparation' })));
+  expect(repair).toHaveBeenCalledWith('distribution.alpha/restore', 'POST', undefined);
+  fireEvent.click(screen.getByRole('button', { name: 'View cards' }));
+  expect((screen.getByLabelText('Source pack') as HTMLSelectElement).value).toBe('pack:alpha');
+});
 
 afterEach(() => {
   cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals();

@@ -20,8 +20,6 @@ def check_host(root: Path) -> None:
     config = tomllib.loads((root / "backend/pyproject.toml").read_text(encoding="utf-8"))
     project = config["project"]
     requirements = [*project["dependencies"], *config["dependency-groups"]["dev"]]
-    for extra in ("adk", "litellm"):
-        requirements.extend(project["optional-dependencies"][extra])
     for value in requirements:
         requirement = Requirement(value)
         if requirement.marker and not requirement.marker.evaluate():
@@ -103,11 +101,6 @@ def main(argv=None) -> None:
         prerequisites(install=False)
         sys.path.insert(0, str(ROOT))
         check_host(ROOT)
-        paths = sorted(path.parent for path in (ROOT / "plugins").glob("*/pyproject.toml")
-                       if tomllib.loads(path.read_text(encoding="utf-8")).get("project", {}).get("entry-points", {}).get("open_agent_world.plugins"))
-        paths = list(dict.fromkeys([*paths, *((ROOT / path).resolve() for path in args.plugin_path)]))
-        for path in paths:
-            check_plugin(path)
         if args.profile:
             from backend.development import profile_path, validate_profile
             data_root = profile_path(args.profile)
@@ -115,7 +108,8 @@ def main(argv=None) -> None:
         else:
             from backend.config import _default_data_root
             data_root = _default_data_root()
-        check_packs(paths, data_root)
+        # Optional Pack metadata/prepared artifacts are checked individually by
+        # the loader. A preflight must not prevent opening their recovery UI.
     except (ImportError, OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
         raise SystemExit(f"Source environment is not ready: {exc}\nRun scripts/setup.ps1 or scripts/setup.sh{suffix}; include the same plugin paths.") from exc
     print("Reusing prepared backend and Pack environments (no installation).", flush=True)

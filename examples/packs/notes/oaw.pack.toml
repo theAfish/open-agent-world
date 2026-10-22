@@ -1,0 +1,16 @@
+schema_version = 3
+
+[distribution]
+id = "example.notes"
+name = "Notes"
+
+[components.frontend]
+entry = "frontend/index.tsx"
+project = "package.json"
+mode = "pack-build"
+
+[[contributions.cards]]
+description = "A persistent note with an independently built view."
+icon = "notebook"
+config_schema = "config.schema.json"
+frontend = { body = "note" }

@@ -36,7 +36,7 @@ test('Legion previews show members on cards and empty canvas without blocking pa
     await expect(panel).toBeVisible();
     await expect(panel).toContainText('Hover Scout');
     await expect(panel).toContainText('Hover Writer');
-    await page.screenshot({ path: '../.open-agent-world/legion-hover-canvas.png' });
+    await page.screenshot({ path: test.info().outputPath('legion-hover-canvas.png') });
     await page.keyboard.press('Escape');
     await expect(panel).not.toBeVisible();
     await page.mouse.move(5, 5);
@@ -78,7 +78,7 @@ test('Legion previews show members on cards and empty canvas without blocking pa
     await card.hover();
     await expect(panel).toBeVisible();
     await expect(panel).toContainText('Hover Scout');
-    await page.screenshot({ path: '../.open-agent-world/legion-hover-card.png' });
+    await page.screenshot({ path: test.info().outputPath('legion-hover-card.png') });
     const bounds = (await panel.boundingBox())!;
     expect(bounds.y).toBeGreaterThanOrEqual(0);
     expect(bounds.y + bounds.height).toBeLessThanOrEqual(1000);

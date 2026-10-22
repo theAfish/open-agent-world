@@ -168,7 +168,7 @@ test("multiple equipment drops and owner deletion stay synchronized through undo
     await expect(surface(item.id)).toHaveClass(/equipment-card/);
   }
   await expect(surface(first.id)).toHaveClass(/equipment-card/);
-  await page.screenshot({ path: "../.open-agent-world/equipment-slots.png" });
+  await page.screenshot({ path: test.info().outputPath("equipment-slots.png") });
   await surface(conversation.id).getByRole('button', { name: conversation.name, exact: true }).click();
   await expect(surface(conversation.id)).toHaveAttribute('data-surface-level', 'workspace');
   const conversationWorkspace = surface(conversation.id).getByRole('dialog', { name: `${conversation.name} workspace`, exact: true });
@@ -204,7 +204,7 @@ test("multiple equipment drops and owner deletion stay synchronized through undo
   await expect(agentWorkspace.locator('.capability-chips')).toBeVisible();
   await expect(agentWorkspace.locator('.capability-chips')).toContainText('New Sandbox');
   await expect(agentWorkspace.locator('.capability-chips')).toContainText('New Conversation');
-  await page.screenshot({ path: "../.open-agent-world/agent-window-settings.png" });
+  await page.screenshot({ path: test.info().outputPath("agent-window-settings.png") });
   await agentWorkspace.getByRole('button', { name: 'Close workspace', exact: true }).click();
   await expect(surface(agent.id)).toHaveClass(/is-selected/);
   await page.getByRole('button', { name: 'Fit view', exact: true }).focus();
@@ -269,7 +269,7 @@ test("Barracks membership and explicit equipment drops preserve card identity", 
   await expect.poll(async () => (await read(agent.id)).parent_id).toBeNull();
   const edges = (await (await request.get("/api/world")).json()).edges;
   expect(edges.some((e: { source: string; target: string }) => e.source === agent.id && e.target === shared.id)).toBe(true);
-  await page.screenshot({ path: "../.open-agent-world/equipment-membership.png" });
+  await page.screenshot({ path: test.info().outputPath("equipment-membership.png") });
 });
 
 test("equipped Summoning skill uses its own connector and Barracks tests create fresh instances", async ({ page, request }) => {
@@ -323,7 +323,7 @@ test("equipped Summoning skill uses its own connector and Barracks tests create 
   expect(spawned.node_ids).toHaveLength(2);
   const newResourceId = spawned.node_ids.find((id: string) => id !== spawned.entry_agent_id);
   expect(newResourceId).not.toBe(resource.id);
-  await page.screenshot({ path: "../.open-agent-world/equipment-summoning.png" });
+  await page.screenshot({ path: test.info().outputPath("equipment-summoning.png") });
   await instances.getByRole("button", { name: "Reclaim instance", exact: true }).click();
   await expect(instances).toContainText("reclaimed");
   expect((await request.get(`/api/nodes/${newResourceId}`)).status()).toBe(404);

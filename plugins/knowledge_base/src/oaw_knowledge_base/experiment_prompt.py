@@ -1,8 +1,10 @@
-"""Turning an assemble prompt into a model request, and its answer back into JSON.
+"""Turning an extract prompt into one model request, and its answer back into records.
 
 Mirrors ``projection.py``: the host bridge holds the model credentials the plugin
-never gets, so building the chat messages and parsing the reply live in one place,
-shared between the bridge and an agent that produces the merge itself.
+never gets, so building the chat messages and parsing the reply live in one place.
+This is the agent-free path for **Extract records** — the same
+``experiment_extract_prompt`` → ``experiment_save`` pair a connected Lab assistant
+drives through its tools, collapsed into a single JSON-mode completion.
 """
 from __future__ import annotations
 
@@ -12,32 +14,42 @@ from .errors import KnowledgeError
 
 
 def build_system_prompt(prompt):
-    return prompt["system_prompt"] + "\n\nJSON Schema the merged \"data\" must match:\n" + \
-        json.dumps(prompt["definition"], ensure_ascii=False)
+    return (prompt["system_prompt"] + "\n\n" + prompt["instruction"]
+            + "\n\nJSON Schema each record's \"data\" must match:\n"
+            + json.dumps(prompt["definition"], ensure_ascii=False)
+            + (("\n\nField notes:\n" + json.dumps(prompt["field_descriptions"], ensure_ascii=False))
+               if prompt.get("field_descriptions") else ""))
 
 
-def build_messages(prompt):
-    """Chat messages for an OpenAI-compatible completion: the merge rules, then
-    every contributing file's already-extracted data, each labelled with its source
-    so the model can cite it back in ``conflicts``."""
-    contributions = "\n\n".join(
-        f"From {item['filename'] or item['source_id']} (source_id={item['source_id']}):\n"
-        + json.dumps(item["data"], ensure_ascii=False)
-        for item in prompt["contributions"])
+def build_messages(prompt, markdown=None):
+    """Chat messages for an OpenAI-compatible completion. ``markdown`` lets a caller
+    that paged through ``has_more`` pass the whole document instead of one window."""
+    files = "\n".join(f"- {item['filename']} (source_id={item['source_id']})" for item in prompt["files"])
+    notes = prompt.get("notes") or ""
+    user = (f"Upload: {prompt['bundle_name']}\nFiles:\n{files}\n"
+            + (f"\nUploader's notes:\n{notes}\n" if notes.strip() else "")
+            + "\nDocument:\n\n" + (markdown if markdown is not None else prompt["markdown"]))
     return [{"role": "system", "content": build_system_prompt(prompt)},
-            {"role": "user", "content": contributions}]
+            {"role": "user", "content": user}]
 
 
-def parse_assemble(answer):
-    """The model's reply as ``{"data": {...}, "conflicts": [...]}``, or a ``KnowledgeError``."""
+def parse_extract(answer):
+    """The model's reply as a list of ``{"name", "data", "source_ids", "note"}``."""
     if isinstance(answer, str):
         try:
             answer = json.loads(answer)
         except ValueError:
             raise KnowledgeError("The model did not return JSON") from None
-    if not isinstance(answer, dict) or not isinstance(answer.get("data"), dict):
-        raise KnowledgeError('The model must return {"data": {...}, "conflicts": [...]}')
-    conflicts = answer.get("conflicts") or []
-    if not isinstance(conflicts, list):
-        raise KnowledgeError('"conflicts" must be a list')
-    return {"data": answer["data"], "conflicts": conflicts}
+    records = answer.get("records") if isinstance(answer, dict) else answer
+    if not isinstance(records, list) or not records:
+        raise KnowledgeError('The model must return {"records": [{"name": ..., "data": {...}}, ...]}')
+    cleaned = []
+    for index, item in enumerate(records):
+        if not isinstance(item, dict) or not isinstance(item.get("data"), dict):
+            raise KnowledgeError(f'Record {index + 1} must be an object with a "data" object')
+        name = str(item.get("name") or "").strip() or f"record {index + 1}"
+        source_ids = [str(value) for value in item.get("source_ids") or [] if value]
+        note = item.get("note")
+        cleaned.append({"name": name[:500], "data": item["data"], "source_ids": source_ids,
+                        "note": str(note)[:4000] if note else None})
+    return cleaned

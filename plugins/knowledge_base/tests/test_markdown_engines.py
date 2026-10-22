@@ -188,3 +188,80 @@ def test_available_engines_reports_vision_only_when_both_env_vars_are_set(monkey
 
     monkeypatch.setenv("OAW_VISION_BASE_URL", "https://vision.example/v1")
     assert "vision" in available_engines()
+
+
+class _Connection:
+    def __init__(self, adapter="openai", model_id="gpt-4o", base_url="https://host.example/v1", api_key="host-key"):
+        self.adapter, self.model_id, self.base_url, self.api_key = adapter, model_id, base_url, api_key
+
+
+def test_vision_prefers_the_card_model_then_the_default_model_then_the_variables(monkeypatch):
+    monkeypatch.delenv("OAW_VISION_API_KEY", raising=False)
+    monkeypatch.delenv("OAW_VISION_BASE_URL", raising=False)
+    monkeypatch.setattr("httpx.Client", _FakeClient)
+    asked = []
+
+    def resolve_model(reference):
+        asked.append(reference)
+        if reference == "oaw:model:broken":
+            raise ValueError("Selected model connection is missing")
+        return _Connection(model_id="openai/gpt-4o" if reference == "oaw:default" else "pixtral")
+
+    # An explicit pick is resolved as given.
+    to_markdown(b"bytes", "chart.png", "image/png", vision_model="oaw:model:m1", resolve_model=resolve_model)
+    assert asked[-1] == "oaw:model:m1"
+    assert _FakeClient.last_payload["model"] == "pixtral"
+    assert _FakeClient.last_url == "https://host.example/v1/chat/completions"
+    assert _FakeClient.last_headers["Authorization"].endswith("host-key")
+
+    # Blank means the OAW default model; a provider prefix is stripped for the wire.
+    to_markdown(b"bytes", "chart.png", "image/png", vision_model="", resolve_model=resolve_model)
+    assert asked[-1] == "oaw:default"
+    assert _FakeClient.last_payload["model"] == "gpt-4o"
+
+    # An explicit pick that cannot be resolved fails loudly rather than falling back.
+    with pytest.raises(KnowledgeError, match="broken"):
+        to_markdown(b"bytes", "chart.png", "image/png", vision_model="oaw:model:broken",
+                    resolve_model=resolve_model)
+
+
+def test_vision_falls_back_to_the_variables_through_the_host_resolver(monkeypatch):
+    monkeypatch.delenv("OAW_VISION_API_KEY", raising=False)
+    monkeypatch.delenv("OAW_VISION_BASE_URL", raising=False)
+    monkeypatch.setattr("httpx.Client", _FakeClient)
+
+    def no_default(reference):
+        raise ValueError("Choose a default model")
+
+    # The global key:value settings arrive through resolve_secret, not os.environ.
+    variables = {"OAW_VISION_API_KEY": "settings-key", "OAW_VISION_BASE_URL": "https://settings.example/v1",
+                 "OAW_VISION_MODEL": "settings-vision"}
+    text, engine, _ = to_markdown(b"bytes", "chart.png", "image/png", resolve_model=no_default,
+                                  resolve_secret=variables.get)
+    assert engine == "vision"
+    assert _FakeClient.last_url == "https://settings.example/v1/chat/completions"
+    assert _FakeClient.last_payload["model"] == "settings-vision"
+    assert _FakeClient.last_headers["Authorization"].endswith("settings-key")
+
+    # Nothing anywhere: the error names both ways to fix it.
+    with pytest.raises(KnowledgeError, match="Vision model in the card's Settings"):
+        to_markdown(b"bytes", "chart.png", "image/png", resolve_model=no_default, resolve_secret=lambda _: None)
+
+
+def test_vision_refuses_a_non_openai_compatible_connection(monkeypatch):
+    monkeypatch.setattr("httpx.Client", _FakeClient)
+    with pytest.raises(KnowledgeError, match="OpenAI-compatible"):
+        to_markdown(b"bytes", "chart.png", "image/png",
+                    resolve_model=lambda _: _Connection(adapter="anthropic"))
+
+
+def test_available_engines_reports_vision_through_the_model_connection(monkeypatch):
+    monkeypatch.delenv("OAW_VISION_API_KEY", raising=False)
+    monkeypatch.delenv("OAW_VISION_BASE_URL", raising=False)
+    assert "vision" in available_engines(resolve_model=lambda _: _Connection())
+
+    def nothing(reference):
+        raise ValueError("no default")
+    assert "vision" not in available_engines(resolve_model=nothing)
+    assert "vision" in available_engines(resolve_model=nothing, resolve_secret={
+        "OAW_VISION_API_KEY": "k", "OAW_VISION_BASE_URL": "u"}.get)

@@ -73,7 +73,7 @@ npx playwright test --config playwright.reader.config.ts
   reading state. A measured 3,427,010-byte paper decode took 75.3 ms elapsed
   including yields; maximum synchronous decode chunk 2.8 ms. The preview's scoped
   Long Tasks observer recorded no >50 ms tasks during that one opening.
-- Test artifacts live under ignored `.open-agent-world/reader-transition-tests`.
+- Test artifacts live under ignored `.tmp/playwright/reader-results`.
   The test PDF is generated in memory and APIs are intercepted; no test writes
   touch research nodes, annotations, or managed files.
 

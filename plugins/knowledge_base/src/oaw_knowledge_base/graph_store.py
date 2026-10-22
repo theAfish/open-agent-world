@@ -4,6 +4,11 @@ MKB's portable client defaults to ``InMemoryGraphStore``, which loses every enti
 and relation when the client closes. This adapter satisfies ``mkb.ports.GraphStore``
 over two plugin-owned tables inside the same SQLite file as the rest of the card, so
 the whole knowledge base stays a single SQL database with no external service.
+
+Every element carries a ``layer``: ``literature`` for what an approved draft
+published, ``experiment`` for a published insight and the record and field nodes it
+cites (see ``insights.py``). One graph, two provenances — MKB's own query and
+traversal walk both; the plugin's filters narrow to either.
 """
 from __future__ import annotations
 
@@ -16,6 +21,10 @@ from sqlalchemy import (
 )
 
 METADATA = MetaData()
+
+LITERATURE_LAYER = "literature"
+EXPERIMENT_LAYER = "experiment"
+LAYERS = (LITERATURE_LAYER, EXPERIMENT_LAYER)
 
 ENTITIES = Table(
     "oaw_kg_entity", METADATA,
@@ -30,7 +39,12 @@ ENTITIES = Table(
     # ownership boundary — an entity that several groups' facts resolve to the
     # same alias for keeps only the most recent group here.
     Column("group_id", String(36), nullable=True),
+    # Which pipeline published this element: ``literature`` for an approved draft's
+    # facts, ``experiment`` for a published insight and the record/field nodes it
+    # cites. One graph, two layers — a query filters by it, traversal crosses it.
+    Column("layer", String(32), nullable=False, server_default=LITERATURE_LAYER),
     Index("ix_oaw_kg_entity_group", "group_id"),
+    Index("ix_oaw_kg_entity_layer", "layer"),
 )
 
 RELATIONS = Table(
@@ -43,9 +57,11 @@ RELATIONS = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     Column("group_id", String(36), nullable=True),
+    Column("layer", String(32), nullable=False, server_default=LITERATURE_LAYER),
     Index("ix_oaw_kg_relation_source", "source_id"),
     Index("ix_oaw_kg_relation_target", "target_id"),
     Index("ix_oaw_kg_relation_group", "group_id"),
+    Index("ix_oaw_kg_relation_layer", "layer"),
 )
 
 
@@ -56,14 +72,31 @@ def _aware(value):
     return value
 
 
-def _add_group_column(engine, table_name):
+def _add_column(engine, table_name, column, ddl):
     # ``create_all(checkfirst=True)`` only creates missing tables, so a card's
-    # database from before groups existed needs this column added by hand.
+    # database from before groups (or layers) existed needs the column added by hand.
     with engine.begin() as connection:
         columns = {row[1] for row in connection.exec_driver_sql(
             f"PRAGMA table_info({table_name})").fetchall()}
-        if "group_id" not in columns:
-            connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN group_id VARCHAR(36)")
+        if column not in columns:
+            connection.exec_driver_sql(f"ALTER TABLE {table_name} ADD COLUMN {column} {ddl}")
+
+
+def _add_group_column(engine, table_name):
+    _add_column(engine, table_name, "group_id", "VARCHAR(36)")
+
+
+def _add_layer_column(engine, table_name):
+    # Everything published before layers existed came from an approved literature draft.
+    _add_column(engine, table_name, "layer", f"VARCHAR(32) NOT NULL DEFAULT '{LITERATURE_LAYER}'")
+
+
+def _layered(query, table, layer):
+    if layer is not None:
+        if layer not in LAYERS:
+            raise ValueError(f"layer must be one of {LAYERS}")
+        query = query.where(table.c.layer == layer)
+    return query
 
 
 class SqlGraphStore:
@@ -77,6 +110,8 @@ class SqlGraphStore:
         METADATA.create_all(engine, checkfirst=True)
         _add_group_column(engine, "oaw_kg_entity")
         _add_group_column(engine, "oaw_kg_relation")
+        _add_layer_column(engine, "oaw_kg_entity")
+        _add_layer_column(engine, "oaw_kg_relation")
 
     # Rows are written through the plugin's own engine rather than MKB's session so
     # that a graph write never joins an unrelated MKB transaction.
@@ -98,11 +133,12 @@ class SqlGraphStore:
             type=row["type"], properties=json.loads(row["properties"]),
             created_at=_aware(row["created_at"]), updated_at=_aware(row["updated_at"]))
 
-    def dataset(self, *, limit, entity_type=None, relation_type=None):
+    def dataset(self, *, limit, entity_type=None, relation_type=None, layer=None):
         """Bound the SQL result before loading a graph for visualization."""
         query = select(ENTITIES.c.id, ENTITIES.c.name, ENTITIES.c.type).order_by(ENTITIES.c.id).limit(limit + 1)
         if entity_type:
             query = query.where(ENTITIES.c.type == entity_type)
+        query = _layered(query, ENTITIES, layer)
         with self._engine.connect() as connection:
             rows = connection.execute(query).mappings().all()
             nodes = [dict(row) for row in rows[:limit]]
@@ -138,12 +174,13 @@ class SqlGraphStore:
         row = self._row(ENTITIES, str(entity_id))
         return self._entity(row) if row is not None else None
 
-    def list_entities(self, *, type=None, group_id=None):
+    def list_entities(self, *, type=None, group_id=None, layer=None):
         query = select(ENTITIES).order_by(ENTITIES.c.id)
         if type is not None:
             query = query.where(ENTITIES.c.type == type)
         if group_id is not None:
             query = query.where(ENTITIES.c.group_id == str(group_id))
+        query = _layered(query, ENTITIES, layer)
         with self._engine.connect() as connection:
             return [self._entity(row) for row in connection.execute(query).mappings()]
 
@@ -171,7 +208,7 @@ class SqlGraphStore:
         row = self._row(RELATIONS, str(relation_id))
         return self._relation(row) if row is not None else None
 
-    def list_relations(self, *, entity_id=None, type=None, group_id=None):
+    def list_relations(self, *, entity_id=None, type=None, group_id=None, layer=None):
         query = select(RELATIONS).order_by(RELATIONS.c.id)
         if type is not None:
             query = query.where(RELATIONS.c.type == type)
@@ -181,26 +218,62 @@ class SqlGraphStore:
                 (RELATIONS.c.source_id == identifier) | (RELATIONS.c.target_id == identifier))
         if group_id is not None:
             query = query.where(RELATIONS.c.group_id == str(group_id))
+        query = _layered(query, RELATIONS, layer)
         with self._engine.connect() as connection:
             return [self._relation(row) for row in connection.execute(query).mappings()]
 
-    def tag_group(self, entity_ids, relation_ids, group_id):
-        """Record which group's approval introduced or last touched these elements.
+    def tag(self, entity_ids, relation_ids, *, group_id=None, layer=None):
+        """Stamp group and/or layer onto exactly the elements a publication touched.
 
         ``kb.graph.extract`` builds and upserts :class:`~mkb.models.Entity` /
-        ``Relation`` objects itself, so there is no seam to hand it a group id
+        ``Relation`` objects itself, so there is no seam to hand it either value
         directly. This runs right after, over the exact ids that call returned.
         """
-        group = str(group_id)
+        values = {}
+        if group_id is not None:
+            values["group_id"] = str(group_id)
+        if layer is not None:
+            if layer not in LAYERS:
+                raise ValueError(f"layer must be one of {LAYERS}")
+            values["layer"] = layer
+        if not values:
+            return
         with self._engine.begin() as connection:
             if entity_ids:
                 connection.execute(update(ENTITIES).where(
-                    ENTITIES.c.id.in_([str(value) for value in entity_ids])
-                ).values(group_id=group))
+                    ENTITIES.c.id.in_([str(value) for value in entity_ids])).values(**values))
             if relation_ids:
                 connection.execute(update(RELATIONS).where(
-                    RELATIONS.c.id.in_([str(value) for value in relation_ids])
-                ).values(group_id=group))
+                    RELATIONS.c.id.in_([str(value) for value in relation_ids])).values(**values))
+
+    def tag_group(self, entity_ids, relation_ids, group_id):
+        """Record which group's approval introduced or last touched these elements."""
+        self.tag(entity_ids, relation_ids, group_id=group_id)
+
+    def remove(self, entity_ids):
+        """Delete these entities and every relation touching them (an unpublish)."""
+        identifiers = [str(value) for value in entity_ids]
+        if not identifiers:
+            return
+        with self._engine.begin() as connection:
+            connection.execute(delete(RELATIONS).where(
+                RELATIONS.c.source_id.in_(identifiers) | RELATIONS.c.target_id.in_(identifiers)))
+            connection.execute(delete(ENTITIES).where(ENTITIES.c.id.in_(identifiers)))
+
+    def orphans(self, *, layer, types):
+        """Ids of this layer's entities of the given types that no relation touches.
+
+        Reference nodes (a record, a field) exist only to be cited; once the last
+        insight citing one is unpublished, nothing should keep it on the map.
+        """
+        if not types:
+            return []
+        linked = select(RELATIONS.c.source_id).union(select(RELATIONS.c.target_id))
+        query = select(ENTITIES.c.id).where(
+            ENTITIES.c.type.in_(list(types)), ENTITIES.c.id.not_in(linked))
+        query = _layered(query, ENTITIES, layer)
+        with self._engine.connect() as connection:
+            return [row[0] for row in connection.execute(query).all()]
 
     def clear(self):
         """Drop every graph element; used when rebuilding from approved facts."""
@@ -208,13 +281,15 @@ class SqlGraphStore:
             connection.execute(delete(RELATIONS))
             connection.execute(delete(ENTITIES))
 
-    def counts(self, *, group_id=None):
+    def counts(self, *, group_id=None, layer=None):
         with self._engine.connect() as connection:
             entity_query = select(func.count()).select_from(ENTITIES)
             relation_query = select(func.count()).select_from(RELATIONS)
             if group_id is not None:
                 entity_query = entity_query.where(ENTITIES.c.group_id == str(group_id))
                 relation_query = relation_query.where(RELATIONS.c.group_id == str(group_id))
+            entity_query = _layered(entity_query, ENTITIES, layer)
+            relation_query = _layered(relation_query, RELATIONS, layer)
             return {
                 "entities": connection.execute(entity_query).scalar_one(),
                 "relations": connection.execute(relation_query).scalar_one(),

@@ -15,6 +15,12 @@ Download published installers from [GitHub Releases](https://github.com/theAfish
 
 On Windows, install the generated `Open Agent World_*_x64-setup.exe`, then open **Open Agent World** from the Start menu. The per-user NSIS installer does not require a developer environment. It includes a complete Python interpreter, locked backend dependencies, bundled plugins, frontend assets, and uv for managed Sandbox Python provisioning. Its WebView2 bootstrapper downloads the runtime if needed.
 
+Windows must have **Enable Win32 long paths** enabled before installation:
+bundled Python packages contain paths longer than 260 characters. The installer
+declares long-path support but does not change this system policy. Release CI
+checks the policy, installs into a directory containing spaces, compares every
+payload file with the build, and reruns the payload self-test after installation.
+
 The desktop shell shows startup progress, waits for backend readiness, and opens the world in a separate window. Opening the app again focuses its existing window. Closing the final window asks the backend to shut down; a Windows Job Object also owns the backend process tree for crash/forced-exit cleanup. Backend logs rotate at 5 MB. Formal launch logs use `%LOCALAPPDATA%\OpenAgentWorld.logs\launcher.log`, outside the relocatable data store; development and explicitly configured stores use `logs/launcher.log` inside their profile. The startup window reports the log path.
 
 Application installation and Sandbox provisioning remain separate. Scientific plugin dependencies and platform-specific execution prerequisites may still require a first-use download or OS configuration. macOS provides native Seatbelt isolation; Apple Silicon hosts on macOS 26+ can additionally install Apple Container for the preferred VM boundary. The release pipeline targets **Windows x64**, **macOS Apple Silicon**, and **macOS Intel**; macOS packages are previews. Build macOS packages on a Mac with `bash scripts/build-desktop.sh`.

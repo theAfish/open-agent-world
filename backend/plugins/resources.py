@@ -22,6 +22,11 @@ class NodeResourceContext:
     # Trusted backend code only. Values must never enter state, job parameters,
     # action responses or exports. Resolve at execution time, not when queueing.
     resolve_secret: Callable[[str], str | None] | None = None
+    # Resolves an OAW model reference ("oaw:default" or "oaw:model:...") to a
+    # ``RuntimeModelConnection`` for a plugin that must call a model itself (for
+    # example to transcribe an image inside its own conversion job). Same rules as
+    # ``resolve_secret``: the connection's key never leaves the handler.
+    resolve_model: Callable[[str], Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

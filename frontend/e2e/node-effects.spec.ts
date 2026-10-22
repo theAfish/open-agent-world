@@ -22,7 +22,7 @@ test("generated copies fly from their template and reusable activity effects fol
     const source = await page.locator(`[data-card-id="${template.id}"]`).boundingBox();
     return !!copy && !!source && copy.x > source.x + 100;
   }).toBeTruthy();
-  await page.screenshot({ path: '../.open-agent-world/node-generation.png' });
+  await page.screenshot({ path: test.info().outputPath('node-generation.png') });
   await expect(page.locator('.generation-copy')).toHaveCount(0);
   await expect(target).toHaveCSS('opacity', '1');
   const persisted = await (await request.get(`/api/nodes/${instance.entry_agent_id}`)).json();
@@ -46,14 +46,14 @@ test("generated copies fly from their template and reusable activity effects fol
   await expect(workspace.getByRole('status')).toHaveText('Working · 1 active');
   await expect(target.locator('.activity-glow > i')).toHaveCount(4);
   await expect(target.locator('.activity-glow')).toHaveCSS('opacity', '0.95');
-  await page.screenshot({ path: '../.open-agent-world/node-effects-running.png' });
+  await page.screenshot({ path: test.info().outputPath('node-effects-running.png') });
   await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
-  await page.screenshot({ path: '../.open-agent-world/node-effects-running-dark.png' });
+  await page.screenshot({ path: test.info().outputPath('node-effects-running-dark.png') });
   await target.getByRole('button', { name: 'Collapse Researcher card' }).click();
   await expect(target).toHaveAttribute('data-surface-level', 'node');
   await expect(target).toHaveCSS('width', '96px');
   await expect(target).toHaveCSS('border-top-left-radius', '48px');
-  await page.screenshot({ path: '../.open-agent-world/node-effects-running-node.png' });
+  await page.screenshot({ path: test.info().outputPath('node-effects-running-node.png') });
   await target.getByRole('button', { name: 'Expand Researcher card' }).click();
   await target.click({ position: { x: 140, y: 75 } });
   await expect(target).toHaveAttribute('data-surface-level', 'inspector');
@@ -65,7 +65,7 @@ test("generated copies fly from their template and reusable activity effects fol
   await expect(workspace.getByRole('status')).toHaveText('Completed');
   await state('idle', 'run_failed');
   await expect(workspace.getByRole('status')).toHaveText('Failed');
-  await page.screenshot({ path: '../.open-agent-world/node-effects-failed.png' });
+  await page.screenshot({ path: test.info().outputPath('node-effects-failed.png') });
   await state('idle', 'run_cancelled');
   await expect(workspace.getByRole('status')).toHaveText('Stopped');
   expect((await (await request.get(`/api/nodes/${instance.entry_agent_id}`)).json()).position).toEqual(persisted.position);

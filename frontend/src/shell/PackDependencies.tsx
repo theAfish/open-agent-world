@@ -46,7 +46,7 @@ export function PackEnvironments({ environments }: { environments: PackEnvironme
 export function PackPlanDetails({ plan }: { plan: PackInstallationPlan }) {
   return <section className="pack-dependencies" aria-label={t('Installation plan')}>
     <h4>{t('Installation plan')}</h4>
-    <p>{t(sources[plan.source])} · {plan.version}{plan.restart_required ? ` · ${t('Restart required')}` : ''}</p>
+    <p>{t(sources[plan.source])} · {plan.version} · {t(plan.restart_required ? 'Restart required' : 'Available after installation')}</p>
     {plan.dependencies.length > 0 && <div><strong>{t('Pack dependencies')}</strong>
       <ul>{plan.dependencies.map(dependency => <li key={dependency.id}>
         {dependency.id} {dependency.version} · {t(dependencyStates[dependency.state])}

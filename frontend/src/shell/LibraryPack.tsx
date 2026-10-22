@@ -7,11 +7,11 @@ import { libraryCardMetadata } from "./libraryCatalog";
 import { packIssue, type InstalledPack } from './installedPacks';
 import { packPackaging } from './packDesign';
 
-export function LibraryPack({ pack, snapshot, onOpened, onBrowse, onInspect, status, versions, contentCountKnown = true }: {
+export function LibraryPack({ pack, snapshot, onOpened, onBrowse, onInspect, status, versions, contentCountKnown = true, failed = false }: {
   pack: LibrarySnapshot["packs"][string]; snapshot: LibrarySnapshot;
   onOpened: (id: string) => void; onBrowse: (id: string) => void;
   onInspect?: () => void; status?: string; contentCountKnown?: boolean;
-  versions?: InstalledPack[];
+  versions?: InstalledPack[]; failed?: boolean;
 }) {
   useLocale();
   const library = useCardLibrary();
@@ -21,7 +21,8 @@ export function LibraryPack({ pack, snapshot, onOpened, onBrowse, onInspect, sta
   const definition = { ...pack.definition, name: t(pack.definition.name), description: t(pack.definition.description) };
   const plugin = snapshot.plugins[definition.plugin_id];
   const available = snapshot.available_pack_ids.includes(definition.id);
-  const issue = packIssue(pack, snapshot, versions);
+  const issue = failed ? { kind: 'error' as const, label: 'Environment failed' } : packIssue(pack, snapshot, versions);
+  const inspectPrimary = !!onInspect && !pack.opened && (!available || !!issue);
   const canOpen = !issue && !library.busy && phase === "idle" && available && pack.owned && !pack.opened;
   const presetCount = Object.values(snapshot.preset_pack_ids ?? {}).filter(ids => ids.includes(definition.id)).length;
   const revealSnapshot = phase === "revealing" ? revealedSnapshot : null;
@@ -58,10 +59,11 @@ export function LibraryPack({ pack, snapshot, onOpened, onBrowse, onInspect, sta
     }))} count={contentCountKnown ? definition.cards.length + presetCount : null}
     opened={pack.opened || !!revealSnapshot} phase={phase} finishVisible={finishVisible}
     issue={issue?.kind} status={issue || status ? t(issue?.label ?? status!) : undefined}
-    label={onInspect ? t('View pack {name}', { name: definition.name }) : pack.opened || !available || issue ? `${t("View cards in")} ${definition.name}` : openLabel}
-    title={onInspect ? t('View pack {name}', { name: definition.name }) : phase === "pending" ? t("Opening…") : pack.opened ? t("View {v0} cards", { v0: definition.name }) : unavailable || t("Open {v0}", { v0: definition.name })}
-    sealLabel={t(onInspect || issue || !available ? 'VIEW PACK' : 'TEAR TO OPEN')}
+    label={inspectPrimary ? t('View pack {name}', { name: definition.name }) : pack.opened || !available || issue ? `${t("View cards in")} ${definition.name}` : openLabel}
+    title={inspectPrimary ? t('View pack {name}', { name: definition.name }) : phase === "pending" ? t("Opening…") : pack.opened ? t("View {v0} cards", { v0: definition.name }) : unavailable || t("Open {v0}", { v0: definition.name })}
+    sealLabel={t(inspectPrimary || issue || !available ? 'VIEW PACK' : 'TEAR TO OPEN')}
     disabled={phase !== "idle" || (!pack.opened && (library.busy || !pack.owned))}
-    onClick={() => onInspect ? onInspect() : pack.opened || !available || issue ? onBrowse(definition.id) : void openPack()}
+    onClick={() => inspectPrimary ? onInspect!() : pack.opened || !available || issue ? onBrowse(definition.id) : void openPack()}
+    actions={onInspect && !inspectPrimary && <button className="library-text-button pack-manage" aria-label={t('View pack {name}', { name: definition.name })} onClick={onInspect}>{t('Pack details')}</button>}
     onSettled={() => setPhase('idle')} />;
 }

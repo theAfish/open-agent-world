@@ -96,9 +96,9 @@ test("a Legion contains live members, shares state, moves as a team and preserve
     await expect.poll(async () => movement(await positionOf(request, first.id), before)).toBeGreaterThan(60);
     const edgeId = (await external.json()).id;
     await expect(page.locator(`path[data-edge-id="${edgeId}"]`)).toHaveCount(1);
-    await page.screenshot({ path: "../.open-agent-world/legion-team-light.png" });
+    await page.screenshot({ path: test.info().outputPath("legion-team-light.png") });
     await page.getByRole("button", { name: "Use dark theme" }).click();
-    await page.screenshot({ path: "../.open-agent-world/legion-team-dark.png" });
+    await page.screenshot({ path: test.info().outputPath("legion-team-dark.png") });
     await page.getByRole("button", { name: "Use light theme" }).click();
     await page.reload();
     await group.getByRole("button", { name: "Legion settings", exact: true }).click();

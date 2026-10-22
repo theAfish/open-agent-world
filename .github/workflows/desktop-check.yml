@@ -2,7 +2,9 @@ name: Desktop native checks
 
 on:
   pull_request:
-    paths: ['desktop/**', 'backend/desktop_backup.py', 'backend/tests/test_desktop_*.py', 'scripts/*desktop*', '.github/workflows/desktop-*.yml']
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
   workflow_dispatch:
 
 permissions:
@@ -13,6 +15,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  required:
+    name: Native required
+    if: always()
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every native target
+        env:
+          RESULT: ${{ needs.check.result }}
+        run: test "$RESULT" = success
+
   check:
     name: Native tests (${{ matrix.platform }})
     strategy:

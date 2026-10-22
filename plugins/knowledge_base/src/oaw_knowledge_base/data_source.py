@@ -101,7 +101,9 @@ def read(context, query):
         raise ResourceValidationError("Unknown schema field")
     cap = min(query.limit + 1, 500)
     if parts[0] == "experiments":
-        records = [item["data"] for item in kb.oaw_experiments.list(schema_id=parts[1], limit=cap)]
+        # Only published records are approved data; drafts are still being reviewed.
+        records = [item["data"] for item in
+                   kb.oaw_experiments.list(schema_id=parts[1], status="published", limit=cap)]
     else:
         records = [item.data for item in kb.projections.list(schema_id=parts[1], newest_only=True, limit=cap)]
     truncated = len(records) >= cap

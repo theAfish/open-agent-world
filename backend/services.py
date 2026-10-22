@@ -232,6 +232,7 @@ class _RecoveryLifecycleNodes:
 @dataclass(frozen=True, slots=True)
 class _LifecycleAgents:
     manager: RunManager
+    restoring: bool = False
 
     async def reserve_delete(self, node_id: str) -> None:
         await self.manager.reserve_agent_deletion(node_id)
@@ -240,7 +241,10 @@ class _LifecycleAgents:
         self.manager.release_agent_deletion(node_id)
 
     async def create(self, node: Card) -> None:
-        await self.manager.register_agent(node)
+        if self.restoring:
+            await self.manager.restore_agent(node)
+        else:
+            await self.manager.register_agent(node)
 
     async def update(self, node: Card) -> None:
         await self.manager.update_agent(node)
@@ -598,6 +602,8 @@ class ApplicationServices:
     _lifecycle_startup_cleanup_budget_seconds: float = field(
         default=30.0, init=False, repr=False
     )
+    _restored_lifecycles: dict = field(default_factory=dict, init=False, repr=False)
+    _cleaned_lifecycles: set = field(default_factory=set, init=False, repr=False)
 
     @property
     def execution_credentials(self):
@@ -680,6 +686,61 @@ class ApplicationServices:
         task.add_done_callback(self._consume_background_task)
         raise TimeoutError("plugin lifecycle cleanup exceeded its deadline")
 
+    def _assert_plugin_recovery_safe(self) -> None:
+        from backend.plugins.failures import PluginIntegrityError
+        with self.database.locked() as db:
+            if db.in_transaction:
+                raise PluginIntegrityError('Plugin callback left an unfinished host transaction')
+        self._assert_no_live_pending_deletions()
+
+    async def activate_passive_packs(self):
+        """Publish new passive owners after Library persistence succeeds.
+
+        The caller holds the existing graph mutation barrier. A staged copy of
+        the same Registry keeps failures from changing live contributions; no
+        plugin lifecycle, module replacement or active-task interruption occurs.
+        """
+        from copy import copy
+        from backend.plugins.loader import load_installed_packs
+        candidate = copy(self.plugins)
+        candidate.__dict__ = {key: copy(value) if isinstance(value, (dict, list, set)) else value
+                              for key, value in self.plugins.__dict__.items()}
+        load_installed_packs(candidate, self.settings.data_root, safe_only=True)
+        if candidate.installed_packs == self.plugins.installed_packs:
+            self.plugins.load_failures = candidate.load_failures
+            return
+        CardLibraryStore(self.database, candidate)
+        self.plugins.__dict__.update(candidate.__dict__)
+        self.pack_installations.pin_loaded_resources()
+        self.pack_installations.reconcile_resources()
+        await self.events.publish_event(RuntimeEvent(type=EventType.CARD_LIBRARY_UPDATED,
+            payload={'revision': self.card_library.snapshot()['revision']}))
+
+    async def _quarantine_plugin(self, owner, error, *, phase='startup'):
+        from backend.plugins.failures import PluginIntegrityError, raise_if_unsafe
+        raise_if_unsafe(error)
+        self._assert_plugin_recovery_safe()
+        affected = self.plugins.mark_unavailable(owner, phase, error)
+        logger.error('Plugin %s unavailable during %s: %s', owner, phase, error)
+        failures = []
+        for node_id, (card, lifecycle) in reversed(tuple(self._restored_lifecycles.items())):
+            if self.plugins.node_type_owner_id(card.type) not in affected:
+                continue
+            try:
+                await self._run_bounded_lifecycle_cleanup(
+                    lifecycle.on_shutdown(self._node_lifecycle_context(), card),
+                    timeout_seconds=self._lifecycle_cleanup_timeout_seconds)
+                self._assert_plugin_recovery_safe()
+            except BaseException as cleanup_error:
+                failures.append(cleanup_error)
+            finally:
+                self._restored_lifecycles.pop(node_id, None)
+                self._cleaned_lifecycles.add(node_id)
+        if failures:
+            # Continuing after failed compensation would claim safety we cannot
+            # establish in an in-process extension host.
+            raise PluginIntegrityError(f'Plugin {owner} startup cleanup failed') from BaseExceptionGroup('Plugin cleanup failures', failures)
+
     async def startup(self) -> None:
         from backend.startup_progress import startup_stage
         with startup_stage("recover managed artifacts"):
@@ -743,25 +804,45 @@ class ApplicationServices:
                 run.run_id, conversation_id, session_id, notice
             )
         self.deliveries.recover_after_restart()
-        for agent_id in self.deliveries.all_queued_agents():
-            task = asyncio.create_task(self._drain_conversation_agent(agent_id))
-            task.add_done_callback(self._consume_background_task)
-        await self.node_execution.startup()
         await self._retry_pending_node_deletions()
-        context = self._node_lifecycle_context()
-        for card in self.world.list_cards():
+        context = self._node_lifecycle_context(restoring=True)
+        # Registry installation already orders dependencies. Finish each owner's
+        # restoration before any dependent owner's callbacks can run.
+        order = {plugin.id: index for index, plugin in enumerate(self.plugins.plugins())}
+        for saved in sorted(self.world.list_cards(), key=lambda card: order.get(
+                card.missing_plugin.plugin_id if card.missing_plugin else self.plugins.node_type_owner_id(card.type), -1)):
+            card = self.world.get_card(saved.id)
             lifecycle = self.plugins.node_type(card.type).lifecycle if not card.missing_plugin else None
             if lifecycle is not None:
-                with startup_stage(f"restore card runtime ({card.type})"):
-                    await lifecycle.on_startup(context, card)
+                self._restored_lifecycles[card.id] = (card, lifecycle)
+                try:
+                    with startup_stage(f"restore card runtime ({card.type})"):
+                        await lifecycle.on_startup(context, card)
+                    self._assert_plugin_recovery_safe()
+                except Exception as error:
+                    await self._quarantine_plugin(self.plugins.node_type_owner_id(card.type), error)
+        for owner in {self.plugins.node_type_owner_id(card.type) for card, _ in self._restored_lifecycles.values()}:
+            if failure := self.plugins.unavailable_reason(owner):
+                await self._quarantine_plugin(owner, RuntimeError(failure['error']), phase=failure['phase'])
+        await self.node_execution.startup()
         await self.summoning.recover()
         from backend.sandbox.history import recover as recover_commands
         await recover_commands(self)
         with startup_stage("recover background jobs"):
             await self.background_jobs.startup()
 
+        import os
+        from backend.plugins.loader import _check_strict
+        _check_strict(self.plugins, os.environ.get('OPEN_AGENT_WORLD_STRICT_PLUGINS') == '1')
+
         self.node_execution.continuation_closed = False
         self.node_execution.signal_continuations()
+
+        for agent_id in self.deliveries.all_queued_agents():
+            card = self.world.maybe_get_card(agent_id)
+            if card is not None and not card.missing_plugin:
+                task = asyncio.create_task(self._drain_conversation_agent(agent_id))
+                task.add_done_callback(self._consume_background_task)
 
         if self.plugin_bootstrap is not None:
             self.plugin_bootstrap.enqueue()
@@ -770,21 +851,34 @@ class ApplicationServices:
         # Lifecycle shutdown drains providers without cancelling scheduled checks
         # whose originating turns already finished successfully.
         self._require_run_manager().shutting_down = True
+        failures = []
+        async def drain(operation):
+            try:
+                await operation
+            except BaseException as error:
+                failures.append(error)
         if self.plugin_bootstrap is not None:
-            await self.plugin_bootstrap.shutdown()
-        await self.node_execution.shutdown()
-        await self.background_jobs.shutdown()
-        await self.sandbox_operations.shutdown()
+            await drain(self.plugin_bootstrap.shutdown())
+        await drain(self.node_execution.shutdown())
+        await drain(self.background_jobs.shutdown())
+        await drain(self.sandbox_operations.shutdown())
         if isinstance(self.sandbox_backend, SandboxManager):
-            await self.sandbox_backend.shutdown()
+            await drain(self.sandbox_backend.shutdown())
         context = self._node_lifecycle_context()
+        callbacks = dict(self._restored_lifecycles)
         for card in self.world.list_cards():
             lifecycle = self.plugins.node_type(card.type).lifecycle if not card.missing_plugin else None
-            if lifecycle is not None:
-                await lifecycle.on_shutdown(context, card)
-        await self._require_run_manager().shutdown()
+            if lifecycle is not None and card.id not in self._cleaned_lifecycles:
+                callbacks[card.id] = (card, lifecycle)
+        for card, lifecycle in reversed(tuple(callbacks.values())):
+            await drain(self._run_bounded_lifecycle_cleanup(lifecycle.on_shutdown(context, card),
+                timeout_seconds=self._lifecycle_cleanup_timeout_seconds))
+        self._restored_lifecycles.clear()
+        await drain(self._require_run_manager().shutdown())
         if self.node_execution.continuation_outputs:
             await asyncio.gather(*tuple(self.node_execution.continuation_outputs), return_exceptions=True)
+        if failures:
+            raise BaseExceptionGroup('Application shutdown could not finish all cleanup', failures)
 
     def enrich_card(self, card: Card) -> Card:
         if card.missing_plugin:
@@ -3906,13 +4000,13 @@ class ApplicationServices:
             in {Relationship.MOUNT_READ_ONLY, Relationship.MOUNT_READ_WRITE}
         )
 
-    def _node_lifecycle_context(self) -> NodeLifecycleContext:
+    def _node_lifecycle_context(self, *, restoring=False) -> NodeLifecycleContext:
         manager = self._require_run_manager()
         return NodeLifecycleContext(
             nodes=_LifecycleNodes(self.world),
             resources=_LifecycleResources(self.resources),
             conversations=_LifecycleConversations(self.conversations, self.state),
-            agents=_LifecycleAgents(manager),
+            agents=_LifecycleAgents(manager, restoring=restoring),
             sandboxes=(
                 _LifecycleSandboxes(self.sandbox_backend, self.resources)
                 if self.sandbox_backend is not None
@@ -4000,10 +4094,10 @@ def create_services(
     from backend.startup_progress import startup_stage
     with startup_stage("open profile database"):
         database = Database(settings.database_path)
-    with startup_stage("load Pack registry"):
-        plugin_registry = plugins or load_plugin_registry(plugin_directories=settings.plugin_directories, data_root=settings.data_root)
-    world = WorldStore(database, plugin_registry, chunk_size=settings.chunk_size, new_world=new_world)
     try:
+        with startup_stage("load Pack registry"):
+            plugin_registry = plugins or load_plugin_registry(plugin_directories=settings.plugin_directories, data_root=settings.data_root)
+        world = WorldStore(database, plugin_registry, chunk_size=settings.chunk_size, new_world=new_world)
         card_library = CardLibraryStore(database, plugin_registry)
         from backend.migrations.barracks import check_legacy
         check_legacy(database)
@@ -4127,9 +4221,15 @@ def create_services(
     if (
         (saved_llm.base_url or saved_llm.api_key)
         and services.run_manager.default_runtime_provider_id is not None
+        and (plugin_registry.has_runtime_provider(services.run_manager.default_runtime_provider_id)
+             or services.run_manager.default_runtime_provider_id in (runtime_providers or {}))
     ):
         with startup_stage("initialize default Agent provider"):
-            default_provider = services.run_manager.default_provider()
+            try:
+                default_provider = services.run_manager.default_provider()
+            except Exception as exc:
+                services.run_manager.unavailable_runtime(services.run_manager.default_runtime_provider_id, exc)
+                default_provider = None
     else:
         default_provider = None
     if isinstance(default_provider, GoogleAdkAgentRuntime):

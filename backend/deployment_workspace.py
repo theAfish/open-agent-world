@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from backend.api import artifacts, conversations, file_preview, job_board, node_documents, node_resources, resources, runtime
 from backend.api.dependencies import get_services
 from backend.api.knowledge_bridge import (
-    ExperimentAssembleRequest, ProjectionRequest, run_experiment_assemble, run_projection,
+    ExperimentExtractRequest, InsightExtractRequest, ProjectionRequest, run_experiment_extract,
+    run_insight_extract, run_projection,
 )
 from backend.node_documents import DocumentActionRequest, read_document, invoke_document_action
 from backend.node_resources import ResourceActionRequest, invoke_resource_action
@@ -294,12 +295,19 @@ def workspace_router(manifest):
             raise HTTPException(404, "This operation is not published")
         return await run_projection(node_id, request, services)
 
-    @router.post("/knowledge/{node_id}/assemble")
-    async def knowledge_assemble(node_id: str, request: ExperimentAssembleRequest, services=Depends(get_services)):
+    @router.post("/knowledge/{node_id}/extract")
+    async def knowledge_extract(node_id: str, request: ExperimentExtractRequest, services=Depends(get_services)):
         actions = manifest.get("plugin_access", {}).get(node_id, {}).get("resource_actions", {})
-        if not {"experiment_assemble_prompt", "experiment_save"} <= set(actions):
+        if not {"experiment_extract_prompt", "experiment_save"} <= set(actions):
             raise HTTPException(404, "This operation is not published")
-        return await run_experiment_assemble(node_id, request, services)
+        return await run_experiment_extract(node_id, request, services)
+
+    @router.post("/knowledge/{node_id}/insights")
+    async def knowledge_insights(node_id: str, request: InsightExtractRequest, services=Depends(get_services)):
+        actions = manifest.get("plugin_access", {}).get(node_id, {}).get("resource_actions", {})
+        if not {"insight_prompt", "insight_save"} <= set(actions):
+            raise HTTPException(404, "This operation is not published")
+        return await run_insight_extract(node_id, request, services)
 
     for route in node_documents.router.routes:
         if route.endpoint.__name__ in {"execution", "start_execution", "stop_execution"}:

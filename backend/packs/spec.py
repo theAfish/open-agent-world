@@ -234,6 +234,40 @@ class SpecDependency(SpecModel):
         return value
 
 
+class CardContribution(SpecModel):
+    """Passive cards compile to the existing NodeTypeDefinition contract."""
+    id: str | None = Field(default=None, pattern=IDENTIFIER, max_length=128)
+    name: str | None = None
+    description: str = ""
+    icon: str = "box"
+    color: str = "#518bba"
+    frontend: dict[str, str] = Field(default_factory=dict)
+    config_schema: dict[str, Any] | str = Field(default_factory=lambda: {"type": "object", "properties": {}})
+    default_name: str | None = None
+    size: tuple[float, float] = (300, 200)
+    statuses: tuple[str, ...] = ("ready",)
+    default_status: str | None = None
+    deck_id: str | None = None
+    deck_name: str | None = None
+
+    @model_validator(mode="after")
+    def valid_card(self) -> Self:
+        import math
+        if not self.statuses or len(set(self.statuses)) != len(self.statuses) or any(not value for value in self.statuses):
+            raise ValueError('Card statuses must be nonempty and unique')
+        if self.default_status is not None and self.default_status not in self.statuses:
+            raise ValueError('Card default_status must belong to statuses')
+        if any(not math.isfinite(value) or value <= 0 for value in self.size):
+            raise ValueError('Card size must contain positive finite dimensions')
+        if set(self.frontend) - {'preview', 'body', 'settings', 'workspace'} or any(not value for value in self.frontend.values()):
+            raise ValueError('Unknown or empty card frontend surface')
+        return self
+
+
+class Contributions(SpecModel):
+    cards: tuple[CardContribution, ...] = Field(default=(), max_length=1000)
+
+
 class PackSpec(SpecModel):
     schema_version: Literal[3] = 3
     distribution_id: str = Field(pattern=IDENTIFIER, max_length=128)
@@ -256,6 +290,7 @@ class PackSpec(SpecModel):
     source_root: Path | None = Field(default=None, exclude=True)
     legacy: bool = False
     compatibility: CompatibilitySpec | None = None
+    contributions: Contributions = Field(default_factory=Contributions)
 
     @field_validator("version")
     @classmethod
@@ -295,7 +330,11 @@ class PackSpec(SpecModel):
 
     @property
     def spec_digest(self) -> str:
-        encoded = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode()
+        payload = self.model_dump(mode="json")
+        if not self.contributions.cards:
+            # New optional syntax must not invalidate existing adapter receipts.
+            payload.pop("contributions")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()
 
     @property
@@ -356,8 +395,8 @@ class _Distribution(SpecModel):
 
 
 class _Plugin(SpecModel):
-    owner: str
-    packs: tuple[str, ...]
+    owner: str | None = None
+    packs: tuple[str, ...] | None = None
     node_types: tuple[str, ...] | None = None
 
 
@@ -369,7 +408,8 @@ class _Components(SpecModel):
 class _Declaration(SpecModel):
     schema_version: Literal[3]
     distribution: _Distribution
-    plugin: _Plugin
+    plugin: _Plugin = Field(default_factory=_Plugin)
+    contributions: Contributions = Field(default_factory=Contributions)
     components: _Components = Field(default_factory=_Components)
     dependency_groups: dict[str, _Group] = Field(default_factory=dict, alias="dependency-groups")
     environments: dict[str, _Environment] = Field(default_factory=dict)
@@ -503,9 +543,10 @@ def read_source_pack(root: Path) -> PackSpec:
     entrypoints = project.get("entry-points", {}).get(ENTRY_POINT_GROUP, {})
     if not isinstance(entrypoints, dict) or any(not isinstance(value, str) for value in entrypoints.values()):
         raise ValueError(f"{ENTRY_POINT_GROUP} must contain string entry points")
-    if not entrypoints:
-        raise ValueError(f"No {ENTRY_POINT_GROUP} entry points in {root}")
     explicit = (reader.root / "oaw.pack.toml").exists()
+    declaration = _Declaration.model_validate(reader.toml("oaw.pack.toml")) if explicit else None
+    if not entrypoints and not (declaration and declaration.contributions.cards):
+        raise ValueError(f"No {ENTRY_POINT_GROUP} entry points or declarative cards in {root}")
     version = project.get("version", "0" if not explicit else None)
     if not isinstance(version, str):
         raise ValueError("Source Packs require a static project.version")
@@ -528,7 +569,33 @@ def read_source_pack(root: Path) -> PackSpec:
                         source_root=reader.root, legacy=True,
                         requirement_origins={key: tuple(value) for key, value in reader.origins.items()})
 
-    declaration = _Declaration.model_validate(reader.toml("oaw.pack.toml"))
+    owner = declaration.plugin.owner or declaration.distribution.id
+    packs = declaration.plugin.packs if declaration.plugin.packs is not None else (owner + ".default",)
+    cards = []
+    for card in declaration.contributions.cards:
+        schema = json.loads(reader.read(card.config_schema)) if isinstance(card.config_schema, str) else card.config_schema
+        identifier = card.id or (owner if len(declaration.contributions.cards) == 1 else None)
+        if identifier is None:
+            raise ValueError("Multiple declarative cards require explicit IDs")
+        cards.append(card.model_copy(update={"id": identifier, "config_schema": schema}))
+    contributions = Contributions(cards=tuple(cards))
+    node_types = declaration.plugin.node_types
+    if cards:
+        if len(packs) != 1 or (declaration.dependencies and not entrypoints):
+            raise ValueError("Declarative cards use one Pack; plugin dependencies require an advanced entrypoint")
+        inferred = tuple(card.id for card in cards)
+        if node_types is not None and (not set(inferred) <= set(node_types) or (not entrypoints and set(node_types) != set(inferred))):
+            raise ValueError("Declared node_types disagree with contributions.cards")
+        node_types = node_types if entrypoints else inferred
+        from backend.plugins.declarative import config_model
+        for card in cards:
+            config_model(card.config_schema)().model_dump(mode="json")
+    compatibility = declaration.compatibility
+    if cards:
+        required_api = '1.38' if entrypoints else '1.37'
+        compatibility = compatibility or CompatibilitySpec(plugin_api=required_api)
+        if Version(compatibility.plugin_api) < Version(required_api):
+            raise ValueError(f"These declarative contributions require Plugin API {required_api} or newer")
     if declaration.distribution.version is not None and declaration.distribution.version != version:
         raise ValueError("oaw.pack.toml and pyproject.toml versions disagree")
     if declaration.components.backend.project != "pyproject.toml":
@@ -605,12 +672,12 @@ def read_source_pack(root: Path) -> PackSpec:
     for path in runtime_resources:
         reader.read(path, max_bytes=128 * 1024 * 1024)
     return PackSpec(distribution_id=declaration.distribution.id, version=version,
-                    name=declaration.distribution.name or project["name"], owner=declaration.plugin.owner,
-                    packs=declaration.plugin.packs, node_types=declaration.plugin.node_types,
+                    name=declaration.distribution.name or project["name"], owner=owner,
+                    packs=packs, node_types=node_types, contributions=contributions,
                     entrypoints=entrypoints, backend=backend, frontend=frontend,
                     environments=environments, features=declaration.features, prerequisites=declaration.prerequisites,
                     dependencies=declaration.dependencies, dependency_groups=groups, source_files=reader.files,
-                    compatibility=declaration.compatibility,
+                    compatibility=compatibility,
                     runtime_resources=runtime_resources,
                     requirement_origins={key: tuple(value) for key, value in reader.origins.items()}, source_root=reader.root)
 
@@ -629,7 +696,7 @@ def discover_source_packs(directories: Iterable[Path]) -> tuple[PackSpec, ...]:
             roots.add(root.resolve())
             reader = _Reader(root)
             data = reader.toml("pyproject.toml")
-            if not data.get("project", {}).get("entry-points", {}).get(ENTRY_POINT_GROUP):
+            if not data.get("project", {}).get("entry-points", {}).get(ENTRY_POINT_GROUP) and not (root / "oaw.pack.toml").is_file():
                 continue
             spec = read_source_pack(root)
             declarations = [("distribution", spec.distribution_id)]

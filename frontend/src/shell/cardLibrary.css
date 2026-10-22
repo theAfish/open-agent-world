@@ -160,17 +160,17 @@
 .pack-install-popover details { margin-bottom: 14px; }
 .pack-install-popover summary, .pack-detail-section summary { cursor: pointer; color: var(--ink-soft); }
 .pack-inventory-status { display: block; text-align: center; color: var(--ink-faint); font-size: 11px; padding: 0 8px 6px; }
-.installed-pack-detail { max-width: 720px; margin: 0 auto; font-size: 13px; }
+.installed-pack-detail { max-width: 720px; margin: 0; font-size: 13px; }
 .pack-back-button, .pack-uninstall-button { display: inline-flex; align-items: center; gap: 6px; }
-.installed-pack-heading { display: flex; align-items: center; gap: 16px; margin: 20px 0 16px; }
-.installed-pack-heading h3 { margin: 0 0 7px; font-size: 24px; overflow-wrap: anywhere; }
+.installed-pack-heading { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+.installed-pack-heading h3 { margin: 0 0 7px; font-size: 20px; overflow-wrap: anywhere; }
 .installed-pack-heading span { color: var(--ink-faint); font-size: 12px; }
-.installed-pack-icon { display: grid; place-items: center; flex-shrink: 0; width: 60px; height: 60px; border-radius: 14px; background: var(--surface-soft); color: var(--accent); }
+.installed-pack-icon { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border-radius: 14px; background: var(--surface-soft); color: var(--accent); }
 .installed-pack-detail p { line-height: 1.65; color: var(--ink-soft); overflow-wrap: anywhere; }
 .pack-restart-note { font-size: 12px; }
 .pack-detail-actions { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .pack-detail-actions .pack-uninstall-button { color: var(--danger); margin-left: auto; }
-.pack-detail-section { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 24px; }
+.pack-detail-section { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 14px; }
 .pack-version-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding-top: 12px; }
 .pack-version-row > span { margin-right: auto; }
 .pack-uninstall-confirm { margin-top: 16px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
@@ -181,3 +181,6 @@
   .library-tab-row .library-tabs { padding: 0; }
   .library-tab-actions { padding-block: 6px; }
 }
+
+.pack-manage { display: block; margin: 6px auto 0; font-size: 11px; }
+.pack-problem { margin-top: 12px; overflow-wrap: anywhere; }

@@ -62,5 +62,9 @@ export function packInventory(snapshot: LibrarySnapshot, installations?: PackIns
   }
   return packs.map(pack => ({ pack, versions: byPlugin.get(pack.definition.plugin_id) ?? [],
     inventory: installations?.inventory?.find(item => item.owner === pack.definition.plugin_id),
+    failures: installations?.failures?.filter(failure => failure.owner ? failure.owner === pack.definition.plugin_id
+      : failure.id === pack.definition.plugin_id
+      || installations.inventory?.some(item => item.owner === pack.definition.plugin_id && item.id === failure.id)
+      || byPlugin.get(pack.definition.plugin_id)?.some(item => item.id === failure.id)) ?? [],
     registered: Boolean(snapshot.packs[pack.definition.id]) }));
 }

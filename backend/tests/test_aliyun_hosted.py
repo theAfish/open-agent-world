@@ -132,6 +132,43 @@ def test_hosted_composition_exposes_only_unavailable_cloud_runtime_until_verifie
         assert client.get("/api/world").status_code == 200
         assert client.post("/api/packs/install", json={}).status_code == 403
         assert client.post("/api/nodes", json={"type": "text"}).status_code == 201
+        # Reconciliation must not re-enable a host-only Pack from its saved intent.
+        services = app.state.services
+        services.card_library.read()
+        assert not services.plugins.is_enabled("openai.codex")
+        assert client.post("/api/nodes", json={"type": "openai.codex.agent"}).status_code == 403
+        assert client.post("/api/nodes", json={"type": "sandbox", "config": {
+            "workspace_path": "/srv/other-user"}}).status_code == 403
+
+
+def test_cloud_discovery_uses_all_bundled_sources_and_private_context(tmp_path, monkeypatch):
+    from backend.plugins import loader
+    from backend.packs.spec import read_source_pack
+    from pathlib import Path
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Hosted discovery must not scan installed user code")
+
+    monkeypatch.setattr(loader, "entry_points", forbidden)
+    monkeypatch.setattr(loader, "load_installed_packs", forbidden)
+    contexts = []
+    original = loader.create_plugin
+
+    def factory(*args, **kwargs):
+        contexts.append(kwargs["data_root"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(loader, "create_plugin", factory)
+    registry = hosted.approved_plugins(tmp_path)
+    source = Path(__file__).resolve().parents[2] / "plugins"
+    expected = {read_source_pack(p.parent).owner for p in source.glob("*/oaw.pack.toml")}
+    # Dependencies may be absent on a developer machine; every trusted source is
+    # still discovered and reports readiness through the normal Pack lifecycle.
+    assert expected <= set(registry.pack_specs)
+    assert contexts and all(root == tmp_path for root in contexts)
+    assert registry.is_enabled("data.sqlite") and registry.is_enabled("matcreator")
+    assert not registry.is_enabled("openai.codex")
+    assert registry.node_type("sandbox").config_model().command_timeout == 60
 
 
 def test_new_ecs_workspace_files_work_before_any_compute_start(tmp_path, monkeypatch):
@@ -174,7 +211,7 @@ def test_shared_cloud_environment_derives_new_users_private_identity(tmp_path, m
     captured = []
     monkeypatch.setattr(hosted, "registry_factory", lambda remote: captured.append(remote))
     monkeypatch.setattr(hosted, "create_services", lambda *args, **kwargs:
-        SimpleNamespace(world=SimpleNamespace(list_cards=lambda: [])))
+        SimpleNamespace(world=SimpleNamespace(list_cards=lambda: []), plugins=kwargs["plugins"]))
     profiles = [str(uuid4()), str(uuid4())]
     for profile in profiles:
         settings = replace(Settings.for_data_root(tmp_path / profile),

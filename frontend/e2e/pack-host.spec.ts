@@ -86,6 +86,10 @@ test('restart activates backend, runtime frontend, Python, Library, Deck and a u
     if (item?.environment?.state === 'environment_failed') throw new Error(item.environment.error);
     return item?.environment?.state;
   }, { timeout: 150000, intervals: [1000, 2000] }).toBe('environment_ready');
+  const installed = await (await request.get('/api/packs')).json();
+  const environment = installed.versions.find((p: { id: string }) => p.id === 'example.greeter').environment;
+  expect(JSON.parse(environment.declaration)).toEqual(
+    process.env.OAW_PACK_HOST_ONLY === '1' ? [] : ['colorama==0.4.6']);
   await dismissOnboarding(page);
   await page.getByRole('button', { name: 'Open Pack and Card Library' }).click();
   const library = page.getByRole('dialog', { name: 'Pack & Card Library' });

@@ -282,13 +282,13 @@ it('clears revoked connections and ignores an in-flight response from the previo
   api.subscribe = listener => { changed = listener; return () => {}; };
   api.read = vi.fn().mockResolvedValueOnce(history()).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
   const view = render(<ExecutionGraphView api={api} />);
-  await screen.findByText('Study copper');
+  await screen.findByRole('button', { name: 'A: success' });
   act(() => changed('execution'));
   await waitFor(() => expect(api.read).toHaveBeenCalledTimes(2));
   api.list = vi.fn().mockResolvedValue({ sources: [] });
   act(() => changed('connections'));
   await act(async () => finish(history()));
-  await waitFor(() => expect(screen.queryByText('Study copper')).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'A: success' })).toBeNull());
   view.rerender(<ExecutionGraphView api={source({ title: '', phase: 'idle', nodes: [] })} />);
   await screen.findByText('No execution yet');
 });

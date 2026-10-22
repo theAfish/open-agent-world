@@ -26,7 +26,7 @@ bash scripts/setup.sh
 bash scripts/start.sh
 ```
 
-Setup installs the backend development dependencies, Google ADK and LiteLLM adapters, frontend dependencies, and builds the production frontend. `start` serves that build from the Python backend and opens the local application URL. Ctrl+C stops the launcher. Rebuild after frontend changes with `npm --prefix frontend run build`.
+Setup installs Core, backend development tools and frontend dependencies, then builds the Core frontend. It next prepares bundled Packs and Google ADK/LiteLLM independently: a failed optional component does not prevent Core or other Packs from being prepared. Existing compatible dependencies and environments are reused. Use `-CoreOnly` (PowerShell) or `--core-only` for minimal setup; use the application's Library/Store for subsequent plugin installation and repair. `start` serves the prepared build from the Python backend and opens the local application URL. Ctrl+C stops the launcher. Rebuild after frontend changes with `npm --prefix frontend run build`.
 
 The shell launcher uses the installed backend environment; Node.js and uv are only needed for setup and rebuilds. It accepts launcher options, for example `bash scripts/start.sh --mode preview --profile demo` or `bash scripts/start.sh --port 38474`. On a machine without a graphical browser, open the printed local URL manually on that machine. In WSL2, install the prerequisites and run both scripts inside the Linux distribution.
 

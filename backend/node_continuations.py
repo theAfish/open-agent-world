@@ -17,6 +17,7 @@ from uuid import uuid4
 from backend.card_state import state_session
 from backend.errors import DomainError, NotFoundError, PermissionDeniedError, RuntimeUnavailableError
 from backend.runs.models import RunStatus, TERMINAL_RUN_STATUSES
+from backend.plugins.failures import raise_if_unsafe
 
 logger = logging.getLogger(__name__)
 MAX_CONTINUATION_TURNS = 64
@@ -45,8 +46,13 @@ class NodeContinuationMixin:
             self.continuation_delay = 30
             try:
                 await self.services.background_jobs.tick()
-            except Exception:
+            except Exception as error:
                 logger.exception("Could not observe background work; durable records retained")
+                try:
+                    raise_if_unsafe(error, allow_revocation=True)
+                except Exception:
+                    self.continuation_closed = True
+                    raise
             for node_id, namespace in tuple(self.continuation_keys):
                 version = self.continuation_versions[(node_id, namespace)]
                 try:
@@ -57,10 +63,15 @@ class NodeContinuationMixin:
                         self.continuation_keys.discard((node_id, namespace))
                 except (NotFoundError, PermissionDeniedError):
                     self.continuation_keys.discard((node_id, namespace))
-                except Exception:
+                except Exception as error:
                     # Retain the durable intent on transient failure. No re-dispatch
                     # occurs if its reserved Run already exists.
                     logger.exception("Could not deliver work notification for %s", node_id)
+                    try:
+                        raise_if_unsafe(error)
+                    except Exception:
+                        self.continuation_closed = True
+                        raise
             if self.continuation_keys or self.services.background_jobs.has_pending():
                 try:
                     await asyncio.wait_for(self.continuation_event.wait(), timeout=self.continuation_delay)

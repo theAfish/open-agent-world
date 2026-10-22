@@ -185,7 +185,7 @@ $env:OAW_PERF_REPORT = '../.outputs/canvas-performance.json'
 node scripts/run-e2e.mjs e2e/canvas-performance.spec.ts
 ```
 
-The runner resets only `.open-agent-world/playwright` and starts services on
+The runner resets only `.tmp/playwright/data` and starts services on
 5177/8017. Run one isolated runner at a time. The report contains frame intervals
 and CDP script/layout/style durations; `.outputs/canvas-performance.png` shows the
 resulting scene.

@@ -6,7 +6,11 @@ requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.11,<3",
     "mat-know-base @ git+https://github.com/theAfish/mat_know_base.git@0d05057e5fdbd821ec96c99227266d4c5e0d6af6",
-    "pymupdf4llm>=0.0.17",
+    # The converter uses the standalone to_markdown API (removed in 2.x).
+    # Intel macOS must avoid the 1.x layout/ONNX closure: coloredlogs ships
+    # a .pth hook rejected by the shared-adapter wheel boundary.
+    "pymupdf4llm>=0.0.17,<2; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "pymupdf4llm>=0.0.17,<0.4; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "openpyxl>=3.1,<4",
     "httpx>=0.28,<1",
 ]

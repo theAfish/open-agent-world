@@ -344,9 +344,15 @@ class NodeExecutionService(NodeDelegationMixin, NodeContinuationMixin):
                     text=self.services.run_manager.final_text(run_id) if run_id else "", error=attempt["error"]))
                 attempt["applied"] = True
             except Exception as callback_error:
+                from backend.plugins.failures import raise_if_unsafe
+                raise_if_unsafe(callback_error)
                 # Preserve attempt truth even when a changed plugin cannot
                 # reconcile its old document; user sees the recovery error.
                 error = f"Result reconciliation failed: {callback_error}"
+                if self.continuation_closed:
+                    # Startup has no live work to cancel. Preserve the ledger;
+                    # quarantine the owner before reopening admission.
+                    raise
         state.update(status=status, error=error)
         self.save(node_id, state)
 
@@ -355,34 +361,46 @@ class NodeExecutionService(NodeDelegationMixin, NodeContinuationMixin):
         # lifecycle startup has completed.
         self.continuation_closed = True
         for node in self.services.world.list_cards():
+            node = self.services.world.get_card(node.id)
             if node.missing_plugin:
                 continue
             if self.services.plugins.node_type(node.type).execution is None:
                 continue
-            namespaces = self.services.card_state.existing(node.id)
-            # Old documents remain eligible for adoption/recovery. Never visit
-            # new cards or unseen sessions just because the backend restarted.
-            with self.services.database.locked() as db:
-                legacy = db.execute("SELECT 1 FROM state_scopes WHERE scope_kind='node_document' AND owner_id=?", (node.id,)).fetchone()
-            if legacy and not namespaces:
-                namespaces = [self.services.card_state.identity(node.id)]
-            for kind, namespace in namespaces:
-                with state_session(namespace if kind == "session" else None):
-                    if self.spec(node.id).summoning:
-                        self.collect_delegations(node.id)
-                        self.watch_continuations(node.id)
-                    elif self.state(node.id)["status"] == "running":
-                        await self.reconcile(node.id)
+            try:
+                await self._restore_node(node)
+                self.services._assert_plugin_recovery_safe()
+            except Exception as error:
+                await self.services._quarantine_plugin(self.services.plugins.node_type_owner_id(node.type), error, phase='execution_recovery')
+
+    async def _restore_node(self, node):
+        namespaces = self.services.card_state.existing(node.id)
+        # Never visit new cards or unseen sessions merely because OAW restarted.
+        with self.services.database.locked() as db:
+            legacy = db.execute("SELECT 1 FROM state_scopes WHERE scope_kind='node_document' AND owner_id=?", (node.id,)).fetchone()
+        if legacy and not namespaces:
+            namespaces = [self.services.card_state.identity(node.id)]
+        for kind, namespace in namespaces:
+            with state_session(namespace if kind == "session" else None):
+                if self.spec(node.id).summoning:
+                    self.collect_delegations(node.id)
+                    self.watch_continuations(node.id)
+                elif self.state(node.id)["status"] == "running":
+                    await self.reconcile(node.id)
 
     async def shutdown(self):
         self.continuation_closed = True
+        failure = None
         if self.continuation_task is not None:
             self.continuation_task.cancel()
-            await asyncio.gather(self.continuation_task, return_exceptions=True)
+            result, = await asyncio.gather(self.continuation_task, return_exceptions=True)
+            if isinstance(result, Exception):
+                failure = result
         for key in tuple(self.workers):
             node_id, session_id = key if isinstance(key, tuple) else (key, None)
             with state_session(session_id):
                 await self.stop(node_id)
+        if failure is not None:
+            raise failure
 
     def assert_session_idle(self, session_id):
         self.services.background_jobs.assert_idle(session_id=session_id)

@@ -70,7 +70,7 @@ for (const composed of [false, true]) test(`session and group creation keep the 
   }
 });
 
-for (const [id, name] of [['matcreator.native-research', 'MatCreator research'], ['knowledge.base.research', 'Knowledge research']]) test(`${name} can create sessions and groups`, async ({ page, request }) => {
+for (const [id, name] of [['matcreator.native-research', 'MatCreator research'], ['knowledge.base.research', 'Lab Manager']]) test(`${name} can create sessions and groups`, async ({ page, request }) => {
   test.setTimeout(60_000);
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.stack ?? error.message));

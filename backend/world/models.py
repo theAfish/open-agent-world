@@ -267,7 +267,7 @@ class CardsUpdate(BaseModel):
 class MissingPlugin(BaseModel):
     """Read-time diagnostic; never replaces persisted plugin identity or data."""
     plugin_id: str
-    reason: Literal["plugin_missing", "plugin_disabled", "type_missing", "owner_mismatch", "endpoint_missing"]
+    reason: Literal["plugin_missing", "plugin_disabled", "plugin_unavailable", "type_missing", "owner_mismatch", "endpoint_missing"]
 
 
 class Card(BaseModel):

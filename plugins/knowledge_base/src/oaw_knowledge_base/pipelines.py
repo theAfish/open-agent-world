@@ -35,7 +35,9 @@ def _convert(context, state):
         data, source.filename, source.media_type,
         engine=context.parameters.get("engine", "auto"),
         mineru_base_url=context.parameters.get("mineru_base_url"),
-        resolve_secret=getattr(kb, "oaw_resolve_secret", None))
+        vision_model=context.parameters.get("vision_model") or "",
+        resolve_secret=getattr(kb, "oaw_resolve_secret", None),
+        resolve_model=getattr(kb, "oaw_resolve_model", None))
     context.check_cancelled()
 
     artifact_id = derived_id(source_id, "artifact")
@@ -104,10 +106,13 @@ def register_pipelines(kb):
     kb.pipelines.register(build_pipeline(), replace=True)
 
 
-def submit_markdown_job(kb, source, collection_id, *, engine="auto", mineru_base_url=None):
+def submit_markdown_job(kb, source, collection_id, *, engine="auto", mineru_base_url=None,
+                        vision_model=""):
+    # A model reference is a name, not a credential: safe to persist with the job.
     return kb.pipelines.submit(
         PIPELINE_NAME,
         inputs={"source_id": str(source.id), "collection_id": str(collection_id)},
-        parameters={"engine": engine, "mineru_base_url": mineru_base_url},
+        parameters={"engine": engine, "mineru_base_url": mineru_base_url,
+                    "vision_model": vision_model or ""},
         idempotency_key=f"markdown:{source.id}:{(source.sha256 or '')[:16]}",
     )

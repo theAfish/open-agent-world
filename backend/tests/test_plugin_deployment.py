@@ -86,30 +86,28 @@ def test_knowledge_project_bridge_needs_both_halves_published(monkeypatch):
     assert calls == [("granted", "schema-1")]
 
 
-def test_knowledge_assemble_bridge_needs_both_halves_published(monkeypatch):
-    """Same gate as projection, for the experiment-record merge bridge: a release
-    only reaches it once both experiment_assemble_prompt and experiment_save are
+def test_knowledge_extract_bridge_needs_both_halves_published(monkeypatch):
+    """Same gate as projection, for the agent-free experiment extraction: a release
+    only reaches it once both experiment_extract_prompt and experiment_save are
     published for this node."""
     calls = []
-    async def fake_run_experiment_assemble(node_id, request, services):
-        calls.append((node_id, tuple(request.projection_ids)))
-        return {"record": {"id": "record-1", "status": "draft"}}
-    monkeypatch.setattr("backend.deployment_workspace.run_experiment_assemble",
-                        fake_run_experiment_assemble)
+    async def fake_run_experiment_extract(node_id, request, services):
+        calls.append((node_id, request.bundle_id, request.replace_drafts))
+        return {"records": [{"id": "record-1"}], "invalid": 0, "bundle_id": request.bundle_id, "truncated": False}
+    monkeypatch.setattr("backend.deployment_workspace.run_experiment_extract", fake_run_experiment_extract)
 
-    body = {"projection_ids": ["p1", "p2"], "model": "oaw:model:m1"}
+    body = {"bundle_id": "bundle-1", "model": "oaw:model:m1", "replace_drafts": True}
     both = DeploymentSurface(resource_actions={
-        "experiment_assemble_prompt": set(), "experiment_save": set()}).model_dump(mode="json")
-    only_read = DeploymentSurface(
-        resource_actions={"experiment_assemble_prompt": set()}).model_dump(mode="json")
+        "experiment_extract_prompt": set(), "experiment_save": set()}).model_dump(mode="json")
+    only_read = DeploymentSurface(resource_actions={"experiment_extract_prompt": set()}).model_dump(mode="json")
     app = FastAPI()
     app.dependency_overrides[get_services] = lambda: None
     app.include_router(workspace_router({"permissions": {}, "plugin_access": {
         "granted": both, "half": only_read}}))
     with TestClient(app) as client:
-        ok = client.post("/workspace/knowledge/granted/assemble", json=body)
+        ok = client.post("/workspace/knowledge/granted/extract", json=body)
         assert ok.status_code == 200, ok.text
-        assert ok.json() == {"record": {"id": "record-1", "status": "draft"}}
-        assert client.post("/workspace/knowledge/half/assemble", json=body).status_code == 404
-        assert client.post("/workspace/knowledge/unpublished/assemble", json=body).status_code == 404
-    assert calls == [("granted", ("p1", "p2"))]
+        assert ok.json()["records"] == [{"id": "record-1"}]
+        assert client.post("/workspace/knowledge/half/extract", json=body).status_code == 404
+        assert client.post("/workspace/knowledge/unpublished/extract", json=body).status_code == 404
+    assert calls == [("granted", "bundle-1", True)]

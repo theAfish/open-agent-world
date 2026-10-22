@@ -179,10 +179,11 @@ def create_worker_services(settings):
     from backend.services import create_services
     from backend.hosting.policy import unsafe_host_configuration
     registry = load_plugin_registry(data_root=settings.data_root, plugin_directories=(),
-                                    load_installed=False, load_unenrolled_sources=True)
-    services = create_services(settings, plugins=registry)
+                                    load_installed=False, load_entry_points=False, load_unenrolled_sources=True)
     if any(plugin.id == "openai.codex" for plugin in registry.plugins()):
-        registry.set_enabled("openai.codex", False)
+        registry.mark_unavailable("openai.codex", "hosting_policy",
+            ValueError("Local Codex execution is not available in hosted workspaces"), source="hosting_policy")
+    services = create_services(settings, plugins=registry)
     # A private source profile may contain a local-only card. Fail closed rather
     # than restore its lifecycle using credentials available in the service.
     if any(unsafe_host_configuration({"type": card.type, "config": card.config})

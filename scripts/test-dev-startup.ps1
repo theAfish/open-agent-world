@@ -81,6 +81,7 @@ foreach ($name in @('Get-ProcessRecord', 'Stop-RecordedProcessTree')) {
 $script:fixtureStart = [datetime]::UtcNow
 $script:cleanupMode = 'exit-during-stop'
 $script:stopCalls = 0
+$savedExitCode = $global:LASTEXITCODE
 function Get-Process {
     param([int]$Id, [object]$ErrorAction)
     if ($script:cleanupMode -eq 'already-exited' -or ($script:cleanupMode -eq 'exit-during-stop' -and $script:stopCalls -gt 0)) { return $null }
@@ -112,4 +113,5 @@ try {
     Write-Host 'PASS: cleanup preserves the original failure, ignores exited/recycled PIDs, and reports a surviving backend.'
 } finally {
     Remove-Item -LiteralPath Function:\Get-Process, Function:\taskkill.exe
+    $global:LASTEXITCODE = $savedExitCode
 }

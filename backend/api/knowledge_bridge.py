@@ -86,12 +86,20 @@ class ProjectionRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
 
 
-class ExperimentAssembleRequest(BaseModel):
-    projection_ids: list[str] = Field(min_length=1, max_length=50)
+class ExperimentExtractRequest(BaseModel):
+    bundle_id: str = Field(min_length=1, max_length=64)
     model: str = Field(min_length=1, max_length=200)
-    name: str | None = Field(default=None, max_length=500)
-    record_id: str | None = Field(default=None, max_length=64)
-    expected_revision: int | None = None
+    replace_drafts: bool = False
+
+
+class InsightExtractRequest(BaseModel):
+    # One schema, several, or neither: every experiment schema with published records.
+    schema_id: str | None = Field(default=None, max_length=64)
+    schema_ids: list[str] = Field(default_factory=list, max_length=50)
+    model: str = Field(min_length=1, max_length=200)
+    group_id: str | None = Field(default=None, max_length=64)
+    all_groups: bool = False
+    replace_drafts: bool = False
 
 
 def _credentials(services, reference):
@@ -147,50 +155,113 @@ async def run_projection(node_id: str, request: ProjectionRequest, services) -> 
             "record_id": prompt["record_id"]}
 
 
-def _experiment_prompt_builders():
+def _extract_prompt_builders():
     try:
-        from oaw_knowledge_base.experiment_prompt import build_messages, parse_assemble
+        from oaw_knowledge_base.experiment_prompt import build_messages, parse_extract
     except ImportError:  # pragma: no cover - the route is dead without the plugin
         raise HTTPException(503, "The knowledge base plugin is not available") from None
-    return build_messages, parse_assemble
+    return build_messages, parse_extract
 
 
-async def run_experiment_assemble(node_id: str, request: ExperimentAssembleRequest, services) -> dict:
-    """Merge several per-file extractions into one experiment record with one model
-    call — the same shape as ``run_projection``, for the same reason: only the
-    caller may hold model credentials, and the plugin owns the write regardless."""
+# One upload's combined markdown is read in full, up to this many characters, so a
+# long upload is not silently cut at the first window the way a single page would be.
+EXTRACT_MAX_CHARS = 400_000
+
+
+async def run_experiment_extract(node_id: str, request: ExperimentExtractRequest, services) -> dict:
+    """The agent-free **Extract records**: page through the upload's prompt, make one
+    JSON-mode model call, and hand the records to the plugin's own ``experiment_save``
+    — the same two actions a connected Lab assistant drives through its tools, so a
+    record is validated and evidence-linked identically whichever path produced it."""
     async with services._node_mutation(read_only=True):
         if services.world.get_card(node_id).type != NODE_TYPE:
             raise HTTPException(422, "Expected a Knowledge base node")
 
-    prompt = await invoke_resource_action(services, node_id, "experiment_assemble_prompt",
-        ResourceActionRequest(arguments={"projection_ids": request.projection_ids}))
+    prompt = await invoke_resource_action(services, node_id, "experiment_extract_prompt",
+        ResourceActionRequest(arguments={"bundle_id": request.bundle_id, "limit": 200_000}))
+    markdown, truncated = prompt["markdown"], False
+    while prompt["has_more"] and len(markdown) < EXTRACT_MAX_CHARS:
+        prompt = await invoke_resource_action(services, node_id, "experiment_extract_prompt",
+            ResourceActionRequest(arguments={"bundle_id": request.bundle_id, "limit": 200_000,
+                                             "offset": len(markdown)}))
+        markdown += prompt["markdown"]
+    if prompt["has_more"]:
+        truncated = True
     base_url, api_key, model = _credentials(services, request.model)
-    build_messages, parse_assemble = _experiment_prompt_builders()
+    build_messages, parse_extract = _extract_prompt_builders()
 
     try:
-        async with httpx.AsyncClient(timeout=180, follow_redirects=False) as client:
+        async with httpx.AsyncClient(timeout=300, follow_redirects=False) as client:
             response = await client.post(base_url.rstrip("/") + "/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"} if api_key and api_key != "oaw-no-auth" else {},
+                headers={"Authorization": f"******"} if api_key and api_key != "oaw-no-auth" else {},
                 json={"model": model, "response_format": {"type": "json_object"},
-                      "messages": build_messages(prompt)})
+                      "messages": build_messages(prompt, markdown=markdown)})
         if response.status_code != 200:
             raise HTTPException(502, f"The model returned HTTP {response.status_code}; check the model, quota and connection settings")
-        merged = parse_assemble(response.json()["choices"][0]["message"]["content"])
+        records = parse_extract(response.json()["choices"][0]["message"]["content"])
     except HTTPException:
         raise
     except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
-        raise HTTPException(502, "The assemble request failed or returned malformed JSON; check the connection and retry") from None
+        raise HTTPException(502, "The extraction request failed or returned malformed JSON; check the connection and retry") from None
 
-    evidence = [{"projection_id": item["projection_id"], "source_id": item["source_id"],
-                "artifact_id": item["artifact_id"]} for item in prompt["contributions"]]
     saved = await invoke_resource_action(services, node_id, "experiment_save",
-        ResourceActionRequest(arguments={
-            "schema_id": prompt["schema_id"], "group_id": prompt["group_id"],
-            "name": request.name or prompt["suggested_name"], "data": merged["data"],
-            "conflicts": merged["conflicts"], "evidence": evidence,
-            "record_id": request.record_id, "expected_revision": request.expected_revision}))
-    return {"record": saved["record"]}
+        ResourceActionRequest(arguments={"bundle_id": request.bundle_id, "records": records,
+                                         "replace_drafts": request.replace_drafts}))
+    return {"records": saved["records"], "invalid": saved["invalid"], "bundle_id": request.bundle_id,
+            "truncated": truncated}
+
+
+def _insight_prompt_builders():
+    try:
+        from oaw_knowledge_base.insight_prompt import build_messages, parse_insights
+    except ImportError:  # pragma: no cover - the route is dead without the plugin
+        raise HTTPException(503, "The knowledge base plugin is not available") from None
+    return build_messages, parse_insights
+
+
+async def run_insight_extract(node_id: str, request: InsightExtractRequest, services) -> dict:
+    """The agent-free **Extract insights**: page through the schema's record table,
+    make one JSON-mode model call, and hand the insights to the plugin's own
+    ``insight_save`` — the same two actions a connected Lab assistant drives through
+    its tools, so an insight is evidence-checked identically whichever path produced it."""
+    async with services._node_mutation(read_only=True):
+        if services.world.get_card(node_id).type != NODE_TYPE:
+            raise HTTPException(422, "Expected a Knowledge base node")
+
+    scope = {"schema_ids": request.schema_ids, "all_groups": request.all_groups,
+             **({"schema_id": request.schema_id} if request.schema_id else {}),
+             **({"group_id": request.group_id} if request.group_id else {})}
+    prompt = await invoke_resource_action(services, node_id, "insight_prompt",
+        ResourceActionRequest(arguments={**scope, "limit": 200_000}))
+    table, truncated = prompt["markdown"], False
+    while prompt["has_more"] and len(table) < EXTRACT_MAX_CHARS:
+        prompt = await invoke_resource_action(services, node_id, "insight_prompt",
+            ResourceActionRequest(arguments={**scope, "limit": 200_000, "offset": len(table)}))
+        table += prompt["markdown"]
+    if prompt["has_more"]:
+        truncated = True
+    base_url, api_key, model = _credentials(services, request.model)
+    build_messages, parse_insights = _insight_prompt_builders()
+
+    try:
+        async with httpx.AsyncClient(timeout=300, follow_redirects=False) as client:
+            response = await client.post(base_url.rstrip("/") + "/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"} if api_key and api_key != "oaw-no-auth" else {},
+                json={"model": model, "response_format": {"type": "json_object"},
+                      "messages": build_messages(prompt, table=table)})
+        if response.status_code != 200:
+            raise HTTPException(502, f"The model returned HTTP {response.status_code}; check the model, quota and connection settings")
+        insights = parse_insights(response.json()["choices"][0]["message"]["content"])
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
+        raise HTTPException(502, "The extraction request failed or returned malformed JSON; check the connection and retry") from None
+
+    saved = await invoke_resource_action(services, node_id, "insight_save",
+        ResourceActionRequest(arguments={**scope, "insights": insights,
+                                         "replace_drafts": request.replace_drafts}))
+    return {"insights": saved["insights"], "warnings": saved["warnings"],
+            "schema_ids": saved["schema_ids"], "truncated": truncated}
 
 
 @router.post("/knowledge/{node_id}/project")
@@ -198,6 +269,11 @@ async def project(node_id: str, request: ProjectionRequest, services=Depends(get
     return await run_projection(node_id, request, services)
 
 
-@router.post("/knowledge/{node_id}/assemble")
-async def assemble(node_id: str, request: ExperimentAssembleRequest, services=Depends(get_services)):
-    return await run_experiment_assemble(node_id, request, services)
+@router.post("/knowledge/{node_id}/extract")
+async def extract(node_id: str, request: ExperimentExtractRequest, services=Depends(get_services)):
+    return await run_experiment_extract(node_id, request, services)
+
+
+@router.post("/knowledge/{node_id}/insights")
+async def extract_insights(node_id: str, request: InsightExtractRequest, services=Depends(get_services)):
+    return await run_insight_extract(node_id, request, services)

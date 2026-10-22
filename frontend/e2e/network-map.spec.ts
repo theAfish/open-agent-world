@@ -98,7 +98,7 @@ test('Knowledge Base publishes real entities and opens the same shared renderer'
     await page.goto('/');
     await page.getByRole('button', { name: 'Fit view', exact: true }).click();
     await page.locator(`[data-card-id="${ids.group}"]`).getByRole('button', { name: 'Workspace mode', exact: true }).click();
-    const workspace = page.getByRole('dialog', { name: 'Knowledge research workspace mode' });
+    const workspace = page.getByRole('dialog', { name: 'Lab Manager workspace mode' });
     await workspace.getByRole('tab', { name: 'Graph', exact: true }).click();
     await mapReady(workspace);
     await expect(workspace.locator('.network-map')).toHaveAttribute('data-node-count', '2');

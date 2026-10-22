@@ -53,7 +53,7 @@ test("equipment links follow visible boundaries and backpack controls stay clear
       await expect(surface(item.id)).toBeVisible();
       await expectAttached(endpoint, surface(item.id));
       await page.mouse.move(30, 150);
-      if (cycle === 0) await page.screenshot({ path: "../.open-agent-world/equipment-boundaries.png" });
+      if (cycle === 0) await page.screenshot({ path: test.info().outputPath("equipment-boundaries.png") });
       if (cycle === 2) await page.getByRole("button", { name: "Close equipment slots", exact: true }).click();
       else await toggle.click();
       await expect(surface(item.id)).toHaveCount(0);
@@ -67,7 +67,7 @@ test("equipment links follow visible boundaries and backpack controls stay clear
     await toggle.click();
     await expectAttached(endpoint, surface(item.id));
     await page.mouse.move(30, 150);
-    await page.screenshot({ path: "../.open-agent-world/equipment-inspector-toggle.png" });
+    await page.screenshot({ path: test.info().outputPath("equipment-inspector-toggle.png") });
     const before = (await ownerSurface.boundingBox())!;
     await page.mouse.move(before.x + 50, before.y + 30);
     await page.mouse.down();

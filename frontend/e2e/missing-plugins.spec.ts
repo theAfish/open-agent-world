@@ -4,6 +4,11 @@ import { expect, test } from '@playwright/test';
 
 // Host integration: persisted unavailable objects, snapshot transport and canvas controls.
 test('missing cards and relationships remain visible and removable', async ({ page, request }, testInfo) => {
+  const root = path.resolve('..');
+  const dataRoot = path.join(root, '.tmp/playwright/data');
+  if (process.env.OAW_E2E_DATA_ROOT !== dataRoot) {
+    throw new Error('Run this test through scripts/run-e2e.mjs with its isolated test world.');
+  }
   const profile = await (await request.get('/api/application')).json();
   await request.patch('/api/application/preferences', { data: {
     profile_id: profile.profile_id, generation: profile.generation,
@@ -19,14 +24,14 @@ test('missing cards and relationships remain visible and removable', async ({ pa
   const edgeResponse = await request.post('/api/edges', { data: { source: agent.id, target: card.id, relationship: 'read' } });
   expect(edgeResponse.ok()).toBe(true);
   const edge = await edgeResponse.json();
-  const root = path.resolve('..');
   // Only the disposable world owned by scripts/run-e2e.mjs is altered.
-  execFileSync(path.join(root, 'backend/.venv/Scripts/python.exe'), ['-c', `
+  const python = path.join(root, 'backend/.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+  execFileSync(python, ['-c', `
 import sqlite3, sys
 with sqlite3.connect(sys.argv[1]) as db:
     db.execute("UPDATE cards SET type='literature.index', plugin_id='research.literature' WHERE id=?", (sys.argv[2],))
     db.execute("UPDATE edges SET relationship='literature.search', plugin_id='research.literature' WHERE id=?", (sys.argv[3],))
-`, path.join(root, '.open-agent-world/playwright/database/world.sqlite3'), card.id, edge.id], { windowsHide: true });
+`, path.join(dataRoot, 'database/world.sqlite3'), card.id, edge.id], { windowsHide: true });
   const snapshot = await (await request.get('/api/world')).json();
   expect(snapshot.nodes.find((node: { id: string }) => node.id === card.id).missing_plugin.plugin_id).toBe('research.literature');
   await page.goto('/');

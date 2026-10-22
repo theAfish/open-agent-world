@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
+  outputDir: "../.tmp/playwright/results",
   testIgnore: ["deployment.runtime.spec.ts", "cross-platform-ui.spec.ts", "execution-graph-visual.spec.ts"],
   fullyParallel: false,
   workers: 1,

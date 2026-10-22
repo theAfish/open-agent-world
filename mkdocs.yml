@@ -84,6 +84,8 @@ nav:
       - developers/index.md
       - Development setup: developers/setup.md
       - Your first plugin: developers/first-plugin.md
+      - Make your first Pack: developers/quickstart-pack.md
+      - Declarative cards: developers/declarative-packs.md
       - Give an Agent a tool: developers/agent-tools.md
       - Runtime context compaction: developers/context-compaction.md
       - Execution graph: developers/execution-graph.md

@@ -2,7 +2,7 @@
 
 OAW's user model is **Pack → Card Library → Deck → World**. Local `.oawpack` files
 and Store downloads use the same installer, dependency checks, immutable version
-storage and restart boundary. Code Packs include their backend and
+storage and activation boundary. Code Packs include their backend and
 frontend; [content Packs](creator-packs.md) carry portable Legion templates and
 reference their required Packs without bundling executable plugins.
 
@@ -16,13 +16,19 @@ be preserved.
 
 ## Source declaration and schema 3
 
+Passive cards can use [declarative contributions](developers/declarative-packs.md)
+without Python registration code. `build-project` generates their adapter wheel;
+advanced and mixed plugins continue to pass `--backend-wheel`. Both use the same installer.
+
 New source projects declare installation intent in `oaw.pack.toml`. The source
 reader does not import the Pack or run setup hooks. Python dependencies remain
 in native `pyproject.toml`/requirements files and frontend dependencies remain
 in the Pack's own `frontend/package.json` and lockfile.
 
-The development launch scripts prepare source dependencies in the same `--profile`
-that the backend will use, before starting the server. For manual preparation,
+Setup defaults to Core. Pass `--with-plugins` to prepare all official plugins or
+`--plugin-path` for selected projects. Schema 3 source loading does not require
+editable installation. The setup scripts prepare dependencies in the same `--profile`
+that the backend will use. Development startup never installs dependencies. For manual preparation,
 run `scripts/install-plugins.py --profile my-dev plugins/my_pack` with the backend
 interpreter. Without `--profile`, preparation uses `OPEN_AGENT_WORLD_DATA_ROOT` or
 the standard application data root. Uninstalled source Packs stay uninstalled
@@ -120,8 +126,9 @@ They import host contracts through `@oaw/plugin-api`. XRD obtains the Structure
 Viewer's renderer through a named frontend service, without importing its source
 or bundling its scientific viewer dependencies a second time.
 
-Run `npm run dev` or `npm run build` in `frontend/`. Both prepare each source
-Pack's locked dependencies and execute its own `npm run build`. Development
+Run `npm run dev` or `npm run build` in `frontend/`. Setup/production build explicitly
+prepares dependencies; ordinary dev only checks them and executes each changed
+Pack's own `npm run build`. Development
 serves the resulting `dist` artifact; production copies the same artifact into
 the host assets. Source edits rebuild the affected Pack and reload the page.
 Adding a new source Pack requires restarting Vite. An existing checkout may
@@ -409,7 +416,8 @@ npm run build:pack-sdk
 npm pack ./pack-sdk --pack-destination ../.outputs
 ```
 
-This is a local developer artifact, not a new public npm release workflow.
+CI also uploads this versioned tarball, identified by commit, for independent
+projects. A public npm release workflow is not yet provided.
 
 ## Storage and lifecycle
 
@@ -424,7 +432,15 @@ Application installation files remain separate. Normal application upgrades do
 not replace user data. Storage relocation copies Pack versions and checkpoints
 the installation database along with the existing databases.
 
-**Inspect → plan → prepare required host environments → stage → select → restart → prepare Sandbox when used**
+**Inspect → plan → prepare required host environments → stage → select → activate or restart → prepare Sandbox when used**
+
+New content Packs and verified pure declarative Packs activate in the running
+host immediately. Their catalog and frontend use the existing Library event and
+dynamic module loader. Pure declarative adapter bytes must exactly match the host
+compiler's output; a claimed manifest label cannot make arbitrary Python safe to
+load live. Frontend-only cards use this declaration path. Other code Packs, mixed
+Python contributions, and changes to already loaded owners remain pending restart.
+No background Agent or Sandbox work is interrupted automatically.
 
 The installer verifies all metadata, both archive layers, checksums, ownership,
 Pack dependencies and obvious direct Python conflicts before selection. Files
@@ -529,9 +545,11 @@ Restoring the matching plugin and restarting makes retained objects usable again
 Deleting missing objects currently clears canvas undo history because restoring
 them requires their plugin implementation.
 
-This recovery applies to unavailable persisted types. If an installed backend
-itself throws during import or registration and prevents startup, stop OAW and
-use the host interpreter:
+Import, registration and safely compensated optional startup failures leave the
+owner Unavailable while independent plugins continue. Use the failure phase and
+diagnostic in the Library, repair/select a compatible version and restart. Unsafe
+cleanup or persistence errors can still prevent startup. Offline recovery uses
+the host interpreter:
 
 ```sh
 python -m open_agent_world.pack activate --data-root /path/to/oaw-data example.greeter 0.1.0

@@ -452,7 +452,71 @@ def cmd_graph(args, backend):
         arguments["name_contains"] = args.name
     if args.group:
         arguments["group_id"] = args.group
+    if args.layer:
+        arguments["layer"] = args.layer
     show(backend.call("graph", arguments))
+    return 0
+
+
+def _insight_scope(args):
+    scope = {"schema_ids": args.schema or [], "all_groups": args.all_groups}
+    if args.group:
+        scope["group_id"] = args.group
+    return scope
+
+
+def cmd_insights(args, backend):
+    """``kb insights`` — list, show, stats, extract, publish, unpublish, delete."""
+    operation = args.operation
+    if operation == "list":
+        arguments = {"operation": "list", "limit": args.limit, "all_groups": args.all_groups,
+                     "schema_ids": args.schema or []}
+        for key, value in (("group_id", args.group), ("kind", args.kind), ("status", args.status),
+                           ("query", args.query)):
+            if value:
+                arguments[key] = value
+        show(backend.call("insights", arguments))
+        return 0
+    if operation == "show":
+        if not args.insight_ids:
+            raise CliError("Pass the insight id to show")
+        show(backend.call("insights", {"operation": "get", "insight_id": args.insight_ids[0]}))
+        return 0
+    if operation == "stats":
+        show(backend.call("insights", {"operation": "stats", **_insight_scope(args)}))
+        return 0
+    if operation == "extract":
+        return _extract_insights(args, backend)
+    if not args.insight_ids:
+        raise CliError(f"Pass at least one insight id to {operation}")
+    # Publishing is a deliberate act: confirmed here, and over HTTP it needs the
+    # separate admin token the service only has when someone sets KB_ADMIN_TOKEN.
+    show(backend.call("insight_review", {"operation": operation, "insight_ids": args.insight_ids},
+                      confirm=operation == "publish"))
+    return 0
+
+
+def _extract_insights(args, backend):
+    from .. import insight_prompt
+
+    scope = _insight_scope(args)
+    prompt = backend.call("insight_prompt", {**scope, "limit": 200_000})
+    table = prompt["markdown"]
+    while prompt["has_more"]:
+        prompt = backend.call("insight_prompt", {**scope, "limit": 200_000, "offset": len(table)})
+        table += prompt["markdown"]
+    answer = _complete(insight_prompt.build_messages(prompt, table=table),
+                       base_url=args.model_url or os.environ.get("KB_MODEL_BASE_URL")
+                       or DEFAULT_MODEL_URL,
+                       api_key=os.environ.get("KB_MODEL_API_KEY"),
+                       model=args.model or os.environ.get("KB_MODEL") or "gpt-4o-mini",
+                       json_mode=not args.no_json_mode)
+    insights = insight_prompt.parse_insights(answer)
+    if args.dry_run:
+        show({"insights": insights})
+        return 0
+    show(backend.call("insight_save", {**scope, "insights": insights,
+                                       "replace_drafts": args.replace}))
     return 0
 
 
@@ -625,6 +689,34 @@ def build_parser():
     graph.add_argument("--name")
     graph.add_argument("--limit", type=int, default=200)
     graph.add_argument("--group", help="Narrow to entities/relations tagged with one group")
+    graph.add_argument("--layer", choices=("literature", "experiment"),
+                       help="Only approved facts (literature) or published insights (experiment)")
+
+    insights = add("insights", cmd_insights,
+                   help="Insights over published experiment records: list, show, stats, "
+                        "extract, publish, unpublish, delete")
+    insights.add_argument("operation", choices=("list", "show", "stats", "extract", "publish",
+                                                "unpublish", "delete"))
+    insights.add_argument("insight_ids", nargs="*", help="Insight id(s) for show/publish/unpublish/delete")
+    insights.add_argument("--schema", action="append",
+                          help="Experiment schema id; repeat for a cross-schema scope, omit for "
+                               "every schema with published records")
+    insights.add_argument("--query", help="list: free text over titles, statements, fields and notes")
+    insights.add_argument("--kind", choices=("anomaly", "rule", "trend", "correlation", "threshold", "note"))
+    insights.add_argument("--status", choices=("draft", "published"))
+    insights.add_argument("--limit", type=int, default=50)
+    insights.add_argument("--group", help="Narrow to one group (collection id)")
+    insights.add_argument("--all-groups", dest="all_groups", action="store_true",
+                          help="Across every group instead of just the default one")
+    insights.add_argument("--replace", action="store_true",
+                          help="extract: replace this scope's earlier draft insights")
+    insights.add_argument("--model", help="extract: model name (default $KB_MODEL)")
+    insights.add_argument("--model-url", help="extract: OpenAI-compatible base URL "
+                                              "(default $KB_MODEL_BASE_URL)")
+    insights.add_argument("--no-json-mode", action="store_true",
+                          help="extract: skip response_format=json_object")
+    insights.add_argument("--dry-run", action="store_true",
+                          help="extract: print the model's insights without saving them")
     return parser
 
 

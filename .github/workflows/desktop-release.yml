@@ -13,7 +13,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  quality:
+    name: Verify release source and CI
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.verify.outputs.sha }}
+      version: ${{ steps.verify.outputs.version }}
+      prerelease: ${{ steps.verify.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Verify committed versions, tag ancestry and latest exact-commit checks
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/check-release.py --verify-ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-validation
+          path: release-validation.json
+          if-no-files-found: error
+
   build:
+    needs: quality
     strategy:
       fail-fast: false
       matrix:
@@ -43,7 +72,9 @@ jobs:
       APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
       APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.quality.outputs.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -58,56 +89,8 @@ jobs:
         with:
           node-version: '24'
       - uses: astral-sh/setup-uv@v6
-      - name: Sync desktop version from tag
-        if: github.ref_type == 'tag'
-        shell: python
-        env:
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          import json, os, pathlib, re
-
-          tag = os.environ['REF_NAME']
-          if not tag.startswith('v'):
-              raise SystemExit(f'Expected release tag to start with v, got {tag!r}')
-          version = tag[1:]
-          if not re.fullmatch(r'\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?', version):
-              raise SystemExit(f'Expected semantic version tag like v1.2.3, got {tag!r}')
-
-          package_path = pathlib.Path('desktop/package.json')
-          package_data = json.loads(package_path.read_text())
-          package_data['version'] = version
-          package_path.write_text(json.dumps(package_data, indent=2) + '\n')
-
-          lock_path = pathlib.Path('desktop/package-lock.json')
-          lock_data = json.loads(lock_path.read_text())
-          lock_data['version'] = version
-          lock_data['packages']['']['version'] = version
-          lock_path.write_text(json.dumps(lock_data, indent=2) + '\n')
-
-          tauri_config_path = pathlib.Path('desktop/src-tauri/tauri.conf.json')
-          tauri_config = json.loads(tauri_config_path.read_text())
-          tauri_config['version'] = version
-          tauri_config_path.write_text(json.dumps(tauri_config, indent=2) + '\n')
-
-          cargo_path = pathlib.Path('desktop/src-tauri/Cargo.toml')
-          cargo_text = cargo_path.read_text()
-          cargo_text = re.sub(r'(?m)^version = ".*"$', f'version = "{version}"', cargo_text, count=1)
-          cargo_path.write_text(cargo_text)
-      - name: Check release version
-        shell: python
-        env:
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          import json, os, pathlib, tomllib
-          version = json.loads(pathlib.Path('desktop/src-tauri/tauri.conf.json').read_text())['version']
-          assert json.loads(pathlib.Path('desktop/package.json').read_text())['version'] == version
-          lock = json.loads(pathlib.Path('desktop/package-lock.json').read_text())
-          assert lock['version'] == version
-          assert lock['packages']['']['version'] == version
-          assert tomllib.loads(pathlib.Path('desktop/src-tauri/Cargo.toml').read_text())['package']['version'] == version
-          if os.environ['REF_TYPE'] == 'tag':
-              assert os.environ['REF_NAME'] == 'v' + version, 'Tag must match desktop version'
+      - name: Check committed release version
+        run: python scripts/check-release.py
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal
       - name: Select Rust
@@ -154,6 +137,35 @@ jobs:
           uv venv backend/.venv --python 3.12
           if ($LASTEXITCODE -ne 0) { throw 'Python environment creation failed' }
           ./scripts/build-desktop.ps1
+      - name: Install Windows package and verify every payload file
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem desktop/src-tauri/target/release/bundle/nsis/*.exe)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one Windows installer' }
+          $installRoot = Join-Path $env:RUNNER_TEMP 'OAW installer acceptance with spaces'
+          if (Test-Path -LiteralPath $installRoot) { throw 'Installer acceptance requires a fresh directory' }
+          $policy = Get-ItemPropertyValue 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' LongPathsEnabled
+          if ($policy -ne 1) { throw 'Windows installer acceptance requires Win32 long paths enabled' }
+          $process = Start-Process -FilePath $installers[0].FullName -ArgumentList "/S /D=$installRoot" -WindowStyle Hidden -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          $env:OAW_INSTALLED_PAYLOAD = Join-Path $installRoot 'payload'
+          @'
+          import hashlib, os
+          from pathlib import Path
+          source = Path(".open-agent-world/desktop-payload")
+          installed = Path(os.environ["OAW_INSTALLED_PAYLOAD"])
+          files = [p.relative_to(source) for p in source.rglob("*") if p.is_file()]
+          assert files and any(len(str(installed / p)) > 260 for p in files)
+          for relative in files:
+              with (source / relative).open("rb") as expected, (installed / relative).open("rb") as actual:
+                  assert hashlib.file_digest(expected, "sha256").digest() == hashlib.file_digest(actual, "sha256").digest(), relative
+          print(f"PASS: all {len(files)} installed payload files match, including long paths")
+          '@ | backend/.venv/Scripts/python.exe -
+          if ($LASTEXITCODE -ne 0) { throw 'Installed payload differs from verified build payload' }
+          $env:PATH = (Join-Path $env:OAW_INSTALLED_PAYLOAD 'tools') + ';' + $env:PATH
+          & (Join-Path $env:OAW_INSTALLED_PAYLOAD 'python/python.exe') -I -B (Join-Path $env:OAW_INSTALLED_PAYLOAD 'launch.py') --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Installed payload self-test failed' }
       - name: Build macOS installer and verify app
         if: runner.os == 'macOS'
         env:
@@ -195,6 +207,8 @@ jobs:
       - name: Remove temporary macOS signing keychain
         if: always() && runner.os == 'macOS' && env.APPLE_CERTIFICATE != ''
         run: security delete-keychain "$RUNNER_TEMP/oaw-build.keychain-db"
+      - name: Record source and artifact checksums
+        run: python scripts/release-assets.py --platform ${{ matrix.platform }}
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.platform }}
@@ -202,31 +216,51 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: build
+    name: Verify artifacts and prepare release
+    needs: [quality, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.quality.outputs.sha }}
       - uses: actions/download-artifact@v4
         with:
           pattern: installer-*
           merge-multiple: true
           path: release-assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-validation
+          path: release-assets
       - name: Assemble complete updater manifest
         if: vars.OAW_UPDATER_PUBLIC_KEY != ''
         run: python3 scripts/collect-desktop-update.py --manifest
+      - name: Verify complete artifacts and generate traceable release notes
+        run: python3 scripts/release-assets.py --assemble
+      - name: Retain verified release evidence for manual previews and tags
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence
+          path: |
+            release-assets/release-manifest.json
+            release-assets/release-validation.json
+            release-notes.generated.md
+          if-no-files-found: error
       - name: Create draft release
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.quality.outputs.prerelease }}
         shell: bash
         run: |
           set -euo pipefail
           if gh release view "$RELEASE_TAG" --json isDraft > release-state.json; then
             python -c 'import json; assert json.load(open("release-state.json"))["isDraft"], "Refusing to replace a published release"'
+            gh release edit "$RELEASE_TAG" --prerelease="$PRERELEASE" --notes-file release-notes.generated.md
           else
-            gh release create "$RELEASE_TAG" --verify-tag --draft --title "Open Agent World $RELEASE_TAG" --notes-file docs/release-notes.md
+            gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease="$PRERELEASE" --title "Open Agent World $RELEASE_TAG" --notes-file release-notes.generated.md
           fi
           gh release upload "$RELEASE_TAG" release-assets/* --clobber

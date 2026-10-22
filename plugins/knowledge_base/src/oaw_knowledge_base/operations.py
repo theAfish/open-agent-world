@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from pydantic import BaseModel
 
-from . import actions
+from . import actions, insights
 
 
 @dataclass(frozen=True)
@@ -55,20 +55,34 @@ OPERATIONS: tuple[Operation, ...] = (
         description="List stored projections, or read one in full with its evidence links. Use this to review extracted data before building a draft."),
     Operation("draft", actions.draft, actions.Draft, tool_name="knowledge_draft",
         description="List or read draft graphs, or create a new draft from selected projections. A draft is proposed knowledge awaiting human review; creating one never changes the published graph."),
-    Operation("experiment_assemble_prompt", actions.experiment_assemble_prompt, actions.ExperimentAssemblePrompt,
-        tool_name="knowledge_experiment_assemble_prompt",
-        description="Get everything needed to merge several per-file extractions (projections against one kind=\"experiment\" schema) into one experiment record: the schema definition and each contributing projection's data and source. Produce the merged JSON, then submit it with knowledge_experiment_save."),
+    Operation("experiment_bundles", actions.experiment_bundles, actions.ExperimentBundles,
+        tool_name="knowledge_experiment_bundles",
+        description="List or read experiment uploads: one upload is a set of files (a photographed table, a spreadsheet, a note) describing specimens of one experiment, projected together onto one kind=\"experiment\" schema. Shows each file's conversion state and how many records the upload has produced."),
+    Operation("experiment_extract_prompt", actions.experiment_extract_prompt, actions.ExperimentExtractPrompt,
+        tool_name="knowledge_experiment_extract_prompt",
+        description="Get everything needed to project one experiment upload onto its schema: the schema's system prompt and JSON Schema definition, the uploader's notes, and every file's markdown joined into one document (windowed: follow has_more with offset). Produce one record per specimen, then submit them with knowledge_experiment_save."),
     Operation("experiment_save", actions.experiment_save, actions.ExperimentSave,
         tool_name="knowledge_experiment_save",
-        description="Store a merged experiment record built from several projections, linking every contributing file as evidence. An experiment record never touches a draft, review or the published graph — it is confirmed or edited directly with knowledge_experiments."),
+        description="Store the records projected from one experiment upload as drafts, each validated against the schema and linked to the files it was read from. Pass replace_drafts=true when re-extracting so earlier drafts are replaced; published records are never touched. A draft is a candidate until a person publishes it."),
     Operation("experiments", actions.experiments, actions.Experiments,
         tool_name="knowledge_experiments",
-        description="List or read experiment records — structured entities assembled from several uploaded files (e.g. a spreadsheet, a photographed notebook page and a paper) describing one experiment. Use this to compare experiments directly instead of the knowledge graph."),
+        description="List or read experiment records — structured specimen data extracted from uploaded files and reviewed by a person. Filter by schema, upload (bundle_id) or status: a published record is approved data; a draft is still being reviewed."),
     Operation("experiment_update", actions.experiment_update, actions.ExperimentUpdate,
         tool_name="knowledge_experiment_update",
-        description="Confirm or hand-edit one experiment record. Never touches a draft, review or the published graph."),
+        description="Edit one draft experiment record's name, data or note, when a person asks for the change. Refuses published records. Never publishes: that is the person's click."),
+    Operation("insights", insights.insights, insights.Insights, tool_name="knowledge_insights",
+        description="Read the insights of this knowledge base: meta-knowledge (anomaly, rule, trend, correlation, threshold, note) that was extracted from published experiment records — of one schema or across several — and reviewed by a person, each evidence-linked to the records it rests on. Use this whenever someone asks what the experiments show as a whole: any anomalies, what drives a property, which rules hold. Filter by schema_id, kind, status or a free-text query over titles and statements; a published insight is in the knowledge graph's experiment layer, a draft is still being reviewed. operation=\"stats\" returns deterministic statistics over published records — per schema the field distributions, outliers and correlations, and across schemas the correlations between fields of different schemas for specimens both describe — use it for numeric questions instead of estimating."),
+    Operation("insight_prompt", insights.insight_prompt, insights.InsightPrompt,
+        tool_name="knowledge_insight_prompt",
+        description="Get everything needed to propose insights over published experiment records — one schema (schema_id), several (schema_ids) or, with neither, every schema that has published records: each schema's definition and statistics (distributions, outliers, correlations), the cross-schema correlations over specimens several schemas describe (records matched by name), the insights already published, and the records as one markdown table per schema with a record_id column (windowed: follow has_more with offset). Produce grounded insights citing record_ids as evidence, then submit them with knowledge_insight_save using the same scope."),
+    Operation("insight_save", insights.insight_save, insights.InsightSave,
+        tool_name="knowledge_insight_save",
+        description="Store proposed insights as drafts for a scope of schemas (the same schema_id / schema_ids / none given to knowledge_insight_prompt), each evidence-linked to the published records it cites; an insight citing a record outside those schemas and that group is refused. Pass replace_drafts=true when re-extracting so that scope's earlier drafts are replaced; published insights are never touched. A draft is a candidate until a person publishes it."),
+    Operation("insight_update", insights.insight_update, insights.InsightUpdate,
+        tool_name="knowledge_insight_update",
+        description="Edit one draft insight's kind, title, statement, fields, confidence, evidence or note, when a person asks for the change. Refuses published insights. Never publishes: that is the person's click."),
     Operation("graph", actions.graph, actions.GraphQuery, tool_name="knowledge_graph",
-        description="Query the published knowledge graph by entity type, relation type or name, or traverse outward from one entity. Only human-approved facts appear here."),
+        description="Query the published knowledge graph by entity type, relation type or name, or traverse outward from one entity. Only human-approved facts and human-published insights appear here; layer=\"literature\" narrows to approved facts, layer=\"experiment\" to published insights with the experiment records and fields they cite."),
     Operation("jobs", actions.jobs, actions.Jobs, tool_name="knowledge_jobs",
         description="Check markdown conversion jobs and their progress events. Poll this after an upload until the job reports COMPLETED before reading its markdown."),
     # No tool_name below this line: human-only, on every transport.
@@ -82,6 +96,14 @@ OPERATIONS: tuple[Operation, ...] = (
         description="Read or change this knowledge base's collection name, PDF engine and MinerU base URL."),
     Operation("review", actions.review, actions.Review,
         description="Submit, reject or approve a draft. Approving publishes it as a fact revision and is the only thing that writes the knowledge graph."),
+    Operation("experiment_bundle_manage", actions.experiment_bundle_manage, actions.ExperimentBundleManage,
+        description="Create, rename, annotate, mark the extraction state of, or delete one experiment upload."),
+    Operation("experiment_ingest", actions.experiment_ingest, actions.ExperimentIngest,
+        description="Upload one raw file into an experiment upload and queue its markdown conversion at once."),
+    Operation("experiment_review", actions.experiment_review, actions.ExperimentReview,
+        description="Publish, unpublish or delete one experiment record. Publishing asks for confirmation and marks the record as approved data."),
+    Operation("insight_review", insights.insight_review, insights.InsightReview,
+        description="Publish, unpublish or delete insights. Publishing asks for confirmation and writes the insight, the records it cites and the fields it is about into the knowledge graph's experiment layer; unpublishing removes exactly that."),
     Operation("graph_schema", actions.graph_schema, actions.GraphSchema,
         description="Get or set which literature-kind schema's projections build the published knowledge graph. A person's config choice, not something an agent should redirect."),
 )
@@ -90,9 +112,15 @@ BY_NAME: dict[str, Operation] = {operation.name: operation for operation in OPER
 AGENT_OPERATIONS: tuple[Operation, ...] = tuple(item for item in OPERATIONS if item.agent)
 
 READ_ACTIONS = ("overview", "sources", "markdown", "search", "schemas", "projections",
-               "experiments", "graph", "jobs")
-EXTRACT_ACTIONS = READ_ACTIONS + ("projection_prompt", "save_projection", "draft",
-                                 "experiment_assemble_prompt", "experiment_save", "experiment_update")
+               "experiments", "experiment_bundles", "insights", "graph", "jobs")
+# The literature pipeline: project, and propose a draft graph for a person to review.
+EXTRACT_ACTIONS = READ_ACTIONS + ("projection_prompt", "save_projection", "draft")
+# The experiment pipeline: project an upload into records, propose insights over the
+# published ones, and edit either kind of draft on request. Publishing is deliberately
+# absent — neither review action has a tool name on any transport.
+EXPERIMENT_ACTIONS = READ_ACTIONS + ("experiment_extract_prompt", "experiment_save",
+                                     "experiment_update", "insight_prompt", "insight_save",
+                                     "insight_update")
 
 
 def tool_manifest() -> list[dict]:

@@ -69,7 +69,7 @@ test('Legion blank space pans the canvas and labels paint above its background',
       frame.style.pointerEvents = '';
       return above;
     })).toBe(true);
-    await page.screenshot({ path: '../.open-agent-world/legion-pan-light.png' });
+    await page.screenshot({ path: test.info().outputPath('legion-pan-light.png') });
     const header = (await group.locator('.container-header').boundingBox())!;
     await page.mouse.move(header.x + 30, header.y + 30);
     await page.mouse.down();
@@ -81,7 +81,7 @@ test('Legion blank space pans the canvas and labels paint above its background',
     await settings.getByLabel('Enable shared team settings').check();
     await settings.getByLabel('Team instruction', { exact: true }).fill('Still editable');
     await page.getByRole('button', { name: 'Use dark theme' }).click();
-    await page.screenshot({ path: '../.open-agent-world/legion-pan-dark.png' });
+    await page.screenshot({ path: test.info().outputPath('legion-pan-dark.png') });
   } finally {
     await request.post('/api/nodes/batch-delete', { data: { node_ids: ids } });
   }

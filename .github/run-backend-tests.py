@@ -8,9 +8,40 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-import subprocess
 import sys
 import tomllib
+
+
+class FileShards:
+    """Partition pytest's actual collection, keeping each file on one runner."""
+
+    def pytest_addoption(self, parser):
+        parser.addoption("--shard", metavar="INDEX/COUNT", help="Run one file shard (1-based)")
+
+    def pytest_configure(self, config):
+        import pytest
+
+        self.shard = None
+        value = config.getoption("shard")
+        if value is None:
+            return
+        try:
+            index, count = map(int, value.split("/"))
+            if not 1 <= index <= count:
+                raise ValueError
+        except ValueError:
+            raise pytest.UsageError("--shard must be INDEX/COUNT with 1 <= INDEX <= COUNT") from None
+        self.shard = index, count
+
+    def pytest_collection_modifyitems(self, config, items):
+        if self.shard is None:
+            return
+        index, count = self.shard
+        paths = sorted({item.path for item in items})
+        selected = set(paths[index - 1::count])
+        deselected = [item for item in items if item.path not in selected]
+        items[:] = [item for item in items if item.path in selected]
+        config.hook.pytest_deselected(items=deselected)
 
 
 def main() -> int:
@@ -22,17 +53,15 @@ def main() -> int:
         if project.get("entry-points", {}).get("open_agent_world.plugins"):
             package = manifest.parent
             sources.append(str(package / "src" if (package / "src").is_dir() else package))
-    environment = os.environ.copy()
-    if environment.get("PYTHONPATH"):
-        sources.append(environment["PYTHONPATH"])
-    environment["PYTHONPATH"] = os.pathsep.join(sources)
+    if os.environ.get("PYTHONPATH"):
+        sources.extend(os.environ["PYTHONPATH"].split(os.pathsep))
+    os.environ["PYTHONPATH"] = os.pathsep.join(sources)
+    sys.path[:0] = sources
+    os.chdir(repository)
     arguments = sys.argv[1:] or ["tests", "backend/tests"]
-    return subprocess.run(
-        [sys.executable, "-m", "pytest", *arguments],
-        cwd=repository,
-        env=environment,
-        check=False,
-    ).returncode
+    import pytest
+
+    return pytest.main(arguments, plugins=[FileShards()])
 
 
 if __name__ == "__main__":

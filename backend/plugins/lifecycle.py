@@ -151,9 +151,20 @@ class NodeLifecycleHandler:
     """Prepares reversible transactions for one registered node type."""
 
     async def on_startup(self, context: NodeLifecycleContext, node: Card) -> None:
+        """Restore transient resources; keep durable mutations atomic.
+
+        If this raises, the host calls on_shutdown for this attempted node and
+        earlier nodes of the same owner. Cleanup must also accept partial startup.
+        Report uncertain persistence/compensation with PluginIntegrityError.
+        Native crashes and arbitrary process side effects cannot be isolated.
+        """
         pass
 
     async def on_shutdown(self, context: NodeLifecycleContext, node: Card) -> None:
+        """Idempotently release transient resources, including partial startup.
+
+        Never delete the node's durable user data as shutdown compensation.
+        """
         pass
 
     async def prepare_create(

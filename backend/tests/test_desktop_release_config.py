@@ -225,8 +225,8 @@ def test_workflow_keeps_release_policies_independent():
     for name in ('Verify Windows installer signature', 'Verify macOS notarization'):
         check = next(step for step in steps if step.get('name') == name)
         assert "env.OAW_SIGNED_RELEASE == 'true'" in check['if']
-    assert jobs['release']['needs'] == 'build'
-    assert jobs['release']['if'] == "github.event_name == 'push' && github.ref_type == 'tag'"
+    assert set(jobs['release']['needs']) == {'quality', 'build'}
+    assert jobs['release']['steps'][-1]['if'] == "github.event_name == 'push' && github.ref_type == 'tag'"
     publish = jobs['release']['steps'][-1]['run']
     assert '--draft' in publish
     assert 'Refusing to replace a published release' in publish

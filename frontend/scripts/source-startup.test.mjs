@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { runNpm } from './source-packs.mjs';
+import { runNpm, sourcePacks, publishSourcePack } from './source-packs.mjs';
 import { cachedBuild, treeFingerprint } from './build-cache.mjs';
 import { frontendBuildFingerprint } from './build-source-frontend.mjs';
 
@@ -17,7 +17,8 @@ test('a direct Node launcher finds npm without npm_execpath and preserves the bu
     await writeFile(path.join(root, 'build.mjs'), `import {writeFileSync} from 'node:fs';
       writeFileSync('result.json', JSON.stringify({cwd:process.cwd(), mode:process.env.NODE_ENV}));`);
     await runNpm(['run', 'build'], root, { ...process.env, NODE_ENV: 'production' });
-    assert.deepEqual(JSON.parse(await readFile(path.join(root, 'result.json'), 'utf8')), { cwd: await realpath(root), mode: 'production' });
+    const result = JSON.parse(await readFile(path.join(root, 'result.json'), 'utf8'));
+    assert.deepEqual({ ...result, cwd: await realpath(result.cwd) }, { cwd: await realpath(root), mode: 'production' });
   } finally {
     if (previous === undefined) delete process.env.npm_execpath; else process.env.npm_execpath = previous;
     await rm(root, { recursive: true, force: true });
@@ -70,4 +71,36 @@ test('build receipts work across platforms and repair missing outputs without an
     await rm(output); assert.equal(await run(), true);
     assert.equal(builds, 3);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('explicit Pack preparation excludes siblings and publishes only its own assets', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'oaw selected packs '));
+  const previous = process.env.OPEN_AGENT_WORLD_CORE_ONLY;
+  try {
+    const selected = path.join(root, 'selected');
+    const sibling = path.join(root, 'sibling');
+    const output = path.join(root, 'host/assets/packs');
+    await mkdir(path.join(selected, 'dist'), { recursive: true });
+    await mkdir(sibling);
+    await writeFile(path.join(selected, 'plugin.json'), JSON.stringify({ apiVersion: 1, pluginId: 'test.selected' }));
+    await writeFile(path.join(sibling, 'plugin.json'), 'invalid JSON');
+    process.env.OPEN_AGENT_WORLD_CORE_ONLY = '1';
+    const packs = await sourcePacks({ roots: [selected, selected] });
+    assert.deepEqual(packs.map(pack => pack.owner), ['test.selected']);
+    await writeFile(path.join(selected, 'dist/frontend-build.json'), '{}');
+    await writeFile(path.join(selected, 'dist/index.js'), 'new asset');
+    await mkdir(path.join(output, 'test.selected'), { recursive: true });
+    await writeFile(path.join(output, 'test.selected/obsolete.js'), 'old asset');
+    await mkdir(path.join(output, 'test.sibling'));
+    await writeFile(path.join(output, 'test.sibling/index.js'), 'keep sibling');
+    await publishSourcePack(packs[0], output);
+    assert.equal(await readFile(path.join(output, 'test.selected/index.js'), 'utf8'), 'new asset');
+    await assert.rejects(readFile(path.join(output, 'test.selected/obsolete.js')), { code: 'ENOENT' });
+    assert.equal(await readFile(path.join(output, 'test.sibling/index.js'), 'utf8'), 'keep sibling');
+    await assert.rejects(publishSourcePack({ ...packs[0], owner: '../test.sibling' }, output), /Invalid Pack frontend owner/);
+    assert.equal(await readFile(path.join(output, 'test.sibling/index.js'), 'utf8'), 'keep sibling');
+  } finally {
+    if (previous === undefined) delete process.env.OPEN_AGENT_WORLD_CORE_ONLY; else process.env.OPEN_AGENT_WORLD_CORE_ONLY = previous;
+    await rm(root, { recursive: true, force: true });
+  }
 });

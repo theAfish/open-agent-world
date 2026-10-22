@@ -18,6 +18,13 @@ there are no host source paths or bundler aliases into the OAW checkout.
 The declared `colorama==0.4.6` dependency is provisioned by the existing shared
 Sandbox Python runtime; it is deliberately not imported into the host backend.
 
+Host CI uses `scripts/build-external-greeter.py --host-only` to omit this unused
+runtime example from the external copy's manifest. It still builds the real
+SDK frontend and Python adapter, installs the archive, restarts the host, and
+exercises the same card and persistence assertions. The source fixture remains
+unchanged. Run without the flag on a machine with a working native Sandbox to
+also verify shared Python preparation; host-only CI is not proof of that feature.
+
 ## Progressive help
 
 This example requires Plugin API 1.26 and declares a two-step card tutorial plus Pack reference documentation. Definitions live in the Python entrypoint and are delivered through the catalog; the frontend needs no tutorial code. See [the authoring guide](../../../docs/developers/progressive-tutorials.md).

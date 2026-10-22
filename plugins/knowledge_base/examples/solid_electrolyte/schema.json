@@ -1,0 +1,56 @@
+{
+  "name": "Solid electrolyte production batch",
+  "description": "One production batch of a solid electrolyte powder: feedstock, yield, conductivity, moisture, XRD and particle-size QC.",
+  "kind": "experiment",
+  "domain": "materials",
+  "system_prompt": "You read a production log for a solid electrolyte powder (the files may be a photographed or exported table, a spreadsheet, or free-text notes, in Chinese or English) and extract one record per production batch (one table row = one batch; 生产批号 is the batch id). Use only what the files state. Column mapping: 生产日期 -> production_date; 生产批号 -> batch_no; 来料 -> feedstock_batch; 来料离子电导率 -> feedstock_ionic_conductivity_ms_cm; 投料量 -> feed_amount_g; 产出量 -> output_amount_g; 产率 -> yield_percent (a percentage written as 76.16% is the number 76.16); 离子电导率 -> ionic_conductivity_ms_cm; 电子电导率 -> electronic_conductivity_s_cm; 水分含量/ppm -> moisture_ppm; XRD -> xrd_result; 粒径 -> particle_size; 粒径判定结果 -> particle_size_result. Where a cell holds two values separated by '/', such as 3.16/3.91, return both numbers in the order written. A lone '/' or '-' means not measured: omit the field (electronic_conductivity_s_cm may be null). Normalise dates to YYYY-MM-DD. Convert 合格 to \"pass\" and 不合格 to \"fail\". Put any remark about a batch (a red or flagged value, a failed check, a comment in the notes) in remarks, quoting the file.",
+  "field_descriptions": {
+    "production_date": "生产日期. ISO date YYYY-MM-DD.",
+    "batch_no": "生产批号, e.g. SC2-01UP-2607115. Identifies the record.",
+    "feedstock_batch": "来料: batch number of the incoming material used.",
+    "feedstock_ionic_conductivity_ms_cm": "来料离子电导率, mS/cm.",
+    "feed_amount_g": "投料量, grams charged.",
+    "output_amount_g": "产出量, grams obtained.",
+    "yield_percent": "产率, percent (output / feed x 100).",
+    "ionic_conductivity_ms_cm": "离子电导率, mS/cm. One or two values in the order written (e.g. 3.16/3.91).",
+    "electronic_conductivity_s_cm": "电子电导率, S/cm. Omit or null when the file shows '/'.",
+    "moisture_ppm": "水分含量, ppm. One or two values in the order written (e.g. 514.9/73.2).",
+    "xrd_result": "XRD phase check: pass or fail.",
+    "particle_size": "粒径: D50 and D90 in micrometres.",
+    "particle_size_result": "粒径判定结果: pass or fail.",
+    "remarks": "Free-text remarks about this batch, quoted from the files."
+  },
+  "definition": {
+    "type": "object",
+    "required": ["production_date", "batch_no", "feed_amount_g", "output_amount_g"],
+    "properties": {
+      "production_date": {"type": "string", "title": "Production date", "description": "生产日期 (YYYY-MM-DD)"},
+      "batch_no": {"type": "string", "title": "Batch no.", "description": "生产批号"},
+      "feedstock_batch": {"type": "string", "title": "Feedstock batch", "description": "来料"},
+      "feedstock_ionic_conductivity_ms_cm": {"type": "number", "title": "Feedstock ionic conductivity (mS/cm)", "description": "来料离子电导率"},
+      "feed_amount_g": {"type": "number", "minimum": 0, "title": "Feed amount (g)", "description": "投料量"},
+      "output_amount_g": {"type": "number", "minimum": 0, "title": "Output amount (g)", "description": "产出量"},
+      "yield_percent": {"type": "number", "minimum": 0, "maximum": 100, "title": "Yield (%)", "description": "产率"},
+      "ionic_conductivity_ms_cm": {
+        "type": "array", "minItems": 1, "maxItems": 2, "items": {"type": "number"},
+        "title": "Ionic conductivity (mS/cm)", "description": "离子电导率, values in the order written"
+      },
+      "electronic_conductivity_s_cm": {"type": ["number", "null"], "title": "Electronic conductivity (S/cm)", "description": "电子电导率; null when not measured"},
+      "moisture_ppm": {
+        "type": "array", "minItems": 1, "maxItems": 2, "items": {"type": "number"},
+        "title": "Moisture (ppm)", "description": "水分含量, values in the order written"
+      },
+      "xrd_result": {"type": "string", "enum": ["pass", "fail"], "title": "XRD result", "description": "XRD 判定"},
+      "particle_size": {
+        "type": "object",
+        "properties": {
+          "d50_um": {"type": "number", "minimum": 0},
+          "d90_um": {"type": "number", "minimum": 0}
+        },
+        "title": "Particle size", "description": "粒径 (µm)"
+      },
+      "particle_size_result": {"type": "string", "enum": ["pass", "fail"], "title": "Particle size result", "description": "粒径判定结果"},
+      "remarks": {"type": "string", "title": "Remarks", "description": "Flags and comments about this batch"}
+    }
+  }
+}

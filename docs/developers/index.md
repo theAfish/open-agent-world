@@ -4,6 +4,13 @@
 
 A plugin is a Python package that registers cards and other contributions with OAW. You can start with a card and an editable field; add Agent tools or React views when your idea needs them.
 
+## Fastest start: share a card without writing code
+
+[Make your first Pack in 10 minutes](quickstart-pack.md) creates a
+configuration-only card and packages it as an installable `.oawpack`. Choose the
+Python path below when you need Agent tools, lifecycle logic or other advanced
+contributions.
+
 ## Follow the learning path
 
 | Step | You will finish with |

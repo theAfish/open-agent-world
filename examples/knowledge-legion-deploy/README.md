@@ -1,6 +1,6 @@
-# Knowledge research, deployed
+# Lab Manager, deployed
 
-Publishes the **Knowledge research** Legion preset — a knowledge base card and a
+Publishes the **Lab Manager** Legion preset — a knowledge base card and a
 read-only Librarian agent — as a locked, password-protected application, and serves
 it. Unlike [`examples/deployed-workspace`](../deployed-workspace/README.md) this is
 not a canned, key-free demo: it is the real `knowledge.base.research` preset, and
@@ -26,7 +26,7 @@ frontend too. Then, from the repository root:
 python examples/knowledge-legion-deploy/run.py
 ```
 
-This installs the knowledge engines if needed, deploys the Knowledge research
+This installs the knowledge engines if needed, deploys the Lab Manager
 preset into a fresh engineering profile, uploads and converts one sample document,
 seeds one hand-written projection so Review and the Graph tab have something to
 look at without a model call, builds and approves a draft from it, publishes a

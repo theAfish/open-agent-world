@@ -13,6 +13,7 @@ from importlib import metadata
 from importlib.machinery import PathFinder, SourceFileLoader
 import io
 import json
+import os
 from pathlib import Path
 import platform
 import re
@@ -401,9 +402,15 @@ def resolve_adapter(spec, directory: Path) -> Path:
         raise RuntimeError("Resolving adapter wheels requires uv")
     command = [uv, 'tool', 'run', '--from', 'pip', 'pip', '--python', sys.executable,
                'wheel', '--wheel-dir', str(directory), '--constraint', str(constraints), '-r', str(requirements)]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=1800)
+    verbose = os.environ.get('OPEN_AGENT_WORLD_SETUP_VERBOSE') == '1'
+    if verbose:
+        command.append('--verbose')
+        print(f'Resolving adapter wheels: {", ".join(spec.backend.python)}', flush=True)
+    result = subprocess.run(command, capture_output=not verbose, text=True, timeout=1800)
     if result.returncode:
-        raise RuntimeError('Adapter wheel resolution failed: ' + (result.stderr or result.stdout)[-6000:])
+        detail = ((result.stderr or result.stdout) or
+                  f'exit code {result.returncode}; see dependency output above')
+        raise RuntimeError('Adapter wheel resolution failed: ' + detail[-6000:])
     collect_wheels(spec.backend.python, directory)
     return directory
 

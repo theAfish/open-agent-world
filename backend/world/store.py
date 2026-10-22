@@ -102,6 +102,8 @@ class WorldStore:
     def missing_plugin(self, kind: str, identifier: str, plugin_id: str) -> MissingPlugin | None:
         if not self.registry.has_plugin(plugin_id):
             reason = "plugin_missing"
+        elif self.registry.unavailable_reason(plugin_id):
+            reason = "plugin_unavailable"
         elif not self.registry.is_enabled(plugin_id):
             reason = "plugin_disabled"
         else:

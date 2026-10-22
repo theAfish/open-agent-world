@@ -41,6 +41,43 @@ def library(name='fixture-helper', version='1.0', *, requires=(), extra=None):
     return declaration, data
 
 
+@pytest.mark.parametrize('verbose', [False, True])
+@pytest.mark.parametrize('returncode', [0, 7])
+def test_resolve_adapter_streams_verbose_output_and_preserves_failures(tmp_path, monkeypatch, capfd, verbose, returncode):
+    from backend.packs import adapters
+    if verbose:
+        monkeypatch.setenv('OPEN_AGENT_WORLD_SETUP_VERBOSE', '1')
+    else:
+        monkeypatch.delenv('OPEN_AGENT_WORLD_SETUP_VERBOSE', raising=False)
+    monkeypatch.setattr(adapters.shutil, 'which', lambda name: 'uv')
+    monkeypatch.setattr(adapters.metadata, 'distributions', lambda: [])
+    original_run = adapters.subprocess.run
+    collected = []
+    monkeypatch.setattr(adapters, 'collect_wheels', lambda *args: collected.append(args))
+
+    def run(command, **kwargs):
+        assert kwargs == dict(capture_output=not verbose, text=True, timeout=1800)
+        assert ('--verbose' in command) == verbose
+        return original_run([sys.executable, '-c',
+                             'import sys; print("downloading fixture"); '
+                             'print("resolver detail", file=sys.stderr); '
+                             f'sys.exit({returncode})'], **kwargs)
+
+    monkeypatch.setattr(adapters.subprocess, 'run', run)
+    spec = SimpleNamespace(backend=SimpleNamespace(python=('fixture-helper==1.0',)))
+    directory = tmp_path / 'wheels'
+    if returncode:
+        with pytest.raises(RuntimeError, match='exit code 7' if verbose else 'resolver detail'):
+            adapters.resolve_adapter(spec, directory)
+        assert not collected
+    else:
+        assert adapters.resolve_adapter(spec, directory) == directory
+        assert collected == [(spec.backend.python, directory)]
+    output = capfd.readouterr()
+    assert ('downloading fixture' in output.out) == verbose
+    assert ('resolver detail' in output.err) == verbose
+
+
 def test_prepare_reuses_identical_wheel_with_independent_consumers_and_checks_tamper(tmp_path):
     wheel, data = library()
     adapter = AdapterDependencies(requirements=('fixture-helper==1.0',), wheels=(wheel,))
@@ -244,6 +281,7 @@ def test_namespace_extension_cannot_replace_an_existing_host_file(tmp_path, monk
 
 
 def test_top_level_library_bytecode_is_discarded_before_reverification(tmp_path, monkeypatch):
+    import py_compile
     from backend.packs.adapters import prepared_adapter_paths
     monkeypatch.setattr(sys, 'path', list(sys.path))
     output = io.BytesIO()
@@ -259,6 +297,9 @@ def test_top_level_library_bytecode_is_discarded_before_reverification(tmp_path,
     try:
         from single_fixture import RESULT
         assert RESULT == 91
+        # CI disables implicit bytecode writes. This test deliberately supplies
+        # a cache to verify that explicit integrity verification discards it.
+        py_compile.compile(str(paths[0] / 'single_fixture.py'), doraise=True)
         assert list((paths[0] / '__pycache__').glob('*.pyc'))
         assert prepared_adapter_paths(adapter, tmp_path) == paths
         assert not (paths[0] / '__pycache__').exists()

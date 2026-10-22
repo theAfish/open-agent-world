@@ -27,6 +27,7 @@ class KnowledgeContext:
     actor_id: str | None = None
     confirmed: bool = False
     resolve_secret: Callable[[str], str | None] | None = field(default=None, repr=False)
+    resolve_model: Callable[[str], Any] | None = field(default=None, repr=False)
 
 
 class MemorySettings:

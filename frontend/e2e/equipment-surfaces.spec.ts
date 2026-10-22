@@ -34,7 +34,7 @@ test("equipped skills reuse draggable detail cards and keep a visual origin", as
       const a = (await origin.boundingBox())!, b = (await surface.boundingBox())!;
       expect(b.x).toBeGreaterThan(a.x + a.width + 40);
     }).toPass();
-    await page.screenshot({ path: '../.open-agent-world/equipment-detail-light.png' });
+    await page.screenshot({ path: test.info().outputPath('equipment-detail-light.png') });
     const before = (await surface.boundingBox())!;
     const path = await bridge.locator('path').getAttribute('d');
     await page.mouse.move(before.x + 220, before.y + 300);
@@ -54,7 +54,7 @@ test("equipped skills reuse draggable detail cards and keep a visual origin", as
     await expect.poll(async () => (await (await request.get(`/api/nodes/${item.id}`)).json()).name).toBe('Call specialists');
     await expect(origin).toContainText('Call specialists');
     await page.getByRole('button', { name: 'Use dark theme', exact: true }).click();
-    await page.screenshot({ path: '../.open-agent-world/equipment-detail-dark.png' });
+    await page.screenshot({ path: test.info().outputPath('equipment-detail-dark.png') });
     await origin.getByRole('button', { name: 'Hide Call specialists details', exact: true }).click();
     await expect(surface).toHaveClass(/equipment-card/);
     await expectSlotSize(surface);

@@ -84,7 +84,11 @@ test('hosted accounts isolate runtime data, invalidate other tabs and share auth
     await login(page, 'carol');
     await expect(page.locator('.world-canvas')).toBeVisible();
     const startBlank = page.getByRole('button', { name: 'Start blank', exact: true });
-    if (await startBlank.isVisible()) await startBlank.click();
+    // Carol is a fresh builder profile. The onboarding state arrives after
+    // the canvas mounts, so an immediate isVisible() races that response.
+    await expect(startBlank).toBeVisible();
+    await startBlank.click();
+    await expect(page.getByRole('region', { name: 'Welcome to Open Agent World' })).toBeHidden();
     await expect(page.locator('.hosted-account')).toContainText('Carol');
     await page.getByRole('button', { name: 'Open settings', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Storage', exact: true })).toHaveCount(0);

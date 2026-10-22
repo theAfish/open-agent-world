@@ -30,7 +30,9 @@ from .store import DEFAULT_COLLECTION, Store
 
 # Operations a plain service token may reach. Everything else in the table is either
 # an agent operation (also allowed) or gated below.
-ADMIN_ONLY = {("review", "approve")}
+# Publishing a fact or an insight writes the graph; neither happens over the network
+# without the admin token.
+ADMIN_ONLY = {("review", "approve"), ("insight_review", "publish")}
 
 
 def _presented(request: Request) -> str | None:
@@ -83,9 +85,9 @@ def create_app(store: Store, *, token: str | None = None, admin_token: str | Non
         if (operation, str(arguments.get("operation"))) in ADMIN_ONLY and not admin:
             raise HTTPException(
                 status_code=403,
-                detail="Approving a draft publishes a permanent fact. It needs the admin "
-                       "token (set KB_ADMIN_TOKEN on the service), or approve it in OAW "
-                       "or with `kb approve` on the host.")
+                detail="Approving a draft or publishing an insight writes the knowledge "
+                       "graph. It needs the admin token (set KB_ADMIN_TOKEN on the service), "
+                       "or do it in OAW or with `kb approve` / `kb insights publish` on the host.")
         try:
             result = store.run(operation, arguments, collection=collection,
                                actor=request.headers.get("x-kb-actor"),

@@ -2,7 +2,7 @@ name: Documentation
 
 on:
   push:
-    branches: [dev]
+    branches: [dev, main]
   pull_request:
     branches: [dev, main]
   workflow_dispatch:
@@ -19,6 +19,18 @@ env:
   PYTHONDONTWRITEBYTECODE: '1'
 
 jobs:
+  required:
+    name: Docs required
+    if: always()
+    needs: [build, tutorial-examples]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require documentation and examples
+        env:
+          BUILD: ${{ needs.build.result }}
+          EXAMPLES: ${{ needs.tutorial-examples.result }}
+        run: test "$BUILD" = success && test "$EXAMPLES" = success
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10

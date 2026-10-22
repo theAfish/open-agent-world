@@ -8,7 +8,8 @@ instead of a fenced dump of the raw file, self-contained here rather than import
 MKB's own dataframe processor (the same reasoning the MinerU client already gives for
 staying out of MKB's heavier module chain). MinerU accepts a host-resolved private
 credential, with an environment fallback for standalone use. Images get a vision
-engine configured through the environment: a photographed lab notebook or a chart needs a
+engine: the card's chosen OAW model connection (or the OAW default model), else the
+``OAW_VISION_*`` variables — a photographed lab notebook or a chart needs a
 model that can actually see it, and OCR alone cannot read handwriting.
 """
 from __future__ import annotations
@@ -45,7 +46,8 @@ VISION_PROMPT = (
 MAX_MARKDOWN_BYTES = 4 * 1024 * 1024
 
 
-def available_engines(mineru_base_url=None, *, resolve_secret=None):
+def available_engines(mineru_base_url=None, *, resolve_secret=None, resolve_model=None,
+                      vision_model=""):
     """What this deployment can actually run, for the overview action."""
     engines = ["text", "tabular"]
     try:
@@ -56,7 +58,11 @@ def available_engines(mineru_base_url=None, *, resolve_secret=None):
         engines.insert(0, "pymupdf4llm")
     if mineru_base_url and _secret(MINERU_TOKEN_ENV, resolve_secret):
         engines.append("mineru")
-    if os.environ.get(VISION_API_KEY_ENV) and os.environ.get(VISION_BASE_URL_ENV):
+    try:
+        _vision_connection(vision_model, resolve_model, resolve_secret)
+    except KnowledgeError:
+        pass
+    else:
         engines.append("vision")
     return engines
 
@@ -79,24 +85,59 @@ def _is_image(filename, media_type):
     return _image_media_type(filename, media_type) is not None
 
 
-def _vision_markdown(data, filename, media_type, timeout=120):
-    """Send the image to an OpenAI-compatible vision model, configured the way
-    MinerU is: a credential read directly from this process's own environment, never
-    from card configuration or a host-mediated model connection."""
-    api_key = os.environ.get(VISION_API_KEY_ENV)
-    base_url = os.environ.get(VISION_BASE_URL_ENV)
-    if not api_key or not base_url:
-        raise KnowledgeError(
-            f"Set {VISION_API_KEY_ENV} and {VISION_BASE_URL_ENV} to read images with a vision model")
+def _vision_connection(vision_model="", resolve_model=None, resolve_secret=None):
+    """``(base_url, api_key, model)`` for the image transcription call.
+
+    Order: the card's chosen model reference (an explicit pick must work or fail
+    loudly), else the OAW default model, else the ``OAW_VISION_*`` variables read
+    through the host resolver — card secret, the global environment-variable
+    settings, then this process's environment — so standalone use and older setups
+    keep working with no OAW model connection at all.
+    """
+    reference = (vision_model or "").strip()
+    failures = []
+    if resolve_model is not None:
+        try:
+            connection = resolve_model(reference or "oaw:default")
+        except Exception as error:  # the host raises its own validation errors
+            if reference:
+                raise KnowledgeError(f"Vision model {reference!r}: {error}") from error
+            failures.append(f"default model: {error}")
+        else:
+            if connection.adapter not in {"openai", "legacy"}:
+                raise KnowledgeError(
+                    "Choose an OpenAI-compatible model connection to read images")
+            return (connection.base_url or "https://api.openai.com/v1", connection.api_key,
+                    connection.model_id.removeprefix("openai/"))
+    elif reference:
+        raise KnowledgeError("This card cannot resolve an OAW model connection here; "
+                             f"set {VISION_API_KEY_ENV} and {VISION_BASE_URL_ENV} instead")
+    api_key = _secret(VISION_API_KEY_ENV, resolve_secret)
+    base_url = _secret(VISION_BASE_URL_ENV, resolve_secret)
+    if api_key and base_url:
+        return base_url, api_key, _secret(VISION_MODEL_ENV, resolve_secret) or DEFAULT_VISION_MODEL
+    hint = ("choose a Vision model in the card's Settings, or set "
+            f"{VISION_API_KEY_ENV} and {VISION_BASE_URL_ENV}")
+    raise KnowledgeError("No vision model is configured (" + "; ".join([*failures, hint]) + ")")
+
+
+def _vision_markdown(data, filename, media_type, *, vision_model="", resolve_model=None,
+                     resolve_secret=None, timeout=120):
+    """Send the image to an OpenAI-compatible vision model chosen by
+    :func:`_vision_connection`. The connection's key is used for this one request
+    and never written anywhere."""
+    base_url, api_key, model = _vision_connection(vision_model, resolve_model, resolve_secret)
     import httpx
 
     image_media_type = _image_media_type(filename, media_type) or "image/png"
     encoded = base64.b64encode(data).decode("ascii")
     root = base_url.rstrip("/")
     auth_scheme = "Bear" + "er "
-    headers = {"Authorization": auth_scheme + api_key, "Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json"}
+    if api_key and api_key != "oaw-no-auth":
+        headers["Authorization"] = auth_scheme + api_key
     payload = {
-        "model": os.environ.get(VISION_MODEL_ENV) or DEFAULT_VISION_MODEL,
+        "model": model,
         "messages": [{"role": "user", "content": [
             {"type": "text", "text": VISION_PROMPT},
             {"type": "image_url", "image_url": {"url": f"data:{image_media_type};base64,{encoded}"}},
@@ -266,7 +307,8 @@ def _read_zip(client, url):
         return bundle.read(name).decode("utf-8", errors="replace")
 
 
-def to_markdown(data, filename, media_type, *, engine="auto", mineru_base_url=None, resolve_secret=None):
+def to_markdown(data, filename, media_type, *, engine="auto", mineru_base_url=None, resolve_secret=None,
+                vision_model="", resolve_model=None):
     """Return ``(text, engine_used, metadata)`` or raise ``KnowledgeError``."""
     requested = engine or "auto"
     if _is_pdf(filename, media_type):
@@ -285,20 +327,23 @@ def to_markdown(data, filename, media_type, *, engine="auto", mineru_base_url=No
                     text = _text_markdown(data, filename)
                 else:
                     raise KnowledgeError(f"Unknown PDF engine {candidate!r}")
-            except ImportError:
-                errors.append(f"{candidate}: not installed")
+            except ImportError as error:
+                errors.append(f"{candidate}: unavailable ({error})")
             except KnowledgeError as error:
                 errors.append(f"{candidate}: {error}")
             else:
                 return _truncate(text, candidate, filename)
         raise KnowledgeError(
             "No PDF engine could convert this file (" + "; ".join(errors) + "). "
-            "Install pymupdf4llm into the backend environment or configure MinerU.")
+            "Prepare or repair the Knowledge Base Pack dependencies and restart OAW, "
+            "or configure MinerU. For standalone use, install the project's declared PDF dependencies.")
 
     suffix = Path(filename).suffix.lower()
     if _is_image(filename, media_type):
         try:
-            return _truncate(_vision_markdown(data, filename, media_type), "vision", filename)
+            return _truncate(_vision_markdown(data, filename, media_type, vision_model=vision_model,
+                                              resolve_model=resolve_model, resolve_secret=resolve_secret),
+                             "vision", filename)
         except ImportError as error:
             raise KnowledgeError(f"vision: not installed ({error})") from error
     delimiter = _tabular_delimiter(filename, media_type)

@@ -37,14 +37,14 @@ test("task board edits dependencies, rejects cycles, stays live and restores aft
     await expect(board.getByRole("button", { name: "Edit task Write report", exact: true })).toContainText("In progress");
     await board.getByRole("button", { name: "Edit task Write report", exact: true }).click();
     await expect(board.getByLabel("Progress note")).toHaveValue("Draft in progress");
-    await page.screenshot({ path: "../.open-agent-world/task-board-light.png" });
+    await page.screenshot({ path: test.info().outputPath("task-board-light.png") });
     await page.getByRole("button", { name: "Use dark theme" }).click();
-    await page.screenshot({ path: "../.open-agent-world/task-board-dark.png" });
+    await page.screenshot({ path: test.info().outputPath("task-board-dark.png") });
     await page.getByRole("button", { name: "Use light theme" }).click();
     await board.getByRole("button", { name: "Close task details", exact: true }).click();
     await board.getByRole("button", { name: "Dependencies", exact: true }).click();
     await expect(board.getByRole("img", { name: "Prerequisites flow from left to right" })).toBeVisible();
-    await page.screenshot({ path: "../.open-agent-world/task-board-dependencies.png" });
+    await page.screenshot({ path: test.info().outputPath("task-board-dependencies.png") });
     await page.reload();
     board = page.getByRole("dialog", { name: "Research plan workspace", exact: true });
     await expect(board.getByRole("button", { name: "Edit task Write report", exact: true })).toBeVisible();
@@ -89,7 +89,7 @@ test("optional execution settings dispatch connected agents and show durable res
     await expect(board.getByLabel("Default executor", { exact: true })).toHaveValue(first.id);
     await board.getByLabel("Execution mode").selectOption("2");
     await expect(board.getByLabel("Execution mode")).toHaveValue("2");
-    await page.screenshot({ path: "../.open-agent-world/task-execution-settings.png" });
+    await page.screenshot({ path: test.info().outputPath("task-execution-settings.png") });
     await board.locator(".task-execution-settings summary").click();
     await board.getByRole("button", { name: "Edit task Second analysis", exact: true }).click();
     await board.getByLabel("Task executor", { exact: true }).selectOption(second.id);
@@ -101,9 +101,9 @@ test("optional execution settings dispatch connected agents and show durable res
     await board.locator(".execution-history summary").click();
     await board.getByRole("button", { name: "Edit task Combined report", exact: true }).click();
     await expect(board.getByLabel("Progress note", { exact: true })).toContainText("First analysis");
-    await page.screenshot({ path: "../.open-agent-world/task-execution-light.png" });
+    await page.screenshot({ path: test.info().outputPath("task-execution-light.png") });
     await page.getByRole("button", { name: "Use dark theme" }).click();
-    await page.screenshot({ path: "../.open-agent-world/task-execution-dark.png" });
+    await page.screenshot({ path: test.info().outputPath("task-execution-dark.png") });
     await page.getByRole("button", { name: "Use light theme" }).click();
     await page.reload();
     await expect(page.getByRole("dialog", { name: "Executable plan workspace", exact: true }).getByRole("status").filter({ hasText: "3 / 3 complete" })).toBeVisible();

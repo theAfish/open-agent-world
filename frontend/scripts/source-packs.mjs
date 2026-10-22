@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
-import { access, mkdir, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, access, cp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildRuntime, cachedBuild, digest, filesFingerprint, installedFingerprint, treeFiles, treeFingerprint } from './build-cache.mjs';
@@ -11,17 +11,36 @@ const repo = path.dirname(frontendRoot);
 const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
 const exists = async file => { try { await access(file); return true; } catch { return false; } };
 
-export async function sourcePacks() {
+export async function reportPackFailure(id, error) {
+  console.error(`Optional Pack ${id} unavailable: ${error.message}`);
+  if (process.env.OAW_PACK_FAILURE_REPORT) {
+    await appendFile(process.env.OAW_PACK_FAILURE_REPORT, JSON.stringify({ id, error: error.message }) + '\n');
+  }
+}
+
+export async function sourcePacks({ strict = true, roots } = {}) {
   const packs = [];
-  for (const parent of ['plugins', 'examples/deployed-workspace/plugins']) {
-    for (const directory of await readdir(path.join(repo, parent), { withFileTypes: true })) {
-      if (!directory.isDirectory()) continue;
-      const root = path.join(repo, parent, directory.name, 'frontend');
-      if (!await exists(path.join(root, 'plugin.json'))) continue;
+  if (!roots && process.env.OPEN_AGENT_WORLD_CORE_ONLY === '1') return packs;
+  if (!roots) {
+    roots = [];
+    for (const parent of ['plugins', 'examples/deployed-workspace/plugins']) {
+      for (const directory of await readdir(path.join(repo, parent), { withFileTypes: true })) {
+        if (!directory.isDirectory()) continue;
+        const root = path.join(repo, parent, directory.name, 'frontend');
+        if (!await exists(path.join(root, 'plugin.json'))) continue;
+        roots.push(root);
+      }
+    }
+  }
+  for (const root of [...new Set(roots.map(root => path.resolve(root)))]) {
+    try {
       const manifest = await readJson(path.join(root, 'plugin.json'));
       if (manifest.apiVersion !== 1 || !/^[a-z][a-z0-9._-]*$/.test(manifest.pluginId)) throw new Error(`Invalid Pack frontend manifest: ${root}`);
       if (packs.some(pack => pack.owner === manifest.pluginId)) throw new Error(`Duplicate Pack frontend owner: ${manifest.pluginId}`);
       packs.push({ root, owner: manifest.pluginId });
+    } catch (error) {
+      if (strict) throw error;
+      await reportPackFailure(root, error);
     }
   }
   return packs;
@@ -94,7 +113,17 @@ export async function dependencyFingerprint(root) {
 export async function preparePack(pack, { install = true } = {}) {
   const { manifest, lock, required } = await projectDependencies(pack.root);
   const sdkReference = manifest.devDependencies?.['@oaw/plugin-api'];
-  if (!sdkReference?.startsWith('file:')) throw new Error(`Source Pack must declare the checkout SDK: ${pack.owner}`);
+  if (!sdkReference) throw new Error(`Declare the versioned @oaw/plugin-api SDK: ${pack.owner}`);
+  // Registry versions and published tarballs use the project's ordinary npm
+  // lockfile. Checkout junctions are only an optional local cache optimization.
+  const sdkDirectory = sdkReference.startsWith('file:') && await exists(path.join(pack.root, sdkReference.slice(5), 'package.json'));
+  if (!sdkDirectory) {
+    try { await checkProject(pack.root); return; }
+    catch (error) { if (!install) throw error; }
+    await runNpm(['ci', '--include=dev', '--ignore-scripts', '--no-audit', '--no-fund'], pack.root);
+    await checkProject(pack.root);
+    return;
+  }
   const sdk = path.resolve(pack.root, sdkReference.slice(5));
   const modules = path.join(pack.root, 'node_modules');
   const cache = path.join(frontendRoot, 'node_modules');
@@ -157,14 +186,48 @@ export async function buildSourcePack(pack, { force = false } = {}) {
   return built;
 }
 
+function outputDirectory(pack, output) {
+  const root = path.resolve(output);
+  const destination = path.resolve(root, pack.owner);
+  if (!/^[a-z][a-z0-9._-]*$/.test(pack.owner) || path.dirname(destination) !== root) {
+    throw new Error(`Invalid Pack frontend owner: ${pack.owner}`);
+  }
+  return destination;
+}
+
+export async function publishSourcePack(pack, output) {
+  const destination = outputDirectory(pack, output);
+  await readFile(path.join(pack.root, 'dist/frontend-build.json'));
+  try {
+    await rm(destination, { recursive: true, force: true });
+    await cp(path.join(pack.root, 'dist'), destination, { recursive: true });
+  } catch (error) {
+    await rm(destination, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.includes('--check-host')) await checkProject(frontendRoot);
   else {
     if (process.argv.includes('--check')) await checkProject(frontendRoot);
-    for (const pack of await sourcePacks()) {
-      if (process.argv.includes('--prepare')) await preparePack(pack);
-      else if (process.argv.includes('--check')) await preparePack(pack, { install: false });
-      else await buildSourcePack(pack, { force: process.argv.includes('--force') });
+    const strict = process.env.OAW_ALLOW_PACK_FAILURES !== '1';
+    const roots = process.argv.flatMap((value, index) => value === '--frontend-path' ? [process.argv[index + 1]] : []);
+    const outputIndex = process.argv.indexOf('--output');
+    const output = outputIndex < 0 ? null : process.argv[outputIndex + 1];
+    for (const pack of await sourcePacks({ strict, ...(roots.length ? { roots } : {}) })) {
+      try {
+        if (process.argv.includes('--prepare')) await preparePack(pack);
+        else if (process.argv.includes('--check')) await preparePack(pack, { install: false });
+        if (process.argv.includes('--build') || !process.argv.includes('--prepare') && !process.argv.includes('--check')) {
+          await buildSourcePack(pack, { force: process.argv.includes('--force') });
+          if (output) await publishSourcePack(pack, output);
+        }
+      } catch (error) {
+        if (output) await rm(outputDirectory(pack, output), { recursive: true, force: true });
+        if (strict) throw error;
+        await reportPackFailure(pack.owner, error);
+      }
     }
   }
 }

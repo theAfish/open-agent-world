@@ -182,3 +182,51 @@ def test_collections_stay_separate_in_one_store(client, store):
     assert [item["filename"] for item in
             call(client, "sources", collection="other").json()["sources"]] == ["b.md"]
     assert names(client) >= {"default", "other"}
+
+
+def test_insights_publish_over_http_only_with_the_admin_token(client, admin, store):
+    tools = {tool["name"] for tool in client.get("/v1/tools").json()["tools"]}
+    assert {"knowledge_insights", "knowledge_insight_prompt", "knowledge_insight_save",
+            "knowledge_insight_update"} <= tools
+    assert "knowledge_insight_review" not in tools
+
+    schema = call(client, "schemas", operation="create", name="Batch", kind="experiment",
+                  definition={"type": "object", "properties": {"m": {"type": "number"}}},
+                  system_prompt="x").json()["schema"]
+    bundle = call(client, "experiment_bundle_manage", operation="create",
+                  schema_id=schema["id"], name="July").json()["bundle"]
+    uploaded = call(client, "experiment_ingest", bundle_id=bundle["id"], filename="log.md",
+                    content_base64=base64.b64encode(b"log").decode(), media_type="text/markdown")
+    assert uploaded.status_code == 200, uploaded.text
+    job = store.open().jobs.wait(uploaded.json()["job"]["id"], timeout=60)
+    assert job.status == "COMPLETED", job.error
+    records = call(client, "experiment_save", bundle_id=bundle["id"],
+                   records=[{"name": "B1", "data": {"m": 1}}]).json()["records"]
+    published = client.post("/v1/collections/default/experiment_review?confirm=true",
+                            json={"operation": "publish", "record_id": records[0]["id"]})
+    # ``confirm`` only counts with the admin token: a plain token gets the speed bump.
+    assert published.status_code == 409
+    published = admin.post("/v1/collections/default/experiment_review?confirm=true",
+                           json={"operation": "publish", "record_id": records[0]["id"]})
+    assert published.status_code == 200, published.text
+
+    prompt = call(client, "insight_prompt", schema_id=schema["id"])
+    assert prompt.status_code == 200 and prompt.json()["record_count"] == 1
+    saved = call(client, "insight_save", schema_id=schema["id"], insights=[
+        {"kind": "note", "title": "one", "statement": "s", "evidence": [{"record_id": records[0]["id"]}]}])
+    assert saved.status_code == 200, saved.text
+    insight_id = saved.json()["insights"][0]["id"]
+
+    refused = call(client, "insight_review", operation="publish", insight_id=insight_id)
+    assert refused.status_code == 403 and "admin token" in refused.json()["detail"]
+    pending = call(admin, "insight_review", operation="publish", insight_id=insight_id)
+    assert pending.status_code == 409 and pending.json()["status"] == "confirmation_required"
+    done = admin.post("/v1/collections/default/insight_review?confirm=true",
+                      json={"operation": "publish", "insight_id": insight_id})
+    assert done.status_code == 200, done.text
+    assert done.json()["insights"][0]["status"] == "published"
+    layer = call(client, "graph", layer="experiment").json()
+    assert {e["type"] for e in layer["entities"]} == {"note", "experiment_record"}
+    # Unpublishing and deleting are not graph writes; a plain token may.
+    assert call(client, "insight_review", operation="unpublish", insight_id=insight_id).status_code == 200
+    assert call(client, "graph", layer="experiment").json()["entities"] == []

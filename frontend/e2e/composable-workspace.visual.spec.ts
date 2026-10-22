@@ -32,7 +32,7 @@ test.afterEach(async ({ request }) => {
 
 for (const preset of [
   { id: 'matcreator.native-research', name: 'MatCreator research', slug: 'matcreator' },
-  { id: 'knowledge.base.research', name: 'Knowledge research', slug: 'knowledge' },
+  { id: 'knowledge.base.research', name: 'Lab Manager', slug: 'knowledge' },
 ]) test(`${preset.slug} real workspace visual matrix`, async ({ page, request }) => {
   test.setTimeout(90_000);
   const errors: string[] = [];

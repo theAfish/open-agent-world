@@ -8,9 +8,9 @@ import { PackGuide } from './PackCreator';
 import { installedPackStatus, packIssue, type InstalledPack } from './installedPacks';
 import { PackRuntimeDetails } from './PackDependencies';
 
-export function InstalledPackDetails({ pack, versions, inventory, registered, snapshot, onBack, onBrowse, onChanged }: {
+export function InstalledPackDetails({ pack, versions, inventory, registered, failures = [], snapshot, onBack, onBrowse, onChanged }: {
   pack: LibrarySnapshot['packs'][string]; versions: InstalledPack[]; registered: boolean; snapshot: LibrarySnapshot;
-  inventory?: PackInventoryItem;
+  inventory?: PackInventoryItem; failures?: NonNullable<PackInstallations['failures']>;
   onBack: () => void; onBrowse: (id: string) => void; onChanged: (value: PackInstallations) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -20,10 +20,12 @@ export function InstalledPackDetails({ pack, versions, inventory, registered, sn
   const library = useCardLibrary();
   const selected = versions.find(item => item.selected);
   const item = selected ?? versions.find(row => row.loaded) ?? versions[0];
-  const loaded = versions.find(row => row.loaded);
   const source = inventory && inventory.source !== 'installed' ? inventory : undefined;
   const removableId = selected?.id ?? (source?.enrolled !== false ? source?.id : undefined);
-  const issue = packIssue(pack, snapshot, versions);
+  const environmentErrors = [...new Set([...failures.map(failure => failure.error),
+    ...versions.flatMap(row => row.environment?.state === 'environment_failed' ? [row.environment.error || 'Environment failed'] : []),
+    ...(inventory?.environments.flatMap(environment => environment.state === 'failed' ? [environment.error || 'Environment failed'] : []) ?? [])])];
+  const issue = environmentErrors.length ? { kind: 'error', label: 'Environment failed' } : packIssue(pack, snapshot, versions);
   const status = source?.enrolled === false ? source.loaded ? 'Uninstall pending restart' : 'Pack uninstalled' : issue?.label ?? (versions.length ? installedPackStatus(versions)
     : inventory ? !inventory.enabled ? 'Pack disabled' : inventory.loaded ? 'Loaded' : 'Not loaded' : 'Installed');
   const mutate = async (path: string, method: string, body?: unknown) => {
@@ -68,12 +70,13 @@ export function InstalledPackDetails({ pack, versions, inventory, registered, sn
         <button className="library-text-button" disabled={busy} onClick={() => setConfirmRemoval(false)}>{t('Cancel')}</button></div>
     </div>}
     {error && <p className="pack-action-error" role="alert">{error}</p>}
-    {inventory && <PackRuntimeDetails inventory={inventory} />}
-    {item?.creator && <details className="pack-detail-section"><summary>{t('Pack guide')}</summary><PackGuide creator={item.creator} /></details>}
-    {loaded?.environment?.state === 'environment_failed' && <div className="pack-detail-section">
-      <p role="alert" className="pack-action-error">{loaded.environment.error}</p>
-      <button className="secondary-button" disabled={busy} onClick={() => void mutate('environment/retry', 'POST')}>{t('Retry environment preparation')}</button>
+    {environmentErrors.length > 0 && <div className="pack-problem">
+      {environmentErrors.map(message => <p key={message} role="alert" className="pack-action-error">{message}</p>)}
+      <button className="secondary-button" disabled={busy} onClick={() => void mutate(source ? `${encodeURIComponent(source.id)}/restore` : 'environment/retry', 'POST')}>{t('Retry environment preparation')}</button>
+      <p>{t('Repair or reinstall this Pack, then restart OAW to retry. Saved cards and connections are retained.')}</p>
     </div>}
+    {inventory && <details className="pack-detail-section"><summary>{t('Pack dependencies')}</summary><PackRuntimeDetails inventory={inventory} /></details>}
+    {item?.creator && <details className="pack-detail-section"><summary>{t('Pack guide')}</summary><PackGuide creator={item.creator} /></details>}
     {versions.some(row => !row.selected) && <details className="pack-detail-section"><summary>{t('Other versions')}</summary>
       {versions.filter(row => !row.selected).map(row => <div className="pack-version-row" key={row.version}>
         <span>{row.version} · {t(row.loaded ? 'Loaded' : 'Retained version')}</span>

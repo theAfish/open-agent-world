@@ -112,17 +112,17 @@ test("build a toolbox, import a skill, export a plugin and restore the local cop
   await expect(box.getByRole("img", { name: "logo.png" })).toBeVisible();
   await box.getByLabel("File path", { exact: true }).fill("assets/brand/logo.png");
   await box.getByRole("button", { name: "Move / rename", exact: true }).click();
-  await page.screenshot({ path: "../.open-agent-world/skill-toolbox-files.png" });
+  await page.screenshot({ path: test.info().outputPath("skill-toolbox-files.png") });
   await box.getByRole("button", { name: "Save skill", exact: true }).click();
   await expect(box.getByRole("button", { name: "Edit skill Review a patch", exact: true })).toBeEnabled();
-  await page.screenshot({ path: "../.open-agent-world/skill-toolbox-light.png" });
+  await page.screenshot({ path: test.info().outputPath("skill-toolbox-light.png") });
   const downloadPromise = page.waitForEvent("download");
   await box.getByRole("link", { name: "Export plugin" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe("oaw-toolbox-example-review-0.1.0.zip");
-  await download.saveAs("../.open-agent-world/skill-toolbox-export.zip");
+  await download.saveAs(test.info().outputPath("skill-toolbox-export.zip"));
   await page.getByRole("button", { name: "Use dark theme" }).click();
-  await page.screenshot({ path: "../.open-agent-world/skill-toolbox-dark.png" });
+  await page.screenshot({ path: test.info().outputPath("skill-toolbox-dark.png") });
   await page.getByRole("button", { name: "Use light theme" }).click();
   await page.reload();
   await card.getByRole("button", { name: "Edit toolbox", exact: true }).click();
@@ -133,7 +133,7 @@ test("build a toolbox, import a skill, export a plugin and restore the local cop
   await expect(box.getByRole("group", { name: "enabled", exact: true }).getByRole("checkbox")).toBeChecked();
   await expect(box.getByRole("group", { name: "formats", exact: true }).getByPlaceholder("Value", { exact: true })).toHaveValue("md");
   await box.getByRole("group", { name: "language", exact: true }).getByPlaceholder("Value", { exact: true }).fill("Chinese");
-  await page.screenshot({ path: "../.open-agent-world/skill-toolbox-settings.png" });
+  await page.screenshot({ path: test.info().outputPath("skill-toolbox-settings.png") });
   await box.getByRole("button", { name: "Save skill", exact: true }).click();
   await expect(box.getByRole("button", { name: "Edit skill Review a patch", exact: true })).toBeEnabled();
   await box.getByRole("button", { name: "Close toolbox editor", exact: true }).click();
@@ -202,7 +202,7 @@ test("drag an independent skill into an open toolbox and back out", async ({ pag
   }
   await card.locator(".card-kind-icon").click();
   await expect(card.getByRole("button", { name: "Edit skill New skill", exact: true })).toBeVisible();
-  await page.screenshot({ path: "../.open-agent-world/skill-open-space.png" });
+  await page.screenshot({ path: test.info().outputPath("skill-open-space.png") });
   await drag(200, bounds.y + 200);
   await expect.poll(async () => (await (await request.get(`/api/nodes/${skill.id}`)).json()).parent_id).toBeNull();
   expect((await (await request.get(`/api/nodes/${box.id}/document`)).json()).value.skills).toEqual([]);
@@ -258,6 +258,6 @@ test("nested containers share drag membership and move their descendants once", 
   // A Legion uses the same open drag-out interaction as the toolbox.
   await drag(page.locator(`[data-card-id="${agent.id}"]`), movedTeam.x - 50, movedTeam.y + 420);
   await expect.poll(() => parent(agent.id)).toBeNull();
-  await page.screenshot({ path: "../.open-agent-world/nested-containers.png" });
+  await page.screenshot({ path: test.info().outputPath("nested-containers.png") });
 
 });

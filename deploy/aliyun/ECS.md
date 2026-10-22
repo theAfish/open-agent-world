@@ -60,7 +60,13 @@ OAW_ALIYUN_SANDBOX_READY=0
 OAW_ALIYUN_SANDBOX_PYTHON_REQUIREMENTS="[\"numpy>=2.1,<3\",\"scipy>=1.14,<2\",\"ase>=3.23,<4\",\"pymatgen>=2025.1\",\"matplotlib>=3.9,<4\",\"mp-api==0.45.13\",\"emmet-core==0.85.1\"]"
 ```
 
-工厂校验 profile 身份，只加载核心、MatCreator、结构查看器和 SQLite 这几组批准的代码。
+工厂校验 profile 身份，通过通用 Pack loader 加载部署者安装在项目 `plugins/` 中的全部源卡包，
+并为每个工厂传递当前用户的 `PluginContext`。不扫描任意已安装 entry point 或用户上传的 Pack。
+本地 Codex 标记为托管策略不可用，卡库刷新及保存的启用状态不能绕过该限制。
+后端依赖在部署时通过标准 Pack 准备流程写入只读 `backend/.venv/oaw-runtime-bundle`；
+每用户数据仍写入独立 profile。部署必须检查卡包加载失败列表及前端资源，不能把可选依赖失败
+当作完整成功。XRD 的科学计算环境、QualX 和外部服务凭据仍遵循各卡包自己的依赖声明。
+更新卡包集合后，已有 runtime 必须重新发布并生成匹配的清单，不能仅改写版本字段绕过校验。
 profile ID 取自已验证的 worker 身份；新老用户共用基础配置，各自的存储、绑定和 VM 仍独立。
 无需为新增用户复制 API Key、模板或依赖清单。旧部署若保留 `OAW_ALIYUN_PROFILE_ID`，仍会检查其是否匹配，
 但不应把此变量放进公共文件。更新公共环境后在空闲时滚动重启 worker；这是部署操作，用户无需配置。

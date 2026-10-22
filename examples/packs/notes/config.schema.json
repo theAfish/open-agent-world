@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "title": "NoteConfig",
+  "additionalProperties": false,
+  "properties": {
+    "message": { "type": "string", "title": "Message", "default": "Hello from an external Pack", "minLength": 1, "maxLength": 2000 }
+  }
+}

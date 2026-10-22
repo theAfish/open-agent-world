@@ -1,0 +1,31 @@
+SC2 solid electrolyte - production log, July 2026 (SIMULATED DATA FOR TESTING)
+Line: SC2-01UP, powder grade UP. Prepared by: shift B. Units: feed/output in g,
+ionic conductivity in mS/cm, electronic conductivity in S/cm, moisture in ppm,
+particle size in um.
+
+Daily summary table (as exported from the lab sheet):
+
+生产日期 | 生产批号 | 来料 | 来料离子电导率 | 投料量 | 产出量 | 产率 | 离子电导率 | 电子电导率 | 水分含量/ppm | XRD | 粒径 | 粒径判定结果
+2026/7/15 | SC2-01UP-2607115 | SC2-05UP-260629 | 10.77 | 400 | 304.62 | 76.16% | 3.16/3.91 | / | 514.9/73.2 | 合格 | D50=0.687μm,D90=2.172μm | 合格
+2026/7/16 | SC2-01UP-2607116 | SC2-05UP-260629 | 10.77 | 400 | 312.40 | 78.10% | 3.52/4.08 | / | 402.3/65.8 | 合格 | D50=0.702μm,D90=2.240μm | 合格
+2026/7/18 | SC2-01UP-2607118 | SC2-05UP-260702 | 9.85 | 500 | 371.25 | 74.25% | 2.74/3.05 | / | 688.1/91.4 | 合格 | D50=0.915μm,D90=3.480μm | 不合格
+2026/7/20 | SC2-01UP-2607120 | SC2-05UP-260702 | 9.85 | 450 | 349.83 | 77.74% | 3.41/3.97 | 1.8e-9 | 455.6/58.9 | 不合格 | D50=0.694μm,D90=2.205μm | 合格
+2026/7/22 | SC2-01UP-2607122 | SC2-05UP-260709 | 11.02 | 400 | 296.80 | 74.20% | 3.88/4.25 | / | 380.2/52.7 | 合格 | D50=0.671μm,D90=2.098μm | 合格
+
+Reading the table: in 离子电导率 and 水分含量/ppm the first value is the sample
+as milled and the second is after the final drying step. A '/' means the item was
+not measured. In the sheet, values outside the specification are shown in red.
+
+Shift notes:
+
+- 2026/7/15 (SC2-01UP-2607115): the as-milled ionic conductivity 3.16 and the
+  as-milled moisture 514.9 ppm were shown in red (below / above spec). After
+  drying the batch recovered (3.91 mS/cm, 73.2 ppm). Released.
+- 2026/7/18 (SC2-01UP-2607118): the D90 of 3.480 um is above the 3.0 um limit, so
+  the particle-size verdict is fail. Both conductivity values and moisture were
+  red. The batch is on hold for re-milling.
+- 2026/7/20 (SC2-01UP-2607120): XRD shows a weak Li2S impurity peak, verdict fail.
+  Electronic conductivity measured at 1.8e-9 S/cm, within spec. Held for
+  re-annealing.
+- 2026/7/22 (SC2-01UP-2607122): feedstock from the new lot SC2-05UP-260709. All
+  checks passed.

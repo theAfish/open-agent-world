@@ -1,4 +1,4 @@
-"""Publish the "Knowledge research" Legion as a locked, served deployment.
+"""Publish the "Lab Manager" Legion as a locked, served deployment.
 
 Unlike ``examples/deployed-workspace`` this is not a canned, key-free demo: the
 Librarian reads a real knowledge base, and turning a document into structured
@@ -142,7 +142,7 @@ def prepare(directory: Path) -> Path:
         resource("review", operation="approve", draft_id=draft["id"], expected_revision=1, confirm=True)
 
         release = request("POST", "/api/deployments",
-                          {"legion_id": node_ids["group"], "name": "Knowledge research · deployed"})
+                          {"legion_id": node_ids["group"], "name": "Lab Manager · deployed"})
     # The engineering profile must be closed before the verified deployment copy.
     return create_deployment(source, runtime, release["id"], password=PASSWORD)
 

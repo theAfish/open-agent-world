@@ -22,7 +22,7 @@ test('knowledge documents, groups and private token survive real HTTP save and r
   try {
     await page.goto('/');
     await openWorkspace();
-    const workspace = page.getByRole('dialog', { name: 'Knowledge research workspace mode' });
+    const workspace = page.getByRole('dialog', { name: 'Lab Manager workspace mode' });
     const app = workspace.locator('.knowledge-app');
     await expect(app.getByRole('tab', { name: 'Sources', exact: true })).toHaveAttribute('aria-selected', 'true');
     await expect(app.getByLabel('Group', { exact: true })).toHaveCount(1);

@@ -7,7 +7,8 @@ const frontendRoot = fileURLToPath(new URL("../", import.meta.url));
 const projectRoot = path.resolve(frontendRoot, "..");
 const backendUrl = "http://127.0.0.1:8017/api/world";
 const frontendUrl = "http://127.0.0.1:5177";
-const dataRoot = path.resolve(projectRoot, ".open-agent-world", "playwright");
+// Test worlds are disposable and must never share the application's state root.
+const dataRoot = path.resolve(projectRoot, ".tmp", "playwright", "data");
 const resultFile = path.join(dataRoot, "result.json");
 const children = [];
 const ministerSuite = process.argv.includes("--minister");
@@ -28,7 +29,7 @@ if (ministerSuite) testArgs.unshift("e2e/minister.spec.ts");
 
 async function resetDataRoot() {
   const relative = path.relative(projectRoot, dataRoot);
-  if (relative !== path.join(".open-agent-world", "playwright")) {
+  if (relative !== path.join(".tmp", "playwright", "data")) {
     throw new Error(`Refusing to clear unexpected E2E data root: ${dataRoot}`);
   }
   await rm(dataRoot, { recursive: true, force: true });
@@ -132,7 +133,7 @@ try {
     ["node_modules/@playwright/test/cli.js", "test", ...testArgs],
     {
       cwd: frontendRoot,
-      env: { ...process.env, OAW_E2E_RESULT_FILE: resultFile, OAW_MINISTER_E2E: ministerSuite ? "1" : "0" },
+      env: { ...process.env, OAW_E2E_DATA_ROOT: dataRoot, OAW_E2E_RESULT_FILE: resultFile, OAW_MINISTER_E2E: ministerSuite ? "1" : "0" },
     },
   );
   exitCode = await waitForResult(runner);

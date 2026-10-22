@@ -21,14 +21,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .client import DEFAULT_COLLECTION, collection, open_client
 from .errors import KnowledgeError
+from .graph_store import LAYERS
 from .markdown import available_engines
 from .pipelines import PIPELINE_NAME, submit_markdown_job
 
 MAX_RESULT_BYTES = 1024 * 1024
 MAX_UPLOAD_BYTES = 32 * 1024 * 1024
 MAX_MARKDOWN_CHARS = 200_000
+# ``vision_model`` is an OAW model reference ("oaw:model:..."), or "" for the OAW
+# default model; the OAW_VISION_* variables are the fallback when neither resolves.
 DEFAULT_SETTINGS = {"collection_name": DEFAULT_COLLECTION, "pdf_engine": "auto",
-                    "mineru_base_url": ""}
+                    "mineru_base_url": "", "vision_model": ""}
 ACTIVE_JOBS = {"QUEUED", "RUNNING", "PENDING", "RETRYING"}
 
 
@@ -59,7 +62,8 @@ def _resolve_group(kb, group_id, settings):
 
 def _client(context):
     return open_client(context.node_id, context.storage_path,
-                       resolve_secret=getattr(context, "resolve_secret", None))
+                       resolve_secret=getattr(context, "resolve_secret", None),
+                       resolve_model=getattr(context, "resolve_model", None))
 
 
 def _base(context, group_id=None):
@@ -129,7 +133,9 @@ def overview(context, arguments):
         "groups": [_group_json(item, default_group_id) for item in kb.collections.list(limit=500)],
         "settings": settings,
         "engines": available_engines(settings["mineru_base_url"] or None,
-                                     resolve_secret=getattr(context, "resolve_secret", None)),
+                                     resolve_secret=getattr(context, "resolve_secret", None),
+                                     resolve_model=getattr(context, "resolve_model", None),
+                                     vision_model=settings["vision_model"]),
         "graph_schema_id": graph_schema_id_of(context) or None,
         "counts": {
             "sources": len(sources),
@@ -141,6 +147,16 @@ def overview(context, arguments):
             "facts": len(kb.knowledge.list_facts(collection_id=scope, limit=500)),
             "entities": counts["entities"],
             "relations": counts["relations"],
+            "experiment_bundles": len(kb.oaw_experiments.list_bundles(
+                group_id=str(scope) if scope else None, limit=500)),
+            "experiment_records": len(kb.oaw_experiments.list(
+                group_id=str(scope) if scope else None, limit=500)),
+            "insights": len(kb.oaw_insights.list(
+                group_id=str(scope) if scope else None, limit=500)),
+            "published_insights": len(kb.oaw_insights.list(
+                group_id=str(scope) if scope else None, status="published", limit=500)),
+            "layers": {layer: kb.oaw_graph_store.counts(group_id=scope, layer=layer)
+                       for layer in LAYERS},
         },
         "active_jobs": len([job for job in jobs if job.status in ACTIVE_JOBS]),
     })
@@ -153,6 +169,7 @@ class Settings(Request):
     collection_name: str | None = Field(default=None, max_length=200)
     pdf_engine: Literal["auto", "pymupdf4llm", "mineru", "text"] | None = None
     mineru_base_url: str | None = Field(default=None, max_length=500)
+    vision_model: str | None = Field(default=None, max_length=200)
 
 
 def update_settings(context, arguments):
@@ -230,6 +247,9 @@ class Sources(Request):
     offset: int = Field(default=0, ge=0)
     group_id: str | None = None
     all_groups: bool = False
+    # Files uploaded into an experiment bundle belong to the Experiment section;
+    # Literature's source list leaves them out unless asked otherwise.
+    workflow: Literal["literature", "experiment", "all"] = "literature"
 
 
 def _record_link(kb, artifact_id):
@@ -252,9 +272,15 @@ def sources(context, arguments):
     # group instead, each still carrying its own group for a per-group header.
     scope = _scope(group, request.all_groups)
     names = {str(item.id): item.name for item in kb.collections.list(limit=500)}
+    tagged = kb.oaw_experiments.tagged_source_ids()
     items = []
     for source in kb.sources.list(collection_id=scope,
                                   limit=request.limit, offset=request.offset):
+        is_experiment = str(source.id) in tagged
+        if request.workflow == "literature" and is_experiment:
+            continue
+        if request.workflow == "experiment" and not is_experiment:
+            continue
         artifacts = kb.artifacts.list(source_id=source.id, limit=10)
         markdown = next((a for a in artifacts if a.processing_type == "MARKDOWN"), None)
         record_id = None
@@ -267,6 +293,7 @@ def sources(context, arguments):
             "media_type": source.media_type, "size": source.size,
             "created_at": source.created_at,
             "group_id": source_group_id, "group_name": names.get(source_group_id),
+            "workflow": "experiment" if is_experiment else "literature",
             "markdown": None if markdown is None else {
                 "artifact_id": str(markdown.id), "size": markdown.size,
                 "engine": (markdown.metadata or {}).get("engine")},
@@ -365,7 +392,8 @@ def process_sources(context, arguments):
         source_group_id = (source.collection_ids[0] if source.collection_ids
                            else collection(kb, settings["collection_name"]).id)
         job = submit_markdown_job(kb, source, source_group_id, engine=settings["pdf_engine"],
-                                  mineru_base_url=settings["mineru_base_url"] or None)
+                                  mineru_base_url=settings["mineru_base_url"] or None,
+                                  vision_model=settings["vision_model"])
         results.append({"source_id": str(source.id), "filename": source.filename,
                         "job": {"id": str(job.id), "status": job.status}})
     return _bounded({"jobs": results})
@@ -733,95 +761,284 @@ def _projections_group(kb, projection_ids):
 # ---------------------------------------------------------------- experiments
 
 
-EXPERIMENT_MERGE_PROMPT = (
-    "You merge several structured extractions, each taken from a different file "
-    "describing the same experiment, into one canonical record matching the given "
-    "JSON Schema. When sources genuinely disagree on a field's value, still choose "
-    "your best answer for \"data\", but list every disagreeing value under "
-    "\"conflicts\" so a person can resolve it. Respond with exactly this JSON shape: "
-    "{\"data\": <object matching the schema>, \"conflicts\": "
-    "[{\"field\": <field name>, \"values\": [{\"value\": <value>, \"source_id\": <source id>}]}]}"
-    ". Include a field under \"conflicts\" only when sources disagree on it.")
+EXTRACT_INSTRUCTION = (
+    "The document below is one experiment upload: several files (a photographed table, a "
+    "spreadsheet, a note) joined in order under '## File:' headings, plus the uploader's own "
+    "notes. Project it onto the JSON Schema: produce one record per specimen, sample, run or "
+    "table row the files describe, each with its fields filled from the document only. Leave a "
+    "field out rather than guess it. Reply with exactly this JSON shape: "
+    "{\"records\": [{\"name\": <short label, e.g. the sample id>, \"data\": <object matching the "
+    "schema>, \"source_ids\": [<ids of the files this record was read from>], "
+    "\"note\": <optional: where in the files it came from, or what was unclear>}]}.")
 
 
-class ExperimentAssemblePrompt(Request):
-    projection_ids: list[str] = Field(min_length=1, max_length=50)
-
-
-def experiment_assemble_prompt(context, arguments):
-    """Everything needed to merge several per-file extractions into one experiment
-    record: the schema's definition and every contributing projection's data and
-    source. A caller (the host bridge, or an agent) produces the merged JSON, then
-    submits it with experiment_save — the same two-step shape projection_prompt and
-    save_projection already use, for the same reason: only the caller may hold model
-    credentials, and the plugin owns the write regardless of who called."""
-    request = ExperimentAssemblePrompt.model_validate(arguments)
-    kb = _client(context)
-    group_id = _projections_group(kb, request.projection_ids)
-    items = [kb.projections.require(_uuid(pid, "projection_id")) for pid in request.projection_ids]
-    schema_ids = {str(item.schema_id) for item in items}
-    if len(schema_ids) > 1:
-        raise KnowledgeError("Select projections extracted with a single experiment schema")
-    schema = kb.schemas.require(next(iter(schema_ids)))
+def _experiment_schema(kb, schema_id):
+    schema = kb.schemas.require(schema_id)
     if _schema_kind(schema) != "experiment":
-        raise KnowledgeError('Only a schema tagged kind="experiment" can build an experiment record')
+        raise KnowledgeError('Only a schema tagged kind="experiment" can hold experiment records')
+    return schema
 
-    contributions = []
-    for item in items:
-        links = kb.evidence.list(output_id=item.id, limit=5)
-        source_id = str(links[0].source_id) if links else None
-        filename = kb.sources.require(source_id).filename if source_id else None
-        contributions.append({
-            "projection_id": str(item.id), "source_id": source_id,
-            "artifact_id": str(links[0].artifact_id) if links else None,
-            "filename": filename, "data": item.data})
 
+def _bundle_files(kb, bundle):
+    """Each file in the bundle with its conversion state, in upload order."""
+    jobs = kb.jobs.list(limit=200)
+    files = []
+    for source_id in kb.oaw_experiments.bundle_source_ids(bundle["id"]):
+        source = kb.sources.get(source_id)
+        if source is None:
+            continue
+        markdown = next((a for a in kb.artifacts.list(source_id=source.id, limit=10)
+                         if a.processing_type == "MARKDOWN"), None)
+        record_id = None
+        if markdown is not None:
+            link = _record_link(kb, markdown.id)
+            record_id = str(link.output_id) if link else None
+        job = next((j for j in jobs if (j.inputs or {}).get("source_id") == str(source.id)), None)
+        if record_id:
+            state = "converted"
+        elif job is not None and job.status in ACTIVE_JOBS:
+            state = "converting"
+        elif job is not None and job.status == "FAILED":
+            state = "failed"
+        else:
+            state = "pending"
+        files.append({
+            "source_id": str(source.id), "filename": source.filename,
+            "media_type": source.media_type, "size": source.size,
+            "artifact_id": str(markdown.id) if markdown else None, "record_id": record_id,
+            "engine": (markdown.metadata or {}).get("engine") if markdown else None,
+            "state": state, "job_id": str(job.id) if job else None,
+            "error": job.error if job is not None and job.status == "FAILED" else None,
+        })
+    return files
+
+
+def _bundle_json(kb, bundle, *, files=True):
+    payload = dict(bundle)
+    if files:
+        payload["files"] = _bundle_files(kb, bundle)
+    payload["records"] = len(kb.oaw_experiments.list(bundle_id=bundle["id"], limit=500))
+    return payload
+
+
+class ExperimentBundles(Request):
+    operation: Literal["list", "get"] = "list"
+    bundle_id: str | None = None
+    group_id: str | None = None
+    all_groups: bool = False
+    schema_id: str | None = None
+    limit: int = Field(default=50, ge=1, le=200)
+
+
+def experiment_bundles(context, arguments):
+    """List or read experiment uploads: the files in each and how far their conversion
+    has got. Read-only; creating one and filing files into it are human acts."""
+    request = ExperimentBundles.model_validate(arguments)
+    kb, group, _ = _base(context, request.group_id)
+    if request.operation == "get":
+        if not request.bundle_id:
+            raise KnowledgeError("bundle_id is required")
+        return _bounded({"bundle": _bundle_json(kb, kb.oaw_experiments.require_bundle(request.bundle_id))})
+    scope = _scope(group, request.all_groups)
+    items = kb.oaw_experiments.list_bundles(
+        group_id=str(scope) if scope else None, schema_id=request.schema_id, limit=request.limit)
+    return _bounded({"bundles": [_bundle_json(kb, item) for item in items]})
+
+
+class ExperimentBundleManage(Request):
+    operation: Literal["create", "update", "delete"]
+    bundle_id: str | None = None
+    schema_id: str | None = None
+    group_id: str | None = None
+    name: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=20_000)
+    # The card sets "extracting" with the run it started; the agent's save sets
+    # "extracted"; the card may set "failed" if the run ends with nothing saved.
+    status: Literal["ready", "extracting", "extracted", "failed"] | None = None
+    run_id: str | None = Field(default=None, max_length=64)
+
+
+def experiment_bundle_manage(context, arguments):
+    request = ExperimentBundleManage.model_validate(arguments)
+    if request.operation == "create":
+        if not (request.schema_id and request.name):
+            raise KnowledgeError("schema_id and name are required to create an experiment upload")
+        kb, group, _ = _base(context, request.group_id)
+        schema = _experiment_schema(kb, request.schema_id)
+        bundle = kb.oaw_experiments.create_bundle(
+            group_id=group.id, schema_id=str(schema.id), name=request.name,
+            notes=request.notes or "", created_by=_actor(context))
+        return _bounded({"bundle": _bundle_json(kb, bundle)})
+    if not request.bundle_id:
+        raise KnowledgeError("bundle_id is required")
+    kb = _client(context)
+    if request.operation == "delete":
+        removed = kb.oaw_experiments.delete_bundle(request.bundle_id)
+        return _bounded({"deleted": request.bundle_id, "records_removed": len(removed)})
+    bundle = kb.oaw_experiments.update_bundle(
+        request.bundle_id, name=request.name, notes=request.notes, status=request.status,
+        schema_id=str(_experiment_schema(kb, request.schema_id).id) if request.schema_id else None,
+        run_id=request.run_id if request.status is not None else ...)
+    return _bounded({"bundle": _bundle_json(kb, bundle)})
+
+
+class ExperimentIngest(Request):
+    bundle_id: str
+    filename: str = Field(min_length=1, max_length=255)
+    content_base64: str = Field(min_length=1)
+    media_type: str = Field(default="application/octet-stream", max_length=200)
+
+
+def experiment_ingest(context, arguments):
+    """Upload one file into an experiment upload and queue its conversion at once.
+
+    Unlike Literature's ``ingest``, there is no separate Process step: a bundle's
+    files are only ever there to be projected together, so converting them is never
+    a choice the person needs to make.
+    """
+    request = ExperimentIngest.model_validate(arguments)
+    if "/" in request.filename or "\\" in request.filename:
+        raise KnowledgeError("filename must not contain a path separator")
+    try:
+        data = base64.b64decode(request.content_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise KnowledgeError("content_base64 is not valid base64") from None
+    if not data:
+        raise KnowledgeError("The uploaded file is empty")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise KnowledgeError("Uploads are limited to 32 MiB")
+
+    settings = settings_of(context)
+    kb = _client(context)
+    bundle = kb.oaw_experiments.require_bundle(request.bundle_id)
+    if bundle["status"] == "deleted":
+        raise KnowledgeError("That experiment upload was deleted")
+    group_id = _uuid(bundle["group_id"], "group_id")
+    source = kb.sources.add_bytes(group_id, data, filename=request.filename,
+                                  media_type=request.media_type,
+                                  metadata={"uploaded_by": _actor(context),
+                                            "workflow": "experiment", "bundle_id": bundle["id"]})
+    kb.oaw_experiments.add_bundle_source(bundle["id"], source.id)
+    job = submit_markdown_job(kb, source, group_id, engine=settings["pdf_engine"],
+                              mineru_base_url=settings["mineru_base_url"] or None,
+                              vision_model=settings["vision_model"])
+    if bundle["status"] != "ready":
+        kb.oaw_experiments.update_bundle(bundle["id"], status="ready", run_id=None)
+    return _bounded({"source": {"id": str(source.id), "filename": source.filename,
+                                "size": source.size, "sha256": source.sha256},
+                     "job": {"id": str(job.id), "status": job.status},
+                     "bundle_id": bundle["id"]})
+
+
+def _combined_markdown(kb, files):
+    """Every converted file's markdown, in upload order, under a heading that names
+    the file and its source id so a record can cite exactly where it was read from."""
+    parts = []
+    for item in files:
+        record = kb.records.require(_uuid(item["record_id"], "record_id"))
+        text = (record.data or {}).get("markdown")
+        if not isinstance(text, str):
+            continue
+        parts.append(f"## File: {item['filename']} (source_id={item['source_id']})\n\n{text.strip()}\n")
+    return "\n".join(parts)
+
+
+class ExperimentExtractPrompt(Request):
+    bundle_id: str
+    limit: int = Field(default=60_000, ge=500, le=MAX_MARKDOWN_CHARS)
+    offset: int = Field(default=0, ge=0)
+
+
+def experiment_extract_prompt(context, arguments):
+    """Everything an agent needs to project one experiment upload onto its schema:
+    the schema, the uploader's notes and the files' markdown joined into one document,
+    windowed like ``markdown`` so a long upload is read in pages. The agent produces
+    the records and submits them with ``experiment_save``; the plugin owns the write."""
+    request = ExperimentExtractPrompt.model_validate(arguments)
+    kb = _client(context)
+    bundle = kb.oaw_experiments.require_bundle(request.bundle_id)
+    schema = _experiment_schema(kb, bundle["schema_id"])
+    files = _bundle_files(kb, bundle)
+    if not files:
+        raise KnowledgeError("This experiment upload has no files yet")
+    unready = [f for f in files if f["state"] != "converted"]
+    if unready:
+        names = ", ".join(f"{f['filename']} ({f['state']})" for f in unready)
+        raise KnowledgeError(f"Not every file is converted yet: {names}. Wait for the "
+                             "conversion jobs, or remove the failed file.")
+    text = _combined_markdown(kb, files)
+    window = text[request.offset:request.offset + request.limit]
     return _bounded({
-        "group_id": str(group_id), "schema_id": str(schema.id), "schema_name": schema.name,
-        "definition": schema.definition, "system_prompt": EXPERIMENT_MERGE_PROMPT,
-        "contributions": contributions,
-        "suggested_name": (contributions[0]["filename"] if contributions else None) or schema.name,
+        "bundle_id": bundle["id"], "bundle_name": bundle["name"], "notes": bundle["notes"],
+        "group_id": bundle["group_id"], "schema_id": str(schema.id), "schema_name": schema.name,
+        "schema_version": schema.version, "system_prompt": schema.system_prompt,
+        "definition": schema.definition, "field_descriptions": schema.field_descriptions,
+        "instruction": EXTRACT_INSTRUCTION,
+        "files": [{"source_id": f["source_id"], "filename": f["filename"]} for f in files],
+        "total_characters": len(text), "offset": request.offset, "markdown": window,
+        "has_more": request.offset + len(window) < len(text),
     })
 
 
-class ExperimentSave(Request):
-    schema_id: str
-    group_id: str
+class ExperimentRecordInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=500)
     data: dict[str, Any]
-    conflicts: list[dict[str, Any]] = Field(default_factory=list)
-    evidence: list[dict[str, Any]] = Field(min_length=1, max_length=50)
-    record_id: str | None = None
-    expected_revision: int | None = None
+    source_ids: list[str] = Field(default_factory=list, max_length=100)
+    note: str | None = Field(default=None, max_length=4000)
+
+
+class ExperimentSave(Request):
+    bundle_id: str
+    records: list[ExperimentRecordInput] = Field(min_length=1, max_length=500)
+    # A re-extraction replaces the bundle's earlier drafts; published records stay.
+    replace_drafts: bool = False
+
+
+def _record_json(kb, record, *, sources=False):
+    payload = dict(record)
+    if sources:
+        names = {}
+        for link in kb.oaw_experiments.sources_for(record["id"]):
+            source = kb.sources.get(link["source_id"])
+            names[link["source_id"]] = source.filename if source else None
+        payload["sources"] = [{"source_id": source_id, "filename": filename}
+                              for source_id, filename in names.items()]
+    return payload
 
 
 def experiment_save(context, arguments):
-    """Store a merged experiment record and its evidence links. Re-assembling an
-    existing record (``record_id`` given) replaces its evidence wholesale, so a
-    record's evidence always matches whichever projections most recently produced it."""
+    """Store the records projected from one experiment upload as drafts, each
+    validated against the schema and linked to the files it was read from."""
     request = ExperimentSave.model_validate(arguments)
     kb = _client(context)
-    schema = kb.schemas.require(request.schema_id)
-    if _schema_kind(schema) != "experiment":
-        raise KnowledgeError('Only a schema tagged kind="experiment" can build an experiment record')
-    validation = _check(schema.definition, request.data)
-    links = [{"projection_id": item.get("projection_id"), "source_id": item.get("source_id"),
-             "artifact_id": item.get("artifact_id")} for item in request.evidence
-             if item.get("projection_id") and item.get("source_id")]
-    if not links:
-        raise KnowledgeError("At least one valid evidence link (projection_id and source_id) is required")
+    bundle = kb.oaw_experiments.require_bundle(request.bundle_id)
+    if bundle["status"] == "deleted":
+        raise KnowledgeError("That experiment upload was deleted")
+    schema = _experiment_schema(kb, bundle["schema_id"])
+    files = {f["source_id"]: f for f in _bundle_files(kb, bundle)}
+    if not files:
+        raise KnowledgeError("This experiment upload has no files to cite as evidence")
 
-    if request.record_id:
-        record = kb.oaw_experiments.update(
-            request.record_id, name=request.name, data=request.data,
-            conflicts=request.conflicts, expected_revision=request.expected_revision)
-    else:
+    if request.replace_drafts:
+        kb.oaw_experiments.delete_drafts_for_bundle(bundle["id"])
+    saved = []
+    for item in request.records:
+        cited = [source_id for source_id in item.source_ids if source_id in files]
+        if item.source_ids and not cited:
+            raise KnowledgeError(
+                f'Record "{item.name}" cites source_ids that are not in this upload')
         record = kb.oaw_experiments.create(
-            group_id=_uuid(request.group_id, "group_id"), schema_id=request.schema_id,
-            name=request.name, data=request.data, conflicts=request.conflicts,
-            created_by=_actor(context))
-    kb.oaw_experiments.set_evidence(record["id"], links)
-    return _bounded({"record": {**record, "validation": validation}})
+            group_id=bundle["group_id"], schema_id=str(schema.id), bundle_id=bundle["id"],
+            name=item.name, data=item.data, validation=_check(schema.definition, item.data),
+            note=item.note, created_by=_actor(context))
+        kb.oaw_experiments.set_sources(record["id"], [
+            {"source_id": source_id, "artifact_id": files[source_id]["artifact_id"]}
+            for source_id in (cited or list(files))])
+        saved.append(_record_json(kb, record, sources=True))
+    kb.oaw_experiments.update_bundle(bundle["id"], status="extracted", run_id=None)
+    return _bounded({"records": saved, "bundle_id": bundle["id"],
+                     "invalid": len([r for r in saved if (r["validation"] or {}).get("valid") is False])})
 
 
 class Experiments(Request):
@@ -830,50 +1047,89 @@ class Experiments(Request):
     group_id: str | None = None
     all_groups: bool = False
     schema_id: str | None = None
-    status: Literal["draft", "confirmed"] | None = None
+    bundle_id: str | None = None
+    status: Literal["draft", "published"] | None = None
     limit: int = Field(default=50, ge=1, le=200)
 
 
 def experiments(context, arguments):
-    """List or read experiment records — structured entities assembled from several
-    uploaded files. Read-only: confirming or editing one is knowledge_experiment_update."""
+    """List or read experiment records. Read-only: editing a draft is
+    knowledge_experiment_update; publishing one is a person's click."""
     request = Experiments.model_validate(arguments)
     kb, group, _ = _base(context, request.group_id)
     if request.operation == "list":
         scope = _scope(group, request.all_groups)
         items = kb.oaw_experiments.list(
             group_id=str(scope) if scope else None, schema_id=request.schema_id,
-            status=request.status, limit=request.limit)
+            bundle_id=request.bundle_id, status=request.status, limit=request.limit)
         return _bounded({"experiments": items})
     if not request.record_id:
         raise KnowledgeError("record_id is required")
     record = kb.oaw_experiments.require(request.record_id)
-    record = {**record, "evidence": kb.oaw_experiments.evidence_for(request.record_id)}
-    return _bounded({"experiment": record})
+    return _bounded({"experiment": _record_json(kb, record, sources=True)})
 
 
 class ExperimentUpdate(Request):
-    operation: Literal["confirm", "update"] = "update"
     record_id: str
     name: str | None = Field(default=None, max_length=500)
     data: dict[str, Any] | None = None
+    note: str | None = Field(default=None, max_length=4000)
     expected_revision: int | None = None
 
 
 def experiment_update(context, arguments):
-    """Confirm or hand-edit one experiment record. Never touches a draft, a review
-    or the published graph — an experiment record is its own object from start to
-    finish, exactly as the design keeps the knowledge graph optional."""
+    """Edit one draft record — by hand in the form, or by an agent asked to in
+    conversation. A published record is the approved dataset and is not edited in
+    place: unpublish it first."""
     request = ExperimentUpdate.model_validate(arguments)
     kb = _client(context)
-    if request.operation == "confirm":
+    current = kb.oaw_experiments.require(request.record_id)
+    if current["status"] == "published":
+        raise KnowledgeError("This record is published; unpublish it before editing")
+    validation = None
+    if request.data is not None:
+        schema = kb.schemas.require(current["schema_id"])
+        validation = _check(schema.definition, request.data)
+    record = kb.oaw_experiments.update(
+        request.record_id, name=request.name, data=request.data, note=request.note,
+        validation=validation, expected_revision=request.expected_revision)
+    return _bounded({"experiment": _record_json(kb, record, sources=True)})
+
+
+class ExperimentReview(Request):
+    operation: Literal["publish", "unpublish", "delete"]
+    record_id: str
+    expected_revision: int | None = None
+
+
+def experiment_review(context, arguments):
+    """Publish, unpublish or delete one record: the person's judgment on what the
+    extraction produced. Publishing asks for confirmation, like approving a draft,
+    because a published record is what every reader of the dataset will trust."""
+    request = ExperimentReview.model_validate(arguments)
+    kb = _client(context)
+    current = kb.oaw_experiments.require(request.record_id)
+    if request.operation == "delete":
+        if current["status"] == "published":
+            raise KnowledgeError("Unpublish this record before deleting it")
+        kb.oaw_experiments.delete(request.record_id)
+        return _bounded({"deleted": request.record_id})
+    if request.operation == "unpublish":
         record = kb.oaw_experiments.update(
-            request.record_id, status="confirmed", expected_revision=request.expected_revision)
-    else:
-        record = kb.oaw_experiments.update(
-            request.record_id, name=request.name, data=request.data,
-            expected_revision=request.expected_revision)
-    return _bounded({"experiment": record})
+            request.record_id, status="draft", expected_revision=request.expected_revision)
+        return _bounded({"experiment": _record_json(kb, record, sources=True)})
+    if current["status"] == "published":
+        raise KnowledgeError("This record is already published")
+    if (current["validation"] or {}).get("valid") is False:
+        raise KnowledgeError("This record does not satisfy its schema; fix it before publishing")
+    if not context.confirmed:
+        return {"status": "confirmation_required",
+                "reasons": ["Publishing marks this record as approved data that every "
+                            "reader of this knowledge base will trust."],
+                "message": f'Publish "{current["name"]}"?'}
+    record = kb.oaw_experiments.update(
+        request.record_id, status="published", expected_revision=request.expected_revision)
+    return _bounded({"experiment": _record_json(kb, record, sources=True)})
 
 
 SLUG = re.compile(r"[^a-z0-9]+")
@@ -1041,38 +1297,42 @@ class GraphQuery(Request):
     direction: Literal["both", "out", "in"] = "both"
     limit: int = Field(default=200, ge=1, le=1000)
     group_id: str | None = None
+    # "literature": facts an approved draft published. "experiment": insights
+    # published from experiment records and the record/field nodes they cite.
+    # Omitted: the whole graph, both layers.
+    layer: Literal["literature", "experiment"] | None = None
 
 
 def graph(context, arguments):
     request = GraphQuery.model_validate(arguments)
     kb = _client(context)
     scope = _any_group(request.group_id)
+    store = kb.oaw_graph_store
+    narrowed = scope is not None or request.layer is not None
     if request.operation == "traverse":
         if not request.entity_id:
             raise KnowledgeError("entity_id is required to traverse")
         result = kb.graph.traverse(_uuid(request.entity_id, "entity_id"),
                                    max_depth=request.max_depth, direction=request.direction)
         all_entities, all_relations = list(result.entities), list(result.relations)
-        if scope is not None:
-            # kb.graph.traverse walks the whole store; group is a soft tag on
+        if narrowed:
+            # kb.graph.traverse walks the whole store; group and layer are tags on
             # published elements (see graph_store.py), so narrow after the walk
-            # rather than teaching mkb's traversal about it.
-            in_scope = {item.id for item in kb.oaw_graph_store.list_relations(group_id=scope)}
+            # rather than teaching mkb's traversal about them.
+            in_scope = {item.id for item in store.list_relations(group_id=scope, layer=request.layer)}
             all_relations = [item for item in all_relations if item.id in in_scope]
             kept_ids = {item.source_id for item in all_relations} | \
                 {item.target_id for item in all_relations} | {_uuid(request.entity_id, "entity_id")}
             all_entities = [item for item in all_entities if item.id in kept_ids]
-    elif scope is not None:
-        # mkb's Graph.query has no group concept to pass a collection_id through,
-        # so this replicates its own entity/relation filtering against the store
-        # directly, narrowed to one group's tagged elements.
-        all_entities = kb.oaw_graph_store.list_entities(type=request.entity_type, group_id=scope)
+    elif narrowed:
+        # mkb's Graph.query has no group or layer concept to pass through, so this
+        # replicates its own entity/relation filtering against the store directly.
+        all_entities = store.list_entities(type=request.entity_type, group_id=scope, layer=request.layer)
         if request.name_contains:
             needle = request.name_contains.casefold()
             all_entities = [item for item in all_entities if needle in item.name.casefold()]
         entity_ids = {item.id for item in all_entities}
-        all_relations = kb.oaw_graph_store.list_relations(
-            type=request.relation_type, group_id=scope)
+        all_relations = store.list_relations(type=request.relation_type, group_id=scope, layer=request.layer)
         if request.entity_type or request.name_contains:
             all_relations = [item for item in all_relations
                              if item.source_id in entity_ids or item.target_id in entity_ids]
