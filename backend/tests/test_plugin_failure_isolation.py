@@ -158,7 +158,7 @@ def test_storage_and_resource_failures_are_fatal(tmp_path, monkeypatch, error):
 
 
 def test_core_failure_remains_fatal(monkeypatch):
-    monkeypatch.setattr(loader, 'create_builtin_registry', lambda: (_ for _ in ()).throw(ValueError('invalid Core')))
+    monkeypatch.setattr(loader, 'create_builtin_registry', lambda **kwargs: (_ for _ in ()).throw(ValueError('invalid Core')))
     with pytest.raises(ValueError, match='invalid Core'):
         loader.load_plugin_registry(core_only=True)
 
