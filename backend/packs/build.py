@@ -227,8 +227,13 @@ def passive_wheel_spec(data: bytes, manifest) -> PackSpec | None:
     if raw is None:
         return None
     spec = PackSpec.model_validate_json(raw)
-    if (spec.entrypoints or not spec.contributions.cards or spec.dependencies or spec.backend.python
+    if (spec.entrypoints or not spec.contributions.cards or spec.backend.python
             or spec.environments or spec.features or spec.prerequisites or spec.legacy_python_requirements):
+        return None
+    # Owner identities are checked against installed Pack providers by the
+    # loader. The static boundary still requires the same dependency count and
+    # version constraints; no optional or implicit dependency may be dropped.
+    if sorted(item.version for item in spec.dependencies) != sorted(item.version for item in manifest.dependencies.packs):
         return None
     if (spec.owner, spec.distribution_id, spec.version, spec.packs, spec.node_types) != (
             manifest.owner_id, manifest.id, manifest.version, manifest.provided_pack_ids, manifest.node_types):
@@ -260,18 +265,23 @@ def build_project(source: Path, output: Path, *, backend_wheel: Path | None = No
         raise ValueError("Declare compatibility.plugin_api or pass --plugin-api matching the runtime descriptor")
     compatibility.setdefault("oaw", ">=0.1.0,<1")
     compatibility.setdefault("frontend_api", 1)
+    if spec.contributions.cards or spec.contributions.associations:
+        from backend.packs.spec import CompatibilitySpec
+        if Version(compatibility['plugin_api']) < Version(spec.minimum_plugin_api):
+            raise ValueError(f'Declarative contributions require Plugin API {spec.minimum_plugin_api} or newer')
+        spec = spec.model_copy(update={'compatibility': CompatibilitySpec.model_validate(compatibility)})
     if spec.contributions.cards and not spec.entrypoints:
         if backend_wheel is not None:
             raise ValueError('Declarative cards generate their adapter; omit --backend-wheel')
         # Validate the same registration before producing an artifact. This only
         # executes Core's compiler, never third-party Python or build hooks.
         from backend.plugins.declarative import declarative_plugin
-        from backend.plugins.registry import PluginRegistry
-        from backend.packs.spec import CompatibilitySpec
-        if Version(compatibility['plugin_api']) < Version('1.37'):
-            raise ValueError('Declarative cards require Plugin API 1.37 or newer')
-        spec = spec.model_copy(update={'compatibility': CompatibilitySpec.model_validate(compatibility)})
-        PluginRegistry().install(declarative_plugin(spec), source_spec=spec)
+        from backend.plugins.registry import PluginDefinition, PluginRegistry
+        plugin = declarative_plugin(spec)
+        # Building validates contributions without loading dependency code.
+        # _dependencies below resolves declared owners into release Pack IDs.
+        validation_plugin = PluginDefinition(plugin.descriptor.model_copy(update={'requires_plugins': ()}), plugin.register)
+        PluginRegistry().install(validation_plugin, source_spec=spec)
         wheel, modules = _declarative_wheel(spec)
     else:
         if backend_wheel is None:

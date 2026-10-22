@@ -1,5 +1,9 @@
 # Declarative cards
 
+For the complete progression from a saved Legion to visual authoring and Python,
+start with [Create cards and connect them](card-contract.md). The
+[manifest reference](../reference/pack-manifest.md) defines fields and limits.
+
 Use Schema 3 contributions for passive cards with saved configuration and an
 optional independent UI. OAW derives the plugin owner, Pack and card metadata
 and compiles them into the existing `PluginDefinition`, `NodeTypeDefinition`,
@@ -13,7 +17,7 @@ even when their directories have the same name. The generated README uses the ne
 identity. If copying the example manually, change `example.notes` and both project
 names before installing it alongside another project. Keep the chosen identity
 stable across releases.
-For lifecycle callbacks, relationships, capabilities, documents, execution,
+For lifecycle callbacks, capability-granting relationships, documents, execution,
 providers or custom configuration validators, keep using the
 [advanced Python API](../plugins.md).
 
@@ -62,7 +66,7 @@ preserving identities that differ from the defaults. Existing advanced Schema 3
 declarations also accept omitted owner/Pack/backend defaults.
 
 Each card can set `name`, `description`, `icon`, `color`, `frontend`, `size`,
-`default_name`, `statuses`, `default_status`, `deck_id` and `deck_name`.
+`default_name`, `statuses`, `default_status`, `deck_id`, `deck_name` and `traits`.
 `config_schema` accepts a relative JSON file or an inline table. Paths stay
 inside the project. The initial config subset supports objects, arrays,
 strings, integers, numbers, booleans, null, scalar enums, numeric bounds,
@@ -72,9 +76,52 @@ Objects reject undeclared properties unless `additionalProperties=true`.
 Unknown keywords fail explicitly rather than weakening validation.
 
 Declarative cards require Plugin API 1.37, inferred when `[compatibility]` is
-omitted. Pure declarations own one Pack and have no Python entrypoint or
-cross-plugin dependency. Advanced plugins keep their existing compatible API
-versions; mixing contributions and Python requires API 1.38.
+omitted. Pure declarations own one Pack and have no Python entrypoint.
+Advanced plugins keep their existing compatible API versions; mixing
+contributions and Python requires API 1.38. Traits, passive associations and
+required owner dependencies raise the inferred minimum to API 1.39.
+
+## Connect cards without Python (API 1.39)
+
+The [Connected Notes example](https://github.com/theAfish/open-agent-world/tree/dev/examples/packs/connected-notes)
+declares two card types and a relationship between them. Each card uses the
+standard configuration editor; there is no frontend build.
+
+```toml
+[[contributions.associations]]
+id = "example.connected-notes.about"
+label = "About topic"
+short_label = "About"
+source_types = ["example.connected-notes.note"]
+target_traits = ["example.connected-notes.topic"]
+directions = ["forward"]
+```
+
+The target card declares `traits = ["example.connected-notes.topic"]`.
+Use `target_types` to select an exact type instead. A type selector matches any
+listed type, a trait selector requires all listed traits, and supplying both
+requires both conditions. Sources belong to this owner; targets may belong to
+another Pack. Passive cards can only publish traits in their own namespace.
+
+These are ordinary saved, templateable connections. They grant no capabilities
+or data-reading access and do not run cards or transfer configuration/output.
+The format has no typed ports, cardinality or payload schemas. Use Python for
+active tool and data-provider contracts.
+
+A target selector can remain unused until a compatible target is installed.
+If that target is required for your Pack, declare its owner explicitly:
+
+```toml
+[[dependencies]]
+id = "example.topics"
+kind = "owner"
+version = ">=0.1.0,<1"
+```
+
+Pure declarations support required owner dependencies; optional dependencies and
+other dependency kinds require an advanced entrypoint. The build resolves the
+owner's library Pack from sibling source declarations. Recipients must install
+compatible dependencies first; no dependency is automatically downloaded.
 
 ## Mixed contributions (API 1.38)
 
@@ -83,7 +130,7 @@ stable `id` values. Owner, version and the default Pack still come from the proj
 and distribution. Do not repeat `plugin.node_types`; if specified, it must describe
 the entire declared and advanced contribution set.
 
-For custom lifecycle, state, capabilities or relationships, keep the existing
+For custom lifecycle, state, capabilities or active relationships, keep the existing
 `pyproject.toml` plugin entrypoint. Manifest cards populate the same registration
 collector before its Python `register` hook runs. Extend a declared definition
 without repeating its presentation or configuration metadata:
@@ -99,7 +146,8 @@ def register(self, registration):
     # Existing register_relationship / register_capability / provider APIs work here.
 ```
 
-The descriptor must declare API 1.38. Both halves commit atomically; a failed hook
+The descriptor must declare at least API 1.38, or 1.39 when using the newer
+declarative connection features. Both halves commit atomically; a failed hook
 publishes neither. If no Pack is explicitly registered, the Registry supplies its
 existing default Pack. Structure Viewer demonstrates mixed presentation metadata
 and advanced state, file preview, deployment and tutorial contracts. These Packs
@@ -154,6 +202,8 @@ execute trusted code and can change that profile's test data.
 `verify` performs explicit integrity verification. Runtime activation failures
 remain visible in the Library with their phase and repair/restart instruction;
 saved cards and connections remain recoverable and cannot grant permissions.
+`schema` prints the archive manifest JSON Schema; it does not describe the whole
+source TOML or Factory recipe format.
 
 ## Validation boundaries
 

@@ -61,6 +61,11 @@ Plugin-specific documentation can remain in its own package or repository. These
 
 ## Developing a plugin
 
+Plugin API 1.39 adds passive card traits and associations to declarative Packs,
+required owner dependencies for pure declarations, and connections for Factory
+recipes. [Create cards and connect them](developers/card-contract.md) shows how
+these paths fit together. API 1.38 supports mixed declarations and Python hooks.
+
 Plugin API 1.37 adds [declarative cards](developers/declarative-packs.md) using
 Schema 3 contributions compiled into the existing registry. Passive cards can
 omit Python factories and repeated owner/Pack/card identities. Advanced plugins
@@ -1024,6 +1029,14 @@ remain owned plugin contributions; the core does not maintain a parallel skill
 registry, plugin marketplace, or content-hash identity scheme.
 
 ## Relationships, traits, and capabilities
+
+Plugin API 1.39 also exposes permission-free associations through
+[Schema 3 declarations](developers/declarative-packs.md#connect-cards-without-python-api-139)
+and [Factory recipes](reference/pack-manifest.md#factory-card-recipe-json).
+They compile into the same `RelationshipDefinition` with empty capability
+grants and `data_read=False`. Use the Python API below for tool grants and
+data-access relationships. The [card contract](developers/card-contract.md)
+defines the shared vocabulary and supported boundaries.
 
 Executable nodes can additionally declare `NodeExecutionDefinition` (API 1.3).
 It uses pure callbacks to enumerate work, apply outcomes, and supply an execution

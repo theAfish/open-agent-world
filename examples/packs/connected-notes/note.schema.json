@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "text": {
+      "type": "string",
+      "title": "Note text",
+      "default": "Write something about your topic.",
+      "maxLength": 10000
+    }
+  }
+}

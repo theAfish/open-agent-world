@@ -6,6 +6,8 @@ Use this section to look up a contract or investigate host behavior. For a guide
 
 | Concern | Reference |
 | --- | --- |
+| Card authoring paths, interfaces and passive connections | [Card contract](../developers/card-contract.md) |
+| Source declarations, recipe files and content limits | [Pack manifests and card recipes](pack-manifest.md) |
 | Package discovery, identity, registration, configuration | [Plugin API](../plugins.md) |
 | Persistent card state and state namespaces | [Card state lifecycle](../card-state.md) |
 | Reversible resource creation and cleanup | [Lifecycle transactions](../plugins.md#lifecycle-transactions) |

@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import re
+from copy import copy
 from urllib.parse import urlsplit
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -17,7 +18,7 @@ from backend.errors import PluginCompatibilityError
 from backend.legions.models import LegionBlueprintPreset, LegionRecord
 from backend.legions.validation import compatibility_issues
 from backend.packs.manifest import Content, CreatorMetadata, Dependencies, PackDependency, PackManifest
-from backend.plugins.registry import PLUGIN_API_VERSION, PackDefinition, PluginDefinition, PluginDescriptor
+from backend.plugins.registry import PLUGIN_API_VERSION, PackDefinition, PluginDefinition, PluginDescriptor, PluginRegistration
 
 MAX_TEMPLATE_BYTES = 64 * 1024 * 1024
 
@@ -47,7 +48,8 @@ def read_presets(manifest: PackManifest, files: dict[str, bytes]) -> list[Legion
 def content_plugin(manifest: PackManifest, files: dict[str, bytes], registry):
     """Validate against loaded dependencies; never load executable content."""
     from backend.legions.presets import plugin_preset_record
-    from backend.packs.factory_cards import read_recipes, recipe_definition
+    from backend.packs.associations import register_associations
+    from backend.packs.factory_cards import FACTORY_RENDERER, read_recipes, recipe_associations, recipe_definition, validate_recipe_targets
     presets = read_presets(manifest, files)
     recipes = read_recipes(manifest, files)
     owners = set()
@@ -60,6 +62,51 @@ def content_plugin(manifest: PackManifest, files: dict[str, bytes], registry):
         if Version(descriptors[owner].version) not in SpecifierSet(dependency.version):
             raise ValueError(f"Restart OAW with required Pack {dependency.id}{dependency.version} first")
         owners.add(owner)
+    if recipes:
+        # Old content Packs omitted this host renderer dependency. Keep their bytes
+        # readable, while making availability and enable/disable propagation explicit.
+        try:
+            renderer_owner = registry.owner_id("pack", FACTORY_RENDERER)
+            registry.node_type(FACTORY_RENDERER + ".card")
+        except ValueError as exc:
+            raise ValueError("Recipe cards require the enabled oaw.factory Pack") from exc
+        owners.add(renderer_owner)
+        validate_recipe_targets(recipes, registry, owners)
+    creator = manifest.creator
+    assert creator is not None
+    descriptor = PluginDescriptor(id=manifest.id, name=manifest.name,
+        description=creator.description, version=manifest.version,
+        plugin_api_version=manifest.compatibility.plugin_api, requires_plugins=tuple(sorted(owners)))
+
+    def register_cards(registration):
+        for recipe in recipes:
+            registration.register_node_type(recipe_definition(recipe))
+        for recipe in recipes:
+            register_associations(registration, tuple(recipe_associations(recipe, manifest.id)))
+
+    # Validate templates against this Pack's staged recipes without mutating the
+    # live registry (including when inspecting an update to an already loaded Pack).
+    candidate = registry
+    if recipes:
+        staged = PluginRegistration(descriptor)
+        register_cards(staged)
+        for kind, definitions in (("node_type", staged.nodes), ("relationship", staged.relationships)):
+            for identifier in definitions:
+                existing_owner = registry._owners.get((kind, identifier))
+                if existing_owner is not None and existing_owner != manifest.id:
+                    raise ValueError(f"Content {kind} ID is already owned by {existing_owner}")
+        candidate = copy(registry)
+        candidate._nodes = {**{key: value for key, value in registry._nodes.items()
+                              if registry._owners.get(("node_type", key)) != manifest.id}, **staged.nodes}
+        candidate._relationships = {**{key: value for key, value in registry._relationships.items()
+                                      if registry._owners.get(("relationship", key)) != manifest.id}, **staged.relationships}
+        candidate._plugins = {**registry._plugins, manifest.id: descriptor}
+        candidate._disabled = registry._disabled - {manifest.id}
+        candidate.load_failures = [row for row in registry.load_failures if row.get("owner") != manifest.id]
+        candidate._owners = {**{key: owner for key, owner in registry._owners.items()
+                               if owner != manifest.id or key[0] not in {"node_type", "relationship"}},
+            **{("node_type", key): manifest.id for key in staged.nodes},
+            **{("relationship", key): manifest.id for key in staged.relationships}}
     for preset in presets:
         registry.validate_identifier(preset.id, "Legion preset")
         try:
@@ -68,30 +115,25 @@ def content_plugin(manifest: PackManifest, files: dict[str, bytes], registry):
             existing_owner = None
         if existing_owner is not None and existing_owner != manifest.id:
             raise ValueError(f"Content Legion ID is already owned by {existing_owner}")
-        record = plugin_preset_record(preset, registry)
-        issues = compatibility_issues(record, registry)
+        record = plugin_preset_record(preset, candidate)
+        issues = compatibility_issues(record, candidate)
         referenced = {node.plugin_id for node in record.blueprint.nodes}
         referenced.update(dep.plugin_id for node in record.blueprint.nodes for dep in node.dependencies)
         referenced.update(edge.plugin_id for edge in record.blueprint.edges)
-        if referenced - owners:
-            issues.append("Undeclared content dependencies: " + ", ".join(sorted(referenced - owners)))
+        undeclared = referenced - owners - ({manifest.id} if recipes else set())
+        if undeclared:
+            issues.append("Undeclared content dependencies: " + ", ".join(sorted(undeclared)))
         if issues:
             raise ValueError(f"Content Legion {preset.name}: " + "; ".join(issues))
-    creator = manifest.creator
-    assert creator is not None
-
     def register(registration):
-        for recipe in recipes:
-            registration.register_node_type(recipe_definition(recipe))
+        register_cards(registration)
         registration.register_pack(PackDefinition(id=manifest.id, name=manifest.name,
             description=creator.description, cards=tuple(recipe.id for recipe in recipes), accent_color=creator.accent_color, packaging=creator.packaging,
             tutorials=creator.tutorials))
         for preset in presets:
             registration.register_legion_preset(preset)
 
-    return PluginDefinition(PluginDescriptor(id=manifest.id, name=manifest.name,
-        description=creator.description, version=manifest.version,
-        plugin_api_version=manifest.compatibility.plugin_api, requires_plugins=tuple(sorted(owners))), register)
+    return PluginDefinition(descriptor, register)
 
 
 class CreatorRequest(BaseModel):
@@ -186,33 +228,40 @@ def prepare_export(record: LegionRecord, request: CreatorRequest, registry) -> t
     portable = record.model_copy(update={"blueprint": blueprint})
     issues.extend({"severity": "error", "path": record.name, "message": message}
                   for message in compatibility_issues(portable, registry))
+    from backend.packs.factory_cards import embed_local_recipes, recipe_dependencies
+    recipes = embed_local_recipes(blueprint, request.id, registry)
+    for recipe in recipes.values():
+        _scan(recipe.model_dump(), recipe.design.face.title, issues)
+        _scan({field.key: field.default for field in recipe.design.function.fields}, recipe.design.face.title + ".defaults", issues)
     owners = {n.plugin_id for n in blueprint.nodes}
     owners.update(d.plugin_id for n in blueprint.nodes for d in n.dependencies)
     owners.update(e.plugin_id for e in blueprint.edges)
     catalog = registry.catalog()
     descriptors = {p.id: p for p in catalog.plugins}
     dependencies = []
-    for owner in sorted(owners):
+    for owner in sorted(owners - ({request.id} if recipes else set())):
         packs = sorted((p for p in catalog.packs if p.plugin_id == owner), key=lambda p: p.id)
         if not packs:
             issues.append({"severity": "error", "path": owner, "message": "This dependency has no distributable Pack."})
             continue
         # A Pack version loads its owning plugin's full contribution set.
         dependencies.append(PackDependency(id=packs[0].id, version="==" + descriptors[owner].version))
+    dependencies = list({dep.id: dep for dep in [*dependencies, *recipe_dependencies(list(recipes.values()), registry)]}.values())
     manifest = PackManifest(schema_version=2, kind="content", id=request.id, name=request.name,
         version=request.version, compatibility={"oaw": f">={__version__},<1", "plugin_api": PLUGIN_API_VERSION, "frontend_api": 1},
-        dependencies=Dependencies(packs=tuple(dependencies)), content=Content(legions=("content/legion.json",)), creator=request.creator)
+        dependencies=Dependencies(packs=tuple(dependencies)), content=Content(legions=("content/legion.json",), cards=tuple(recipes)), creator=request.creator)
     preset = LegionBlueprintPreset(id=manifest.id + ".legion", name=record.name,
         description=record.description, revision=record.revision, blueprint=blueprint)
     files = {"manifest.json": _json(manifest.model_dump(mode="json", exclude_none=True)),
-             "content/legion.json": _json(preset.model_dump(mode="json"))}
+             "content/legion.json": _json(preset.model_dump(mode="json")),
+             **{path: _json(recipe.model_dump(mode="json")) for path, recipe in recipes.items()}}
     guide = request.creator
     files["README.md"] = (f"# {manifest.name}\n\n{guide.description}\n\n"
         f"Author (self-declared): {guide.author}\n\n## Preparation\n\n{guide.preparation}\n\n"
         f"## Example task\n\n{guide.example}\n\n## Expected result\n\n{guide.expected_result}\n\n"
         "## Required Packs\n\n" + "\n".join(f"- {d.id} {d.version}" for d in dependencies) +
-        "\n\nInstall required Packs first, restart OAW, then install this file through the Library. "
-        "After restarting, open the Pack and add its Legion to a deck. Configure your model and local tools before running.\n").encode("utf-8")
+        "\n\nInstall required Packs first, then install this file through the Library. Restart only when the Library asks. "
+        "Open the Pack and add its Legion to a deck. Configure your model and local tools before running.\n").encode("utf-8")
     return {"manifest": manifest.model_dump(mode="json"), "nodes": content_nodes,
             "issues": issues, "can_export": not any(i["severity"] == "error" for i in issues)}, files
 

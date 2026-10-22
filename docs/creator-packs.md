@@ -1,5 +1,8 @@
 # Share a Legion as a content Pack
 
+See [Create cards and connect them](developers/card-contract.md) for the other
+authoring paths and the distinction between a Pack, collection and Deck.
+
 For visual card design and multi-item composition, use the bundled
 [Card Factory](card-factory.md). Its connected designers, printer and
 packer export standalone declarative cards together with Legion templates.
@@ -7,6 +10,8 @@ packer export standalone declarative cards together with Legion templates.
 You can create and share a useful formation without writing a plugin or signing
 in to a store. A content Pack contains saved Legion templates, usage instructions
 and references to the original Packs that supply its cards and tools.
+Local printed card types and their local exact-type connection targets are
+embedded as recipes, so recipients do not need the author's local printed Packs.
 
 ## Create a Pack
 
@@ -44,8 +49,9 @@ the description, self-declared author and first-use guide.
 
 Install and activate the required Packs first. Missing or incompatible
 dependencies are reported with their IDs and version requirements. Content Packs
-use the existing installation, immutable-version and restart workflow; there is
-no automatic downloading of dependencies. After restarting OAW, open the new Pack
+use the existing installation and immutable-version workflow; there is
+no automatic downloading of dependencies. New content Packs activate live;
+updates to a loaded owner require the restart shown by the Library. Open the new Pack
 in the Library. Its Legion appears under that Pack, before ordinary cards. Drag
 it into a deck or onto the canvas when you want to use it. Installation does not
 add entries to your decks.
@@ -98,19 +104,23 @@ Version 1 code Packs keep their existing contract. An example content manifest i
 ```
 
 Use the dependency IDs emitted by your installed OAW rather than copying the
-example. Each declared JSON file contains a namespaced ID, name, description,
+example. The illustrative `1.23` minimum describes the legacy Legion-only format;
+current exports record their actual host compatibility. The
+[manifest reference](reference/pack-manifest.md) covers recipes and limits.
+Each declared Legion JSON file contains a namespaced ID, name, description,
 revision and the existing `LegionBlueprint` data. A content archive accepts only
-`manifest.json`, `checksums.json`, optional `README.md` and its declared template
+`manifest.json`, `checksums.json`, optional `README.md` and its declared content
 files. It rejects backend wheels, frontend modules, undeclared files and runtime
 package installation requirements. Existing archive size, path and checksum
 checks apply. Installing also validates template compatibility and declared owners
 against loaded dependencies before selecting the version.
 
-The host registers templates and an empty-card Pack wrapper through its own
+The host registers templates and any embedded card recipes through its own
 registry adapter. No Python module or JavaScript bundle comes from the content
 archive. Existing `python -m open_agent_world.pack build/inspect/install` commands
 can process these artifacts as well.
 
 The Library editor above remains a single-Legion shortcut. Card Factory adds
-multi-Legion composition and declarative card recipes. Cover asset authoring,
-Deck recipes and a guided temporary-profile preview remain future work.
+multi-Legion composition, declarative card recipes, packaging styles and theme
+colors. Imported custom cover assets, Deck recipes and a guided temporary-profile
+preview remain future work.

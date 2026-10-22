@@ -16,6 +16,10 @@ be preserved.
 
 ## Source declaration and schema 3
 
+Choose an authoring path in [Create cards and connect them](developers/card-contract.md).
+The [manifest reference](reference/pack-manifest.md) distinguishes source TOML,
+archive manifests and Factory recipe JSON, including their compatibility minimums.
+
 Passive cards can use [declarative contributions](developers/declarative-packs.md)
 without Python registration code. `build-project` generates their adapter wheel;
 advanced and mixed plugins continue to pass `--backend-wheel`. Both use the same installer.
@@ -43,7 +47,7 @@ name = "Research"
 # Version defaults to project.version in pyproject.toml.
 
 [compatibility]
-plugin_api = "1.35"
+plugin_api = "1.35" # Minimum used by this advanced example, not the current host API.
 oaw = ">=0.1.0,<1"
 
 [plugin]

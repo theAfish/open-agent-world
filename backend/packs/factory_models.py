@@ -11,6 +11,7 @@ from backend.card_finishes import CardFinish
 from backend.plugins.tutorials import Tutorials, validate_tutorials
 from backend.packs.manifest import CreatorMetadata
 from backend.packs.face_design import FaceStudio, Mode
+from backend.packs.identifiers import IDENTIFIER, PACK_ID
 
 Scalar = StrictStr | StrictBool | StrictInt | StrictFloat
 
@@ -71,14 +72,32 @@ class ButtonBinding(Model):
     logic_id: str = Field(pattern=r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
 
 
+class FactoryAssociation(Model):
+    """A passive outgoing connection, scoped to the printed recipe's type."""
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,39}$")
+    label: str = Field(min_length=1, max_length=120)
+    target_type: str | None = Field(default=None, pattern=IDENTIFIER, max_length=128)
+    target_trait: str | None = Field(default=None, pattern=IDENTIFIER, max_length=128)
+
+    @model_validator(mode="after")
+    def target(self):
+        if (self.target_type is None) == (self.target_trait is None):
+            raise ValueError("Choose exactly one connection target: card type or trait")
+        return self
+
+
 class FunctionDesign(Model):
     button_bindings: list[ButtonBinding] | None = Field(default=None, max_length=128)
+    associations: list[FactoryAssociation] | None = Field(default=None, max_length=20)
 
     @model_serializer(mode="wrap")
     def serialize(self, handler):
         data = handler(self)
         if self.button_bindings is None:
             data.pop("button_bindings", None)
+        if not self.associations:
+            data.pop("associations", None)
         return data
 
     fields: list[InputField] = Field(default_factory=lambda: [InputField(key="name", label="名称", default="世界")], max_length=20)
@@ -88,6 +107,9 @@ class FunctionDesign(Model):
 
     @model_validator(mode="after")
     def valid_fields(self):
+        association_ids = [association.id for association in self.associations or []]
+        if len(association_ids) != len(set(association_ids)):
+            raise ValueError("Connection identifiers must be unique")
         targets = [(binding.mode, binding.element_id) for binding in self.button_bindings or []]
         if len(set(targets)) != len(targets):
             raise ValueError("同一视图的按钮不能重复挂载逻辑")
@@ -149,10 +171,16 @@ class CardRecipe(Model):
 
 
 class PackDesign(Model):
-    id: str = Field(default="local.mycards", pattern=r"^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$", max_length=100)
+    id: str = Field(default="local.mycards", pattern=PACK_ID, max_length=100)
     name: str = Field(default="我的卡包", min_length=1, max_length=120)
     version: str = Field(default="0.1.0", max_length=64)
     creator: CreatorMetadata = Field(default_factory=CreatorMetadata)
+
+    @model_validator(mode="after")
+    def runtime_owner(self):
+        if re.fullmatch(IDENTIFIER, self.id) is None:
+            raise ValueError("The Pack ID must also be a valid runtime owner identifier")
+        return self
 
 
 class BasketItem(Model):

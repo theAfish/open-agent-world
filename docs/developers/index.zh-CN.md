@@ -2,7 +2,7 @@
 
 [English](index.md) | **简体中文**
 
-插件是向 OAW 注册卡片、关系、工具或界面的 Python 包。先用 Python 做一张带配置字段的卡片；需要自定义界面时再加入 React / TypeScript。
+先用[卡牌创作路线与契约（英文）](card-contract.md)选择适合的方式：已有卡牌可保存为 Legion 并打包；配置表单和被动连接可用声明式卡牌；视觉设计可用[卡包工厂](../card-factory.zh-CN.md)；工具权限、数据访问或生命周期行为再使用 Python 插件。需要自定义视图时才加入 React / TypeScript。
 
 ## 从零开始
 
@@ -12,7 +12,7 @@
 4. [添加自定义界面（英文）](frontend.md)：声明前端 manifest，通过 `@oaw/plugin-api` 编辑卡片配置。
 5. [测试与分发（英文）](testing.md)：验证真实入口发现、保存与重启、权限撤销和打包方式。
 
-最小示例在 [examples/plugins/hello_world](../../examples/plugins/hello_world/README.md)，不需要模型密钥。涉及 Agent 工具和生命周期的完整示例在 [Greeter](../../examples/plugins/greeter/README.md)。
+无需 Python 或 JavaScript 的双卡连接示例见 [Connected Notes](https://github.com/theAfish/open-agent-world/tree/dev/examples/packs/connected-notes)，对应[声明式卡牌指南（英文）](declarative-packs.md)。被动连接只保存关联，不传送数据或授予工具权限。最小 Python 示例在 [examples/plugins/hello_world](../../examples/plugins/hello_world/README.md)，不需要模型密钥。涉及 Agent 工具和生命周期的完整示例在 [Greeter](../../examples/plugins/greeter/README.md)。
 
 ## 需要更多功能时
 

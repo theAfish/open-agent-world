@@ -55,7 +55,8 @@ export interface FaceStudio {
   modes: Partial<Record<NodeSurfaceLevel, SurfaceDesign>>;
 }
 export interface InputField { key: string; label: string; type: 'text' | 'number' | 'boolean'; default: Scalar; required: boolean }
-export interface FunctionDesign { fields: InputField[]; operation: 'template' | 'sum' | 'multiply' | 'join'; template: string; separator: string; button_bindings?: ButtonBinding[] }
+export interface FactoryAssociation { id: string; label: string; target_type?: string | null; target_trait?: string | null }
+export interface FunctionDesign { fields: InputField[]; operation: 'template' | 'sum' | 'multiply' | 'join'; template: string; separator: string; button_bindings?: ButtonBinding[]; associations?: FactoryAssociation[] }
 export interface PrintedDesign { face: FaceDesign; function: FunctionDesign }
 export interface PackDesign { id: string; name: string; version: string; creator: CreatorMetadata }
 export interface BasketItem { kind: 'node' | 'legion' | 'preset'; id: string; name: string }

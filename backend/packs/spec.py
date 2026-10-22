@@ -18,11 +18,13 @@ from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import Version
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
+
+from backend.packs.associations import CardTraits, PassiveAssociation, validate_associations, validate_card_traits
+from backend.packs.identifiers import IDENTIFIER, PACK_ID
 
 ENTRY_POINT_GROUP = "open_agent_world.plugins"
 MAX_METADATA_BYTES = 2 * 1024 * 1024
-IDENTIFIER = r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$"
 
 
 class SpecModel(BaseModel):
@@ -249,6 +251,14 @@ class CardContribution(SpecModel):
     default_status: str | None = None
     deck_id: str | None = None
     deck_name: str | None = None
+    traits: CardTraits = ()
+
+    @model_serializer(mode='wrap')
+    def canonical_fields(self, handler):
+        payload = handler(self)
+        if not self.traits:
+            payload.pop('traits', None)
+        return payload
 
     @model_validator(mode="after")
     def valid_card(self) -> Self:
@@ -266,11 +276,19 @@ class CardContribution(SpecModel):
 
 class Contributions(SpecModel):
     cards: tuple[CardContribution, ...] = Field(default=(), max_length=1000)
+    associations: tuple[PassiveAssociation, ...] = Field(default=(), max_length=1000)
+
+    @model_serializer(mode='wrap')
+    def canonical_fields(self, handler):
+        payload = handler(self)
+        if not self.associations:
+            payload.pop('associations', None)
+        return payload
 
 
 class PackSpec(SpecModel):
     schema_version: Literal[3] = 3
-    distribution_id: str = Field(pattern=IDENTIFIER, max_length=128)
+    distribution_id: str = Field(max_length=128)
     version: str
     name: str
     owner: str | None = Field(default=None, pattern=IDENTIFIER, max_length=128)
@@ -301,6 +319,9 @@ class PackSpec(SpecModel):
 
     @model_validator(mode="after")
     def references(self) -> Self:
+        if (not re.fullmatch(IDENTIFIER if self.legacy else PACK_ID, self.distribution_id)
+                or (not self.legacy and len(self.distribution_id) > 120)):
+            raise ValueError('Distribution IDs must use the Pack archive grammar; legacy sources use runtime identifiers')
         if self.node_types is not None and (len(set(self.node_types)) != len(self.node_types) or any(
                 not re.fullmatch(IDENTIFIER, value) or value == "core" or value.startswith("core.")
                 for value in self.node_types)):
@@ -326,12 +347,29 @@ class PackSpec(SpecModel):
                     or (item.kind == "owner" and item.id == self.owner)
                     or (item.kind == "pack" and item.id in self.packs)):
                 raise ValueError("Pack dependency cannot reference itself")
+        if self.contributions.cards or self.contributions.associations:
+            if not self.owner:
+                raise ValueError('Declarative contributions require an owner')
+            for card in self.contributions.cards:
+                validate_card_traits(self.owner, card.traits)
+            validate_associations(self.owner, self.contributions.cards, self.contributions.associations)
+            if not self.entrypoints and any(item.kind != 'owner' or item.optional for item in self.dependencies):
+                raise ValueError('Passive declarations support required owner dependencies; other dependencies require an advanced entrypoint')
+            if self.compatibility is None or Version(self.compatibility.plugin_api) < Version(self.minimum_plugin_api):
+                raise ValueError(f'These declarative contributions require Plugin API {self.minimum_plugin_api} or newer')
         return self
+
+    @property
+    def minimum_plugin_api(self) -> str:
+        if (self.contributions.associations or any(card.traits for card in self.contributions.cards)
+                or (self.dependencies and not self.entrypoints)):
+            return '1.39'
+        return '1.38' if self.entrypoints else '1.37'
 
     @property
     def spec_digest(self) -> str:
         payload = self.model_dump(mode="json")
-        if not self.contributions.cards:
+        if not self.contributions.cards and not self.contributions.associations:
             # New optional syntax must not invalidate existing adapter receipts.
             payload.pop("contributions")
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -389,7 +427,7 @@ class _Environment(_Group):
 
 
 class _Distribution(SpecModel):
-    id: str
+    id: str = Field(pattern=PACK_ID, max_length=120)
     version: str | None = None
     name: str | None = None
 
@@ -578,11 +616,11 @@ def read_source_pack(root: Path) -> PackSpec:
         if identifier is None:
             raise ValueError("Multiple declarative cards require explicit IDs")
         cards.append(card.model_copy(update={"id": identifier, "config_schema": schema}))
-    contributions = Contributions(cards=tuple(cards))
+    contributions = Contributions(cards=tuple(cards), associations=declaration.contributions.associations)
     node_types = declaration.plugin.node_types
     if cards:
-        if len(packs) != 1 or (declaration.dependencies and not entrypoints):
-            raise ValueError("Declarative cards use one Pack; plugin dependencies require an advanced entrypoint")
+        if len(packs) != 1:
+            raise ValueError('Declarative cards use one Pack')
         inferred = tuple(card.id for card in cards)
         if node_types is not None and (not set(inferred) <= set(node_types) or (not entrypoints and set(node_types) != set(inferred))):
             raise ValueError("Declared node_types disagree with contributions.cards")
@@ -591,8 +629,9 @@ def read_source_pack(root: Path) -> PackSpec:
         for card in cards:
             config_model(card.config_schema)().model_dump(mode="json")
     compatibility = declaration.compatibility
-    if cards:
-        required_api = '1.38' if entrypoints else '1.37'
+    if cards or contributions.associations:
+        required_api = ('1.39' if contributions.associations or any(card.traits for card in cards)
+                        or (declaration.dependencies and not entrypoints) else '1.38' if entrypoints else '1.37')
         compatibility = compatibility or CompatibilitySpec(plugin_api=required_api)
         if Version(compatibility.plugin_api) < Version(required_api):
             raise ValueError(f"These declarative contributions require Plugin API {required_api} or newer")

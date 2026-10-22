@@ -71,6 +71,7 @@ def config_model(schema: dict):
 def contribute_cards(registration, spec):
     """Populate the same staging collector before an advanced register hook."""
     from backend.plugins.registry import NodeTypeDefinition
+    from backend.packs.associations import register_associations, validate_card_traits
     for card in spec.contributions.cards:
         name = card.name or spec.name
         registration.register_node_type(NodeTypeDefinition(
@@ -79,7 +80,10 @@ def contribute_cards(registration, spec):
             default_name=card.default_name or name, default_size=card.size,
             default_status=card.default_status or card.statuses[0],
             statuses=frozenset(card.statuses), config_model=config_model(card.config_schema), frontend=card.frontend,
+            traits=validate_card_traits(spec.owner, card.traits),
+            templateable=True,
             surfaces={'preview': True, 'inspector': True, 'workspace': 'workspace' in card.frontend}))
+    register_associations(registration, spec.contributions.associations)
 
 
 def declarative_plugin(spec):
@@ -87,10 +91,11 @@ def declarative_plugin(spec):
     from backend.packs.spec import PackSpec
     from backend.plugins.registry import PackDefinition, PluginDefinition, PluginDescriptor
     spec = spec if isinstance(spec, PackSpec) else PackSpec.model_validate(spec)
-    if not spec.contributions.cards or spec.entrypoints or spec.dependencies or len(spec.packs) != 1:
+    if not spec.contributions.cards or spec.entrypoints or len(spec.packs) != 1:
         raise ValueError('Expected passive declarative cards in one Pack')
     descriptor = PluginDescriptor(id=spec.owner, version=spec.version, name=spec.name,
                                   plugin_api_version=spec.compatibility.plugin_api,
+                                  requires_plugins=tuple(item.id for item in spec.dependencies),
                                   python_requirements=spec.legacy_python_requirements)
 
     def register(registration):

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Download, Package, Plus, Printer as PrinterIcon, RefreshCw, Save, Share2, Trash2 } from 'lucide-react';
 import { apiErrorMessage, worldApi } from '../api/client';
+import { t, useLocale } from '../i18n';
 import { finishLabel } from '../cards/cardFinish';
 import { FaceDesignerCanvas } from './FaceDesignerCanvas';
 import { faceStudio, MODE_LABELS } from './faceDesign';
@@ -13,7 +14,7 @@ import { PACK_DESIGNS, PACK_PACKAGING } from '../shell/packDesign';
 import { FacePreview, FieldInput, FunctionForm } from './PrintedCardView';
 import type { PluginViewProps } from '../plugins/sdk';
 import type { LegionSummary, WorldCard } from '../types/world';
-import type { BasketItem, FaceDesign, FactoryContext, FactoryInspection, FunctionDesign, InputField, PackDesign, PackerConfig, Scalar } from './types';
+import type { BasketItem, FaceDesign, FactoryAssociation, FactoryContext, FactoryInspection, FunctionDesign, InputField, PackDesign, PackerConfig, Scalar } from './types';
 import './factory.css';
 
 function useTask() {
@@ -135,10 +136,43 @@ export function FunctionDesigner(props: PluginViewProps) {
         <option value="template">填充文本模板</option><option value="sum">数值字段求和</option><option value="multiply">数值字段乘积</option><option value="join">按字段顺序拼接</option></select></label>
       {draft.operation === 'template' && <label>输出模板<textarea rows={4} maxLength={10000} value={draft.template} onChange={event => change({ template: event.target.value })} /></label>}
       {draft.operation === 'join' && <label>分隔符<input maxLength={100} value={draft.separator} onChange={event => change({ separator: event.target.value })} /></label>}
+      <ConnectionEditor value={draft.associations ?? []} onChange={associations => change({ associations })} />
       <SaveButton editor={editor} task={task} />
     </div><div className="factory-test"><h4>功能试验台</h4><FunctionForm design={draft}
       run={async values => (await worldApi.factory<{ result: Scalar }>(props.card.id, 'try', { design: draft, values })).result} /></div></div>
   </Frame>;
+}
+
+function ConnectionEditor({ value, onChange }: { value: FactoryAssociation[]; onChange: (value: FactoryAssociation[]) => void }) {
+  useLocale();
+  const types = useWorldStore(state => state.catalog.node_types);
+  const traits = [...new Set(types.flatMap(type => type.traits))].sort();
+  const update = (index: number, patch: Partial<FactoryAssociation>) => onChange(value.map((binding, i) => i === index ? { ...binding, ...patch } : binding));
+  return <section className="factory-connections" aria-label={t('Card connections')}>
+    <h4>{t('Card connections')}</h4>
+    <p className="factory-hint">{t('Choose compatible targets. Connections organize cards without transferring results or granting permissions.')}</p>
+    {value.map((binding, index) => {
+      const byTrait = binding.target_trait != null;
+      const target = (byTrait ? binding.target_trait : binding.target_type) ?? '';
+      const targets = byTrait ? traits.map(id => ({ id, label: id })) : types.map(type => ({ id: type.id, label: `${type.label} · ${type.id}` }));
+      return <div className="factory-field-editor" key={index}>
+        <div className="factory-row"><label>{t('Connection name')}<input maxLength={120} value={binding.label} onChange={event => update(index, { label: event.target.value })} /></label>
+          <button type="button" className="factory-icon-button" aria-label={t('Remove connection {number}', { number: index + 1 })} onClick={() => onChange(value.filter((_, i) => i !== index))}><Trash2 size={15} /></button></div>
+        <div className="factory-row"><label>{t('Connection ID')}<input maxLength={40} value={binding.id} onChange={event => update(index, { id: event.target.value })} /></label>
+          <label>{t('Target kind')}<select aria-label={t('Target kind')} value={byTrait ? 'trait' : 'type'} onChange={event => update(index, event.target.value === 'trait'
+            ? { target_type: undefined, target_trait: traits[0] ?? '' }
+            : { target_trait: undefined, target_type: types[0]?.id ?? '' })}><option value="type">{t('Card type')}</option><option value="trait" disabled={!traits.length}>{t('Trait')}</option></select></label></div>
+        <label>{t('Connection target')}<select aria-label={t('Connection target')} value={target} onChange={event => update(index, byTrait ? { target_trait: event.target.value } : { target_type: event.target.value })}>
+          {!targets.some(candidate => candidate.id === target) && <option value={target}>{t('{target} (unavailable)', { target: target || t('Choose target') })}</option>}
+          {targets.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.label}</option>)}
+        </select></label>
+      </div>;
+    })}
+    <button type="button" disabled={value.length >= 20 || !types.length} onClick={() => {
+      let index = value.length + 1; while (value.some(binding => binding.id === `link${index}`)) index++;
+      onChange([...value, { id: `link${index}`, label: t('Connection {number}', { number: index }), target_type: types.find(type => type.id === 'text')?.id ?? types[0]?.id }]);
+    }}><Plus size={14} />{t('Add connection')}</button>
+  </section>;
 }
 
 function useInputs(cardId: string) {
@@ -164,6 +198,7 @@ function Inputs({ context, error }: ReturnType<typeof useInputs>) {
 }
 
 export function Printer(props: PluginViewProps) {
+  useLocale();
   const task = useTask(), inputs = useInputs(props.card.id), [printed, setPrinted] = useState<WorldCard>();
   if (props.level === 'preview') return <ToolPreview id={props.card.id}><strong>{inputs.context && !inputs.context.issues.length ? '已就绪，可以印刷' : '等待设计连线'}</strong><small>卡面 + 功能 → 预设卡牌</small></ToolPreview>;
   return <Frame title="卡牌印刷器" step="04 / 印刷" task={task} level={props.level}>
@@ -173,7 +208,7 @@ export function Printer(props: PluginViewProps) {
     <p>印刷会固定当前已保存的卡面和功能。修改设计后可再次印刷。</p>
     <button type="button" disabled={!inputs.context || inputs.context.issues.length > 0} onClick={() => void task.perform(async () => {
       const card = await worldApi.factory<WorldCard>(props.card.id, 'print');
-      await useWorldStore.getState().refreshWorld(); setPrinted(card); task.setMessage(`已印刷「${card.name}」，可拖入打包器。`);
+      await useWorldStore.getState().refreshWorld(); setPrinted(card); task.setMessage(t('Printed {name}. Reuse it from your collection or add it to a Pack.', { name: card.name }));
     })}><PrinterIcon size={16} />印刷卡牌</button>
     {printed && <button type="button" onClick={() => useNodeSurfaceStore.getState().openWorkspace(printed.id)}>打开「{printed.name}」</button>}
   </Frame>;

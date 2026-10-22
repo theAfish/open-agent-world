@@ -52,6 +52,7 @@
 .factory-function { display: grid; gap: 14px; }.factory-fields { display: grid; gap: 10px; }.factory-function[data-layout=columns] .factory-fields { grid-template-columns: repeat(2,minmax(0,1fr)); }
 .factory-result { white-space: pre-wrap; overflow-wrap: anywhere; display: block; padding: 14px; background: #718d7015; border: 1px solid #718d7030; border-radius: 8px; min-height: 52px; max-height: 400px; overflow: auto; }
 .factory-field-editor { border-bottom: 1px solid var(--line); padding: 12px 0; display: grid; gap: 10px; }
+.factory-connections { min-width: 0; }.factory-connections > button { margin-top: 8px; }
 .factory-test { background: var(--surface-soft); border-radius: var(--radius-control); padding: var(--space-4); align-self: start; }
 .factory-layout-preview { display: grid; gap: 8px; padding: 12px; border: 1px dashed #a7865f66; border-radius: 9px; font-size: 11px; }
 .factory-layout-preview[data-layout=columns] { grid-template-columns: 1fr 1fr; }.factory-layout-preview > span { padding: 12px; border: 1px solid #a7865f44; }.factory-layout-preview > button, .factory-layout-preview > output { grid-column: 1/-1; text-align: center; }

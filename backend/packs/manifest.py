@@ -10,11 +10,11 @@ from packaging.version import Version
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend import __version__
+from backend.packs.identifiers import IDENTIFIER, PACK_ID
 from backend.plugins.registry import _supports_plugin_api
 from backend.plugins.tutorials import Tutorials, validate_tutorials
 from backend.sandbox.python_runtime import validate_requirements
 
-PACK_ID = r"^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$"
 FRONTEND_API_VERSION = 1
 
 
@@ -47,7 +47,7 @@ class Compatibility(Model):
 
 
 class PackDependency(Model):
-    id: str = Field(pattern=r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$", max_length=128)
+    id: str = Field(pattern=IDENTIFIER, max_length=128)
     version: str = Field(default="", max_length=100)
     distribution: str | None = Field(default=None, pattern=PACK_ID, max_length=120)
 
@@ -206,7 +206,7 @@ class PackManifest(Model):
     content: Content | None = None
     creator: CreatorMetadata | None = None
     # Version 3 separates the immutable distribution from persisted runtime IDs.
-    owner: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$", max_length=128)
+    owner: str | None = Field(default=None, pattern=IDENTIFIER, max_length=128)
     packs: tuple[str, ...] = Field(default=(), max_length=100)
     node_types: tuple[str, ...] | None = Field(default=None, max_length=1000)
     backend_modules: tuple[str, ...] = Field(default=(), max_length=20)
@@ -229,7 +229,7 @@ class PackManifest(Model):
             raise ValueError("Explicit ownership and environment declarations require code schema 3")
         if self.schema_version == 3:
             if self.node_types is not None and (len(set(self.node_types)) != len(self.node_types) or any(
-                    not re.fullmatch(r"[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*", value)
+                    not re.fullmatch(IDENTIFIER, value)
                     or value == "core" or value.startswith("core.") for value in self.node_types)):
                 raise ValueError("Owned node types must be unique non-core identifiers")
             if self.owner_id == "core" or self.owner_id.startswith("core."):

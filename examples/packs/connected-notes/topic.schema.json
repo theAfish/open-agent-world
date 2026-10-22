@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "title": {
+      "type": "string",
+      "title": "Topic",
+      "default": "Research ideas",
+      "maxLength": 200
+    },
+    "description": {
+      "type": "string",
+      "default": "Collect notes related to this topic.",
+      "maxLength": 2000
+    }
+  }
+}

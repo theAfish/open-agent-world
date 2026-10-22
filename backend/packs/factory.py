@@ -9,6 +9,7 @@ from backend.legions.presets import preset_record
 from backend.packs.content import CreatorRequest, _json, _scan, prepare_export
 from backend.packs.archive import MAX_EXPANDED_BYTES
 from backend.packs.factory_models import BasketItem, CardRecipe, PackDesign, PackerConfig, PrintedCard
+from backend.packs.factory_cards import exported_recipe_location, local_recipes, recipe_dependencies, remap_recipe_targets
 from backend.packs.manifest import Content, Dependencies, PackManifest
 from backend.plugins.registry import PLUGIN_API_VERSION
 from backend.world.models import CardCreate, CardPatch
@@ -43,7 +44,9 @@ async def print_card(services, node_id):
         printer = factory_node(services, node_id, "printer")
         design = PrintedCard(face=linked_design(services, node_id, "face").config,
                              function=linked_design(services, node_id, "function").config)
-    return await services._create_card(CardCreate(type=PREFIX + "card", name=design.face.title,
+        from backend.packs.printing import collect_printed_type
+        card_type = await collect_printed_type(services, design)
+    return await services._create_card(CardCreate(type=card_type, name=design.face.title,
         finish=design.face.finish, config=design.model_dump(mode="json"),
         position={"x": printer.position.x + printer.size.width + 60, "y": printer.position.y}))
 
@@ -88,6 +91,8 @@ async def prepare_factory_export(services, node_id):
             if not config.items:
                 raise ValueError("请先将卡牌或 Legion 加入打包器")
             files, card_paths, legion_paths, issues, dependencies, entries = {}, [], [], [], {}, []
+            recipes, exported_types = {}, {}
+            local_targets = set()
             _scan(config.params, "通用参数", issues)
             _scan(design.creator.model_dump(), "发布信息", issues)
             now = datetime.now(timezone.utc)
@@ -100,7 +105,20 @@ async def prepare_factory_export(services, node_id):
                 key = hashlib.sha256(f"{item.kind}:{item.id}".encode()).hexdigest()[:16]
                 path = f"content/item-{key}.json"
                 if item.kind == "node" and "ui.factory-card.v1" in services.plugins.node_type(source.type).traits:
+                    if source.type.startswith("local.printed."):
+                        key = hashlib.sha256(f"recipe:{source.type}".encode()).hexdigest()[:16]
+                        path = f"content/item-{key}.json"
                     recipe = CardRecipe(id=f"{design.id}.card{key}", design=apply_params(PrintedCard.model_validate(source.config), config.params))
+                    local_targets.update(binding.target_type for binding in recipe.design.function.associations or []
+                                         if binding.target_type and binding.target_type.startswith("local.printed."))
+                    remap_recipe_targets(recipe.design, {type_id: exported_recipe_location(design.id, type_id)[0] for type_id in local_targets})
+                    if path in recipes:
+                        if recipe != recipes[path]:
+                            raise ValueError("Instances of one printed card type have different designs; print them as separate types before exporting")
+                        continue
+                    recipes[path] = recipe
+                    if source.type != PREFIX + "card":
+                        exported_types.setdefault(source.type, set()).add(recipe.id)
                     _scan(recipe.model_dump(), source.name, issues)
                     _scan({field.key: field.default for field in recipe.design.function.fields}, source.name + ".defaults", issues)
                     files[path] = _json(recipe.model_dump(mode="json"))
@@ -122,6 +140,15 @@ async def prepare_factory_export(services, node_id):
                         include_state_nodes=[n.key for n in source.blueprint.nodes] if config.include_content else []), services.plugins)
                     from backend.packs.archive import json_object
                     template = json_object(projected["content/legion.json"])
+                    for recipe_path in result["manifest"]["content"]["cards"]:
+                        embedded = CardRecipe.model_validate(json_object(projected[recipe_path]))
+                        embedded.design = apply_params(embedded.design, config.params)
+                        if recipe_path in recipes and recipes[recipe_path] != embedded:
+                            raise ValueError("Instances of one printed card type have different designs; print them as separate types before exporting")
+                        if recipe_path not in recipes:
+                            recipes[recipe_path] = embedded
+                            card_paths.append(recipe_path)
+                            files[recipe_path] = _json(embedded.model_dump(mode="json"))
                     template["id"] = f"{design.id}.template{key}"
                     files[path] = _json(template)
                     legion_paths.append(path)
@@ -130,6 +157,27 @@ async def prepare_factory_export(services, node_id):
                 entries.append({"name": source.name, "kind": "card" if path in card_paths else "template", "path": path})
                 if sum(len(value) for value in files.values()) > MAX_EXPANDED_BYTES - 1024 * 1024:
                     raise ValueError("素材总大小超过卡包容量，请拆成多个卡包")
+            for type_id, embedded in local_recipes(local_targets, design.id, services.plugins).items():
+                recipe_path = exported_recipe_location(design.id, type_id)[1]
+                if recipe_path not in recipes:
+                    embedded.design = apply_params(embedded.design, config.params)
+                    recipes[recipe_path] = embedded
+                    card_paths.append(recipe_path)
+                    entries.append({"name": embedded.design.face.title, "kind": "card", "path": recipe_path})
+            for path, recipe in recipes.items():
+                for binding in recipe.design.function.associations or []:
+                    targets = exported_types.get(binding.target_type, set())
+                    if len(targets) > 1:
+                        raise ValueError("A connection target has multiple exported designs; export one design per target card type")
+                    if targets:
+                        binding.target_type = next(iter(targets))
+                files[path] = _json(recipe.model_dump(mode="json"))
+                _scan(recipe.model_dump(), recipe.design.face.title, issues)
+                _scan({field.key: field.default for field in recipe.design.function.fields}, recipe.design.face.title + ".defaults", issues)
+            if sum(len(value) for value in files.values()) > MAX_EXPANDED_BYTES - 1024 * 1024:
+                raise ValueError("素材总大小超过卡包容量，请拆成多个卡包")
+            dependencies.update({dependency.id: dependency.model_dump(mode="json", exclude_none=True)
+                                 for dependency in recipe_dependencies(list(recipes.values()), services.plugins)})
             manifest = PackManifest(schema_version=2, kind="content", id=design.id, name=design.name, version=design.version,
                 compatibility={"oaw": f">={__version__},<1", "plugin_api": PLUGIN_API_VERSION, "frontend_api": 1},
                 content=Content(cards=tuple(card_paths), legions=tuple(legion_paths)), creator=design.creator,
@@ -139,7 +187,7 @@ async def prepare_factory_export(services, node_id):
             files["README.md"] = (f"# {design.name}\n\n{creator.description}\n\n作者: {creator.author}\n\n"
                 f"## 准备\n{creator.preparation}\n\n## 示例\n{creator.example}\n\n## 预期结果\n{creator.expected_result}\n\n"
                 "## 内容\n" + "\n".join(f"- {entry['name']} ({entry['kind']})" for entry in entries) +
-                "\n\n## 安装\n先安装依赖卡包并重启，再从卡牌库安装本 .oawpack 文件并重启。\n" +
+                "\n\n## 安装\n先安装依赖卡包，再从卡牌库安装本 .oawpack 文件；仅在卡牌库提示时重启。\n" +
                 "\n".join(f"- {dep['id']} {dep['version']}" for dep in dependencies.values())).encode("utf-8")
             return {"manifest": manifest.model_dump(mode="json"), "entries": entries, "issues": issues,
                     "can_export": not any(issue["severity"] == "error" for issue in issues)}, files

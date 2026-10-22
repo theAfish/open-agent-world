@@ -3,6 +3,9 @@
 Packs add cards and tools to your world. Open a Pack to collect its cards, choose
 which belong in your Deck, then place them in your World.
 
+To make your own, follow [Create cards and connect them](../developers/card-contract.md)
+for saved formations, declarative cards, visual Card Factory designs and Python plugins.
+
 ## Use an installed Pack
 
 1. Open **Pack & Card Library**.

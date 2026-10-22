@@ -1,0 +1,30 @@
+schema_version = 3
+
+[distribution]
+id = "example.connected-notes"
+name = "Connected Notes"
+
+[[contributions.cards]]
+id = "example.connected-notes.note"
+name = "Note"
+description = "Write a note and connect it to a topic."
+icon = "file-text"
+config_schema = "note.schema.json"
+
+[[contributions.cards]]
+id = "example.connected-notes.topic"
+name = "Topic"
+description = "A topic that groups related notes through explicit connections."
+icon = "book-open"
+color = "#617b72"
+config_schema = "topic.schema.json"
+traits = ["example.connected-notes.topic"]
+
+[[contributions.associations]]
+id = "example.connected-notes.about"
+label = "About topic"
+short_label = "About"
+description = "This note is about the connected topic. No data or permissions are transferred."
+source_types = ["example.connected-notes.note"]
+target_traits = ["example.connected-notes.topic"]
+directions = ["forward"]

@@ -2,7 +2,10 @@
 
 **English** | [简体中文](index.zh-CN.md)
 
-A plugin is a Python package that registers cards and other contributions with OAW. You can start with a card and an editable field; add Agent tools or React views when your idea needs them.
+A Pack can contribute cards without a Python plugin. Start with
+[Create cards and connect them](card-contract.md) to choose between a saved
+Legion, declarative cards, Card Factory and Python. Add Agent tools or React
+views when your idea needs them.
 
 ## Follow the learning path
 
@@ -14,7 +17,10 @@ A plugin is a Python package that registers cards and other contributions with O
 | 4. [Add a custom interface](frontend.md) | A view using the public frontend SDK |
 | 5. [Test and distribute](testing.md) | Checks and clear installation instructions for your package |
 
-**Start with Python.** React and TypeScript are only needed for a custom interface. The first example uses OAW's standard card controls and needs no model credentials.
+For a form card with saved values and passive connections, start with
+[declarative cards](declarative-packs.md). The learning path above covers the
+Python API for runtime behavior. React and TypeScript are only needed for a
+custom view; both paths can use OAW's standard controls without model credentials.
 
 For distribution, add `oaw.pack.toml` and keep Python dependencies in
 `pyproject.toml` and frontend dependencies in the Pack's `frontend/package.json`.
@@ -28,6 +34,7 @@ and `.oawpack` releases.
 
 | Example | Learn from it |
 | --- | --- |
+| [Connected Notes](https://github.com/theAfish/open-agent-world/tree/dev/examples/packs/connected-notes) | Two persistent cards and a passive association, without Python or JavaScript |
 | [Hello World](../../examples/plugins/hello_world/README.md) | A minimal card and pack |
 | [Greeter](../../examples/plugins/greeter/README.md) | Agent tool, relationship, lifecycle, and integration test |
 | [Structure Viewer](../../plugins/structure_viewer/README.md) | Connected file viewing |

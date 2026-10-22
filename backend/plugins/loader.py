@@ -177,6 +177,13 @@ def load_plugin_registry(plugin_directory: Path | None = None, *, plugin_directo
             descriptor = plugin.descriptor
             if spec is not None and not spec.legacy and (spec.owner != descriptor.id or spec.version != descriptor.version):
                 raise ValueError("Plugin descriptor disagrees with its static Pack identity/version")
+            if spec is not None and not spec.entrypoints:
+                from packaging.specifiers import SpecifierSet
+                from packaging.version import Version
+                for dependency in spec.dependencies:
+                    target = registry.pack_specs.get(dependency.id)
+                    if target is not None and Version(target.version) not in SpecifierSet(dependency.version):
+                        raise ValueError(f'Owner dependency {dependency.id} requires {dependency.version}, found {target.version}')
             requirements = _requirements(descriptor.python_requirements)
             if spec is not None:
                 declared = spec.legacy_python_requirements
@@ -263,8 +270,17 @@ def load_installed_packs(registry: PluginRegistry, data_root: Path, *, strict: b
             registry.pack_roots[manifest.owner_id] = manager.version_path(manifest.id, manifest.version)
             registry.pack_sources[manifest.owner_id] = "installed"
     providers = {pack: manifest.id for manifest in pending.values() for pack in manifest.provided_pack_ids}
+    def pending_dependencies(manifest):
+        dependencies = {dependency.id for dependency in manifest.dependencies.packs}
+        if manifest.kind == 'content' and manifest.content.cards:
+            # Legacy recipe archives predate the explicit renderer dependency.
+            # Preserve their immutable bytes while honoring the same load order.
+            from backend.packs.factory_cards import FACTORY_RENDERER
+            dependencies.add(FACTORY_RENDERER)
+        return any(providers.get(dependency) in pending for dependency in dependencies)
+
     while pending:
-        ready = [m for m in pending.values() if not any(providers.get(d.id) in pending for d in m.dependencies.packs)]
+        ready = [m for m in pending.values() if not pending_dependencies(m)]
         if not ready:
             for manifest in pending.values():
                 _failure(registry, manifest.id, manager.version_path(manifest.id, manifest.version), "dependency",
@@ -288,6 +304,14 @@ def load_installed_packs(registry: PluginRegistry, data_root: Path, *, strict: b
                         if (plugin.descriptor.id, plugin.descriptor.version, plugin.descriptor.plugin_api_version) != (
                                 manifest.owner_id, manifest.version, manifest.compatibility.plugin_api):
                             raise ValueError('Passive declaration differs from installed ownership or compatibility')
+                        dependencies = {registry.owner_id('pack', dependency.id): dependency.version
+                                        for dependency in manifest.dependencies.packs}
+                        from backend.packs.spec import PackSpec
+                        declared_dependencies = {item.id: item.version
+                                                 for item in PackSpec.model_validate(passive_spec).dependencies}
+                        if (len(dependencies) != len(manifest.dependencies.packs)
+                                or declared_dependencies != dependencies):
+                            raise ValueError('Passive declaration dependencies differ from installed Pack providers')
                     else:
                         from backend.packs.content import content_plugin
                         root = manager.version_path(manifest.id, manifest.version)

@@ -95,3 +95,41 @@ def test_arbitrary_python_and_modified_generated_wheel_are_never_loaded_live(tmp
         assert not services.plugins.has_plugin('test.notes')
         assert not services.plugins.has_plugin('test.greeter')
     services.close()
+
+
+def test_legacy_recipe_waits_for_installed_renderer_even_without_declared_dependency(tmp_path, monkeypatch):
+    from backend.plugins import loader
+    from backend.packs.factory_models import CardRecipe, PrintedCard
+    from backend.packs.installation import PackInstallationManager
+    from backend.packs.manifest import PackManifest
+
+    # A passive renderer stub isolates startup dependency ordering from Python
+    # imports; content registration requires only the renderer's canonical card.
+    source = project(tmp_path)
+    manifest = source / 'oaw.pack.toml'
+    manifest.write_text('''schema_version=3
+[distribution]
+id="test.renderer"
+[plugin]
+owner="oaw.factory"
+packs=["oaw.factory"]
+[[contributions.cards]]
+id="oaw.factory.card"
+''')
+    renderer = build_project(source, tmp_path / 'renderer.oawpack').read_bytes()
+    registry = create_builtin_registry()
+    data_root = tmp_path / 'profile'
+    manager = PackInstallationManager(data_root, registry)
+    manager.install(renderer)
+    loader.load_installed_packs(registry, data_root, strict=True)
+    content = PackManifest(schema_version=2, kind='content', id='aaa.recipe', name='Legacy recipe', version='1.0.0',
+        compatibility={'plugin_api': '1.35', 'oaw': '>=0.1.0,<1', 'frontend_api': 1}, content={'cards': ['content/card.json']}, creator={})
+    recipe = CardRecipe(id='aaa.recipe.card', design=PrintedCard())
+    manager.install(export_archive({'manifest.json': content.model_dump_json().encode(),
+                                    'content/card.json': recipe.model_dump_json().encode()}))
+    selected = PackInstallationManager.selected
+    monkeypatch.setattr(PackInstallationManager, 'selected', lambda self, db=None: dict(sorted(selected(self, db).items())))
+    restarted = create_builtin_registry()
+    loader.load_installed_packs(restarted, data_root, strict=True)
+    assert restarted.node_type('aaa.recipe.card')
+    assert next(plugin for plugin in restarted.plugins() if plugin.id == 'aaa.recipe').requires_plugins == ('oaw.factory',)

@@ -76,6 +76,7 @@ nav:
       - Models and settings: user-guide/models.md
       - Cards and connections: user-guide/canvas.md
       - Packs and cards: user-guide/plugins.md
+      - Create cards and connect them: developers/card-contract.md
       - Create and share Packs: creator-packs.md
       - Card Factory: card-factory.md
       - Card Factory (Chinese): card-factory.zh-CN.md
@@ -88,7 +89,7 @@ nav:
       - Give an Agent a tool: developers/agent-tools.md
       - Runtime context compaction: developers/context-compaction.md
       - Execution graph: developers/execution-graph.md
-      - Add a custom interface: developers/frontend.md
+      - Add a custom view: developers/frontend.md
       - Workspace design system: developers/workspace-design.md
       - Connected data sources: developers/data-sources.md
       - Progressive card tutorials: developers/progressive-tutorials.md
@@ -100,6 +101,7 @@ nav:
       - reference/index.md
       - Plugin contracts:
           - Plugin API: plugins.md
+          - Pack manifests and recipes: reference/pack-manifest.md
           - Card state: card-state.md
           - Lifecycle and artifacts: lifecycle-artifacts.md
           - Work-source execution: execution.md

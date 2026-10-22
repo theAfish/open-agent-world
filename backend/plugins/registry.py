@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator, TypeAdapter
 from backend.plugins.state import PluginStateSpec, LEGACY_STATE
+from backend.packs.identifiers import IDENTIFIER
 
 from backend.errors import GraphValidationError, PluginCompatibilityError, PluginUnavailableError
 from backend.plugins.lifecycle import NodeLifecycleHandler
@@ -33,8 +34,8 @@ from backend.plugins.deployment import NodeDeploymentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.38"
-_IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
+PLUGIN_API_VERSION = "1.39"
+_IDENTIFIER = re.compile(IDENTIFIER)
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
 

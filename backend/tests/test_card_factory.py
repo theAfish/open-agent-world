@@ -68,7 +68,7 @@ def test_print_export_install_and_run_in_clean_profile(client, tmp_path):
     pack = inspect_archive(artifact)
     assert pack.manifest.kind == "content"
     assert len(pack.manifest.content.cards) == 2
-    assert not pack.manifest.dependencies.packs
+    assert [dependency.id for dependency in pack.manifest.dependencies.packs] == ["oaw.factory"]
     assert pack.backend_entry is None
     assert call(client, printed, "run", {"values": {}}).json()["result"] == "你好，世界！"
 
@@ -160,6 +160,161 @@ def test_declarative_content_cannot_inject_code_or_unowned_ids(client):
     files[path] = json.dumps(recipe).encode()
     with pytest.raises(ValueError, match="namespace"):
         export_archive(files)
+
+
+def test_connected_printed_types_export_together_and_activate_in_clean_profile(client, tmp_path):
+    devices = factory(client)
+    target = call(client, devices["printer"], "print", expected=201).json()
+    patch(client, devices["face"], {**devices["face"]["config"], "title": "Connected card"})
+    patch(client, devices["function"], {**devices["function"]["config"], "associations": [
+        {"id": "reference", "label": "Reference card", "target_type": target["type"]}]})
+    source = call(client, devices["printer"], "print", expected=201).json()
+    # Two instances of a reusable type produce one exported recipe, without ID inference.
+    duplicate = node(client, target["type"])
+    for card in (source, target, duplicate):
+        call(client, devices["packer"], "items", {"kind": "node", "id": card["id"]})
+    artifact = call(client, devices["packer"], "export").content
+    archive = inspect_archive(artifact)
+    recipes = [json.loads(archive.files[path]) for path in archive.manifest.content.cards]
+    assert len(recipes) == 2
+    assert [dep.id for dep in archive.manifest.dependencies.packs] == ["oaw.factory"]
+    source_recipe = next(recipe for recipe in recipes if recipe["design"]["function"].get("associations"))
+    target_recipe = next(recipe for recipe in recipes if recipe is not source_recipe)
+    assert source_recipe["design"]["function"]["associations"][0]["target_type"] == target_recipe["id"]
+    settings = Settings.for_data_root(tmp_path / "connected-recipient")
+    with TestClient(create_app(settings)) as recipient:
+        result = recipient.post("/api/packs/install", content=artifact, headers=ARCHIVE_HEADERS)
+        assert result.status_code == 201, result.text
+        assert not result.json()["restart_required"]
+        source_card, target_card = node(recipient, source_recipe["id"]), node(recipient, target_recipe["id"])
+        registry = recipient.app.state.services.plugins
+        link = next(link for link in registry.catalog().relationships if link.source_types == [source_recipe["id"]])
+        definition = registry.relationship(link.id)
+        assert definition.capabilities == () and not definition.data_read and definition.templateable
+        result = recipient.post("/api/edges", json={"source": source_card["id"], "target": target_card["id"], "relationship": link.id})
+        assert result.status_code == 201, result.text
+        edge_id = result.json()["id"]
+    with TestClient(create_app(settings)) as recipient:
+        assert any(edge["id"] == edge_id for edge in recipient.get("/api/world").json()["edges"])
+
+
+@pytest.mark.parametrize("binding", [
+    {"id": "link", "label": "Link"},
+    {"id": "link", "label": "Link", "target_type": "text", "target_trait": "core.agent"},
+    {"id": "link", "label": "Link", "target_type": "text", "capabilities": ["execute"]},
+    {"id": "link", "label": "Link", "target_type": "text", "data_read": True},
+])
+def test_factory_connection_contract_rejects_ambiguous_or_privileged_bindings(binding):
+    with pytest.raises(ValueError):
+        FunctionDesign(associations=[binding])
+
+
+def test_recipe_connections_require_declared_targets_and_new_api(client, tmp_path):
+    from backend.packs.installation import PackInstallationManager
+
+    devices = factory(client)
+    patch(client, devices["function"], {**devices["function"]["config"], "associations": [
+        {"id": "notes", "label": "Notes", "target_type": "text"}]})
+    printed = call(client, devices["printer"], "print", expected=201).json()
+    call(client, devices["packer"], "items", {"kind": "node", "id": printed["id"]})
+    archive = inspect_archive(call(client, devices["packer"], "export").content)
+    files = {path: data for path, data in archive.files.items() if path != "checksums.json"}
+    manifest = json.loads(files["manifest.json"])
+    manifest["compatibility"]["plugin_api"] = "1.38"
+    files["manifest.json"] = json.dumps(manifest).encode()
+    with pytest.raises(ValueError, match="1.39"):
+        export_archive(files)
+    manifest["compatibility"]["plugin_api"] = "1.39"
+    manifest["dependencies"]["packs"] = [dep for dep in manifest["dependencies"]["packs"] if dep["id"] == "oaw.factory"]
+    files["manifest.json"] = json.dumps(manifest).encode()
+    manager = PackInstallationManager(tmp_path / "missing-target", client.app.state.services.plugins)
+    with pytest.raises(ValueError, match="undeclared connection target"):
+        manager.install(export_archive(files))
+    assert manager.selected() == {}
+
+
+def test_legacy_recipe_without_renderer_dependency_remains_readable(client, tmp_path):
+    devices = factory(client)
+    printed = call(client, devices["printer"], "print", expected=201).json()
+    call(client, devices["packer"], "items", {"kind": "node", "id": printed["id"]})
+    archive = inspect_archive(call(client, devices["packer"], "export").content)
+    files = {path: data for path, data in archive.files.items() if path != "checksums.json"}
+    manifest = json.loads(files["manifest.json"])
+    manifest["dependencies"]["packs"] = []
+    manifest["compatibility"]["plugin_api"] = "1.35"
+    files["manifest.json"] = json.dumps(manifest).encode()
+    with TestClient(create_app(Settings.for_data_root(tmp_path / "legacy-recipient"))) as recipient:
+        result = recipient.post("/api/packs/install", content=export_archive(files), headers=ARCHIVE_HEADERS)
+        assert result.status_code == 201, result.text
+        descriptor = next(plugin for plugin in recipient.app.state.services.plugins.plugins() if plugin.id == manifest["id"])
+        assert "oaw.factory" in descriptor.requires_plugins
+
+
+@pytest.mark.parametrize("route", ["creator", "factory"])
+def test_printed_formation_exports_its_types_and_passive_edges(client, tmp_path, route):
+    devices = factory(client)
+    target = call(client, devices["printer"], "print", expected=201).json()
+    patch(client, devices["function"], {**devices["function"]["config"], "associations": [
+        {"id": "pair", "label": "Paired card", "target_type": target["type"]}]})
+    source = call(client, devices["printer"], "print", expected=201).json()
+    relationship = next(link for link in client.get("/api/catalog").json()["relationships"] if link["source_types"] == [source["type"]])
+    result = client.post("/api/edges", json={"source": source["id"], "target": target["id"], "relationship": relationship["id"]})
+    assert result.status_code == 201, result.text
+    # Instance data can differ from the reusable type's defaults without changing its contract.
+    patch(client, target, {**target["config"], "function": {**target["config"]["function"], "template": "An instance-specific value"}})
+    saved = client.post("/api/legions", json={"name": "Printed pair", "node_ids": [source["id"], target["id"]]}).json()
+    original_blueprint = client.app.state.services.legions.get(saved["id"]).blueprint.model_dump(mode="json")
+    if route == "creator":
+        response = client.post("/api/packs/creator/export", headers=HEADERS, json={"legion_id": saved["id"], "id": "local.mycards", "name": "Pair"})
+        assert response.status_code == 200, response.text
+    else:
+        call(client, devices["packer"], "items", {"kind": "legion", "id": saved["id"]})
+        response = call(client, devices["packer"], "export")
+    archive = inspect_archive(response.content)
+    assert len(archive.manifest.content.cards) == 2
+    assert [dep.id for dep in archive.manifest.dependencies.packs] == ["oaw.factory"]
+    preset = json.loads(archive.files[archive.manifest.content.legions[0]])
+    assert [node["key"] for node in preset["blueprint"]["nodes"]] == [node["key"] for node in original_blueprint["nodes"]]
+    assert [node["position"] for node in preset["blueprint"]["nodes"]] == [node["position"] for node in original_blueprint["nodes"]]
+    assert preset["blueprint"]["edges"][0]["key"] == original_blueprint["edges"][0]["key"]
+    assert client.app.state.services.legions.get(saved["id"]).blueprint.model_dump(mode="json") == original_blueprint
+    with TestClient(create_app(Settings.for_data_root(tmp_path / route))) as recipient:
+        installed = recipient.post("/api/packs/install", content=response.content, headers=ARCHIVE_HEADERS)
+        assert installed.status_code == 201, installed.text
+        placed = recipient.post(f'/api/legions/presets/{preset["id"]}/instances', json={"position": {"x": 0, "y": 0}})
+        assert placed.status_code == 201, placed.text
+        assert len(placed.json()["edges"]) == 1
+        target_type = next(node["type"] for node in preset["blueprint"]["nodes"] if node["config"]["function"]["template"] == "An instance-specific value")
+        instance = next(card for card in placed.json()["nodes"] if card["type"] == target_type)
+        assert call(recipient, instance, "run", {"values": {}}).json()["result"] == "An instance-specific value"
+        fresh = node(recipient, target_type)
+        assert call(recipient, fresh, "run", {"values": {}}).json()["result"] == "你好，世界！"
+        if route == "creator":
+            # An upgrade cannot validate a retained edge against a removed rule
+            # from the currently loaded version of the same Pack.
+            files = {path: data for path, data in archive.files.items() if path != "checksums.json"}
+            manifest = json.loads(files["manifest.json"])
+            manifest["version"] = "0.2.0"
+            files["manifest.json"] = json.dumps(manifest).encode()
+            for path in archive.manifest.content.cards:
+                recipe = json.loads(files[path])
+                recipe["design"]["function"].pop("associations", None)
+                files[path] = json.dumps(recipe).encode()
+            invalid = recipient.post("/api/packs/install", content=export_archive(files), headers=ARCHIVE_HEADERS)
+            assert invalid.status_code == 422, invalid.text
+            assert "not registered" in invalid.text
+            assert recipient.app.state.services.plugins.installed_packs["local.mycards"].version == "0.1.0"
+
+
+def test_factory_trait_dependency_reuses_the_renderer_instead_of_an_unrelated_local_print(client):
+    devices = factory(client)
+    call(client, devices["printer"], "print", expected=201)
+    patch(client, devices["function"], {**devices["function"]["config"], "associations": [
+        {"id": "related", "label": "Related cards", "target_trait": "ui.factory-card.v1"}]})
+    source = call(client, devices["printer"], "print", expected=201).json()
+    call(client, devices["packer"], "items", {"kind": "node", "id": source["id"]})
+    archive = inspect_archive(call(client, devices["packer"], "export").content)
+    assert [dep.id for dep in archive.manifest.dependencies.packs] == ["oaw.factory"]
 
 
 def test_parameter_types_secrets_and_deleted_sources_are_checked(client):
@@ -264,7 +419,7 @@ def test_custom_face_survives_print_capture_export_and_clean_install(client, tmp
     saved = client.post('/api/legions', json={'name': 'Custom cards', 'node_ids': [printed['id'], text['id']]}).json()
     restored = client.post(f'/api/legions/{saved["id"]}/instances', json={'position': {'x': 1000, 'y': 0}})
     assert restored.status_code == 201, restored.text
-    copied = next(card for card in restored.json()['nodes'] if card['type'] == 'oaw.factory.card')
+    copied = next(card for card in restored.json()['nodes'] if card['type'] == printed['type'])
     assert copied['config']['face']['studio'] == studio
     call(client, devices['packer'], 'items', {'kind': 'node', 'id': printed['id']})
     artifact = call(client, devices['packer'], 'export').content

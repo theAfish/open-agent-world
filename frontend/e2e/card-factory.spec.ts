@@ -125,6 +125,11 @@ test('design, try, print, pack and download real cards through the factory', asy
   const func = await openDevice(page, devices.function);
   await expect(func.getByRole('region', { name: '卡面按钮' })).toContainText('切换视图');
   await func.getByRole('textbox', { name: '输出模板', exact: true }).fill('欢迎 {{name}} 来到卡包工厂');
+  const connections = func.getByRole('region', { name: 'Card connections' });
+  await connections.getByRole('button', { name: 'Add connection', exact: true }).click();
+  await connections.getByLabel('Connection name', { exact: true }).fill('参考笔记');
+  await connections.getByLabel('Connection target', { exact: true }).selectOption('text');
+  expect(await connections.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
   await func.locator('.factory-test').getByLabel('名称', { exact: true }).fill('小明');
   await func.getByRole('button', { name: '试运行', exact: true }).click();
   await expect(func.locator('output')).toHaveText('欢迎 小明 来到卡包工厂');
@@ -137,10 +142,12 @@ test('design, try, print, pack and download real cards through the factory', asy
   await expect(printer.getByRole('button', { name: '印刷卡牌', exact: true })).toBeEnabled();
   const printing = page.waitForResponse(response => response.url().endsWith(`/factory/${devices.printer}/print`) && response.request().method() === 'POST');
   await printer.getByRole('button', { name: '印刷卡牌', exact: true }).click();
-  await expect(printer.locator('.factory-message')).toContainText('已印刷');
+  await expect(printer.locator('.factory-message')).toContainText('Printed');
   const printed = await (await printing).json();
   createdNodes.push(printed.id);
   expect(printed.name).toBe('问候卡');
+  expect(printed.type).toMatch(/^local\.printed\./);
+  expect(printed.config.function.associations).toEqual([{ id: 'link1', label: '参考笔记', target_type: 'text', target_trait: null }]);
   await printer.getByRole('button', { name: 'Close workspace', exact: true }).click();
   const runtime = await openDevice(page, printed.id);
   await runtime.getByLabel('名称', { exact: true }).fill('世界');
