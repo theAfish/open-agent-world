@@ -148,7 +148,7 @@ mode = "pack-build"
 [environments.scientific]
 target = "host-worker"
 provider = "python"
-requires_python = ">=3.10,<3.12"
+requires_python = ">=3.10"
 prepare = "on-use"
 management = "managed"
 sources = [{ path = "src/oaw_xrd/OAW_XRDfit/requirements.txt", kind = "requirements" }]
