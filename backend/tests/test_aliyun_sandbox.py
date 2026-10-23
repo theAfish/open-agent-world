@@ -168,6 +168,32 @@ async def test_unknown_creation_never_blindly_retries(remote):
 
 
 @pytest.mark.asyncio
+async def test_rejected_credentials_do_not_leave_an_uncertain_creation(remote, monkeypatch):
+    from e2b import AuthenticationException
+    backend, sdk, _ = remote
+    await backend.create("s")
+    create = sdk.create
+
+    async def rejected(**kwargs):
+        raise AuthenticationException("api key has expired: private-control-key")
+
+    monkeypatch.setattr(sdk, "create", rejected)
+    with pytest.raises(SandboxStateError, match="hosting operator must renew") as error:
+        await backend.start("s")
+    assert "private-control-key" not in str(error.value)
+    value = backend._read("s")
+    assert value["state"] == "stopped" and value["remote_id"] is None and value["command"] is None
+    assert value["create_failure"] == "authentication"
+    assert not sdk.commands
+    # Stop remains usable without cloud reconciliation; fixing credentials
+    # permits the next explicit start, with no automatic retry of the request.
+    await backend.terminate("s")
+    monkeypatch.setattr(sdk, "create", create)
+    await backend.start("s")
+    assert len(sdk.created) == 1 and "create_failure" not in backend._read("s")
+
+
+@pytest.mark.asyncio
 async def test_lost_create_response_reconciles_by_metadata(remote):
     backend, sdk, _ = remote
     await backend.create("s")

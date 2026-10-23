@@ -224,6 +224,7 @@ class AliyunSandboxBackend(SandboxBackend):
         self._write(value)
 
     async def _start(self, value):
+        from e2b import AuthenticationException
         if self.settings.unavailable_reason:
             raise SandboxStateError(self.settings.unavailable_reason)
         if value["command"] is not None:
@@ -240,12 +241,22 @@ class AliyunSandboxBackend(SandboxBackend):
         # never retried just because the HTTP response was lost.
         value.update(state="creating", request_key=uuid4().hex)
         self._write(value)
-        sandbox = await self.sdk.create(template=self.settings.template, timeout=self.settings.lifetime_seconds,
-            metadata={**self.settings.metadata, "oaw.profile": self.settings.profile_id, "oaw.request": value["request_key"]},
-            volume_mounts={"/workspace": self.settings.volume} if self.settings.workspace_store == "volume" else {},
-            secure=True, allow_internet_access=value.get("network_enabled", False),
-            network={"allow_public_traffic": False, "deny_out": list(PRIVATE_EGRESS)},
-            **self.settings.connection)
+        try:
+            sandbox = await self.sdk.create(template=self.settings.template, timeout=self.settings.lifetime_seconds,
+                metadata={**self.settings.metadata, "oaw.profile": self.settings.profile_id, "oaw.request": value["request_key"]},
+                volume_mounts={"/workspace": self.settings.volume} if self.settings.workspace_store == "volume" else {},
+                secure=True, allow_internet_access=value.get("network_enabled", False),
+                network={"allow_public_traffic": False, "deny_out": list(PRIVATE_EGRESS)},
+                **self.settings.connection)
+        except AuthenticationException:
+            # A rejected create has no remote effects. Do not turn an expired
+            # operator credential into an uncertain creation that locks files.
+            value.update(state="stopped", create_failure="authentication")
+            self._write(value)
+            raise SandboxStateError(
+                "Alibaba Sandbox authentication failed; the hosting operator must renew or replace its API key. "
+                "No VM or user command was created.") from None
+        value.pop("create_failure", None)
         value.update(remote_id=sandbox.sandbox_id, state="ready")
         self._write(value)
         return sandbox
