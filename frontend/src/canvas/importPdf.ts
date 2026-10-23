@@ -1,5 +1,6 @@
 import { normalizeCard } from "../api/client";
 import { t } from '../i18n';
+import { guardHostedTransfer } from '../auth/hostedSession';
 
 export type PdfImportProgress = { stage: "reading" | "uploading" | "processing" | "complete"; percent: number };
 
@@ -16,15 +17,21 @@ export async function importPdf(file:File, position:{x:number;y:number}, parentI
     await new Promise<void>((resolve,reject)=>{
       const xhr = new XMLHttpRequest();
       xhr.open("POST",`/api/nodes/${node.id}/actions/import`);
+      const hosted = guardHostedTransfer(xhr, `/api/nodes/${node.id}/actions/import`);
       xhr.setRequestHeader("Content-Type","application/json");
       xhr.upload.onprogress = event => {
         if(event.lengthComputable) onProgress({stage:"uploading",percent:Math.floor(100*event.loaded/event.total)});
       };
       xhr.upload.onload = () => onProgress({stage:"processing",percent:100});
-      xhr.onerror = () => reject(new Error(t('PDF 上传连接中断')));
-      xhr.onabort = () => reject(new Error(t('PDF 上传已取消')));
-      xhr.onload = () => xhr.status>=200 && xhr.status<300 ? resolve() : reject(new Error(xhr.responseText || `HTTP ${xhr.status}`));
-      xhr.send(JSON.stringify({arguments:{filename:file.name,pdf},expected_revision:doc.revision}));
+      xhr.onerror = () => { hosted.release(); reject(new Error(t('PDF 上传连接中断'))); };
+      xhr.onabort = () => { hosted.release(); reject(new Error(t('PDF 上传已取消'))); };
+      xhr.onload = () => {
+        hosted.release();
+        try { hosted.checkResponse(); } catch (error) { reject(error); return; }
+        xhr.status>=200 && xhr.status<300 ? resolve() : reject(new Error(xhr.responseText || `HTTP ${xhr.status}`));
+      };
+      try { xhr.send(JSON.stringify({arguments:{filename:file.name,pdf},expected_revision:doc.revision})); }
+      catch (error) { hosted.release(); reject(error); }
     });
   }
   catch(error){const cleanup=await fetch(`/api/nodes/${node.id}`,{method:"DELETE"});if(!cleanup.ok)throw new Error(t('Could not clean up empty node {id}: {error}', { id: node.id, error: String(error) }));throw error;}

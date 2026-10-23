@@ -13,6 +13,11 @@ _HOST_FIELDS = frozenset({"workspace_path", "workspace_root", "working_directory
 _BLOCKED_PREFIXES = ("/api/desktop", "/api/settings/storage", "/api/diagnostics", "/api/development",
                      "/api/store", "/api/runtime/python/plugins", "/api/settings/sandbox")
 _PACK_ASSET = re.compile(r"/api/packs/[^/]+/versions/[^/]+/.+")
+_NODE_ACTION = re.compile(r"/api/(?:runtime-app/workspace/)?nodes/[^/]+/(?:actions|resource)/[^/]+")
+# Pack actions carry uploads as base64 JSON (up to 32 MiB decoded). Their
+# handlers still enforce file limits, schemas and capability authorization.
+_ACTION_BODY_LIMIT = 48 * 1024 * 1024
+_CONFIG_BODY_LIMIT = 4 * 1024 * 1024
 
 
 def unsafe_host_configuration(value) -> bool:
@@ -76,14 +81,17 @@ class HostedPolicyMiddleware:
                                         "/api/runtime-app/workspace/nodes", "/api/settings/models")))
         if inspect:
             messages, size = [], 0
+            limit = _ACTION_BODY_LIMIT if _NODE_ACTION.fullmatch(path) else _CONFIG_BODY_LIMIT
             while True:
                 message = await receive()
                 messages.append(message)
                 if message["type"] == "http.disconnect":
                     return
                 size += len(message.get("body", b""))
-                if size > 4 * 1024 * 1024:
-                    return await self._deny(scope, receive, send, 413)
+                if size > limit:
+                    return await JSONResponse({"error": {"code": "request_too_large",
+                        "message": f"Request exceeds the {limit // (1024 * 1024)} MiB limit."}},
+                        status_code=413)(scope, receive, send)
                 if not message.get("more_body"):
                     break
             try:

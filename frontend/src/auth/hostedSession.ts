@@ -59,6 +59,30 @@ function isPrivateApi(url: URL) {
   return url.origin === window.location.origin && (url.pathname === '/api' || url.pathname.startsWith('/api/'));
 }
 
+/** Progress uploads use XHR, so they need the same account pin and revocation as fetch. */
+export function guardHostedTransfer(xhr: XMLHttpRequest, value: string) {
+  const noop = () => {};
+  if (!isHosted() || !isPrivateApi(new URL(value, window.location.href))) {
+    return { checkResponse: noop, release: noop };
+  }
+  if (!hostedSessionActive() || !session?.instance) throw sessionError();
+  const instanceId = session.instance.id;
+  xhr.setRequestHeader('X-OAW-Instance', instanceId);
+  const abort = () => xhr.abort();
+  window.addEventListener('oaw-hosted-session-ended', abort, { once: true });
+  return {
+    release: () => window.removeEventListener('oaw-hosted-session-ended', abort),
+    checkResponse: () => {
+      if (!hostedSessionActive()) throw sessionError();
+      const responseInstance = xhr.getResponseHeader('X-OAW-Instance');
+      if (xhr.status === 401 || (responseInstance && responseInstance !== instanceId)) {
+        invalidateHostedSession();
+        throw sessionError();
+      }
+    },
+  };
+}
+
 /** Pin every API request to the account originally used by this page. */
 export function installHostedFetch() {
   const original = window.fetch;

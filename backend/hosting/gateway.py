@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+import re
 from urllib.parse import urlsplit
 
 import httpx
@@ -135,15 +136,23 @@ class Gateway:
         origin = "http://localhost" if unix_socket_path(profile.upstream) else profile.upstream
         client = self.unix_clients.get(profile.profile_id, self.http)
         target = httpx.URL(origin).copy_with(raw_path=raw_path + (b"?" + query if query else b""))
+        # Cold Sandbox preparation is independently bounded by the worker and
+        # can exceed five minutes before a command is even admitted.
+        sandbox_operation = request.method == "POST" and re.fullmatch(
+            r"/api/(?:runtime-app/workspace/)?sandboxes/[^/]+/(?:start|execute|python/packages)", request.url.path)
+        timeout = httpx.Timeout(300, connect=10, read=3600 if sandbox_operation else 300)
         try:
             outgoing = client.build_request(request.method, target, headers=self.upstream_headers(request, profile, user),
-                                               content=request.stream())
+                                               content=request.stream(), timeout=timeout)
             # AsyncClient also applies its own upstream cookie jar. Those
             # cookies must never become worker authority or cross profiles on
             # the same hostname at different ports.
             outgoing.headers.pop("cookie", None)
             response = await client.send(outgoing, stream=True)
             client.cookies.clear()
+        except httpx.ReadTimeout:
+            return self.error(504, "workspace_operation_timeout",
+                "The request timed out; the operation may still be running. Inspect its status before retrying.", profile)
         except httpx.HTTPError:
             return self.error(503, "workspace_unavailable", "This workspace is temporarily unavailable.", profile)
         connection = {part.strip().lower() for part in response.headers.get("connection", "").split(",")}

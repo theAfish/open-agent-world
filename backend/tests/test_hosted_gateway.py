@@ -165,6 +165,34 @@ def test_worker_cookie_jar_never_crosses_same_host_upstreams(tmp_path):
         assert all("cookie" not in request.headers for request in calls)
 
 
+def test_sandbox_cold_start_keeps_response_channel_open_without_replaying_timeouts(tmp_path):
+    store, users, profiles, frontend, settings = fixture_data(tmp_path)
+    calls = []
+
+    def upstream(request):
+        calls.append(request)
+        if request.url.path.endswith('/execute'):
+            raise httpx.ReadTimeout('response deadline', request=request)
+        return httpx.Response(200, json={'ok': True})
+
+    gateway = create_gateway(settings, frontend, store=store, transport=httpx.MockTransport(upstream))
+    with TestClient(gateway, base_url=ORIGIN) as client:
+        client.cookies.set('oaw_session', store.create_session(users[0]['id']))
+        headers = {'Origin': ORIGIN, 'X-OAW-Instance': profiles[0].profile_id}
+        for prefix in ('/api', '/api/runtime-app/workspace'):
+            for action in ('start', 'python/packages', 'execute'):
+                response = client.post(f'{prefix}/sandboxes/s/{action}', headers=headers, json={})
+                assert calls[-1].extensions['timeout']['read'] == 3600
+                assert calls[-1].extensions['timeout']['connect'] == 10
+                if action == 'execute':
+                    assert response.status_code == 504
+                    assert response.json()['error']['code'] == 'workspace_operation_timeout'
+                    assert 'may still be running' in response.json()['error']['message']
+        assert len(calls) == 6  # A response timeout never retries a mutation.
+        client.get('/api/world')
+        assert calls[-1].extensions['timeout']['read'] == 300
+
+
 class FakeWorkerSocket:
     def __init__(self):
         self.queue = asyncio.Queue()

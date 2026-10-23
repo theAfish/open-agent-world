@@ -67,6 +67,72 @@ it('pins download URLs and websocket connections while leaving external URLs alo
   expect(auth.hostedInstanceUrl('https://external.example/api/files')).toBe('https://external.example/api/files');
 });
 
+function xhrResponse(status = 200, instance = 'alice-profile') {
+  return {
+    status, setRequestHeader: vi.fn(), getResponseHeader: vi.fn(() => instance), abort: vi.fn(),
+  } as unknown as XMLHttpRequest;
+}
+
+it('pins progress transfers and cancels them when the hosted account ends', async () => {
+  const { auth } = await start();
+  const xhr = xhrResponse();
+  const guard = auth.guardHostedTransfer(xhr, '/api/conversations/chat/sessions/session/attachments');
+  expect(xhr.setRequestHeader).toHaveBeenCalledWith('X-OAW-Instance', 'alice-profile');
+  auth.invalidateHostedSession(false);
+  expect(xhr.abort).toHaveBeenCalledOnce();
+  expect(guard.checkResponse).toThrow(expect.objectContaining({ name: 'AbortError' }));
+  expect(() => auth.guardHostedTransfer(xhrResponse(), '/api/files')).toThrow();
+  guard.release();
+});
+
+it('sends the instance pin through the actual binary transfer path while reporting upload progress', async () => {
+  await start();
+  const headers = new Headers();
+  vi.stubGlobal('XMLHttpRequest', class {
+    status = 201;
+    response = new Blob(['{"uploaded":true}']);
+    upload: { onprogress?: (event: unknown) => void } = {};
+    onload?: () => void;
+    open = vi.fn();
+    setRequestHeader(name: string, value: string) { headers.set(name, value); }
+    getResponseHeader() { return 'alice-profile'; }
+    getAllResponseHeaders() { return 'Content-Type: application/json\r\nX-OAW-Instance: alice-profile'; }
+    send(body: Blob) {
+      this.upload.onprogress?.({ loaded: body.size, total: body.size, lengthComputable: true });
+      this.onload?.();
+    }
+  });
+  const { transferResponse } = await import('../api/transfer');
+  const onProgress = vi.fn();
+  const response = await transferResponse('/api/runtime-app/workspace/conversations/c/sessions/s/attachments',
+    'POST', new Blob(['PDF']), { onProgress });
+  expect(response.status).toBe(201);
+  expect(headers.get('X-OAW-Instance')).toBe('alice-profile');
+  expect(headers.get('Content-Type')).toBe('application/octet-stream');
+  expect(onProgress).toHaveBeenCalledWith({ loaded: 3, total: 3 });
+});
+
+it.each([401, 200])('rejects a progress response from an expired or changed instance (%s)', async status => {
+  const { auth } = await start();
+  const guard = auth.guardHostedTransfer(xhrResponse(status, status === 401 ? 'alice-profile' : 'bob-profile'), '/api/files');
+  guard.release();
+  expect(guard.checkResponse).toThrow();
+  expect(auth.hostedSessionActive()).toBe(false);
+});
+
+it('releases completed transfers and leaves external transfers unpinned', async () => {
+  const { auth } = await start();
+  const xhr = xhrResponse(409);
+  const guard = auth.guardHostedTransfer(xhr, '/api/files');
+  guard.checkResponse(); // An ordinary revision conflict does not end the account session.
+  guard.release();
+  const external = xhrResponse();
+  auth.guardHostedTransfer(external, 'https://external.example/api/files').checkResponse();
+  expect(external.setRequestHeader).not.toHaveBeenCalled();
+  auth.invalidateHostedSession(false);
+  expect(xhr.abort).not.toHaveBeenCalled();
+});
+
 it('clears private rendering and blocks subsequent writes on an instance mismatch', async () => {
   const { auth, request } = await start(async () => json({ error: { code: 'instance_changed' } }, { status: 409 }));
   const ended = vi.fn();
