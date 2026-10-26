@@ -1,5 +1,7 @@
 # ECS 多用户 Workspace 测试
 
+日常从 dev 合并、构建、更新线上及回滚，使用[发布脚本说明](RELEASING.md)。
+
 本方案使用 ECS 承载 OAW HTTPS 网关及每用户独立后台，复用 `backend.hosting`
 的账号、鉴权、systemd 隔离和持久目录。Agent 命令只允许交给阿里 Agent Sandbox；
 不需要 ACR 或 AgentCore 托管 OAW 镜像。个人版入口和默认 Sandbox 保持不变。

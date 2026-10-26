@@ -1,0 +1,14 @@
+{
+  "repository": "D:/AI/open-agent-world",
+  "worktree": "D:/AI/open-agent-world/.tmp/aliyun-release-build",
+  "output": "D:/AI/open-agent-world/.tmp/aliyun-releases",
+  "python": "D:/AI/open-agent-world/backend/.venv/Scripts/python.exe",
+  "identity_file": "C:/Users/your-name/.ssh/server.pem",
+  "ssh_target": "root@your-server",
+  "branch": "feat/aliyun-agentcore-poc",
+  "app": "/opt/open-agent-world",
+  "hosting": "/srv/oaw-hosting",
+  "releases": "/opt/oaw-releases",
+  "service": "oaw-hosted",
+  "public_origin": "https://your-server"
+}
