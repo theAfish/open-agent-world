@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+import ipaddress
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -56,6 +57,7 @@ class AliyunSandboxSettings:
     unavailable_reason: str | None = None
     workspace_store: str = "volume"
     python_requirements: tuple[str, ...] = ()
+    storage_addresses: tuple[str, ...] = ()
 
     def __post_init__(self):
         from backend.sandbox.python_runtime import validate_requirements
@@ -72,6 +74,19 @@ class AliyunSandboxSettings:
             raise ValueError("Unsupported platform metadata")
         if any(not isinstance(v, str) for v in self.metadata.values()):
             raise ValueError("Sandbox metadata values must be strings")
+        if self.storage_addresses and self.workspace_store != "volume":
+            raise ValueError("Storage network exceptions require a dedicated Volume")
+        if len(self.storage_addresses) > 5:
+            raise ValueError("Too many storage addresses")
+        for address in self.storage_addresses:
+            try:
+                if not isinstance(address, str):
+                    raise ValueError("Expected a string address")
+                ip = ipaddress.IPv4Address(address)
+            except (ValueError, TypeError) as error:
+                raise ValueError("Storage addresses must be exact private IPv4 addresses") from error
+            if not any(ip in ipaddress.ip_network(cidr) for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")):
+                raise ValueError("Storage addresses must be exact private IPv4 addresses")
 
     @property
     def connection(self):
@@ -134,6 +149,8 @@ class AliyunSandboxBackend(SandboxBackend):
                 "metadata": self.settings.metadata}
         if self.settings.workspace_store != "volume":
             value["workspace_store"] = self.settings.workspace_store
+        if self.settings.storage_addresses:
+            value["storage_addresses"] = list(self.settings.storage_addresses)
         return value
 
     def _write(self, value):
@@ -181,11 +198,18 @@ class AliyunSandboxBackend(SandboxBackend):
             unavailable_reason=self.settings.unavailable_reason or (
                 "Remote state requires reconciliation; no command will be resubmitted" if state == SandboxState.ERROR else None),
             network_enabled=value.get("network_enabled", False),
-            network_reason=NETWORK_REASON, supported_network_modes=("disabled", "enabled"),
+            network_reason=self.network_reason, supported_network_modes=("disabled", "enabled"),
             network_available=True, network_transport="platform_firewall",
             network_status="enabled" if value.get("network_enabled", False) else "disabled",
             resource_limits_available=False, resource_limit_reason="Resource limits are set by the Alibaba template",
             installation_guidance=INSTALLATION_GUIDANCE)
+
+    @property
+    def network_reason(self):
+        if self.settings.storage_addresses:
+            return ("Public internet follows this Sandbox's network setting. Its dedicated storage endpoint remains "
+                    "reachable even when public internet is disabled; other private networks and cloud metadata are denied.")
+        return NETWORK_REASON
 
     async def get(self, sandbox_id):
         # A poll reports our durable receipt; it never creates/resumes a VM.
@@ -246,7 +270,9 @@ class AliyunSandboxBackend(SandboxBackend):
                 metadata={**self.settings.metadata, "oaw.profile": self.settings.profile_id, "oaw.request": value["request_key"]},
                 volume_mounts={"/workspace": self.settings.volume} if self.settings.workspace_store == "volume" else {},
                 secure=True, allow_internet_access=value.get("network_enabled", False),
-                network={"allow_public_traffic": False, "deny_out": list(PRIVATE_EGRESS)},
+                network={"allow_public_traffic": False, "deny_out": list(PRIVATE_EGRESS),
+                         **({"allow_out": [address + "/32" for address in self.settings.storage_addresses]}
+                            if self.settings.storage_addresses else {})},
                 **self.settings.connection)
         except AuthenticationException:
             # A rejected create has no remote effects. Do not turn an expired
@@ -482,10 +508,10 @@ def registry_factory(settings: AliyunSandboxSettings):
             SandboxRuntime("aliyun.agent-sandbox", "Alibaba Agent Sandbox (POC)", "linux", ("/bin/sh", "-c"),
                            supports_workspace=False, supported_network_modes=("disabled", "enabled"),
                            network_available=True, network_status="available", network_transport="platform_firewall",
-                           network_reason=NETWORK_REASON, resource_limits_available=False,
+                           network_reason=backend.network_reason, resource_limits_available=False,
                            resource_limit_reason="Resource limits are set by the Alibaba template",
                            installation_guidance=INSTALLATION_GUIDANCE,
-                           files_before_start=settings.workspace_store == "ecs"), lambda: backend, probe,
+                           files_before_start=True), lambda: backend, probe,
         ))
         return registry
     return build

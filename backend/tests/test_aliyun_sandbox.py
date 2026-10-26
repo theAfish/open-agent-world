@@ -269,6 +269,25 @@ async def test_remote_files_keep_existing_card_protocol_without_host_mounts(remo
 
 
 @pytest.mark.asyncio
+async def test_offline_volume_files_keep_only_the_scoped_storage_route(remote):
+    import base64
+    from backend.cloud.aliyun.sandbox import PRIVATE_EGRESS
+    backend, sdk, _ = remote
+    backend.settings = replace(backend.settings, storage_addresses=('172.28.1.39',))
+    await backend.create('persistent')
+    await backend.file_operation('persistent', 'write', path='saved.txt', data=base64.b64encode(b'persisted').decode())
+    await backend.terminate('persistent')
+    assert (await backend.file_operation('persistent', 'preview', path='saved.txt'))['text'] == 'persisted'
+    assert all(call['allow_internet_access'] is False and call['network'] == {
+        'allow_public_traffic': False, 'deny_out': list(PRIVATE_EGRESS), 'allow_out': ['172.28.1.39/32']}
+        for call in sdk.created)
+    assert 'storage endpoint' in (await backend.get('persistent')).network_reason
+    backend.settings = replace(backend.settings, storage_addresses=('172.28.1.40',))
+    with pytest.raises(SandboxSecurityError, match='binding differs'):
+        await backend.get('persistent')
+
+
+@pytest.mark.asyncio
 async def test_confirmed_idle_expiry_can_recreate_but_not_repeat_a_command(remote):
     backend, sdk, _ = remote
     await backend.create("s")
