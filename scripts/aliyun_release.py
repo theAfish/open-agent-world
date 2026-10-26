@@ -116,8 +116,9 @@ def npm(tree, *args):
 
 def clean(tree):
     # A build may rewrite a generated file with equivalent checkout line endings.
-    if git(tree, 'status', '--porcelain') and not git(tree, 'diff', '--name-only'):
-        run(['git', '-c', 'safe.directory=' + tree.as_posix(), '-C', tree, 'update-index', '--refresh'])
+    if (git(tree, 'status', '--porcelain') and not git(tree, 'diff', '--name-only')
+            and not git(tree, 'diff', '--cached', '--name-only')):
+        git(tree, 'add', '--renormalize', '--update', '--', '.')
     if git(tree, 'status', '--porcelain'):
         raise ValueError(f'Worktree has changes: {tree}; preserve/review them before releasing')
 

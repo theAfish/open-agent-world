@@ -271,3 +271,22 @@ def test_git_merge_leaves_developer_branch_and_dirty_files_untouched(tmp_path, m
     assert client.git(repo, 'branch', '--show-current') == 'dev'
     assert client.git(repo, 'rev-parse', 'HEAD') == before
     assert (repo / 'shared').read_text() == 'unfinished user work'
+
+
+def test_build_clean_handles_equivalent_newlines_but_preserves_real_edits(tmp_path):
+    client.git(tmp_path, 'init')
+    client.git(tmp_path, 'config', 'user.email', 'test@example.invalid')
+    client.git(tmp_path, 'config', 'user.name', 'Release test')
+    client.git(tmp_path, 'config', 'core.autocrlf', 'true')
+    source = tmp_path / 'generated.mjs'
+    source.write_bytes(b'export const value = 1;\r\n')
+    client.git(tmp_path, 'add', '.')
+    client.git(tmp_path, 'commit', '-m', 'fixture')
+    source.write_bytes(b'export const value = 1;\n')
+    client.clean(tmp_path)
+    assert client.git(tmp_path, 'status', '--porcelain') == ''
+    source.write_bytes(b'export const value = 2;\n')
+    with pytest.raises(ValueError, match='Worktree has changes'):
+        client.clean(tmp_path)
+    assert client.git(tmp_path, 'diff', '--cached', '--name-only') == ''
+    assert b'value = 2' in source.read_bytes()
