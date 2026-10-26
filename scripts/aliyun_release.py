@@ -16,6 +16,7 @@ import sys
 import tarfile
 import time
 from urllib.request import urlopen
+from urllib.error import HTTPError
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -280,6 +281,22 @@ def wait(cfg, identifier):
         time.sleep(5)
 
 
+def verify_public(origin):
+    deadline = time.monotonic() + 60
+    while True:
+        try:
+            with urlopen(origin + '/auth/me', timeout=10) as response:
+                value = json.load(response)
+            if value.get('hosted') is not True or value.get('authenticated') is not False:
+                raise ValueError('Public HTTPS authentication entry check failed; inspect status (do not replay the release)')
+            return
+        except HTTPError as error:
+            # systemd active precedes the gateway's HTTP listener readiness.
+            if error.code not in {502, 503, 504} or time.monotonic() >= deadline:
+                raise
+            time.sleep(2)
+
+
 def deploy(cfg, args):
     directory, record = selected(cfg, args.release)
     identifier = record['release']
@@ -296,7 +313,8 @@ def deploy(cfg, args):
         write(directory / 'release.json', record)
     state = remote(cfg, 'status', identifier)
     if state['phase'] in {'complete', 'already-current'}:
-        print(json.dumps(state), flush=True)
+        verify_public(cfg['public_origin'])
+        print(json.dumps({'deployed': state, 'public_https': True}), flush=True)
         return
     if state['unit_active']:
         print(json.dumps(wait(cfg, identifier)), flush=True)
@@ -309,10 +327,7 @@ def deploy(cfg, args):
     result = remote(cfg, 'start', identifier)
     if result['phase'] != 'already-current':
         result = wait(cfg, identifier)
-    with urlopen(cfg['public_origin'] + '/auth/me', timeout=30) as response:
-        value = json.load(response)
-        if value.get('hosted') is not True or value.get('authenticated') is not False:
-            raise ValueError('Public HTTPS authentication entry check failed; inspect status (do not replay the release)')
+    verify_public(cfg['public_origin'])
     print(json.dumps({'deployed': result, 'public_https': True}), flush=True)
 
 

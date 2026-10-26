@@ -27,6 +27,27 @@ worker = module('release_worker', 'deploy/aliyun/release_worker.py')
 client = module('release_client', 'scripts/aliyun_release.py')
 
 
+def test_public_check_waits_for_gateway_readiness(monkeypatch):
+    responses = iter([client.HTTPError('https://example/auth/me', 502, 'Starting', {}, None),
+                      io.BytesIO(b'{"hosted":true,"authenticated":false}')])
+    delays = []
+    def fetch(*args, **kwargs):
+        result = next(responses)
+        if isinstance(result, Exception):
+            raise result
+        return result
+    monkeypatch.setattr(client, 'urlopen', fetch)
+    monkeypatch.setattr(client.time, 'sleep', delays.append)
+    client.verify_public('https://example')
+    assert delays == [2]
+
+
+def test_public_check_rejects_incorrect_authentication_state(monkeypatch):
+    monkeypatch.setattr(client, 'urlopen', lambda *a, **k: io.BytesIO(b'{"hosted":true,"authenticated":true}'))
+    with pytest.raises(ValueError, match='authentication entry check failed'):
+        client.verify_public('https://example')
+
+
 def archive(path, entries):
     with tarfile.open(path, 'w:gz') as tar:
         for name, content, kind in entries:
