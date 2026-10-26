@@ -58,8 +58,10 @@ def prepare(source, previous, scratch):
             prepare_source_adapter(spec, bundle, dependency_wheels=wheelhouse)
         for name, environment in spec.environments.items():
             if environment.target == 'host-worker' and environment.prepare == 'install':
-                prepare_declared(spec.owner, name, environment, spec.source_root, bundle)
                 state = environment_status(spec.owner, name, environment, spec.source_root, bundle)
+                if state['state'] != 'ready':
+                    prepare_declared(spec.owner, name, environment, spec.source_root, bundle)
+                    state = environment_status(spec.owner, name, environment, spec.source_root, bundle)
                 if state['state'] != 'ready':
                     raise ValueError(f'{spec.owner}/{name}: runtime is not ready')
         report.append(spec.owner)
@@ -116,13 +118,33 @@ async def migrate(config_path):
         services.close()
 
 
-def verify(hosting):
+def entry_profiles(profiles, choices):
+    """The same entry selection as Gateway.profiles, without opening account stores."""
+    entries = {}
+    for profile in profiles:
+        if profile.user_id not in choices:
+            entries.setdefault(profile.user_id, profile)
+        elif choices[profile.user_id] == profile.profile_id:
+            entries[profile.user_id] = profile
+    return tuple(entries.values())
+
+
+def verify(hosting, *, entries_only=False):
     import httpx
     from backend.hosting.configuration import read_gateway_settings, unix_socket_path
     from backend.hosting.worker import mint_worker_token
     settings = read_gateway_settings(hosting / 'control/hosting.json')
+    selected = settings.profiles
+    if entries_only:
+        import contextlib
+        import sqlite3
+        with contextlib.closing(sqlite3.connect(f'file:{hosting}/control/deployments.sqlite3?mode=ro', uri=True)) as db:
+            choices = dict(db.execute('SELECT user_id,profile_id FROM hosting_entries'))
+        selected = entry_profiles(selected, choices)
+        if not selected:
+            raise ValueError('No login entries available for release verification')
     results = []
-    for profile in settings.profiles:
+    for profile in selected:
         socket = unix_socket_path(profile.upstream)
         if not socket:
             raise ValueError('Release verification requires the existing private Unix sockets')
@@ -151,6 +173,7 @@ def main():
     parser.add_argument('--scratch', type=Path)
     parser.add_argument('--config', type=Path)
     parser.add_argument('--hosting', type=Path)
+    parser.add_argument('--entries-only', action='store_true')
     args = parser.parse_args()
     sys.path.insert(0, str(args.source))
     if args.mode == 'prepare':
@@ -158,7 +181,7 @@ def main():
     elif args.mode == 'migrate':
         result = asyncio.run(migrate(args.config))
     else:
-        result = verify(args.hosting)
+        result = verify(args.hosting, entries_only=args.entries_only)
     print(json.dumps(result), flush=True)
 
 

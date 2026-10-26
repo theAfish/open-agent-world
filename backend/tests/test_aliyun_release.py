@@ -302,3 +302,74 @@ def test_build_clean_handles_equivalent_newlines_but_preserves_real_edits(tmp_pa
         client.clean(tmp_path)
     assert client.git(tmp_path, 'diff', '--cached', '--name-only') == ''
     assert b'value = 2' in source.read_bytes()
+
+
+def test_routine_tests_follow_changed_behavior_without_unrelated_cloud_suites():
+    changed = ['plugins/knowledge_base/src/oaw_knowledge_base/knowledge.py',
+               'plugins/knowledge_base/tests/test_pipeline.py',
+               'frontend/src/plugins/KnowledgeWorkspace.test.tsx']
+    backend, frontend = client.test_scope(changed, routine=True)
+    assert backend == {'plugins/knowledge_base/tests/test_pipeline.py'}
+    assert frontend == {'src/plugins/KnowledgeWorkspace.test.tsx'}
+    backend, _ = client.test_scope(['backend/hosting/policy.py'], routine=True)
+    assert set(client.BACKEND_TESTS) <= backend
+
+
+def test_routine_guard_rejects_core_contract_schema_and_dependency_changes():
+    remote.routine_guard({'plugins/knowledge_base/src/oaw_knowledge_base/knowledge.py',
+                          'plugins/knowledge_base/frontend/Knowledge.tsx'})
+    for path in ['backend/hosting/policy.py', 'backend/deployments.py', 'open_agent_world/plugin_api.py',
+                 'plugins/sample/oaw.pack.toml', 'plugins/sample/src/lifecycle.py', 'plugins/sample/src/plugin.py',
+                 'plugins/sample/src/schema.py', 'plugins/sample/src/__init__.py']:
+        with pytest.raises(ValueError, match='Routine release cannot change'):
+            remote.routine_guard({path})
+
+
+def test_routine_transaction_keeps_backup_and_verification_without_offline_migration(installation):
+    f = installation
+    f.manifest['routine'] = True
+    f.manifest['files'].pop('main.py')
+    f.manifest['files'].pop('new-package/file.py')
+    f.manifest['files']['main.py'] = remote.digest(f.app / 'main.py')
+    (f.stage / 'main.py').write_text('old version')
+    remote.write(f.stage / 'release-manifest.json', f.manifest)
+    result = remote.transaction(f.request)
+    assert result['phase'] == 'complete'
+    assert (f.b / 'backup.json').exists()
+    assert not any(c[:2] == ('systemctl', 'start') and c[2].startswith('oaw-release-') for c in f.commands)
+    assert any('verify' in c and '--entries-only' in c for c in f.commands)
+    assert (f.data / 'document.txt').read_text() == 'user data before release'
+
+
+def test_entry_verification_matches_gateway_current_route_selection():
+    from backend.hosting.gateway import Gateway
+    profiles = [SimpleNamespace(user_id='one', profile_id='old'), SimpleNamespace(user_id='one', profile_id='new'),
+                SimpleNamespace(user_id='two', profile_id='default'), SimpleNamespace(user_id='two', profile_id='history'),
+                SimpleNamespace(user_id='three', profile_id='unselected')]
+    choices = {'one': 'new', 'three': 'removed'}
+    gateway = SimpleNamespace(settings=SimpleNamespace(profiles=profiles),
+                              deployments=SimpleNamespace(entries=lambda: choices))
+    assert worker.entry_profiles(profiles, choices) == tuple(Gateway.profiles.fget(gateway).values())
+    assert [p.profile_id for p in worker.entry_profiles(profiles, choices)] == ['new', 'default']
+
+
+def test_npm_cache_is_invalidated_by_lockfile_or_node_change(tmp_path, monkeypatch):
+    root = tmp_path / 'frontend'
+    root.mkdir()
+    (root / 'package.json').write_text('{}')
+    (root / 'package-lock.json').write_text('first')
+    for name in ('vitest/vitest.mjs', 'vite/bin/vite.js', 'typescript/bin/tsc'):
+        p = root / 'node_modules' / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text('fixture')
+    calls = []
+    monkeypatch.setattr(client, 'npm', lambda *args: calls.append(args))
+    monkeypatch.setattr(client, 'run', lambda *args, **kw: 'v22')
+    client.prepare_npm(tmp_path)
+    client.prepare_npm(tmp_path)
+    assert len(calls) == 1
+    (root / 'package-lock.json').write_text('second')
+    client.prepare_npm(tmp_path)
+    monkeypatch.setattr(client, 'run', lambda *args, **kw: 'v24')
+    client.prepare_npm(tmp_path)
+    assert len(calls) == 3

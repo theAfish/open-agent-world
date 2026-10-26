@@ -22,6 +22,9 @@ $releasePython = 'D:/AI/open-agent-world/backend/.venv/Scripts/python.exe'
 # 拉取并合并 dev，运行相关测试，构建前端和卡包，打包并正常推送阿里分支
 & $releasePython $releaseTool prepare --merge origin/dev
 
+# 已审阅的小范围界面/业务处理更新：不涉及数据库、依赖或发布声明时
+& $releasePython $releaseTool prepare --merge origin/dev --routine
+
 # 也可指定经过审阅的 dev 提交，避免把后续实验内容一起合入
 # & $releasePython $releaseTool prepare --merge <commit>
 
@@ -40,6 +43,17 @@ $releasePython = 'D:/AI/open-agent-world/backend/.venv/Scripts/python.exe'
 默认运行部署/鉴权/Sandbox/发布相关后端测试、发生修改的插件测试，以及 hosted 前端测试和正式前端构建。
 可用 `--pytest-path` 或配置中的 `backend_tests`、`frontend_tests` 增加检查；这不等同于完整 PR CI。
 每次记录提交、测试路径、部署包 SHA-256、目标服务器和线上基线；线上版本变化后必须重新 prepare。
+
+`--routine` 是操作者审阅后的精简路径：运行改动涉及的测试文件，以及用 `--pytest-path` 指定的相关测试；
+不会固定重跑无关的阿里 Sandbox、Pack IDE 等测试。Python 改动没有对应测试时拒绝准备发布。
+`--pytest-path` 也接受 `文件::测试函数`。宿主核心、卡包声明、注册、生命周期及常见 schema 文件的改动会被拒绝，
+必须改用完整模式；这项路径保护不代替代码审阅，业务处理文件内也可能包含迁移或权限变化。
+
+精简模式仍执行完整备份、哈希校验、任务空闲检查、失败恢复和入口鉴权检查，但不重写发布声明、
+不额外运行每个历史 profile 的离线迁移，只冷启动并验证网关当前选中的登录入口。
+其他历史工作区保留原声明，日后按需启动。发布声明或数据库结构发生变化时必须使用完整模式。
+Node 版本及 npm 锁文件未变时复用已安装的依赖；卡包前端继续使用项目既有构建缓存。
+服务器上已就绪的受管理环境复用其有效准备记录，不重复运行重型科学库的安装验证。
 
 ## 更新过程和边界
 

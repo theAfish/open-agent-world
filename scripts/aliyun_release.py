@@ -123,6 +123,40 @@ def clean(tree):
         raise ValueError(f'Worktree has changes: {tree}; preserve/review them before releasing')
 
 
+def test_scope(changed, *, routine=False):
+    """Routine releases use changed test files; broader upgrades keep hosting checks."""
+    backend = set() if routine else set(BACKEND_TESTS)
+    frontend = set() if routine else set(FRONTEND_TESTS)
+    for name in changed:
+        if name.endswith('.py') and ('/tests/test_' in name):
+            backend.add(name)
+        if name.startswith('frontend/src/') and re.search(r'\.test\.tsx?$', name):
+            frontend.add(name.removeprefix('frontend/'))
+        if name.startswith(('scripts/aliyun_release', 'deploy/aliyun/release_')):
+            backend.add('backend/tests/test_aliyun_release.py')
+        if name.startswith(('backend/hosting/', 'backend/security/', 'backend/cloud/')):
+            backend.update(BACKEND_TESTS)
+        parts = Path(name).parts
+        if not routine and len(parts) > 2 and parts[0] == 'plugins':
+            backend.add('plugins/' + parts[1] + '/tests')
+    if any(p.startswith('plugins/knowledge_base/frontend/') for p in changed):
+        frontend.add('src/plugins/KnowledgeWorkspace.test.tsx')
+    return backend, frontend
+
+
+def prepare_npm(tree):
+    root = tree / 'frontend'
+    stamp = root / 'node_modules/.oaw-release-install.json'
+    inputs = {name: sha(root / name) for name in ('package.json', 'package-lock.json')}
+    inputs['node'] = run(['node', '--version'], capture=True)
+    if (stamp.exists() and read(stamp) == inputs
+            and all((root / 'node_modules' / name).is_file() for name in ('vitest/vitest.mjs', 'vite/bin/vite.js', 'typescript/bin/tsc'))):
+        print('Reusing installed frontend dependencies (unchanged lockfile and Node version)', flush=True)
+        return
+    npm(tree, 'ci', '--no-audit', '--no-fund')
+    write(stamp, inputs)
+
+
 def prepare(cfg, args):
     repository, tree = Path(cfg['repository']), Path(cfg['worktree'])
     if repository == tree or not tree.is_relative_to(repository / '.tmp'):
@@ -155,23 +189,24 @@ def build(cfg, tree, base, args):
     git(tree, 'merge-base', '--is-ancestor', base, commit)
     baseline = remote(cfg, 'status')
     changed = git(tree, 'diff', '--name-only', baseline['commit'], commit).splitlines()
-    tests = set(BACKEND_TESTS + list(cfg.get('backend_tests', [])) + args.pytest_path)
-    for name in changed:
-        parts = Path(name).parts
-        if len(parts) > 2 and parts[0] == 'plugins' and (tree / 'plugins' / parts[1] / 'tests').is_dir():
-            tests.add('plugins/' + parts[1] + '/tests')
-    tests = sorted(p for p in tests if (tree / p).exists())
-    if not tests:
-        raise ValueError('No release verification tests found')
+    routine = getattr(args, 'routine', False)
+    if routine:
+        import runpy
+        runpy.run_path(str(OPERATOR / 'release_remote.py'))['routine_guard'](changed)
+    tests, frontend = test_scope(changed, routine=routine)
+    tests.update([*cfg.get('backend_tests', []), *args.pytest_path])
+    tests = sorted(p for p in tests if (tree / p.split('::')[0]).exists())
+    if not tests and any(p.endswith('.py') for p in changed):
+        raise ValueError('Python changes require relevant tests; add --pytest-path')
     print(json.dumps({'stage': 'testing', 'commit': commit, 'pytest_paths': tests}), flush=True)
     python = cfg['python']
     code = "from pathlib import Path;import sys;sys.path[:0]=[str(Path.cwd()),*[str(p.parent/'src') for p in Path('plugins').glob('*/pyproject.toml')],*[str(p.parent) for p in Path('plugins').glob('*/pyproject.toml')]];import pytest;raise SystemExit(pytest.main(sys.argv[1:]))"
-    run([python, '-c', code, *tests, '-q', '-o', 'addopts='], cwd=tree)
-    npm(tree, 'ci', '--no-audit', '--no-fund')
-    frontend = [*FRONTEND_TESTS, *cfg.get('frontend_tests', [])]
-    if any(p.startswith('plugins/knowledge_base/') for p in changed):
-        frontend.append('src/plugins/KnowledgeWorkspace.test.tsx')
-    run(['node', 'node_modules/vitest/vitest.mjs', 'run', *frontend], cwd=tree / 'frontend')
+    if tests:
+        run([python, '-c', code, *tests, '-q', '-o', 'addopts='], cwd=tree)
+    prepare_npm(tree)
+    frontend = sorted(frontend | set(cfg.get('frontend_tests', [])))
+    if frontend:
+        run(['node', 'node_modules/vitest/vitest.mjs', 'run', *frontend], cwd=tree / 'frontend')
     npm(tree, 'run', 'build')
     clean(tree)
     release = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + commit[:12] + '-' + uuid4().hex[:8]
@@ -190,7 +225,8 @@ def build(cfg, tree, base, args):
     files = {name: sha(tree / name) for name in sorted(names)}
     operators = {'operator/' + name: OPERATOR / name for name in ('release_remote.py', 'release_worker.py')}
     manifest = {'version': 1, 'source_commit': commit, 'baseline_receipt': baseline['receipt'],
-                'baseline_commit': baseline['commit'], 'files': files, 'operator_files': {n: sha(p) for n, p in operators.items()}}
+                'baseline_commit': baseline['commit'], 'routine': routine,
+                'files': files, 'operator_files': {n: sha(p) for n, p in operators.items()}}
     write(directory / 'release-manifest.json', manifest)
     archive = directory / 'bundle.tar.gz'
     with tarfile.open(archive, 'w:gz') as tar:
@@ -200,7 +236,7 @@ def build(cfg, tree, base, args):
             tar.add(path, arcname=name, recursive=False)
         tar.add(directory / 'release-manifest.json', arcname='release-manifest.json', recursive=False)
     record = {'release': release, 'commit': commit, 'target': target_id(cfg), 'archive_sha256': sha(archive),
-              'pytest_paths': tests, 'frontend_tests': frontend, 'full_ci': False}
+              'pytest_paths': tests, 'frontend_tests': frontend, 'routine': routine, 'full_ci': False}
     write(directory / 'release.json', record)
     # Publish the tested integration commit without changing any checked-out branch.
     if commit != base:
@@ -233,7 +269,7 @@ def wait(cfg, identifier):
         phase = result['phase']
         progress = (phase, result.get('migrated_profiles'))
         if progress != previous:
-            print(json.dumps(result), flush=True)
+            print(json.dumps({k: v for k, v in result.items() if k != 'helpers'}), flush=True)
             previous = progress
         if phase in {'complete', 'already-current', 'rolled-back'}:
             return result
@@ -288,6 +324,8 @@ def main(argv=None):
     prepare_parser.add_argument('--merge', help='For example origin/dev, or an exact reviewed commit')
     prepare_parser.add_argument('--resolved', action='store_true', help='Continue after manually resolving the build worktree merge')
     prepare_parser.add_argument('--pytest-path', action='append', default=[])
+    prepare_parser.add_argument('--routine', action='store_true',
+        help='Operator reviewed: no schema/publication changes. Focus tests, retain contracts and verify current login entries')
     deploy_parser = commands.add_parser('deploy')
     deploy_parser.add_argument('--release')
     deploy_parser.add_argument('--check', action='store_true', help='Stage and prepare dependencies; do not restart services or migrate user data')

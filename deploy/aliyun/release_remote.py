@@ -200,6 +200,21 @@ def save(b, phase, **extra):
     return state
 
 
+def routine_guard(changed):
+    """Catch known incompatible changes; the operator must also review handler diffs."""
+    for name in changed:
+        if name.startswith(('backend/tests/', 'frontend/', 'docs/', 'scripts/', 'deploy/', '.github/')):
+            continue
+        p = PurePosixPath(name)
+        if name.startswith('plugins/'):
+            if '/frontend/' in name or '/tests/' in name or p.suffix in {'.md', '.css', '.svg', '.png'}:
+                continue
+            if (p.suffix == '.py' and p.name != '__init__.py'
+                    and not re.search(r'plugin|lifecycle|schema|migrat|database|client|preset|model|operation', p.stem)):
+                continue
+        require(False, f'Routine release cannot change {name}; use the full release path')
+
+
 def plan(request):
     app, hosting, releases = paths(request)
     b = release_dir(request)
@@ -208,6 +223,9 @@ def plan(request):
     require(fingerprint == manifest['baseline_receipt'], 'Installed version changed; prepare a new release')
     verify_files(app, current['source_files'])
     verify_files(b / 'stage', {**manifest['files'], **manifest['operator_files']})
+    if manifest.get('routine'):
+        routine_guard({n for n in current['source_files'].keys() | manifest['files'].keys()
+                       if current['source_files'].get(n) != manifest['files'].get(n)})
     for name in manifest['files'].keys() - current['source_files'].keys():
         p = destination(app, name)
         require(not p.exists() or digest(p) == manifest['files'][name], f'Unmanaged application file would be overwritten: {name}')
@@ -223,6 +241,7 @@ def plan(request):
     require(shutil.disk_usage(releases).free > disk_needed, 'Insufficient space for data backup and recovery')
     return {'release': request['release'], 'from_commit': current['source_commit'], 'to_commit': manifest['source_commit'],
             'profiles': len(list(profiles(hosting))), 'files': len(manifest['files']),
+            'routine': bool(manifest.get('routine')), 'offline_migration': not manifest.get('routine', False),
             'already_current': current['source_commit'] == manifest['source_commit'],
             'contracts': 'Refresh existing published Pack surfaces; retain core permissions and saved layouts'}
 
@@ -360,7 +379,7 @@ def transaction(request, *, rollback=False):
             shutil.copyfile(b / 'stage/operator/release_worker.py', helper)
             helper.chmod(0o644)
             units = UNITS
-            for identifier, _ in profiles(hosting):
+            for identifier, _ in ([] if manifest.get('routine') else profiles(hosting)):
                 original = (units / f"{request['service']}-worker-{identifier}.service").read_text()
                 name = f'oaw-release-{request["release"][-8:]}-{identifier}.service'
                 target = units / name
@@ -368,8 +387,9 @@ def transaction(request, *, rollback=False):
                 target.write_text(worker_unit(original, app, helper, request['service']))
                 target.chmod(0o644)
                 helpers.append(name)
-            save(b, 'migrating', helpers=helpers)
-            run('systemctl', 'daemon-reload')
+            if helpers:
+                save(b, 'migrating', helpers=helpers)
+                run('systemctl', 'daemon-reload')
             for index, name in enumerate(helpers):
                 try:
                     run('systemctl', 'start', name, log=b / 'migration.log', timeout=330)
@@ -381,13 +401,15 @@ def transaction(request, *, rollback=False):
             resume(request, gateway=False)
             save(b, 'verifying')
             run(str(app / 'backend/.venv/bin/python'), str(helper), 'verify', '--source', str(app), '--hosting', str(hosting),
+                *(['--entries-only'] if manifest.get('routine') else []),
                 log=b / 'verification.log', timeout=3600)
             new = {'source_commit': manifest['source_commit'], 'source_files': manifest['files'],
                    'release_id': request['release'], 'previous_source_commit': old['source_commit'], 'backup': str(b)}
             write(app / '.oaw-deployment.json', new)
             resume(request)
             run('systemctl', 'is-active', '--quiet', request['service'] + '-gateway.service')
-            return save(b, 'complete', commit=manifest['source_commit'], verification='worker bootstrap and authorization checks passed')
+            return save(b, 'complete', commit=manifest['source_commit'],
+                        verification=('login entry workers' if manifest.get('routine') else 'all workers') + ' bootstrap and authorization checks passed')
         except BaseException as error:
             with (b / 'failure.log').open('a') as stream:
                 traceback.print_exc(file=stream)
