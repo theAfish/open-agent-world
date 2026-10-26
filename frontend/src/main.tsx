@@ -73,7 +73,8 @@ async function start() {
     if (isHosted() && new URL(apiBase, window.location.href).origin !== window.location.origin) {
       throw new Error('Hosted workspaces require the same-origin API.');
     }
-    const response = await fetchWithRetry(`${apiBase}/deployment`, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+    // A hosted worker may need to load its Packs after socket activation.
+    const response = await fetchWithRetry(`${apiBase}/deployment`, { cache: 'no-store', signal: AbortSignal.timeout(isHosted() ? 60_000 : 5000) });
     if (!response.ok) throw new Error('Deployment mode unavailable');
     const mode = await response.json();
     if (mode.mode !== 'runtime') await initializeProfile();
