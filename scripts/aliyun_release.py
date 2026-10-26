@@ -164,7 +164,7 @@ def build(cfg, tree, base, args):
         raise ValueError('No release verification tests found')
     print(json.dumps({'stage': 'testing', 'commit': commit, 'pytest_paths': tests}), flush=True)
     python = cfg['python']
-    code = "from pathlib import Path;import sys;sys.path[:0]=[str(Path.cwd()),*[str(p) for p in Path('plugins').glob('*/src')]];import pytest;raise SystemExit(pytest.main(sys.argv[1:]))"
+    code = "from pathlib import Path;import sys;sys.path[:0]=[str(Path.cwd()),*[str(p.parent/'src') for p in Path('plugins').glob('*/pyproject.toml')],*[str(p.parent) for p in Path('plugins').glob('*/pyproject.toml')]];import pytest;raise SystemExit(pytest.main(sys.argv[1:]))"
     run([python, '-c', code, *tests, '-q', '-o', 'addopts='], cwd=tree)
     npm(tree, 'ci', '--no-audit', '--no-fund')
     frontend = [*FRONTEND_TESTS, *cfg.get('frontend_tests', [])]
