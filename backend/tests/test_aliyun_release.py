@@ -207,6 +207,18 @@ def test_manual_rollback_requires_explicit_data_restore(installation, monkeypatc
     assert not (f.b / 'transaction.json').exists()
 
 
+def test_background_submission_releases_lock_before_oneshot_startup(installation, monkeypatch):
+    f = installation
+    monkeypatch.setattr(remote, 'unit_state', lambda _: 'inactive')
+    def systemd(*args, **kwargs):
+        if args[0] == 'systemd-run' and '--no-block' not in args:
+            raise TimeoutError('oneshot startup waits for transaction to acquire the held submission lock')
+        return f.run(*args, **kwargs)
+    monkeypatch.setattr(remote, 'run', systemd)
+    assert remote.dispatch({**f.request, 'action': 'start'})['phase'] == 'queued'
+    assert remote.read(f.b / 'transaction.json')['action'] == 'transaction'
+
+
 def test_archive_roundtrip_and_changed_content_rejected(installation):
     f = installation
     archive_path = f.b / 'bundle.tar.gz'

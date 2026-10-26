@@ -499,7 +499,9 @@ def start_job(request):
         require((b / 'backup.json').exists(), 'This release has no rollback backup')
     request = {**request, 'action': 'transaction', 'rollback': action == 'rollback'}
     write(b / 'transaction.json', request)
-    run('systemd-run', '--unit=' + unit, '--collect', '--property=Type=oneshot', '--property=UMask=0077',
+    # The caller still owns the submission lock. Waiting for oneshot startup here
+    # deadlocks with transaction(), which must acquire that lock before proceeding.
+    run('systemd-run', '--no-block', '--unit=' + unit, '--collect', '--property=Type=oneshot', '--property=UMask=0077',
         '--property=TimeoutStartSec=infinity', sys.executable, str(b / 'stage/operator/release_remote.py'),
         str(b / 'transaction.json'))
     return {'phase': 'queued', 'release': request['release']}
