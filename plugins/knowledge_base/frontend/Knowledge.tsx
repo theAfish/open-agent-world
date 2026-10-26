@@ -2,7 +2,7 @@ import { t, WorkspaceEmptyState, WorkspaceToolbar } from "@oaw/plugin-api";
 import type { PluginViewProps } from "@oaw/plugin-api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ArrowRight, Check, CheckCircle2, ClipboardCheck, FileText, Loader2, Network, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
+import { ArrowRight, Check, CheckCircle2, ClipboardCheck, FileText, Loader2, LockKeyhole, Network, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import { GraphMap } from "./GraphMap";
 import type { Entity, Relation } from "./GraphMap";
 import "./KnowledgeFlow.css";
@@ -38,6 +38,10 @@ type Pending = { args: Record<string, unknown>; reasons: string[] };
 type SourceItem = { id: string; filename: string; group_name: string | null };
 type Agent = { id: string; name: string };
 type Edit = { title: string; entities: DraftEntity[]; relations: DraftRelation[] };
+type WorkflowStep = "extract" | "review" | "publish";
+type AgentRun = { agent_id: string; draft_id: string; kind: "extract" | "review" };
+type ViewDraft = { draftId: string; creating: boolean; picked: string[]; title: string;
+  workflowStep?: WorkflowStep; edit?: Edit; extracting?: AgentRun };
 
 type Props = {
   host: PluginViewProps["host"]; cardId: string; deployed: boolean; busy: boolean;
@@ -57,8 +61,10 @@ type Props = {
   onOpenSource: (sourceId: string) => void;
   /** Move to Sources to add or convert a document. */
   onAddSources?: () => void;
-  /** A fresh array opens a new draft with these converted sources selected. */
+  active?: boolean;
+  /** A one-shot request to continue work with exactly these sources. */
   suggestedSourceIds?: string[];
+  onSourcesHandled?: () => void;
 };
 
 const shortId = (value: string) => value.length > 13 ? `${value.slice(0, 8)}…` : value;
@@ -67,41 +73,72 @@ const label = (value: string) => value.replaceAll("_", " ");
 export function KnowledgeSection({
   host, cardId, deployed, busy, version, sources, activeGroup, groupCount, groupArgs, groupFilter, call, perform, request,
   extractAgent, canRunAgent, selectedModel, modelSelect, groupSelect, refreshControls, banner, setNotice, setError, onOpenSource,
-  onAddSources, suggestedSourceIds,
+  onAddSources, suggestedSourceIds, onSourcesHandled, active = true,
 }: Props) {
+  // The host scopes transient view state to this card/session. It survives closing
+  // a workspace without introducing a durable setting or another storage owner.
+  const [restored] = useState(() => host.draft?.get()?.knowledgeView as ViewDraft | undefined);
   const [drafts, setDrafts] = useState<KnowledgeDraft[]>([]);
-  const [draftId, setDraftId] = useState("");
+  const [draftId, setDraftId] = useState(restored?.draftId ?? "");
   const [graph, setGraph] = useState<Graph>();
   const [entity, setEntity] = useState("");
   // A selected published relation: read like a node — statement, evidence, snippet, sources.
   const [relationId, setRelationId] = useState("");
   const [side, setSide] = useState<"concepts" | "relations">("concepts");
   const [filter, setFilter] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [picked, setPicked] = useState<string[]>([]);
-  const [title, setTitle] = useState("");
-  const [edit, setEdit] = useState<Edit>();
+  const [creating, setCreating] = useState(restored?.creating ?? false);
+  const [picked, setPicked] = useState<string[]>(restored?.picked ?? []);
+  const [title, setTitle] = useState(restored?.title ?? "");
+  const [edit, setEdit] = useState<Edit | undefined>(restored?.edit);
   const [pending, setPending] = useState<Pending>();
   // A graph review the model proposed and the person has not confirmed yet.
   const [proposal, setProposal] = useState<{ operations: Record<string, unknown>[]; drafts: string[] }>();
   const [replace, setReplace] = useState(false);
   // A running agent extraction or review: which agent to watch until it is idle again.
-  const [extracting, setExtracting] = useState<{ agent_id: string; draft_id: string; kind: "extract" | "review" }>();
+  const [extracting, setExtracting] = useState<AgentRun | undefined>(restored?.extracting);
   // Where a streamed bridge run is: shown as a progress strip until it finishes.
   const [progress, setProgress] = useState<{ kind: "extract" | "review" | "graph"; event: BridgeProgress }>();
-  const [workflowStep, setWorkflowStep] = useState<"extract" | "review" | "publish">();
+  const [workflowStep, setWorkflowStep] = useState<WorkflowStep | undefined>(restored?.workflowStep);
   const [lastFailure, setLastFailure] = useState<string>();
   const [loaded, setLoaded] = useState(false);
+  const working = !!progress || !!extracting;
   const generation = useRef(0);
   const appliedSourceSuggestion = useRef<string[]>();
   const evidenceRef = useRef<HTMLHeadingElement>(null);
   const graphRef = useRef<HTMLElement>(null);
+  const previousDraftId = useRef(draftId);
 
   useEffect(() => {
-    if (!suggestedSourceIds || appliedSourceSuggestion.current === suggestedSourceIds) return;
+    if (previousDraftId.current !== draftId) {
+      setEdit(undefined); setPending(undefined); setWorkflowStep(undefined);
+      previousDraftId.current = draftId;
+    }
+  }, [draftId]);
+
+  useEffect(() => {
+    host.draft?.set({ ...host.draft.get(), knowledgeView: { draftId, creating, picked, title, workflowStep, edit, extracting } satisfies ViewDraft });
+  }, [host.draft, draftId, creating, picked, title, workflowStep, edit, extracting]);
+
+  const matchingDraft = (ids: string[], name?: string) => {
+    const matches = drafts.filter(item => item.sources.length === new Set(ids).size
+      && item.sources.every(source => ids.includes(source.source_id)) && (!name || item.title === name));
+    return matches.find(item => item.id === draftId) ?? matches.find(item => item.entities.length) ?? matches[0];
+  };
+  const selectDraft = (item: KnowledgeDraft) => {
+    setDraftId(item.id); setCreating(false); setPicked([]); setTitle(""); setEdit(undefined);
+    setPending(undefined); setReplace(false); setWorkflowStep(undefined); setLastFailure(undefined);
+  };
+
+  useEffect(() => {
+    if (!loaded || !suggestedSourceIds || appliedSourceSuggestion.current === suggestedSourceIds) return;
     appliedSourceSuggestion.current = suggestedSourceIds;
-    setPicked([...new Set(suggestedSourceIds)]); setTitle(""); setCreating(true); setPending(undefined); setReplace(false);
-  }, [suggestedSourceIds]);
+    const existing = matchingDraft(suggestedSourceIds);
+    if (existing) selectDraft(existing);
+    else { setPicked([...new Set(suggestedSourceIds)]); setTitle(""); setCreating(true); setPending(undefined); setReplace(false); }
+    onSourcesHandled?.();
+    // The request is consumed exactly once, after the saved drafts are available.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, suggestedSourceIds, drafts, onSourcesHandled]);
 
   const loadGraph = useCallback(async (args: Record<string, unknown> = {}) => {
     const current = generation.current;
@@ -118,13 +155,18 @@ export function KnowledgeSection({
       call("graph", { layer: "literature", limit: 500, full: true, ...groupFilter() }),
     ]);
     if (generation.current !== current) return;
-    if (list.status === "fulfilled") { setDrafts((list.value.drafts as KnowledgeDraft[]) ?? []); setLoaded(true); }
+    if (list.status === "fulfilled") {
+      const items = (list.value.drafts as KnowledgeDraft[]) ?? [];
+      setDrafts(items); setLoaded(true);
+      setDraftId(previous => items.some(item => item.id === previous) ? previous
+        : items.find(item => item.entities.length)?.id ?? items[0]?.id ?? "");
+    }
     if (map.status === "fulfilled") setGraph(map.value as unknown as Graph);
     const failure = [list, map].find(result => result.status === "rejected");
     if (failure) throw (failure as PromiseRejectedResult).reason;
   }, [call, groupArgs, groupFilter]);
 
-  useEffect(() => { void perform(load); }, [load, perform, version]);
+  useEffect(() => { if (active && !working) void perform(load); }, [load, perform, version, active, working]);
   useEffect(() => () => { generation.current += 1; }, []);
 
   const draft = drafts.find(item => item.id === draftId);
@@ -132,15 +174,17 @@ export function KnowledgeSection({
   // A group change or refresh can remove a selected source from this scope. Keep
   // the form mounted, but never submit invisible or no-longer-converted files.
   const selectedSourceIds = picked.filter(id => sources.some(source => source.id === id));
+  const existingSelection = selectedSourceIds.length ? matchingDraft(selectedSourceIds, title.trim()) : undefined;
 
   const create = () => perform(async () => {
     if (!selectedSourceIds.length) throw new Error(t("Select at least one converted source first"));
-    const result = await call("knowledge_draft_manage", { operation: "create", source_ids: selectedSourceIds,
+    if (existingSelection) { selectDraft(existingSelection); setNotice(""); return; }
+    const result = await call("knowledge_draft_manage", { operation: "open", source_ids: selectedSourceIds,
       ...(title.trim() ? { title: title.trim() } : {}), ...(activeGroup ? { group_id: activeGroup } : {}) });
     const created = result.draft as KnowledgeDraft;
     setCreating(false); setPicked([]); setTitle("");
     setDraftId(created.id); setEdit(undefined); setPending(undefined); setReplace(false); setWorkflowStep("extract"); setLastFailure(undefined);
-    setNotice(t("Draft \"{v0}\" opened over {v1} source(s) · extract it below", { v0: created.title, v1: created.sources.length }));
+    setNotice("");
     await load();
   });
 
@@ -358,7 +402,7 @@ export function KnowledgeSection({
   </span>;
   const entityName = (list: DraftEntity[], id: string) => list.find(item => item.id === id)?.name || shortId(id);
   const blocker = !draft ? "" : draft.status === "published" ? t("Unpublish this draft before extracting again.")
-    : extracting ? t("An extraction is already running.")
+    : working ? t("An extraction is already running.")
     : (!canRunAgent && !selectedModel) ? (deployed ? t("This deployment has no default model configured yet.")
       : t("Configure a model connection in OAW Settings, or connect an Agent to this card with the Knowledge extract relationship."))
     : "";
@@ -375,9 +419,11 @@ export function KnowledgeSection({
         v0: draft?.sources.filter(item => item.extracted_at && !item.missing).length ?? 0, v1: draft?.sources.length ?? 0 }) },
     { id: "review" as const, label: t("Review"), accessible: t("Review stage"), icon: ClipboardCheck,
       complete: false, detail: draft?.review_log.length
-        ? t("{v0} review(s) recorded", { v0: draft.review_log.length }) : t("Check source evidence") },
+        ? t("{v0} review(s) recorded", { v0: draft.review_log.length })
+        : draft?.entities.length ? t("Check source evidence") : t("After extraction") },
     { id: "publish" as const, label: t("Publish"), accessible: t("Publication stage"), icon: Network,
-      complete: draft?.status === "published", detail: draft?.status === "published" ? t("In the graph") : t("Your confirmation") },
+      complete: draft?.status === "published", detail: draft?.status === "published" ? t("In the graph")
+        : draft?.entities.length ? t("Your confirmation") : t("Needs extracted concepts") },
   ];
   // A determinate bar when the bridge knows how many steps remain, an indeterminate
   // one for an agent run or a step of unknown length; always with the current stage.
@@ -417,7 +463,7 @@ export function KnowledgeSection({
       {groupSelect}
       <div className="knowledge-heading-actions">
         {refreshControls}
-        <button type="button" className={drafts.length ? "knowledge-primary" : undefined} disabled={busy || creating} onClick={startDraft}>
+        <button type="button" className={drafts.length ? "knowledge-primary" : undefined} disabled={busy || working || creating} onClick={startDraft}>
           <Plus size={14} />{t("New draft")}</button>
       </div>
     </WorkspaceToolbar>
@@ -448,13 +494,13 @@ export function KnowledgeSection({
       </ul>}
       <div className="knowledge-formbar">
         <button type="button" className="knowledge-primary" disabled={busy || !selectedSourceIds.length} onClick={() => void create()}>
-          {t("Open draft over {v0} source(s)", { v0: selectedSourceIds.length })}</button>
+          {existingSelection ? t("Continue existing draft") : t("Create draft from {v0} source(s)", { v0: selectedSourceIds.length })}</button>
         <button type="button" disabled={busy} onClick={() => setCreating(false)}>{t("Cancel")}</button>
       </div>
     </div>}
 
     <section className="knowledge-insight-block knowledge-flow-drafts" hidden={creating}>
-      <h4>{t("Drafts")} {!!drafts.length && <span className="knowledge-total">{drafts.length}</span>}</h4>
+      <h4>{t("Knowledge drafts")} {!!drafts.length && <span className="knowledge-total">{drafts.length}</span>}</h4>
       {!drafts.length && loaded && <div className="knowledge-flow-welcome">
         <div className="knowledge-flow-illustration" aria-hidden="true">
           <span><FileText size={24} /></span><i /><span><Sparkles size={24} /></span><i /><span><Network size={26} /></span>
@@ -471,10 +517,11 @@ export function KnowledgeSection({
         {!!drafts.length && <div className="knowledge-source-pane">
           <ul className="knowledge-list knowledge-record-list">
             {drafts.map(item => <li key={item.id}>
-              <button type="button" aria-pressed={draftId === item.id} disabled={busy}
-                onClick={() => { setDraftId(item.id); setEdit(undefined); setPending(undefined); setReplace(false); setWorkflowStep(undefined); setLastFailure(undefined); }}>
+              <button type="button" aria-pressed={draftId === item.id} disabled={busy || working}
+                onClick={() => { selectDraft(item); setNotice(""); }}>
                 <span><span className={`knowledge-badge knowledge-status-${item.status}`}>{item.status === "published" ? t("Published") : t("Draft")}</span> {item.title}</span>
                 <small>{t("{v0} source(s)", { v0: item.sources.length })} · {elements(item)}</small>
+                <span className="knowledge-draft-source-names">{item.sources.map(source => source.filename ?? shortId(source.source_id)).join(" · ")}</span>
                 <span className="knowledge-flow-mini" aria-hidden="true">
                   <i data-complete={!!item.sources.length && item.sources.every(source => source.extracted_at && !source.missing)} />
                   <i /><i data-complete={item.status === "published"} />
@@ -490,10 +537,12 @@ export function KnowledgeSection({
           <div className="knowledge-flow-stages" aria-label={t("Knowledge draft workflow")}>
             {workflowStages.map((step, index) => <button key={step.id} type="button"
               className="knowledge-flow-step" aria-label={step.accessible} aria-current={currentStep === step.id ? "step" : undefined}
-              data-complete={step.complete} disabled={busy || !!extracting || !!edit || draft.status === "published" || (step.id !== "extract" && !draft.entities.length)}
+              title={draft.status === "published" ? t("Published draft: unpublish to change it")
+                : step.id !== "extract" && !draft.entities.length ? t("Extract concepts before reviewing or publishing") : step.label}
+              data-complete={step.complete} disabled={busy || working || !!edit || draft.status === "published" || (step.id !== "extract" && !draft.entities.length)}
               onClick={() => setWorkflowStep(step.id)}>
               <span className="knowledge-flow-step-icon">{runningStep === step.id ? <Loader2 className="knowledge-flow-spinner" size={18} />
-                : step.complete ? <Check size={18} /> : <step.icon size={18} />}</span>
+                : step.complete ? <Check size={18} /> : step.id !== "extract" && !draft.entities.length ? <LockKeyhole size={18} /> : <step.icon size={18} />}</span>
               <span><strong>{index + 1}. {step.label}</strong><small>{step.detail}</small></span>
             </button>)}
           </div>
@@ -560,7 +609,7 @@ export function KnowledgeSection({
               {t("Explore the graph")}<ArrowRight size={14} /></button>}
           </section>}
 
-          <details className="knowledge-flow-sources">
+          <details className="knowledge-flow-sources" open={!draft.entities.length || undefined}>
             <summary><FileText size={15} />{t("Sources")}<span className="knowledge-total">{draft.sources.length}</span></summary>
             <ul className="knowledge-list knowledge-compact">
               {draft.sources.map(item => <li key={item.source_id}>
@@ -637,10 +686,10 @@ export function KnowledgeSection({
             </div>
           </div> : <div className="knowledge-formbar knowledge-draft-actions">
             {draft.status === "draft" ? <>
-              <button type="button" disabled={busy || !!extracting} onClick={() => beginEdit(draft)}><Pencil size={13} />{t("Edit")}</button>
-              <button type="button" className={currentStep === "publish" ? "knowledge-primary" : undefined} disabled={busy || !!extracting || !draft.entities.length}
+              <button type="button" disabled={busy || working} onClick={() => beginEdit(draft)}><Pencil size={13} />{t("Edit")}</button>
+              <button type="button" className={currentStep === "publish" ? "knowledge-primary" : undefined} disabled={busy || working || !draft.entities.length}
                 onClick={() => void publish(draft)}>{t("Publish")}</button>
-              <button type="button" className="knowledge-danger" disabled={busy || !!extracting} onClick={() => void remove(draft)}>{t("Delete")}</button>
+              <button type="button" className="knowledge-danger" disabled={busy || working} onClick={() => void remove(draft)}>{t("Delete")}</button>
             </> : <button type="button" disabled={busy} onClick={() => void unpublish(draft)}>{t("Unpublish")}</button>}
           </div>}
           <details className="knowledge-flow-options"><summary>{t("Draft details")}</summary>

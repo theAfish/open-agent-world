@@ -30,6 +30,7 @@
 .knowledge-flow-source-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 24px; border: 1px dashed var(--line); border-radius: 8px; color: var(--ink-soft); }
 .knowledge-flow-source-empty p { margin: 0; }
 .knowledge-flow-mini { display: flex; gap: 4px; width: 56px; margin-top: 4px; }
+.knowledge-record-list .knowledge-draft-source-names { font-size: 11px; color: var(--ink-soft); line-height: 1.5; }
 .knowledge-flow-mini > i { flex: 1; height: 3px; border-radius: 3px; background: var(--line); }
 .knowledge-flow-mini > i[data-complete="true"] { background: var(--knowledge-accent); }
 .knowledge-flow-stages { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; padding: 4px; margin: 6px 0 2px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }

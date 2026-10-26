@@ -1,4 +1,11 @@
 {
+  "Knowledge drafts": ["Knowledge drafts", "知识草稿"],
+  "Continue existing draft": ["Continue existing draft", "继续已有草稿"],
+  "Create draft from {v0} source(s)": ["Create draft from {v0} source(s)", "用 {v0} 个来源创建草稿"],
+  "After extraction": ["After extraction", "提取后可用"],
+  "Needs extracted concepts": ["Needs extracted concepts", "需要已提取的概念"],
+  "Published draft: unpublish to change it": ["Published draft: unpublish to change it", "草稿已发布，取消发布后可修改"],
+  "Extract concepts before reviewing or publishing": ["Extract concepts before reviewing or publishing", "先提取概念，再审核或发布"],
   "Literature": ["Literature", "文献"],
   "Experiment": ["Experiment", "实验"],
   "Records": ["Records", "记录"],

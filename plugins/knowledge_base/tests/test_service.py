@@ -140,7 +140,7 @@ def test_the_loop_runs_over_http_and_only_an_admin_publishes(client, admin, stor
     listing = call(client, "sources").json()["sources"]
     assert listing[0]["markdown"]["engine"] == "text"
 
-    draft = call(client, "knowledge_draft_manage", operation="create",
+    draft = call(client, "knowledge_draft_manage", operation="open",
                  source_ids=[source_id]).json()["draft"]
     prompt = call(client, "knowledge_extract_prompt", source_id=source_id,
                   draft_id=draft["id"]).json()

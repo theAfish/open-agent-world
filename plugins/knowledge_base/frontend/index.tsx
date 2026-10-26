@@ -216,6 +216,10 @@ export function Workspace({ host, card }: PluginViewProps) {
   const [rawMarkdown, setRawMarkdown] = useState(false);
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [suggestedSourceIds, setSuggestedSourceIds] = useState<string[]>();
+  const [knowledgeVisited, setKnowledgeVisited] = useState(false);
+  const consumeSourceSuggestion = useCallback(() => {
+    setSuggestedSourceIds(undefined); setSelectedSources([]);
+  }, []);
   const [sourceDrag, setSourceDrag] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number }>();
   // Literature → Records: "" shows every literature schema's records; a chosen id narrows to it.
@@ -845,6 +849,8 @@ export function Workspace({ host, card }: PluginViewProps) {
   const literatureRecords = experiments.filter(item => !experimentSchemaIds.has(item.schema_id));
   const convertedSources = sources.filter(item => item.markdown && item.record_id);
   const activeSection = category === "settings" ? "settings" : category === "literature" ? literatureTab : experimentTab;
+  const knowledgeActive = activeSection === "knowledge" || isDetached("knowledge");
+  useEffect(() => { if (knowledgeActive) setKnowledgeVisited(true); }, [knowledgeActive]);
   const publishedCounts = experiments.reduce<Record<string, number>>((counts, item) => {
     if (item.status === "published") counts[item.schema_id] = (counts[item.schema_id] ?? 0) + 1;
     return counts;
@@ -1096,7 +1102,9 @@ export function Workspace({ host, card }: PluginViewProps) {
           </button>
           <button type="button" onClick={() => {
             const selected = convertedSources.filter(item => selectedSources.includes(item.id));
-            setSuggestedSourceIds((selected.length ? selected : convertedSources).map(item => item.id));
+            // With no explicit selection, continue the workspace instead of silently
+            // starting another draft over every document in the collection.
+            setSuggestedSourceIds(selected.length ? selected.map(item => item.id) : undefined);
             setLiteratureTab("knowledge"); setCategory("literature");
           }}><Network size={22} /><span><strong>{t("Build knowledge")}</strong><small>{t("Connect ideas across sources")}</small></span><ArrowRight size={16} /></button>
           <button type="button" onClick={() => { setLiteratureTab("records"); setCategory("literature"); }}>
@@ -1201,11 +1209,13 @@ export function Workspace({ host, card }: PluginViewProps) {
         </div>
       </WorkspaceSection>}
 
-      {((category === "literature" && literatureTab === "knowledge") || isDetached("knowledge")) && <WorkspaceSection id="knowledge" title={t("Knowledge")} layout={{ min_width: 320, min_height: 320, ideal_width: 960, ideal_height: 640 }} className="knowledge-section knowledge-wide">
+      {(knowledgeActive || knowledgeVisited) && <WorkspaceSection id="knowledge" title={t("Knowledge")} layout={{ min_width: 320, min_height: 320, ideal_width: 960, ideal_height: 640 }} className="knowledge-section knowledge-wide"
+        style={knowledgeActive ? undefined : { display: "none" }}>
         <div className="knowledge-section knowledge-wide" data-detached={isDetached("knowledge") || undefined}>
           <KnowledgeSection host={host} cardId={card.id} deployed={deployed} busy={busy} version={refreshVersion}
             sources={convertedSources} activeGroup={activeGroup} groupCount={groups.length}
-            suggestedSourceIds={suggestedSourceIds} onAddSources={() => { setCategory("literature"); setLiteratureTab("sources"); }}
+            active={knowledgeActive} suggestedSourceIds={suggestedSourceIds} onSourcesHandled={consumeSourceSuggestion}
+            onAddSources={() => { setCategory("literature"); setLiteratureTab("sources"); }}
             groupArgs={groupArgs} groupFilter={groupFilter} call={call} perform={perform} request={request}
             extractAgent={extractAgents[0]} canRunAgent={!deployed && typeof host.runAgent === "function" && extractAgents.length > 0}
             selectedModel={selectedModel} modelSelect={modelSelect} groupSelect={groupSelect} refreshControls={refreshControls}

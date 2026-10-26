@@ -193,6 +193,29 @@ def test_agent_draft_open_reuses_unpublished_sources_and_preserves_published_dra
         run(agent, knowledge.knowledge_draft_open, source_ids=[raw["id"]])
 
 
+def test_card_open_continues_the_same_source_set_and_revalidates_sources(card):
+    first, _ = ingest_document(card)
+    second, _ = ingest_document(card, "# Other paper", "other.md")
+    single = run(card, knowledge.knowledge_draft_manage, operation="open", source_ids=[first])["draft"]
+    combined = run(card, knowledge.knowledge_draft_manage, operation="open", source_ids=[first, second])["draft"]
+    run(card, knowledge.knowledge_save, draft_id=combined["id"], source_id=first, entities=[{"name": "Si3N4"}])
+    reopened = run(card, knowledge.knowledge_draft_manage, operation="open", source_ids=[second, first, first])["draft"]
+    assert reopened["id"] == combined["id"] and reopened["entities"][0]["name"] == "Si3N4"
+    assert reopened["id"] != single["id"]
+    card.confirmed = True
+    run(card, knowledge.knowledge_review, operation="publish", draft_id=combined["id"])
+    published = run(card, knowledge.knowledge_draft_manage, operation="open", source_ids=[first, second])["draft"]
+    assert published["id"] == combined["id"] and published["status"] == "published"
+    assert len(run(card, knowledge.knowledge_drafts)["drafts"]) == 2
+    raw = run(card, actions.ingest, filename="pending.md", content_base64="cmF3")["source"]
+    with pytest.raises(KnowledgeError):
+        run(card, knowledge.knowledge_draft_manage, operation="open", source_ids=[first, raw["id"]])
+    other_group = run(card, actions.groups, operation="create", name="Other group")["group"]
+    with pytest.raises(KnowledgeError, match="another group"):
+        run(card, knowledge.knowledge_draft_manage, operation="open", source_ids=[first], group_id=other_group["id"])
+    assert len(run(card, knowledge.knowledge_drafts, all_groups=True)["drafts"]) == 2
+
+
 def test_agent_bundle_preparation_reuses_drafts_and_refuses_published_or_destructive_changes(card):
     schema = _experiment_schema(card)
     agent = replace(card, actor_id="researcher")

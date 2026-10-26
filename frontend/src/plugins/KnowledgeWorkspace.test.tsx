@@ -387,7 +387,7 @@ it("opens a knowledge draft over a source and extracts it through the host bridg
     if (name === "sources") return { sources: [CONVERTED] };
     if (name === "knowledge_drafts") return { drafts: opened ? [{ ...DRAFT, entities: [], relations: [],
       sources: [{ ...DRAFT.sources[0], extracted_at: null }] }] : [] };
-    if (name === "knowledge_draft_manage" && args.operation === "create") {
+    if (name === "knowledge_draft_manage" && args.operation === "open") {
       opened = true;
       return { draft: { ...DRAFT, entities: [], relations: [], sources: [{ ...DRAFT.sources[0], extracted_at: null }] } };
     }
@@ -398,9 +398,9 @@ it("opens a knowledge draft over a source and extracts it through the host bridg
   const region = within(await screen.findByRole("region", { name: "Knowledge" }));
   fireEvent.click(await region.findByRole("button", { name: "New draft" }));
   fireEvent.click(await region.findByLabelText("Select sintering.md"));
-  fireEvent.click(region.getByRole("button", { name: "Open draft over 1 source(s)" }));
+  fireEvent.click(region.getByRole("button", { name: "Create draft from 1 source(s)" }));
   await waitFor(() => expect(action).toHaveBeenCalledWith("knowledge_draft_manage",
-    expect.objectContaining({ operation: "create", source_ids: ["source-1"] }), undefined));
+    expect.objectContaining({ operation: "open", source_ids: ["source-1"] }), undefined));
 
   // The new draft is selected; its one unread source is extracted with the chosen model.
   expect((await region.findByLabelText("Model") as HTMLSelectElement).value).toBe("oaw:model:model-1");
@@ -412,6 +412,66 @@ it("opens a knowledge draft over a source and extracts it through the host bridg
   // The card never writes the draft itself: the bridge hands the model's answer to the plugin.
   expect(action.mock.calls.some(([name]) => name === "knowledge_save")).toBe(false);
   expect(await region.findByText(/Read 1 source\(s\) in 1 part\(s\) · 2 concepts added/)).toBeTruthy();
+});
+
+it("resumes a draft across navigation and consumes an explicit source selection only once", async () => {
+  const other = { ...CONVERTED, id: "source-2", filename: "other.md", record_id: "record-2" };
+  const created = { ...DRAFT, id: "draft-2", title: "Other paper", entities: [], relations: [],
+    sources: [{ ...DRAFT.sources[0], source_id: other.id, filename: other.filename, extracted_at: null }] };
+  const drafts: (typeof DRAFT | typeof created)[] = [DRAFT];
+  const action = open(async (name, args) => {
+    if (name === "sources") return { sources: [CONVERTED, other] };
+    if (name === "knowledge_drafts") return { drafts: [...drafts] };
+    if (name === "knowledge_draft_manage" && args.operation === "open") { drafts.push(created); return { draft: created }; }
+    return undefined;
+  });
+  fireEvent.click(await screen.findByRole("button", { name: /Build knowledge/ }));
+  expect(await screen.findByRole("button", { name: "Review draft" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Create draft from/ })).toBeNull();
+  fireEvent.click(screen.getByRole("tab", { name: "Sources" }));
+  fireEvent.click(await screen.findByLabelText("Select other.md"));
+  fireEvent.click(screen.getByRole("button", { name: /Build knowledge/ }));
+  const title = await screen.findByLabelText("Title") as HTMLInputElement;
+  fireEvent.change(title, { target: { value: "Other paper" } });
+  expect((screen.getByLabelText("Select sintering.md") as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(screen.getByRole("tab", { name: "Records" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Knowledge" }));
+  expect(screen.getByLabelText("Title")).toBe(title);
+  expect(title.value).toBe("Other paper");
+  expect((screen.getByLabelText("Select other.md") as HTMLInputElement).checked).toBe(true);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Create draft from 1 source(s)" }).hasAttribute("disabled")).toBe(false));
+  fireEvent.click(screen.getByRole("button", { name: "Create draft from 1 source(s)" }));
+  expect(await screen.findByRole("heading", { name: "Other paper" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab", { name: "Sources" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Build knowledge/ }));
+  expect(await screen.findByRole("heading", { name: "Other paper" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Create draft from/ })).toBeNull();
+  fireEvent.click(screen.getByRole("tab", { name: "Sources" }));
+  fireEvent.click(await screen.findByLabelText("Select other.md"));
+  fireEvent.click(screen.getByRole("button", { name: /Build knowledge/ }));
+  expect(await screen.findByRole("heading", { name: "Other paper" })).toBeTruthy();
+  expect(action.mock.calls.filter(([name]) => name === "knowledge_draft_manage")).toEqual([
+    ["knowledge_draft_manage", { operation: "open", source_ids: ["source-2"], title: "Other paper" }, undefined],
+  ]);
+});
+
+it("restores the selected draft and unfinished editing after the workspace closes", async () => {
+  let saved: Record<string, unknown> | undefined;
+  const host = { draft: { get: () => saved, set: (value: Record<string, unknown>) => { saved = value; } } };
+  const older = { ...DRAFT, id: "older", title: "Previous analysis" };
+  const handler: Action = async name => name === "knowledge_drafts" ? { drafts: [DRAFT, older] } : undefined;
+  open(handler, { host });
+  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Draft Previous analysis/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Unfinished title" } });
+  cleanup();
+  const action = open(handler, { host });
+  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
+  await screen.findByRole("button", { name: /Draft Previous analysis/ });
+  expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Unfinished title");
+  expect(screen.getByRole("button", { name: /Draft Previous analysis/ }).getAttribute("aria-pressed")).toBe("true");
+  expect(action.mock.calls.some(([name]) => name === "knowledge_draft_manage")).toBe(false);
 });
 
 it.each(["extract", "research"])("extracts a literature draft through a %s agent", async access => {
@@ -477,7 +537,7 @@ it("reviews a knowledge draft through the host bridge and shows the applied oper
 
   fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
   const region = within(await screen.findByRole("region", { name: "Knowledge" }));
-  fireEvent.click(await region.findByRole("button", { name: /sintering\.md/ }));
+  fireEvent.click(await region.findByRole("button", { name: /Draft sintering\.md/ }));
   fireEvent.click(await region.findByRole("button", { name: "Review draft" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
@@ -556,11 +616,16 @@ it("shows streamed extraction progress and keeps the result of the final line", 
 
   fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
   const region = within(await screen.findByRole("region", { name: "Knowledge" }));
-  fireEvent.click(await region.findByRole("button", { name: /sintering\.md/ }));
+  fireEvent.click(await region.findByRole("button", { name: /Draft sintering\.md/ }));
   fireEvent.click(await region.findByRole("button", { name: "Extract 1 unread source(s)" }));
   const bar = await region.findByRole("progressbar", { name: /Reading sintering\.md · part 1\/2/ }) as HTMLProgressElement;
   expect(bar.value).toBe(0); expect(bar.max).toBe(2);
   expect(region.getByText(/0 of 2/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab", { name: "Sources" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Knowledge" }));
+  expect(region.getByRole("progressbar", { name: /Reading sintering\.md/ })).toBe(bar);
+  expect(region.getByRole("button", { name: "Extraction stage" }).hasAttribute("disabled")).toBe(true);
+  expect(fetch).toHaveBeenCalledTimes(1);
   release();
   expect(await region.findByText(/Read 1 source\(s\) in 2 part\(s\) · 2 concepts added/)).toBeTruthy();
   expect(region.queryByRole("progressbar")).toBeNull();
@@ -687,7 +752,7 @@ it("keeps the graph empty until the person confirms publishing a knowledge draft
 
   fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
   const region = within(await screen.findByRole("region", { name: "Knowledge" }));
-  fireEvent.click(await region.findByRole("button", { name: /sintering\.md/ }));
+  fireEvent.click(await region.findByRole("button", { name: /Draft sintering\.md/ }));
   // The draft's elements are listed with their evidence before anyone publishes.
   expect(await region.findByText("a ceramic")).toBeTruthy();
   expect(region.getByText("silicon nitride")).toBeTruthy();

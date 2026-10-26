@@ -158,9 +158,16 @@ ever shows.
    switches to the raw text.
 2. **Knowledge** — the concept graph of your literature, with no schema to write.
    **New draft** picks one or more converted sources and opens a **knowledge
-   draft** over them. **Build knowledge** in Sources preselects your ready materials.
+   draft** over them. A draft is an extraction task over a chosen set of documents;
+   selecting sources does not run extraction or copy the documents. **Build knowledge**
+   in Sources continues your current work. Explicitly checked sources open a matching
+   saved draft, or a creation form for exactly those sources. Opening the same source
+   set and title reuses its draft. Tab changes retain the form, selected draft and run;
+   the host's transient card/session state also restores your place after closing the workspace.
    The draft's **Extract → Review → Publish** stages show actual source and review
-   progress, with the current action beside it. **Extract** reads each source a few sections at a time —
+   progress, with the current action beside it. Review and publication unlock once
+   the draft contains concepts; the primary **Extract** button starts that work.
+   **Extract** reads each source a few sections at a time —
    through a connected Agent holding **Knowledge extract** when there is one, else
    one model call per chunk of sections (a short document is one call) — and names
    the concepts it is about and the relations it states between them. Nodes are

@@ -87,7 +87,7 @@ def knowledge_drafts(context, arguments):
 
 
 class KnowledgeDraftManage(Request):
-    operation: Literal["create", "update", "delete"]
+    operation: Literal["open", "create", "update", "delete"]
     draft_id: str | None = None
     group_id: str | None = None
     title: str | None = Field(default=None, max_length=500)
@@ -113,6 +113,12 @@ def knowledge_draft_manage(context, arguments):
     """Open a draft over a set of converted sources, change its title or source set,
     or delete it. Agents use the narrower knowledge_draft_open operation."""
     request = KnowledgeDraftManage.model_validate(arguments)
+    if request.operation == "open":
+        # Navigation and retry must not create another draft over the same material.
+        # A person can continue reading published work; an agent prepares editable drafts.
+        return _open_draft(context, KnowledgeDraftOpen.model_validate({
+            "source_ids": request.source_ids, "group_id": request.group_id, "title": request.title,
+        }), include_published=True)
     if request.operation == "create":
         if not request.source_ids:
             raise KnowledgeError("source_ids are required to open a knowledge draft")
@@ -151,10 +157,13 @@ class KnowledgeDraftOpen(Request):
 
 def knowledge_draft_open(context, arguments):
     """Open or reuse an unpublished draft over exactly these converted sources."""
-    request = KnowledgeDraftOpen.model_validate(arguments)
+    return _open_draft(context, KnowledgeDraftOpen.model_validate(arguments))
+
+
+def _open_draft(context, request, *, include_published=False):
     kb, group, _ = _base(context, request.group_id)
     sources = _converted_sources(kb, group.id, request.source_ids)
-    for draft in kb.oaw_knowledge.list(group_id=str(group.id), status="draft", limit=500):
+    for draft in kb.oaw_knowledge.list(group_id=str(group.id), status=None if include_published else "draft", limit=500):
         if (set(_source_ids(kb, draft["id"])) == set(sources)
                 and (request.title is None or draft["title"] == request.title)):
             return _bounded({"draft": _draft_json(kb, draft, sources=True)})

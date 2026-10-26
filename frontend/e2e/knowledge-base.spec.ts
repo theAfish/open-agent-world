@@ -42,7 +42,7 @@ test('knowledge guides documents into drafts and records, with saved groups and 
       await app.screenshot({ path: path.join(screenshotDirectory, `${name}.png`) });
     };
     await expect(app.getByRole('tab', { name: 'Sources', exact: true })).toHaveAttribute('aria-selected', 'true');
-    await expect(app.getByLabel('Group', { exact: true })).toHaveCount(1);
+    await expect(app.getByRole('combobox', { name: 'Group', exact: true })).toHaveCount(1);
     await expect(app.getByText('Add your first document')).toBeVisible();
     await expect(app.getByLabel('Add documents', { exact: true })).toBeEnabled();
     await app.screenshot({ path: path.join(screenshotDirectory, 'empty-light-wide.png') });
@@ -75,15 +75,35 @@ test('knowledge guides documents into drafts and records, with saved groups and 
     const goals = app.getByRole('group', { name: 'Use your documents', exact: true });
     await expect(goals).toBeVisible();
     await capture('sources-ready-light-wide');
+    await app.getByRole('checkbox', { name: 'Select Lithium-ion transport in solid electrolytes.md', exact: true }).check();
     await goals.getByRole('button', { name: /Build knowledge/ }).click();
     await expect(app.getByRole('tab', { name: 'Knowledge', exact: true })).toHaveAttribute('aria-selected', 'true');
     await expect(app.getByRole('checkbox', { name: 'Select Lithium-ion transport in solid electrolytes.md', exact: true })).toBeChecked();
     await capture('knowledge-create-light-wide');
     await app.getByLabel('Title', { exact: true }).fill('Solid electrolyte transport');
-    await app.getByRole('button', { name: 'Open draft over 1 source(s)', exact: true }).click();
+    await app.getByRole('tab', { name: 'Sources', exact: true }).click();
+    await app.getByRole('tab', { name: 'Knowledge', exact: true }).click();
+    await expect(app.getByLabel('Title', { exact: true })).toHaveValue('Solid electrolyte transport');
+    await expect(app.getByRole('checkbox', { name: 'Select Lithium-ion transport in solid electrolytes.md', exact: true })).toBeChecked();
+    await app.getByRole('button', { name: 'Create draft from 1 source(s)', exact: true }).click();
     await expect(app.getByRole('button', { name: 'Extraction stage', exact: true })).toHaveAttribute('aria-current', 'step');
     await expect(app.getByRole('button', { name: 'Review stage', exact: true })).toBeDisabled();
     await expect(app.getByRole('button', { name: 'Publication stage', exact: true })).toBeDisabled();
+    const listDrafts = async () => (await (await request.post(`/api/nodes/${ids.knowledge}/resource/knowledge_drafts`,
+      { data: { arguments: { all_groups: true } } })).json()).drafts;
+    const [savedDraft] = await listDrafts();
+    for (const selected of [false, true]) {
+      await app.getByRole('tab', { name: 'Sources', exact: true }).click();
+      if (selected) await app.getByRole('checkbox', { name: 'Select Lithium-ion transport in solid electrolytes.md', exact: true }).check();
+      await goals.getByRole('button', { name: /Build knowledge/ }).click();
+      await expect(app.getByRole('heading', { name: 'Solid electrolyte transport', exact: true })).toBeVisible();
+      await expect(app.getByLabel('Title', { exact: true })).toHaveCount(0);
+      expect((await listDrafts()).map((item: { id: string }) => item.id)).toEqual([savedDraft.id]);
+    }
+    await workspace.getByRole('button', { name: 'Back to canvas', exact: true }).click();
+    await openWorkspace();
+    await app.getByRole('tab', { name: 'Knowledge', exact: true }).click();
+    await expect(app.getByRole('heading', { name: 'Solid electrolyte transport', exact: true })).toBeVisible();
     await capture('knowledge-draft-light-wide');
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await expect(app.locator('.knowledge-flow-panel:visible')).toHaveCSS('animation-name', 'none');
@@ -126,15 +146,15 @@ test('knowledge guides documents into drafts and records, with saved groups and 
     await expect(app.getByRole('button', { name: 'Remove token', exact: true })).toHaveCount(0);
 
     await app.getByRole('button', { name: 'Literature', exact: true }).click();
-    await app.getByLabel('Group', { exact: true }).selectOption({ label: 'Knowledge base' });
+    await app.getByRole('combobox', { name: 'Group', exact: true }).selectOption({ label: 'Knowledge base' });
     await app.getByLabel('Manage groups', { exact: true }).click();
     await app.getByRole('button', { name: 'New group', exact: true }).click();
     await app.getByLabel('Group name', { exact: true }).fill('Transport studies');
     await app.getByRole('button', { name: 'Create', exact: true }).click();
-    await expect(app.getByLabel('Group', { exact: true })).toHaveValue(/.+/);
+    await expect(app.getByRole('combobox', { name: 'Group', exact: true })).toHaveValue(/.+/);
     const groups = await (await request.post(`/api/nodes/${ids.knowledge}/resource/groups`, { data: { arguments: {} } })).json();
     expect(groups.groups.map((group: { name: string }) => group.name)).toEqual(expect.arrayContaining(['Knowledge base', 'Transport studies']));
-    await app.getByLabel('Group', { exact: true }).selectOption('');
+    await app.getByRole('combobox', { name: 'Group', exact: true }).selectOption('');
     await expect(document.locator('small')).toContainText('Ready');
     await document.click();
     await page.setViewportSize({ width: 1000, height: 850 });
@@ -177,7 +197,7 @@ test('knowledge guides documents into drafts and records, with saved groups and 
     await capture('experiment-upload-light-minimum');
     await app.getByRole('button', { name: 'Literature', exact: true }).click();
     await app.getByRole('tab', { name: 'Sources', exact: true }).click();
-    await app.getByLabel('Group', { exact: true }).selectOption({ label: 'Transport studies' });
+    await app.getByRole('combobox', { name: 'Group', exact: true }).selectOption({ label: 'Transport studies' });
     await expect(app.getByText('Add your first document')).toBeVisible();
     await capture('empty-light-minimum');
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
