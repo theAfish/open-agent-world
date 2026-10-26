@@ -8,17 +8,18 @@ Restart OAW, open the Pack in **Packs**, collect its cards and add them to a dec
 Store lists an explicit **Update** action when a newer version is available;
 it does not poll or install updates in the background.
 
-The official Marketplace endpoint has not been deployed. An unconfigured build
-shows **Store unavailable → Retry**, while Packs, Cards, Deck and World continue
-to work. Development and acceptance can set `OPEN_AGENT_WORLD_MARKETPLACE_URL`
-to the Marketplace service origin (without `/v1`). This is a host environment
-override, not an ordinary Settings UI field. The single release-owned default is
+OAW connects to the deployed official Marketplace at
+`https://open-agent-world.space` by default; users do not configure an endpoint.
+If it is unreachable, **Store unavailable → Retry** leaves Packs, Cards, Deck and
+World usable. Development can set `OPEN_AGENT_WORLD_MARKETPLACE_URL` to a service
+origin (without `/marketplace` or `/v1`). This is a host environment override,
+not an ordinary Settings UI field. The single release-owned default is
 `backend/official_marketplace.py:OFFICIAL_MARKETPLACE_URL`. An explicit override
 wins; an explicit empty override disables Store for development/offline checks.
 All URL validation and networking remain lazy, so startup does not need internet.
-Tagged Desktop releases require a confirmed default. The default stays unset
-until the service is deployed and verified; no guessed address is shipped.
-See [production readiness and remaining operator steps](internal/plans/marketplace-production.md).
+Pushed Desktop release tags check the default when `OAW_REQUIRE_MARKETPLACE=true`;
+manual preview builds retain the existing release policy.
+See [production integration acceptance](internal/validation/official-marketplace.md).
 
 ## Ownership and HTTP
 
@@ -116,9 +117,8 @@ node frontend/scripts/run-pack-e2e.mjs --store-fake    # fake HTTP + offline
 ```
 
 The fake HTTP server implements catalog/search/pagination/detail/version and
-streams the fixture bytes. It is stopped before the offline UI scenario. Real
-Shared Python provisioning may download the fixture's declared `colorama`
-requirement from PyPI; the fake Marketplace itself never accesses GitHub.
+streams the Schema 3 fixture bytes. It is stopped before the offline UI scenario.
+Greeter has no Sandbox requirements; the fake Marketplace never accesses GitHub.
 
 The explicitly gated real acceptance can use an already running Marketplace:
 
@@ -141,11 +141,25 @@ CLI credential, sends it only to the Marketplace subprocess, and removes GitHub
 and Marketplace credential variables from the OAW/browser environment. It does
 not publish, upload, modify the Marketplace source or persist credentials.
 
-The real gate requires the original `example.greeter@0.1.0` artifact, 4,191 bytes:
+The real gate requires the same Schema 3 Greeter version and bytes recorded by
+`scripts/build-external-greeter.py` in `.outputs/pack-acceptance/build.json` to be
+published separately. Historical Schema 1 releases are unsupported. Publishing
+or deleting Releases is an explicit operator action, never performed by this test.
+Official production acceptance uses the published Schema 3 Greeter directly,
+without building a local fixture or supplying any Marketplace override:
 
-```text
-34ee377564f6fd7776a041cc8db82d6e9f8e5bd107c4b9287f416122259cffb5
+```powershell
+Remove-Item Env:OPEN_AGENT_WORLD_MARKETPLACE_URL -ErrorAction SilentlyContinue
+$env:OAW_PACK_VERSION = '0.2.0'
+$env:OAW_PACK_EXPECTED_SHA = 'c589f96c0201c35da3398a747e47b845bfb2d7d3dac3b8ff5c2c427cdbd6ad41'
+node frontend/scripts/run-pack-e2e.mjs --store-official
 ```
+
+The official runner rejects even an explicitly empty override. After the online
+flow it restarts the host with unreachable HTTP proxies, verifies the saved
+World/Deck and local interaction, and checks Store failure and Retry. Proxy
+settings apply only to the isolated acceptance host; the official origin stays
+unchanged. This models upstream network failure, not an OS-wide network outage.
 
 It checks the install database's actual digest after Get and runs the complete
 restart/Library/Deck/World/persisted-interaction scenario. Each fresh profile

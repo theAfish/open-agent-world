@@ -1,3 +1,9 @@
+> Historical record. The subsequent pre-release cleanup removes Pack Schema 1
+> support and its acceptance fixture. Current contracts support Schema 2 content
+> and Schema 3 code-capable Packs only; historical hashes, compatibility claims
+> and `--host-only` build instructions below are not current requirements.
+> See [the current distribution guide](../../pack-distribution.md).
+
 # Pack 安装与依赖管理统一方案
 
 状态：本轮继续完成现有 Pack 迁移及安装、恢复、卸载闭环；历史审查基线为 `b2b9012`，实施基于合入 AtomSculptor 后的 `d1f6ce3`。日期：2026-10-16。

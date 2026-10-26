@@ -1,8 +1,7 @@
 """Single release-owned Marketplace endpoint; never a user preference.
 
-Set this only after the operator has deployed and verified the permanent HTTPS
-service. An unset value truthfully keeps builds and releases Store-unavailable.
-The developer override is resolved by Settings, without doing network I/O.
+The deployed service origin contains no API path. Settings resolves the
+developer override without network I/O; Store requests connect lazily.
 """
 
-OFFICIAL_MARKETPLACE_URL: str | None = None
+OFFICIAL_MARKETPLACE_URL: str | None = "https://open-agent-world.space"

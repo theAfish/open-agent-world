@@ -12,10 +12,9 @@ Pack's declared dependencies in its own directory. Source-component tests then
 resolve Pack dependencies without adding them to the host manifest. The same job
 packs the public SDK, builds the existing Greeter outside the checkout, installs
 its `.oawpack`, restarts the production host, and checks cards and frontend assets
-in Chromium with the mock runtime. `--host-only` omits the fixture's optional,
-unused Sandbox Python dependency from the external copy; the original fixture
-and its full native-environment acceptance remain available without that flag.
-CI checks host loading, not native Sandbox provisioning. No Marketplace or
+in Chromium with the mock runtime. The fixture uses `oaw.pack.toml` and the
+canonical Schema 3 `build-project` toolchain. CI checks host loading and saved
+card behavior; this fixture has no Sandbox dependency. No Marketplace or
 model credentials are used.
 
 `Application version consistency` checks all committed application declarations.

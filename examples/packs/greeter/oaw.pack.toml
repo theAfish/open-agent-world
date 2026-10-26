@@ -1,0 +1,23 @@
+schema_version = 3
+
+[distribution]
+id = "example.greeter"
+name = "Greeter"
+
+[compatibility]
+oaw = ">=0.1.0,<1"
+plugin_api = "1.26"
+
+[plugin]
+owner = "example.greeter"
+packs = ["example.greeter"]
+node_types = ["example.greeter.card"]
+
+[components.backend]
+project = "pyproject.toml"
+mode = "host-adapter"
+
+[components.frontend]
+entry = "frontend/index.tsx"
+project = "package.json"
+mode = "pack-build"

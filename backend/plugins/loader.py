@@ -298,16 +298,14 @@ def load_installed_packs(registry: PluginRegistry, data_root: Path, *, strict: b
                     registry.install(plugin, distribution=manifest)
                     _record_installed(registry, manager, manifest)
                     continue
-                origin = manager.version_path(manifest.id, manifest.version) / manifest.entrypoints.backend
-                if manifest.schema_version == 3:
-                    from backend.packs.adapters import activate_adapters
-                    activate_adapters(manifest.adapter, data_root)
-                    from backend.packs.modules import prepared_modules
-                    origin = prepared_modules(manifest, manager.root / "cache" / "modules",
-                        expected_digest=manager._checksums(manifest.id, manifest.version)[manifest.entrypoints.backend])
-                    phase = 'accounting'
-                    ledger.register('modules:' + origin.name, origin, 'modules')
-                    phase = 'environment'
+                from backend.packs.adapters import activate_adapters
+                activate_adapters(manifest.adapter, data_root)
+                from backend.packs.modules import prepared_modules
+                origin = prepared_modules(manifest, manager.root / "cache" / "modules",
+                    expected_digest=manager._checksums(manifest.id, manifest.version)[manifest.entrypoints.backend])
+                phase = 'accounting'
+                ledger.register('modules:' + origin.name, origin, 'modules')
+                phase = 'environment'
                 for module_name in manifest.module_names:
                     existing = importlib.util.find_spec(module_name)
                     if existing is None:
@@ -322,8 +320,7 @@ def load_installed_packs(registry: PluginRegistry, data_root: Path, *, strict: b
                 # Keep the installed backend tree free of host bytecode writes.
                 previous_bytecode = sys.dont_write_bytecode
                 try:
-                    if manifest.schema_version == 3:
-                        sys.dont_write_bytecode = True
+                    sys.dont_write_bytecode = True
                     plugin = create_plugin(EntryPoint(name=manifest.id, value=entrypoint, group=ENTRY_POINT_GROUP).load(),
                         data_root=data_root, source_root=manager.version_path(manifest.id, manifest.version))
                 finally:

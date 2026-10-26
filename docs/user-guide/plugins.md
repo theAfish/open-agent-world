@@ -60,9 +60,9 @@ Open it, add its cards to your Deck and place them in your World.
 
 **Update available** offers an explicit **Update** action; OAW does not update
 Packs automatically. If the Store is unavailable, use **Retry** later. Your
-existing Packs, Cards, Deck and World keep working. The official endpoint is
-not deployed yet; development builds can connect through the host override
-described in [Pack Store Client V0](../pack-store.md).
+existing Packs, Cards, Deck and World keep working. OAW connects to the official
+Marketplace at `https://open-agent-world.space` automatically. Development host
+overrides are described in [Pack Store Client V0](../pack-store.md).
 
 ## Disable or remove a Pack
 

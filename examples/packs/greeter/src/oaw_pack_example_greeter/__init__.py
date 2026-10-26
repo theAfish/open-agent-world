@@ -33,4 +33,4 @@ def register(registration):
 
 
 def create_plugin():
-    return PluginDefinition(PluginDescriptor(id="example.greeter", version="0.1.0", plugin_api_version="1.26", name="Greeter"), register)
+    return PluginDefinition(PluginDescriptor(id="example.greeter", version="0.2.0", plugin_api_version="1.26", name="Greeter"), register)

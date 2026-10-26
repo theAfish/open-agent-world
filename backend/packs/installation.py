@@ -68,7 +68,7 @@ class PackInstallationManager:
         adapter = getattr(manifest, 'adapter', None)
         if adapter:
             result.update('adapter:' + wheel.sha256 for wheel in adapter.wheels)
-        if manifest.kind == 'plugin' and manifest.schema_version == 3:
+        if manifest.kind == 'plugin':
             try:
                 result.add('modules:' + self._checksums(manifest.id, manifest.version)[manifest.entrypoints.backend])
             except (ValueError, KeyError):
@@ -373,10 +373,10 @@ class PackInstallationManager:
         if check_requirements:
             aggregate_requirements(declarations)
         from backend.packs.adapters import check_adapter_dependencies, source_adapter_declaration
-        adapters = [manifest.adapter for manifest in selected.values() if manifest.schema_version == 3]
+        adapters = [manifest.adapter for manifest in selected.values() if manifest.kind == 'plugin']
         if registry is not None:
             adapters.extend(manifest.adapter for manifest in registry.installed_packs.values()
-                            if manifest.schema_version == 3 and selected.get(manifest.id) != manifest)
+                            if manifest.kind == 'plugin' and selected.get(manifest.id) != manifest)
             for owner, spec in registry.pack_specs.items():
                 if (registry.has_plugin(owner) and registry.pack_sources.get(owner) != 'installed'
                         and self.source_enrolled(spec.distribution_id)):
@@ -713,7 +713,7 @@ class PackInstallationManager:
     def _prepare_startup_receipt(self, manifest, files, entry, *, consumer):
         """Persist only metadata already accepted by the full archive inspector."""
         receipt = self._startup_metadata(manifest, files, entry)
-        if manifest.kind == 'plugin' and manifest.schema_version == 3:
+        if manifest.kind == 'plugin':
             self._materialize_backend(manifest, files[manifest.entrypoints.backend],
                                       receipt['backend_sha256'], consumer=consumer)
         return receipt
@@ -765,7 +765,7 @@ class PackInstallationManager:
         return materialize_modules(wheel, manifest, self.root / 'cache/modules', expected_digest=digest)
 
     def _prepare_backend_modules(self, manifest, *, consumer):
-        if manifest.kind == 'plugin' and manifest.schema_version == 3:
+        if manifest.kind == 'plugin':
             digest = self._checksums(manifest.id, manifest.version)[manifest.entrypoints.backend]
             wheel = (self.version_path(manifest.id, manifest.version) / manifest.entrypoints.backend).read_bytes()
             self._materialize_backend(manifest, wheel, digest, consumer=consumer)
@@ -817,9 +817,8 @@ class PackInstallationManager:
         if not isinstance(entry, str) or not re.fullmatch(re.escape(manifest.module_name) + r'(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*', entry):
             raise ValueError('Invalid installed Pack entry point')
         _regular(path / manifest.entrypoints.backend, path, directory=False)
-        from backend.packs.archive import check_backend_requirements
-        check_backend_requirements(receipt['requires_python'],
-                                   receipt['requires'] if manifest.schema_version < 3 else ())
+        from backend.packs.archive import check_backend_python
+        check_backend_python(receipt['requires_python'])
         return entry
 
     def verify_integrity(self, manifest: PackManifest) -> None:
@@ -837,7 +836,7 @@ class PackInstallationManager:
                 raise ValueError('Pack startup receipt differs from verified archive metadata')
         from backend.packs.adapters import prepared_adapter_paths
         prepared_adapter_paths(manifest.adapter, self.root.parent, read_only=True)
-        if manifest.kind == 'plugin' and manifest.schema_version == 3:
+        if manifest.kind == 'plugin':
             from backend.packs.modules import verify_modules
             verify_modules(files[manifest.entrypoints.backend],
                            manifest, self.root / 'cache/modules',

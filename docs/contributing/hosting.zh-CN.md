@@ -101,6 +101,15 @@ oaw.example.com {
 
 DNS 和证书配置完成后通过该域名访问；ECS 安全组仅开放需要的 HTTPS/HTTP 和受限管理端口。代理需保留原始 Host；网关严格校验 Host/Origin，不信任浏览器转发头。登录限速按真实 socket peer 计算，单一反向代理后的用户共享保守的来源限额。
 
+上传和耗时操作还需要匹配代理限制：使用 Nginx 时，将 `client_max_body_size` 设置为至少 `48m`，
+容纳最大 32 MiB 知识库文件的 base64 JSON 请求；将 `proxy_read_timeout` 设置为至少 `3600s`，
+让 Sandbox 启动、执行和 Python 安装请求能等待冷启动完成。实际操作时限仍由 worker 控制，
+其他 API 的网关读取超时保持 300 秒。响应超时不代表后台操作已停止，应先检查执行状态，不能直接重复提交。
+
+节点动作和资源操作的请求体上限为 48 MiB，普通配置 JSON 保持 4 MiB，并继续校验托管路径策略。
+超过限制返回明确的 413 大小错误。会话附件和 PDF 导入的进度上传与普通请求一样携带工作区标识；
+登录失效或工作区变化时终止旧上传，重新登录或刷新后再由用户重新选择文件。
+
 新增用户或修改部署配置时，先 `sudo systemctl stop oaw-hosted.target`，执行账号/实例命令，再重新执行上述生成、安装、启动步骤。这会为新用户分配独立 UID，并保持已有用户 UUID、密码、签名密钥、会话和文件。安装器可以把旧的 HTTP worker 地址转换为 Unix socket，原始路由保存在 `control/hosting.before-systemd.json`；不会重新初始化用户数据。旧部署若仍在运行，应先停止它，旧 Compose 文件不会再被使用。
 
 ```bash

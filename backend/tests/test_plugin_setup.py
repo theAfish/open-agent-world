@@ -29,7 +29,7 @@ native = "example:prepare"
 
 
 @pytest.mark.parametrize("mode", ["editable", "target", "dry-run"])
-def test_plugin_hooks_follow_successful_install_in_destination_python(installer, monkeypatch, tmp_path, mode):
+def test_undeclared_setup_hooks_are_rejected_before_install(installer, monkeypatch, tmp_path, mode):
     module, plugin, calls = installer
     args = ["install-plugins.py", str(plugin), "--python", "destination-python"]
     if mode == "target":
@@ -37,15 +37,13 @@ def test_plugin_hooks_follow_successful_install_in_destination_python(installer,
     if mode == "dry-run":
         args += ["--dry-run"]
     monkeypatch.setattr(sys, "argv", args)
-    module.main()
-    assert calls[0][:6] == ["uv", "pip", "install", "--no-deps", "--python", "destination-python"]
-    assert len(calls) == (1 if mode == "dry-run" else 2)
-    if mode != "dry-run":
-        assert calls[1][:2] == ["destination-python", "-c"]
-        assert calls[1][-2:] == ["example-pack", str(tmp_path / "payload") if mode == "target" else ""]
+    with pytest.raises(SystemExit) as error:
+        module.main()
+    assert error.value.code == 2
+    assert not calls
 
 
-def test_failed_dependency_install_never_runs_hooks(installer, monkeypatch):
+def test_failed_desktop_install_never_prepares_environments(installer, monkeypatch, tmp_path):
     module, plugin, calls = installer
 
     def fail(args, **kwargs):
@@ -53,7 +51,8 @@ def test_failed_dependency_install_never_runs_hooks(installer, monkeypatch):
         raise subprocess.CalledProcessError(1, args)
 
     monkeypatch.setattr(module.subprocess, "run", fail)
-    monkeypatch.setattr(sys, "argv", ["install-plugins.py", str(plugin)])
+    (plugin / "oaw.pack.toml").write_text("schema_version=3\n")
+    monkeypatch.setattr(sys, "argv", ["install-plugins.py", str(plugin), "--target", str(tmp_path / "payload")])
     with pytest.raises(subprocess.CalledProcessError):
         module.main()
     assert len(calls) == 1
@@ -70,7 +69,6 @@ def test_declared_pack_uses_shared_manager_instead_of_setup_hook(installer, monk
     module.main()
     assert len(calls) == (2 if target else 1)
     assert calls[-1][2] == module.PREPARE_DECLARED
-    assert module.SETUP_HOOKS not in calls[-1]
     assert calls[-1][-2:] == [str(plugin.resolve()), str(tmp_path / "payload") if target else ""]
     if not target:
         assert not any('--editable' in call for call in calls)

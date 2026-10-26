@@ -612,9 +612,9 @@ class PluginRegistry:
             raise ValueError("Plugin must register exactly its declared owned node types")
         if distribution is not None:
             if declared_nodes is None and any(not key.startswith(distribution.owner_id + ".") and not (
-                    distribution.schema_version == 3 and key == distribution.owner_id) for key in staged.nodes):
+                    distribution.kind == 'plugin' and key == distribution.owner_id) for key in staged.nodes):
                 raise ValueError("External card IDs must belong to the Pack namespace")
-            if distribution.schema_version != 3 and any(card not in staged.nodes for pack in staged.packs.values() for card in pack.cards):
+            if distribution.kind == 'content' and any(card not in staged.nodes for pack in staged.packs.values() for card in pack.cards):
                 raise ValueError("An external Pack may include only its own cards")
         for key, node in tuple(staged.nodes.items()):
             policy = node.state if node.state is not None else descriptor.state
@@ -631,7 +631,7 @@ class PluginRegistry:
         if source_spec is not None and source_spec.packs and set(staged.packs) != set(source_spec.packs):
             raise ValueError("Plugin must register exactly its declared provided Pack IDs")
         if distribution is not None and set(staged.packs) != set(distribution.provided_pack_ids):
-            raise ValueError("An external Pack must register exactly one Pack with its distribution ID" if distribution.schema_version != 3
+            raise ValueError("A content Pack must register exactly one Pack with its distribution ID" if distribution.kind == 'content'
                 else "An external Pack must register exactly its declared provided Pack IDs")
         self._normalize_capabilities(staged)
         self._validate_registration(staged)
@@ -757,7 +757,7 @@ class PluginRegistry:
                 candidate.validate_direction(edge.relationship, edge.direction)
 
         # Source and schema 3 Packs may collect canonical host cards without
-        # taking ownership. Schema 1 retains its own-card-only contract.
+        # taking ownership.
         host_cards = {key for key in self._nodes
                       if self.node_type_owner_id(key) == "open-agent-world.core"}
         covered = set()

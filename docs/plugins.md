@@ -22,16 +22,18 @@ Reuse named dependency groups explicitly between a Pack engine and Sandbox;
 Sandbox does not inherit the entire host environment. The Library shows source,
 loaded version and per-environment readiness separately. See the
 [source declaration and diagnostics guide](pack-distribution.md#source-declaration-and-schema-3)
-for `doctor`, `build-project` and compatibility with older Packs.
+for `doctor`, `build-project` and preserving runtime identities. Pack archives
+support Schema 2 content and Schema 3 code only; Schema 1 is rejected.
 
 `scripts/install-plugins.py` reads each declared Pack without importing it,
 prepares its shared adapter
 libraries and install-time environments using the same managed providers as
 archive installation. Schema 3 source discovery needs no editable package install;
 desktop assembly still installs adapter code into its target directory. MatCreator's native worker uses its declared private
-Python environment; XRD prepares its scientific worker on first use. Existing
-undeclared plugins retain their legacy `open_agent_world.setup` hook. Discovery
-does not run setup hooks or download dependencies, and `--dry-run` does neither.
+Python environment; XRD prepares its scientific worker on first use.
+`open_agent_world.setup` hooks are no longer executed. Declare preparation in
+`oaw.pack.toml`; Python plugin factories remain supported. Discovery does not
+download dependencies, and `--dry-run` does not prepare environments.
 
 The Library previews removal and checks world objects, dependent Packs, Agent
 runtimes and active work. Source Pack uninstall changes this profile's enrollment

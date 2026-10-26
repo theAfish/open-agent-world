@@ -1,3 +1,9 @@
+> Historical record. The subsequent pre-release cleanup removes Pack Schema 1
+> support and its acceptance fixture. Current contracts support Schema 2 content
+> and Schema 3 code-capable Packs only; historical hashes, compatibility claims
+> and `--host-only` build instructions below are not current requirements.
+> See [the current distribution guide](../../pack-distribution.md).
+
 # Pack Store Client V0 implementation and acceptance
 
 Implementation based on `dev` at `e91569b`, verified against `origin/dev` on
@@ -97,8 +103,9 @@ The installed artifact digest in the real run is:
 The original artifact is 4,191 bytes. Marketplace HTTP logs for the source-host
 run are under `.outputs/store-private/1790054003037759200/`; the Desktop payload
 run uses `.outputs/store-private/1790054980013217800/`. The service is stopped
-after acceptance. The official endpoint is still undeployed, so normal builds
-remain Store-unavailable until an endpoint is configured by the host.
+after acceptance. At the time of this historical run the official endpoint was
+undeployed. It is now bound to `https://open-agent-world.space`; current Schema 3
+results are recorded in [official Marketplace acceptance](official-marketplace.md).
 
 Transient validation issues were resolved: restricted test networking initially
 prevented PyPI provisioning, and the final pytest pass needed a workspace-local

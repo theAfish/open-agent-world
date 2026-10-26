@@ -110,7 +110,7 @@ The updater can be reviewed and merged while disabled by default. Ready for revi
 Before a signed public release:
 
 - Configure the Windows signing certificate and Apple Developer ID/notarization credentials listed above. Configure and securely retain the updater keypair only if automatic updates are wanted.
-- If Marketplace support is required, deploy and smoke-test it, bind its origin in `backend/official_marketplace.py`, and set `OAW_REQUIRE_MARKETPLACE=true`. Otherwise leave the constant as `None`; installers remain releasable with Store unavailable.
+- The official Marketplace is deployed at `https://open-agent-world.space` and bound in `backend/official_marketplace.py`. Set the repository variable `OAW_REQUIRE_MARKETPLACE=true` for public releases that promise Store access. The existing gate checks the embedded HTTPS origin on pushed tags only; it does not probe service health. Before publication, repeat [official acceptance](pack-store.md#acceptance) with no endpoint override against the actual release payload and complete installed-app acceptance. Manual preview, signing and updater policies remain independent.
 - Build real signed installers, verify platform signatures/notarization, and complete the installed-app acceptance below.
 - Verify the stable manifest and asset URLs against the release assets before publishing them together.
 

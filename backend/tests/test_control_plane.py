@@ -130,10 +130,16 @@ def test_real_socket_ingress_rejects_interface_and_forged_forwarding(tmp_path):
     worker = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
     worker.start()
     try:
-        deadline = time.monotonic() + 5
+        # This checks real ingress policy, not a five-second startup SLA.
+        # Fresh profile/Pack initialization can take longer on Windows CI.
+        startup_timeout = 30
+        deadline = time.monotonic() + startup_timeout
         while not server.started and worker.is_alive() and time.monotonic() < deadline:
             time.sleep(0.01)
-        assert server.started
+        assert server.started, (
+            f"Listener did not start within {startup_timeout}s "
+            f"(worker_alive={worker.is_alive()}, app_ready={app.state.ready})"
+        )
         with httpx.Client(trust_env=False, timeout=3) as client:
             local = f"http://127.0.0.1:{port}"
             before = client.get(local + "/api/world").json()

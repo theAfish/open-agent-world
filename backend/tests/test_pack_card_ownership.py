@@ -80,7 +80,7 @@ def test_source_restore_checks_selected_archives_before_preparation(tmp_path, mo
         update={'node_types': ('historic.paper',)})
     manager = PackInstallationManager(tmp_path / 'profile', registry)
     foreign = manifest(node_types=['historic.paper'] if collision == 'card' else [],
-                       backend_modules=['oaw_source_owned'] if collision == 'module' else [])
+                       backend_modules=['oaw_source_owned'] if collision == 'module' else ['oaw_foreign'])
     monkeypatch.setattr(manager, 'selected', lambda *args: {foreign.id: foreign})
     monkeypatch.setattr(adapters, 'prepare_source_adapter', lambda *args, **kwargs: pytest.fail('No preparation before ownership checks'))
     with manager.connect(write=True) as db:

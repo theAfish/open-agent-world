@@ -17,7 +17,6 @@ import pytest
 from backend.config import Settings
 from backend.main import create_app
 from backend.packs.archive import inspect_archive
-from backend.plugins.registry import PLUGIN_API_VERSION
 from backend.packs.installation import PackInstallationManager
 from backend.packs.manifest import PackManifest
 from backend.packs.requirements import aggregate_requirements
@@ -26,7 +25,8 @@ from backend.plugins.registry import PLUGIN_API_VERSION
 from backend.plugins.loader import load_installed_packs
 
 MANIFEST = {
-    'schema_version': 1, 'id': 'test.greeter', 'name': 'Greeter', 'version': '0.1.0',
+    'schema_version': 3,
+    'packs': ['test.greeter'], 'backend_modules': ['oaw_pack_test_greeter'], 'id': 'test.greeter', 'name': 'Greeter', 'version': '0.1.0',
     'compatibility': {'oaw': '>=0.1.0,<1', 'plugin_api': '1.23', 'frontend_api': 1},
     'dependencies': {'packs': []}, 'runtime': {'sandbox': {'python': []}},
     'entrypoints': {'backend': 'backend/runtime.whl', 'frontend': 'frontend/index.js'},
@@ -44,6 +44,8 @@ def zipped(files):
 def pack_files(manifest=None, source=None):
     manifest = deepcopy(manifest or MANIFEST)
     module = 'oaw_pack_' + manifest['id'].replace('.', '_')
+    manifest['packs'] = [manifest['id']]
+    manifest['backend_modules'] = [module]
     prefix = f"{module}-{manifest['version']}.dist-info"
     code = source or f'''
 from open_agent_world.plugin_api import PluginDescriptor, PluginDefinition, NodeTypeDefinition, PackDefinition
@@ -88,7 +90,7 @@ def test_inspection_never_executes_backend_and_emits_schema(tmp_path):
 
 
 @pytest.mark.parametrize('change', [
-    {'schema_version': 2}, {'id': '../core'}, {'version': 'v1.0'}, {'post_install': 'curl | bash'},
+    {'schema_version': 1}, {'schema_version': 2}, {'id': '../core'}, {'version': 'v1.0'}, {'post_install': 'curl | bash'},
     {'compatibility': {'oaw': '>=99', 'plugin_api': '1.23', 'frontend_api': 1}},
     {'compatibility': {'oaw': '>=0.1', 'plugin_api': '2.0', 'frontend_api': 1}},
     {'compatibility': {'oaw': '>=0.1', 'plugin_api': f"1.{int(PLUGIN_API_VERSION.split('.')[1]) + 1}", 'frontend_api': 1}},
@@ -104,6 +106,20 @@ def test_invalid_or_incompatible_manifest(change):
     manifest = {**deepcopy(MANIFEST), **change}
     with pytest.raises(ValueError):
         inspect_archive(artifact(manifest))
+
+
+def test_schema1_installation_cannot_change_selection_or_import_code(tmp_path):
+    manager = PackInstallationManager(tmp_path, create_builtin_registry())
+    manager.install(artifact())
+    before = manager.selected()
+    marker = tmp_path / 'executed'
+    payload = artifact({**MANIFEST, 'schema_version': 1, 'version': '0.2.0'},
+                       source=f"from pathlib import Path\nPath({str(marker)!r}).touch()\n")
+    with pytest.raises(ValueError, match='schema_version'):
+        manager.install(payload)
+    assert manager.selected() == before
+    assert not manager.version_path('test.greeter', '0.2.0').exists()
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize('name', ['../escape', '/absolute', 'C:/escape', 'frontend/../escape', 'frontend\\escape',
@@ -308,7 +324,7 @@ def test_runtime_rejects_distribution_ownership_mismatch(tmp_path):
     files['backend/runtime.whl'] = zipped(wheel)
     manager = PackInstallationManager(tmp_path, create_builtin_registry())
     manager.install(artifact(files=files))
-    with pytest.raises(RuntimeError, match='exactly one Pack'):
+    with pytest.raises(RuntimeError, match='declared provided Pack IDs'):
         load_installed_packs(manager.registry, tmp_path, strict=True)
     assert not manager.registry.has_plugin('test.greeter')
 

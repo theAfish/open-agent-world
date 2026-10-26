@@ -234,7 +234,7 @@ def test_concurrent_materialization_publishes_one_complete_tree(tmp_path):
     assert not list(cache.glob(".staging-*"))
 
 
-def test_schema1_continues_to_use_existing_zip_contract(tmp_path):
+def test_module_preparation_rejects_unsupported_schema(tmp_path):
     archive = inspect_archive(distribution())
     with pytest.raises(ValueError, match="Only schema 3"):
         materialize_modules(archive.files[archive.manifest.entrypoints.backend],

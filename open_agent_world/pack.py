@@ -2,14 +2,11 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import re
 import shutil
 from uuid import uuid4
-from zipfile import ZIP_DEFLATED, ZipFile
-import io
 
 from backend.packs.archive import inspect_archive
 from backend.packs.manifest import PackManifest
@@ -34,39 +31,11 @@ def init_project(directory: Path) -> Path:
     return directory
 
 
-def build(source: Path, output: Path) -> Path:
-    """Package already-built artifacts, never import the Pack or run build hooks."""
-    source = source.resolve()
-    files = {}
-    for path in sorted(source.rglob('*')):
-        if path.is_symlink() or not path.resolve().is_relative_to(source):
-            raise ValueError("Pack input must not contain symlinks")
-        if path.is_file():
-            name = path.relative_to(source).as_posix()
-            if name != 'checksums.json':
-                files[name] = path.read_bytes()
-    files['checksums.json'] = json.dumps({name: hashlib.sha256(data).hexdigest() for name, data in files.items()}, indent=2).encode()
-    buffer = io.BytesIO()
-    with ZipFile(buffer, 'w', ZIP_DEFLATED) as archive:
-        for name, data in files.items():
-            archive.writestr(name, data)
-    data = buffer.getvalue()
-    inspect_archive(data, check_host_libraries=False)
-    if output.exists():
-        raise ValueError("Output already exists; choose a new artifact path")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_bytes(data)
-    return output
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
     initializer = commands.add_parser('init', help='Create an independent Schema 3 project from the Notes template')
     initializer.add_argument('directory', type=Path)
-    builder = commands.add_parser('build')
-    builder.add_argument('source', type=Path)
-    builder.add_argument('output', type=Path)
     project_builder = commands.add_parser('build-project', help='Package a declared source project using prebuilt artifacts')
     project_builder.add_argument('source', type=Path)
     project_builder.add_argument('output', type=Path)
@@ -106,8 +75,6 @@ def main():
     args = parser.parse_args()
     if args.command == 'init':
         print(init_project(args.directory))
-    elif args.command == 'build':
-        print(build(args.source, args.output))
     elif args.command == 'build-project':
         from backend.packs.build import build_project
         print(build_project(args.source, args.output, backend_wheel=args.backend_wheel,

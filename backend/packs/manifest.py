@@ -194,7 +194,7 @@ class CreatorMetadata(Model):
 
 
 class PackManifest(Model):
-    schema_version: Literal[1, 2, 3]
+    schema_version: Literal[2, 3]
     kind: Literal["plugin", "content"] = "plugin"
     id: str = Field(pattern=PACK_ID, max_length=120)
     name: str = Field(min_length=1, max_length=120)
@@ -218,8 +218,8 @@ class PackManifest(Model):
     @model_validator(mode="after")
     def pack_kind(self) -> Self:
         if self.kind == "plugin":
-            if self.schema_version not in (1, 3) or self.entrypoints is None or self.content is not None or self.creator is not None:
-                raise ValueError("Plugin Packs require schema 1 or 3 and code entrypoints")
+            if self.schema_version != 3 or self.entrypoints is None or self.content is not None or self.creator is not None:
+                raise ValueError("Plugin Packs require schema 3 and code entrypoints")
         elif (self.schema_version != 2 or self.entrypoints is not None or self.content is None
                 or self.creator is None or self.runtime.sandbox.python):
             raise ValueError("Content Packs require schema 2, content and creator metadata, without code entrypoints or runtime installs")
@@ -238,9 +238,9 @@ class PackManifest(Model):
                 raise ValueError("Schema 3 requires unique provided Pack IDs")
             if any(key != self.owner_id and not key.startswith(self.owner_id + ".") for key in self.packs):
                 raise ValueError("Provided Pack IDs must belong to the runtime owner")
-            if len(set(self.backend_modules)) != len(self.backend_modules) or any(
+            if not self.backend_modules or len(set(self.backend_modules)) != len(self.backend_modules) or any(
                     not re.fullmatch(r"oaw_[a-z][a-z0-9_]*", name) for name in self.backend_modules):
-                raise ValueError("Backend modules must be unique private oaw_ package names")
+                raise ValueError("Backend modules must declare unique private oaw_ package names")
             for key in (*self.environments, *self.features, *self.prerequisites):
                 if not re.fullmatch(r"[a-z][a-z0-9_-]{0,79}", key):
                     raise ValueError("Invalid environment, feature or prerequisite ID")
@@ -274,11 +274,11 @@ class PackManifest(Model):
 
     @property
     def module_name(self) -> str:
-        return self.backend_modules[0] if self.backend_modules else "oaw_pack_" + self.id.replace(".", "_").replace("-", "_")
+        return self.backend_modules[0]
 
     @property
     def module_names(self) -> tuple[str, ...]:
-        return self.backend_modules or (self.module_name,)
+        return self.backend_modules
 
     @property
     def owner_id(self) -> str:

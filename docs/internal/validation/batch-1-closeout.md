@@ -1,3 +1,9 @@
+> Historical record. The subsequent pre-release cleanup removes Pack Schema 1
+> support and its acceptance fixture. Current contracts support Schema 2 content
+> and Schema 3 code-capable Packs only; historical hashes, compatibility claims
+> and `--host-only` build instructions below are not current requirements.
+> See [the current distribution guide](../../pack-distribution.md).
+
 # Batch 1 closeout audit
 
 Date: 2026-10-21. Audited `feat/batch-1-plugin-lifecycle` at `9fc0d86b`

@@ -12,6 +12,7 @@ const frontend = path.join(root, 'frontend');
 const official = process.argv.includes('--store-official');
 const declarative = process.argv.includes('--declarative');
 const build = official ? {} : JSON.parse(await readFile(path.join(root, `.outputs/${declarative ? 'declarative-acceptance' : 'pack-acceptance'}/build.json`), 'utf8'));
+if (!official && !declarative && build.schema_version !== 3) throw new Error('Rebuild the Greeter fixture through scripts/build-external-greeter.py');
 const source = official ? 'store-official' : process.argv.includes('--store-real') ? 'store-real' : process.argv.includes('--store-fake') ? 'store-fake' : 'local';
 if (official && Object.hasOwn(process.env, 'OPEN_AGENT_WORLD_MARKETPLACE_URL')) {
   throw new Error('Official acceptance forbids OPEN_AGENT_WORLD_MARKETPLACE_URL, including an empty override');
@@ -25,7 +26,7 @@ const port = Number(process.env.OAW_PACK_E2E_PORT ?? 38579);
 const url = `http://127.0.0.1:${port}`;
 const env = { ...process.env, OPEN_AGENT_WORLD_MODE: 'production', OPEN_AGENT_WORLD_DATA_ROOT: dataRoot,
   OPEN_AGENT_WORLD_AGENT_RUNTIME: 'mock', OAW_E2E_BASE_URL: url, OAW_PACK_ARTIFACT: build.artifact,
-  OAW_PACK_E2E_DATA_ROOT: dataRoot, OAW_PACK_SOURCE: source, OAW_PACK_HOST_ONLY: build.host_only ? '1' : '0' };
+  OAW_PACK_E2E_DATA_ROOT: dataRoot, OAW_PACK_SOURCE: source, OAW_PACK_VERSION: official ? process.env.OAW_PACK_VERSION : build.version };
 env.OAW_PACK_DECLARATIVE = declarative ? '1' : '0';
 delete env.OPEN_AGENT_WORLD_PLUGIN_DIRS;
 for (const key of Object.keys(env)) if (/^(?:GH_|GITHUB_|MARKETPLACE_)/.test(key)) delete env[key];
@@ -55,11 +56,11 @@ if (official) {
     throw new Error('Official acceptance requires the confirmed public HTTPS origin embedded in this build');
   }
 }
-const expectedSha = official ? '34ee377564f6fd7776a041cc8db82d6e9f8e5bd107c4b9287f416122259cffb5'
+const expectedSha = official ? process.env.OAW_PACK_EXPECTED_SHA
   : createHash('sha256').update(await readFile(build.artifact)).digest('hex');
 env.OAW_PACK_EXPECTED_SHA = expectedSha;
-if (source === 'store-real' && expectedSha !== '34ee377564f6fd7776a041cc8db82d6e9f8e5bd107c4b9287f416122259cffb5') {
-  throw new Error('Real acceptance must use the original private Release Greeter');
+if (official && (!/^[a-f0-9]{64}$/.test(expectedSha ?? '') || !env.OAW_PACK_VERSION)) {
+  throw new Error('Official acceptance requires OAW_PACK_VERSION and OAW_PACK_EXPECTED_SHA for a published Schema 3 Greeter');
 }
 let host;
 let logs = '';
@@ -99,8 +100,19 @@ try {
   await run(source === 'local' ? 'install local' : 'install remote');
   if (!declarative) { await stop(); await start(); await run('restart activates'); }
   if (declarative) { await stop(); await start(); await run('saved note'); }
-  if (marketplace) { await marketplace.stop(); marketplace = undefined; await run('Store offline'); }
-  const receipt = { status: 'passed', source, productionEndpoint, marketplaceOverride: official ? false : Boolean(env.OPEN_AGENT_WORLD_MARKETPLACE_URL), desktopPayload: payload ?? null, ...build, dataRoot, url, sha256: expectedSha };
+  if (marketplace || official) {
+    await stop();
+    if (marketplace) { await marketplace.stop(); marketplace = undefined; }
+    if (official) {
+      // Block upstream HTTP only in this host process. Keep the embedded default
+      // and no Marketplace override, including across an offline cold start.
+      env.HTTP_PROXY = env.HTTPS_PROXY = env.ALL_PROXY = 'http://127.0.0.1:9';
+      env.NO_PROXY = 'localhost,127.0.0.1,::1';
+    }
+    await start();
+    await run('Store offline');
+  }
+  const receipt = { status: 'passed', source, productionEndpoint, marketplaceOverride: official ? false : Boolean(env.OPEN_AGENT_WORLD_MARKETPLACE_URL), desktopPayload: payload ?? null, ...build, version: env.OAW_PACK_VERSION, dataRoot, url, sha256: expectedSha, offlineRestart: official || source === 'store-fake' };
   await writeFile(path.join(dataRoot, 'receipt.json'), JSON.stringify(receipt, null, 2));
   console.log(JSON.stringify(receipt));
 } finally {

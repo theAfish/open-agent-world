@@ -156,6 +156,20 @@ def test_declared_artifact_digest_is_verified_independently():
             'artifact_hashes': {'runtime/verify.py': hashlib.sha256(b'other').hexdigest()}}, script='pass'))
 
 
+@pytest.mark.parametrize('declaration', ['lock', 'executable'])
+def test_runtime_declaration_cannot_override_verified_file_checksum(declaration):
+    environment = {'target': 'host-worker'}
+    if declaration == 'lock':
+        environment.update(lock='runtime/verify.py', lock_digest='0' * 64)
+    else:
+        environment.update(provider='executable', artifacts=[{
+            'platform': 'linux-x86_64', 'path': 'runtime/verify.py',
+            'sha256': '0' * 64, 'executable': 'verify.py',
+        }])
+    with pytest.raises(ValueError, match='digest|checksum'):
+        inspect_archive(unified(environment=environment, script='pass'))
+
+
 def test_unsupported_host_environment_blocks_plan_before_install(tmp_path):
     manager = PackInstallationManager(tmp_path)
     data = unified(environment={'target': 'host-worker', 'provider': 'node', 'prepare': 'install'})

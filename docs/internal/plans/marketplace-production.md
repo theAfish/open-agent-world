@@ -1,9 +1,20 @@
+> Historical record. The subsequent pre-release cleanup removes Pack Schema 1
+> support and its acceptance fixture. Current contracts support Schema 2 content
+> and Schema 3 code-capable Packs only; historical hashes, compatibility claims
+> and `--host-only` build instructions below are not current requirements.
+> See [the current distribution guide](../../pack-distribution.md).
+>
+> Superseded deployment status (2026-10-23): the official Marketplace is live at
+> `https://open-agent-world.space` and OAW now uses that origin by default.
+> See [current integration acceptance](../validation/official-marketplace.md).
+> Provisioning steps and undeployed statements below describe the earlier handoff.
+
 # Official Marketplace readiness
 
-The requested production implementation is prepared. **The official service is
-not deployed**, and no production URL has been invented. The operator confirmed
-there is no current VPS/domain and requested a stop before provisioning resources,
-DNS, certificates or production secrets. Those steps remain external.
+At the time of this handoff, the production implementation was prepared but
+the official service was not deployed. The operator had confirmed
+there was no VPS/domain and requested a stop before provisioning resources,
+DNS, certificates or production secrets. Those steps were external at that point.
 
 ## Implementation
 

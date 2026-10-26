@@ -18,26 +18,6 @@ from setup import profile_name, run_logged
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Compatibility for undeclared legacy plugins only. New declarations route
-# host-worker preparation through the same manager as archive installation.
-SETUP_HOOKS = """
-import os
-import sys
-from importlib.metadata import distribution
-from pathlib import Path
-sys.path.insert(0, sys.argv[1])
-if sys.argv[3]:
-    sys.path.insert(0, sys.argv[3])
-    os.environ['OPEN_AGENT_WORLD_RUNTIME_BUILD_ROOT'] = str(Path(sys.prefix) / 'oaw-runtime-bundle')
-if len(sys.argv) > 4 and sys.argv[4]:
-    from backend.development import prepare_profile
-    os.environ['OPEN_AGENT_WORLD_DATA_ROOT'] = str(prepare_profile(sys.argv[4]))
-for entry in distribution(sys.argv[2]).entry_points:
-    if entry.group == 'open_agent_world.setup':
-        print(f'Preparing {sys.argv[2]}: {entry.name}', flush=True)
-        entry.load()()
-"""
-
 PREPARE_DECLARED = """
 import os
 import sys
@@ -164,6 +144,10 @@ def main():
             print("Optional Pack preparation failed; Core remains available. Retry install-plugins.py with the individual path:\n"
                   + "\n".join(f"{row['id']}: {row['error']}\nRetry: {subprocess.list2cmdline([sys.executable, str(Path(__file__).resolve()), row['path'], '--python', args.python, *(['--profile', args.profile] if args.profile else [])])}" for row in failed), file=sys.stderr)
         return 3 if failed else 0
+    for path in paths:
+        project = tomllib.loads((path / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+        if not (path / "oaw.pack.toml").is_file() and project.get("entry-points", {}).get("open_agent_world.setup"):
+            parser.error(f"Setup hooks are unsupported; declare environments in oaw.pack.toml: {path}")
     command = ["uv", "pip", "install", "--no-deps", "--python", args.python]
     # Schema 3 source discovery already adds the source path. Installing an
     # editable copy repeats that authority and leaves stale entrypoint metadata.
@@ -183,7 +167,6 @@ def main():
         subprocess.run(command, cwd=ROOT, check=True)
     if not args.dry_run:
         for path in paths:
-            project = tomllib.loads((path / "pyproject.toml").read_text(encoding="utf-8"))["project"]
             if (path / "oaw.pack.toml").is_file():
                 try:
                     subprocess.run([args.python, "-c", PREPARE_DECLARED, str(ROOT), str(path.resolve()),
@@ -193,10 +176,6 @@ def main():
                     if exc.returncode == 10:
                         continue  # Explicitly removed sources must not regain frontend assets either.
                     raise
-            elif project.get("entry-points", {}).get("open_agent_world.setup"):
-                subprocess.run([args.python, "-c", SETUP_HOOKS, str(ROOT), project["name"],
-                                str(args.target.resolve()) if args.target else "",
-                                *([args.profile] if args.profile else [])], cwd=ROOT, check=True)
             if not args.target:
                 prepare_frontend(path, args)
 
