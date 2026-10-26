@@ -5,7 +5,9 @@ SQLite file as the rest of the card. A **bundle** is one experiment upload: seve
 files (a photographed table, a spreadsheet, a note) that together describe a set of
 specimens, projected as one long document onto one ``kind="experiment"`` schema. The
 projection yields **records** — one per specimen — each evidence-linked back to the
-bundle's source files. A person edits a record directly or through an agent, then
+bundle's source files. The Literature section's Records tab writes the same table
+with no bundle: a record extracted straight from one converted source, linked to it.
+A person edits a record directly or through an agent, then
 publishes it; a published record is the approved dataset and nothing here ever
 touches ``oaw_kg_entity``/``oaw_kg_relation`` or the draft/review flow.
 """
@@ -316,7 +318,9 @@ class ExperimentRecordStore:
             raise KnowledgeError(f"Experiment record not found: {record_id}")
         return record
 
-    def list(self, *, group_id=None, schema_id=None, bundle_id=None, status=None, limit=100):
+    def list(self, *, group_id=None, schema_id=None, bundle_id=None, source_id=None, status=None, limit=100):
+        """``source_id`` narrows to records read from that file — a bundle's file, or
+        a literature source records were extracted from directly."""
         query = select(RECORDS).order_by(RECORDS.c.updated_at.desc()).limit(max(1, min(limit, 500)))
         if group_id:
             query = query.where(RECORDS.c.group_id == str(group_id))
@@ -324,6 +328,9 @@ class ExperimentRecordStore:
             query = query.where(RECORDS.c.schema_id == str(schema_id))
         if bundle_id:
             query = query.where(RECORDS.c.bundle_id == str(bundle_id))
+        if source_id:
+            query = query.where(RECORDS.c.id.in_(
+                select(RECORD_SOURCES.c.record_id).where(RECORD_SOURCES.c.source_id == str(source_id))))
         if status:
             query = query.where(RECORDS.c.status == status)
         with self._engine.connect() as connection:
@@ -366,10 +373,20 @@ class ExperimentRecordStore:
 
     def delete_drafts_for_bundle(self, bundle_id):
         """Drop a bundle's unpublished records before a re-extraction replaces them."""
+        return self._delete_drafts(RECORDS.c.bundle_id == str(bundle_id))
+
+    def delete_drafts_for_source(self, *, schema_id, source_id):
+        """Drop the unpublished records one literature source produced for one schema
+        before a re-extraction replaces them; a bundle's records are left alone."""
+        return self._delete_drafts(
+            RECORDS.c.schema_id == str(schema_id), RECORDS.c.bundle_id.is_(None),
+            RECORDS.c.id.in_(select(RECORD_SOURCES.c.record_id).where(
+                RECORD_SOURCES.c.source_id == str(source_id))))
+
+    def _delete_drafts(self, *conditions):
         with self._engine.begin() as connection:
             record_ids = [row[0] for row in connection.execute(
-                select(RECORDS.c.id).where(RECORDS.c.bundle_id == str(bundle_id),
-                                           RECORDS.c.status == "draft")).all()]
+                select(RECORDS.c.id).where(*conditions, RECORDS.c.status == "draft")).all()]
             if record_ids:
                 connection.execute(delete(RECORD_SOURCES).where(
                     RECORD_SOURCES.c.record_id.in_(record_ids)))

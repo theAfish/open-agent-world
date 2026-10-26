@@ -2,7 +2,7 @@ import { NetworkMap, t, type NetworkData } from '@oaw/plugin-api';
 import { useMemo } from 'react';
 
 export type Entity = { id: string; type: string; name: string; properties: Record<string, unknown> };
-export type Relation = { id: string; type: string; source_id: string; target_id: string };
+export type Relation = { id: string; type: string; source_id: string; target_id: string; properties?: Record<string, unknown> };
 type Props = {
   graphKey: string; entities: Entity[]; relations: Relation[]; selected: string;
   onSelect: (id: string) => void; onExpand: (id: string) => void;

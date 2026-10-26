@@ -29,8 +29,7 @@ PREFIX = "knowledge.base"
 # chosen ahead of time. Every top-level field a resource action's result may carry,
 # named once so the whole-card surface and each workspace section can share it.
 DEPLOYMENT_FIELDS = {
-    "overview": frozenset({"collection", "groups", "engines", "counts", "active_jobs",
-                          "graph_schema_id"}),
+    "overview": frozenset({"collection", "groups", "engines", "counts", "active_jobs"}),
     "sources": frozenset({"sources", "offset"}),
     "ingest": frozenset({"source", "group_id"}),
     "process": frozenset({"jobs"}),
@@ -39,12 +38,27 @@ DEPLOYMENT_FIELDS = {
                            "markdown", "has_more"}),
     "search": frozenset({"query", "results"}),
     "schemas": frozenset({"schemas", "schema"}),
-    "projection_prompt": frozenset({"schema_id", "schema_name", "schema_version", "system_prompt",
-                                    "definition", "field_descriptions", "record_id", "artifact_id",
-                                    "source_id", "filename", "markdown", "truncated"}),
-    "save_projection": frozenset({"projection"}),
-    "projections": frozenset({"projection", "projections"}),
-    "draft": frozenset({"drafts", "draft"}),
+    "knowledge_drafts": frozenset({"drafts", "draft"}),
+    "knowledge_draft_manage": frozenset({"draft", "deleted"}),
+    "knowledge_source_outline": frozenset({"source_id", "filename", "total_characters", "sections"}),
+    "knowledge_lookup": frozenset({"terms", "in_draft", "published", "predicates"}),
+    "knowledge_extract_prompt": frozenset({"source_id", "draft_id", "filename", "instruction",
+                                           "suggested_predicates", "existing", "existing_predicates",
+                                           "published", "section", "heading_path", "total_characters",
+                                           "offset", "markdown", "has_more"}),
+    "knowledge_save": frozenset({"draft", "added"}),
+    # Reviewing a draft has no deployment route yet; listed so the whole-card surface
+    # stays complete, granted to no section of its own.
+    "knowledge_audit_prompt": frozenset({"draft_id", "revision", "instruction", "operations", "statistics", "draft"}),
+    "knowledge_audit_apply": frozenset({"draft", "applied", "skipped", "review"}),
+    "knowledge_graph_audit_prompt": frozenset({"draft_ids", "instruction", "operations", "statistics", "draft"}),
+    "knowledge_graph_audit_apply": frozenset({"drafts", "applied", "skipped", "graph", "status", "reasons", "message"}),
+    "knowledge_update": frozenset({"draft"}),
+    "knowledge_review": frozenset({"draft", "status", "reasons", "message", "graph"}),
+    "record_extract_prompt": frozenset({"source_id", "filename", "schema_id", "schema_name", "schema_version",
+                                        "system_prompt", "definition", "field_descriptions", "instruction",
+                                        "total_characters", "offset", "markdown", "has_more"}),
+    "record_save": frozenset({"records", "source_id", "schema_id", "invalid"}),
     "experiment_bundles": frozenset({"bundles", "bundle"}),
     "experiment_bundle_manage": frozenset({"bundle", "deleted", "records_removed"}),
     "experiment_ingest": frozenset({"source", "job", "bundle_id"}),
@@ -66,10 +80,8 @@ DEPLOYMENT_FIELDS = {
     "insight_save": frozenset({"insights", "schema_ids", "warnings"}),
     "insight_update": frozenset({"insight"}),
     "insight_review": frozenset({"insights", "deleted", "status", "reasons", "message", "graph"}),
-    "review": frozenset({"decision", "draft_id", "status", "reasons", "message", "fact", "event",
-                         "graph"}),
-    "graph_schema": frozenset({"schema_id"}),
-    "graph": frozenset({"entities", "relations", "truncated"}),
+    "graph": frozenset({"entities", "relations", "truncated", "matched", "connections", "search_text",
+                        "semantic", "semantic_error"}),
     "jobs": frozenset({"jobs", "job", "events"}),
 }
 
@@ -85,19 +97,18 @@ def _deployment():
     ``settings`` never appears here: the collection name, PDF engine and MinerU URL
     stay engineering-only, matching "it does not mount ... model settings". Every
     other business action a person uses to drive the pipeline — upload, convert,
-    search, project, choose the graph schema, build a draft, review, publish, upload
-    an experiment, publish its records and publish insights over them — is exactly
-    what a deployed release is for, so it is granted. Experiment and insight
-    extraction in a release go through the model bridge with the pre-chosen default
+    search, open a knowledge draft and extract into it, publish it, extract records
+    from a source, upload an experiment, publish its records and publish insights
+    over them — is exactly what a deployed release is for, so it is granted. Every
+    extraction in a release goes through the model bridge with the pre-chosen default
     model, since a release carries no agent edges for the connected-agent path. The
-    layout can place
-    this card as one whole pane (``surface``) or extract each section into its own
-    tab (``sections``); both are covered so either shape of a saved workspace can
-    publish. Section names match the card's own frontend's WorkspaceSection ids —
-    Sources holds search and the single-document projection convenience, Graph holds
-    the graph-schema pipeline end to end (project, draft, review, publish) that used
-    to be split across three separate tabs, Insights holds the meta-knowledge
-    extracted from published experiment records.
+    layout can place this card as one whole pane (``surface``) or extract each
+    section into its own tab (``sections``); both are covered so either shape of a
+    saved workspace can publish. Section names match the card's own frontend's
+    WorkspaceSection ids — Sources holds upload, conversion and search; Knowledge the
+    general concept graph drafted from sources; Records the literature schemas, the
+    records read from sources with them and the insights over those records;
+    Experiments and Insights their experiment-side counterparts.
     """
     all_actions = tuple(DEPLOYMENT_FIELDS)
     return NodeDeploymentDefinition(
@@ -108,14 +119,16 @@ def _deployment():
             # release from showing engineering configuration at all.
             "settings": DeploymentSurface(),
             "sources": _surface("overview", "sources", "ingest", "process", "groups", "jobs",
-                                "search", "markdown", "projection_prompt", "save_projection",
-                                config_fields={"default_model"}),
+                                "search", "markdown"),
+            "knowledge": _surface("overview", "sources", "knowledge_drafts", "knowledge_draft_manage",
+                                  "knowledge_source_outline", "knowledge_lookup",
+                                  "knowledge_extract_prompt", "knowledge_save", "knowledge_update",
+                                  "knowledge_review", "graph", config_fields={"default_model"}),
+            "records": _surface("overview", "sources", "schemas", "record_extract_prompt", "record_save",
+                                "experiments", "experiment_update", "experiment_review", "insights",
+                                "insight_prompt", "insight_save", "insight_update", "insight_review",
+                                "graph", config_fields={"default_model"}),
             "schemas": _surface("schemas"),
-            "projections": _surface("projections", "save_projection", "projection_prompt",
-                                    config_fields={"default_model"}),
-            "graph": _surface("graph", "graph_schema", "projections", "save_projection",
-                              "projection_prompt", "draft", "review",
-                              config_fields={"default_model"}),
             "experiments": _surface("overview", "jobs", "schemas", "experiment_bundles",
                                     "experiment_bundle_manage", "experiment_ingest",
                                     "experiment_extract_prompt", "experiment_save", "experiments",
@@ -158,7 +171,7 @@ class KnowledgeConfig(BaseModel):
     status: Literal["available", "error"] = "available"
     description: str = Field(default="", max_length=2000,
         json_schema_extra={"agentReadable": True, "agentWritable": True})
-    # A deployment has no live model picker, so projection there uses whichever
+    # A deployment has no live model picker, so extraction there uses whichever
     # model reference (an "oaw:model:..." id, set from the engineering Settings
     # section) was chosen before publishing. Blank until someone picks one.
     default_model: str = Field(default="", max_length=200)
@@ -188,7 +201,7 @@ class KnowledgeBasePlugin:
 
         registration.register_node_type(NodeTypeDefinition(
             id=PREFIX, label="Knowledge base",
-            description="Documents, structured projections and a reviewed knowledge graph",
+            description="Documents, structured records and a review-gated knowledge graph",
             icon="library", icon_asset="knowledge", color="#8a6fd1",
             deck_id="knowledge", deck_label="Knowledge", deck_icon="library",
             default_name="Knowledge base", default_size=(360, 280), default_status="available",
@@ -196,7 +209,7 @@ class KnowledgeBasePlugin:
             traits=frozenset({"knowledge.base", "data.source"}), lifecycle=KnowledgeLifecycle(),
             data_source=NodeDataSource(DATA_SOURCE.schemas, _guarded(DATA_SOURCE.read)),
             resource_actions=resource_actions,
-            deletion_warning="Deleting this card permanently removes its documents, projections, drafts, published facts and knowledge graph. Canvas undo and copy do not preserve knowledge base files. Back up your profile before deleting knowledge you need.",
+            deletion_warning="Deleting this card permanently removes its documents, records, drafts, insights and knowledge graph. Canvas undo and copy do not preserve knowledge base files. Back up your profile before deleting knowledge you need.",
             # Templateable with no template handler: a Legion copy deploys a card with
             # the same name and settings over an empty database, which is what the
             # deletion warning already promises. Files are never captured.
@@ -210,9 +223,9 @@ class KnowledgeBasePlugin:
 
         for access, label, short, granted, description in (
             ("read", "Knowledge read", "read", READ_ACTIONS,
-             "Can read this knowledge base: sources, extracted markdown, schemas, projections, drafts and the published graph."),
+             "Can read this knowledge base: sources, extracted markdown, schemas, knowledge drafts, records, insights and the published graph."),
             ("extract", "Knowledge extract", "extract", EXTRACT_ACTIONS,
-             "Can read this knowledge base and add projections and draft graphs. Drafts stay unpublished until a person approves them on the canvas."),
+             "Can read this knowledge base, name a source's concepts into a knowledge draft a person opened, read records and insights from literature, and edit drafts when asked. Nothing is published until a person does it on the canvas."),
             ("experiment", "Knowledge experiment", "experiment", EXPERIMENT_ACTIONS,
              "Can read this knowledge base, project an experiment upload into draft records and edit drafts when asked. Records stay unpublished until a person publishes them on the canvas."),
         ):

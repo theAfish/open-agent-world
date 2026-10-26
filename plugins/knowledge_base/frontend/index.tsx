@@ -1,47 +1,37 @@
 import { t, useLocale, useWorkspaceSections, WorkspaceEmptyState, WorkspaceSection, WorkspaceToolbar } from "@oaw/plugin-api";
 import type { FrontendPlugin, PluginViewProps } from "@oaw/plugin-api";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
 import { useModelOptions, useConnectedCards, updateCardConfig } from "@oaw/plugin-api";
 import { hostApiBase as deploymentApiBase } from "@oaw/plugin-api";
 import { ModelSelect, Modal } from "@oaw/plugin-api";
 import { DocumentMarkdown } from "@oaw/plugin-api";
-import { BookOpen, FlaskConical, Settings2, Plus, RefreshCw, MoreHorizontal, FileText, Network, X, Square, ScrollText, Upload, Search, ChevronRight, ChevronDown, List, Table2, Pencil } from "lucide-react";
+import { BookOpen, FlaskConical, Settings2, Plus, RefreshCw, MoreHorizontal, FileText, X, Square, ScrollText, Upload, Search, ChevronRight, ChevronDown, List, Table2, Pencil } from "lucide-react";
 import { MineruCredentials } from "./MineruCredentials";
-import { GraphMap } from "./GraphMap";
 import { InsightsSection } from "./Insights";
 import type { InsightKind } from "./Insights";
+import { KnowledgeSection } from "./Knowledge";
+import type { BridgeProgress } from "./Knowledge";
+import { RecordsSection } from "./Records";
+import { SchemaEditor } from "./SchemaEditor";
+import type { SchemaDetail, SchemaItem } from "./SchemaEditor";
 import { ExtractDialog } from "./ExtractDialog";
 import type { ExtractDetails } from "./ExtractDialog";
 import { RecordGrid, RecordTable, flattenValues } from "./RecordView";
+import { RecordForm } from "./RecordForm";
 import "./style.css";
 
-type Settings = { collection_name: string; pdf_engine: string; mineru_base_url: string; vision_model: string };
+type Settings = { collection_name: string; pdf_engine: string; mineru_base_url: string; vision_model: string; embedding_model: string };
+type IndexStatus = { enabled: boolean; embedding_model: string | null; model_id: string | null; total: number;
+  embedded: number; pending: number; stale: number; last_error?: string | null; built_at?: string | null };
 type Group = { id: string; name: string; source_count: number; created_at: string; is_default: boolean };
 type Overview = { collection: { id: string; name: string }; groups: Group[]; settings: Settings;
-  engines: string[]; counts: Record<string, number>; active_jobs: number;
-  graph_schema_id: string | null };
+  engines: string[]; counts: Record<string, number>; active_jobs: number };
 type Source = { id: string; filename: string; media_type: string; size: number; created_at: string;
   group_id: string | null; group_name: string | null;
   markdown: { artifact_id: string; size: number; engine: string | null } | null;
-  record_id: string | null; projections: number };
+  record_id: string | null; records: number };
 type Extracted = { record_id: string; filename: string | null; engine: string | null;
   total_characters: number; offset: number; markdown: string; has_more: boolean };
-type SchemaItem = { id: string; name: string; description: string | null; domain: string;
-  kind: "literature" | "experiment"; version: number };
-type SchemaDetail = SchemaItem & { definition: Record<string, unknown>; system_prompt: string;
-  field_descriptions: Record<string, unknown> | null };
-type Projection = { id: string; schema_id: string; record_id: string; status: string;
-  valid: boolean | null; extracted_at: string; summary: string };
-type ProjectionDetail = { id: string; schema_id: string; record_id: string; status: string;
-  validation: { valid?: boolean; errors?: string[]; missing?: string[] } | null; notes: string | null;
-  data: Record<string, unknown>; evidence: { id: string; source_id: string; artifact_id: string }[] };
-type DraftItem = { id: string; status: string; revision: number; created_by: string; updated_at: string };
-type DraftDetail = { id: string; status: string; revision: number; created_by: string;
-  graph: { entities?: unknown[]; relations?: unknown[] }; evidence_ids: string[] };
-type Entity = { id: string; type: string; name: string; properties: Record<string, unknown> };
-type Relation = { id: string; type: string; source_id: string; target_id: string };
-type Graph = { entities: Entity[]; relations: Relation[]; truncated: boolean };
 type Job = { id: string; kind: string; status: string; progress: number | null; message: string | null;
   error: string | null; source_id: string | null; group_id: string | null; created_at: string;
   completed_at: string | null };
@@ -59,7 +49,6 @@ type BundleFile = { source_id: string; filename: string; media_type: string; siz
 type Bundle = { id: string; group_id: string; schema_id: string; name: string; notes: string;
   status: "ready" | "extracting" | "extracted" | "failed" | "deleted"; run_id: string | null;
   created_at: string; updated_at: string; files: BundleFile[]; records: number };
-type Property = { type?: string | string[]; enum?: unknown[]; description?: string; title?: string };
 type RunSummary = { run_id: string; agent_id: string; status: string; error: string | null;
   created_at: string; finished_at: string | null;
   lifecycle?: { model_requests?: { model_request: number; error_type?: string; elapsed_ms?: number;
@@ -69,18 +58,18 @@ type RunActivity = { id: string; type: string; timestamp: string; text?: string;
 /** An approval the card asked the person to confirm before it publishes a fact. */
 type Pending = { args: Record<string, unknown>; reasons: string[] };
 
-/** Literature stays the deep, general-purpose workflow; Experiment turns one upload
- * of several files into reviewed records against a schema it shares with Literature,
- * then Insights extracts what a schema's published records show as a whole and
- * publishes that into the graph's experiment layer. Settings only ever appears for
- * the engineering view. */
+/** Literature reads papers: Knowledge drafts the general concept graph from chosen
+ * sources, Records reads structured data out of them with a schema and draws
+ * insights over it. Experiment turns one upload of several files into reviewed
+ * records against a schema, then Insights extracts what those records show as a
+ * whole. Both publish into the one graph, in their own layer. Settings only ever
+ * appears for the engineering view. */
 type Category = "literature" | "experiment" | "settings";
-type LiteratureTab = "sources" | "schemas" | "projections" | "graph";
+type LiteratureTab = "sources" | "knowledge" | "records";
 type ExperimentTab = "experiments" | "insights" | "schemas";
 const LITERATURE_TABS: { id: LiteratureTab; label: () => string }[] = [
-  { id: "sources", label: () => t("Sources") },
-  { id: "schemas", label: () => t("Schemas") }, { id: "projections", label: () => t("Projections") },
-  { id: "graph", label: () => t("Graph") },
+  { id: "sources", label: () => t("Sources") }, { id: "knowledge", label: () => t("Knowledge") },
+  { id: "records", label: () => t("Records") },
 ];
 const EXPERIMENT_TABS: { id: ExperimentTab; label: () => string }[] = [
   { id: "experiments", label: () => t("Experiments") }, { id: "insights", label: () => t("Insights") },
@@ -112,16 +101,42 @@ const provisionalName = (files: File[]) => {
   return files.length > 1 ? `${stem} +${files.length - 1}` : stem;
 };
 
-/** The projection call needs a model, so it goes through the host bridge, not the
+/** An extraction needs a model, so it goes through the host bridge, not the
  * plugin. The engineering bridge lives at ``/api/...``; a deployment mounts the same
  * bridge scoped under the runtime workspace instead, gated by the release's grants. */
-async function request(path: string, body: unknown, deployed: boolean) {
+async function request(path: string, body: unknown, deployed: boolean, onProgress?: (event: BridgeProgress) => void) {
   const base = deployed ? `${deploymentApiBase}/runtime-app/workspace` : deploymentApiBase;
   const response = await fetch(`${base}/${path}`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : t("The projection request failed"));
-  return data as Record<string, unknown>;
+  const type = response.headers?.get?.("content-type") ?? "";
+  if (!type.includes("x-ndjson") || !response.body) {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : t("The extraction request failed"));
+    return data as Record<string, unknown>;
+  }
+  // The engineering routes stream: progress lines, then one done or error line.
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: Record<string, unknown> | undefined;
+  const handle = (line: string) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line) as Record<string, unknown>;
+    if (event.event === "progress") onProgress?.(event as unknown as BridgeProgress);
+    else if (event.event === "done") result = event.result as Record<string, unknown>;
+    else if (event.event === "error") throw new Error(typeof event.detail === "string" ? event.detail : t("The extraction request failed"));
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = done ? "" : (lines.pop() ?? "");
+    for (const line of lines) handle(line);
+    if (done) break;
+  }
+  if (buffer) handle(buffer);
+  if (!result) throw new Error(t("The extraction request failed"));
+  return result;
 }
 
 /** Read a host API resource (engineering canvas only — the run log is not part of
@@ -156,85 +171,6 @@ function Banner({ error, notice }: { error: string; notice: string }) {
   </>;
 }
 
-const propertyTypes = (property: Property) => {
-  const value = property.type;
-  return new Set(Array.isArray(value) ? value : value ? [value] : []);
-};
-
-/** One input per schema property, typed from the JSON Schema; anything the form
- * cannot type (objects, arrays, untyped fields) is edited as JSON in place. The raw
- * JSON toggle beside the form stays the escape hatch for everything else. */
-function RecordForm({ definition, value, disabled, onChange }: {
-  definition: Record<string, unknown>; value: Record<string, unknown>; disabled: boolean;
-  onChange: (next: Record<string, unknown>) => void;
-}) {
-  const properties = (definition.properties ?? {}) as Record<string, Property>;
-  const required = new Set((definition.required as string[] | undefined) ?? []);
-  const [jsonDrafts, setJsonDrafts] = useState<Record<string, string>>({});
-  const [jsonErrors, setJsonErrors] = useState<Record<string, boolean>>({});
-  const set = (key: string, next: unknown) => {
-    const copy = { ...value };
-    if (next === undefined) delete copy[key]; else copy[key] = next;
-    onChange(copy);
-  };
-  const extra = Object.keys(value).filter(key => !(key in properties));
-  const jsonField = (key: string, label: ReactNode) => {
-    const text = jsonDrafts[key] ?? pretty(value[key] ?? null);
-    return <label key={key} className="knowledge-record-field">{label}
-      <textarea value={text} disabled={disabled} rows={3} spellCheck={false}
-        aria-invalid={jsonErrors[key] || undefined}
-        onChange={event => {
-          const next = event.target.value;
-          setJsonDrafts({ ...jsonDrafts, [key]: next });
-          try { set(key, next.trim() ? JSON.parse(next) : undefined); setJsonErrors({ ...jsonErrors, [key]: false }); }
-          catch { setJsonErrors({ ...jsonErrors, [key]: true }); }
-        }} />
-      {jsonErrors[key] && <small className="knowledge-error">{t("Not valid JSON")}</small>}
-    </label>;
-  };
-  return <div className="knowledge-record-form">
-    {Object.entries(properties).map(([key, property]) => {
-      const types = propertyTypes(property);
-      const label = <span className="knowledge-record-label">
-        <span>{property.title || key}{required.has(key) ? " *" : ""}</span>
-        {property.description && <small>{property.description}</small>}
-      </span>;
-      const current = value[key];
-      if (property.enum) {
-        return <label key={key} className="knowledge-record-field">{label}
-          <select value={current === undefined ? "" : String(current)} disabled={disabled}
-            onChange={event => set(key, event.target.value === "" ? undefined
-              : property.enum!.find(option => String(option) === event.target.value))}>
-            <option value="">—</option>
-            {property.enum.map(option => <option key={String(option)} value={String(option)}>{String(option)}</option>)}
-          </select></label>;
-      }
-      if (types.has("boolean") && types.size <= 2) {
-        return <label key={key} className="knowledge-record-field">{label}
-          <select value={current === undefined || current === null ? "" : String(current)} disabled={disabled}
-            onChange={event => set(key, event.target.value === "" ? undefined : event.target.value === "true")}>
-            <option value="">—</option><option value="true">true</option><option value="false">false</option>
-          </select></label>;
-      }
-      if ((types.has("number") || types.has("integer")) && !types.has("string") && !types.has("object") && !types.has("array")) {
-        return <label key={key} className="knowledge-record-field">{label}
-          <input type="number" step={types.has("integer") ? 1 : "any"} disabled={disabled}
-            value={typeof current === "number" ? current : ""}
-            onChange={event => set(key, event.target.value === "" ? undefined
-              : types.has("integer") ? parseInt(event.target.value, 10) : Number(event.target.value))} /></label>;
-      }
-      if (types.has("string") && !types.has("object") && !types.has("array")) {
-        return <label key={key} className="knowledge-record-field">{label}
-          <input type="text" disabled={disabled} value={typeof current === "string" ? current : current === undefined || current === null ? "" : String(current)}
-            onChange={event => set(key, event.target.value === "" ? undefined : event.target.value)} /></label>;
-      }
-      return jsonField(key, label);
-    })}
-    {extra.map(key => jsonField(key, <span className="knowledge-record-label"><span>{key}</span>
-      <small>{t("Not in the schema")}</small></span>))}
-  </div>;
-}
-
 function Preview({ host, card }: PluginViewProps) {
   useLocale();
   const [summary, setSummary] = useState<Overview>();
@@ -250,9 +186,10 @@ function Preview({ host, card }: PluginViewProps) {
     {error ? <p role="alert" title={error}>{t("Knowledge base unavailable")}</p>
       : !summary ? <p role="status">{t("Opening knowledge base…")}</p>
       : <>
-        <strong>{summary.counts.facts} {summary.counts.facts === 1 ? t("published fact") : t("published facts")}</strong>
-        <p>{t("{v0} documents · {v1} entities · {v2} awaiting review", {
-          v0: summary.counts.sources, v1: summary.counts.entities, v2: summary.counts.pending_review })}</p>
+        <strong>{summary.counts.entities} {summary.counts.entities === 1 ? t("published entity") : t("published entities")}</strong>
+        <p>{t("{v0} documents · {v1} relations · {v2} draft(s) awaiting review", {
+          v0: summary.counts.sources, v1: summary.counts.relations,
+          v2: (summary.counts.knowledge_drafts - summary.counts.published_knowledge) + (summary.counts.insights - summary.counts.published_insights) })}</p>
       </>}
   </div>;
 }
@@ -268,25 +205,20 @@ export function Workspace({ host, card }: PluginViewProps) {
   const [overview, setOverview] = useState<Overview>();
   const [sources, setSources] = useState<Source[]>([]);
   const [schemas, setSchemas] = useState<SchemaItem[]>([]);
-  const [projections, setProjections] = useState<Projection[]>([]);
-  const [drafts, setDrafts] = useState<DraftItem[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [graph, setGraph] = useState<Graph>();
 
   // "" means every group; otherwise the id every list is narrowed to, so sources,
-  // markdown, projections, drafts and the graph all stay scoped to one group at a time.
+  // markdown, drafts, records and the graph all stay scoped to one group at a time.
   const [activeGroup, setActiveGroup] = useState("");
   const [groupName, setGroupName] = useState("");
   const [groupEditing, setGroupEditing] = useState(false);
   const [groupCreating, setGroupCreating] = useState(false);
   const [rawMarkdown, setRawMarkdown] = useState(false);
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
-  // Which literature schema's projections build the published graph — the one
-  // pipeline Graph owns end to end. Every other literature schema is "custom":
-  // Projections runs it and reviews the result, but it never reaches the graph.
-  const [graphSchemaId, setGraphSchemaId] = useState("");
-  const [customSchemaId, setCustomSchemaId] = useState("");
-  const [customSelectedSources, setCustomSelectedSources] = useState<string[]>([]);
+  // Literature → Records: "" shows every literature schema's records; a chosen id narrows to it.
+  const [literatureSchemaId, setLiteratureSchemaId] = useState("");
+  // A record an insight's evidence asked Literature → Records to unfold.
+  const [focusRecordId, setFocusRecordId] = useState("");
 
   const [selectedSource, setSelectedSource] = useState("");
   const [extracted, setExtracted] = useState<Extracted>();
@@ -294,12 +226,6 @@ export function Workspace({ host, card }: PluginViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>();
   const [searchError, setSearchError] = useState("");
-  const [schemaId, setSchemaId] = useState("");
-  const [editor, setEditor] = useState<{ id: string; name: string; description: string;
-    system_prompt: string; definition: string; kind: "literature" | "experiment" }>();
-  const [chosen, setChosen] = useState<string[]>([]);
-  const [projection, setProjection] = useState<ProjectionDetail>();
-  const [draftDetail, setDraftDetail] = useState<DraftDetail>();
   const [experiments, setExperiments] = useState<ExperimentItem[]>([]);
   // Records open in place: which rows are unfolded, the full detail (sources,
   // revision) fetched for each as it opens, and the one row being edited — its data
@@ -342,19 +268,16 @@ export function Workspace({ host, card }: PluginViewProps) {
   const [runLogError, setRunLogError] = useState("");
   const [runLogOpen, setRunLogOpen] = useState(false);
   const [stopping, setStopping] = useState(false);
-  const [reviewNotes, setReviewNotes] = useState("");
-  const [pending, setPending] = useState<Pending>();
   const [notice, setNotice] = useState("");
-  const [filter, setFilter] = useState("");
-  const [entity, setEntity] = useState("");
   const [jobDetail, setJobDetail] = useState<{ job: Job; events: JobEvent[] }>();
   const [settings, setSettings] = useState<Settings>();
+  const [indexStatus, setIndexStatus] = useState<IndexStatus>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const generation = useRef(0);
   const documentSequence = useRef(0);
-  // A deployment mounts no model settings and no live picker, so projection there
+  // A deployment mounts no model settings and no live picker, so extraction there
   // always uses whichever model was chosen ahead of time in the engineering Settings
   // section — never a value the deployed viewer can change.
   const deployed = !!host.deployment;
@@ -370,6 +293,9 @@ export function Workspace({ host, card }: PluginViewProps) {
   // Extraction is an Agent run: only an agent holding the experiment relationship
   // can read the upload and save its records, so only those are offered.
   const labAgents = useConnectedCards(card.id, { direction: "incoming", relationshipPrefix: "knowledge.base.experiment", trait: "core.agent" });
+  // The literature half: an agent holding the extract relationship names concepts
+  // into knowledge drafts and reads records out of sources.
+  const extractAgents = useConnectedCards(card.id, { direction: "incoming", relationshipPrefix: "knowledge.base.extract", trait: "core.agent" });
   const canRunAgents = !deployed && typeof host.runAgent === "function" && labAgents.length > 0;
   const canExtract = canRunAgents || !!selectedModel;
 
@@ -384,13 +310,13 @@ export function Workspace({ host, card }: PluginViewProps) {
   const groupFilter = useCallback((): Record<string, unknown> =>
     activeGroup ? { group_id: activeGroup } : {}, [activeGroup]);
 
-  // Select a source for the extracted-markdown/projection panel and jump to the
-  // Sources tab, wherever the click that asked for it happened — a search result
-  // or a projection's evidence link both point at a source, not at the tab.
+  // Select a source for the reader and jump to the Sources tab, wherever the click
+  // that asked for it happened — a search result, a draft's source chip or a
+  // record's evidence all point at a source, not at the tab.
   const viewSource = useCallback((id: string) => {
-    setSelectedSource(id); setSchemaId(schemaId || schemas[0]?.id || "");
+    setSelectedSource(id);
     setCategory("literature"); setLiteratureTab("sources");
-  }, [schemaId, schemas]);
+  }, []);
 
   const refresh = useCallback(async () => {
     const current = generation.current;
@@ -399,38 +325,25 @@ export function Workspace({ host, card }: PluginViewProps) {
     // every other section's data — only whichever call actually failed stays empty.
     const results = await Promise.allSettled([
       call("overview", groupArgs()), call("sources", { limit: 100, ...groupArgs() }),
-      call("schemas", { operation: "list" }),
-      call("projections", { limit: 100, ...groupArgs() }),
-      call("draft", { operation: "list", ...groupArgs() }), call("jobs", { limit: 20, ...groupFilter() }),
+      call("schemas", { operation: "list" }), call("jobs", { limit: 20, ...groupFilter() }),
       call("experiments", { limit: 200, ...groupArgs() }),
       call("experiment_bundles", { limit: 100, ...groupArgs() }),
     ]);
     if (generation.current !== current) return;
-    const [summary, sourceList, schemaList, projectionList, draftList, jobList, experimentList, bundleList] =
+    const [summary, sourceList, schemaList, jobList, experimentList, bundleList] =
       results.map(result => result.status === "fulfilled" ? result.value : undefined);
-    if (summary) {
-      setOverview(summary as Overview); setSettings((summary as Overview).settings);
-      setGraphSchemaId((summary as Overview).graph_schema_id ?? "");
-    }
+    if (summary) { setOverview(summary as Overview); setSettings((summary as Overview).settings); }
     if (sourceList) setSources((sourceList.sources as Source[]) ?? []);
     if (schemaList) setSchemas((schemaList.schemas as SchemaItem[]) ?? []);
-    if (projectionList) setProjections((projectionList.projections as Projection[]) ?? []);
-    if (draftList) setDrafts((draftList.drafts as DraftItem[]) ?? []);
     if (jobList) setJobs((jobList.jobs as Job[]) ?? []);
     setExperiments((experimentList?.experiments as ExperimentItem[]) ?? []);
     setBundles((bundleList?.bundles as Bundle[]) ?? []);
     setRefreshVersion(value => value + 1);
     // A core section failing is still worth surfacing; "experiments" not being
     // published on an older release is not a real error, so it never blocks this.
-    const coreFailure = results.slice(0, 6).find(result => result.status === "rejected");
+    const coreFailure = results.slice(0, 4).find(result => result.status === "rejected");
     if (coreFailure) throw (coreFailure as PromiseRejectedResult).reason;
   }, [call, groupArgs, groupFilter]);
-
-  const loadGraph = useCallback(async (args: Record<string, unknown> = {}) => {
-    const current = generation.current;
-    const result = await call("graph", { layer: "literature", ...groupFilter(), ...args }) as Graph;
-    if (generation.current === current) setGraph(result);
-  }, [call, groupFilter]);
 
   const perform = useCallback(async (work: () => Promise<void>) => {
     const current = generation.current;
@@ -440,16 +353,10 @@ export function Workspace({ host, card }: PluginViewProps) {
     finally { if (generation.current === current) setBusy(false); }
   }, []);
 
-  /** Walk outward from one entity; the map keeps whatever is already placed. */
-  const expand = useCallback((id: string) => {
-    setEntity(id);
-    void perform(() => loadGraph({ operation: "traverse", entity_id: id, max_depth: 2 }));
-  }, [loadGraph, perform]);
-
   useEffect(() => {
-    void perform(async () => { await refresh(); await loadGraph(); });
+    void perform(refresh);
     return () => { generation.current += 1; documentSequence.current += 1; };
-  }, [card.id, perform, refresh, loadGraph]);
+  }, [card.id, perform, refresh]);
 
   // A conversion job runs on the card's own thread, so poll until nothing is active.
   useEffect(() => {
@@ -537,101 +444,6 @@ export function Workspace({ host, card }: PluginViewProps) {
     setExtracted({ ...next, offset: extracted.offset, markdown: extracted.markdown + next.markdown });
   });
 
-  const project = () => extracted && perform(async () => {
-    if (!schemaId) throw new Error(t("Choose an extraction schema first"));
-    if (!selectedModel) throw new Error(deployed
-      ? t("This deployment has no default model configured yet")
-      : t("Configure a model connection first"));
-    const result = await request(`knowledge/${card.id}/project`, {
-      schema_id: schemaId, model: selectedModel, record_id: extracted.record_id }, deployed);
-    const saved = result.projection as { id: string; validation?: { valid?: boolean } };
-    setNotice(result.truncated
-      ? t("Projected a truncated document; only the first part was sent to the model")
-      : saved.validation?.valid === false
-        ? t("Projection saved but it does not satisfy the schema; open it to see why")
-        : t("Projection {v0} saved", { v0: shortId(saved.id) }));
-    await refresh();
-  });
-
-  // Same call as "Project to JSON" above, just run once per source id given
-  // instead of the one currently open — used by both Projections' custom batch
-  // (deliberately selected sources) and Graph's "project all pending" (every
-  // converted source the graph schema has not already produced a projection for).
-  const projectSources = (targetSchemaId: string, sourceIds: string[], onDone?: () => void) => perform(async () => {
-    if (!targetSchemaId) throw new Error(t("Choose an extraction schema first"));
-    if (!selectedModel) throw new Error(deployed
-      ? t("This deployment has no default model configured yet")
-      : t("Configure a model connection first"));
-    const targets = sources.filter(item => sourceIds.includes(item.id) && item.record_id);
-    if (!targets.length) throw new Error(t("Select at least one converted source first"));
-    let invalid = 0;
-    for (const source of targets) {
-      const result = await request(`knowledge/${card.id}/project`, {
-        schema_id: targetSchemaId, model: selectedModel, record_id: source.record_id }, deployed);
-      const projection = result.projection as { validation?: { valid?: boolean } };
-      if (projection.validation?.valid === false) invalid++;
-    }
-    setNotice(invalid
-      ? t("Projected {v0} source(s); {v1} do not satisfy the schema", { v0: targets.length, v1: invalid })
-      : t("Projected {v0} source(s)", { v0: targets.length }));
-    onDone?.();
-    await refresh();
-  });
-
-  // Which literature schema builds the graph is a business choice, not engineering
-  // config, so it stays changeable from a deployed release — unlike Settings.
-  const setGraphSchema = (id: string) => perform(async () => {
-    const result = await call("graph_schema", { operation: "set", schema_id: id || null });
-    setGraphSchemaId((result.schema_id as string) ?? "");
-    await refresh();
-  });
-
-  const saveSchema = () => editor && perform(async () => {
-    let definition: unknown;
-    try { definition = JSON.parse(editor.definition); }
-    catch { throw new Error(t("The schema definition must be valid JSON")); }
-    const payload = { name: editor.name, description: editor.description || null,
-      system_prompt: editor.system_prompt, definition, kind: editor.kind };
-    const result = editor.id
-      ? await call("schemas", { operation: "update", schema_id: editor.id, ...payload })
-      : await call("schemas", { operation: "create", ...payload });
-    const saved = result.schema as SchemaItem;
-    // The experiment tables and forms read definitions from a cache; an edit refills it.
-    setSchemaDetails(previous => { const next = { ...previous }; delete next[saved.id]; return next; });
-    setSchemaId(saved.id);
-    setEditor(undefined);
-    await refresh();
-  });
-
-  const openSchema = (id: string) => perform(async () => {
-    const result = await call("schemas", { operation: "get", schema_id: id });
-    const detail = result.schema as SchemaDetail;
-    setEditor({ id: detail.id, name: detail.name, description: detail.description ?? "",
-      system_prompt: detail.system_prompt, definition: pretty(detail.definition), kind: detail.kind });
-  });
-
-  const openProjection = (id: string) => perform(async () => {
-    setProjection((await call("projections", { projection_id: id })).projection as ProjectionDetail);
-  });
-
-  const loadDraft = useCallback(async (id: string) => {
-    const current = generation.current;
-    const result = await call("draft", { operation: "get", draft_id: id });
-    if (generation.current !== current) return;
-    setPending(undefined);
-    setDraftDetail(result.draft as DraftDetail);
-  }, [call]);
-
-  const buildDraft = () => perform(async () => {
-    const result = await call("draft", { operation: "create", projection_ids: chosen });
-    const built = result.draft as { id: string; entities: number; relations: number };
-    setNotice(t("Draft ready for review: {v0} entities, {v1} relations", {
-      v0: built.entities, v1: built.relations }));
-    setChosen([]);
-    await refresh();
-    await loadDraft(built.id);
-  });
-
   // The full record (sources, revision) behind a row, fetched as it opens and kept
   // until the list refreshes it.
   const loadExperiment = useCallback(async (id: string) => {
@@ -657,12 +469,17 @@ export function Workspace({ host, card }: PluginViewProps) {
     if (!expanded.has(id)) toggleRecord(id);
   };
 
-  // From an insight's evidence to the record it cites: widen the Experiments filters
-  // so the row is in view, then unfold it.
+  // From an insight's evidence to the record it cites: a literature record unfolds
+  // in Literature → Records; an experiment one here, with the filters widened so
+  // the row is in view.
   const jumpToRecord = (id: string) => {
+    const record = experiments.find(item => item.id === id);
+    if (record && !experimentSchemaIds.has(record.schema_id)) {
+      setCategory("literature"); setLiteratureTab("records"); setFocusRecordId(id);
+      return;
+    }
     setCategory("experiment"); setExperimentTab("experiments");
     setBundleId(""); setRecordStatus(""); setRecordQuery("");
-    const record = experiments.find(item => item.id === id);
     if (record && currentExperimentSchemaId && record.schema_id !== currentExperimentSchemaId) setExperimentSchemaId("");
     openRecord(id);
   };
@@ -920,26 +737,6 @@ export function Workspace({ host, card }: PluginViewProps) {
     await refresh();
   });
 
-  const decide = (operation: "submit" | "approve" | "reject", confirmed?: Pending) =>
-    draftDetail && perform(async () => {
-      const args = confirmed?.args ?? { operation, draft_id: draftDetail.id,
-        expected_revision: draftDetail.revision, notes: reviewNotes || null };
-      const result = await call("review", args, !!confirmed);
-      if (result.status === "confirmation_required") {
-        setPending({ args, reasons: (result.reasons as string[]) ?? [] });
-        return;
-      }
-      setPending(undefined); setReviewNotes("");
-      const published = result.graph as { entities: number; relations: number } | undefined;
-      setNotice(published
-        ? t("Published as fact: {v0} entities and {v1} relations are now in the graph", {
-            v0: published.entities, v1: published.relations })
-        : t("Draft {v0}", { v0: String(result.decision).toLowerCase() }));
-      await refresh();
-      await loadGraph();
-      await loadDraft(draftDetail.id);
-    });
-
   const openJob = (id: string) => perform(async () => {
     const result = await call("jobs", { job_id: id });
     setJobDetail({ job: result.job as Job, events: (result.events as JobEvent[]) ?? [] });
@@ -949,7 +746,22 @@ export function Workspace({ host, card }: PluginViewProps) {
     const result = await call("settings", patch);
     setSettings(result.settings as Settings);
     await refresh();
+    await loadIndex();
   });
+
+  // The semantic index behind graph search: loaded when Settings opens and after any
+  // change to the embedding model, built on request so the first search is not slow.
+  const loadIndex = useCallback(async () => {
+    try { setIndexStatus(await call("graph_index", { operation: "status" }) as IndexStatus); }
+    catch { setIndexStatus(undefined); }
+  }, [call]);
+  const buildIndex = () => perform(async () => {
+    setIndexStatus(await call("graph_index", { operation: "build" }) as IndexStatus);
+  });
+  useEffect(() => {
+    if (!deployed && (category === "settings" || isDetached("settings"))) void loadIndex();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, deployed, loadIndex]);
 
   // Engineering-only: a deployment has no writable config at all, so this never
   // runs there — the Settings section that calls it is not even mounted when deployed.
@@ -957,11 +769,9 @@ export function Workspace({ host, card }: PluginViewProps) {
     await host.updateConfig({ default_model: value });
   });
 
-  const current = settings ?? { collection_name: "", pdf_engine: "auto", mineru_base_url: "", vision_model: "" };
+  const current = settings ?? { collection_name: "", pdf_engine: "auto", mineru_base_url: "", vision_model: "", embedding_model: "" };
   const currentSource = sources.find(item => item.id === selectedSource);
   const running = jobs.filter(job => ACTIVE.has(job.status));
-  // A search can drop the selected entity; the panel follows what is on the map.
-  const selectedEntity = graph?.entities.find(item => item.id === entity);
   const groups = overview?.groups ?? [];
   const activeGroupObject = groups.find(item => item.id === activeGroup);
   const pendingSources = sources.filter(item => !item.markdown);
@@ -969,7 +779,9 @@ export function Workspace({ host, card }: PluginViewProps) {
   const schemaName = (id: string) => schemas.find(item => item.id === id)?.name ?? shortId(id);
   const schemaBundles = bundles.filter(item => !currentExperimentSchemaId || item.schema_id === currentExperimentSchemaId);
   const selectedBundle = schemaBundles.find(item => item.id === bundleId);
-  const scopedRecords = experiments.filter(item => (!currentExperimentSchemaId || item.schema_id === currentExperimentSchemaId)
+  // Records read from literature sources share the table; the Experiment tab shows its own schemas' only.
+  const scopedRecords = experiments.filter(item => experimentSchemaIds.has(item.schema_id)
+    && (!currentExperimentSchemaId || item.schema_id === currentExperimentSchemaId)
     && (!selectedBundle || item.bundle_id === selectedBundle.id));
   // The filter bar: status, then free text against everything a person might
   // remember about a record — its name, note, upload, schema, file names, and
@@ -1001,17 +813,8 @@ export function Workspace({ host, card }: PluginViewProps) {
       : t("Configure a model connection in OAW Settings, or connect an Agent to this card with the Knowledge experiment relationship, to extract records."))
     : (extracting || selectedBundle?.status === "extracting") ? t("An extraction is already running.") : "";
   const literatureSchemas = schemas.filter(item => item.kind === "literature");
-  // Every literature schema is a candidate to become the graph schema; whichever
-  // one is not currently chosen is "custom" — Projections runs and reviews it, but
-  // it never reaches the graph. Changing the choice in Graph moves a schema
-  // between these two lists; nothing about the schema itself is retagged.
-  const customSchemas = literatureSchemas.filter(item => item.id !== graphSchemaId);
+  const literatureRecords = experiments.filter(item => !experimentSchemaIds.has(item.schema_id));
   const convertedSources = sources.filter(item => item.markdown && item.record_id);
-  const customProjections = projections.filter(item =>
-    item.schema_id !== graphSchemaId && !experimentSchemaIds.has(item.schema_id));
-  const graphProjections = projections.filter(item => item.schema_id === graphSchemaId);
-  const graphProjectedRecordIds = new Set(graphProjections.map(item => item.record_id));
-  const graphPendingSources = convertedSources.filter(item => !graphProjectedRecordIds.has(item.record_id!));
   const activeSection = category === "settings" ? "settings" : category === "literature" ? literatureTab : experimentTab;
   const publishedCounts = experiments.reduce<Record<string, number>>((counts, item) => {
     if (item.status === "published") counts[item.schema_id] = (counts[item.schema_id] ?? 0) + 1;
@@ -1027,12 +830,19 @@ export function Workspace({ host, card }: PluginViewProps) {
     </select>
   </label>;
 
+  const modelSelect = <label>{t("Model")}
+    <select value={selectedModel} disabled={busy || !models.length} onChange={event => setModel(event.target.value)}>
+      {!models.length && <option value="">{t("No model configured")}</option>}
+      {models.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
+    </select>
+  </label>;
+
   const refreshControls = <>
       {!!running.length && <span className="knowledge-running" role="status">
         {t("{v0} conversion running", { v0: running.length })}</span>}
       <button type="button" className="knowledge-icon-button" aria-label={t("Refresh")} title={t("Refresh")}
         disabled={busy} onClick={() => void perform(async () => {
-          setNotice(""); await refresh(); await loadGraph();
+          setNotice(""); await refresh();
         })}><RefreshCw size={15} /></button>
   </>;
 
@@ -1106,6 +916,29 @@ export function Workspace({ host, card }: PluginViewProps) {
         <p className="knowledge-meta">{(overview?.engines ?? []).includes("vision")
           ? t("Images convert through this model. Pick an OpenAI-compatible connection whose model can read images.")
           : t("No vision model resolves yet: choose one here, set a default model in OAW Settings, or add OAW_VISION_BASE_URL and OAW_VISION_API_KEY under Settings → Environment variables.")}</p>
+        {/* Graph search's semantic channel. Unlike the vision model there is no default
+            to fall back to — a chat model cannot embed — so "" means off and the graph
+            is searched by words alone. */}
+        <div className="knowledge-agent-model knowledge-vision-model">
+          <span>{t("Embedding model for graph search")}</span>
+          <ModelSelect label={t("Embedding model for graph search")} allowEmpty emptyLabel={t("Off — search by words only")}
+            value={current.embedding_model ?? ""}
+            onChange={value => void saveSettings({ embedding_model: value })} />
+        </div>
+        <p className="knowledge-meta">{t("Pick an OpenAI-compatible connection with an embedding model (one that serves /embeddings). Graph text — concept names, descriptions and relation statements — is sent to it when you search.")}</p>
+        {current.embedding_model && <div className="knowledge-semantic-index" role="group" aria-label={t("Semantic index")}>
+          <h5>{t("Semantic index")}</h5>
+          {!indexStatus ? <p className="knowledge-meta">{t("Checking…")}</p> : <>
+            <p className="knowledge-meta">{indexStatus.model_id
+              ? t("{v0}: {v1} of {v2} graph elements embedded", { v0: indexStatus.model_id, v1: indexStatus.embedded, v2: indexStatus.total })
+              : t("{v0} of {v1} graph elements embedded", { v0: indexStatus.embedded, v1: indexStatus.total })}
+              {indexStatus.pending ? ` · ${t("{v0} pending", { v0: indexStatus.pending })}` : ""}
+              {indexStatus.stale ? ` · ${t("{v0} stale", { v0: indexStatus.stale })}` : ""}</p>
+            {indexStatus.last_error && <p className="knowledge-error" role="alert">{t("Last error: {v0}", { v0: indexStatus.last_error })}</p>}
+            <button type="button" disabled={busy} onClick={() => void buildIndex()}>{t("Build index now")}</button>
+            <p className="knowledge-meta">{t("Searches keep the index up to date on their own; building it here makes the first search fast and shows whether the model works.")}</p>
+          </>}
+        </div>}
         <details className="knowledge-disclosure"><summary>{t("Available engines")}</summary>
           <p>{(overview?.engines ?? []).join(", ") || "—"}</p></details>
         </section>
@@ -1242,31 +1075,6 @@ export function Workspace({ host, card }: PluginViewProps) {
             <button type="button" className="knowledge-icon-button" aria-label={t("Close document")} title={t("Close document")}
               onClick={() => setSelectedSource("")}><X size={16} /></button>
           </div>
-          <details className="knowledge-disclosure knowledge-extraction">
-          <summary>{t("Project to JSON")}</summary>
-          <div className="knowledge-projectbar">
-            {/* An ad hoc, single-document projection while reading — any schema,
-                including the graph one. Batch-projecting several sources at once
-                lives in Projections (custom schemas) and Graph (the graph schema). */}
-            <label>{t("Extraction schema")}
-              <select value={schemaId} disabled={busy} onChange={event => setSchemaId(event.target.value)}>
-                <option value="">{t("Choose a schema")}</option>
-                {schemas.map(item => <option key={item.id} value={item.id}>{item.name} v{item.version}</option>)}
-              </select>
-            </label>
-            {deployed
-              ? <p className="knowledge-meta">{t("Model: {v0}", { v0: defaultModel || t("none configured") })}</p>
-              : <label>{t("Model")}
-                  <select value={selectedModel} disabled={busy || !models.length} onChange={event => setModel(event.target.value)}>
-                    {!models.length && <option value="">{t("No model configured")}</option>}
-                    {models.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
-                  </select>
-                </label>}
-            <button type="button" className="knowledge-primary" disabled={busy || !extracted || !schemaId || !selectedModel}
-              onClick={() => void project()}>{busy ? t("Working…") : t("Project to JSON")}</button>
-
-          </div>
-          </details>
           {documentError ? <p className="knowledge-empty">{documentError}</p>
             : !extracted ? <p role="status">{t("Loading markdown…")}</p> : <>
             <div className="knowledge-reading-toolbar">
@@ -1304,130 +1112,45 @@ export function Workspace({ host, card }: PluginViewProps) {
         </div>
       </WorkspaceSection>}
 
-      {((category === "literature" && literatureTab === "schemas") || (category === "experiment" && experimentTab === "schemas") || isDetached("schemas")) && <WorkspaceSection id="schemas" title={t("Schemas")} className="knowledge-section">
+      {((category === "experiment" && experimentTab === "schemas") || isDetached("schemas")) && <WorkspaceSection id="schemas" title={t("Schemas")} className="knowledge-section">
         <div className="knowledge-section" data-detached={isDetached("schemas") || undefined}>
         <WorkspaceToolbar label={t("Schemas")} className="knowledge-section-toolbar">
-          <span className="knowledge-meta">{schemas.length} {t("Schemas")}</span>
-          <div className="knowledge-heading-actions">{refreshControls}
-          <button type="button" className="knowledge-primary" disabled={busy || !!editor} onClick={() => setEditor({
-            id: "", name: "", description: "", system_prompt: "", kind: category === "experiment" ? "experiment" : "literature",
-            definition: pretty({ type: "object", required: [], properties: { entities: { type: "array", items: { type: "object" } }, relations: { type: "array", items: { type: "object" } } } }),
-          })}><Plus size={14} />{t("New schema")}</button></div>
+          <span className="knowledge-meta">{t("Experiment schemas: the fields each specimen record carries")}</span>
+          <div className="knowledge-heading-actions">{refreshControls}</div>
         </WorkspaceToolbar>
         <Banner error={error} notice={notice} />
-        <div className={`knowledge-split${editor ? " has-detail" : ""}`}>
-        <div className="knowledge-source-pane">
-        {!schemas.length && <WorkspaceEmptyState title={t("No schemas yet")}
-          description={t("Create a schema to define the information you want to extract.")} />}
-        <ul className="knowledge-list knowledge-record-list">
-          {schemas.map(item => <li key={item.id}>
-            <button type="button" aria-pressed={editor?.id === item.id} disabled={busy} onClick={() => void openSchema(item.id)}>
-              <span>{item.name}</span>
-              <small>v{item.version} · {item.kind === "experiment" ? t("experiment") : t("literature")} · {item.description || item.domain}</small>
-            </button>
-          </li>)}
-        </ul>
-        </div>
-        {editor && <div className="knowledge-form">
-          <label>{t("Name")}<input value={editor.name} disabled={busy}
-            onChange={event => setEditor({ ...editor, name: event.target.value })} /></label>
-          <label>{t("Description")}<input value={editor.description} disabled={busy}
-            onChange={event => setEditor({ ...editor, description: event.target.value })} /></label>
-          <label>{t("Kind")}
-            <select value={editor.kind} disabled={busy}
-              onChange={event => setEditor({ ...editor, kind: event.target.value as "literature" | "experiment" })}>
-              <option value="literature">{t("Literature")}</option>
-              <option value="experiment">{t("Experiment")}</option>
-            </select>
-          </label>
-          <label>{t("System prompt")}<textarea value={editor.system_prompt} disabled={busy} rows={3}
-            onChange={event => setEditor({ ...editor, system_prompt: event.target.value })} /></label>
-          <label>{t("JSON Schema definition")}<textarea value={editor.definition} disabled={busy} rows={8} spellCheck={false}
-            onChange={event => setEditor({ ...editor, definition: event.target.value })} /></label>
-          <div className="knowledge-formbar">
-            <button type="button" className="knowledge-primary" disabled={busy || !editor.name || !editor.system_prompt}
-              onClick={() => void saveSchema()}>{editor.id ? t("Save schema") : t("Create schema")}</button>
-            <button type="button" disabled={busy} onClick={() => setEditor(undefined)}>{t("Cancel")}</button>
-          </div>
-        </div>}
-        </div>
+        <SchemaEditor busy={busy} schemas={experimentSchemas} kind="experiment" call={call} perform={perform}
+          onSaved={async saved => {
+            // The experiment tables and forms read definitions from a cache; an edit refills it.
+            setSchemaDetails(previous => { const next = { ...previous }; delete next[saved.id]; return next; });
+            await refresh();
+          }} />
         </div>
       </WorkspaceSection>}
 
-      {((category === "literature" && literatureTab === "projections") || isDetached("projections")) && <WorkspaceSection id="projections" title={t("Projections")} className="knowledge-section">
-        <div className="knowledge-section" data-detached={isDetached("projections") || undefined}>
-        <WorkspaceToolbar label={t("Projections")} className="knowledge-section-toolbar">
-          {groupSelect}<div className="knowledge-heading-actions">{refreshControls}</div>
-        </WorkspaceToolbar>
-        <Banner error={error} notice={notice} />
-
-        <details className="knowledge-disclosure knowledge-workflow" open={!customProjections.length || undefined}>
-        <summary>{t("Project sources")}</summary>
-        {!customSchemas.length
-          ? <WorkspaceEmptyState title={t("Create an extraction schema")}
-              description={t("Create a literature schema in Schemas first (or free one up: Graph is currently using {v0}).", {
-                v0: literatureSchemas.find(item => item.id === graphSchemaId)?.name ?? t("none") })}
-              actions={<button type="button" onClick={() => setLiteratureTab("schemas")}>{t("Schemas")}</button>} />
-          : <>
-            <div className="knowledge-formbar">
-              <label>{t("Custom schema")}
-                <select value={customSchemaId} disabled={busy} onChange={event => setCustomSchemaId(event.target.value)}>
-                  <option value="">{t("Choose a schema")}</option>
-                  {customSchemas.map(item => <option key={item.id} value={item.id}>{item.name} v{item.version}</option>)}
-                </select>
-              </label>
-              {deployed
-                ? <p className="knowledge-meta">{t("Model: {v0}", { v0: defaultModel || t("none configured") })}</p>
-                : <label>{t("Model")}
-                    <select value={selectedModel} disabled={busy || !models.length} onChange={event => setModel(event.target.value)}>
-                      {!models.length && <option value="">{t("No model configured")}</option>}
-                      {models.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
-                    </select>
-                  </label>}
-            </div>
-            {!convertedSources.length ? <p className="knowledge-empty">{t("Convert a source in Sources first.")}</p> : <ul className="knowledge-list">
-              {convertedSources.map(item => <li key={item.id} className="knowledge-checkrow">
-                <label><input type="checkbox" checked={customSelectedSources.includes(item.id)} disabled={busy}
-                  onChange={event => setCustomSelectedSources(event.target.checked
-                    ? [...customSelectedSources, item.id] : customSelectedSources.filter(value => value !== item.id))} />
-                  <span className="knowledge-visually-hidden">{t("Select {v0}", { v0: item.filename })}</span>
-                </label>
-                <span className="knowledge-checkrow-label">
-                  <span>{item.filename}</span>
-                  <small>{!activeGroup && item.group_name ? item.group_name : t("{v0} projections", { v0: item.projections })}</small>
-                </span>
-              </li>)}
-            </ul>}
-            <button type="button" className="knowledge-primary"
-              disabled={busy || !customSchemaId || !selectedModel || !customSelectedSources.length}
-              onClick={() => void projectSources(customSchemaId, customSelectedSources, () => setCustomSelectedSources([]))}>
-              {t("Project {v0} selected", { v0: customSelectedSources.length })}</button>
-          </>}
-
-        </details>
-        <div className={`knowledge-split${projection ? " has-detail" : ""}`}>
-        <div className="knowledge-source-pane">
-        {!customProjections.length && !!customSchemas.length && <WorkspaceEmptyState title={t("No custom projections yet.")}
-          description={t("Extract structured data with a schema. Review results below.")} />}
-        <ul className="knowledge-list knowledge-record-list">
-          {customProjections.map(item => <li key={item.id}>
-            <button type="button" aria-pressed={projection?.id === item.id} disabled={busy}
-              onClick={() => void openProjection(item.id)}>
-              <span>{item.summary || shortId(item.id)}</span>
-              <small>{item.valid === false ? t("invalid") : t("valid")} · {schemas.find(s => s.id === item.schema_id)?.name ?? shortId(item.schema_id)}</small>
-            </button>
-          </li>)}
-        </ul>
+      {((category === "literature" && literatureTab === "knowledge") || isDetached("knowledge")) && <WorkspaceSection id="knowledge" title={t("Knowledge")} layout={{ min_width: 320, min_height: 320, ideal_width: 960, ideal_height: 640 }} className="knowledge-section knowledge-wide">
+        <div className="knowledge-section knowledge-wide" data-detached={isDetached("knowledge") || undefined}>
+          <KnowledgeSection host={host} cardId={card.id} deployed={deployed} busy={busy} version={refreshVersion}
+            sources={convertedSources} activeGroup={activeGroup} groupCount={groups.length}
+            groupArgs={groupArgs} groupFilter={groupFilter} call={call} perform={perform} request={request}
+            extractAgent={extractAgents[0]} canRunAgent={!deployed && typeof host.runAgent === "function" && extractAgents.length > 0}
+            selectedModel={selectedModel} modelSelect={modelSelect} groupSelect={groupSelect} refreshControls={refreshControls}
+            banner={<Banner error={error} notice={notice} />} setNotice={setNotice} setError={setError} onOpenSource={viewSource} />
         </div>
-        {projection && <div className="knowledge-detail">
-          <h4>{t("Projection {v0}", { v0: shortId(projection.id) })}</h4>
-          {projection.validation?.valid === false && <p role="alert" className="knowledge-error">
-            {(projection.validation.errors ?? projection.validation.missing ?? []).join("; ") || t("Does not satisfy the schema")}</p>}
-          <p className="knowledge-meta">{t("Evidence: {v0}", {
-            v0: projection.evidence.map(link => shortId(link.source_id)).join(", ") || "—" })}</p>
-          <pre>{pretty(projection.data)}</pre>
-        </div>}
-        </div>
+      </WorkspaceSection>}
+
+      {((category === "literature" && literatureTab === "records") || isDetached("records")) && <WorkspaceSection id="records" title={t("Records")} layout={{ min_width: 320, min_height: 320, ideal_width: 960, ideal_height: 640 }} className="knowledge-section knowledge-wide">
+        <div className="knowledge-section knowledge-wide" data-detached={isDetached("records") || undefined}>
+          <RecordsSection host={host} cardId={card.id} deployed={deployed} busy={busy} version={refreshVersion}
+            schemas={literatureSchemas} records={literatureRecords} sources={convertedSources}
+            schemaId={literatureSchemas.some(item => item.id === literatureSchemaId) ? literatureSchemaId : ""} onSchemaChange={setLiteratureSchemaId}
+            activeGroup={activeGroup} groupCount={groups.length} groupArgs={groupArgs} groupFilter={groupFilter}
+            call={call} perform={perform} request={request} refresh={refresh}
+            extractAgent={extractAgents[0]} labAgent={labAgents[0]} selectedModel={selectedModel}
+            modelSelect={modelSelect} groupSelect={groupSelect} refreshControls={refreshControls}
+            banner={<Banner error={error} notice={notice} />} setNotice={setNotice} setError={setError}
+            onOpenSource={viewSource} kindLabel={kind => KIND_LABELS[kind]()}
+            focusRecordId={focusRecordId} onFocused={() => setFocusRecordId("")} />
         </div>
       </WorkspaceSection>}
 
@@ -1446,10 +1169,8 @@ export function Workspace({ host, card }: PluginViewProps) {
             </select>
           </label>
           <div className="knowledge-heading-actions">{refreshControls}
-            <button type="button" disabled={busy} onClick={() => { setCategory("experiment"); setExperimentTab("schemas"); setEditor({
-              id: "", name: "", description: "", system_prompt: "", kind: "experiment",
-              definition: pretty({ type: "object", required: ["sample_id"], properties: { sample_id: { type: "string", description: "Specimen label" } } }),
-            }); }}><Plus size={14} />{t("New schema")}</button>
+            <button type="button" disabled={busy} onClick={() => { setCategory("experiment"); setExperimentTab("schemas"); }}>
+              <Plus size={14} />{t("New schema")}</button>
           </div>
         </WorkspaceToolbar>
         <Banner error={error} notice={notice} />
@@ -1717,166 +1438,13 @@ export function Workspace({ host, card }: PluginViewProps) {
             onSchemaChange={setInsightSchemaId} publishedCounts={publishedCounts}
             groupArgs={groupArgs} groupFilter={groupFilter} call={call} perform={perform} request={request}
             labAgent={labAgents[0]} canRunAgent={canRunAgents} selectedModel={selectedModel}
-            modelSelect={<label>{t("Model")}
-              <select value={selectedModel} disabled={busy || !models.length} onChange={event => setModel(event.target.value)}>
-                {!models.length && <option value="">{t("No model configured")}</option>}
-                {models.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
-              </select>
-            </label>}
+            modelSelect={modelSelect}
             groupSelect={groupSelect} refreshControls={refreshControls} banner={<Banner error={error} notice={notice} />}
             setNotice={setNotice} setError={setError} onOpenRecord={jumpToRecord}
             kindLabel={kind => KIND_LABELS[kind]()} />
         </div>
       </WorkspaceSection>}
 
-      {((category === "literature" && literatureTab === "graph") || isDetached("graph")) && <WorkspaceSection id="graph" title={t("Graph")} layout={{ min_width: 320, min_height: 320, ideal_width: 960, ideal_height: 640 }} className="knowledge-section knowledge-wide">
-        <div className="knowledge-section knowledge-wide" data-detached={isDetached("graph") || undefined}>
-        <WorkspaceToolbar label={t("Knowledge graph")} className="knowledge-section-toolbar">
-          {groupSelect}<div className="knowledge-heading-actions">{refreshControls}</div>
-        </WorkspaceToolbar>
-        <Banner error={error} notice={notice} />
-        <details className="knowledge-disclosure knowledge-collection-search">
-        <summary>{t("Search collection")}</summary>
-        <p className="knowledge-meta">{t("Search published entities beyond the current map.")}</p>
-        <form className="knowledge-formbar knowledge-graph-search" onSubmit={event => {
-          event.preventDefault();
-          void perform(() => loadGraph(filter.trim() ? { name_contains: filter.trim() } : {}));
-        }}>
-          <input type="search" aria-label={t("Filter by name")} placeholder={t("Filter by name")} value={filter} disabled={busy}
-            onChange={event => setFilter(event.target.value)} />
-          <button type="submit" disabled={busy}>{t("Search")}</button>
-          <button type="button" disabled={busy} onClick={() => void perform(async () => {
-            setFilter(""); setEntity(""); await loadGraph();
-          })}>{t("Show everything")}</button>
-        </form>
-        </details>
-        {!graph?.entities.length ? <WorkspaceEmptyState className="knowledge-graph-empty" icon={<Network size={28} />}
-          title={filter.trim() ? t("No matches") : t("No published knowledge yet")}
-          description={filter.trim() ? t("Try another name or show everything.") : t("The graph is empty until a draft is approved.")} /> : <>
-          <p className="knowledge-meta">{t("{v0} entities · {v1} relations{v2}", {
-            v0: graph.entities.length, v1: graph.relations.length,
-            v2: graph.truncated ? t(" · result limited") : "" })}</p>
-          <div className="knowledge-graph">
-            <GraphMap graphKey={`knowledge:${card.id}`} entities={graph.entities} relations={graph.relations} selected={entity}
-              onSelect={setEntity} onExpand={expand} />
-            <div className="knowledge-graphside">
-              <ul className="knowledge-list">
-                {graph.entities.map(item => <li key={item.id}>
-                  <button type="button" aria-pressed={entity === item.id} disabled={busy}
-                    onClick={() => setEntity(item.id)}>
-                    <span>{item.name}</span><small>{item.type}</small>
-                  </button>
-                </li>)}
-              </ul>
-              {selectedEntity && <div className="knowledge-detail">
-                <h4>{selectedEntity.name}</h4>
-                <p className="knowledge-meta">{selectedEntity.type}</p>
-                <button type="button" disabled={busy} onClick={() => expand(selectedEntity.id)}>
-                  {t("Show neighbours")}</button>
-                {!!Object.keys(selectedEntity.properties ?? {}).length && <pre>{pretty(selectedEntity.properties)}</pre>}
-                <ul className="knowledge-relations">
-                  {graph.relations.filter(relation => relation.source_id === selectedEntity.id
-                      || relation.target_id === selectedEntity.id).map(relation => {
-                    const name = (id: string) => graph.entities.find(item => item.id === id)?.name ?? shortId(id);
-                    return <li key={relation.id}>{name(relation.source_id)} →{relation.type}→ {name(relation.target_id)}</li>;
-                  })}
-                </ul>
-              </div>}
-            </div>
-          </div>
-        </>}
-        <details className="knowledge-disclosure knowledge-workflow knowledge-graph-workflow" open={!graph?.entities.length || !!draftDetail || undefined}>
-          <summary>{t("Build and review knowledge")} {drafts.length > 0 && <span className="knowledge-total">{drafts.length}</span>}</summary>
-        <p className="knowledge-meta">{t("Extract → build draft → review → publish")}</p>
-        <label>{t("Graph schema")}
-          <select value={graphSchemaId} disabled={busy} onChange={event => void setGraphSchema(event.target.value)}>
-            <option value="">{t("Choose a schema")}</option>
-            {literatureSchemas.map(item => <option key={item.id} value={item.id}>{item.name} v{item.version}</option>)}
-          </select>
-        </label>
-
-        {!graphSchemaId
-          ? <p className="knowledge-empty">{t("Choose a schema above to start building the graph from your sources (create one in Schemas first if none fits).")}</p>
-          : <>
-            <h4>{t("Project sources")}</h4>
-            <p className="knowledge-meta">{t("{v0} converted source(s) awaiting projection against the graph schema.", { v0: graphPendingSources.length })}</p>
-            {!deployed && <label>{t("Model")}
-              <select value={selectedModel} disabled={busy || !models.length} onChange={event => setModel(event.target.value)}>
-                {!models.length && <option value="">{t("No model configured")}</option>}
-                {models.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
-              </select>
-            </label>}
-            <button type="button" className="knowledge-primary" disabled={busy || !selectedModel || !graphPendingSources.length}
-              onClick={() => void projectSources(graphSchemaId, graphPendingSources.map(item => item.id))}>
-              {t("Project all pending ({v0})", { v0: graphPendingSources.length })}</button>
-
-            <h4>{t("Projections")}</h4>
-            {!graphProjections.length && <p className="knowledge-empty">{t("No graph-schema projections yet.")}</p>}
-            <ul className="knowledge-list">
-              {graphProjections.map(item => <li key={item.id} className="knowledge-checkrow">
-                <label><input type="checkbox" checked={chosen.includes(item.id)} disabled={busy}
-                  onChange={event => setChosen(event.target.checked
-                    ? [...chosen, item.id] : chosen.filter(value => value !== item.id))} />
-                  <span className="knowledge-visually-hidden">{t("Select projection {v0}", { v0: shortId(item.id) })}</span>
-                </label>
-                <button type="button" aria-pressed={projection?.id === item.id} disabled={busy}
-                  onClick={() => void openProjection(item.id)}>
-                  <span>{item.summary || shortId(item.id)}</span>
-                  <small>{item.valid === false ? t("invalid") : t("valid")}</small>
-                </button>
-              </li>)}
-            </ul>
-            <button type="button" className="knowledge-primary" disabled={busy || !chosen.length}
-              onClick={() => void buildDraft()}>{t("Build draft from {v0} selected", { v0: chosen.length })}</button>
-            {projection && <div className="knowledge-detail">
-              <h4>{t("Projection {v0}", { v0: shortId(projection.id) })}</h4>
-              {projection.validation?.valid === false && <p role="alert" className="knowledge-error">
-                {(projection.validation.errors ?? projection.validation.missing ?? []).join("; ") || t("Does not satisfy the schema")}</p>}
-              <p className="knowledge-meta">{t("Evidence: {v0}", {
-                v0: projection.evidence.map(link => shortId(link.source_id)).join(", ") || "—" })}</p>
-              <pre>{pretty(projection.data)}</pre>
-            </div>}
-
-            <h4>{t("Review")}</h4>
-            <p className="knowledge-meta">{t("Approving publishes a fact revision and is the only thing that writes the graph.")}</p>
-            {!drafts.length && <p className="knowledge-empty">{t("No drafts yet. Select projections above to build one.")}</p>}
-            <ul className="knowledge-list">
-              {drafts.map(item => <li key={item.id}>
-                <button type="button" aria-pressed={draftDetail?.id === item.id} disabled={busy}
-                  onClick={() => void perform(() => loadDraft(item.id))}>
-                  <span>{shortId(item.id)}</span><small>{item.status} · {t("revision {v0}", { v0: item.revision })} · {item.created_by}</small>
-                </button>
-              </li>)}
-            </ul>
-            {draftDetail && <div className="knowledge-detail">
-              <h4>{t("Draft {v0}", { v0: shortId(draftDetail.id) })}</h4>
-              <p className="knowledge-meta">{t("{v0} · {v1} entities · {v2} relations · {v3} evidence links", {
-                v0: draftDetail.status, v1: draftDetail.graph.entities?.length ?? 0,
-                v2: draftDetail.graph.relations?.length ?? 0, v3: draftDetail.evidence_ids.length })}</p>
-              <pre>{pretty(draftDetail.graph)}</pre>
-              <label>{t("Review notes")}<textarea value={reviewNotes} rows={2} disabled={busy}
-                onChange={event => setReviewNotes(event.target.value)} /></label>
-              {pending ? <div role="alert" className="knowledge-confirm">
-                <strong>{t("Publish this draft as fact?")}</strong>
-                <p>{pending.reasons.join(" ")}</p>
-                <button type="button" className="knowledge-primary" disabled={busy}
-                  onClick={() => void decide("approve", pending)}>{t("Confirm and publish")}</button>
-                <button type="button" disabled={busy} onClick={() => setPending(undefined)}>{t("Cancel")}</button>
-              </div> : <div className="knowledge-formbar">
-                <button type="button" disabled={busy || draftDetail.status !== "DRAFT"}
-                  onClick={() => void decide("submit")}>{t("Submit for review")}</button>
-                {/* mkb only allows approve/reject once a draft has moved past DRAFT into IN_REVIEW. */}
-                <button type="button" className="knowledge-primary" disabled={busy || draftDetail.status !== "IN_REVIEW"}
-                  onClick={() => void decide("approve")}>{t("Approve")}</button>
-                <button type="button" disabled={busy || draftDetail.status !== "IN_REVIEW"}
-                  onClick={() => void decide("reject")}>{t("Reject")}</button>
-              </div>}
-            </div>}
-          </>}
-
-        </details>
-        </div>
-      </WorkspaceSection>}
     </div>
   </div>;
 }

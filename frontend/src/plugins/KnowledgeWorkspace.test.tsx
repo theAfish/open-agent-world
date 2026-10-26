@@ -28,32 +28,36 @@ vi.mock("@oaw/plugin-api", async () => {
 });
 
 const SOURCE = { id: "source-1", filename: "sintering.md", media_type: "text/markdown", size: 2048,
-  created_at: "2026-09-23T00:00:00Z", markdown: null, record_id: null, projections: 0 };
+  created_at: "2026-09-23T00:00:00Z", markdown: null, record_id: null, records: 0 };
 const CONVERTED = { ...SOURCE, markdown: { artifact_id: "artifact-1", size: 2048, engine: "text" },
   record_id: "record-1" };
 const SCHEMA = { id: "schema-1", name: "Process graph", description: "Samples and processes",
   domain: "materials", kind: "literature", version: 1 };
 const EXPERIMENT_SCHEMA = { id: "schema-2", name: "Conductivity run", description: null,
   domain: "materials", kind: "experiment", version: 1 };
-const EXPERIMENT_PROJECTION = { id: "projection-1", schema_id: "schema-2", record_id: "record-1",
-  status: "COMPLETED", valid: true, extracted_at: "2026-09-23T00:00:00Z", summary: "A1" };
 const DOCUMENT = { record_id: "record-1", filename: "sintering.md", engine: "text",
   total_characters: 42, offset: 0, markdown: "# Sintering of Si3N4", has_more: false };
-const DRAFT = { id: "draft-1", status: "DRAFT", revision: 1, created_by: "user:desktop",
-  updated_at: "2026-09-23T00:00:00Z" };
+/** One knowledge draft as ``knowledge_drafts`` returns it, opened over the converted source. */
+const DRAFT = { id: "draft-1", group_id: "collection-1", title: "sintering.md", status: "draft", revision: 1,
+  run_id: null, review_log: [], created_by: "user:desktop", created_at: "2026-09-23T00:00:00Z", updated_at: "2026-09-23T00:00:00Z",
+  entities: [{ id: "concept:si3n4", name: "Si3N4", description: "a ceramic", aliases: ["silicon nitride"], source_ids: ["source-1"] },
+    { id: "concept:sintering", name: "Sintering", description: null, aliases: [], source_ids: ["source-1"] }],
+  relations: [{ id: "concept:si3n4|processed_by|concept:sintering", source: "concept:si3n4",
+    target: "concept:sintering", predicate: "processed_by", description: "Si3N4 powder is densified by pressureless sintering.",
+    evidence_level: 2, snippet: "Si3N4 was sintered", source_ids: ["source-1"] }],
+  sources: [{ source_id: "source-1", filename: "sintering.md", extracted_at: "2026-09-23T00:00:00Z", missing: false }] };
 
-const overview = (counts: Record<string, number> = {}, graphSchemaId: string | null = null) => ({
+const overview = (counts: Record<string, number> = {}) => ({
   collection: { id: "collection-1", name: "Knowledge base" },
   settings: { collection_name: "Knowledge base", pdf_engine: "auto", mineru_base_url: "" },
   engines: ["text"],
-  counts: { sources: 1, records: 1, schemas: 1, projections: 0, drafts: 1, pending_review: 1,
-    facts: 0, entities: 0, relations: 0, ...counts },
+  counts: { sources: 1, records: 1, schemas: 1, knowledge_drafts: 0, published_knowledge: 0,
+    entities: 0, relations: 0, insights: 0, published_insights: 0, ...counts },
   active_jobs: 0,
-  graph_schema_id: graphSchemaId,
 });
 const EMPTY: Record<string, Record<string, unknown>> = {
-  sources: { sources: [] }, schemas: { schemas: [] }, projections: { projections: [] },
-  draft: { drafts: [] }, jobs: { jobs: [] }, graph: { entities: [], relations: [], truncated: false },
+  sources: { sources: [] }, schemas: { schemas: [] }, knowledge_drafts: { drafts: [] },
+  jobs: { jobs: [] }, graph: { entities: [], relations: [], truncated: false },
 };
 
 type Action = (name: string, args: Record<string, unknown>, confirm?: boolean) =>
@@ -124,7 +128,7 @@ it("creates a new group while another group is selected", async () => {
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ configured: false, source: null }) })));
-  // The Graph section draws a React Flow map, which measures itself on mount.
+  // The Knowledge and Insights sections draw a React Flow map, which measures itself on mount.
   vi.stubGlobal("ResizeObserver", class {
     observe() {} unobserve() {} disconnect() {}
   });
@@ -162,8 +166,8 @@ it("keeps a detached reader and its draft mounted while another section opens", 
     const reader = destination.querySelector(".knowledge-reader");
     const search = within(destination).getByLabelText("Search converted documents") as HTMLInputElement;
     fireEvent.change(search, { target: { value: "unsent query" } });
-    fireEvent.click(screen.getByRole("button", { name: "Schemas" }));
-    expect(await screen.findByRole("button", { name: "New schema" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Knowledge" }));
+    expect(await screen.findByRole("button", { name: "New draft" })).toBeTruthy();
     expect(destination.querySelector(".knowledge-reader")).toBe(reader);
     expect(within(destination).getByLabelText("Search converted documents")).toBe(search);
     expect(search.value).toBe("unsent query");
@@ -178,9 +182,8 @@ it("searches published entities through the collection controls and restores the
   const entity = { id: "entity-1", type: "material", name: "Si3N4", properties: { topic: "ceramics" } };
   const action = open(async (name, args) => name === "graph"
     ? { entities: args.name_contains ? [] : [entity], relations: [], truncated: false } : undefined);
-  fireEvent.click(screen.getByRole("tab", { name: "Graph" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Knowledge" }));
   await screen.findByRole("button", { name: /Si3N4/ });
-  fireEvent.click(screen.getByText("Search collection", { selector: "summary" }));
   const input = screen.getByLabelText("Filter by name");
   fireEvent.change(input, { target: { value: "missing material" } });
   fireEvent.submit(input.closest("form")!);
@@ -317,33 +320,174 @@ it("shows a search error inline instead of crashing the workspace", async () => 
   expect(action).toHaveBeenCalled();
 });
 
-it("projects the selected document through the host bridge, never the plugin", async () => {
+it("opens a knowledge draft over a source and extracts it through the host bridge, never the plugin", async () => {
+  let opened = false;
   const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({
-    projection: { id: "projection-1", validation: { valid: true } },
-    truncated: false, record_id: "record-1" }) }));
+    draft: DRAFT, sources: [{ source_id: "source-1", filename: "sintering.md", chunks: 1, entities: 2, relations: 1, truncated: false }] }) }));
   vi.stubGlobal("fetch", fetchMock);
-  const action = open(async name => {
+  const action = open(async (name, args) => {
     if (name === "sources") return { sources: [CONVERTED] };
-    if (name === "schemas") return { schemas: [SCHEMA] };
-    if (name === "markdown") return DOCUMENT;
+    if (name === "knowledge_drafts") return { drafts: opened ? [{ ...DRAFT, entities: [], relations: [],
+      sources: [{ ...DRAFT.sources[0], extracted_at: null }] }] : [] };
+    if (name === "knowledge_draft_manage" && args.operation === "create") {
+      opened = true;
+      return { draft: { ...DRAFT, entities: [], relations: [], sources: [{ ...DRAFT.sources[0], extracted_at: null }] } };
+    }
     return undefined;
   });
 
-  fireEvent.click(await screen.findByRole("button", { name: /sintering\.md/ }));
-  await screen.findByRole("heading", { name: "Sintering of Si3N4" });
-  fireEvent.click(screen.getByText("Project to JSON", { selector: "summary" }));
-  fireEvent.change(screen.getByLabelText("Extraction schema"), { target: { value: "schema-1" } });
-  expect((screen.getByLabelText("Model") as HTMLSelectElement).value).toBe("oaw:model:model-1");
-  fireEvent.click(screen.getByRole("button", { name: "Project to JSON" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
+  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
+  fireEvent.click(await region.findByRole("button", { name: "New draft" }));
+  fireEvent.click(await region.findByLabelText("Select sintering.md"));
+  fireEvent.click(region.getByRole("button", { name: "Open draft over 1 source(s)" }));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("knowledge_draft_manage",
+    expect.objectContaining({ operation: "create", source_ids: ["source-1"] }), undefined));
 
+  // The new draft is selected; its one unread source is extracted with the chosen model.
+  expect((await region.findByLabelText("Model") as HTMLSelectElement).value).toBe("oaw:model:model-1");
+  fireEvent.click(region.getByRole("button", { name: "Extract 1 unread source(s)" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-  expect(url).toBe("/api/knowledge/card-1/project");
-  expect(JSON.parse(String(init.body))).toEqual({
-    schema_id: "schema-1", model: "oaw:model:model-1", record_id: "record-1" });
-  expect(action.mock.calls.some(([name]) => name === "save_projection")).toBe(false);
-  expect(await within(await screen.findByRole("region", { name: "Sources" }))
-    .findByText("Projection projection-1 saved")).toBeTruthy();
+  expect(url).toBe("/api/knowledge/card-1/knowledge");
+  expect(JSON.parse(String(init.body))).toEqual({ draft_id: "draft-1", model: "oaw:model:model-1", replace: false });
+  // The card never writes the draft itself: the bridge hands the model's answer to the plugin.
+  expect(action.mock.calls.some(([name]) => name === "knowledge_save")).toBe(false);
+  expect(await region.findByText(/Read 1 source\(s\) in 1 part\(s\) · 2 concepts added/)).toBeTruthy();
+});
+
+it("reviews a knowledge draft through the host bridge and shows the applied operations", async () => {
+  let reviewed = false;
+  const entry = { at: "2026-09-24T00:00:00Z", actor: "user:desktop", before: { concepts: 3, relations: 2 }, after: { concepts: 2, relations: 1 },
+    operations: [{ op: "merge_concepts", keep: "Si3N4", drop: ["silicon nitride"], merged: ["silicon nitride"], into: "Si3N4", reason: "same material" },
+                 { op: "flag", message: "check the sintering edge" }],
+    skipped: [{ op: "delete_concept", name: "ghost", skipped: "no such concept in the draft" }] };
+  const fetchMock = vi.fn(async () => { reviewed = true; return { ok: true, json: async () => ({
+    draft: { ...DRAFT, revision: 2, review_log: [entry] }, applied: 2, skipped: 1, review: entry }) }; });
+  vi.stubGlobal("fetch", fetchMock);
+  const action = open(async name => {
+    if (name === "knowledge_drafts") return { drafts: [{ ...DRAFT, ...(reviewed ? { revision: 2, review_log: [entry] } : {}) }] };
+    return undefined;
+  });
+
+  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
+  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
+  fireEvent.click(await region.findByRole("button", { name: /sintering\.md/ }));
+  fireEvent.click(await region.findByRole("button", { name: "Review draft" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+  expect(url).toBe("/api/knowledge/card-1/audit");
+  expect(JSON.parse(String(init.body))).toEqual({ draft_id: "draft-1", model: "oaw:model:model-1" });
+  // The card never applies operations itself; it shows what the bridge handed to the plugin.
+  expect(action.mock.calls.some(([name]) => name === "knowledge_audit_apply")).toBe(false);
+  expect(await region.findByText(/Review applied 2 change\(s\)/)).toBeTruthy();
+  expect(await region.findByText(/Merged silicon nitride into Si3N4/)).toBeTruthy();
+  expect(region.getByText(/Flagged: check the sintering edge/)).toBeTruthy();
+  expect(region.getByText(/Skipped delete_concept: no such concept in the draft/)).toBeTruthy();
+});
+
+it("reviews the published graph only after the person confirms the proposed operations", async () => {
+  let applied = false;
+  const operations = [{ op: "merge_concepts", keep: "Si3N4", drop: ["silicon nitride"], reason: "same material" },
+                      { op: "flag", message: "check the sintering edge" }];
+  const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ operations, drafts: ["draft-1"], statistics: {} }) }));
+  vi.stubGlobal("fetch", fetchMock);
+  const action = open(async (name, args, confirm) => {
+    if (name === "knowledge_drafts") return { drafts: [{ ...DRAFT, status: "published" }] };
+    if (name === "graph") return { truncated: false, relations: [],
+      entities: [{ id: "entity-1", type: "concept", name: "Si3N4", properties: { source_ids: ["source-1"], aliases: applied ? ["silicon nitride"] : [] } }] };
+    if (name === "knowledge_graph_audit_apply") {
+      if (!confirm) return { status: "confirmation_required", reasons: ["rewrites"] };
+      applied = true;
+      return { drafts: ["draft-1"], applied: 2, skipped: [], graph: { entities: 1, relations: 0 } };
+    }
+    return undefined;
+  });
+
+  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
+  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
+  fireEvent.click(await region.findByRole("button", { name: "Review graph" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+  expect(url).toBe("/api/knowledge/card-1/graph-audit");
+  expect(JSON.parse(String(init.body))).toEqual({ model: "oaw:model:model-1", all_groups: true });
+  // The proposal is shown first; nothing is applied until the person confirms.
+  expect(await region.findByText(/Merged silicon nitride into Si3N4/)).toBeTruthy();
+  expect(region.getByText(/Flagged: check the sintering edge/)).toBeTruthy();
+  expect(action.mock.calls.some(([name]) => name === "knowledge_graph_audit_apply")).toBe(false);
+
+  fireEvent.click(region.getByRole("button", { name: "Confirm and apply" }));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("knowledge_graph_audit_apply",
+    expect.objectContaining({ operations, all_groups: true }), true));
+  expect(await region.findByText(/Review applied 2 operation\(s\) to 1 published draft\(s\)/)).toBeTruthy();
+});
+
+it("shows streamed extraction progress and keeps the result of the final line", async () => {
+  const lines = [
+    { event: "progress", stage: "read", done: 0, total: 2, message: "Reading sintering.md · part 1/2" },
+    { event: "progress", stage: "saved", done: 1, total: 2, message: "sintering.md: 2 concepts, 1 relations so far" },
+    { event: "done", result: { draft: DRAFT, sources: [{ source_id: "source-1", filename: "sintering.md", chunks: 2, entities: 2, relations: 1, truncated: false }] } },
+  ];
+  // A body that yields one line, lets the card render, then yields the rest.
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      controller.enqueue(encoder.encode(JSON.stringify(lines[0]) + "\n"));
+      await gate;
+      controller.enqueue(encoder.encode(lines.slice(1).map(line => JSON.stringify(line)).join("\n") + "\n"));
+      controller.close();
+    },
+  });
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, body, headers: new Headers({ "content-type": "application/x-ndjson" }),
+    json: async () => ({}) })));
+  const action = open(async name => {
+    if (name === "sources") return { sources: [CONVERTED] };
+    if (name === "knowledge_drafts") return { drafts: [{ ...DRAFT, entities: [], relations: [],
+      sources: [{ ...DRAFT.sources[0], extracted_at: null }] }] };
+    return undefined;
+  });
+
+  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
+  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
+  fireEvent.click(await region.findByRole("button", { name: /sintering\.md/ }));
+  fireEvent.click(await region.findByRole("button", { name: "Extract 1 unread source(s)" }));
+  const bar = await region.findByRole("progressbar", { name: /Reading sintering\.md · part 1\/2/ }) as HTMLProgressElement;
+  expect(bar.value).toBe(0); expect(bar.max).toBe(2);
+  expect(region.getByText(/0 of 2/)).toBeTruthy();
+  release();
+  expect(await region.findByText(/Read 1 source\(s\) in 2 part\(s\) · 2 concepts added/)).toBeTruthy();
+  expect(region.queryByRole("progressbar")).toBeNull();
+  expect(action.mock.calls.some(([name]) => name === "knowledge_save")).toBe(false);
+});
+
+it("reads a published relation like a concept: its statement, evidence, snippet and endpoints", async () => {
+  const action = open(async name => {
+    if (name === "knowledge_drafts") return { drafts: [{ ...DRAFT, status: "published" }] };
+    if (name === "graph") return { truncated: false,
+      entities: [{ id: "e-si", type: "concept", name: "Si3N4", properties: { source_ids: ["source-1"] } },
+                 { id: "e-sin", type: "concept", name: "Sintering", properties: {} }],
+      relations: [{ id: "r-1", type: "processed_by", source_id: "e-si", target_id: "e-sin", properties: {
+        description: "Si3N4 powder is densified by pressureless sintering at 1750 °C.", evidence_level: 2,
+        snippet: "Si3N4 was sintered", source_ids: ["source-1"] } }] };
+    return undefined;
+  });
+
+  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
+  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
+  // The side list offers relations beside concepts; picking one opens its own panel.
+  fireEvent.click(await region.findByRole("tab", { name: /Relations/ }));
+  fireEvent.click(await region.findByRole("button", { name: "Si3N4 processed by Sintering" }));
+  const panel = within((await region.findByText(/evidence 2/)).closest(".knowledge-relation-detail") as HTMLElement);
+  expect(panel.getByText("Si3N4 powder is densified by pressureless sintering at 1750 °C.")).toBeTruthy();
+  expect(panel.getByText("Si3N4 was sintered")).toBeTruthy();
+  // The endpoints lead back to the concept panel, whose relation lines lead back to the edge.
+  fireEvent.click(panel.getByRole("button", { name: "Sintering" }));
+  expect(await region.findByRole("button", { name: "Show neighbours" })).toBeTruthy();
+  fireEvent.click(region.getByRole("button", { name: "Si3N4 →processed by→ Sintering" }));
+  expect(await region.findByText(/evidence 2/)).toBeTruthy();
+  expect(action.mock.calls.some(([name]) => name === "graph")).toBe(true);
 });
 
 const BUNDLE = { id: "bundle-1", group_id: "collection-1", schema_id: "schema-2", name: "Batch 7", notes: "",
@@ -421,45 +565,42 @@ it("extracts records from an upload through a connected Lab assistant run, then 
   expect(await region.findByText(/Record "A1" published/)).toBeTruthy();
 });
 
-it("keeps the graph empty until the person confirms the approval", async () => {
-  let inReview = false;
+it("keeps the graph empty until the person confirms publishing a knowledge draft", async () => {
   let published = false;
   const action = open(async (name, args, confirm) => {
-    if (name === "overview") return overview({ entities: published ? 2 : 0 }, "schema-1");
-    if (name === "draft" && args.operation === "list") return { drafts: [DRAFT] };
-    if (name === "draft" && args.operation === "get") return { draft: { ...DRAFT,
-      status: inReview ? "IN_REVIEW" : DRAFT.status,
-      graph: { entities: [{ name: "Si3N4" }, { name: "Sintering" }], relations: [{ type: "processed_by" }] },
-      evidence_ids: ["evidence-1"] } };
-    if (name === "review" && args.operation === "submit") {
-      inReview = true;
-      return { decision: "IN_REVIEW" };
-    }
-    if (name === "review" && args.operation === "approve") {
+    if (name === "overview") return overview({ entities: published ? 2 : 0, knowledge_drafts: 1 });
+    if (name === "knowledge_drafts") return { drafts: [{ ...DRAFT, status: published ? "published" : "draft" }] };
+    if (name === "knowledge_review" && args.operation === "publish") {
       if (!confirm) return { status: "confirmation_required",
-        reasons: ["Approval publishes this draft as a permanent fact revision."] };
+        reasons: ["Publishing writes 2 entities and 1 relations into the knowledge graph."] };
       published = true;
-      return { decision: "APPROVED", fact: { id: "fact-1" }, graph: { entities: 2, relations: 1 } };
+      return { draft: { ...DRAFT, status: "published", revision: 2 }, graph: { entities: 2, relations: 1 } };
     }
     if (name === "graph" && published) return { truncated: false, relations: [],
-      entities: [{ id: "entity-1", type: "material", name: "Si3N4", properties: {} }] };
+      entities: [{ id: "entity-1", type: "entity", name: "Si3N4", properties: { source_ids: ["source-1"] } }] };
     return undefined;
   });
 
-  // The whole project/draft/review/publish pipeline lives in Graph now, gated on
-  // a graph schema being chosen — "schema-1" above is what unlocks it here.
-  fireEvent.click(await screen.findByRole("tab", { name: "Graph" }));
-  fireEvent.click(await screen.findByRole("button", { name: /draft-1/ }));
-  // Approving requires IN_REVIEW; "Submit for review" is what mkb needs to get there.
-  fireEvent.click(await screen.findByRole("button", { name: "Submit for review" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
-  expect(await screen.findByText(/Approval publishes this draft/)).toBeTruthy();
-  expect(screen.getByText("The graph is empty until a draft is approved.")).toBeTruthy();
+  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
+  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
+  fireEvent.click(await region.findByRole("button", { name: /sintering\.md/ }));
+  // The draft's elements are listed with their evidence before anyone publishes.
+  expect(await region.findByText("a ceramic")).toBeTruthy();
+  expect(region.getByText("silicon nitride")).toBeTruthy();
+  expect(region.getByText("processed by")).toBeTruthy();
+  expect(region.getByText("Si3N4 powder is densified by pressureless sintering.")).toBeTruthy();
+  expect(region.getByText("Si3N4 was sintered")).toBeTruthy();
+  fireEvent.click(region.getByRole("button", { name: "Publish" }));
+  expect(await region.findByText(/Publishing writes 2 entities/)).toBeTruthy();
+  expect(region.getByText("The graph is empty until a draft is published.")).toBeTruthy();
+  expect(action.mock.calls.filter(([name, , confirm]) => name === "knowledge_review" && confirm)).toHaveLength(0);
 
-  fireEvent.click(screen.getByRole("button", { name: "Confirm and publish" }));
-  await waitFor(() => expect(action).toHaveBeenCalledWith("review", expect.objectContaining({
-    operation: "approve", draft_id: "draft-1", expected_revision: 1 }), true));
-  expect(await screen.findByRole("button", { name: /Si3N4/ })).toBeTruthy();
+  fireEvent.click(region.getByRole("button", { name: "Confirm and publish" }));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("knowledge_review", expect.objectContaining({
+    operation: "publish", draft_id: "draft-1", expected_revision: 1 }), true));
+  expect(await region.findByText(/Published "sintering\.md": 2 concepts and 1 relations/)).toBeTruthy();
+  expect(await region.findByRole("button", { name: "Unpublish" })).toBeTruthy();
+  expect(region.getAllByRole("button", { name: /Si3N4/ }).length).toBeGreaterThan(0);
 });
 
 it("drafts insights over published records and publishes one into the experiment layer on confirmation", async () => {
@@ -494,20 +635,20 @@ it("drafts insights over published records and publishes one into the experiment
 
   fireEvent.click(await screen.findByRole("button", { name: "Experiment" }));
   fireEvent.click(await screen.findByRole("tab", { name: "Insights" }));
-  // The Literature map asks for approved facts only; this tab for the experiment layer.
-  await waitFor(() => expect(action).toHaveBeenCalledWith("graph", expect.objectContaining({ layer: "literature" }), undefined));
+  // This tab reads the experiment layer only; the Literature map reads its own.
   await waitFor(() => expect(action).toHaveBeenCalledWith("graph", expect.objectContaining({ layer: "experiment" }), undefined));
+  expect(action.mock.calls.some(([name, args]) => name === "graph" && args.layer === "literature")).toBe(false);
   const insightsSection = within(await screen.findByRole("region", { name: "Insights" }));
   expect(await insightsSection.findByText("B7 moisture is 3.2σ above the batch mean.")).toBeTruthy();
   expect(insightsSection.getByText("Nothing published yet")).toBeTruthy();
 
   // The open scope reads every schema; statistics are asked for it as well.
   await waitFor(() => expect(action).toHaveBeenCalledWith("insights", expect.objectContaining({ operation: "stats" }), undefined));
-  expect(await insightsSection.findByText(/1 published record\(s\) across every experiment schema/)).toBeTruthy();
+  expect(await insightsSection.findByText(/1 published record\(s\) across every schema/)).toBeTruthy();
   expect(insightsSection.getByText("Mean")).toBeTruthy();
   // Narrowing to one schema narrows the statistics and the extraction scope; the
   // extraction goes through the host bridge when no agent is connected.
-  fireEvent.change(insightsSection.getByLabelText("Experiment schema"), { target: { value: "schema-2" } });
+  fireEvent.change(insightsSection.getByLabelText("Insight schema"), { target: { value: "schema-2" } });
   await waitFor(() => expect(action).toHaveBeenCalledWith("insights", expect.objectContaining({ operation: "stats", schema_id: "schema-2" }), undefined));
   expect(await insightsSection.findByText(/1 published record\(s\) of "Conductivity run"/)).toBeTruthy();
   fireEvent.click(insightsSection.getByRole("button", { name: "Extract insights" }));
@@ -540,30 +681,37 @@ it("surfaces a failed conversion with the step that failed", async () => {
   expect(screen.getAllByRole("alert").some(node => node.textContent?.includes("scan.bin"))).toBe(true);
 });
 
-it("projects several selected, already-converted sources against one schema in a batch", async () => {
+it("reads records out of several selected sources with one schema through the host bridge", async () => {
   const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({
-    projection: { id: "projection-x", validation: { valid: true } } }) }));
+    records: [{ id: "r1" }, { id: "r2" }], invalid: 0, schema_id: "schema-1",
+    sources: [{ source_id: "source-1", records: 1, invalid: 0, truncated: false }, { source_id: "source-2", records: 1, invalid: 0, truncated: false }] }) }));
   vi.stubGlobal("fetch", fetchMock);
   const OTHER = { ...CONVERTED, id: "source-2", filename: "other.md", record_id: "record-2" };
-  const action = open(async name => {
+  const action = open(async (name, args) => {
     if (name === "sources") return { sources: [CONVERTED, OTHER] };
-    if (name === "schemas") return { schemas: [SCHEMA] };
+    if (name === "schemas") return args.operation === "get"
+      ? { schema: { ...SCHEMA, definition: { type: "object", properties: { material: { type: "string" } } }, system_prompt: "x", field_descriptions: null } }
+      : { schemas: [SCHEMA, EXPERIMENT_SCHEMA] };
     return undefined;
   });
-  fireEvent.click(await screen.findByRole("tab", { name: "Projections" }));
-  const region = within(await screen.findByRole("region", { name: "Projections" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Records" }));
+  const region = within(await screen.findByRole("region", { name: "Records" }));
 
-  fireEvent.change(region.getByLabelText("Custom schema"), { target: { value: "schema-1" } });
+  // Only literature schemas are offered here; the experiment one stays in its own section.
+  const picker = await region.findByLabelText("Record schema") as HTMLSelectElement;
+  expect(Array.from(picker.options).map(option => option.textContent)).toEqual(["All schemas", "Process graph"]);
+  fireEvent.change(picker, { target: { value: "schema-1" } });
   fireEvent.click(await region.findByLabelText("Select sintering.md"));
   fireEvent.click(region.getByLabelText("Select other.md"));
-  fireEvent.click(region.getByRole("button", { name: "Project 2 selected" }));
+  fireEvent.click(region.getByRole("button", { name: "Extract from 2 selected" }));
 
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-  const recordIds = (fetchMock.mock.calls as unknown as [string, RequestInit][]).map(([, init]) =>
-    JSON.parse(String(init.body)).record_id);
-  expect(recordIds.sort()).toEqual(["record-1", "record-2"]);
-  expect(action.mock.calls.some(([name]) => name === "save_projection")).toBe(false);
-  expect(await region.findByText("Projected 2 source(s)")).toBeTruthy();
+  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+  expect(url).toBe("/api/knowledge/card-1/records");
+  expect(JSON.parse(String(init.body))).toEqual({
+    schema_id: "schema-1", source_ids: ["source-1", "source-2"], model: "oaw:model:model-1", replace_drafts: false });
+  expect(action.mock.calls.some(([name]) => name === "record_save")).toBe(false);
+  expect(await region.findByText(/Read 2 record\(s\) from 2 source\(s\)/)).toBeTruthy();
 });
 
 it("lets an engineer pick a connected agent's model from the Knowledge card's Settings", async () => {
@@ -721,15 +869,57 @@ it("stores the vision model as a card setting, blank for the OAW default model",
   expect(action.mock.calls.every(([, args]) => !JSON.stringify(args).includes("api_key"))).toBe(true);
 });
 
+it("stores the embedding model as a card setting, off by default", async () => {
+  const saved: Record<string, unknown>[] = [];
+  open(async (name, args) => {
+    if (name === "settings") { saved.push(args); return { settings: { collection_name: "Knowledge base",
+      pdf_engine: "auto", mineru_base_url: "", vision_model: "", embedding_model: (args.embedding_model as string) ?? "" } }; }
+    return undefined;
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  const region = within(await screen.findByRole("region", { name: "Settings" }));
+  const picker = await region.findByLabelText("Embedding model for graph search") as HTMLSelectElement;
+  expect(picker.value).toBe("");
+
+  fireEvent.change(picker, { target: { value: "oaw:model:model-1" } });
+  await waitFor(() => expect(saved).toContainEqual({ embedding_model: "oaw:model:model-1" }));
+  fireEvent.change(region.getByLabelText("Embedding model for graph search"), { target: { value: "" } });
+  await waitFor(() => expect(saved).toContainEqual({ embedding_model: "" }));
+});
+
+it("shows the semantic index behind graph search and builds it on request", async () => {
+  let embedded = 0;
+  const action = open(async (name, args) => {
+    if (name === "overview") return { ...overview(), settings: { collection_name: "Knowledge base", pdf_engine: "auto",
+      mineru_base_url: "", vision_model: "", embedding_model: "oaw:model:emb" } };
+    if (name === "graph_index") {
+      if (args.operation === "build") embedded = 23;
+      return { enabled: true, embedding_model: "oaw:model:emb", model_id: "qwen3.7-text-embedding", total: 23,
+        embedded, pending: 23 - embedded, stale: 0, last_error: embedded ? null : "Embedding model request failed (HTTP 400)" };
+    }
+    return undefined;
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  const panel = within(await screen.findByRole("group", { name: "Semantic index" }));
+  expect(await panel.findByText("qwen3.7-text-embedding: 0 of 23 graph elements embedded · 23 pending")).toBeTruthy();
+  expect(panel.getByRole("alert").textContent).toContain("HTTP 400");
+
+  fireEvent.click(panel.getByRole("button", { name: "Build index now" }));
+  expect(await panel.findByText("qwen3.7-text-embedding: 23 of 23 graph elements embedded")).toBeTruthy();
+  expect(panel.queryByRole("alert")).toBeNull();
+  expect(action).toHaveBeenCalledWith("graph_index", { operation: "build" }, undefined);
+});
+
 it("hides engineering settings and posts through the deployment bridge when deployed", async () => {
   const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({
-    projection: { id: "projection-1", validation: { valid: true } },
-    truncated: false, record_id: "record-1" }) }));
+    records: [{ id: "r1" }], invalid: 0, schema_id: "schema-1",
+    sources: [{ source_id: "source-1", records: 1, invalid: 0, truncated: false }] }) }));
   vi.stubGlobal("fetch", fetchMock);
-  const action = open(async name => {
+  open(async (name, args) => {
     if (name === "sources") return { sources: [CONVERTED] };
-    if (name === "schemas") return { schemas: [SCHEMA] };
-    if (name === "markdown") return DOCUMENT;
+    if (name === "schemas") return args.operation === "get"
+      ? { schema: { ...SCHEMA, definition: { type: "object", properties: {} }, system_prompt: "x", field_descriptions: null } }
+      : { schemas: [SCHEMA] };
     return undefined;
   }, {
     card: { config: { default_model: "oaw:model:model-1" } },
@@ -741,20 +931,19 @@ it("hides engineering settings and posts through the deployment bridge when depl
   expect(screen.queryByRole("region", { name: "Settings" })).toBeNull();
   expect(screen.queryByLabelText("Collection name")).toBeNull();
 
-  fireEvent.click(await screen.findByRole("button", { name: /sintering\.md/ }));
-  await screen.findByRole("heading", { name: "Sintering of Si3N4" });
-  fireEvent.click(screen.getByText("Project to JSON", { selector: "summary" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Records" }));
+  const region = within(await screen.findByRole("region", { name: "Records" }));
+  fireEvent.change(await region.findByLabelText("Record schema"), { target: { value: "schema-1" } });
   // No live picker either: the deployment shows the model fixed at publish time.
-  expect(screen.queryByLabelText("Model")).toBeNull();
-  expect(await screen.findByText("Model: oaw:model:model-1")).toBeTruthy();
-  fireEvent.change(screen.getByLabelText("Extraction schema"), { target: { value: "schema-1" } });
-  fireEvent.click(screen.getByRole("button", { name: "Project to JSON" }));
+  expect(region.queryByLabelText("Model")).toBeNull();
+  expect((await region.findAllByText("Model: oaw:model:model-1")).length).toBeGreaterThan(0);
+  fireEvent.click(await region.findByLabelText("Select sintering.md"));
+  fireEvent.click(region.getByRole("button", { name: "Extract from 1 selected" }));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-  expect(url).toBe("/api/runtime-app/workspace/knowledge/card-1/project");
+  expect(url).toBe("/api/runtime-app/workspace/knowledge/card-1/records");
   expect(JSON.parse(String(init.body))).toEqual({
-    schema_id: "schema-1", model: "oaw:model:model-1", record_id: "record-1" });
-  expect(await within(await screen.findByRole("region", { name: "Sources" }))
-    .findByText("Projection projection-1 saved")).toBeTruthy();
+    schema_id: "schema-1", source_ids: ["source-1"], model: "oaw:model:model-1", replace_drafts: false });
+  expect(await region.findByText(/Read 1 record\(s\) from 1 source\(s\)/)).toBeTruthy();
 });

@@ -5,10 +5,10 @@ and relation when the client closes. This adapter satisfies ``mkb.ports.GraphSto
 over two plugin-owned tables inside the same SQLite file as the rest of the card, so
 the whole knowledge base stays a single SQL database with no external service.
 
-Every element carries a ``layer``: ``literature`` for what an approved draft
-published, ``experiment`` for a published insight and the record and field nodes it
-cites (see ``insights.py``). One graph, two provenances — MKB's own query and
-traversal walk both; the plugin's filters narrow to either.
+Every element carries a ``layer``: ``literature`` for what a published knowledge
+draft wrote (see ``knowledge.py``), ``experiment`` for a published insight and the
+record and field nodes it cites (see ``insights.py``). One graph, two provenances —
+MKB's own query and traversal walk both; the plugin's filters narrow to either.
 """
 from __future__ import annotations
 
@@ -260,6 +260,14 @@ class SqlGraphStore:
                 RELATIONS.c.source_id.in_(identifiers) | RELATIONS.c.target_id.in_(identifiers)))
             connection.execute(delete(ENTITIES).where(ENTITIES.c.id.in_(identifiers)))
 
+    def remove_relations(self, relation_ids):
+        """Delete exactly these relations, leaving their endpoints in place."""
+        identifiers = [str(value) for value in relation_ids]
+        if not identifiers:
+            return
+        with self._engine.begin() as connection:
+            connection.execute(delete(RELATIONS).where(RELATIONS.c.id.in_(identifiers)))
+
     def orphans(self, *, layer, types):
         """Ids of this layer's entities of the given types that no relation touches.
 
@@ -275,11 +283,67 @@ class SqlGraphStore:
         with self._engine.connect() as connection:
             return [row[0] for row in connection.execute(query).all()]
 
+    def clear_layer(self, layer):
+        """Drop one layer's elements, before rebuilding it from its published drafts."""
+        if layer not in LAYERS:
+            raise ValueError(f"layer must be one of {LAYERS}")
+        with self._engine.begin() as connection:
+            connection.execute(delete(RELATIONS).where(RELATIONS.c.layer == layer))
+            connection.execute(delete(ENTITIES).where(ENTITIES.c.layer == layer))
+
     def clear(self):
         """Drop every graph element; used when rebuilding from approved facts."""
         with self._engine.begin() as connection:
             connection.execute(delete(RELATIONS))
             connection.execute(delete(ENTITIES))
+
+    def predicate_counts(self, *, layer=None, limit=50):
+        """Relation types in use with their frequencies, most common first."""
+        query = select(RELATIONS.c.type, func.count().label("count")).group_by(RELATIONS.c.type)
+        query = _layered(query, RELATIONS, layer).order_by(func.count().desc(), RELATIONS.c.type)
+        with self._engine.connect() as connection:
+            rows = connection.execute(query.limit(max(1, min(int(limit), 500)))).all()
+        return [{"predicate": row[0], "count": row[1]} for row in rows]
+
+    def find_names(self, terms, *, layer=None, limit=20):
+        """Entities whose name or aliases contain any of ``terms`` (case-insensitive),
+        with the predicates used around them — what an extraction consults before it
+        names a concept the published graph already holds."""
+        needles = [str(term).strip().casefold() for term in terms if str(term).strip()]
+        if not needles:
+            return []
+        query = select(ENTITIES.c.id, ENTITIES.c.name, ENTITIES.c.properties)
+        query = _layered(query, ENTITIES, layer)
+        condition = None
+        for needle in needles:
+            clause = func.lower(ENTITIES.c.name).contains(needle) | func.lower(ENTITIES.c.properties).contains(needle)
+            condition = clause if condition is None else condition | clause
+        query = query.where(condition).order_by(ENTITIES.c.name)
+        with self._engine.connect() as connection:
+            rows = connection.execute(query.limit(max(1, min(int(limit), 200)) * 3)).mappings().all()
+            matches = []
+            for row in rows:
+                properties = json.loads(row["properties"] or "{}")
+                aliases = [alias for alias in properties.get("aliases") or [] if isinstance(alias, str)]
+                haystack = [row["name"].casefold()] + [alias.casefold() for alias in aliases]
+                hits = [needle for needle in needles if any(needle in text for text in haystack)]
+                if hits:
+                    matches.append({"id": row["id"], "name": row["name"], "aliases": aliases, "matched": hits})
+            matches = matches[:max(1, min(int(limit), 200))]
+            if matches:
+                identifiers = [item["id"] for item in matches]
+                edges = connection.execute(select(RELATIONS.c.source_id, RELATIONS.c.target_id, RELATIONS.c.type)
+                                           .where(RELATIONS.c.source_id.in_(identifiers)
+                                                  | RELATIONS.c.target_id.in_(identifiers))).all()
+                by_id = {item["id"]: item for item in matches}
+                for item in matches:
+                    item["predicates"] = []
+                for source, target, kind in edges:
+                    for identifier in (source, target):
+                        item = by_id.get(identifier)
+                        if item is not None and kind not in item["predicates"]:
+                            item["predicates"].append(kind)
+        return matches
 
     def counts(self, *, group_id=None, layer=None):
         with self._engine.connect() as connection:

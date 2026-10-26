@@ -3,8 +3,17 @@
 An automatically discovered OAW plugin (`knowledge.base`). One card owns one SQL
 file and carries three related workflows over the same collection:
 
-- **Literature** — raw data → markdown → full-text search, or → structured JSON
-  projection → draft graph → human review → published knowledge graph.
+- **Literature** — raw data → markdown → full-text search; then either
+  **Knowledge**: pick some converted sources, open a **knowledge draft** over them,
+  and a model — a connected Agent or a few calls per source — reads each section by
+  section, consults what the draft and the published graph already name, and names
+  the concepts the source is about and the relations it states between them (free
+  predicates, an evidence level and a quote each; no graph schema to author) → a
+  model **reviews** the draft against findings the card computes → a person edits
+  it → **publishes** it into the graph's **literature layer**; or **Records**: read structured data out
+  of sources with a schema you write (say, the ionic conductivity of every solid
+  electrolyte a paper reports) → publish the records → extract **insights** over
+  them, exactly as the Experiment workflow does over its own.
 - **Experiments** — upload the files of one experiment (a photographed table, a
   spreadsheet, a note) and they become one **upload**; **Extract records** confirms
   its name, description and the schema describing one specimen record, then
@@ -20,21 +29,21 @@ file and carries three related workflows over the same collection:
   rule, a trend, a correlation, a threshold, a note), each evidence-linked to the
   records it rests on → a person edits and **publishes** each one, which writes it,
   the records it cites and the fields it is about into the knowledge graph's
-  **experiment layer**, beside the literature facts. Asking the Lab assistant "any
-  anomalies in July?" or "what drives yield?" reads those published insights.
+  **experiment layer**, beside the literature knowledge. Asking the Lab assistant
+  "any anomalies in July?" or "what drives yield?" reads those published insights.
 - The knowledge graph is opt-in, not required by either workflow: search answers
-  document-level questions and published experiment records answer structured ones
-  without ever touching a draft or a review. What *does* reach the graph from the
-  Experiment workflow is a published insight — never a record on its own.
+  document-level questions and published records answer structured ones without
+  ever touching a draft. What reaches the graph is a published knowledge draft from
+  Literature and a published insight from either side — never a record on its own.
 
 This is a proof of concept built on the `mat_know_base` (MKB) Python SDK. It runs
 the pipeline in process, stores every byte in one SQLite file, and needs no Docker,
 no MinIO, no PostgreSQL and no object store. The plugin imports MKB as a fixed,
-installed dependency; it never modifies it — full-text search, experiment records,
-insights and the multi-format converters below are all implemented in this plugin,
-in `search_store.py`, `experiment_store.py`, `insight_store.py`, `insight_stats.py`
-and `markdown.py`, alongside MKB's own tables in the same SQLite file, the same way
-the knowledge graph already is.
+installed dependency; it never modifies it — full-text search, knowledge drafts,
+records, insights and the multi-format converters below are all implemented in this
+plugin, in `search_store.py`, `knowledge_store.py`, `experiment_store.py`,
+`insight_store.py`, `insight_stats.py` and `markdown.py`, alongside MKB's own tables
+in the same SQLite file, the same way the knowledge graph already is.
 
 The same package runs two ways. **Embedded**, as the card described below.
 **Standalone**, as a small HTTP service, an MCP server and a `kb` CLI over the same
@@ -103,22 +112,24 @@ the card on one side with a rail for its two workflows, **Literature** and
 **Experiment**, and the conversation beside it.
 
 **You drive the pipeline; the Lab assistant reads, and drafts experiment records
-only when you ask.** Uploading a file, converting it, running a projection, building
-a draft, approving it and publishing a record are buttons in the workspace. The Lab
-assistant holds **Knowledge experiment**: every read tool — it can tell you what the
-base contains, search or read a converted document back to you, read experiment
-records and insights (and the statistics behind them) and query the published graph
-— plus the experiment half: it is what the Experiment workflow's **Extract records**
-and **Extract insights** buttons start when it is connected, and the one you ask in
-the conversation to fix a draft record or a draft insight. It cannot ingest,
-convert, project, build a draft graph, approve or publish. Nothing enters the graph,
-and no record or insight is published, except by your click. Connect a second Agent with
-**Knowledge read** if you want a strictly read-only one beside it.
+only when you ask.** Uploading a file, converting it, opening a knowledge draft,
+extracting it, publishing it and publishing a record are buttons in the workspace.
+The Lab assistant holds **Knowledge experiment**: every read tool — it can tell you
+what the base contains, search or read a converted document back to you, read
+knowledge drafts, records and insights (and the statistics behind them) and query
+the published graph — plus the experiment half: it is what the Experiment workflow's
+**Extract records** and **Extract insights** buttons start when it is connected, and
+the one you ask in the conversation to fix a draft record or a draft insight. It
+cannot ingest, convert, write a knowledge draft or publish anything. Nothing enters
+the graph, and no record or insight is published, except by your click. Connect a
+second Agent with **Knowledge extract** to hand it the literature half — naming a
+source's concepts into a knowledge draft you opened, reading records out of a source
+with a schema — or with **Knowledge read** for a strictly read-only one beside it.
 
 Saving your own knowledge Legion works too, but note what a copy is: the node type is
 templateable while the database is not captured, so **a deployed copy is an empty
-knowledge base** with the same name and wiring — no sources, no groups, no facts, and
-settings back at their defaults. This is the same promise the card's deletion warning
+knowledge base** with the same name and wiring — no sources, no groups, no graph,
+and settings back at their defaults. This is the same promise the card's deletion warning
 makes.
 
 ## Using the card
@@ -141,29 +152,60 @@ ever shows.
    the source filename and the heading it falls under, and a click jumps straight
    to that source. Click a converted source to read its formatted document (a
    real table for spreadsheets, a model's transcription for images). **Markdown**
-   switches to the raw text. The reader also offers an ad hoc, single-document
-   **Project to JSON** against any schema — batch-projecting several sources at
-   once lives in Projections and Graph instead, scoped to the schema each is for.
-2. **Schemas** — a schema is a JSON Schema object plus the system prompt used to
-   extract it. Every schema is **literature**-kind by default (**experiment**-kind
-   ones belong to the Experiment workflow); exactly one literature schema can be
-   **the graph schema** at a time, chosen in Graph — every other one is a
-   **custom** schema, run and reviewed in Projections. Reachable from both
-   workflows, since they share the same schema collection. Reuse one before
-   creating a near-duplicate.
-3. **Projections** — custom, domain-specific structured extraction (e.g.
-   materials properties) that never reaches the published graph. Pick a custom
-   schema, select one or more already-converted sources and **Project N
-   selected**; the resulting projections list right below, each opening its
-   validation, evidence and JSON on click.
-4. **Graph** — the one pipeline that is always on: pick which literature schema
-   is **the graph schema**, project sources against it (**Project all pending**,
-   no manual selection needed), select the resulting projections and **Build
-   draft**, then submit, reject or approve that draft — approving asks for an
-   explicit confirmation and is the **only** thing that writes the knowledge
-   graph. The published graph itself is drawn as a map below all of that: click
-   an entity to read its type and properties beside it, double-click to traverse
-   outward from it.
+   switches to the raw text.
+2. **Knowledge** — the concept graph of your literature, with no schema to write.
+   **New draft** picks one or more converted sources and opens a **knowledge
+   draft** over them; **Extract** reads each source a few sections at a time —
+   through a connected Agent holding **Knowledge extract** when there is one, else
+   one model call per chunk of sections (a short document is one call) — and names
+   the concepts it is about and the relations it states between them. Nodes are
+   **concepts only** (a material, a phenomenon, a method, a property — never a bare
+   value or a figure number), each with **aliases** for its other spellings; a
+   relation is a statement as first-class as a concept: a **free predicate** in
+   the active voice (`improves`, `caused_by`, `measured_by` …, normalised to
+   snake_case), a one-sentence **statement** of what the document claims about the
+   pair, with the values and conditions that matter, MKB's **evidence level** (1
+   causal … 4 inferred) and the **snippet** that states it. Predicates that only
+   say a link exists (`related_to`, `associated_with` …) are flagged by the review,
+   which gives each such relation the specific verb its statement supports. Concepts are keyed by
+   name, so a concept two papers both name becomes one node with both as evidence;
+   before each chunk the model is handed the names and predicates already in the
+   draft and the published concepts the text mentions, so it reuses them. **Review
+   draft** then has a model — the Agent, or one call — go over the draft against
+   findings the card computes (predicate frequencies, look-alike names, isolated
+   concepts, pairs related both ways, contradicting predicates, names the published
+   graph already uses) and propose typed operations: merge concepts (the dropped
+   names become aliases), rename a predicate, add an alias, delete a relation or a
+   metadata-only concept, or flag something for you. They are applied to the draft
+   at once and listed in its **review log**; `set_predicate` retypes one relation
+   from its statement. **Edit** the concept and relation
+   tables (rename, alias, change a predicate or evidence level, remove, add), then
+   **Publish** — after an explicit confirmation, the **only** thing that writes
+   the graph's literature layer. Below the drafts, **Review graph** runs the same
+   review over the whole published layer: the model's proposed operations are
+   shown first and, once you confirm, applied to every published draft that
+   asserts the affected elements, after which the layer is rebuilt from the
+   drafts — so what the graph holds is always exactly what its drafts assert.
+   **Unpublish** removes exactly what the draft wrote, except elements another
+   published draft also asserts. The published layer is drawn as a map below:
+   click a concept to read its description, aliases, sources and relations;
+   switch the side list to **Relations** (or click a relation line in a concept's
+   panel) to read a relation on the same footing — its statement, predicate,
+   evidence level, snippet, sources and both endpoints; double-click a concept to
+   traverse outward. **Replace** empties a draft and reads every source again.
+3. **Records** — structured data read out of sources with a schema of your own.
+   **Schemas** here are **literature**-kind (the Experiment workflow has its own);
+   a schema is a JSON Schema object plus the system prompt that explains it — e.g.
+   one record per solid electrolyte, with its ionic conductivity and the
+   temperature it was measured at. Pick a schema, select converted sources and
+   **Extract**: one model call (or Agent run) per source produces zero or more
+   draft records, each validated against the schema and linked to the source it
+   came from. Rows unfold to a table; a draft edits in place as a form or JSON;
+   **Publish** marks it approved data. **Insights** at the bottom of the tab are
+   the same meta-knowledge extraction the Experiment workflow has, scoped to the
+   literature schemas: statistics the card computes over the published records,
+   draft insights a model proposes, and publication into the graph's experiment
+   layer.
 
 ### Experiment
 
@@ -234,49 +276,75 @@ ever shows.
 
 The group selector — in Sources, or the toolbar for other sections — narrows every
 section to one group at a time, or shows everything across every group. A source
-belongs to exactly one group for its whole life; markdown, projections, drafts,
-experiment uploads and records and the entities and relations a draft publishes all
+belongs to exactly one group for its whole life; markdown, knowledge drafts,
+records, experiment uploads and the entities and relations a draft publishes all
 trace back to the group their source came from, so a knowledge base with several
 document sets stays as easy to browse group by group as it is to see as a whole. A
 file uploaded into an experiment upload stays in the Experiment workflow: Literature's
 source list leaves it out (`sources` with `workflow="experiment"` or `"all"` lists it).
 
-Model output is never presented as fact. A projection and a draft are candidates; a
-published experiment record is a person's checked judgment, not a graph fact; a
-published insight is a person's checked statement *about* records, in the graph's
-experiment layer and traceable to every record it cites; a published fact revision
-is what an approval produces, and every published entity traces back through its
-draft and projections to the page it came from.
+Model output is never presented as fact. A draft of any kind is a candidate; a
+published record is a person's checked judgment, not a graph element; a published
+insight is a person's checked statement *about* records, in the graph's experiment
+layer and traceable to every record it cites; a published knowledge draft is what
+the literature layer holds, and every entity and relation in it carries the
+`source_ids` it was read from.
 
 ## Where the model call happens
 
-Projection needs a configured model, and plugins never see API credentials. The
-**Project to JSON** button posts to `POST /api/knowledge/{card_id}/project` in the
-OAW backend, which reads the prompt from the card, resolves the model connection,
-calls the provider, and writes the result back through the card's own
-`save_projection` action. Provider response bodies are never returned to the
-browser — they can carry request credentials.
+Every extraction needs a configured model, and plugins never see API credentials.
+Each Extract button therefore either starts a connected Agent that does the work
+through the plugin's own tools, or posts to a small bridge route in the OAW backend
+that reads the prompt from the card, resolves the model connection, calls the
+provider and writes the result back through the card's own save action. Provider
+response bodies are never returned to the browser — they can carry request
+credentials — and the card never writes an extraction result itself.
 
-A connected Agent takes the other path: `knowledge_projection_prompt` returns the
-prompt and markdown, the Agent produces the JSON, and `knowledge_save_projection`
-stores it. Either way the projection is validated and evidence-linked the same way.
+**Extract knowledge** is `knowledge_source_outline` → (`knowledge_lookup` →
+`knowledge_extract_prompt` → `knowledge_save`) per section or group of sections,
+for each source of the draft — a port of MKB's agent workflow (list headings, read a
+section, search the existing graph, save incrementally) as plugin tools. The outline
+returns each section as a character window; the prompt takes `section` (or
+`heading`) and carries the instruction and suggested predicates
+(`knowledge_prompt.py`), the names and predicates already in the draft, the published
+concepts the text mentions, and that section's markdown; the save normalises the
+reply — predicates to snake_case, endpoints that name nothing dropped, aliases
+unioned — and merges it into the draft by content-keyed id (`concept:<slug>`,
+`<source>|<predicate>|<target>`). With an Agent holding **Knowledge extract**
+connected, the card starts it with a `KNOWLEDGE EXTRACTION REQUEST`; without one,
+`POST /api/knowledge/{card_id}/knowledge` reads the outline, groups consecutive
+sections into ~40k-character chunks and makes one call per chunk in the backend.
+**Review draft** is `knowledge_audit_prompt` → `knowledge_audit_apply`
+(`knowledge_audit.py`): the prompt carries the findings the card computes and the
+draft; the apply takes typed operations (`merge_concepts`, `rename_predicate`,
+`add_alias`, `delete_relation`, `delete_concept`, `set_evidence`, `flag`), applies
+them through the same normalisation and appends them to the draft's `review_log`
+(`set_predicate` retypes one relation and may correct its statement).
+The bridge route is `POST /api/knowledge/{card_id}/audit`; an Agent can read a
+source section before deciding on a merge. On the engineering canvas the three
+knowledge bridge routes stream NDJSON — one `progress` line per section chunk or
+review stage, then a `done` or `error` line — which the card shows as a progress
+bar; the deployment routes return plain JSON. **Review graph** is
+`knowledge_graph_audit_prompt` → `POST /api/knowledge/{card_id}/graph-audit`
+(proposes only) → `knowledge_graph_audit_apply`, which asks for confirmation like
+publishing does, applies the operations to every published draft in scope, and
+rebuilds the literature layer from all published drafts; neither action has a tool
+name, as rewriting published knowledge is a person's decision. `knowledge_update` is how a connected
+agent edits a draft when asked to; `knowledge_draft_manage` (open, retitle, delete)
+and `knowledge_review` (publish, unpublish) have no tool name on any transport.
+Publishing a concept another published draft already wrote unions its aliases and
+sources with the node's. Databases from before this model are re-keyed once on open
+(`knowledge_migration.py`): typed nodes with one name collapse onto one concept, and
+old relation types become predicates.
 
-**Extract records** has two paths over the same two actions.
-`experiment_extract_prompt` returns the schema, the uploader's notes and every
-file's markdown joined under `## File:` headings (windowed with `offset`/`has_more`,
-so a long upload is read in pages); `experiment_save` stores the records produced,
-each validated against the schema and evidence-linked to the files it cites. With a
-**Lab assistant** connected, the card asks the host to start it (`host.runAgent`)
-with a delimited `EXPERIMENT EXTRACTION REQUEST` naming the upload, and the agent
-does the work through those two tools, paging through the document itself; the card
-only watches the agent until it is idle again. Without one, `POST
-/api/knowledge/{card_id}/extract` pages through the prompt in the backend, makes one
-JSON-mode call to the selected model and writes the result back through
-`experiment_save`. Either way the card never saves a record itself, and
-`knowledge_experiment_update` is how a connected agent edits a draft when asked to
-in conversation.
+**Extract records** from literature is `record_extract_prompt` → `record_save`, once
+per selected source: the schema, the instruction and the source's markdown in; zero
+or more records out, each validated against the schema and linked to that source.
+The bridge route is `POST /api/knowledge/{card_id}/records`; the Agent path uses the
+same two tools (`knowledge_record_extract_prompt`, `knowledge_record_save`).
 
-**Extract insights** is the same shape a third time. `insight_prompt` takes a
+**Extract records** from an experiment upload has the same two paths over its own two
+actions.**Extract insights** is the same shape a third time. `insight_prompt` takes a
 scope — one `schema_id`, several `schema_ids`, or neither for every experiment
 schema with published records — and returns each schema with its statistics, the
 cross-schema statistics, the insights already published, and the records as one
@@ -286,12 +354,14 @@ is not a published record of those schemas in that group. With a Lab assistant
 connected the card starts it with an `INSIGHT EXTRACTION REQUEST`; without one,
 `POST /api/knowledge/{card_id}/insights` makes one JSON-mode call and writes back
 through `insight_save`. Publishing — `insight_review` — is the one write to the graph
-from the Experiment workflow, and it has no tool name on any transport.
+from insights, and it has no tool name on any transport. The scope's open form
+takes every schema of one `schema_kind` (experiment by default; the Records tab
+passes `literature`), so each section's insights stay over its own records.
 
-Outside OAW, `kb project` and `kb insights extract` are the other callers of those
-same prompt builders, using a model from your own shell (`KB_MODEL_BASE_URL`,
-`KB_MODEL_API_KEY`, `KB_MODEL`). The standalone service never holds model
-credentials and never calls a provider.
+Outside OAW, `kb knowledge extract`, `kb records extract` and `kb insights extract`
+are the other callers of those same prompt builders, using a model from your own
+shell (`KB_MODEL_BASE_URL`, `KB_MODEL_API_KEY`, `KB_MODEL`). The standalone service
+never holds model credentials and never calls a provider.
 
 ## Deploying it as a locked application
 
@@ -300,25 +370,25 @@ The card declares a `NodeDeploymentDefinition` (Plugin API 1.21+, see
 Legion can be [published](../../docs/deployment.md) as a locked, password-protected
 application the same way a Conversation or a Text card can. Every business action a
 person uses to drive the pipeline publishes: upload, convert (alone or batched),
-organize sources into groups, search, project, choose the graph schema, build a
-draft, create an experiment upload and add its files, review, publish or unpublish
-its records, extract and publish insights over them, and submit, reject or approve
-a draft — approving a draft and publishing an insight are still the only things
-that write the graph. The **Settings**
+organize sources into groups, search, open a knowledge draft and extract, edit,
+publish or unpublish it, read records out of sources with a schema, create an
+experiment upload and add its files, review, publish or unpublish records, and
+extract and publish insights over them — publishing a knowledge draft and
+publishing an insight are still the only things that write the graph. The **Settings**
 section never publishes: the collection name, PDF engine and MinerU URL stay
 engineering-only and the section does not even mount in a deployed release,
 regardless of whether its pane stays visible in the published layout.
 
 A deployment mounts no live model picker (`docs/deployment.md`: "it does not mount
-... model settings"), so **Project to JSON**, **Extract records** and **Extract
-insights** there always use one model chosen ahead of time: set **Default model for
-deployment** in the engineering Settings section before publishing. `POST
-/api/knowledge/{card_id}/project`, `.../extract` and `.../insights` are
-engineering-only routes; a deployment reaches the same underlying calls through
-`POST /api/runtime-app/workspace/knowledge/{card_id}/project`, `.../extract` and
-`.../insights` instead, each gated on the release granting both halves of the
-pipeline it drives. A release
-carries no agent edges, so extraction there is always the one-call path.
+... model settings"), so every **Extract** button there uses one model chosen ahead
+of time: set **Default model for deployment** in the engineering Settings section
+before publishing. `POST /api/knowledge/{card_id}/knowledge`, `.../records`,
+`.../extract` and `.../insights` are engineering-only routes; a deployment reaches
+the same underlying calls through `POST
+/api/runtime-app/workspace/knowledge/{card_id}/knowledge`, `.../records`,
+`.../extract` and `.../insights` instead, each gated on the release granting both
+halves of the pipeline it drives. A release carries no agent edges, so extraction
+there is always the one-call path.
 
 See [`examples/knowledge-legion-deploy`](../../examples/knowledge-legion-deploy/README.md)
 for a runnable end-to-end example — it also installs this plugin and its declared
@@ -351,12 +421,20 @@ export KB_SERVICE_STORE=~/kb
 kb ingest paper.pdf                       # uploads it; conversion is a separate step
 kb process                                # converts every unconverted source, in a batch
 kb sources                                # source id, record id, engine used
-kb schema add --file process-schema.json  # name, definition, system_prompt
-kb project --schema SCHEMA_ID --source SOURCE_ID   # your model, your credentials
-kb draft create --projection PROJECTION_ID
-kb submit DRAFT_ID --revision 1
-kb approve DRAFT_ID --revision 1          # the only command that writes the graph
-kb graph
+kb knowledge open --source SOURCE_ID      # a draft over one or more converted sources
+kb knowledge extract DRAFT_ID             # your model, your credentials: one call per source (no chunking or review offline)
+kb knowledge show DRAFT_ID                # the concepts and relations, each with its sources
+kb knowledge publish DRAFT_ID             # the only command that writes the literature layer
+kb graph --layer literature
+```
+
+Records read out of sources with a schema of your own are the other family:
+
+```sh
+kb schema add --file conductivity-schema.json   # name, definition, system_prompt
+kb records extract --schema SCHEMA_ID --source SOURCE_ID [--replace]
+kb records list --schema SCHEMA_ID
+kb records publish RECORD_ID
 ```
 
 `kb ingest` also accepts several files at once and, in process, waits for their
@@ -365,12 +443,13 @@ to file them into a named group instead of the default one, and `kb groups creat
 --name Alloys` to make one first.
 
 `kb tools` prints the agent manifest; `kb --help` lists the rest (`jobs --watch`,
-`markdown --out`, `prompt`, `save-projection`, `projections`, `settings`, `groups`,
-`process`). Insights have their own family:
+`markdown --out`, `knowledge unpublish|delete`, `records show|unpublish|delete`,
+`settings`, `groups`, `process`). Insights have their own family:
 
 ```sh
-kb insights stats [--schema ID ...]               # the statistics, no model involved;
-                                                  # no --schema: every schema, with cross-schema stats
+kb insights stats [--schema ID ...]               # the statistics, no model involved; no --schema:
+                                                  # every experiment schema (--schema-kind literature for
+                                                  # the Records tab's), with cross-schema stats
 kb insights extract [--schema ID ...] [--replace]  # your model proposes draft insights over that scope
 kb insights list [--schema ID] [--kind anomaly] [--status draft] [--query moisture]
 kb insights publish INSIGHT_ID [...]              # writes the graph's experiment layer
@@ -392,12 +471,12 @@ body, for every operation the card has, because both read one table. `GET /v1/to
 returns the manifest and `GET /v1/health` is the only unauthenticated route.
 Binding anything other than loopback without a token is refused.
 
-**Writing the graph is not reachable over the network.** `review` with
-`operation=approve` and `insight_review` with `operation=publish` return 403 unless
-`KB_ADMIN_TOKEN` is set on the service *and* presented, and even then the first call
-returns `confirmation_required` until the request repeats with `?confirm=true`. Out
-of the box, publishing a fact or an insight happens on the canvas or at the host's
-own terminal — nowhere else.
+**Writing the graph is not reachable over the network.** `knowledge_review`, `knowledge_graph_audit_apply` and
+`insight_review` with `operation=publish` return 403 unless `KB_ADMIN_TOKEN` is set
+on the service *and* presented, and even then the first call returns
+`confirmation_required` until the request repeats with `?confirm=true`. Out of the
+box, publishing a knowledge draft or an insight happens on the canvas or at the
+host's own terminal — nowhere else.
 
 Point the CLI at a running service with `--service URL` (or `KB_SERVICE_URL`) and
 it proxies instead of opening the store itself.
@@ -408,10 +487,10 @@ it proxies instead of opening the store itself.
 {"command": "kb", "args": ["mcp", "--store", "/home/you/kb", "--collection", "default"]}
 ```
 
-The server exposes the same twenty tools with the same names and schemas an OAW
-Agent sees, on stdio. `ingest`, `process`, `groups`, `settings`, `review`, the
-experiment upload/publish actions and `insight_review` are absent, exactly as they
-are absent from every relationship in OAW.
+The server exposes the same tools with the same names and schemas an OAW Agent
+sees, on stdio. `ingest`, `process`, `groups`, `settings`, `knowledge_draft_manage`,
+`knowledge_review`, the experiment upload/publish actions and `insight_review` are
+absent, exactly as they are absent from every relationship in OAW.
 
 ### The two modes coexist — one writer per store
 
@@ -441,17 +520,53 @@ conversion, create/delete) is covered by
 
 | Relationship | Tools and permissions |
 | --- | --- |
-| Knowledge read | `knowledge_overview`, `knowledge_sources`, `knowledge_markdown`, `knowledge_document_search`, `knowledge_schemas`, `knowledge_projections`, `knowledge_experiments`, `knowledge_experiment_bundles`, `knowledge_insights`, `knowledge_graph`, `knowledge_jobs` |
-| Knowledge extract | Read tools plus `knowledge_projection_prompt`, `knowledge_save_projection`, `knowledge_draft` |
+| Knowledge read | `knowledge_overview`, `knowledge_sources`, `knowledge_markdown`, `knowledge_document_search`, `knowledge_schemas`, `knowledge_drafts`, `knowledge_source_outline`, `knowledge_lookup`, `knowledge_experiments`, `knowledge_experiment_bundles`, `knowledge_insights`, `knowledge_graph`, `knowledge_jobs` |
+| Knowledge extract | Read tools plus `knowledge_extract_prompt`, `knowledge_save`, `knowledge_update`, `knowledge_audit_prompt`, `knowledge_audit_apply`, `knowledge_record_extract_prompt`, `knowledge_record_save` |
 | Knowledge experiment | Read tools plus `knowledge_experiment_extract_prompt`, `knowledge_experiment_save`, `knowledge_experiment_update`, `knowledge_insight_prompt`, `knowledge_insight_save`, `knowledge_insight_update` |
 
+`knowledge_graph` answers "what does the base say about X (and Y)" and is the first
+tool the Lab assistant calls for any question about the base. It has **one search
+path**: whatever is passed — `query=<question>`, `names=[...]` (name, alias or acronym;
+spacing and punctuation aside) or, from the UI and CLI, `name_contains` /
+`relation_contains` — is searched the same way: by words (name and acronym match,
+statement text) and, when the card has an embedding model, by meaning, fused with
+reciprocal-rank fusion. The result holds the best-fitting concepts (`matched: true`),
+the relations ranked best first — each readable as `source_name → predicate →
+target_name` with its statement, evidence level and snippet (the relations are the
+published claims; a concept's description is background) — and `connections`: the
+shortest relation chains between any two concepts the question names.
+`operation="connect"` with `names=[X, Y]` returns only those chains (`max_depth`,
+default 3) or `connected: false`; `traverse` walks outward from an entity id. The
+agent's tool schema exposes only `query` and `names`, so no lexical-only knob can be
+picked by mistake; the graph map's name filter passes `semantic: false` and stays
+lexical.
+
+Meaning-based matching is on when the card's **Settings → Embedding model for graph
+search** names an OpenAI-compatible embedding model (a connection from OAW's Models &
+connections that serves `/embeddings`). Every search then reports `semantic: true`, or
+`semantic: false` plus `semantic_error` when the model could not be used — the answer
+is still the word-based one. Concept and relation vectors live in the card's SQLite
+file (`oaw_kb_vectors`) and are brought up to date on each search (only changed
+elements are embedded); **Settings → Semantic index** shows coverage and the last error
+and can build the index up front, and `knowledge_graph_index` reports the same to the
+assistant. A hit must stand out from the rest of the graph (two standard deviations
+above the mean cosine) *and* clear an absolute floor (0.45, tuned on qwen3
+text-embedding), so an unrelated question matches nothing. The graph text is sent to
+the chosen endpoint. Empty means off, and a chat default model is never used for this.
+
+The Lab assistant's instruction is copied into the agent when the Lab Manager
+formation is created, so an existing formation keeps its old guidance: recreate it, or
+paste the current instruction from `preset.py` into the agent's system instruction.
+
 Uploading raw data (`ingest`, `experiment_ingest`), converting it (`process`),
-managing groups (`groups`) and experiment uploads (`experiment_bundle_manage`),
-changing card settings (`settings`), reviewing a draft (`review`) and publishing,
-unpublishing or deleting an experiment record (`experiment_review`) or an insight
-(`insight_review`) have **no capability kind at all**, so no relationship can reach them and no Agent can call
-them. Publishing a fact, and publishing a record, stay human acts performed on the
-canvas. Agents
+managing groups (`groups`), knowledge drafts (`knowledge_draft_manage`) and
+experiment uploads (`experiment_bundle_manage`), changing card settings
+(`settings`) and publishing, unpublishing or deleting a knowledge draft
+(`knowledge_review`), reviewing the published graph (`knowledge_graph_audit_prompt`,
+`knowledge_graph_audit_apply`), a record (`experiment_review`) or an insight
+(`insight_review`) have **no capability kind at all**, so no relationship can reach
+them and no Agent can call them. Publishing anything stays a human act performed on
+the canvas. Agents
 cannot pass desktop confirmation arguments. `knowledge_overview` still reports every
 group by name and count, and every read tool accepts an optional `group_id` to
 narrow its answer to one group, so the Lab assistant can talk about how the base is
@@ -470,29 +585,33 @@ conversation.
 ## Persistence and failure behavior
 
 Each card owns `knowledge.db` under its node storage directory. Sources,
-artifacts, records, schemas, projections, evidence, drafts, review decisions,
-fact revisions, the integration outbox and the knowledge graph itself all live in
-that one file — the graph in plugin-owned `oaw_kg_entity` / `oaw_kg_relation`
-tables, so it survives a restart. The search index (`oaw_kb_chunks_fts`, an FTS5
-virtual table populated as each document converts), experiment uploads
-(`oaw_kb_experiment_bundle` / `oaw_kb_experiment_bundle_source`) and experiment
-records (`oaw_kb_experiment_record` / `oaw_kb_experiment_record_source`) and
-insights (`oaw_kb_insight` / `oaw_kb_insight_record`) are plugin-owned tables in the
-same file too, alongside MKB's own schema, not a second database. An insight
-table from before cross-schema insights existed is rebuilt on first open so
-`schema_id` may be null and `schema_ids` lists every schema an insight spans. The two graph
-tables carry a `layer` column — `literature` for what an approved draft published,
-`experiment` for a published insight and the record and field nodes it cites — so
-one graph holds both and a query narrows to either. A database from before uploads existed is migrated on first open: its
+artifacts, markdown records, schemas, evidence, the integration outbox and the
+knowledge graph itself all live in that one file — the graph in plugin-owned
+`oaw_kg_entity` / `oaw_kg_relation` tables, so it survives a restart. The search
+index (`oaw_kb_chunks_fts`, an FTS5 virtual table populated as each document
+converts), knowledge drafts (`oaw_kb_knowledge_draft` /
+`oaw_kb_knowledge_draft_source`), experiment uploads (`oaw_kb_experiment_bundle` /
+`oaw_kb_experiment_bundle_source`), records from either side
+(`oaw_kb_experiment_record` / `oaw_kb_experiment_record_source`; a literature
+record has no `bundle_id`) and insights (`oaw_kb_insight` / `oaw_kb_insight_record`)
+are plugin-owned tables in the same file too, alongside MKB's own schema, not a
+second database. An insight table from before cross-schema insights existed is
+rebuilt on first open so `schema_id` may be null and `schema_ids` lists every schema
+an insight spans. The two graph tables carry a `layer` column — `literature` for
+what a published knowledge draft wrote, `experiment` for a published insight and
+the record and field nodes it cites — so one graph holds both and a query narrows
+to either. Projections, MKB drafts and facts written by earlier versions stay in
+the file untouched and unreachable; entities they published remain in the
+`literature` layer and on the Knowledge map. A database from before uploads existed is migrated on first open: its
 records gain the new columns, `confirmed` becomes `published`, and the old
 projection-keyed evidence table is folded into the source-keyed one. The
 file uses WAL and a 30-second busy timeout because the job thread and resource
 actions write concurrently. Groups are plain MKB collections in the same file, so
 they persist and restart exactly the same way; opening an older `knowledge.db` for
 the first time after upgrading adds the `group_id` and `layer` columns those two
-tables need automatically, leaving every existing fact in place (tagged to no group
-until the next approval touches it, and to the `literature` layer), and backfills
-the search index for any record converted before it existed.
+tables need automatically, leaving every existing element in place (tagged to no
+group until the next publication touches it, and to the `literature` layer), and
+backfills the search index for any record converted before it existed.
 
 Deleting a card permanently removes `knowledge.db` and its WAL/SHM companions
 through OAW's journaled lifecycle finalizer. Canvas undo, copy/paste and Legion

@@ -4,39 +4,48 @@ Each handler is deliberately short — validate, make a few MKB calls, return bo
 JSON — because the host holds the global node mutation lock for the whole call. Slow
 work belongs in the ``oaw.to_markdown`` job or in the host LLM bridge.
 
-``ingest``, ``process``, ``groups`` and ``review`` carry no capability kind in
-``__init__.py``, which makes them desktop-only: uploading raw data, converting it,
-managing groups and publishing a fact stay human acts.
+``ingest``, ``process``, ``groups`` and the review actions carry no tool name in
+``operations.py``, which makes them desktop-only: uploading raw data, converting it,
+managing groups and publishing stay human acts.
 """
 from __future__ import annotations
 
 import base64
 import binascii
 import json
-import re
+import logging
 import uuid
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from . import embeddings, graph_search
 from .client import DEFAULT_COLLECTION, collection, open_client
 from .errors import KnowledgeError
 from .graph_store import LAYERS
 from .markdown import available_engines
 from .pipelines import PIPELINE_NAME, submit_markdown_job
 
+logger = logging.getLogger(__name__)
+
 MAX_RESULT_BYTES = 1024 * 1024
 MAX_UPLOAD_BYTES = 32 * 1024 * 1024
 MAX_MARKDOWN_CHARS = 200_000
 # ``vision_model`` is an OAW model reference ("oaw:model:..."), or "" for the OAW
 # default model; the OAW_VISION_* variables are the fallback when neither resolves.
+# ``embedding_model`` is the same kind of reference for graph search's semantic
+# channel, but "" means off: a chat default model cannot embed.
 DEFAULT_SETTINGS = {"collection_name": DEFAULT_COLLECTION, "pdf_engine": "auto",
-                    "mineru_base_url": "", "vision_model": ""}
+                    "mineru_base_url": "", "vision_model": "", "embedding_model": ""}
 ACTIVE_JOBS = {"QUEUED", "RUNNING", "PENDING", "RETRYING"}
 
 
 class Request(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+# Marks a request field the UI and CLI may pass but the agent's tool schema omits.
+AGENT_HIDDEN = {"agent_hidden": True}
 
 
 def settings_of(context):
@@ -125,9 +134,9 @@ def overview(context, arguments):
     scope = _scope(group, request.all_groups)
     sources = kb.sources.list(collection_id=scope, limit=500)
     jobs = kb.jobs.list(limit=50)
-    drafts = kb.knowledge.list_drafts(collection_id=scope, limit=200)
     counts = kb.oaw_graph_store.counts(group_id=scope)
     default_group_id = str(collection(kb, settings["collection_name"]).id)
+    knowledge_drafts = kb.oaw_knowledge.list(group_id=str(scope) if scope else None, limit=500)
     return _bounded({
         "collection": {"id": str(group.id), "name": group.name},
         "groups": [_group_json(item, default_group_id) for item in kb.collections.list(limit=500)],
@@ -136,15 +145,12 @@ def overview(context, arguments):
                                      resolve_secret=getattr(context, "resolve_secret", None),
                                      resolve_model=getattr(context, "resolve_model", None),
                                      vision_model=settings["vision_model"]),
-        "graph_schema_id": graph_schema_id_of(context) or None,
         "counts": {
             "sources": len(sources),
             "records": len(kb.records.list(collection_id=scope, limit=500)),
             "schemas": len(kb.schemas.list(limit=200)),
-            "projections": len(kb.projections.list(collection_id=scope, limit=500)),
-            "drafts": len(drafts),
-            "pending_review": len([d for d in drafts if d.status in {"DRAFT", "SUBMITTED"}]),
-            "facts": len(kb.knowledge.list_facts(collection_id=scope, limit=500)),
+            "knowledge_drafts": len(knowledge_drafts),
+            "published_knowledge": len([d for d in knowledge_drafts if d["status"] == "published"]),
             "entities": counts["entities"],
             "relations": counts["relations"],
             "experiment_bundles": len(kb.oaw_experiments.list_bundles(
@@ -170,6 +176,7 @@ class Settings(Request):
     pdf_engine: Literal["auto", "pymupdf4llm", "mineru", "text"] | None = None
     mineru_base_url: str | None = Field(default=None, max_length=500)
     vision_model: str | None = Field(default=None, max_length=200)
+    embedding_model: str | None = Field(default=None, max_length=200)
 
 
 def update_settings(context, arguments):
@@ -201,9 +208,9 @@ def groups(context, arguments):
     """Create, rename and delete the groups sources are filed into.
 
     A group is one MKB collection: sources, and everything derived from them
-    (records, projections, drafts and the graph) already filter by ``collection_id``
-    everywhere MKB's own repositories do, so using collections as groups gets that
-    scoping for free instead of the plugin re-implementing it.
+    (records, experiment records, knowledge drafts and the graph) already filter by
+    ``collection_id`` everywhere MKB's own repositories do, so using collections as
+    groups gets that scoping for free instead of the plugin re-implementing it.
     """
     request = Groups.model_validate(arguments)
     settings = settings_of(context)
@@ -255,9 +262,8 @@ class Sources(Request):
 def _record_link(kb, artifact_id):
     """The markdown artifact's record link.
 
-    Evidence is listed per artifact, and ``save_projection`` deliberately copies a
-    record's evidence onto the projection, so the same artifact accumulates links of
-    several output types. Only the record one answers "what holds this markdown".
+    Evidence is listed per artifact and an artifact may accumulate links of several
+    output types; only the record one answers "what holds this markdown".
     """
     for link in kb.evidence.list(artifact_id=artifact_id, limit=100):
         if link.output_type == "record":
@@ -298,8 +304,7 @@ def sources(context, arguments):
                 "artifact_id": str(markdown.id), "size": markdown.size,
                 "engine": (markdown.metadata or {}).get("engine")},
             "record_id": record_id,
-            "projections": 0 if record_id is None else len(
-                kb.projections.list(record_id=record_id, newest_only=True, limit=50)),
+            "records": len(kb.oaw_experiments.list(source_id=str(source.id), limit=200)),
         })
     return _bounded({"sources": items, "offset": request.offset})
 
@@ -571,70 +576,6 @@ def _validate_definition(definition):
             "definition must be a JSON Schema object with a properties map")
 
 
-# ---------------------------------------------------------------- projection
-
-
-class ProjectionPrompt(Request):
-    schema_id: str
-    source_id: str | None = None
-    record_id: str | None = None
-    limit: int = Field(default=60_000, ge=500, le=MAX_MARKDOWN_CHARS)
-
-
-def projection_prompt(context, arguments):
-    """Everything the host bridge or an agent needs to produce the structured JSON."""
-    request = ProjectionPrompt.model_validate(arguments)
-    kb, _, _ = _base(context)
-    schema = kb.schemas.require(request.schema_id)
-    record, text = _markdown_record(kb, source_id=request.source_id,
-                                    record_id=request.record_id)
-    links = kb.evidence.list(output_id=record.id, limit=5)
-    return _bounded({
-        "schema_id": str(schema.id), "schema_name": schema.name,
-        "schema_version": schema.version,
-        "system_prompt": schema.system_prompt, "definition": schema.definition,
-        "field_descriptions": schema.field_descriptions,
-        "record_id": str(record.id),
-        "artifact_id": str(links[0].artifact_id) if links else None,
-        "source_id": str(links[0].source_id) if links else request.source_id,
-        "filename": (record.data or {}).get("filename"),
-        "markdown": text[:request.limit],
-        "truncated": len(text) > request.limit,
-    })
-
-
-class SaveProjection(Request):
-    schema_id: str
-    record_id: str
-    data: dict[str, Any]
-    notes: str | None = Field(default=None, max_length=4000)
-    model: str | None = Field(default=None, max_length=200)
-
-
-def save_projection(context, arguments):
-    request = SaveProjection.model_validate(arguments)
-    kb, _, _ = _base(context)
-    schema = kb.schemas.require(request.schema_id)
-    record = kb.records.require(_uuid(request.record_id, "record_id"))
-    validation = _check(schema.definition, request.data)
-
-    with kb.transaction():
-        projection = kb.projections.create(
-            schema_id=schema.id, record_id=record.id, data=request.data,
-            source_type="record", validation=validation, notes=request.notes)
-        # Carry the record's own evidence forward so the projection stays traceable
-        # to the exact artifact and uploaded file it came from (rule 4.2).
-        for link in kb.evidence.list(output_id=record.id, limit=5):
-            kb.evidence.create(
-                output_type="projection", output_id=projection.id,
-                source_id=link.source_id, artifact_id=link.artifact_id,
-                locator=link.locator,
-                metadata={"schema": schema.name, "schema_version": schema.version,
-                          "model": request.model, "actor": _actor(context)})
-    return _bounded({"projection": {"id": str(projection.id), "status": projection.status,
-                                    "validation": validation}})
-
-
 def _check(definition, data):
     """Best-effort JSON Schema validation; ``jsonschema`` is optional."""
     try:
@@ -648,39 +589,6 @@ def _check(definition, data):
     return {"validator": "jsonschema", "valid": not errors, "errors": errors}
 
 
-class Projections(Request):
-    projection_id: str | None = None
-    record_id: str | None = None
-    schema_id: str | None = None
-    group_id: str | None = None
-    all_groups: bool = False
-    limit: int = Field(default=50, ge=1, le=200)
-
-
-def projections(context, arguments):
-    request = Projections.model_validate(arguments)
-    kb, group, _ = _base(context, request.group_id)
-    if request.projection_id:
-        item = kb.projections.require(_uuid(request.projection_id, "projection_id"))
-        links = kb.evidence.list(output_id=item.id, limit=20)
-        return _bounded({"projection": {
-            "id": str(item.id), "schema_id": str(item.schema_id),
-            "record_id": str(item.record_id), "status": item.status,
-            "validation": item.validation, "notes": item.notes, "data": item.data,
-            "evidence": [{"id": str(link.id), "source_id": str(link.source_id),
-                          "artifact_id": str(link.artifact_id), "locator": link.locator}
-                         for link in links]}})
-    items = kb.projections.list(
-        collection_id=_scope(group, request.all_groups), record_id=request.record_id,
-        schema_id=request.schema_id, newest_only=True, limit=request.limit)
-    return _bounded({"projections": [
-        {"id": str(item.id), "schema_id": str(item.schema_id),
-         "record_id": str(item.record_id), "status": item.status,
-         "valid": (item.validation or {}).get("valid"),
-         "extracted_at": item.extracted_at,
-         "summary": _summarize(item.data)} for item in items]})
-
-
 def _summarize(data):
     if isinstance(data, dict):
         for key in ("name", "title", "sample_id", "id"):
@@ -688,74 +596,6 @@ def _summarize(data):
                 return data[key]
         return ", ".join(sorted(data)[:6])
     return str(data)[:120]
-
-
-# ---------------------------------------------------------------- draft
-
-
-class Draft(Request):
-    operation: Literal["list", "get", "create"] = "list"
-    draft_id: str | None = None
-    projection_ids: list[str] = Field(default_factory=list, max_length=50)
-    group_id: str | None = None
-    all_groups: bool = False
-    limit: int = Field(default=50, ge=1, le=200)
-
-
-def draft(context, arguments):
-    request = Draft.model_validate(arguments)
-    if request.operation == "list":
-        kb, group, _ = _base(context, request.group_id)
-        return _bounded({"drafts": [
-            {"id": str(item.id), "status": item.status, "revision": item.current_revision,
-             "created_by": item.created_by, "updated_at": item.updated_at}
-            for item in kb.knowledge.list_drafts(
-                collection_id=_scope(group, request.all_groups), limit=request.limit)]})
-    kb = _client(context)
-    if request.operation == "get":
-        if not request.draft_id:
-            raise KnowledgeError("draft_id is required")
-        item = kb.knowledge.get_draft(_uuid(request.draft_id, "draft_id"))
-        if item is None:
-            raise KnowledgeError("No such draft")
-        revision = kb.knowledge.get_revision(item.id)
-        return _bounded({"draft": {
-            "id": str(item.id), "status": item.status, "revision": item.current_revision,
-            "created_by": item.created_by,
-            "graph": revision.graph if revision else {},
-            "evidence_ids": [str(value) for value in (revision.evidence_ids if revision else [])]}})
-
-    if not request.projection_ids:
-        raise KnowledgeError("Select at least one projection")
-    group_id = _projections_group(kb, request.projection_ids)
-    graph, evidence_ids = build_graph(kb, request.projection_ids)
-    if not graph["entities"]:
-        raise KnowledgeError(
-            "Those projections produced no entities; check the schema output shape")
-    item, revision = kb.knowledge.create_draft(
-        group_id, graph, evidence_ids=evidence_ids, actor=_actor(context))
-    return _bounded({"draft": {"id": str(item.id), "status": item.status,
-                               "revision": revision.revision,
-                               "entities": len(graph["entities"]),
-                               "relations": len(graph["relations"])}})
-
-
-def _projections_group(kb, projection_ids):
-    """The one group every selected projection's record belongs to.
-
-    A draft becomes one collection_id in ``kb.knowledge.create_draft``, so mixing
-    projections from two groups into it would blur which group's sources back the
-    published facts — keep that traceable by refusing the mix instead.
-    """
-    group_ids = set()
-    for identifier in projection_ids:
-        item = kb.projections.require(_uuid(identifier, "projection_id"))
-        record = kb.records.require(item.record_id)
-        group_ids.add(str(record.collection_id))
-    if len(group_ids) > 1:
-        raise KnowledgeError(
-            "Select projections from a single group to build one draft")
-    return uuid.UUID(next(iter(group_ids)))
 
 
 # ---------------------------------------------------------------- experiments
@@ -1048,25 +888,122 @@ class Experiments(Request):
     all_groups: bool = False
     schema_id: str | None = None
     bundle_id: str | None = None
+    # Records read from one file: a bundle's, or a literature source's.
+    source_id: str | None = None
     status: Literal["draft", "published"] | None = None
     limit: int = Field(default=50, ge=1, le=200)
 
 
 def experiments(context, arguments):
-    """List or read experiment records. Read-only: editing a draft is
-    knowledge_experiment_update; publishing one is a person's click."""
+    """List or read structured records — from an experiment upload or a literature
+    source. Read-only: editing a draft is knowledge_experiment_update; publishing one
+    is a person's click."""
     request = Experiments.model_validate(arguments)
     kb, group, _ = _base(context, request.group_id)
     if request.operation == "list":
         scope = _scope(group, request.all_groups)
         items = kb.oaw_experiments.list(
             group_id=str(scope) if scope else None, schema_id=request.schema_id,
-            bundle_id=request.bundle_id, status=request.status, limit=request.limit)
+            bundle_id=request.bundle_id, source_id=request.source_id, status=request.status,
+            limit=request.limit)
         return _bounded({"experiments": items})
     if not request.record_id:
         raise KnowledgeError("record_id is required")
     record = kb.oaw_experiments.require(request.record_id)
     return _bounded({"experiment": _record_json(kb, record, sources=True)})
+
+
+# ---------------------------------------------------------------- literature records
+
+
+RECORD_INSTRUCTION = (
+    "The document below is one converted literature source. Project it onto the JSON "
+    "Schema: produce one record per specimen, material, sample or case the document "
+    "reports values for, each with its fields filled from the document only. Leave a "
+    "field out rather than guess it; skip the document entirely if it reports nothing the "
+    "schema asks for by returning an empty list. Reply with exactly this JSON shape: "
+    "{\"records\": [{\"name\": <short label, e.g. the material or sample>, \"data\": <object "
+    "matching the schema>, \"note\": <optional: where in the document it came from, or "
+    "what was unclear>}]}.")
+
+
+def _literature_schema(kb, schema_id):
+    schema = kb.schemas.require(schema_id)
+    if _schema_kind(schema) != "literature":
+        raise KnowledgeError('Only a schema tagged kind="literature" can hold records read from sources')
+    return schema
+
+
+class RecordExtractPrompt(Request):
+    schema_id: str
+    source_id: str
+    limit: int = Field(default=60_000, ge=500, le=MAX_MARKDOWN_CHARS)
+    offset: int = Field(default=0, ge=0)
+
+
+def record_extract_prompt(context, arguments):
+    """Everything needed to project one literature source onto a schema: the schema,
+    the instruction and the source's markdown, windowed like ``markdown``. The caller
+    produces the records and submits them with ``record_save``."""
+    request = RecordExtractPrompt.model_validate(arguments)
+    kb = _client(context)
+    schema = _literature_schema(kb, request.schema_id)
+    record, text = _markdown_record(kb, source_id=request.source_id)
+    window = text[request.offset:request.offset + request.limit]
+    return _bounded({
+        "source_id": request.source_id, "filename": (record.data or {}).get("filename"),
+        "schema_id": str(schema.id), "schema_name": schema.name, "schema_version": schema.version,
+        "system_prompt": schema.system_prompt, "definition": schema.definition,
+        "field_descriptions": schema.field_descriptions, "instruction": RECORD_INSTRUCTION,
+        "total_characters": len(text), "offset": request.offset, "markdown": window,
+        "has_more": request.offset + len(window) < len(text),
+    })
+
+
+class LiteratureRecordInput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: str = Field(min_length=1, max_length=500)
+    data: dict[str, Any]
+    note: str | None = Field(default=None, max_length=4000)
+
+
+class RecordSave(Request):
+    schema_id: str
+    source_id: str
+    # Empty is allowed: a source that reports nothing for this schema still counts as read.
+    records: list[LiteratureRecordInput] = Field(max_length=500)
+    # A re-extraction replaces this source's earlier drafts for this schema; published records stay.
+    replace_drafts: bool = False
+
+
+def record_save(context, arguments):
+    """Store the records projected from one literature source as drafts, each
+    validated against the schema and linked to that source."""
+    request = RecordSave.model_validate(arguments)
+    kb = _client(context)
+    schema = _literature_schema(kb, request.schema_id)
+    source = kb.sources.get(_uuid(request.source_id, "source_id"))
+    if source is None:
+        raise KnowledgeError(f"No such source: {request.source_id}")
+    artifacts = [a for a in kb.artifacts.list(source_id=source.id, limit=10) if a.processing_type == "MARKDOWN"]
+    if not artifacts:
+        raise KnowledgeError("This source has no markdown yet; wait for its conversion job to finish")
+    group_id = str(source.collection_ids[0]) if source.collection_ids else None
+    if group_id is None:
+        raise KnowledgeError("This source belongs to no group")
+
+    if request.replace_drafts:
+        kb.oaw_experiments.delete_drafts_for_source(schema_id=str(schema.id), source_id=str(source.id))
+    saved = []
+    for item in request.records:
+        record = kb.oaw_experiments.create(
+            group_id=group_id, schema_id=str(schema.id), bundle_id=None, name=item.name,
+            data=item.data, validation=_check(schema.definition, item.data), note=item.note,
+            created_by=_actor(context))
+        kb.oaw_experiments.set_sources(record["id"], [{"source_id": str(source.id), "artifact_id": str(artifacts[0].id)}])
+        saved.append(_record_json(kb, record, sources=True))
+    return _bounded({"records": saved, "source_id": str(source.id), "schema_id": str(schema.id),
+                     "invalid": len([r for r in saved if (r["validation"] or {}).get("valid") is False])})
 
 
 class ExperimentUpdate(Request):
@@ -1132,168 +1069,34 @@ def experiment_review(context, arguments):
     return _bounded({"experiment": _record_json(kb, record, sources=True)})
 
 
-SLUG = re.compile(r"[^a-z0-9]+")
-
-
-def _slug(value):
-    return SLUG.sub("_", str(value).strip().lower()).strip("_") or "value"
-
-
-def build_graph(kb, projection_ids):
-    """Turn selected projections into the ``{entities, relations}`` shape MKB extracts.
-
-    A schema may emit that shape directly, which is passed through. Anything else is
-    mapped generically: one entity per projection holding its scalar fields, with
-    nested objects becoming linked child entities.
-    """
-    entities, relations, evidence_ids, seen = [], [], [], set()
-    for identifier in projection_ids:
-        item = kb.projections.require(_uuid(identifier, "projection_id"))
-        for link in kb.evidence.list(output_id=item.id, limit=20):
-            evidence_ids.append(str(link.id))
-        data = item.data if isinstance(item.data, dict) else {"value": item.data}
-        schema = kb.schemas.get(item.schema_id)
-        if isinstance(data.get("entities"), list):
-            _extend(entities, data["entities"], seen)
-            if isinstance(data.get("relations"), list):
-                relations.extend(data["relations"])
-            continue
-        root = _generic(data, schema, item, entities, relations, seen)
-        if root is None:
-            continue
-    return {"entities": entities, "relations": relations}, evidence_ids
-
-
-def _extend(entities, candidates, seen):
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
-        key = (str(candidate.get("type") or "concept"), str(candidate.get("name") or ""))
-        if not key[1] or key in seen:
-            continue
-        seen.add(key)
-        entities.append(candidate)
-
-
-def _generic(data, schema, projection, entities, relations, seen):
-    root_type = _slug(schema.name if schema else "record")
-    root_name = _summarize(data) or f"projection {str(projection.id)[:8]}"
-    scalars = {key: value for key, value in data.items()
-               if isinstance(value, (str, int, float, bool)) or value is None}
-    _extend(entities, [{"type": root_type, "name": root_name, **scalars,
-                        "projection_id": str(projection.id)}], seen)
-    for key, value in data.items():
-        children = value if isinstance(value, list) else [value]
-        for index, child in enumerate(children):
-            if not isinstance(child, dict):
-                continue
-            child_name = _summarize(child) or f"{key} {index + 1}"
-            _extend(entities, [{"type": _slug(key), "name": child_name,
-                                **{k: v for k, v in child.items()
-                                   if isinstance(v, (str, int, float, bool))}}], seen)
-            relations.append({"source": root_name, "target": child_name, "type": _slug(key)})
-    return root_name
-
-
-# ---------------------------------------------------------------- review
-
-
-class Review(Request):
-    operation: Literal["submit", "approve", "reject"]
-    draft_id: str
-    expected_revision: int = Field(ge=1)
-    notes: str | None = Field(default=None, max_length=4000)
-
-
-def review(context, arguments):
-    """Publishing a fact is the only thing that writes the graph (rule 4.1)."""
-    request = Review.model_validate(arguments)
-    kb, _, _ = _base(context)
-    identifier = _uuid(request.draft_id, "draft_id")
-
-    if request.operation == "submit":
-        decision = kb.knowledge.submit_review(
-            identifier, expected_revision=request.expected_revision,
-            actor=_actor(context), notes=request.notes)
-        return _bounded({"decision": decision.decision, "draft_id": str(decision.draft_id)})
-    if request.operation == "reject":
-        decision = kb.knowledge.reject(
-            identifier, expected_revision=request.expected_revision,
-            actor=_actor(context), notes=request.notes)
-        return _bounded({"decision": decision.decision, "draft_id": str(decision.draft_id)})
-
-    if not context.confirmed:
-        return {"status": "confirmation_required",
-                "reasons": ["Approval publishes this draft as a permanent fact revision "
-                            "and writes it into the knowledge graph."],
-                "message": "Approve this draft?"}
-    revision_row = kb.knowledge.get_revision(identifier, request.expected_revision)
-    if revision_row is None:
-        raise KnowledgeError("No such draft revision")
-    draft_row = kb.knowledge.get_draft(identifier)
-    decision, fact, event = kb.knowledge.approve(
-        identifier, expected_revision=request.expected_revision,
-        actor=_actor(context), notes=request.notes)
-    # The published fact — never the raw model output — is what enters the graph.
-    result = kb.graph.extract(fact.data, extractor=lambda payload: payload)
-    if draft_row is not None:
-        # kb.graph.extract builds Entity/Relation objects itself, with no group on
-        # them, so stamp the draft's group onto exactly what it just touched.
-        kb.oaw_graph_store.tag_group([entity.id for entity in result.entities],
-                                     [relation.id for relation in result.relations],
-                                     draft_row.collection_id)
-    return _bounded({
-        "decision": decision.decision,
-        "fact": {"id": str(fact.id), "fact_set_id": str(fact.fact_set_id),
-                 "revision": fact.revision, "status": fact.status},
-        "event": {"id": str(event.id), "type": event.event_type},
-        "graph": {"entities": len(result.entities), "relations": len(result.relations)},
-    })
-
-
 # ---------------------------------------------------------------- graph
 
 
-def graph_schema_id_of(context):
-    """The one literature schema whose projections build the published graph.
-
-    Stored under its own top-level state key, not inside ``settings``: unlike the
-    collection name, PDF engine or MinerU URL, choosing it is an ordinary business
-    action (like Process or Build draft), so it must stay changeable from a deployed
-    release too, not only from the engineering-only Settings section.
-    """
-    if context.state is None:
-        return ""
-    return context.state.get()["value"].get("graph_schema_id") or ""
-
-
-class GraphSchema(Request):
-    operation: Literal["get", "set"] = "get"
-    schema_id: str | None = None
-
-
-def graph_schema(context, arguments):
-    request = GraphSchema.model_validate(arguments)
-    if context.state is None:
-        raise KnowledgeError("Card state is unavailable")
-    if request.operation == "set":
-        if request.schema_id:
-            kb = _client(context)
-            schema = kb.schemas.require(request.schema_id)
-            if _schema_kind(schema) != "literature":
-                raise KnowledgeError(
-                    "The graph schema must be a literature-kind schema")
-        context.state.update({"graph_schema_id": request.schema_id or ""})
-    return _bounded({"schema_id": graph_schema_id_of(context)})
-
-
 class GraphQuery(Request):
-    operation: Literal["query", "traverse"] = "query"
+    operation: Literal["query", "traverse", "connect"] = "query"
+    # A question or keywords in plain words: concepts are found by name, alias or
+    # acronym anywhere in it, and relations are ranked by how well they fit — by
+    # words and, when the card has an embedding model, by meaning.
+    query: str | None = Field(default=None, max_length=500)
     entity_id: str | None = None
-    entity_type: str | None = Field(default=None, max_length=200)
-    relation_type: str | None = Field(default=None, max_length=200)
-    name_contains: str | None = Field(default=None, max_length=200)
-    max_depth: int = Field(default=1, ge=1, le=5)
+    # The fields below are for the graph map and the CLI; the agent only sees ``query``
+    # and ``names``, so there is no lexical-only knob for it to pick by mistake.
+    entity_type: str | None = Field(default=None, max_length=200, json_schema_extra=AGENT_HIDDEN)
+    relation_type: str | None = Field(default=None, max_length=200, json_schema_extra=AGENT_HIDDEN)
+    # Concepts to look up, by name or alias; spacing and punctuation do not matter
+    # ("dpa sse" finds "DPA-SSE"). ``name_contains`` is the single-needle form.
+    names: list[str] = Field(default_factory=list, max_length=20)
+    name_contains: str | None = Field(default=None, max_length=200, json_schema_extra=AGENT_HIDDEN)
+    # A word to find in a relation's predicate, statement or snippet.
+    relation_contains: str | None = Field(default=None, max_length=200, json_schema_extra=AGENT_HIDDEN)
+    # The graph map's name filter passes false: a filter should not call a model.
+    semantic: bool = Field(default=True, json_schema_extra=AGENT_HIDDEN)
+    # The UI passes true to get every element's properties. The agent's view is compact
+    # and bounded (see ``_fit``): the host projects a tool result over ~8000 characters
+    # into a stub the model cannot read, which is worse than fewer relations.
+    full: bool = Field(default=False, json_schema_extra=AGENT_HIDDEN)
+    # Hops to walk: 1 for traverse, 3 for connect, unless given.
+    max_depth: int | None = Field(default=None, ge=1, le=5)
     direction: Literal["both", "out", "in"] = "both"
     limit: int = Field(default=200, ge=1, le=1000)
     group_id: str | None = None
@@ -1302,57 +1105,348 @@ class GraphQuery(Request):
     # Omitted: the whole graph, both layers.
     layer: Literal["literature", "experiment"] | None = None
 
+    def search_text(self):
+        """Everything the caller typed, as one string to search for."""
+        parts = [self.query or "", *self.names, self.name_contains or "", self.relation_contains or ""]
+        return " ".join(part.strip() for part in parts if part and part.strip())
+
+
+def _entity_json(entity, *, matched=None):
+    properties = entity.properties or {}
+    payload = {"id": str(entity.id), "type": entity.type, "name": entity.name,
+               "aliases": [a for a in properties.get("aliases") or [] if isinstance(a, str)],
+               "description": properties.get("description") if isinstance(properties.get("description"), str) else None,
+               "properties": properties}
+    if matched is not None:
+        payload["matched"] = matched
+    return payload
+
+
+def _relation_json(relation, names):
+    """A relation as a readable statement: both endpoints by name, the predicate, and
+    what the source claims — so a reader need not join ids to find out what an edge says."""
+    properties = relation.properties or {}
+    return {"id": str(relation.id), "type": relation.type, "predicate": relation.type,
+            "source_id": str(relation.source_id), "source_name": names.get(str(relation.source_id)),
+            "target_id": str(relation.target_id), "target_name": names.get(str(relation.target_id)),
+            "statement": properties.get("description") if isinstance(properties.get("description"), str) else None,
+            "evidence_level": properties.get("evidence_level") if isinstance(properties.get("evidence_level"), int) else None,
+            "snippet": properties.get("snippet") if isinstance(properties.get("snippet"), str) else None,
+            "source_ids": [v for v in properties.get("source_ids") or [] if isinstance(v, str)],
+            "properties": properties}
+
+
+QUERY_ENTITIES = 10
+QUERY_RELATIONS = 30
+CONNECT_DEPTH = 3
+# The agent's compact result: fewer, shorter, and trimmed to fit the host's window.
+COMPACT_ENTITIES = 8
+COMPACT_RELATIONS = 12
+COMPACT_BYTES = 7000
+STATEMENT_CHARS = 240
+
+
+def _clip(text, limit):
+    return text if not isinstance(text, str) or len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def _compact_entity(entity, matched):
+    properties = entity.properties or {}
+    item = {"name": entity.name, "type": entity.type, "matched": matched}
+    if matched:
+        # Only a matched concept's background and id (for traverse) are worth the space.
+        item["id"] = str(entity.id)
+        aliases = [a for a in properties.get("aliases") or [] if isinstance(a, str)]
+        if aliases:
+            item["aliases"] = aliases
+        if isinstance(properties.get("description"), str):
+            item["description"] = _clip(properties["description"], STATEMENT_CHARS)
+    return item
+
+
+def _compact_relation(relation, names):
+    properties = relation.properties or {}
+    item = {"source_name": names.get(str(relation.source_id)), "predicate": relation.type,
+            "target_name": names.get(str(relation.target_id))}
+    if isinstance(properties.get("description"), str):
+        item["statement"] = _clip(properties["description"], STATEMENT_CHARS)
+    if isinstance(properties.get("evidence_level"), int):
+        item["evidence_level"] = properties["evidence_level"]
+    sources = [v for v in properties.get("source_ids") or [] if isinstance(v, str)]
+    if sources:
+        item["source_ids"] = sources
+    return item
+
+
+def _compact_path(first, second, path, names):
+    return {"from": names[str(first)], "to": names[str(second)], "length": len(path),
+            "steps": [f"{names.get(str(r.source_id))} —{r.type}→ {names.get(str(r.target_id))}" for r in path]}
+
+
+def _fit(result, budget=COMPACT_BYTES):
+    """Drop the lowest-ranked relations, then unmatched concepts, until the JSON fits."""
+    def size():
+        return len(json.dumps(result, ensure_ascii=False, default=str).encode("utf-8"))
+    while size() > budget and len(result.get("relations", [])) > 1:
+        result["relations"].pop()
+        result["truncated"] = True
+    while size() > budget and any(not e.get("matched") for e in result.get("entities", [])):
+        index = max(i for i, e in enumerate(result["entities"]) if not e.get("matched"))
+        result["entities"].pop(index)
+        result["truncated"] = True
+    return result
+
+
+def _graph_result(entity_ids, by_id, relations, matched_ids, **extra):
+    """Entities (matched ones first in the given order, then the rest by name) and
+    relations as readable JSON, every edge resolvable by name."""
+    ordered = [identifier for identifier in dict.fromkeys(entity_ids) if identifier in by_id]
+    matched = [identifier for identifier in ordered if identifier in matched_ids]
+    others = sorted((identifier for identifier in ordered if identifier not in matched_ids),
+                    key=lambda identifier: by_id[identifier].name.casefold())
+    entities = [by_id[identifier] for identifier in matched + others]
+    names = {str(entity.id): entity.name for entity in entities}
+    return _bounded({"entities": [_entity_json(e, matched=e.id in matched_ids) for e in entities],
+                     "relations": [_relation_json(r, names) for r in relations], **extra})
+
+
+def _path_json(first, second, path, names):
+    return {"from": names[str(first)], "to": names[str(second)], "length": len(path),
+            "relations": [_relation_json(r, names) for r in path]}
+
+
+def _semantic_scores(context, kb, query, entities, relations):
+    """``({element: cosine}, status)`` from the card's embedding model. ``status`` is empty
+    when the model is off, and says why the answer fell back to words when it cannot be
+    used — an unreachable endpoint must not make the graph unsearchable."""
+    model = settings_of(context)["embedding_model"]
+    if not model:
+        return {}, {}
+    try:
+        connection = embeddings.connection_for(model, getattr(context, "resolve_model", None))
+        texts = embeddings.graph_texts(entities, relations)
+        vectors = embeddings.sync(kb.oaw_engine, texts, connection)
+        query_vector = embeddings.embed([query], connection)[0]
+        found = {}
+        for group in (entities, relations):
+            keyed = {str(item.id): item.id for item in group}
+            found.update({keyed[key]: score for key, score in embeddings.scores(
+                query_vector, {key: vectors[key] for key in keyed}).items()})
+    except Exception as error:  # an optional channel must never make the graph unsearchable
+        message = (str(error) or type(error).__name__)[:300]
+        logger.warning("knowledge_graph semantic channel off for this query (%s): %s", model, message)
+        _remember_index(context, last_error=message)
+        return {}, {"semantic": False, "semantic_error": message}
+    logger.info("knowledge_graph semantic channel: %s stood out of %d elements (%s)",
+                len(found), len(entities) + len(relations), model)
+    return found, {"semantic": True}
+
+
+def _ranked_query(request, entities, relations, by_id, needles=(), semantic=None):
+    """A plain-words question: concepts found by name, alias or acronym anywhere in it,
+    the relations that fit it best (those joining two named concepts first), and — when
+    it names two or more concepts — the shortest paths between them."""
+    entity_scores, relation_scores = graph_search.search(
+        entities, relations, request.search_text(), needles=needles, semantic=semantic)
+    top = sorted(entity_scores, key=lambda identifier: -entity_scores[identifier])
+    top = top[:min(request.limit, max(QUERY_ENTITIES, len(needles)))]
+    by_relation = {r.id: r for r in relations}
+    best = sorted(relation_scores, key=lambda identifier: -relation_scores[identifier])
+    shown = [by_relation[identifier] for identifier in best[:min(request.limit * 5, QUERY_RELATIONS)]]
+    named = [identifier for identifier in top if entity_scores[identifier] >= graph_search.STRONG][:3]
+
+    paths = []
+    if len(named) > 1:
+        adjacency = graph_search.adjacency(relations)
+        for index, first in enumerate(named):
+            for second in named[index + 1:]:
+                paths += [(first, second, path) for path in graph_search.shortest_paths(
+                    adjacency, first, second, max_depth=request.max_depth or CONNECT_DEPTH, max_paths=2)]
+    ids = list(top) + [i for r in shown for i in (r.source_id, r.target_id)]
+    ids += [r.source_id for _, _, path in paths for r in path] + [r.target_id for _, _, path in paths for r in path]
+    names = {str(identifier): by_id[identifier].name for identifier in ids if identifier in by_id}
+    if request.full:
+        result = _graph_result(ids, by_id, shown, set(top), matched=len(top),
+                               truncated=len(best) > len(shown))
+        result["connections"] = [_path_json(first, second, path, names) for first, second, path in paths]
+        return result
+    top, shown = top[:COMPACT_ENTITIES], shown[:COMPACT_RELATIONS]
+    ordered = [i for i in dict.fromkeys(ids) if i in by_id]
+    others = sorted((i for i in ordered if i not in set(top)), key=lambda i: by_id[i].name.casefold())
+    return _fit(_bounded({
+        "entities": [_compact_entity(by_id[i], i in set(top)) for i in list(top) + others],
+        "relations": [_compact_relation(r, names) for r in shown],
+        "connections": [_compact_path(first, second, path, names) for first, second, path in paths],
+        "matched": len(top), "truncated": len(best) > len(shown),
+    }))
+
+
+def _connect(request, entities, relations, by_id):
+    """How two named concepts are connected: the shortest relation chains between them,
+    each relation readable as a statement. Each name may resolve to several concepts
+    (an acronym and its spelled-out form); the shortest chain over any pairing wins."""
+    if len(request.names) != 2:
+        raise KnowledgeError("connect needs exactly two names")
+    sides = [graph_search.resolve(entities, name)[:5] for name in request.names]
+    missing = [name for name, side in zip(request.names, sides) if not side]
+    if missing:
+        return {"connected": False, "unresolved": missing, "paths": [], "entities": []}
+    adjacency = graph_search.adjacency(relations)
+    depth = request.max_depth or CONNECT_DEPTH
+    found = []
+    for rank_a, first in enumerate(sides[0]):
+        for rank_b, second in enumerate(sides[1]):
+            for path in graph_search.shortest_paths(adjacency, first.id, second.id, max_depth=depth):
+                found.append((len(path), rank_a + rank_b, first.id, second.id, path))
+    found.sort(key=lambda item: item[:2])
+    found = found[:5]
+    ids = [e.id for side in sides for e in side] + [
+        i for _, _, _, _, path in found for r in path for i in (r.source_id, r.target_id)]
+    names = {str(identifier): by_id[identifier].name for identifier in ids if identifier in by_id}
+    resolved = [[e.name for e in side] for side in sides]
+    if request.full:
+        return _graph_result(ids, by_id, [], {e.id for side in sides for e in side},
+                             connected=bool(found), resolved=resolved,
+                             paths=[_path_json(first, second, path, names) for _, _, first, second, path in found])
+    # Compact: each chain as readable steps, with every relation's statement once.
+    seen, relations = set(), []
+    for _, _, _, _, path in found:
+        for relation in path:
+            if relation.id not in seen:
+                seen.add(relation.id)
+                relations.append(_compact_relation(relation, names))
+    return _fit(_bounded({"connected": bool(found), "resolved": resolved,
+                          "paths": [_compact_path(first, second, path, names) for _, _, first, second, path in found],
+                          "relations": relations, "entities": []}))
+
 
 def graph(context, arguments):
+    """The published graph. A name query answers "what does the base say about X (and
+    Y)": the matching concepts, every relation touching them, and the concepts on the
+    other end, so each relation reads as source → predicate → target with its statement.
+    ``query`` takes a plain-words question and ranks; ``connect`` finds the paths
+    between two named concepts."""
     request = GraphQuery.model_validate(arguments)
     kb = _client(context)
     scope = _any_group(request.group_id)
     store = kb.oaw_graph_store
-    narrowed = scope is not None or request.layer is not None
+
     if request.operation == "traverse":
         if not request.entity_id:
             raise KnowledgeError("entity_id is required to traverse")
-        result = kb.graph.traverse(_uuid(request.entity_id, "entity_id"),
-                                   max_depth=request.max_depth, direction=request.direction)
+        start = _uuid(request.entity_id, "entity_id")
+        result = kb.graph.traverse(start, max_depth=request.max_depth or 1, direction=request.direction)
         all_entities, all_relations = list(result.entities), list(result.relations)
-        if narrowed:
+        if scope is not None or request.layer is not None:
             # kb.graph.traverse walks the whole store; group and layer are tags on
-            # published elements (see graph_store.py), so narrow after the walk
-            # rather than teaching mkb's traversal about them.
+            # published elements (see graph_store.py), so narrow after the walk.
             in_scope = {item.id for item in store.list_relations(group_id=scope, layer=request.layer)}
             all_relations = [item for item in all_relations if item.id in in_scope]
-            kept_ids = {item.source_id for item in all_relations} | \
-                {item.target_id for item in all_relations} | {_uuid(request.entity_id, "entity_id")}
+            kept_ids = {item.source_id for item in all_relations} | {item.target_id for item in all_relations} | {start}
             all_entities = [item for item in all_entities if item.id in kept_ids]
-    elif narrowed:
-        # mkb's Graph.query has no group or layer concept to pass through, so this
-        # replicates its own entity/relation filtering against the store directly.
-        all_entities = store.list_entities(type=request.entity_type, group_id=scope, layer=request.layer)
-        if request.name_contains:
-            needle = request.name_contains.casefold()
-            all_entities = [item for item in all_entities if needle in item.name.casefold()]
-        entity_ids = {item.id for item in all_entities}
-        all_relations = store.list_relations(type=request.relation_type, group_id=scope, layer=request.layer)
-        if request.entity_type or request.name_contains:
-            all_relations = [item for item in all_relations
-                             if item.source_id in entity_ids or item.target_id in entity_ids]
-    else:
-        result = kb.graph.query(entity_type=request.entity_type,
-                                relation_type=request.relation_type,
-                                name_contains=request.name_contains)
-        all_entities, all_relations = list(result.entities), list(result.relations)
+        entities = all_entities[:request.limit]
+        kept = {str(entity.id) for entity in entities}
+        names = {str(entity.id): entity.name for entity in entities}
+        return _bounded({
+            "entities": [_entity_json(e, matched=str(e.id) == str(start)) for e in entities],
+            "relations": [_relation_json(r, names) for r in all_relations
+                          if str(r.source_id) in kept and str(r.target_id) in kept][:request.limit * 5],
+            "truncated": len(all_entities) > len(entities),
+        })
 
-    entities = all_entities[:request.limit]
-    kept = {str(entity.id) for entity in entities}
+    needles = [graph_search.phrase(value) for value in request.names]
+    if request.name_contains:
+        needles.append(graph_search.phrase(request.name_contains))
+    needles = [needle for needle in needles if needle]
+
+    all_entities = store.list_entities(type=request.entity_type, group_id=scope, layer=request.layer)
+    by_id = {entity.id: entity for entity in all_entities}
+    all_relations = store.list_relations(type=request.relation_type, group_id=scope, layer=request.layer)
+    all_relations = [r for r in all_relations if r.source_id in by_id and r.target_id in by_id]
+
+    if request.operation == "connect":
+        return _connect(request, all_entities, all_relations, by_id)
+
+    # One search path. Whatever the caller typed — a question, concept names, a word
+    # from a statement — is searched by words and (when the card has an embedding
+    # model) by meaning, so no choice of parameter can bypass either.
+    search_text = request.search_text()
+    if graph_search.phrase(search_text):
+        semantic, status = ({}, {})
+        if request.semantic:
+            semantic, status = _semantic_scores(context, kb, search_text, all_entities, all_relations)
+        return {**_ranked_query(request, all_entities, all_relations, by_id, needles, semantic),
+                "search_text": search_text, **status}
+
+    # No search at all: the plain listing the graph map loads.
+    shown = all_entities[:request.limit]
+    shown_ids = {entity.id for entity in shown}
+    relations = [r for r in all_relations if r.source_id in shown_ids and r.target_id in shown_ids][:request.limit * 5]
+    names = {str(entity.id): entity.name for entity in shown}
     return _bounded({
-        "entities": [{"id": str(e.id), "type": e.type, "name": e.name,
-                      "properties": e.properties} for e in entities],
-        "relations": [{"id": str(r.id), "type": r.type, "source_id": str(r.source_id),
-                       "target_id": str(r.target_id), "properties": r.properties}
-                      for r in all_relations
-                      if str(r.source_id) in kept and str(r.target_id) in kept][:request.limit],
-        "truncated": len(all_entities) > len(entities),
+        "entities": [_entity_json(e) for e in shown],
+        "relations": [_relation_json(r, names) for r in relations],
+        "matched": None,
+        "truncated": len(all_entities) > len(shown) or len(all_relations) > len(relations),
     })
+
+
+# ---------------------------------------------------------------- graph index
+
+
+class GraphIndex(Request):
+    operation: Literal["status", "build"] = "status"
+    group_id: str | None = None
+
+
+def _index_state(context):
+    stored = context.state.get()["value"] if context.state is not None else {}
+    saved = stored.get("semantic_index")
+    return dict(saved) if isinstance(saved, dict) else {}
+
+
+def _remember_index(context, **patch):
+    if context.state is not None:
+        context.state.update({"semantic_index": {**_index_state(context), **patch}})
+
+
+def graph_index(context, arguments):
+    """The semantic index behind graph search: which embedding model, how much of the
+    published graph it covers, and the last failure. ``build`` embeds everything that
+    is missing or stale now, so the first search is not the slow one."""
+    request = GraphIndex.model_validate(arguments)
+    kb = _client(context)
+    scope = _any_group(request.group_id)
+    store = kb.oaw_graph_store
+    entities = store.list_entities(group_id=scope)
+    relations = store.list_relations(group_id=scope)
+    texts = embeddings.graph_texts(entities, relations)
+    model = settings_of(context)["embedding_model"]
+    result = {"embedding_model": model or None, "model_id": None, "total": len(texts),
+              "embedded": 0, "pending": len(texts), "stale": 0, **_index_state(context)}
+    if not model:
+        return _bounded({**result, "enabled": False})
+    try:
+        connection = embeddings.connection_for(model, getattr(context, "resolve_model", None))
+        result["model_id"] = connection[2]
+        if request.operation == "build":
+            embeddings.sync(kb.oaw_engine, texts, connection)
+            _remember_index(context, last_error=None, built_at=_now())
+            result.update(_index_state(context))
+        result.update(embeddings.status(kb.oaw_engine, texts, connection[2]))
+    except Exception as error:
+        message = (str(error) or type(error).__name__)[:300]
+        _remember_index(context, last_error=message)
+        result["last_error"] = message
+        if result["model_id"]:
+            result.update(embeddings.status(kb.oaw_engine, texts, result["model_id"]))
+    return _bounded({**result, "enabled": True})
+
+
+def _now():
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
 
 
 # ---------------------------------------------------------------- jobs

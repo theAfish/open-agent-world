@@ -48,9 +48,13 @@ type Props = {
   labAgent?: Agent; canRunAgent: boolean; selectedModel: string;
   modelSelect: ReactNode; groupSelect: ReactNode; refreshControls: ReactNode; banner: ReactNode;
   setNotice: (value: string) => void; setError: (value: string) => void;
-  /** Jump to one experiment record in the Experiments tab. */
+  /** Jump to one record where it lives (Experiments, or Literature → Records). */
   onOpenRecord: (recordId: string) => void;
   kindLabel: (kind: InsightKind) => string;
+  /** Which section's schemas the open scope ("all schemas") takes; experiment by default. */
+  schemaKind?: "literature" | "experiment";
+  /** Mounted inside another section (Literature → Records): no toolbar of its own. */
+  embedded?: boolean;
 };
 
 const shortId = (value: string) => value.length > 13 ? `${value.slice(0, 8)}…` : value;
@@ -62,6 +66,7 @@ export function InsightsSection({
   host, cardId, deployed, busy, version, schemas, schemaId, onSchemaChange, publishedCounts,
   groupArgs, groupFilter, call, perform, request, labAgent, canRunAgent, selectedModel,
   modelSelect, groupSelect, refreshControls, banner, setNotice, setError, onOpenRecord, kindLabel,
+  schemaKind = "experiment", embedded = false,
 }: Props) {
   const [insights, setInsights] = useState<Insight[]>([]);
   const [stats, setStats] = useState<ScopeStatistics>();
@@ -82,7 +87,8 @@ export function InsightsSection({
   const currentSchema = schemas.find(item => item.id === schemaId);
   const published = currentSchema ? (publishedCounts[currentSchema.id] ?? 0)
     : Object.values(publishedCounts).reduce((sum, count) => sum + count, 0);
-  const scopeArgs = useCallback((): Record<string, unknown> => schemaId ? { schema_id: schemaId } : {}, [schemaId]);
+  const scopeArgs = useCallback((): Record<string, unknown> =>
+    schemaId ? { schema_id: schemaId } : { schema_kind: schemaKind }, [schemaId, schemaKind]);
 
   const load = useCallback(async () => {
     const current = ++generation.current;
@@ -108,14 +114,14 @@ export function InsightsSection({
   // the card watches until idle; otherwise one JSON-mode call through the host bridge.
   const scopeLabel = currentSchema ? currentSchema.name : t("all schemas");
   const extract = () => perform(async () => {
-    const scope = { schema_ids: currentSchema ? [currentSchema.id] : [], ...groupArgs() };
+    const scope = { schema_ids: currentSchema ? [currentSchema.id] : [], schema_kind: schemaKind, ...groupArgs() };
     if (labAgent && host.runAgent && !deployed) {
       const requestBody = { ...scope, schema_names: currentSchema ? [currentSchema.name] : schemas.map(item => item.name),
         knowledge_card: cardId, replace_drafts: replace };
       await host.runAgent(labAgent.id, [
         "Perform the insight extraction described by the JSON data below.",
         "INSIGHT EXTRACTION REQUEST", JSON.stringify(requestBody), "END INSIGHT EXTRACTION REQUEST",
-        "Call knowledge_insight_prompt with exactly these schema_ids (an empty list means every schema with published records) and group_id / all_groups,",
+        "Call knowledge_insight_prompt with exactly these schema_ids (an empty list means every schema of schema_kind with published records), schema_kind and group_id / all_groups,",
         "read every table (follow has_more with offset), propose insights grounded in the statistics and the records — including what the cross-schema",
         "statistics show — citing record_ids as evidence, and save them in one knowledge_insight_save call with the same scope",
         `and replace_drafts=${replace ? "true" : "false"}, then report what you proposed and what was unclear.`,
@@ -209,8 +215,9 @@ export function InsightsSection({
   const publishedInsights = insights.filter(item => item.status === "published" && (!kindFilter || item.kind === kindFilter));
   const selectedEntity = graph?.entities.find(item => item.id === entity);
   const selectedInsight = selectedEntity && insights.find(item => item.id === selectedEntity.properties.insight_id);
-  const blocker = !published ? (currentSchema ? t("Publish some records of this schema in Experiments first.")
-      : t("Publish some records in Experiments first."))
+  const where = schemaKind === "literature" ? t("above") : t("in Experiments");
+  const blocker = !published ? (currentSchema ? t("Publish some records of this schema {v0} first.", { v0: where })
+      : t("Publish some records {v0} first.", { v0: where }))
     : extracting ? t("An extraction is already running.")
     : (!canRunAgent && !selectedModel) ? (deployed ? t("This deployment has no default model configured yet.")
       : t("Configure a model connection in OAW Settings, or connect an Agent to this card with the Knowledge experiment relationship."))
@@ -227,39 +234,44 @@ export function InsightsSection({
 
   const kindBadge = (kind: InsightKind) => <span className={`knowledge-kind knowledge-kind-${kind}`}>{kindLabel(kind)}</span>;
 
+  const schemaSelect = <label className="knowledge-groupselect">
+    <span className="knowledge-visually-hidden">{t("Insight schema")}</span>
+    <select aria-label={t("Insight schema")} value={schemaId} disabled={busy || !schemas.length}
+      onChange={event => { onSchemaChange(event.target.value); setEntity(""); setEditingId(""); }}>
+      {!schemas.length ? <option value="">{t("No schema yet")}</option> : <option value="">{t("All schemas (cross-schema)")}</option>}
+      {schemas.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+    </select>
+  </label>;
+  const kindFilterBar = <span className="knowledge-kind-filter" role="group" aria-label={t("Kind")}>
+    <button type="button" aria-pressed={!kindFilter} disabled={busy} onClick={() => setKindFilter("")}>{t("All kinds")}</button>
+    {KINDS.map(kind => <button key={kind} type="button" aria-pressed={kindFilter === kind} disabled={busy}
+      onClick={() => setKindFilter(kind)}>{kindLabel(kind)}</button>)}
+  </span>;
+
   return <>
-    <WorkspaceToolbar label={t("Insights")} className="knowledge-section-toolbar">
-      {groupSelect}
-      <label className="knowledge-groupselect">
-        <span className="knowledge-visually-hidden">{t("Experiment schema")}</span>
-        <select aria-label={t("Experiment schema")} value={schemaId} disabled={busy || !schemas.length}
-          onChange={event => { onSchemaChange(event.target.value); setEntity(""); setEditingId(""); }}>
-          {!schemas.length ? <option value="">{t("No experiment schema yet")}</option> : <option value="">{t("All schemas (cross-schema)")}</option>}
-          {schemas.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>
-      </label>
-      <div className="knowledge-heading-actions">
-        <span className="knowledge-kind-filter" role="group" aria-label={t("Kind")}>
-          <button type="button" aria-pressed={!kindFilter} disabled={busy} onClick={() => setKindFilter("")}>{t("All kinds")}</button>
-          {KINDS.map(kind => <button key={kind} type="button" aria-pressed={kindFilter === kind} disabled={busy}
-            onClick={() => setKindFilter(kind)}>{kindLabel(kind)}</button>)}
-        </span>
-        {refreshControls}
-      </div>
-    </WorkspaceToolbar>
-    {banner}
+    {embedded
+      ? <div className="knowledge-formbar knowledge-embedded-toolbar">{schemaSelect}{kindFilterBar}</div>
+      : <WorkspaceToolbar label={t("Insights")} className="knowledge-section-toolbar">
+        {groupSelect}
+        {schemaSelect}
+        <div className="knowledge-heading-actions">{kindFilterBar}{refreshControls}</div>
+      </WorkspaceToolbar>}
+    {!embedded && banner}
     {!schemas.length && <WorkspaceEmptyState icon={<Sparkles size={24} />} title={t("Insights come from published records")}
-      description={t("Create an experiment schema, extract and publish records in Experiments, then come back here to extract what they show as a whole.")} />}
+      description={schemaKind === "literature"
+        ? t("Create a schema, extract and publish records from your sources above, then extract what they show as a whole.")
+        : t("Create an experiment schema, extract and publish records in Experiments, then come back here to extract what they show as a whole.")} />}
 
     {!!schemas.length && <details className="knowledge-disclosure knowledge-workflow" open={!insights.length || undefined}>
       <summary>{t("Extract insights")}</summary>
       <p className="knowledge-meta">{currentSchema
         ? t("{v0} published record(s) of \"{v1}\" are read as one table, with statistics the card computes over them.", { v0: published, v1: currentSchema.name })
-        : t("{v0} published record(s) across every experiment schema are read together — one table per schema, plus what specimens that appear in several schemas (matched by name) show across them. Pick one schema in the toolbar to narrow the scope.", { v0: published })}</p>
+        : t("{v0} published record(s) across every schema are read together — one table per schema, plus what specimens that appear in several schemas (matched by name) show across them. Pick one schema in the toolbar to narrow the scope.", { v0: published })}</p>
       <p className="knowledge-meta">{canRunAgent && labAgent
         ? t("Runs the connected {v0}, which reads the table and the statistics and proposes draft insights itself.", { v0: labAgent.name })
         : t("Extraction runs as one model call through the selected model.")}</p>
       {!canRunAgent && !deployed && modelSelect}
+      {deployed && <p className="knowledge-meta">{t("Model: {v0}", { v0: selectedModel || t("none configured") })}</p>}
       <div className="knowledge-formbar">
         <button type="button" className="knowledge-primary" disabled={busy || !!blocker} onClick={() => void extract()}>
           <Sparkles size={14} />{extracting ? t("Extracting…") : t("Extract insights")}</button>

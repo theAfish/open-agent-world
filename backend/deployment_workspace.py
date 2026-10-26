@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from backend.api import artifacts, conversations, file_preview, job_board, node_documents, node_resources, resources, runtime
 from backend.api.dependencies import get_services
 from backend.api.knowledge_bridge import (
-    ExperimentExtractRequest, InsightExtractRequest, ProjectionRequest, run_experiment_extract,
-    run_insight_extract, run_projection,
+    ExperimentExtractRequest, InsightExtractRequest, KnowledgeExtractRequest, RecordExtractRequest,
+    run_experiment_extract, run_insight_extract, run_knowledge_extract, run_record_extract,
 )
 from backend.node_documents import DocumentActionRequest, read_document, invoke_document_action
 from backend.node_resources import ResourceActionRequest, invoke_resource_action
@@ -286,14 +286,21 @@ def workspace_router(manifest):
         result = await invoke_resource_action(services, node_id, action, request)
         return {key: value for key, value in result.items() if key in actions[action]}
 
-    @router.post("/knowledge/{node_id}/project")
-    async def knowledge_project(node_id: str, request: ProjectionRequest, services=Depends(get_services)):
+    @router.post("/knowledge/{node_id}/knowledge")
+    async def knowledge_knowledge(node_id: str, request: KnowledgeExtractRequest, services=Depends(get_services)):
         # The bridge itself never checks capability; a release only reaches it once
         # both halves of the pipeline it drives are published for this node.
         actions = manifest.get("plugin_access", {}).get(node_id, {}).get("resource_actions", {})
-        if not {"projection_prompt", "save_projection"} <= set(actions):
+        if not {"knowledge_drafts", "knowledge_extract_prompt", "knowledge_save"} <= set(actions):
             raise HTTPException(404, "This operation is not published")
-        return await run_projection(node_id, request, services)
+        return await run_knowledge_extract(node_id, request, services)
+
+    @router.post("/knowledge/{node_id}/records")
+    async def knowledge_records(node_id: str, request: RecordExtractRequest, services=Depends(get_services)):
+        actions = manifest.get("plugin_access", {}).get(node_id, {}).get("resource_actions", {})
+        if not {"record_extract_prompt", "record_save"} <= set(actions):
+            raise HTTPException(404, "This operation is not published")
+        return await run_record_extract(node_id, request, services)
 
     @router.post("/knowledge/{node_id}/extract")
     async def knowledge_extract(node_id: str, request: ExperimentExtractRequest, services=Depends(get_services)):

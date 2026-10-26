@@ -122,6 +122,9 @@
 .knowledge-settings-fields small, .knowledge-settings-fields p { color: var(--ink-soft); font-size: 11px; line-height: 1.6; }
 .knowledge-agent-model, .knowledge-credential { display: flex; flex-direction: column; gap: 8px; }
 .knowledge-agent-model > span { font-size: 12px; font-weight: 500; }
+.knowledge-semantic-index { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-control, 6px); }
+.knowledge-semantic-index h5 { margin: 0; font-size: 12px; font-weight: 600; }
+.knowledge-semantic-index button { align-self: flex-start; }
 .knowledge-credential > label { position: relative; }
 .knowledge-secret-label { position: absolute; right: 0; top: 0; font-size: 10px; color: var(--knowledge-accent); }
 
@@ -279,3 +282,55 @@
 .knowledge-stats-block > h4, .knowledge-stats-block > h5 { margin: 0; }
 .knowledge-stats-block > h5 { font-size: 12px; color: var(--ink-soft); font-weight: 500; }
 .knowledge-insight-head .knowledge-chip-schema { font-size: 10px; color: var(--ink-soft); padding: 1px 6px; border-radius: 999px; background: var(--surface-raised); border: 1px solid var(--line); }
+
+/* Literature → Knowledge: the draft form, the element tables and their source chips. */
+.knowledge-draft-form { display: flex; flex-direction: column; gap: 8px; }
+.knowledge-draft-form > h4 { margin: 0; }
+.knowledge-draft-detail { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.knowledge-draft-detail > h4, .knowledge-draft-detail > h5 { margin: 0; }
+.knowledge-draft-detail > h5 { margin-top: 6px; }
+.knowledge-elements table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.knowledge-elements th, .knowledge-elements td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+.knowledge-elements thead th { font-weight: 500; color: var(--ink-soft); white-space: nowrap; }
+.knowledge-elements tbody tr:last-child > td { border-bottom: 0; }
+.knowledge-elements input, .knowledge-elements select { width: 100%; min-width: 90px; }
+.knowledge-elements .knowledge-insight-evidence { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+
+/* Literature → Records: the schema editor folded into a disclosure, the record filter bar
+   and the embedded Insights block, which has no toolbar of its own. */
+.knowledge-schema-editor { display: flex; flex-direction: column; gap: 8px; }
+.knowledge-record-filters { align-items: center; }
+.knowledge-record-filters input[type="search"] { flex: 1; min-width: 160px; }
+.knowledge-embedded-toolbar { align-items: center; flex-wrap: wrap; }
+.knowledge-embedded-insights { padding-top: 8px; border-top: 1px solid var(--line); }
+
+/* Review log: one entry per review run, operations as lines, flags and skips set apart. */
+.knowledge-review-log > li { display: block; }
+.knowledge-review-entry > small { display: block; color: var(--text-muted); margin-bottom: 4px; }
+.knowledge-review-entry ul { margin: 0; padding-left: 16px; font-size: 12px; }
+.knowledge-review-entry li + li { margin-top: 2px; }
+.knowledge-review-entry li small { color: var(--text-muted); }
+.knowledge-review-flag { color: var(--knowledge-accent); }
+.knowledge-review-skipped { color: var(--text-muted); font-style: italic; }
+.knowledge-elements q { font-style: italic; }
+.knowledge-review-proposal { margin: 6px 0 0; padding-left: 16px; font-size: 12px; }
+.knowledge-review-proposal li + li { margin-top: 2px; }
+.knowledge-review-proposal li small { color: var(--text-muted); }
+
+/* Progress of a streamed extraction or review: a bar (indeterminate for an agent run) and the current stage. */
+.knowledge-progress { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+.knowledge-progress progress { width: 100%; height: 6px; accent-color: var(--knowledge-accent); }
+.knowledge-progress small { color: var(--text-muted); }
+.knowledge-relations .knowledge-statement { display: block; color: var(--text-muted); font-style: italic; margin: 1px 0 4px; }
+
+/* Relations beside the map, readable like concepts: the list, and a detail panel symmetric to a node's. */
+.knowledge-side-tabs { flex-shrink: 0; }
+.knowledge-side-tabs button { padding: 4px 8px; font-size: 12px; background: transparent; }
+.knowledge-side-tabs button[aria-selected=true] { color: var(--knowledge-accent); background: var(--surface-raised); box-shadow: var(--shadow-surface); }
+.knowledge-relation-list button span em { font-style: italic; color: var(--knowledge-accent); }
+.knowledge-relation-list button small { display: block; color: var(--text-muted); font-size: 11px; white-space: normal; }
+.knowledge-relation-detail h4 { font-weight: 500; line-height: 1.5; }
+.knowledge-relation-detail h4 em { color: var(--knowledge-accent); }
+.knowledge-link { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline dotted; cursor: pointer; text-align: left; }
+.knowledge-link:hover { color: var(--knowledge-accent); }
+.knowledge-snippet { margin: 6px 0; padding: 4px 10px; border-left: 2px solid var(--line); color: var(--text-muted); font-style: italic; font-size: 12px; }

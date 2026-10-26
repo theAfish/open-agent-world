@@ -59,35 +59,58 @@ def test_resource_results_projected_and_section_names_cannot_grant_builtin_acces
     assert calls == ["query"]
 
 
-def test_knowledge_project_bridge_needs_both_halves_published(monkeypatch):
-    """The deployment route for the knowledge base's model-projection bridge only
-    runs once a release grants both the read half (projection_prompt) and the write
-    half (save_projection) — either alone would let a release read without ever
-    writing, or write without the plugin ever building the prompt it validates."""
+def test_knowledge_bridge_needs_both_halves_published(monkeypatch):
+    """The deployment route for the knowledge base's model bridge only runs once a
+    release grants both the read half (knowledge_drafts, knowledge_extract_prompt) and
+    the write half (knowledge_save) — either alone would let a release read without
+    ever writing, or write without the plugin ever building the prompt it validates."""
     calls = []
-    async def fake_run_projection(node_id, request, services):
-        calls.append((node_id, request.schema_id))
-        return {"projection": {"id": "projection-1"}, "truncated": False, "record_id": "record-1"}
-    monkeypatch.setattr("backend.deployment_workspace.run_projection", fake_run_projection)
+    async def fake_run_knowledge_extract(node_id, request, services):
+        calls.append((node_id, request.draft_id, request.replace))
+        return {"draft": {"id": "draft-1"}, "sources": []}
+    monkeypatch.setattr("backend.deployment_workspace.run_knowledge_extract", fake_run_knowledge_extract)
 
-    body = {"schema_id": "schema-1", "model": "oaw:model:m1", "record_id": "record-1"}
-    both = DeploymentSurface(resource_actions={"projection_prompt": set(), "save_projection": set()}).model_dump(mode="json")
-    only_read = DeploymentSurface(resource_actions={"projection_prompt": set()}).model_dump(mode="json")
+    body = {"draft_id": "draft-1", "model": "oaw:model:m1"}
+    both = DeploymentSurface(resource_actions={"knowledge_drafts": set(), "knowledge_extract_prompt": set(),
+                                               "knowledge_save": set()}).model_dump(mode="json")
+    only_read = DeploymentSurface(resource_actions={"knowledge_drafts": set(), "knowledge_extract_prompt": set()}).model_dump(mode="json")
     app = FastAPI()
     app.dependency_overrides[get_services] = lambda: None
     app.include_router(workspace_router({"permissions": {}, "plugin_access": {
         "granted": both, "half": only_read}}))
     with TestClient(app) as client:
-        ok = client.post("/workspace/knowledge/granted/project", json=body)
+        ok = client.post("/workspace/knowledge/granted/knowledge", json=body)
         assert ok.status_code == 200, ok.text
-        assert ok.json() == {"projection": {"id": "projection-1"}, "truncated": False, "record_id": "record-1"}
-        assert client.post("/workspace/knowledge/half/project", json=body).status_code == 404
-        assert client.post("/workspace/knowledge/unpublished/project", json=body).status_code == 404
-    assert calls == [("granted", "schema-1")]
+        assert ok.json() == {"draft": {"id": "draft-1"}, "sources": []}
+        assert client.post("/workspace/knowledge/half/knowledge", json=body).status_code == 404
+        assert client.post("/workspace/knowledge/unpublished/knowledge", json=body).status_code == 404
+    assert calls == [("granted", "draft-1", False)]
+
+
+def test_knowledge_records_bridge_needs_both_halves_published(monkeypatch):
+    """Same gate for records read from a literature source: record_extract_prompt and
+    record_save must both be published."""
+    calls = []
+    async def fake_run_record_extract(node_id, request, services):
+        calls.append((node_id, request.schema_id, request.source_ids))
+        return {"records": [], "invalid": 0, "sources": [], "schema_id": request.schema_id}
+    monkeypatch.setattr("backend.deployment_workspace.run_record_extract", fake_run_record_extract)
+
+    body = {"schema_id": "schema-1", "source_ids": ["source-1"], "model": "oaw:model:m1"}
+    both = DeploymentSurface(resource_actions={"record_extract_prompt": set(), "record_save": set()}).model_dump(mode="json")
+    only_read = DeploymentSurface(resource_actions={"record_extract_prompt": set()}).model_dump(mode="json")
+    app = FastAPI()
+    app.dependency_overrides[get_services] = lambda: None
+    app.include_router(workspace_router({"permissions": {}, "plugin_access": {
+        "granted": both, "half": only_read}}))
+    with TestClient(app) as client:
+        assert client.post("/workspace/knowledge/granted/records", json=body).status_code == 200
+        assert client.post("/workspace/knowledge/half/records", json=body).status_code == 404
+    assert calls == [("granted", "schema-1", ["source-1"])]
 
 
 def test_knowledge_extract_bridge_needs_both_halves_published(monkeypatch):
-    """Same gate as projection, for the agent-free experiment extraction: a release
+    """Same gate, for the agent-free experiment extraction: a release
     only reaches it once both experiment_extract_prompt and experiment_save are
     published for this node."""
     calls = []
@@ -111,3 +134,56 @@ def test_knowledge_extract_bridge_needs_both_halves_published(monkeypatch):
         assert client.post("/workspace/knowledge/half/extract", json=body).status_code == 404
         assert client.post("/workspace/knowledge/unpublished/extract", json=body).status_code == 404
     assert calls == [("granted", "bundle-1", True)]
+
+
+def test_knowledge_chunks_group_sections_split_oversized_ones_and_stop_at_the_cap():
+    """The agent-free knowledge extraction reads a long document a few sections at a
+    time; a short one stays a single call, as it was before chunking existed."""
+    from backend.api.knowledge_bridge import _chunks
+
+    sections = [{"index": 0, "heading_path": "", "offset": 0, "length": 10},
+                {"index": 1, "heading_path": "A", "offset": 10, "length": 30},
+                {"index": 2, "heading_path": "B", "offset": 40, "length": 50},
+                {"index": 3, "heading_path": "C", "offset": 90, "length": 10}]
+    assert _chunks(sections, 100, chunk_chars=200) == [(0, 100, [])]
+    assert _chunks(sections, 100, chunk_chars=45) == [(0, 40, ["A"]), (40, 45, ["B"]), (85, 5, ["B"]), (90, 10, ["C"])]
+    assert _chunks(sections, 100, chunk_chars=45, max_chars=60) == [(0, 40, ["A"]), (40, 20, ["B"])]
+    assert _chunks([], 0) == []
+
+
+def test_knowledge_bridge_streams_progress_then_the_result_or_the_error():
+    """The engineering routes answer as NDJSON so the card can show where a long
+    extraction is; the last line always carries the result or the failure."""
+    import json
+
+    from fastapi import FastAPI, HTTPException
+    from fastapi.testclient import TestClient
+
+    from backend.api.knowledge_bridge import _stream
+
+    app = FastAPI()
+
+    @app.post("/ok")
+    async def ok():
+        async def run(progress):
+            await progress({"stage": "read", "done": 0, "total": 2, "message": "first"})
+            await progress({"stage": "saved", "done": 1, "total": 2})
+            return {"sources": [{"entities": 3}]}
+        return _stream(run)
+
+    @app.post("/fail")
+    async def fail():
+        async def run(progress):
+            await progress({"stage": "findings", "done": 0, "total": 3})
+            raise HTTPException(422, "Nothing published yet")
+        return _stream(run)
+
+    with TestClient(app) as client:
+        response = client.post("/ok")
+        assert response.headers["content-type"].startswith("application/x-ndjson")
+        lines = [json.loads(line) for line in response.text.splitlines()]
+        assert lines == [{"event": "progress", "stage": "read", "done": 0, "total": 2, "message": "first"},
+                         {"event": "progress", "stage": "saved", "done": 1, "total": 2},
+                         {"event": "done", "result": {"sources": [{"entities": 3}]}}]
+        failed = [json.loads(line) for line in client.post("/fail").text.splitlines()]
+        assert failed[-1] == {"event": "error", "status": 422, "detail": "Nothing published yet"}

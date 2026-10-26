@@ -4,8 +4,8 @@ import { useState } from "react";
 import { modelRef } from "../state/modelConnections";
 import { modelLabel } from "./modelLabel";
 
-export function ModelSelect({ value, onChange, allowEmpty = false, label = t("Model") }: {
-  value: string; onChange: (value: string) => void; allowEmpty?: boolean; label?: string;
+export function ModelSelect({ value, onChange, allowEmpty = false, emptyLabel, label = t("Model") }: {
+  value: string; onChange: (value: string) => void; allowEmpty?: boolean; emptyLabel?: string; label?: string;
 }) {
   useLocale();
   const catalog = useWorldStore(s => s.modelCatalog);
@@ -14,7 +14,7 @@ export function ModelSelect({ value, onChange, allowEmpty = false, label = t("Mo
   const known = catalog.connections.some(c => c.enabled && c.models.some(m => m.enabled && modelRef(m.id) === value));
   return <div className="model-select"><input aria-label={t("Search {v0}", { v0: String(label.toLowerCase()) })} placeholder={t("Search models…")} value={query} onChange={e => setQuery(e.target.value)} />
     <select aria-label={label} value={value} onChange={e => { onChange(e.target.value); setQuery(""); }}>
-    {allowEmpty && <option value="">{t("Use each agent’s model")}</option>}
+    {allowEmpty && <option value="">{emptyLabel ?? t("Use each agent’s model")}</option>}
     {!allowEmpty && <option value="oaw:default">{modelLabel(catalog, "oaw:default")}{catalog.default_model ? ` (${t("Use default model")})` : ""}</option>}
     {value && value !== "oaw:default" && !known && <option value={value}>{value.startsWith("oaw:model:") ? t("Unavailable model — choose another") : value}</option>}
     {catalog.connections.filter(c => c.enabled).map(c => <optgroup key={c.id} label={c.name}>

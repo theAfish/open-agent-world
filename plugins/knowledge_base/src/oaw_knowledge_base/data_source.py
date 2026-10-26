@@ -53,10 +53,11 @@ def fields(definition, prefix="", root=None, depth=0):
 
 
 def datasets(schema):
-    kind = actions._schema_kind(schema)
-    prefix = "experiments" if kind == "experiment" else "projections"
+    # Every schema's dataset is its published records, whether they were read from an
+    # experiment upload or straight from a literature source: one table, one id shape
+    # (kept as "experiments:" so charts saved against it keep resolving).
     definition = schema.definition
-    root = {"id": f"{prefix}:{schema.id}", "label": schema.name, "kind": "table", "fields": fields(definition), "aggregates": False}
+    root = {"id": f"experiments:{schema.id}", "label": schema.name, "kind": "table", "fields": fields(definition), "aggregates": False}
     result = [root] if root["fields"] else []
     for name, prop in definition.get("properties", {}).items():
         prop = resolve(prop, definition)
@@ -89,7 +90,7 @@ def read(context, query):
         raise ResourceValidationError("This source exposes bounded records; aggregate in a SQL data source")
     kb = actions._client(context)
     parts = query.schema_id.split(":", 2)
-    if len(parts) < 2 or parts[0] not in {"projections", "experiments"}:
+    if len(parts) < 2 or parts[0] != "experiments":
         raise ResourceValidationError("Unknown knowledge dataset")
     schema = kb.schemas.require(parts[1])
     dataset = next((item for item in datasets(schema) if item["id"] == query.schema_id), None)
@@ -100,12 +101,9 @@ def read(context, query):
     if any(name not in allowed for name in [*columns, *filter(None, (query.order_by,))]):
         raise ResourceValidationError("Unknown schema field")
     cap = min(query.limit + 1, 500)
-    if parts[0] == "experiments":
-        # Only published records are approved data; drafts are still being reviewed.
-        records = [item["data"] for item in
-                   kb.oaw_experiments.list(schema_id=parts[1], status="published", limit=cap)]
-    else:
-        records = [item.data for item in kb.projections.list(schema_id=parts[1], newest_only=True, limit=cap)]
+    # Only published records are approved data; drafts are still being reviewed.
+    records = [item["data"] for item in
+               kb.oaw_experiments.list(schema_id=parts[1], status="published", limit=cap)]
     truncated = len(records) >= cap
     if len(parts) == 3:
         expanded = []

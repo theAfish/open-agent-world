@@ -11,8 +11,8 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 
-CORE = ["errors", "context", "operations", "projection", "client", "markdown",
-        "graph_store", "pipelines", "actions"]
+CORE = ["errors", "context", "operations", "knowledge_prompt", "knowledge_store", "knowledge",
+        "knowledge_audit", "knowledge_migration", "experiment_prompt", "insight_prompt", "client", "markdown", "graph_store", "pipelines", "actions"]
 
 PROBE = f"""
 import sys

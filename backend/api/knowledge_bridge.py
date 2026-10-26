@@ -1,19 +1,26 @@
-"""Small host bridge: projection uses the existing protected LLM connection.
+"""Small host bridge: extraction uses the existing protected LLM connection.
 
-The card's Project button needs a model call that no plugin may make itself — plugins
-never see API credentials. This route resolves the OAW model connection, calls the
-provider, and hands the result straight back to the plugin's own ``save_projection``
-action, so the projection is validated and evidence-linked by the plugin as usual.
+The card's Extract buttons need a model call that no plugin may make itself — plugins
+never see API credentials. Each route resolves the OAW model connection, calls the
+provider, and hands the result straight back to the plugin's own save action, so
+what was extracted is validated and evidence-linked by the plugin as usual.
 
-The prompt itself is built by the plugin (``oaw_knowledge_base.projection``), which is
-also what ``kb project`` uses outside OAW, so the two paths cannot drift.
+The prompts themselves are built by the plugin (``oaw_knowledge_base.knowledge_prompt``,
+``experiment_prompt``, ``insight_prompt``), which is also what the ``kb`` CLI uses
+outside OAW, so the two paths cannot drift.
 
-``run_projection`` is the reusable core: the engineering route below and the
-deployment route in ``backend/deployment_workspace.py`` both call it, so a published
-release runs the exact same model call the engineering canvas does.
+The ``run_*`` functions are the reusable core: the engineering routes below and the
+deployment routes in ``backend/deployment_workspace.py`` both call them, so a
+published release runs the exact same model calls the engineering canvas does.
 """
+import asyncio
+import json
+from collections.abc import Awaitable, Callable
+from typing import Literal
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from backend.api.dependencies import get_services
@@ -69,21 +76,38 @@ async def save_mineru_token(node_id: str, request: Request, services=Depends(get
         return _mineru_status(services, node)
 
 
-def _prompt_builders():
+def _builders(module, *names):
     """Imported lazily: the plugin reaches ``sys.path`` only once the loader runs."""
     try:
-        from oaw_knowledge_base.projection import build_messages, parse_projection
+        imported = __import__(f"oaw_knowledge_base.{module}", fromlist=list(names))
     except ImportError:  # pragma: no cover - the route is dead without the plugin
         raise HTTPException(503, "The knowledge base plugin is not available") from None
-    return build_messages, parse_projection
+    return tuple(getattr(imported, name) for name in names)
 
 
-class ProjectionRequest(BaseModel):
-    schema_id: str = Field(min_length=1, max_length=64)
+class KnowledgeExtractRequest(BaseModel):
+    draft_id: str = Field(min_length=1, max_length=64)
     model: str = Field(min_length=1, max_length=200)
-    source_id: str | None = Field(default=None, max_length=64)
-    record_id: str | None = Field(default=None, max_length=64)
-    notes: str | None = Field(default=None, max_length=2000)
+    # Empty the draft and read every source again; otherwise only the sources not yet extracted.
+    replace: bool = False
+
+
+class KnowledgeAuditRequest(BaseModel):
+    draft_id: str = Field(min_length=1, max_length=64)
+    model: str = Field(min_length=1, max_length=200)
+
+
+class KnowledgeGraphAuditRequest(BaseModel):
+    model: str = Field(min_length=1, max_length=200)
+    group_id: str | None = Field(default=None, max_length=64)
+    all_groups: bool = False
+
+
+class RecordExtractRequest(BaseModel):
+    schema_id: str = Field(min_length=1, max_length=64)
+    source_ids: list[str] = Field(min_length=1, max_length=100)
+    model: str = Field(min_length=1, max_length=200)
+    replace_drafts: bool = False
 
 
 class ExperimentExtractRequest(BaseModel):
@@ -99,6 +123,8 @@ class InsightExtractRequest(BaseModel):
     model: str = Field(min_length=1, max_length=200)
     group_id: str | None = Field(default=None, max_length=64)
     all_groups: bool = False
+    # Which section's schemas an open scope takes (see ``insights.Scoped``).
+    schema_kind: Literal["literature", "experiment"] = "experiment"
     replace_drafts: bool = False
 
 
@@ -109,7 +135,7 @@ def _credentials(services, reference):
         except ResourceValidationError as exc:
             raise HTTPException(422, str(exc)) from None
         if adapter not in {"openai", "legacy"}:
-            raise HTTPException(422, "Select an OpenAI-compatible model for projection")
+            raise HTTPException(422, "Select an OpenAI-compatible model for extraction")
         base_url = base_url or "https://api.openai.com/v1"
     else:
         connection = services.llm_settings.read()
@@ -119,53 +145,288 @@ def _credentials(services, reference):
     return base_url, api_key, model.removeprefix("openai/")
 
 
-async def run_projection(node_id: str, request: ProjectionRequest, services) -> dict:
+# One document (or table) is read in full, up to this many characters, so a long
+# source is not silently cut at the first window the way a single page would be.
+EXTRACT_MAX_CHARS = 400_000
+
+
+async def _check_node(node_id, services):
     async with services._node_mutation(read_only=True):
         if services.world.get_card(node_id).type != NODE_TYPE:
             raise HTTPException(422, "Expected a Knowledge base node")
 
-    prompt = await invoke_resource_action(services, node_id, "projection_prompt",
-        ResourceActionRequest(arguments={
-            "schema_id": request.schema_id, "source_id": request.source_id,
-            "record_id": request.record_id}))
-    base_url, api_key, model = _credentials(services, request.model)
-    build_messages, parse_projection = _prompt_builders()
 
-    # Never return provider exception bodies: they may contain request credentials.
+async def _complete(base_url, api_key, model, messages, parse, *, timeout=300):
+    """One JSON-mode chat completion, parsed by the plugin. Never returns provider
+    exception bodies: they may contain request credentials."""
     try:
-        async with httpx.AsyncClient(timeout=180, follow_redirects=False) as client:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
             response = await client.post(base_url.rstrip("/") + "/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"} if api_key and api_key != "oaw-no-auth" else {},
-                json={"model": model, "response_format": {"type": "json_object"},
-                      "messages": build_messages(prompt)})
+                json={"model": model, "response_format": {"type": "json_object"}, "messages": messages})
         if response.status_code != 200:
             raise HTTPException(502, f"The model returned HTTP {response.status_code}; check the model, quota and connection settings")
-        data = parse_projection(response.json()["choices"][0]["message"]["content"])
+        return parse(response.json()["choices"][0]["message"]["content"])
     except HTTPException:
         raise
     except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
-        raise HTTPException(502, "The projection request failed or returned malformed JSON; check the connection and retry") from None
-
-    # The plugin owns the write: it validates against the schema and links evidence.
-    saved = await invoke_resource_action(services, node_id, "save_projection",
-        ResourceActionRequest(arguments={
-            "schema_id": request.schema_id, "record_id": prompt["record_id"],
-            "data": data, "notes": request.notes, "model": request.model}))
-    return {"projection": saved["projection"], "truncated": prompt["truncated"],
-            "record_id": prompt["record_id"]}
+        raise HTTPException(502, "The extraction request failed or returned malformed JSON; check the connection and retry") from None
 
 
-def _extract_prompt_builders():
-    try:
-        from oaw_knowledge_base.experiment_prompt import build_messages, parse_extract
-    except ImportError:  # pragma: no cover - the route is dead without the plugin
-        raise HTTPException(503, "The knowledge base plugin is not available") from None
-    return build_messages, parse_extract
+async def _paged_prompt(services, node_id, action, arguments):
+    """One prompt's whole document, following ``has_more`` up to ``EXTRACT_MAX_CHARS``."""
+    prompt = await invoke_resource_action(services, node_id, action,
+        ResourceActionRequest(arguments={**arguments, "limit": 200_000}))
+    text = prompt["markdown"]
+    while prompt["has_more"] and len(text) < EXTRACT_MAX_CHARS:
+        prompt = await invoke_resource_action(services, node_id, action,
+            ResourceActionRequest(arguments={**arguments, "limit": 200_000, "offset": len(text)}))
+        text += prompt["markdown"]
+    return prompt, text, bool(prompt["has_more"])
 
 
-# One upload's combined markdown is read in full, up to this many characters, so a
-# long upload is not silently cut at the first window the way a single page would be.
-EXTRACT_MAX_CHARS = 400_000
+Progress = Callable[[dict], Awaitable[None]] | None
+
+
+async def _report(progress: Progress, **event) -> None:
+    if progress is not None:
+        await progress(event)
+
+
+def _stream(run: Callable[[Progress], Awaitable[dict]]) -> StreamingResponse:
+    """Run ``run`` while streaming its progress as NDJSON: one ``{"event": "progress", ...}``
+    line per step, then ``{"event": "done", "result": ...}`` or ``{"event": "error", "detail": ...}``.
+    A long extraction (several model calls per source) thus shows the card where it is
+    instead of one silent request; a client that ignores the stream still gets the
+    result as the last line."""
+    queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+    async def progress(event: dict) -> None:
+        await queue.put({"event": "progress", **event})
+
+    async def work() -> None:
+        try:
+            result = await run(progress)
+            await queue.put({"event": "done", "result": result})
+        except HTTPException as exc:
+            await queue.put({"event": "error", "status": exc.status_code, "detail": exc.detail})
+        except Exception:  # noqa: BLE001 - the stream must end; the detail stays generic
+            await queue.put({"event": "error", "status": 500, "detail": "The request failed"})
+        finally:
+            await queue.put(None)
+
+    async def lines():
+        task = asyncio.create_task(work())
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield json.dumps(item) + "\n"
+        finally:
+            if not task.done():
+                task.cancel()
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# One chunk of a document per knowledge call: consecutive sections are grouped up to
+# this many characters, so a long paper is read a few sections at a time (as MKB's
+# agent does) instead of as one 400k-character prompt that dilutes the model's attention.
+KNOWLEDGE_CHUNK_CHARS = 40_000
+
+
+def _chunks(sections, total_characters, *, chunk_chars=KNOWLEDGE_CHUNK_CHARS, max_chars=EXTRACT_MAX_CHARS):
+    """``[(offset, length, heading_paths)]`` covering the document in reading order.
+
+    A document that fits one chunk is one call, as before. Otherwise consecutive
+    sections are grouped until the next would overflow; a single section longer than
+    a chunk is split by character windows. Reading stops at ``max_chars``; the caller
+    reports the document as truncated when it does.
+    """
+    limit = min(total_characters, max_chars)
+    if limit <= chunk_chars:
+        return [(0, limit, [])] if limit else []
+    chunks, start, length, paths = [], None, 0, []
+
+    def flush():
+        nonlocal start, length, paths
+        if start is not None and length:
+            chunks.append((start, length, paths))
+        start, length, paths = None, 0, []
+
+    for section in sections:
+        offset, size, path = section["offset"], section["length"], section["heading_path"]
+        if offset >= limit:
+            break
+        size = min(size, limit - offset)
+        if size > chunk_chars:
+            flush()
+            for window in range(offset, offset + size, chunk_chars):
+                chunks.append((window, min(chunk_chars, offset + size - window), [path]))
+            continue
+        if length and length + size > chunk_chars:
+            flush()
+        if start is None:
+            start = offset
+        length += size
+        if path and path not in paths:
+            paths.append(path)
+    flush()
+    return chunks
+
+
+async def run_knowledge_extract(node_id: str, request: KnowledgeExtractRequest, services,
+                                progress: Progress = None) -> dict:
+    """The agent-free **Extract knowledge**: for each source of the draft not yet
+    extracted (every one, when replacing), the document's outline is read, grouped
+    into chunks of a few sections, and each chunk goes through one JSON-mode model
+    call handed to the plugin's own ``knowledge_save`` — the same
+    ``knowledge_extract_prompt`` → ``knowledge_save`` pair a connected Lab assistant
+    drives section by section through its tools, so the draft merges identically
+    whichever path produced it. Each prompt already carries the draft's names and the
+    published concepts the chunk mentions, so later chunks reuse earlier ones."""
+    await _check_node(node_id, services)
+    draft = (await invoke_resource_action(services, node_id, "knowledge_drafts",
+        ResourceActionRequest(arguments={"operation": "get", "draft_id": request.draft_id})))["draft"]
+    pending = [item["source_id"] for item in draft["sources"]
+               if request.replace or item["extracted_at"] is None]
+    if not pending:
+        raise HTTPException(422, "Every source of this draft is extracted already; choose Replace to read them again")
+    base_url, api_key, model = _credentials(services, request.model)
+    build_messages, parse_graph = _builders("knowledge_prompt", "build_messages", "parse_graph")
+
+    await _report(progress, stage="outline", message=f"Reading the outline of {len(pending)} source(s)", done=0, total=None)
+    outlines = {}
+    for source_id in pending:
+        outline = await invoke_resource_action(services, node_id, "knowledge_source_outline",
+            ResourceActionRequest(arguments={"source_id": source_id}))
+        outlines[source_id] = (outline, _chunks(outline["sections"], outline["total_characters"]))
+    total = sum(len(chunks) for _, chunks in outlines.values())
+    step = 0
+
+    results, saved = [], None
+    first_save = True
+    for source_id in pending:
+        outline, chunks = outlines[source_id]
+        added = {"entities": 0, "relations": 0}
+        for position, (offset, length, paths) in enumerate(chunks, start=1):
+            where = " / ".join(paths) if paths else None
+            await _report(progress, stage="read", done=step, total=total, source_id=source_id,
+                          filename=outline.get("filename"), chunk=position, chunks=len(chunks), heading=where,
+                          message=(f"Reading {outline.get('filename') or source_id}"
+                                   + (f" · part {position}/{len(chunks)}" if len(chunks) > 1 else "")
+                                   + (f" · {where}" if where else "")))
+            prompt = await invoke_resource_action(services, node_id, "knowledge_extract_prompt",
+                ResourceActionRequest(arguments={"source_id": source_id, "draft_id": request.draft_id,
+                                                 "offset": offset, "limit": max(500, length)}))
+            prompt["heading_path"] = " / ".join(paths) if paths else None
+            entities, relations = await _complete(
+                base_url, api_key, model, build_messages(prompt),
+                lambda answer: parse_graph(answer, allow_empty=len(chunks) > 1))
+            if not entities:
+                # One chunk naming nothing (a reference list, a figure index) is not a failure.
+                step += 1
+                continue
+            saved = await invoke_resource_action(services, node_id, "knowledge_save",
+                ResourceActionRequest(arguments={"draft_id": request.draft_id, "source_id": source_id,
+                                                 "entities": entities, "relations": relations,
+                                                 "replace": request.replace and first_save}))
+            first_save = False
+            added["entities"] += saved["added"]["entities"]
+            added["relations"] += saved["added"]["relations"]
+            step += 1
+            await _report(progress, stage="saved", done=step, total=total, source_id=source_id,
+                          filename=outline.get("filename"), chunk=position, chunks=len(chunks),
+                          entities=added["entities"], relations=added["relations"],
+                          message=f"{outline.get('filename') or source_id}: {added['entities']} concepts, {added['relations']} relations so far")
+        results.append({"source_id": source_id, "filename": outline.get("filename"), "chunks": len(chunks),
+                        "truncated": outline["total_characters"] > EXTRACT_MAX_CHARS, **added})
+    if saved is None:
+        raise HTTPException(502, "The model named no concepts in any source of this draft")
+    return {"draft": saved["draft"], "sources": results}
+
+
+async def run_knowledge_audit(node_id: str, request: KnowledgeAuditRequest, services,
+                              progress: Progress = None) -> dict:
+    """The agent-free **Review draft**: the plugin's findings and the draft go through
+    one JSON-mode model call whose typed operations are handed to the plugin's own
+    ``knowledge_audit_apply`` — the same pair a connected Agent drives through its
+    tools, minus the agent's option of checking a source section before a merge."""
+    await _check_node(node_id, services)
+    await _report(progress, stage="findings", message="Computing findings over the draft", done=0, total=3)
+    prompt = await invoke_resource_action(services, node_id, "knowledge_audit_prompt",
+        ResourceActionRequest(arguments={"draft_id": request.draft_id}))
+    base_url, api_key, model = _credentials(services, request.model)
+    build_messages, parse_operations = _builders("knowledge_audit", "build_messages", "parse_operations")
+    statistics = prompt["statistics"]
+    await _report(progress, stage="model", done=1, total=3,
+                  message=(f"Asking the model about {statistics['concepts']} concepts and {statistics['relations']} relations "
+                           f"({len(statistics['concept_clusters'])} look-alike group(s), {len(statistics['isolated'])} isolated)"))
+    operations = await _complete(base_url, api_key, model, build_messages(prompt), parse_operations)
+    await _report(progress, stage="apply", done=2, total=3, operations=len(operations),
+                  message=f"Applying {len(operations)} operation(s)" if operations else "Nothing to change")
+    if not operations:
+        draft = (await invoke_resource_action(services, node_id, "knowledge_drafts",
+            ResourceActionRequest(arguments={"operation": "get", "draft_id": request.draft_id})))["draft"]
+        return {"draft": draft, "applied": 0, "skipped": 0, "review": None}
+    return await invoke_resource_action(services, node_id, "knowledge_audit_apply",
+        ResourceActionRequest(arguments={"draft_id": request.draft_id, "operations": operations,
+                                         "expected_revision": prompt["revision"]}))
+
+
+async def run_knowledge_graph_audit(node_id: str, request: KnowledgeGraphAuditRequest, services,
+                                    progress: Progress = None) -> dict:
+    """**Review graph**: findings over the whole published literature layer go through
+    one JSON-mode model call. Unlike a draft review, nothing is applied here — the
+    proposed operations go back to the card, which applies them through the plugin's
+    ``knowledge_graph_audit_apply`` only after the person confirms, since they rewrite
+    published knowledge."""
+    await _check_node(node_id, services)
+    scope = {"all_groups": request.all_groups, **({"group_id": request.group_id} if request.group_id else {})}
+    await _report(progress, stage="findings", message="Computing findings over the published knowledge", done=0, total=2)
+    prompt = await invoke_resource_action(services, node_id, "knowledge_graph_audit_prompt",
+        ResourceActionRequest(arguments=scope))
+    base_url, api_key, model = _credentials(services, request.model)
+    build_messages, parse_operations = _builders("knowledge_audit", "build_messages", "parse_operations")
+    statistics = prompt["statistics"]
+    await _report(progress, stage="model", done=1, total=2,
+                  message=(f"Asking the model about {statistics['concepts']} concepts and {statistics['relations']} relations "
+                           f"from {len(prompt['draft_ids'])} published draft(s)"))
+    operations = await _complete(base_url, api_key, model, build_messages(prompt), parse_operations)
+    return {"operations": operations, "drafts": prompt["draft_ids"], "statistics": prompt["statistics"]}
+
+
+async def run_record_extract(node_id: str, request: RecordExtractRequest, services) -> dict:
+    """The agent-free **Extract records** from literature: one JSON-mode call per
+    source, each handed to the plugin's own ``record_save``."""
+    await _check_node(node_id, services)
+    base_url, api_key, model = _credentials(services, request.model)
+    build_messages, parse_extract = _builders("experiment_prompt", "build_messages", "parse_extract")
+
+    results, records, invalid = [], [], 0
+    for source_id in request.source_ids:
+        prompt, markdown, truncated = await _paged_prompt(services, node_id, "record_extract_prompt",
+                                                          {"schema_id": request.schema_id, "source_id": source_id})
+        extracted = await _complete(base_url, api_key, model, build_messages(prompt, markdown=markdown), _parse_records(parse_extract))
+        saved = await invoke_resource_action(services, node_id, "record_save",
+            ResourceActionRequest(arguments={"schema_id": request.schema_id, "source_id": source_id,
+                                             "records": extracted, "replace_drafts": request.replace_drafts}))
+        records.extend(saved["records"])
+        invalid += saved["invalid"]
+        results.append({"source_id": source_id, "filename": prompt.get("filename"),
+                        "records": len(saved["records"]), "invalid": saved["invalid"], "truncated": truncated})
+    return {"records": records, "invalid": invalid, "sources": results, "schema_id": request.schema_id}
+
+
+def _parse_records(parse_extract):
+    """A literature source may legitimately report nothing for a schema; the records
+    themselves carry no ``source_ids`` because the source is the request's."""
+    def parse(answer):
+        return [{"name": item["name"], "data": item["data"], "note": item["note"]}
+                for item in parse_extract(answer, allow_empty=True)]
+    return parse
 
 
 async def run_experiment_extract(node_id: str, request: ExperimentExtractRequest, services) -> dict:
@@ -173,36 +434,12 @@ async def run_experiment_extract(node_id: str, request: ExperimentExtractRequest
     JSON-mode model call, and hand the records to the plugin's own ``experiment_save``
     — the same two actions a connected Lab assistant drives through its tools, so a
     record is validated and evidence-linked identically whichever path produced it."""
-    async with services._node_mutation(read_only=True):
-        if services.world.get_card(node_id).type != NODE_TYPE:
-            raise HTTPException(422, "Expected a Knowledge base node")
-
-    prompt = await invoke_resource_action(services, node_id, "experiment_extract_prompt",
-        ResourceActionRequest(arguments={"bundle_id": request.bundle_id, "limit": 200_000}))
-    markdown, truncated = prompt["markdown"], False
-    while prompt["has_more"] and len(markdown) < EXTRACT_MAX_CHARS:
-        prompt = await invoke_resource_action(services, node_id, "experiment_extract_prompt",
-            ResourceActionRequest(arguments={"bundle_id": request.bundle_id, "limit": 200_000,
-                                             "offset": len(markdown)}))
-        markdown += prompt["markdown"]
-    if prompt["has_more"]:
-        truncated = True
+    await _check_node(node_id, services)
+    prompt, markdown, truncated = await _paged_prompt(services, node_id, "experiment_extract_prompt",
+                                                      {"bundle_id": request.bundle_id})
     base_url, api_key, model = _credentials(services, request.model)
-    build_messages, parse_extract = _extract_prompt_builders()
-
-    try:
-        async with httpx.AsyncClient(timeout=300, follow_redirects=False) as client:
-            response = await client.post(base_url.rstrip("/") + "/chat/completions",
-                headers={"Authorization": f"******"} if api_key and api_key != "oaw-no-auth" else {},
-                json={"model": model, "response_format": {"type": "json_object"},
-                      "messages": build_messages(prompt, markdown=markdown)})
-        if response.status_code != 200:
-            raise HTTPException(502, f"The model returned HTTP {response.status_code}; check the model, quota and connection settings")
-        records = parse_extract(response.json()["choices"][0]["message"]["content"])
-    except HTTPException:
-        raise
-    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
-        raise HTTPException(502, "The extraction request failed or returned malformed JSON; check the connection and retry") from None
+    build_messages, parse_extract = _builders("experiment_prompt", "build_messages", "parse_extract")
+    records = await _complete(base_url, api_key, model, build_messages(prompt, markdown=markdown), parse_extract)
 
     saved = await invoke_resource_action(services, node_id, "experiment_save",
         ResourceActionRequest(arguments={"bundle_id": request.bundle_id, "records": records,
@@ -211,51 +448,20 @@ async def run_experiment_extract(node_id: str, request: ExperimentExtractRequest
             "truncated": truncated}
 
 
-def _insight_prompt_builders():
-    try:
-        from oaw_knowledge_base.insight_prompt import build_messages, parse_insights
-    except ImportError:  # pragma: no cover - the route is dead without the plugin
-        raise HTTPException(503, "The knowledge base plugin is not available") from None
-    return build_messages, parse_insights
-
-
 async def run_insight_extract(node_id: str, request: InsightExtractRequest, services) -> dict:
     """The agent-free **Extract insights**: page through the schema's record table,
     make one JSON-mode model call, and hand the insights to the plugin's own
     ``insight_save`` — the same two actions a connected Lab assistant drives through
     its tools, so an insight is evidence-checked identically whichever path produced it."""
-    async with services._node_mutation(read_only=True):
-        if services.world.get_card(node_id).type != NODE_TYPE:
-            raise HTTPException(422, "Expected a Knowledge base node")
-
+    await _check_node(node_id, services)
     scope = {"schema_ids": request.schema_ids, "all_groups": request.all_groups,
+             "schema_kind": request.schema_kind,
              **({"schema_id": request.schema_id} if request.schema_id else {}),
              **({"group_id": request.group_id} if request.group_id else {})}
-    prompt = await invoke_resource_action(services, node_id, "insight_prompt",
-        ResourceActionRequest(arguments={**scope, "limit": 200_000}))
-    table, truncated = prompt["markdown"], False
-    while prompt["has_more"] and len(table) < EXTRACT_MAX_CHARS:
-        prompt = await invoke_resource_action(services, node_id, "insight_prompt",
-            ResourceActionRequest(arguments={**scope, "limit": 200_000, "offset": len(table)}))
-        table += prompt["markdown"]
-    if prompt["has_more"]:
-        truncated = True
+    prompt, table, truncated = await _paged_prompt(services, node_id, "insight_prompt", scope)
     base_url, api_key, model = _credentials(services, request.model)
-    build_messages, parse_insights = _insight_prompt_builders()
-
-    try:
-        async with httpx.AsyncClient(timeout=300, follow_redirects=False) as client:
-            response = await client.post(base_url.rstrip("/") + "/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"} if api_key and api_key != "oaw-no-auth" else {},
-                json={"model": model, "response_format": {"type": "json_object"},
-                      "messages": build_messages(prompt, table=table)})
-        if response.status_code != 200:
-            raise HTTPException(502, f"The model returned HTTP {response.status_code}; check the model, quota and connection settings")
-        insights = parse_insights(response.json()["choices"][0]["message"]["content"])
-    except HTTPException:
-        raise
-    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
-        raise HTTPException(502, "The extraction request failed or returned malformed JSON; check the connection and retry") from None
+    build_messages, parse_insights = _builders("insight_prompt", "build_messages", "parse_insights")
+    insights = await _complete(base_url, api_key, model, build_messages(prompt, table=table), parse_insights)
 
     saved = await invoke_resource_action(services, node_id, "insight_save",
         ResourceActionRequest(arguments={**scope, "insights": insights,
@@ -264,9 +470,24 @@ async def run_insight_extract(node_id: str, request: InsightExtractRequest, serv
             "schema_ids": saved["schema_ids"], "truncated": truncated}
 
 
-@router.post("/knowledge/{node_id}/project")
-async def project(node_id: str, request: ProjectionRequest, services=Depends(get_services)):
-    return await run_projection(node_id, request, services)
+@router.post("/knowledge/{node_id}/knowledge")
+async def extract_knowledge(node_id: str, request: KnowledgeExtractRequest, services=Depends(get_services)):
+    return _stream(lambda progress: run_knowledge_extract(node_id, request, services, progress))
+
+
+@router.post("/knowledge/{node_id}/audit")
+async def audit_knowledge(node_id: str, request: KnowledgeAuditRequest, services=Depends(get_services)):
+    return _stream(lambda progress: run_knowledge_audit(node_id, request, services, progress))
+
+
+@router.post("/knowledge/{node_id}/graph-audit")
+async def audit_knowledge_graph(node_id: str, request: KnowledgeGraphAuditRequest, services=Depends(get_services)):
+    return _stream(lambda progress: run_knowledge_graph_audit(node_id, request, services, progress))
+
+
+@router.post("/knowledge/{node_id}/records")
+async def extract_records(node_id: str, request: RecordExtractRequest, services=Depends(get_services)):
+    return await run_record_extract(node_id, request, services)
 
 
 @router.post("/knowledge/{node_id}/extract")

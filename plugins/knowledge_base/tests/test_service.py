@@ -102,8 +102,8 @@ def test_mkb_refusals_keep_their_own_status_and_message(client):
     assert clash.status_code == 409  # a conflict, not a 500 with a stack trace
     assert "Process graph" in clash.json()["detail"]
 
-    missing = call(client, "projections",
-                   projection_id="00000000-0000-0000-0000-000000000000")
+    missing = call(client, "schemas", operation="get",
+                   schema_id="00000000-0000-0000-0000-000000000000")
     assert missing.status_code == 404
 
 
@@ -121,49 +121,45 @@ def test_the_loop_runs_over_http_and_only_an_admin_publishes(client, admin, stor
     listing = call(client, "sources").json()["sources"]
     assert listing[0]["markdown"]["engine"] == "text"
 
-    schema = call(client, "schemas", operation="create", name="Process graph",
-                  definition=SCHEMA, system_prompt="Extract entities.").json()["schema"]
-    prompt = call(client, "projection_prompt", schema_id=schema["id"],
-                  source_id=source_id).json()
+    draft = call(client, "knowledge_draft_manage", operation="create",
+                 source_ids=[source_id]).json()["draft"]
+    prompt = call(client, "knowledge_extract_prompt", source_id=source_id,
+                  draft_id=draft["id"]).json()
     assert "Sintering" in prompt["markdown"]
-
-    saved = call(client, "save_projection", schema_id=schema["id"],
-                 record_id=prompt["record_id"], model="test-model",
-                 data={"entities": [{"type": "material", "name": "Si3N4"}],
-                       "relations": []}).json()["projection"]
-    built = call(client, "draft", operation="create",
-                 projection_ids=[saved["id"]]).json()["draft"]
-    assert call(client, "review", operation="submit", draft_id=built["id"],
-                expected_revision=1).status_code == 200
+    saved = call(client, "knowledge_save", draft_id=draft["id"], source_id=source_id,
+                 entities=[{"type": "entity", "name": "Si3N4"}]).json()
+    assert saved["added"] == {"entities": 1, "relations": 0}
 
     # The service token reaches everything except the publish.
-    refused = call(client, "review", operation="approve", draft_id=built["id"],
-                   expected_revision=1)
+    refused = call(client, "knowledge_review", operation="publish", draft_id=draft["id"])
     assert refused.status_code == 403
     assert "admin token" in refused.json()["detail"]
     assert call(client, "graph").json()["entities"] == []
 
     # Even the admin has to confirm: the first call is a deliberate speed bump.
-    pending = call(admin, "review", operation="approve", draft_id=built["id"],
-                   expected_revision=1)
+    pending = call(admin, "knowledge_review", operation="publish", draft_id=draft["id"])
     assert pending.status_code == 409
     assert pending.json()["status"] == "confirmation_required"
     assert call(client, "graph").json()["entities"] == []
 
-    published = admin.post("/v1/collections/default/review?confirm=true",
-                           json={"operation": "approve", "draft_id": built["id"],
-                                 "expected_revision": 1})
+    published = admin.post("/v1/collections/default/knowledge_review?confirm=true",
+                           json={"operation": "publish", "draft_id": draft["id"]})
     assert published.status_code == 200, published.text
-    assert published.json()["decision"] == "APPROVED"
+    assert published.json()["draft"]["status"] == "published"
     assert [item["name"] for item in call(client, "graph").json()["entities"]] == ["Si3N4"]
 
 
 def test_confirm_is_ignored_without_the_admin_token(client, store):
-    # ``?confirm=true`` must not become a way around the approval gate.
-    response = client.post("/v1/collections/default/review?confirm=true",
-                           json={"operation": "approve",
-                                 "draft_id": "00000000-0000-0000-0000-000000000000",
-                                 "expected_revision": 1})
+    # ``?confirm=true`` must not become a way around the publish gate.
+    response = client.post("/v1/collections/default/knowledge_review?confirm=true",
+                           json={"operation": "publish",
+                                 "draft_id": "00000000-0000-0000-0000-000000000000"})
+    assert response.status_code == 403
+
+
+def test_rewriting_the_published_graph_needs_the_admin_token_too(client, store):
+    response = client.post("/v1/collections/default/knowledge_graph_audit_apply?confirm=true",
+                           json={"operations": [{"op": "flag", "message": "x"}]})
     assert response.status_code == 403
 
 

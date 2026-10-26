@@ -1,6 +1,6 @@
 """One store directory, opened in this process, shared by every front door.
 
-A store is a folder holding ``knowledge.db`` (documents, projections, facts and the
+A store is a folder holding ``knowledge.db`` (documents, records, drafts and the
 graph, all in SQLite) and a ``settings/`` folder with one small JSON file per
 collection. It is the standalone equivalent of an OAW card's storage directory, and
 it is deliberately the same shape: the service calls the very same handlers the card

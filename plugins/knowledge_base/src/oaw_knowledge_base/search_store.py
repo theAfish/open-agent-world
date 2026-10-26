@@ -55,6 +55,30 @@ def _sections(text):
         yield path, current
 
 
+def outline(text):
+    """``[{index, heading_path, offset, length}]`` — the document's sections as
+    character windows, so a reader can take one section at a time. The heading line
+    belongs to the section it opens, as in ``_sections``; text before the first
+    heading is section 0 with an empty path."""
+    stack: list[tuple[int, str]] = []
+    sections: list[dict] = []
+    path, start, offset = "", 0, 0
+    for line in text.splitlines(keepends=True):
+        match = _HEADING_RE.match(line)
+        if match:
+            if offset > start:
+                sections.append({"index": len(sections), "heading_path": path, "offset": start,
+                                 "length": offset - start})
+            level = len(match.group(1))
+            stack = [item for item in stack if item[0] < level]
+            stack.append((level, match.group(2).strip()))
+            path, start = " > ".join(title for _, title in stack), offset
+        offset += len(line)
+    if offset > start:
+        sections.append({"index": len(sections), "heading_path": path, "offset": start, "length": offset - start})
+    return sections
+
+
 def chunk_markdown(text):
     """Yield ``(chunk_index, heading_path, chunk_text)`` for one document.
 

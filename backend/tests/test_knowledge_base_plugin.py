@@ -35,13 +35,12 @@ from oaw_knowledge_base.errors import KnowledgeError  # noqa: E402
 from oaw_knowledge_base.operations import BY_NAME, EXPERIMENT_ACTIONS, EXTRACT_ACTIONS, OPERATIONS, READ_ACTIONS  # noqa: E402
 
 NODE_TYPE = "knowledge.base"
-# Uploading a file, converting it, managing groups, changing settings, approving a
-# draft, choosing which schema builds the graph and publishing a record or an insight
-# are acts a person takes on the canvas. They must never gain a capability kind, on
-# any transport.
-DESKTOP_ONLY = {"ingest", "process", "groups", "settings", "review", "graph_schema",
-                "experiment_ingest", "experiment_bundle_manage", "experiment_review",
-                "insight_review"}
+# Uploading a file, converting it, managing groups, changing settings, opening a
+# knowledge draft and publishing a draft, a record or an insight are acts a person
+# takes on the canvas. They must never gain a capability kind, on any transport.
+DESKTOP_ONLY = {"ingest", "process", "groups", "settings", "knowledge_draft_manage",
+                "knowledge_review", "knowledge_graph_audit_prompt", "knowledge_graph_audit_apply",
+                "experiment_ingest", "experiment_bundle_manage", "experiment_review", "insight_review"}
 
 
 def test_declared_local_pdf_engine_converts_a_real_document():
@@ -91,7 +90,7 @@ def test_the_loader_registers_the_card_and_its_grants():
     assert experiment == {f"{NODE_TYPE}.{name}" for name in EXPERIMENT_ACTIONS}
     assert read < extract and read < experiment  # each is read plus its own write half
     # The two write halves are separate pipelines: a literature extractor cannot
-    # save experiment records and a lab assistant cannot propose draft graphs.
+    # save experiment records and a lab assistant cannot write knowledge drafts.
     assert not (extract - read) & (experiment - read)
     assert not {kind for kind in (extract | experiment) if kind.rsplit(".", 1)[-1] in DESKTOP_ONLY}
 
@@ -113,8 +112,8 @@ async def test_an_mkb_refusal_does_not_reach_the_browser_as_a_crash(services):
     # MKB's exceptions are not ValueErrors, so without the plugin's guard asking for a
     # well-formed id that does not exist would leave the handler as a 500.
     with pytest.raises(ResourceValidationError) as failure:
-        await action(services, node.id, "projections",
-                     projection_id="00000000-0000-0000-0000-000000000000")
+        await invoke_resource_action(services, node.id, "schemas", ResourceActionRequest(arguments={
+            "operation": "get", "schema_id": "00000000-0000-0000-0000-000000000000"}))
     assert "not found" in str(failure.value).lower()
 
 
@@ -274,9 +273,9 @@ def test_the_research_formation_deploys_wired_independent_bases(client):
     tools = {tool.name for tool in client.portal.call(provider.list_tools, a["agent"])}
     assert {BY_NAME[name].tool_name for name in EXPERIMENT_ACTIONS} <= tools
     # The literature pipeline and every publication stay buttons, not tools.
-    assert not tools & {"knowledge_projection_prompt", "knowledge_save_projection",
-                        "knowledge_draft", "knowledge_ingest", "knowledge_review",
-                        "knowledge_experiment_review", "knowledge_experiment_ingest",
+    assert not tools & {"knowledge_extract_prompt", "knowledge_save", "knowledge_update",
+                        "knowledge_record_extract_prompt", "knowledge_record_save", "knowledge_ingest",
+                        "knowledge_review", "knowledge_experiment_review", "knowledge_experiment_ingest",
                         "knowledge_insight_review"}
 
     layout = json.dumps(nodes[a["group"]]["config"]["workspace_layout"])
@@ -316,7 +315,7 @@ def test_a_saved_knowledge_legion_deploys_an_empty_working_base(client):
     overview = resource(client, copied["id"], "overview")
     assert overview["counts"]["sources"] == 0
     assert overview["settings"] == {"collection_name": "Knowledge base",
-                                    "pdf_engine": "auto", "mineru_base_url": "", "vision_model": ""}
+                                    "pdf_engine": "auto", "mineru_base_url": "", "vision_model": "", "embedding_model": ""}
     assert resource(client, keys["knowledge"], "overview")["counts"]["sources"] == 1
 
     group = next(node for node in copy.json()["nodes"] if node["type"] == "legion")
@@ -345,23 +344,21 @@ def test_the_research_formation_publishes_and_serves_as_a_deployment(data_root):
     runtime_root = data_root.with_name(data_root.name + "-runtime")
     create_deployment(data_root, runtime_root, release_id, password="a-fine-long-password")
     manifest = json.loads((runtime_root / "deployment.json").read_text("utf-8"))
-    # Section names match the card's own WorkspaceSection ids: Sources absorbs
-    # search, markdown and the single-document projection convenience; Graph
-    # absorbs the graph-schema pipeline (project, draft, review, publish) that used
-    # to be split across three separate tabs; Insights holds the meta-knowledge
-    # extracted from published experiment records.
+    # Section names match the card's own WorkspaceSection ids: Sources holds
+    # upload, conversion, search and markdown; Knowledge the concept graph drafted
+    # from sources; Records the literature schemas, the records read with them and
+    # the insights over those; Experiments, Schemas and Insights the experiment side.
     assert set(manifest["permissions"][keys["knowledge"]]) == {
-        "settings", "sources", "schemas", "projections", "experiments", "insights", "graph"}
+        "settings", "sources", "knowledge", "records", "schemas", "experiments", "insights"}
     access = manifest["plugin_access"][keys["knowledge"]]
     # Settings never appears among the granted resource actions, so a business
     # release can never rewrite the collection name, PDF engine or MinerU URL,
     # regardless of whether its pane stays visible in the published layout.
     assert "settings" not in access["resource_actions"]
     assert access["config_fields"] == ["default_model"]
-    # Search, markdown and choosing the graph schema are still real, callable
-    # resource actions — just grouped under the sections above, not section names
-    # of their own.
-    assert {"search", "markdown", "graph_schema"} <= set(access["resource_actions"])
+    # Search, markdown and the knowledge review are still real, callable resource
+    # actions — just grouped under the sections above, not section names of their own.
+    assert {"search", "markdown", "knowledge_review"} <= set(access["resource_actions"])
 
     with TestClient(create_app(ConfigSettings.for_data_root(runtime_root)),
                     client=("127.0.0.1", 50000)) as deployed_client:

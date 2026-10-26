@@ -62,7 +62,7 @@ def _index(context, state):
 
     record_id = derived_id(source_id, "record")
     evidence_id = derived_id(source_id, "evidence")
-    # The record carries the markdown a projection will read; the evidence link ties it
+    # The record carries the markdown an extraction will read; the evidence link ties it
     # back to the uploaded file so every downstream fact stays traceable (rule 4.2).
     with kb.transaction():
         if kb.records.get(record_id) is None:

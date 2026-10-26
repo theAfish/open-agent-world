@@ -1,6 +1,6 @@
 """Insights: meta-knowledge extracted from published experiment records.
 
-The third pair of prompt/save actions after projections and experiment records, and
+The third pair of prompt/save actions after knowledge drafts and experiment records, and
 the one place where the Experiment workflow reaches the knowledge graph. The flow is
 the card's usual one: ``insight_prompt`` hands a model (or a connected Lab assistant)
 everything about a **scope** of published records — one experiment schema, several,
@@ -10,8 +10,10 @@ name), and the records themselves as tables; ``insight_save`` stores what came b
 as **draft insights** evidence-linked to the records they cite, and a person
 publishes each one. Publishing is the only write to the graph: the insight, the
 records it cites and the fields it is about become nodes and edges in the
-``experiment`` layer of the same ``oaw_kg_*`` tables an approved literature draft
+``experiment`` layer of the same ``oaw_kg_*`` tables a published knowledge draft
 writes, so the Lab assistant's ``knowledge_graph`` tool and the map work over both.
+Records read from literature sources (the Records tab) share the record table, so
+insights over them take the same path and land in the same layer.
 Unpublishing removes exactly what publishing added.
 
 ``insight_review`` has no tool name on any transport: an agent proposes and edits
@@ -26,8 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import insight_stats
 from .actions import (
-    MAX_MARKDOWN_CHARS, Request, _actor, _base, _bounded, _client, _experiment_schema,
-    _schema_kind, _scope,
+    MAX_MARKDOWN_CHARS, Request, _actor, _base, _bounded, _client, _schema_kind, _scope,
 )
 from .errors import KnowledgeError
 from .graph_store import EXPERIMENT_LAYER
@@ -64,11 +65,15 @@ INSIGHT_INSTRUCTION = (
 
 class Scoped(Request):
     """The schemas an insight call is about: one, several, or — neither given —
-    every experiment schema with published records in the group scope."""
+    every schema of ``schema_kind`` (experiment unless said otherwise) with
+    published records in the group scope."""
     schema_id: str | None = None
     schema_ids: list[str] = Field(default_factory=list, max_length=50)
     group_id: str | None = None
     all_groups: bool = False
+    # Which section's schemas an unnamed scope takes: the Literature Records tab
+    # passes "literature"; the Experiment Insights tab and agents get "experiment".
+    schema_kind: Literal["literature", "experiment"] = "experiment"
 
 
 def _published_records(kb, schema, scope):
@@ -79,15 +84,15 @@ def _published_records(kb, schema, scope):
 def _resolve(kb, request, group):
     """``(scope, [(schema, published records), ...])`` for a request, in a stable order.
 
-    Named schemas are required to be experiment-kind and may be empty of records;
-    an unnamed scope takes every experiment schema that has at least one.
+    Named schemas may be of either kind and may be empty of records; an unnamed
+    scope takes every schema of the request's kind that has at least one.
     """
     scope = _scope(group, request.all_groups)
     wanted = list(dict.fromkeys(request.schema_ids + ([request.schema_id] if request.schema_id else [])))
     if wanted:
-        schemas = [_experiment_schema(kb, identifier) for identifier in wanted]
+        schemas = [kb.schemas.require(identifier) for identifier in wanted]
     else:
-        schemas = [item for item in kb.schemas.list(limit=200) if _schema_kind(item) == "experiment"]
+        schemas = [item for item in kb.schemas.list(limit=200) if _schema_kind(item) == request.schema_kind]
     groups = [(schema, _published_records(kb, schema, scope)) for schema in schemas]
     if not wanted:
         groups = [item for item in groups if item[1]]
@@ -189,8 +194,8 @@ def insight_prompt(context, arguments):
     kb, group, _ = _base(context, request.group_id)
     scope, groups = _resolve(kb, request, group)
     if not any(records for _, records in groups):
-        raise KnowledgeError("No published records in this scope yet; publish some in "
-                             "Experiments before extracting insights")
+        raise KnowledgeError("No published records in this scope yet; publish some records "
+                             "before extracting insights")
     text = "\n".join(
         f"# Schema: {schema.name} (schema_id={schema.id}, {len(records)} published records)\n\n"
         + insight_stats.render_table(schema.definition, records)

@@ -8,10 +8,11 @@ the CLI, the HTTP service, MCP and the OAW card all execute the same code. Two m
 * **Against a service** (``--service URL`` or ``KB_SERVICE_URL``): post the same
   arguments over HTTP.
 
-``kb project`` is the piece that makes the whole loop testable with no OAW: it builds
-the same prompt OAW's host bridge builds, calls an OpenAI-compatible endpoint named by
-the environment, and saves the answer. Model credentials stay in the operator's shell
-and never enter the store or the service.
+``kb knowledge extract``, ``kb records extract`` and ``kb insights extract`` are what
+make the whole loop testable with no OAW: each builds the same prompt OAW's host bridge
+builds, calls an OpenAI-compatible endpoint named by the environment, and saves the
+answer. Model credentials stay in the operator's shell and never enter the store or
+the service.
 """
 from __future__ import annotations
 
@@ -321,43 +322,11 @@ def cmd_schema(args, backend):
     return 0
 
 
-def _prompt(backend, args):
-    arguments = {"schema_id": args.schema, "limit": args.limit}
-    arguments.update({"source_id": args.source} if args.source else {"record_id": args.record})
-    return backend.call("projection_prompt", arguments)
-
-
-def cmd_prompt(args, backend):
-    show(_prompt(backend, args))
-    return 0
-
-
-def cmd_project(args, backend):
-    from .. import projection
-
-    prompt = _prompt(backend, args)
-    answer = _complete(projection.build_messages(prompt),
-                       base_url=args.model_url or os.environ.get("KB_MODEL_BASE_URL")
-                       or DEFAULT_MODEL_URL,
-                       api_key=os.environ.get("KB_MODEL_API_KEY"),
-                       model=args.model or os.environ.get("KB_MODEL") or "gpt-4o-mini",
-                       json_mode=not args.no_json_mode)
-    data = projection.parse_projection(answer)
-    if args.dry_run:
-        show(data)
-        return 0
-    show(backend.call("save_projection", {
-        "schema_id": prompt["schema_id"], "record_id": prompt["record_id"],
-        "data": data, "model": args.model or os.environ.get("KB_MODEL"),
-        "notes": args.notes}))
-    return 0
-
-
 def _complete(messages, *, base_url, api_key, model, json_mode):
     import httpx
 
     if not api_key:
-        raise CliError("Set KB_MODEL_API_KEY (and KB_MODEL_BASE_URL / KB_MODEL) to project.")
+        raise CliError("Set KB_MODEL_API_KEY (and KB_MODEL_BASE_URL / KB_MODEL) to extract.")
     payload = {"model": model, "messages": messages, "temperature": 0}
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
@@ -376,63 +345,124 @@ def _complete(messages, *, base_url, api_key, model, json_mode):
         raise CliError("The model endpoint returned an unexpected response shape") from None
 
 
-def cmd_save_projection(args, backend):
-    show(backend.call("save_projection", {
-        "schema_id": args.schema, "record_id": args.record, "data": _read_json(args.file),
-        "model": args.model, "notes": args.notes}))
-    return 0
+def _model_options(args):
+    return {"base_url": args.model_url or os.environ.get("KB_MODEL_BASE_URL") or DEFAULT_MODEL_URL,
+            "api_key": os.environ.get("KB_MODEL_API_KEY"),
+            "model": args.model or os.environ.get("KB_MODEL") or "gpt-4o-mini",
+            "json_mode": not args.no_json_mode}
 
 
-def cmd_projections(args, backend):
-    if args.projection_id:
-        show(backend.call("projections", {"projection_id": args.projection_id}))
-        return 0
-    arguments = {"limit": args.limit, "all_groups": args.all_groups}
-    if args.record:
-        arguments["record_id"] = args.record
-    if args.schema:
-        arguments["schema_id"] = args.schema
-    if args.group:
-        arguments["group_id"] = args.group
-    show(backend.call("projections", arguments))
-    return 0
+def _paged(backend, operation, arguments):
+    """One prompt's whole document, following ``has_more`` from the first window."""
+    prompt = backend.call(operation, {**arguments, "limit": 200_000})
+    text = prompt["markdown"]
+    while prompt["has_more"]:
+        prompt = backend.call(operation, {**arguments, "limit": 200_000, "offset": len(text)})
+        text += prompt["markdown"]
+    return prompt, text
 
 
-def cmd_draft(args, backend):
-    if args.operation == "list":
+def cmd_knowledge(args, backend):
+    """``kb knowledge`` — list, show, open, extract, publish, unpublish, delete drafts."""
+    operation = args.operation
+    if operation == "list":
         arguments = {"operation": "list", "limit": args.limit, "all_groups": args.all_groups}
+        for key, value in (("group_id", args.group), ("status", args.status)):
+            if value:
+                arguments[key] = value
+        show(backend.call("knowledge_drafts", arguments))
+        return 0
+    if operation == "open":
+        if not args.source:
+            raise CliError("Pass at least one --source id to open a draft over")
+        arguments = {"operation": "create", "source_ids": args.source}
+        if args.title:
+            arguments["title"] = args.title
         if args.group:
             arguments["group_id"] = args.group
-        show(backend.call("draft", arguments))
+        show(backend.call("knowledge_draft_manage", arguments))
         return 0
-    if args.operation == "show":
-        show(backend.call("draft", {"operation": "get", "draft_id": args.draft_id}))
+    if not args.draft_id:
+        raise CliError(f"Pass the draft id to {operation}")
+    if operation == "show":
+        show(backend.call("knowledge_drafts", {"operation": "get", "draft_id": args.draft_id}))
         return 0
-    if not args.projection:
-        raise CliError("Pass at least one --projection ID to create a draft")
-    show(backend.call("draft", {"operation": "create", "projection_ids": args.projection}))
-    return 0
-
-
-def _review(args, backend, operation, *, confirm=False):
-    show(backend.call("review", {"operation": operation, "draft_id": args.draft_id,
-                                 "expected_revision": args.revision, "notes": args.notes},
-                      confirm=confirm))
-    return 0
-
-
-def cmd_submit(args, backend):
-    return _review(args, backend, "submit")
-
-
-def cmd_reject(args, backend):
-    return _review(args, backend, "reject")
-
-
-def cmd_approve(args, backend):
-    # Publishing is a deliberate act: it is confirmed here, and over HTTP it needs the
+    if operation == "delete":
+        show(backend.call("knowledge_draft_manage", {"operation": "delete", "draft_id": args.draft_id}))
+        return 0
+    if operation == "extract":
+        return _extract_knowledge(args, backend)
+    # Publishing is a deliberate act: confirmed here, and over HTTP it needs the
     # separate admin token the service only has when someone sets KB_ADMIN_TOKEN.
-    return _review(args, backend, "approve", confirm=True)
+    show(backend.call("knowledge_review", {"operation": operation, "draft_id": args.draft_id},
+                      confirm=operation == "publish"))
+    return 0
+
+
+def _extract_knowledge(args, backend):
+    from .. import knowledge_prompt
+
+    draft = backend.call("knowledge_drafts", {"operation": "get", "draft_id": args.draft_id})["draft"]
+    pending = [item["source_id"] for item in draft["sources"]
+               if args.replace or item["extracted_at"] is None]
+    if not pending:
+        raise CliError("Every source of this draft is extracted already; pass --replace to redo them")
+    results = []
+    for index, source_id in enumerate(pending):
+        prompt, text = _paged(backend, "knowledge_extract_prompt",
+                              {"source_id": source_id, "draft_id": args.draft_id})
+        answer = _complete(knowledge_prompt.build_messages(prompt, markdown=text), **_model_options(args))
+        entities, relations = knowledge_prompt.parse_graph(answer)
+        if args.dry_run:
+            results.append({"source_id": source_id, "entities": entities, "relations": relations})
+            continue
+        saved = backend.call("knowledge_save", {
+            "draft_id": args.draft_id, "source_id": source_id, "entities": entities,
+            "relations": relations, "replace": args.replace and index == 0})
+        results.append({"source_id": source_id, **saved["added"]})
+    show({"draft_id": args.draft_id, "sources": results})
+    return 0
+
+
+def cmd_records(args, backend):
+    """``kb records`` — list, show, extract, publish, unpublish, delete structured records."""
+    operation = args.operation
+    if operation == "list":
+        arguments = {"operation": "list", "limit": args.limit, "all_groups": args.all_groups}
+        for key, value in (("group_id", args.group), ("schema_id", args.schema),
+                           ("source_id", args.source), ("status", args.status)):
+            if value:
+                arguments[key] = value
+        show(backend.call("experiments", arguments))
+        return 0
+    if operation == "extract":
+        return _extract_records(args, backend)
+    if not args.record_id:
+        raise CliError(f"Pass the record id to {operation}")
+    if operation == "show":
+        show(backend.call("experiments", {"operation": "get", "record_id": args.record_id}))
+        return 0
+    show(backend.call("experiment_review", {"operation": operation, "record_id": args.record_id},
+                      confirm=operation == "publish"))
+    return 0
+
+
+def _extract_records(args, backend):
+    from .. import experiment_prompt
+
+    if not (args.schema and args.source):
+        raise CliError("Pass --schema and --source to extract records from a source")
+    prompt, text = _paged(backend, "record_extract_prompt",
+                          {"schema_id": args.schema, "source_id": args.source})
+    answer = _complete(experiment_prompt.build_messages(prompt, markdown=text), **_model_options(args))
+    records = [{"name": item["name"], "data": item["data"], "note": item["note"]}
+               for item in experiment_prompt.parse_extract(answer, allow_empty=True)]
+    if args.dry_run:
+        show({"records": records})
+        return 0
+    show(backend.call("record_save", {"schema_id": args.schema, "source_id": args.source,
+                                      "records": records, "replace_drafts": args.replace}))
+    return 0
 
 
 def cmd_graph(args, backend):
@@ -459,7 +489,8 @@ def cmd_graph(args, backend):
 
 
 def _insight_scope(args):
-    scope = {"schema_ids": args.schema or [], "all_groups": args.all_groups}
+    scope = {"schema_ids": args.schema or [], "all_groups": args.all_groups,
+             "schema_kind": args.schema_kind}
     if args.group:
         scope["group_id"] = args.group
     return scope
@@ -500,17 +531,8 @@ def _extract_insights(args, backend):
     from .. import insight_prompt
 
     scope = _insight_scope(args)
-    prompt = backend.call("insight_prompt", {**scope, "limit": 200_000})
-    table = prompt["markdown"]
-    while prompt["has_more"]:
-        prompt = backend.call("insight_prompt", {**scope, "limit": 200_000, "offset": len(table)})
-        table += prompt["markdown"]
-    answer = _complete(insight_prompt.build_messages(prompt, table=table),
-                       base_url=args.model_url or os.environ.get("KB_MODEL_BASE_URL")
-                       or DEFAULT_MODEL_URL,
-                       api_key=os.environ.get("KB_MODEL_API_KEY"),
-                       model=args.model or os.environ.get("KB_MODEL") or "gpt-4o-mini",
-                       json_mode=not args.no_json_mode)
+    prompt, table = _paged(backend, "insight_prompt", scope)
+    answer = _complete(insight_prompt.build_messages(prompt, table=table), **_model_options(args))
     insights = insight_prompt.parse_insights(answer)
     if args.dry_run:
         show({"insights": insights})
@@ -628,57 +650,46 @@ def build_parser():
     schema.add_argument("--file", help="JSON with name, definition, system_prompt, ...")
     schema.add_argument("--schema-id")
 
-    prompt = add("prompt", cmd_prompt, help="The projection prompt for a schema and document")
-    project = add("project", cmd_project,
-                  help="Build the prompt, call your model, save the projection")
-    for item in (prompt, project):
-        item.add_argument("--schema", required=True)
-        item.add_argument("--source")
-        item.add_argument("--record")
-        item.add_argument("--limit", type=int, default=60_000)
-    project.add_argument("--model", help="Model name (default $KB_MODEL)")
-    project.add_argument("--model-url", help="OpenAI-compatible base URL "
-                                             "(default $KB_MODEL_BASE_URL)")
-    project.add_argument("--no-json-mode", action="store_true",
-                         help="Skip response_format=json_object for endpoints without it")
-    project.add_argument("--notes")
-    project.add_argument("--dry-run", action="store_true",
-                         help="Print the model's JSON without saving it")
+    def model_flags(item, verb):
+        item.add_argument("--model", help=f"{verb}: model name (default $KB_MODEL)")
+        item.add_argument("--model-url", help=f"{verb}: OpenAI-compatible base URL (default $KB_MODEL_BASE_URL)")
+        item.add_argument("--no-json-mode", action="store_true",
+                          help=f"{verb}: skip response_format=json_object for endpoints without it")
+        item.add_argument("--dry-run", action="store_true",
+                          help=f"{verb}: print the model's JSON without saving it")
 
-    save = add("save-projection", cmd_save_projection, help="Save JSON you produced elsewhere")
-    save.add_argument("--schema", required=True)
-    save.add_argument("--record", required=True)
-    save.add_argument("--file", required=True)
-    save.add_argument("--model")
-    save.add_argument("--notes")
+    knowledge = add("knowledge", cmd_knowledge,
+                    help="Knowledge drafts — the concept graph read from sources: list, show, "
+                         "open, extract, publish, unpublish, delete")
+    knowledge.add_argument("operation", choices=("list", "show", "open", "extract", "publish",
+                                                 "unpublish", "delete"))
+    knowledge.add_argument("draft_id", nargs="?", help="Draft id for show/extract/publish/unpublish/delete")
+    knowledge.add_argument("--source", action="append", help="open: a converted source id; repeat for several")
+    knowledge.add_argument("--title", help="open: the draft's title (defaults to the first file's name)")
+    knowledge.add_argument("--status", choices=("draft", "published"))
+    knowledge.add_argument("--limit", type=int, default=50)
+    knowledge.add_argument("--group", help="Narrow to one group (collection id)")
+    knowledge.add_argument("--all-groups", dest="all_groups", action="store_true",
+                           help="Across every group instead of just the default one")
+    knowledge.add_argument("--replace", action="store_true",
+                           help="extract: empty the draft and extract every source again")
+    model_flags(knowledge, "extract")
 
-    projections = add("projections", cmd_projections, help="List or show projections")
-    projections.add_argument("projection_id", nargs="?")
-    projections.add_argument("--record")
-    projections.add_argument("--schema")
-    projections.add_argument("--limit", type=int, default=50)
-    projections.add_argument("--group", help="Narrow to one group (collection id)")
-    projections.add_argument("--all-groups", dest="all_groups", action="store_true",
-                             help="List across every group instead of just the default one")
-
-    draft = add("draft", cmd_draft, help="Build a graph draft from projections")
-    draft.add_argument("operation", choices=("list", "show", "create"))
-    draft.add_argument("--projection", action="append", default=[])
-    draft.add_argument("--draft-id")
-    draft.add_argument("--limit", type=int, default=50)
-    draft.add_argument("--group", help="Narrow \"list\" to one group (collection id)")
-    draft.add_argument("--all-groups", dest="all_groups", action="store_true",
-                       help="List drafts across every group instead of just the default one")
-
-    for name, function, help_text in (
-        ("submit", cmd_submit, "Send a draft for review"),
-        ("reject", cmd_reject, "Reject a draft"),
-        ("approve", cmd_approve, "Publish a draft as a fact and write it into the graph"),
-    ):
-        item = add(name, function, help=help_text)
-        item.add_argument("draft_id")
-        item.add_argument("--revision", type=int, required=True)
-        item.add_argument("--notes")
+    records = add("records", cmd_records,
+                  help="Structured records read from a source with a schema: list, show, "
+                       "extract, publish, unpublish, delete")
+    records.add_argument("operation", choices=("list", "show", "extract", "publish", "unpublish", "delete"))
+    records.add_argument("record_id", nargs="?", help="Record id for show/publish/unpublish/delete")
+    records.add_argument("--schema", help="Schema id (required to extract)")
+    records.add_argument("--source", help="Source id (required to extract)")
+    records.add_argument("--status", choices=("draft", "published"))
+    records.add_argument("--limit", type=int, default=50)
+    records.add_argument("--group", help="Narrow to one group (collection id)")
+    records.add_argument("--all-groups", dest="all_groups", action="store_true",
+                         help="Across every group instead of just the default one")
+    records.add_argument("--replace", action="store_true",
+                         help="extract: replace this source's earlier draft records for the schema")
+    model_flags(records, "extract")
 
     graph = add("graph", cmd_graph, help="Query the published knowledge graph")
     graph.add_argument("--traverse", help="Entity id to traverse from")
@@ -690,17 +701,19 @@ def build_parser():
     graph.add_argument("--limit", type=int, default=200)
     graph.add_argument("--group", help="Narrow to entities/relations tagged with one group")
     graph.add_argument("--layer", choices=("literature", "experiment"),
-                       help="Only approved facts (literature) or published insights (experiment)")
+                       help="Only published knowledge (literature) or published insights (experiment)")
 
     insights = add("insights", cmd_insights,
-                   help="Insights over published experiment records: list, show, stats, "
+                   help="Insights over published records: list, show, stats, "
                         "extract, publish, unpublish, delete")
     insights.add_argument("operation", choices=("list", "show", "stats", "extract", "publish",
                                                 "unpublish", "delete"))
     insights.add_argument("insight_ids", nargs="*", help="Insight id(s) for show/publish/unpublish/delete")
     insights.add_argument("--schema", action="append",
-                          help="Experiment schema id; repeat for a cross-schema scope, omit for "
-                               "every schema with published records")
+                          help="Schema id; repeat for a cross-schema scope, omit for "
+                               "every schema of --schema-kind with published records")
+    insights.add_argument("--schema-kind", dest="schema_kind", choices=("literature", "experiment"),
+                          default="experiment", help="Which schemas an open scope takes")
     insights.add_argument("--query", help="list: free text over titles, statements, fields and notes")
     insights.add_argument("--kind", choices=("anomaly", "rule", "trend", "correlation", "threshold", "note"))
     insights.add_argument("--status", choices=("draft", "published"))
