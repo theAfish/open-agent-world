@@ -18,7 +18,9 @@ from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import Version
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator, model_serializer
+
+from backend.packs.interfaces import CardInterface
 
 ENTRY_POINT_GROUP = "open_agent_world.plugins"
 MAX_METADATA_BYTES = 2 * 1024 * 1024
@@ -291,6 +293,15 @@ class PackSpec(SpecModel):
     legacy: bool = False
     compatibility: CompatibilitySpec | None = None
     contributions: Contributions = Field(default_factory=Contributions)
+    designs: dict[str, CardInterface] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        data = handler(self)
+        if not self.designs:
+            # Preserve historical source receipts and generated adapter bytes.
+            data.pop("designs", None)
+        return data
 
     @field_validator("version")
     @classmethod
@@ -301,6 +312,12 @@ class PackSpec(SpecModel):
 
     @model_validator(mode="after")
     def references(self) -> Self:
+        if self.designs and (self.compatibility is None or Version(self.compatibility.plugin_api) < Version('1.39')):
+            raise ValueError("Card interface resources require Plugin API 1.39 or newer")
+        if any(not re.fullmatch(IDENTIFIER, key) for key in self.designs):
+            raise ValueError("Designs must reference valid card identifiers")
+        if self.node_types is not None and self.designs.keys() - set(self.node_types):
+            raise ValueError("Design references a card outside the declared node_types")
         if self.node_types is not None and (len(set(self.node_types)) != len(self.node_types) or any(
                 not re.fullmatch(IDENTIFIER, value) or value == "core" or value.startswith("core.")
                 for value in self.node_types)):
@@ -410,6 +427,7 @@ class _Declaration(SpecModel):
     distribution: _Distribution
     plugin: _Plugin = Field(default_factory=_Plugin)
     contributions: Contributions = Field(default_factory=Contributions)
+    designs: dict[str, str] = Field(default_factory=dict)
     components: _Components = Field(default_factory=_Components)
     dependency_groups: dict[str, _Group] = Field(default_factory=dict, alias="dependency-groups")
     environments: dict[str, _Environment] = Field(default_factory=dict)
@@ -590,9 +608,11 @@ def read_source_pack(root: Path) -> PackSpec:
         from backend.plugins.declarative import config_model
         for card in cards:
             config_model(card.config_schema)().model_dump(mode="json")
+    designs = {identifier: CardInterface.model_validate_json(reader.read(path).decode('utf-8-sig'))
+               for identifier, path in declaration.designs.items()}
     compatibility = declaration.compatibility
-    if cards:
-        required_api = '1.38' if entrypoints else '1.37'
+    if cards or designs:
+        required_api = '1.39' if designs else '1.38' if entrypoints else '1.37'
         compatibility = compatibility or CompatibilitySpec(plugin_api=required_api)
         if Version(compatibility.plugin_api) < Version(required_api):
             raise ValueError(f"These declarative contributions require Plugin API {required_api} or newer")
@@ -673,7 +693,7 @@ def read_source_pack(root: Path) -> PackSpec:
         reader.read(path, max_bytes=128 * 1024 * 1024)
     return PackSpec(distribution_id=declaration.distribution.id, version=version,
                     name=declaration.distribution.name or project["name"], owner=owner,
-                    packs=packs, node_types=node_types, contributions=contributions,
+                    packs=packs, node_types=node_types, contributions=contributions, designs=designs,
                     entrypoints=entrypoints, backend=backend, frontend=frontend,
                     environments=environments, features=declaration.features, prerequisites=declaration.prerequisites,
                     dependencies=declaration.dependencies, dependency_groups=groups, source_files=reader.files,

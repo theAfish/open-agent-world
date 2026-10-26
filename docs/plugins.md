@@ -63,6 +63,31 @@ Plugin-specific documentation can remain in its own package or repository. These
 
 ## Developing a plugin
 
+For full Python/React Card Apps, use an external IDE or Coding Agent with the
+public SDKs and [developer guides](developers/index.md), then
+[build and package](pack-distribution.md) the source as `.oawpack`.
+The optional visual Pack IDE (Design / Function / Code) is experimental and
+still in development; traditional Factory card production tools remain separate.
+
+Plugin API 1.40 adds `CapabilityContext.read_artifact_file(capability, collection_id,
+version_id, path, max_bytes=...)` for trusted plugin handlers to consume an authorized
+Artifact Collection file or a sent Conversation attachment. The host checks the
+destination capability, its selectors and required grants, independent `artifact.read`
+access, and Conversation session visibility throughout the read. The immutable
+manifest, pinned file and complete checksum are verified before bytes reach the
+handler. The default and maximum transfer size is 32 MiB; handlers may request a
+smaller limit. Bytes remain backend data: return provenance and operation results
+to the Agent, not the raw file. Use this helper before `node_resource_action` when
+importing a file into plugin-owned storage; that action rechecks its destination
+grants, selectors and every successfully read source's access before dispatching
+the write under the graph mutation lock.
+
+Plugin API 1.39 adds [Pack IDE visual resources (Experimental workflow)](developers/pack-ide.md): a
+`[designs]` mapping binds structured card presentation to existing resource
+actions. The IDE, external editors and authorized Agents share ordinary Schema 3
+source files. Visual changes preserve handwritten Python and custom frontend
+slots; new visual-only projects use the same Schema 3 builder and installer.
+
 Plugin API 1.37 adds `AgentCapabilityProvider.subprocess_environment()` for
 trusted runtimes that launch workers. Use this fresh host-approved environment,
 then narrow it and add explicit Pack-owned worker settings. Hosted workers allow

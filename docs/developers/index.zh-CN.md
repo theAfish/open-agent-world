@@ -4,6 +4,16 @@
 
 插件是向 OAW 注册卡片、关系、工具或界面的 Python 包。先用 Python 做一张带配置字段的卡片；需要自定义界面时再加入 React / TypeScript。
 
+## 当前推荐：外部 IDE、SDK 与 Coding Agent
+
+完整 Python/React Card App 推荐通过外部 IDE 或 Coding Agent，使用
+`open_agent_world.plugin_api`、`@oaw/plugin-api` 和下方开发文档编写行为、连接协议与界面。
+独立构建 Python wheel 和前端资源后，按 [Pack 开发与发行指南（英文）](../pack-distribution.md)
+打包为 `.oawpack`，无需经过可视化编辑器。
+
+[Pack IDE（实验性，英文）](pack-ide.md) 的 Design / Function / Code 与可视化逻辑编辑仍在开发中，
+可从工厂的卡包设计器或 Library 底部的“开发工具”进入。
+
 ## 从零开始
 
 1. [准备开发环境（英文）](setup.md)：克隆仓库，切换到文档对应的 `dev` 分支，运行 setup，使用独立的 `plugin-tutorial` 开发配置。

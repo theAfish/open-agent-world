@@ -5,12 +5,13 @@ front doors, so a tool behaves the same whichever one a caller came through. Row
 without a tool name get a resource action with no capability kind, which is what makes
 them unreachable by any agent.
 """
+import asyncio
 from functools import wraps
 from importlib.resources import files
 from typing import Literal
 
 from open_agent_world.plugin_api import (
-    CapabilityDefinition, CapabilityGrantDefinition, DeploymentSurface, NodeDeploymentDefinition,
+    CapabilityDefinition, CapabilityGrantDefinition, CapabilitySelector, DeploymentSurface, NodeDeploymentDefinition,
     NodeResourceAction, NodeTypeDefinition, PackDefinition, PluginAsset, PluginDescriptor,
     RelationshipDefinition, NodeDataSource, NodePresentation, WorkspaceLayoutMetadata,
 )
@@ -18,7 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .errors import KnowledgeError, operator_message
 from .lifecycle import KnowledgeLifecycle
-from .operations import EXPERIMENT_ACTIONS, EXTRACT_ACTIONS, OPERATIONS, READ_ACTIONS
+from .operations import EXPERIMENT_ACTIONS, EXTRACT_ACTIONS, OPERATIONS, READ_ACTIONS, RESEARCH_ACTIONS
+from . import actions, artifact_import
 from .preset import definition as research_preset
 from .data_source import DATA_SOURCE
 
@@ -177,8 +179,28 @@ class KnowledgeConfig(BaseModel):
     default_model: str = Field(default="", max_length=200)
 
 
+class _JobWait(actions.Jobs):
+    wait_seconds: float = Field(default=0, ge=0, le=30,
+        description="With job_id, wait up to this many seconds for conversion to finish before returning its actual status.")
+
+
+async def _wait_jobs(context, capability, arguments):
+    request = _JobWait.model_validate(arguments)
+    if request.wait_seconds and not request.job_id:
+        raise KnowledgeError("job_id is required when waiting for a conversion")
+    deadline = asyncio.get_running_loop().time() + request.wait_seconds
+    arguments = request.model_dump(exclude={"wait_seconds"})
+    while True:
+        result = await context.node_resource_action(capability, "jobs", arguments)
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0 or result.get("job", {}).get("status") not in actions.ACTIVE_JOBS:
+            return result
+        # Wait outside the resource mutation lock; the next poll rechecks access.
+        await asyncio.sleep(min(1, remaining))
+
+
 class KnowledgeBasePlugin:
-    descriptor = PluginDescriptor(id=PREFIX, version="0.2.0", plugin_api_version="1.35",
+    descriptor = PluginDescriptor(id=PREFIX, version="0.2.0", plugin_api_version="1.40",
         name="Knowledge base",
         description="Embedded research knowledge base: documents to markdown, markdown to structured JSON, and a review-gated knowledge graph.")
 
@@ -192,12 +214,29 @@ class KnowledgeBasePlugin:
                 continue
             kind = f"{PREFIX}.{operation.name}"
             async def invoke(context, capability, arguments, action=operation.name):
+                if action == "jobs":
+                    return await _wait_jobs(context, capability, arguments)
                 return await context.node_resource_action(capability, action, arguments)
             registration.register_capability(CapabilityDefinition(kind=kind,
-                tool_name=operation.tool_name, description=operation.description,
-                target_parameter="knowledge", input_schema=operation.input_schema()), invoke)
+                tool_name=operation.tool_name, description=operation.description + (
+                    " Supply job_id and wait_seconds=20 to wait for completion without repeated immediate polls."
+                    if operation.name == "jobs" else ""),
+                target_parameter="knowledge", input_schema=(
+                    _JobWait.model_json_schema() if operation.name == "jobs" else operation.input_schema()),
+                read_only=operation.name in READ_ACTIONS), invoke)
             resource_actions[operation.name] = NodeResourceAction(_guarded(operation.handler),
                 capability_kind=kind)
+
+        schema = artifact_import.ArtifactImport.model_json_schema()
+        schema["properties"].pop("source_collection_id")
+        schema["required"].remove("source_collection_id")
+        registration.register_capability(CapabilityDefinition(kind=artifact_import.KIND,
+            tool_name=artifact_import.TOOL_NAME, description=artifact_import.DESCRIPTION,
+            target_parameter="knowledge", input_schema=schema,
+            selectors=(CapabilitySelector(parameter="source", argument="source_collection_id",
+                capability_kinds=frozenset({"artifact.read"})),)), artifact_import.invoke)
+        resource_actions[artifact_import.ACTION] = NodeResourceAction(
+            _guarded(artifact_import.store_import), capability_kind=artifact_import.KIND)
 
         registration.register_node_type(NodeTypeDefinition(
             id=PREFIX, label="Knowledge base",
@@ -228,6 +267,8 @@ class KnowledgeBasePlugin:
              "Can read this knowledge base, name a source's concepts into a knowledge draft a person opened, read records and insights from literature, and edit drafts when asked. Nothing is published until a person does it on the canvas."),
             ("experiment", "Knowledge experiment", "experiment", EXPERIMENT_ACTIONS,
              "Can read this knowledge base, project an experiment upload into draft records and edit drafts when asked. Records stay unpublished until a person publishes them on the canvas."),
+            ("research", "Knowledge research", "research", RESEARCH_ACTIONS + (artifact_import.ACTION,),
+             "Can import authorized attachments, convert documents, prepare schemas and uploads, and extract literature, experiment and insight drafts. Publication and settings remain under human control."),
         ):
             registration.register_relationship(RelationshipDefinition(
                 id=f"{PREFIX}.{access}", label=label, short_label=short, description=description,

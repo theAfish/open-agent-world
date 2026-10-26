@@ -26,8 +26,23 @@
     "prebuild": "npm run build:pack-sdk && npm run prepare:packs"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/lang-html": "^6.4.12",
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/lang-python": "^6.2.1",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/legacy-modes": "^6.5.5",
+    "@codemirror/lint": "^6.9.7",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@lezer/highlight": "^1.2.5",
     "@sigma/edge-curve": "3.1.0",
     "@xyflow/react": "^12.8.5",
+    "codemirror": "^6.0.2",
     "d3-contour": "4.0.2",
     "graphology": "0.26.0",
     "graphology-communities-louvain": "2.0.2",
@@ -39,8 +54,8 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "sigma": "3.0.3",
-    "zustand": "^5.0.2",
-    "three": "0.185.1"
+    "three": "0.185.1",
+    "zustand": "^5.0.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
@@ -49,12 +64,12 @@
     "@types/d3-contour": "3.0.6",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
+    "@types/three": "0.185.4",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "10.4.21",
     "jsdom": "^25.0.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
-    "vitest": "^2.1.8",
-    "@types/three": "0.185.4"
+    "vitest": "^2.1.8"
   }
 }

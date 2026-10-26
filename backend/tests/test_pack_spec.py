@@ -3,10 +3,25 @@ from __future__ import annotations
 
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 
 import pytest
 
 from backend.packs.spec import EnvironmentSpec, discover_source_packs, read_source_pack
+
+
+@pytest.mark.parametrize("entry", ["spec", "manifest", "interfaces", "factory_models"])
+def test_pack_models_import_in_fresh_process(entry):
+    # Pytest's shared imports can hide cycles that break discovery/setup subprocesses.
+    result = subprocess.run(
+        [sys.executable, "-c", f"import backend.packs.{entry}; "
+         "from backend.packs.manifest import PackManifest; "
+         "from backend.packs.spec import PackSpec; "
+         "PackManifest.model_json_schema(); PackSpec.model_json_schema()"],
+        cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def source(tmp_path: Path, extra: str = "", *, pyproject_extra: str = "") -> Path:

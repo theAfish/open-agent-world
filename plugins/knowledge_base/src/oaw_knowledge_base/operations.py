@@ -3,8 +3,9 @@
 Every front door reads this table — the OAW plugin turns each row into a capability
 and a resource action, the HTTP service turns it into a route, the MCP server turns it
 into a tool, and the CLI turns it into a subcommand. A row with no ``tool_name`` is
-deliberately unreachable by any agent on any transport: uploading raw data, converting
-it in batch, managing groups, changing settings and publishing anything stay human acts.
+deliberately unreachable by any agent on any transport. Raw-byte upload, destructive
+management, settings and publication stay outside the agent surface; explicit write
+capabilities prepare selected sources and unpublished drafts.
 """
 from __future__ import annotations
 
@@ -53,8 +54,8 @@ OPERATIONS: tuple[Operation, ...] = (
         description="Read the markdown extracted from one source, by source_id or record_id. Long documents are windowed: use offset and limit and follow has_more to page through."),
     Operation("search", actions.search, actions.Search, tool_name="knowledge_document_search",
         description="Full-text search across every converted document's markdown. Returns ranked excerpts, each with the source filename and the heading it falls under — raw document text, not a verified fact. Use this to answer document-level questions across many sources at once instead of reading one document from the top with knowledge_markdown."),
-    Operation("schemas", actions.schemas, actions.Schemas, tool_name="knowledge_schemas",
-        description="List, read, create or update extraction schemas. A schema is a JSON Schema object plus the system prompt used to project a document onto structured records: kind=\"literature\" schemas fill records from converted sources, kind=\"experiment\" schemas from experiment uploads. Reuse an existing schema when one fits instead of creating a near-duplicate."),
+    Operation("schemas", actions.schemas, actions.SchemaRead, tool_name="knowledge_schemas",
+        description="List or read extraction schemas. A schema describes the fields to extract: kind=\"literature\" reads records from converted sources, kind=\"experiment\" reads experiment uploads. Reuse an existing schema when one fits. Creating or changing one requires knowledge_schema_manage."),
     Operation("knowledge_drafts", knowledge.knowledge_drafts, knowledge.KnowledgeDrafts,
         tool_name="knowledge_drafts",
         description="List or read knowledge drafts: the concept graph proposed from a set of literature sources — concepts (name, aliases, description) and the relations between them (a free predicate read as \"source predicate target\", an evidence_level 1-4 and a quoted snippet), each citing the source_ids it was read from. A draft is a candidate until a person publishes it into the knowledge graph's literature layer; a published one is what the base asserts about its literature."),
@@ -113,10 +114,25 @@ OPERATIONS: tuple[Operation, ...] = (
         description="Edit one draft insight's kind, title, statement, fields, confidence, evidence or note, when a person asks for the change. Refuses published insights. Never publishes: that is the person's click."),
     Operation("graph", actions.graph, actions.GraphQuery, tool_name="knowledge_graph",
         description="Search the published knowledge graph — the only place published knowledge lives. Call it FIRST for any question about what this base knows, before knowledge_document_search. Pass query=<the question or key terms in plain words>; or names=[X] / names=[X, Y] for exact concept names (aliases and acronyms count; spacing and punctuation do not). Every form runs the same search: by words and, when the card has an embedding model, by meaning — the result's semantic field is true when meaning-based matching ran, false with semantic_error when it could not (then the answer is word-based only; say so). You get the best-fitting concepts (matched=true), the relations that fit the question ranked best first — each readable as source_name, predicate, target_name with the statement the source makes, evidence_level and snippet — and, when two or more concepts are named, connections: the shortest relation chains between them. The relations are the published claims; a concept's description is background only. operation=\"connect\" with names=[X, Y] returns only the chains between two concepts (max_depth hops, default 3) or connected=false; operation=\"traverse\" with an entity_id walks outward. An empty result or a concept with no relations means the base holds no published claim — report that rather than inferring one. Only human-published knowledge drafts and insights appear here; layer=\"literature\" narrows to what was published from documents, layer=\"experiment\" to published insights with the records and fields they cite."),
-    Operation("graph_index", actions.graph_index, actions.GraphIndex, tool_name="knowledge_graph_index",
-        description="The semantic index behind knowledge_graph: which embedding model the card uses (enabled=false when none), how many graph elements are embedded, pending or stale, and the last error. Call it with operation=\"status\" when asked whether meaning-based search is available or why a search said semantic=false; never answer that from memory. operation=\"build\" embeds what is missing now."),
+    Operation("graph_index", actions.graph_index, actions.GraphIndexStatus, tool_name="knowledge_graph_index",
+        description="Read the semantic index status: which embedding model the card uses (enabled=false when none), how many graph elements are embedded, pending or stale, and the last error. Call this when asked whether meaning-based search is available or why a search said semantic=false. Building the index requires knowledge_graph_index_build."),
     Operation("jobs", actions.jobs, actions.Jobs, tool_name="knowledge_jobs",
         description="Check markdown conversion jobs and their progress events. Poll this after an upload until the job reports COMPLETED before reading its markdown."),
+    Operation("process_selected", actions.process_selected, actions.ProcessSelected,
+        tool_name="knowledge_process",
+        description="Convert the selected source_ids to readable markdown using this base's configured converter. Obtain IDs from knowledge_sources or an attachment import. Already converted sources are skipped and running jobs are reused. Check knowledge_jobs until COMPLETED, then read knowledge_markdown; no schema or graph is needed to read a paper."),
+    Operation("schema_manage", actions.schema_manage, actions.SchemaManage,
+        tool_name="knowledge_schema_manage",
+        description="Create or update an extraction schema when the user wants structured records. First check knowledge_schemas for a suitable existing schema. Supply a JSON Schema object describing the desired fields and a system_prompt telling the extractor how to fill them from evidence; choose kind=literature for papers or kind=experiment for experiment uploads. This does not extract or publish records."),
+    Operation("knowledge_draft_open", knowledge.knowledge_draft_open, knowledge.KnowledgeDraftOpen,
+        tool_name="knowledge_draft_open",
+        description="Open a literature knowledge draft over selected converted source_ids, or reuse an unpublished draft over the same sources and title. Use this only when the user wants concepts and relations prepared for the graph; simply reading a paper needs no draft. Next use knowledge_extract_prompt and knowledge_save, then leave the draft for human review and publication."),
+    Operation("experiment_bundle_prepare", actions.experiment_bundle_prepare, actions.ExperimentBundlePrepare,
+        tool_name="knowledge_experiment_bundle_prepare",
+        description="Create or update an experiment upload's name, notes and schema. For create, choose an experiment schema with knowledge_schemas or knowledge_schema_manage and give a name; an equivalent unpublished upload is reused. Import its files next, wait for conversion, then use knowledge_experiment_extract_prompt and knowledge_experiment_save. Updates refuse uploads with published records. This cannot delete, publish or change extraction run state."),
+    Operation("graph_index_build", actions.graph_index_build, actions.GraphIndexBuild,
+        tool_name="knowledge_graph_index_build",
+        description="Build missing or stale embeddings for the published graph using the configured embedding model. Does not change the model or publish knowledge. Read knowledge_graph_index first to check availability and progress."),
     # No tool_name below this line: human-only, on every transport.
     Operation("ingest", actions.ingest, actions.Ingest,
         description="Upload one raw file into a group. It stays unconverted until the Process action runs its conversion job."),
@@ -150,10 +166,7 @@ AGENT_OPERATIONS: tuple[Operation, ...] = tuple(item for item in OPERATIONS if i
 READ_ACTIONS = ("overview", "sources", "markdown", "search", "schemas", "knowledge_drafts",
                "knowledge_source_outline", "knowledge_lookup",
                "experiments", "experiment_bundles", "insights", "graph", "graph_index", "jobs")
-# The literature pipeline: name a source's concepts into a knowledge draft a person
-# opened, project a source onto a schema as records, and edit a knowledge draft on
-# request. Insights over those records are the experiment half's tools, which take
-# any schema; the card's own buttons reach them through the host bridge regardless.
+# Existing narrow extract and experiment relationships retain their write scopes.
 EXTRACT_ACTIONS = READ_ACTIONS + ("knowledge_extract_prompt", "knowledge_save", "knowledge_update",
                                   "knowledge_audit_prompt", "knowledge_audit_apply",
                                   "record_extract_prompt", "record_save")
@@ -163,6 +176,10 @@ EXTRACT_ACTIONS = READ_ACTIONS + ("knowledge_extract_prompt", "knowledge_save", 
 EXPERIMENT_ACTIONS = READ_ACTIONS + ("experiment_extract_prompt", "experiment_save",
                                      "experiment_update", "insight_prompt", "insight_save",
                                      "insight_update")
+RESEARCH_ACTIONS = tuple(dict.fromkeys(EXTRACT_ACTIONS + EXPERIMENT_ACTIONS + (
+    "process_selected", "schema_manage", "knowledge_draft_open", "experiment_bundle_prepare",
+    "graph_index_build",
+)))
 
 
 def tool_manifest() -> list[dict]:

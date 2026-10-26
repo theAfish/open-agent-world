@@ -5,7 +5,7 @@ import { useModelOptions, useConnectedCards, updateCardConfig } from "@oaw/plugi
 import { hostApiBase as deploymentApiBase } from "@oaw/plugin-api";
 import { ModelSelect, Modal } from "@oaw/plugin-api";
 import { DocumentMarkdown } from "@oaw/plugin-api";
-import { BookOpen, FlaskConical, Settings2, Plus, RefreshCw, MoreHorizontal, FileText, X, Square, ScrollText, Upload, Search, ChevronRight, ChevronDown, List, Table2, Pencil } from "lucide-react";
+import { BookOpen, FlaskConical, Settings2, Plus, RefreshCw, MoreHorizontal, FileText, X, Square, ScrollText, Upload, Search, ChevronRight, ChevronDown, List, Table2, Pencil, Network, ArrowRight, CheckCircle2, CircleAlert, LoaderCircle } from "lucide-react";
 import { MineruCredentials } from "./MineruCredentials";
 import { InsightsSection } from "./Insights";
 import type { InsightKind } from "./Insights";
@@ -80,7 +80,7 @@ const KIND_LABELS: Record<InsightKind, () => string> = {
   correlation: () => t("correlation"), threshold: () => t("threshold"), note: () => t("note"),
 };
 
-const ACTIVE = new Set(["QUEUED", "RUNNING", "PENDING", "RETRYING"]);
+const ACTIVE = new Set(["QUEUED", "RUNNING", "PENDING", "RETRYING", "CANCELLING"]);
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const shortId = (value: string) => value.length > 13 ? `${value.slice(0, 8)}…` : value;
 const bytes = (value: number) => value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / 1024 / 1024).toFixed(1)} MiB`;
@@ -215,6 +215,9 @@ export function Workspace({ host, card }: PluginViewProps) {
   const [groupCreating, setGroupCreating] = useState(false);
   const [rawMarkdown, setRawMarkdown] = useState(false);
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
+  const [suggestedSourceIds, setSuggestedSourceIds] = useState<string[]>();
+  const [sourceDrag, setSourceDrag] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number }>();
   // Literature → Records: "" shows every literature schema's records; a chosen id narrows to it.
   const [literatureSchemaId, setLiteratureSchemaId] = useState("");
   // A record an insight's evidence asked Literature → Records to unfold.
@@ -290,12 +293,12 @@ export function Workspace({ host, card }: PluginViewProps) {
   // this is engineering-only anyway, so an empty list there is both correct and safe.
   const connectedCards = useConnectedCards(card.id, { direction: "incoming", relationshipPrefix: "knowledge.base.", trait: "core.agent" });
   const connectedAgents = deployed ? [] : connectedCards;
-  // Extraction is an Agent run: only an agent holding the experiment relationship
-  // can read the upload and save its records, so only those are offered.
-  const labAgents = useConnectedCards(card.id, { direction: "incoming", relationshipPrefix: "knowledge.base.experiment", trait: "core.agent" });
-  // The literature half: an agent holding the extract relationship names concepts
-  // into knowledge drafts and reads records out of sources.
-  const extractAgents = useConnectedCards(card.id, { direction: "incoming", relationshipPrefix: "knowledge.base.extract", trait: "core.agent" });
+  // Research grants both extraction paths; keep the narrower roles eligible too.
+  const researchAgents = useConnectedCards(card.id, { direction: "incoming", relationshipPrefix: "knowledge.base.research", trait: "core.agent" });
+  const experimentAgents = useConnectedCards(card.id, { direction: "incoming", relationshipPrefix: "knowledge.base.experiment", trait: "core.agent" });
+  const literatureAgents = useConnectedCards(card.id, { direction: "incoming", relationshipPrefix: "knowledge.base.extract", trait: "core.agent" });
+  const labAgents = [...new Map([...experimentAgents, ...researchAgents].map(agent => [agent.id, agent])).values()];
+  const extractAgents = [...new Map([...literatureAgents, ...researchAgents].map(agent => [agent.id, agent])).values()];
   const canRunAgents = !deployed && typeof host.runAgent === "function" && labAgents.length > 0;
   const canExtract = canRunAgents || !!selectedModel;
 
@@ -365,26 +368,45 @@ export function Workspace({ host, card }: PluginViewProps) {
     return () => clearTimeout(timer);
   }, [jobs, refresh]);
 
+  const selectedDocumentId = sources.find(item => item.id === selectedSource)?.record_id;
   useEffect(() => {
     const sequence = ++documentSequence.current;
     setExtracted(undefined); setDocumentError("");
-    if (!selectedSource) return;
+    if (!selectedSource || !selectedDocumentId) return;
     call("markdown", { source_id: selectedSource, limit: 40000 }).then(value => {
       if (sequence === documentSequence.current) setExtracted(value as Extracted);
     }).catch(reason => { if (sequence === documentSequence.current) setDocumentError(message(reason)); });
-  }, [call, selectedSource]);
+  }, [call, selectedSource, selectedDocumentId]);
 
   const upload = (files: FileList | File[]) => perform(async () => {
     const list = Array.from(files);
     if (!list.length) return;
-    for (const file of list) {
-      const content = await fileBase64(file);
-      await call("ingest", { filename: file.name, content_base64: content,
-        media_type: file.type || "application/octet-stream",
-        ...(activeGroup ? { group_id: activeGroup } : {}) });
+    const currentGeneration = generation.current;
+    const failures: string[] = [];
+    setNotice(""); setUploadProgress({ done: 0, total: list.length });
+    try {
+      for (const [index, file] of list.entries()) {
+        if (generation.current !== currentGeneration) return;
+        try {
+          if (file.size > 32 * 1024 * 1024) throw new Error(t("Up to 32 MiB per file"));
+          const content = await fileBase64(file);
+          if (generation.current !== currentGeneration) return;
+          const result = await call("ingest", { filename: file.name, content_base64: content,
+            media_type: file.type || "application/octet-stream",
+            ...(activeGroup ? { group_id: activeGroup } : {}) });
+          if (generation.current !== currentGeneration) return;
+          const source = result.source as { id: string };
+          // Queue only this upload; existing pending documents remain an explicit choice.
+          await call("process", { source_ids: [source.id] });
+        } catch (reason) { failures.push(`${file.name}: ${message(reason)}`); }
+        if (generation.current === currentGeneration) setUploadProgress({ done: index + 1, total: list.length });
+      }
+      if (generation.current !== currentGeneration) return;
+      await refresh();
+      if (failures.length) throw new Error(failures.join("\n"));
+    } finally {
+      if (generation.current === currentGeneration) setUploadProgress(undefined);
     }
-    setNotice(t("{v0} uploaded · ready to process", { v0: list.length }));
-    await refresh();
   });
 
   const processSources = (sourceIds: string[]) => perform(async () => {
@@ -774,7 +796,14 @@ export function Workspace({ host, card }: PluginViewProps) {
   const running = jobs.filter(job => ACTIVE.has(job.status));
   const groups = overview?.groups ?? [];
   const activeGroupObject = groups.find(item => item.id === activeGroup);
-  const pendingSources = sources.filter(item => !item.markdown);
+  const sourceJob = (id: string) => jobs.find(job => job.source_id === id);
+  const sourceState = (item: Source) => {
+    const job = sourceJob(item.id);
+    return job && ACTIVE.has(job.status) ? "processing"
+      : job && ["FAILED", "CANCELLED"].includes(job.status) ? "failed"
+      : item.markdown && item.record_id ? "ready" : "pending";
+  };
+  const pendingSources = sources.filter(item => ["pending", "failed"].includes(sourceState(item)));
   const experimentSchemaIds = new Set(experimentSchemas.map(item => item.id));
   const schemaName = (id: string) => schemas.find(item => item.id === id)?.name ?? shortId(id);
   const schemaBundles = bundles.filter(item => !currentExperimentSchemaId || item.schema_id === currentExperimentSchemaId);
@@ -824,7 +853,7 @@ export function Workspace({ host, card }: PluginViewProps) {
   const groupSelect = <label className="knowledge-groupselect">
     <span className="knowledge-visually-hidden">{t("Group")}</span>
     <select aria-label={t("Group")} value={activeGroup} disabled={busy}
-      onChange={event => { setActiveGroup(event.target.value); setGroupEditing(false); }}>
+      onChange={event => { setActiveGroup(event.target.value); setGroupEditing(false); setSelectedSources([]); setSuggestedSourceIds(undefined); setSearchResults(undefined); }}>
       <option value="">{t("All groups")}</option>
       {groups.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
     </select>
@@ -966,7 +995,15 @@ export function Workspace({ host, card }: PluginViewProps) {
         </div>
       </WorkspaceSection>}
       {((category === "literature" && literatureTab === "sources") || isDetached("sources")) && <WorkspaceSection id="sources" title={t("Sources")} layout={{ min_width: 320, min_height: 280, ideal_width: 920, ideal_height: 640 }} className="knowledge-section">
-        <div className="knowledge-section" data-detached={isDetached("sources") || undefined}>
+        <div className={`knowledge-section knowledge-sources${sourceDrag ? " is-file-over" : ""}`} data-detached={isDetached("sources") || undefined}
+          onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); if (!busy) setSourceDrag(true); } }}
+          onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSourceDrag(false); }}
+          onDrop={event => {
+            const files = Array.from(event.dataTransfer.files ?? []);
+            if (!files.length) return;
+            event.preventDefault(); setSourceDrag(false);
+            if (!busy) void upload(files);
+          }}>
         <WorkspaceToolbar label={t("Documents")} className="knowledge-section-toolbar">
           <span className="knowledge-meta">{sources.length === 1 ? t("1 document") : t("{v0} documents", { v0: sources.length })}</span>
           {!!running.length && <span className="knowledge-running" role="status">
@@ -975,16 +1012,6 @@ export function Workspace({ host, card }: PluginViewProps) {
           <button type="button" className="knowledge-icon-button" aria-label={t("Refresh")} title={t("Refresh")}
             disabled={busy} onClick={() => void perform(async () => { setNotice(""); await refresh(); })}>
             <RefreshCw size={15} /></button>
-          <label className={`knowledge-upload${busy ? " is-disabled" : ""}`}>
-            <Plus size={16} />{t("Add documents")}
-            <input className="knowledge-visually-hidden" type="file" multiple disabled={busy}
-              aria-label={t("Add documents")} title={t("Up to 32 MiB per file")}
-              onChange={event => {
-                const files = Array.from(event.target.files ?? []);
-                event.target.value = "";
-                if (files.length) void upload(files);
-              }} />
-          </label>
           </div>
         </WorkspaceToolbar>
         <Banner error={error} notice={notice} />
@@ -1018,7 +1045,7 @@ export function Workspace({ host, card }: PluginViewProps) {
         {/* Folded in from what used to be its own "Search" tab: Sources already
             has almost every source-level action, so full-text search over the
             converted documents belongs right here too, not behind another tab. */}
-        <div className="knowledge-search-inline">
+        {!!sources.length && <div className="knowledge-search-inline">
           <div className="knowledge-formbar">
             <input type="search" value={searchQuery} disabled={busy} aria-label={t("Search converted documents")} placeholder={t("Search converted documents…")}
               onChange={event => setSearchQuery(event.target.value)}
@@ -1036,16 +1063,51 @@ export function Workspace({ host, card }: PluginViewProps) {
               </button>
             </li>)}
           </ul>}
+        </div>}
         </div>
+
+        <div className={`knowledge-source-dropzone${sources.length ? " is-compact" : ""}`} aria-busy={!!uploadProgress}>
+          {!sources.length && <div className="knowledge-file-illustration" aria-hidden="true">
+            <span><Table2 size={28} /></span><span><FileText size={34} /></span><span><BookOpen size={28} /></span>
+          </div>}
+          <div className="knowledge-source-intro">
+            {sources.length ? <strong><Upload size={18} />{t("Drop documents here")}</strong>
+              : <><h3>{t("Add your first document")}</h3><p>{t("Papers, notes, spreadsheets or images · up to 32 MiB each")}</p></>}
+          </div>
+          <label className={`knowledge-upload${busy ? " is-disabled" : ""}`}>
+            <Plus size={16} />{t("Add documents")}
+            <input className="knowledge-visually-hidden" type="file" multiple disabled={busy}
+              aria-label={t("Add documents")} title={t("Up to 32 MiB per file")}
+              onChange={event => {
+                const files = Array.from(event.target.files ?? []);
+                event.target.value = "";
+                if (files.length) void upload(files);
+              }} />
+          </label>
+          {!sources.length && <span className="knowledge-meta">{t("Or drop files here · conversion starts automatically")}</span>}
+          {uploadProgress && <div className="knowledge-upload-progress" role="status">
+            <span>{t("Preparing {v0} of {v1} files", { v0: uploadProgress.done, v1: uploadProgress.total })}</span>
+            <progress aria-label={t("Upload progress")} value={uploadProgress.done} max={uploadProgress.total} />
+          </div>}
         </div>
+        {!!convertedSources.length && !currentSource && <div className="knowledge-source-goals" role="group" aria-label={t("Use your documents")}>
+          <button type="button" onClick={() => viewSource(convertedSources.find(item => selectedSources.includes(item.id))?.id ?? convertedSources[0].id)}>
+            <BookOpen size={22} /><span><strong>{t("Read documents")}</strong><small>{t("Open the full text")}</small></span><ArrowRight size={16} />
+          </button>
+          <button type="button" onClick={() => {
+            const selected = convertedSources.filter(item => selectedSources.includes(item.id));
+            setSuggestedSourceIds((selected.length ? selected : convertedSources).map(item => item.id));
+            setLiteratureTab("knowledge"); setCategory("literature");
+          }}><Network size={22} /><span><strong>{t("Build knowledge")}</strong><small>{t("Connect ideas across sources")}</small></span><ArrowRight size={16} /></button>
+          <button type="button" onClick={() => { setLiteratureTab("records"); setCategory("literature"); }}>
+            <Table2 size={22} /><span><strong>{t("Extract records")}</strong><small>{t("Compare structured data")}</small></span><ArrowRight size={16} />
+          </button>
+        </div>}
 
         <div className={`knowledge-document-layout${currentSource ? " has-document" : ""}`}>
         <div className="knowledge-source-pane">
-        {!sources.length && <WorkspaceEmptyState className="knowledge-empty-state" icon={<FileText size={30} />}
-          title={t("Add your first document")}
-          description={t("Papers, notes, spreadsheets or images · up to 32 MiB each")} />}
         <ul className="knowledge-list knowledge-source-list">
-          {sources.map(item => <li key={item.id} className="knowledge-checkrow">
+          {sources.map(item => <li key={item.id} className="knowledge-checkrow" data-state={sourceState(item)}>
             <label><input type="checkbox" checked={selectedSources.includes(item.id)} disabled={busy}
               onChange={event => setSelectedSources(event.target.checked
                 ? [...selectedSources, item.id] : selectedSources.filter(value => value !== item.id))} />
@@ -1053,10 +1115,14 @@ export function Workspace({ host, card }: PluginViewProps) {
             </label>
             <button type="button" aria-pressed={selectedSource === item.id}
               onClick={() => viewSource(item.id)}>
-              <span title={item.filename}>{item.filename}</span>
-              <small>{bytes(item.size)} · {item.markdown ? t("Ready") : t("awaiting conversion")}
+              <span className="knowledge-source-name" title={item.filename}><FileText size={17} />{item.filename}</span>
+              <small className="knowledge-source-state">
+                {sourceState(item) === "ready" ? <CheckCircle2 size={13} /> : sourceState(item) === "processing" ? <LoaderCircle size={13} className="knowledge-spin" /> : sourceState(item) === "failed" ? <CircleAlert size={13} /> : <Upload size={13} />}
+                {bytes(item.size)} · {sourceState(item) === "ready" ? t("Ready") : sourceState(item) === "processing" ? t("Converting…") : sourceState(item) === "failed" ? t("Needs attention") : t("awaiting conversion")}
                 {!activeGroup && item.group_name && groups.length > 1 ? ` · ${item.group_name}` : ""}</small>
             </button>
+            {sourceState(item) === "failed" && <button type="button" className="knowledge-source-retry" disabled={busy}
+              aria-label={t("Retry {v0}", { v0: item.filename })} onClick={() => void processSources([item.id])}><RefreshCw size={14} />{t("Retry")}</button>}
           </li>)}
         </ul>
         {(selectedSources.length > 0 || pendingSources.length > 0) && <div className="knowledge-formbar knowledge-batchbar">
@@ -1075,7 +1141,14 @@ export function Workspace({ host, card }: PluginViewProps) {
             <button type="button" className="knowledge-icon-button" aria-label={t("Close document")} title={t("Close document")}
               onClick={() => setSelectedSource("")}><X size={16} /></button>
           </div>
-          {documentError ? <p className="knowledge-empty">{documentError}</p>
+          {!currentSource.record_id ? <WorkspaceEmptyState
+            icon={sourceState(currentSource) === "processing" ? <LoaderCircle className="knowledge-spin" size={24} /> : <FileText size={24} />}
+            busy={sourceState(currentSource) === "processing"}
+            title={sourceState(currentSource) === "processing" ? t("Preparing your document") : t("Document needs conversion")}
+            description={sourceState(currentSource) === "processing" ? t("The full text will appear here when it is ready.") : sourceJob(currentSource.id)?.error}
+            actions={sourceState(currentSource) !== "processing" && <button type="button" className="knowledge-primary" disabled={busy}
+              onClick={() => void processSources([currentSource.id])}>{t("Convert document")}</button>} />
+            : documentError ? <p role="alert" className="knowledge-error">{documentError}</p>
             : !extracted ? <p role="status">{t("Loading markdown…")}</p> : <>
             <div className="knowledge-reading-toolbar">
               <span className="knowledge-meta">{t("{v0} characters", { v0: extracted.total_characters })}</span>
@@ -1088,7 +1161,7 @@ export function Workspace({ host, card }: PluginViewProps) {
         </div>}
 
         </div>
-        {!!jobs.length && <details className="knowledge-disclosure knowledge-jobs" open={running.length > 0 || jobs.some(job => !!job.error) || undefined}>
+        {!!jobs.length && <details className="knowledge-disclosure knowledge-jobs">
         <summary>{t("Conversion jobs")} <span className="knowledge-total">{jobs.length}</span></summary>
         <ul className="knowledge-list">
           {jobs.map(job => <li key={job.id}>
@@ -1132,6 +1205,7 @@ export function Workspace({ host, card }: PluginViewProps) {
         <div className="knowledge-section knowledge-wide" data-detached={isDetached("knowledge") || undefined}>
           <KnowledgeSection host={host} cardId={card.id} deployed={deployed} busy={busy} version={refreshVersion}
             sources={convertedSources} activeGroup={activeGroup} groupCount={groups.length}
+            suggestedSourceIds={suggestedSourceIds} onAddSources={() => { setCategory("literature"); setLiteratureTab("sources"); }}
             groupArgs={groupArgs} groupFilter={groupFilter} call={call} perform={perform} request={request}
             extractAgent={extractAgents[0]} canRunAgent={!deployed && typeof host.runAgent === "function" && extractAgents.length > 0}
             selectedModel={selectedModel} modelSelect={modelSelect} groupSelect={groupSelect} refreshControls={refreshControls}
@@ -1149,7 +1223,7 @@ export function Workspace({ host, card }: PluginViewProps) {
             extractAgent={extractAgents[0]} labAgent={labAgents[0]} selectedModel={selectedModel}
             modelSelect={modelSelect} groupSelect={groupSelect} refreshControls={refreshControls}
             banner={<Banner error={error} notice={notice} />} setNotice={setNotice} setError={setError}
-            onOpenSource={viewSource} kindLabel={kind => KIND_LABELS[kind]()}
+            onOpenSource={viewSource} onAddSources={() => { setCategory("literature"); setLiteratureTab("sources"); }} kindLabel={kind => KIND_LABELS[kind]()}
             focusRecordId={focusRecordId} onFocused={() => setFocusRecordId("")} />
         </div>
       </WorkspaceSection>}
@@ -1174,9 +1248,12 @@ export function Workspace({ host, card }: PluginViewProps) {
           </div>
         </WorkspaceToolbar>
         <Banner error={error} notice={notice} />
-        {!experimentSchemas.length && <WorkspaceEmptyState title={t("Start with a schema")}
-          description={t("An experiment schema describes one specimen record: its fields, their types, and the prompt that extracts them. Create one, then upload your files.")}
-          actions={<button type="button" onClick={() => { setCategory("experiment"); setExperimentTab("schemas"); }}>{t("Schemas")}</button>} />}
+        {!experimentSchemas.length && <div className="knowledge-experiment-start">
+          <div className="knowledge-experiment-route" aria-hidden="true"><Table2 size={26} /><ArrowRight size={18} /><Upload size={26} /><ArrowRight size={18} /><CheckCircle2 size={26} /></div>
+          <WorkspaceEmptyState title={t("What will you measure?")}
+            description={t("Choose the fields for your records, then add an experiment's files together.")}
+            actions={<button type="button" className="knowledge-primary" onClick={() => { setCategory("experiment"); setExperimentTab("schemas"); }}><Plus size={16} />{t("Define record fields")}</button>} />
+        </div>}
         {!!experimentSchemas.length && <div className="knowledge-bundles"
           onDragOver={event => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
           onDrop={event => {
@@ -1194,7 +1271,7 @@ export function Workspace({ host, card }: PluginViewProps) {
             <strong>{selectedBundle
               ? t("Drop files here to add them to \"{v0}\"", { v0: selectedBundle.name })
               : t("Drop an experiment's files here")}</strong>
-            {!schemaBundles.length && <p>{t("A photographed table, a spreadsheet, a PDF, a note — the files of one experiment become one upload, convert as they land, and are read together when you extract records.")}</p>}
+            {!schemaBundles.length && <p>{t("Add the files of one experiment together. Conversion starts automatically.")}</p>}
             <label className={`knowledge-upload${busy ? " is-disabled" : ""}`}>
               <Upload size={14} />{schemaBundles.length ? t("New upload from files") : t("Choose files")}
               <input className="knowledge-visually-hidden" type="file" multiple disabled={busy}
@@ -1441,6 +1518,7 @@ export function Workspace({ host, card }: PluginViewProps) {
             modelSelect={modelSelect}
             groupSelect={groupSelect} refreshControls={refreshControls} banner={<Banner error={error} notice={notice} />}
             setNotice={setNotice} setError={setError} onOpenRecord={jumpToRecord}
+            onOpenExperiments={() => { setCategory("experiment"); setExperimentTab("experiments"); }}
             kindLabel={kind => KIND_LABELS[kind]()} />
         </div>
       </WorkspaceSection>}

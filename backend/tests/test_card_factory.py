@@ -11,7 +11,7 @@ from backend.config import Settings
 from backend.main import create_app
 from backend.packs.archive import inspect_archive
 from backend.packs.content import export_archive
-from backend.packs.factory_models import FaceDesign, FunctionDesign
+from backend.packs.factory_models import FaceDesign, FunctionDesign, PackDesign
 from backend.packs.face_design import FaceStudio, CardProduction, SurfaceRecipe
 
 HEADERS = {"X-OAW-Pack-Install": "1"}
@@ -45,8 +45,10 @@ def patch(client, card, config):
     return response.json()
 
 
-def test_print_export_install_and_run_in_clean_profile(client, tmp_path):
+@pytest.mark.parametrize("pack_id", ["local.mycards", "my-team.my-pack"])
+def test_print_export_install_and_run_in_clean_profile(client, tmp_path, pack_id):
     devices = factory(client)
+    patch(client, devices["pack"], {**devices["pack"]["config"], "id": pack_id})
     printed = call(client, devices["printer"], "print", expected=201).json()
     assert printed["name"] == "我的卡牌"
     assert call(client, printed, "run", {"values": {"name": "OAW"}}).json() == {"result": "你好，OAW！"}
@@ -66,6 +68,8 @@ def test_print_export_install_and_run_in_clean_profile(client, tmp_path):
     assert len(review["entries"]) == 2
     artifact = call(client, packer, "export").content
     pack = inspect_archive(artifact)
+    assert pack.manifest.id == pack_id
+    assert pack.manifest.schema_version == 2
     assert pack.manifest.kind == "content"
     assert len(pack.manifest.content.cards) == 2
     assert not pack.manifest.dependencies.packs
@@ -78,14 +82,24 @@ def test_print_export_install_and_run_in_clean_profile(client, tmp_path):
         assert response.status_code == 201, response.text
     with TestClient(create_app(settings)) as recipient:
         library = recipient.get("/api/card-library").json()
-        definitions = library["packs"]["local.mycards"]["definition"]["cards"]
+        definitions = library["packs"][pack_id]["definition"]["cards"]
         assert len(definitions) == 2
-        opened = recipient.post("/api/card-library/actions", json={"action": "open_pack", "id": "local.mycards", "expected_revision": library["revision"]})
+        opened = recipient.post("/api/card-library/actions", json={"action": "open_pack", "id": pack_id, "expected_revision": library["revision"]})
         assert opened.status_code == 200, opened.text
         for type_ in definitions:
             card = node(recipient, type_)
             assert call(recipient, card, "run", {"values": {}}).json()["result"] == "你好，朋友！"
         assert client.get(f'/api/nodes/{printed["id"]}').status_code == 200
+
+
+@pytest.mark.parametrize("pack_id", ["My.pack", "my_pack.cards", "my..cards", "my.cards/escape", "my." + "a" * 98])
+def test_pack_designer_rejects_noncanonical_distribution_ids(pack_id):
+    with pytest.raises(ValueError):
+        PackDesign(id=pack_id)
+
+
+def test_pack_designer_keeps_room_for_generated_card_ids():
+    assert len(PackDesign(id="my." + "a" * 97).id) == 100
 
 
 def test_mixed_cards_saved_and_live_legions_preserve_portable_state(client, tmp_path):

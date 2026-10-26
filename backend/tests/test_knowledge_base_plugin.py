@@ -2,7 +2,7 @@
 
 The pipeline itself is covered by ``plugins/knowledge_base/tests``, which runs with
 no host at all. What is left for the backend to prove is the seam: that the loader
-registers the card, that the three human-only operations stay unreachable by agents,
+registers the card, that human-only operations stay unreachable by agents,
 that a ``KnowledgeError`` out of a handler becomes a ``ResourceValidationError``
 without any adapter in between, that create/delete own the storage directory, and
 that the ``Lab Manager`` formation deploys — and copies — a working card.
@@ -32,12 +32,12 @@ from backend.services import create_services  # noqa: E402
 from backend.tests.conftest import create_node  # noqa: E402
 from backend.world.models import CardCreate  # noqa: E402
 from oaw_knowledge_base.errors import KnowledgeError  # noqa: E402
-from oaw_knowledge_base.operations import BY_NAME, EXPERIMENT_ACTIONS, EXTRACT_ACTIONS, OPERATIONS, READ_ACTIONS  # noqa: E402
+from oaw_knowledge_base.operations import BY_NAME, EXPERIMENT_ACTIONS, EXTRACT_ACTIONS, OPERATIONS, READ_ACTIONS, RESEARCH_ACTIONS  # noqa: E402
+from oaw_knowledge_base import artifact_import  # noqa: E402
 
 NODE_TYPE = "knowledge.base"
-# Uploading a file, converting it, managing groups, changing settings, opening a
-# knowledge draft and publishing a draft, a record or an insight are acts a person
-# takes on the canvas. They must never gain a capability kind, on any transport.
+# Raw upload bodies, broad management actions and publication remain desktop-only.
+# Research agents use reference-based imports and separate bounded preparation tools.
 DESKTOP_ONLY = {"ingest", "process", "groups", "settings", "knowledge_draft_manage",
                 "knowledge_review", "knowledge_graph_audit_prompt", "knowledge_graph_audit_apply",
                 "experiment_ingest", "experiment_bundle_manage", "experiment_review", "insight_review"}
@@ -73,7 +73,7 @@ def test_the_loader_registers_the_card_and_its_grants():
     definition = registry.node_type(NODE_TYPE)
     assert definition.frontend["workspace"] == "workspace"
     assert definition.deletion_warning  # deleting a card destroys knowledge; warn first
-    assert set(definition.resource_actions) == {operation.name for operation in OPERATIONS}
+    assert set(definition.resource_actions) == {operation.name for operation in OPERATIONS} | {artifact_import.ACTION}
 
     for name, resource_action in definition.resource_actions.items():
         if name in DESKTOP_ONLY:
@@ -85,14 +85,19 @@ def test_the_loader_registers_the_card_and_its_grants():
     read = {grant.kind for grant in registry.relationship(f"{NODE_TYPE}.read").capabilities}
     extract = {grant.kind for grant in registry.relationship(f"{NODE_TYPE}.extract").capabilities}
     experiment = {grant.kind for grant in registry.relationship(f"{NODE_TYPE}.experiment").capabilities}
+    research = {grant.kind for grant in registry.relationship(f"{NODE_TYPE}.research").capabilities}
     assert read == {f"{NODE_TYPE}.{name}" for name in READ_ACTIONS}
     assert extract == {f"{NODE_TYPE}.{name}" for name in EXTRACT_ACTIONS}
     assert experiment == {f"{NODE_TYPE}.{name}" for name in EXPERIMENT_ACTIONS}
+    assert research == {f"{NODE_TYPE}.{name}" for name in RESEARCH_ACTIONS} | {artifact_import.KIND}
     assert read < extract and read < experiment  # each is read plus its own write half
     # The two write halves are separate pipelines: a literature extractor cannot
     # save experiment records and a lab assistant cannot write knowledge drafts.
     assert not (extract - read) & (experiment - read)
-    assert not {kind for kind in (extract | experiment) if kind.rsplit(".", 1)[-1] in DESKTOP_ONLY}
+    assert extract < research and experiment < research
+    assert not {kind for kind in research if kind.rsplit(".", 1)[-1] in DESKTOP_ONLY}
+    assert all(registry.capability_definition(kind).read_only for kind in read)
+    assert not any(registry.capability_definition(kind).read_only for kind in research - read)
 
 
 @pytest.mark.asyncio
@@ -263,18 +268,16 @@ def test_the_research_formation_deploys_wired_independent_bases(client):
     instruction = nodes[a["agent"]]["config"]["system_instruction"]
     assert "knowledge_graph" in instruction and "knowledge_experiment_save" in instruction
     assert "knowledge_insight_save" in instruction and "INSIGHT EXTRACTION REQUEST" in instruction
-    # The person drives the pipeline from the workspace; the Lab assistant reads, and
-    # holds exactly the experiment half — draft records and insights only, never a publication.
+    # The assistant prepares both workflows from conversation; publication remains human-only.
     assert {(edge["source"], edge["target"], edge["relationship"]) for edge in first["edges"]} == {
         (a["agent"], a["conversation"], "participate"),
-        (a["agent"], a["knowledge"], f"{NODE_TYPE}.experiment")}
+        (a["agent"], a["knowledge"], f"{NODE_TYPE}.research")}
 
     provider = WorldAgentCapabilityProvider(client.app.state.services)
     tools = {tool.name for tool in client.portal.call(provider.list_tools, a["agent"])}
-    assert {BY_NAME[name].tool_name for name in EXPERIMENT_ACTIONS} <= tools
-    # The literature pipeline and every publication stay buttons, not tools.
-    assert not tools & {"knowledge_extract_prompt", "knowledge_save", "knowledge_update",
-                        "knowledge_record_extract_prompt", "knowledge_record_save", "knowledge_ingest",
+    assert {BY_NAME[name].tool_name for name in RESEARCH_ACTIONS} | {artifact_import.TOOL_NAME} <= tools
+    # Raw file bodies and every publication stay out of the model's tools.
+    assert not tools & {"knowledge_ingest",
                         "knowledge_review", "knowledge_experiment_review", "knowledge_experiment_ingest",
                         "knowledge_insight_review"}
 

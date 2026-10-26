@@ -7,6 +7,7 @@ that has ``mat-know-base`` installed. ``cd plugins/knowledge_base && pytest``.
 import base64
 import json
 import uuid
+from dataclasses import replace
 
 import pytest
 
@@ -59,6 +60,172 @@ def ingest_document(context, text=DOCUMENT, filename="sintering.md"):
     job = kb.jobs.wait(processed["jobs"][0]["job"]["id"], timeout=60)
     assert job.status == "COMPLETED", job.error
     return source_id, job
+
+
+def test_agent_schema_writes_require_the_management_operation(card):
+    agent = replace(card, actor_id="researcher")
+    body = {"operation": "create", "name": "Sample", "definition": SCHEMA, "system_prompt": "Read samples."}
+    with pytest.raises(KnowledgeError, match="read-only"):
+        actions.schemas(agent, body)
+    created = actions.schema_manage(agent, body)["schema"]
+    with pytest.raises(KnowledgeError, match="read-only"):
+        run(agent, actions.schemas, operation="update", schema_id=created["id"], name="Changed")
+    changed = run(agent, actions.schema_manage, operation="update", schema_id=created["id"], name="Changed")["schema"]
+    assert run(agent, actions.schemas, operation="get", schema_id=created["id"])["schema"] == changed
+    # The existing UI action remains compatible.
+    assert run(card, actions.schemas, operation="update", schema_id=created["id"], name="Desktop")["schema"]["name"] == "Desktop"
+
+
+def test_agent_cannot_change_the_schema_of_published_records(card):
+    schema = _experiment_schema(card)
+    bundle = _bundle(card, schema)
+    _upload(card, bundle, "A1 conductivity 1.0", "batch.md")
+    record = run(card, actions.experiment_save, bundle_id=bundle["id"], records=[
+        {"name": "A1", "data": {"sample_id": "A1", "conductivity": 1.0}}])["records"][0]
+    card.confirmed = True
+    run(card, actions.experiment_review, operation="publish", record_id=record["id"])
+    agent = replace(card, actor_id="researcher", confirmed=False)
+    for patch in ({"definition": {"type": "object", "properties": {}}}, {"kind": "literature"}):
+        with pytest.raises(KnowledgeError, match="published records"):
+            run(agent, actions.schema_manage, operation="update", schema_id=schema["id"], **patch)
+    assert run(agent, actions.schemas, operation="get", schema_id=schema["id"])["schema"] == schema
+
+
+def test_agent_conversion_requires_selected_sources_and_leaves_other_uploads_pending(card):
+    agent = replace(card, actor_id="researcher")
+    selected = run(card, actions.ingest, filename="chosen.md", content_base64=base64.b64encode(DOCUMENT.encode()).decode())["source"]
+    pending = run(card, actions.ingest, filename="later.md", content_base64=base64.b64encode(b"Later document").decode())["source"]
+    for values in ({}, {"source_ids": []}):
+        with pytest.raises(ValueError):
+            actions.process_selected(agent, values)
+    result = run(agent, actions.process_selected, source_ids=[selected["id"]])
+    kb = client.open_client(card.node_id, card.storage_path)
+    assert kb.jobs.wait(result["jobs"][0]["job"]["id"], timeout=60).status == "COMPLETED"
+    assert "Si3N4" in run(agent, actions.markdown, source_id=selected["id"])["markdown"]
+    assert not kb.artifacts.list(source_id=pending["id"], limit=10)
+    assert run(agent, actions.process_selected, source_ids=[selected["id"]])["jobs"][0]["skipped"] == "already converted"
+
+
+def test_agent_conversion_retries_a_failed_pdf_with_corrected_engine_settings(card):
+    import pymupdf
+
+    with pymupdf.open() as document:
+        document.new_page().insert_text((50, 50), "Measured conductivity 1.0 S/cm")
+        data = document.tobytes()
+    run(card, actions.update_settings, pdf_engine="mineru", mineru_base_url="")
+    source = run(card, actions.ingest, filename="measurement.pdf", media_type="application/pdf",
+                 content_base64=base64.b64encode(data).decode())["source"]
+    agent = replace(card, actor_id="researcher")
+    kb = client.open_client(card.node_id, card.storage_path)
+    failed = run(agent, actions.process_selected, source_ids=[source["id"]])["jobs"][0]["job"]
+    failure = kb.jobs.wait(failed["id"], timeout=60)
+    assert failure.status == "FAILED" and "No MinerU base URL" in failure.error
+    run(card, actions.update_settings, pdf_engine="pymupdf4llm")
+    retried = run(agent, actions.process_selected, source_ids=[source["id"]])["jobs"][0]["job"]
+    assert retried["id"] != failed["id"]
+    completed = kb.jobs.wait(retried["id"], timeout=60)
+    assert completed.status == "COMPLETED" and completed.parameters["engine"] == "pymupdf4llm"
+    assert "Measured conductivity" in run(agent, actions.markdown, source_id=source["id"])["markdown"]
+    assert kb.jobs.require(failed["id"]).status == "FAILED"
+
+
+@pytest.mark.parametrize("older_job", [False, True], ids=["recent-job", "next-page-job"])
+def test_agent_conversion_resumes_an_index_failure_without_duplicating_the_artifact(card, monkeypatch, older_job):
+    from oaw_knowledge_base import search_store
+
+    index = search_store.index_record
+    unavailable = True
+
+    def temporarily_unavailable(*args, **kwargs):
+        if unavailable:
+            raise KnowledgeError("Index temporarily unavailable")
+        return index(*args, **kwargs)
+
+    monkeypatch.setattr(search_store, "index_record", temporarily_unavailable)
+    source = run(card, actions.ingest, filename="notes.md", content_base64="IyBOb3Rlcw==")["source"]
+    agent = replace(card, actor_id="researcher")
+    kb = client.open_client(card.node_id, card.storage_path)
+    failed = run(agent, actions.process_selected, source_ids=[source["id"]])["jobs"][0]["job"]
+    assert kb.jobs.wait(failed["id"], timeout=60).status == "FAILED"
+    assert run(agent, actions.markdown, source_id=source["id"])["markdown"] == "# Notes"
+    pages = []
+    if older_job:
+        failed_job = kb.jobs.require(failed["id"])
+        newer = [failed_job.model_copy(update={"id": uuid.uuid4(), "inputs": {"source_id": str(uuid.uuid4())}})
+                 for _ in range(200)]
+
+        def paged_history(*, limit, offset=0):
+            pages.append(offset)
+            return (newer + [kb.jobs.require(failed["id"])])[offset:offset + limit]
+
+        monkeypatch.setattr(kb.jobs, "list", paged_history)
+    unavailable = False
+    # Converter changes do not invalidate the completed conversion checkpoint.
+    run(card, actions.update_settings, pdf_engine="text")
+    selected = [source["id"], source["id"]] if older_job else [source["id"]]
+    resumed_jobs = run(agent, actions.process_selected, source_ids=selected)["jobs"]
+    assert len(resumed_jobs) == 1
+    resumed = resumed_jobs[0]["job"]
+    assert resumed["id"] == failed["id"]
+    if older_job:
+        assert pages == [0, 200]
+    completed = kb.jobs.wait(resumed["id"], timeout=60)
+    assert completed.status == "COMPLETED" and completed.parameters["engine"] == "auto"
+    assert run(agent, actions.search, query="Notes")["results"][0]["source_id"] == source["id"]
+    assert len(kb.artifacts.list(source_id=source["id"], limit=10)) == 1
+
+
+def test_agent_draft_open_reuses_unpublished_sources_and_preserves_published_drafts(card):
+    first, _ = ingest_document(card)
+    second, _ = ingest_document(card, "# Second\n\nA second paper.", "second.md")
+    agent = replace(card, actor_id="researcher")
+    draft = run(agent, knowledge.knowledge_draft_open, source_ids=[first, second], title="Review")["draft"]
+    again = run(agent, knowledge.knowledge_draft_open, source_ids=[second, first, first], title="Review")["draft"]
+    assert again["id"] == draft["id"] and draft["created_by"] == "agent:researcher"
+    run(agent, knowledge.knowledge_save, draft_id=draft["id"], source_id=first, entities=[{"name": "Si3N4"}])
+    card.confirmed = True
+    run(card, knowledge.knowledge_review, operation="publish", draft_id=draft["id"])
+    reopened = run(agent, knowledge.knowledge_draft_open, source_ids=[first, second], title="Review")["draft"]
+    assert reopened["id"] != draft["id"] and reopened["status"] == "draft"
+    assert run(card, knowledge.knowledge_drafts, operation="get", draft_id=draft["id"])["draft"]["status"] == "published"
+    raw = run(card, actions.ingest, filename="raw.md", content_base64="cmF3")["source"]
+    with pytest.raises(KnowledgeError):
+        run(agent, knowledge.knowledge_draft_open, source_ids=[raw["id"]])
+
+
+def test_agent_bundle_preparation_reuses_drafts_and_refuses_published_or_destructive_changes(card):
+    schema = _experiment_schema(card)
+    agent = replace(card, actor_id="researcher")
+    arguments = {"schema_id": schema["id"], "name": "Batch", "notes": "Measured conductivity"}
+    bundle = actions.experiment_bundle_prepare(agent, arguments)["bundle"]
+    assert actions.experiment_bundle_prepare(agent, arguments)["bundle"]["id"] == bundle["id"]
+    _upload(card, bundle, "A1 1.0\n", "batch.md")
+    saved = run(agent, actions.experiment_save, bundle_id=bundle["id"],
+                records=[{"name": "A1", "data": {"sample_id": "A1", "conductivity": 1.0}}])["records"][0]
+    assert run(agent, actions.experiment_bundle_prepare, operation="update", bundle_id=bundle["id"],
+               schema_id=schema["id"], name="Batch reviewed")["bundle"]["name"] == "Batch reviewed"
+    for extra in ({"operation": "delete"}, {"status": "extracted"}, {"run_id": "forged"}):
+        with pytest.raises(ValueError):
+            actions.experiment_bundle_prepare(agent, {"bundle_id": bundle["id"], **extra})
+    card.confirmed = True
+    run(card, actions.experiment_review, operation="publish", record_id=saved["id"])
+    with pytest.raises(KnowledgeError, match="published records"):
+        run(agent, actions.experiment_bundle_prepare, operation="update", bundle_id=bundle["id"], notes="Changed")
+
+
+def test_agent_index_build_is_separate_from_status_and_status_does_not_write_failures(card):
+    from oaw_knowledge_base.operations import BY_NAME
+
+    agent = replace(card, actor_id="researcher")
+    with pytest.raises(KnowledgeError, match="read-only"):
+        run(agent, actions.graph_index, operation="build")
+    assert run(agent, actions.graph_index_build)["enabled"] is False
+    with pytest.raises(ValueError):
+        BY_NAME["graph_index"].model.model_validate({"operation": "build"})
+    run(card, actions.update_settings, embedding_model="oaw:model:missing")
+    before = card.state.get()
+    assert run(agent, actions.graph_index)["last_error"]
+    assert card.state.get() == before
 
 
 def test_ingest_converts_to_markdown_with_evidence(card):

@@ -162,9 +162,13 @@ class LlmSettingsStore:
     def _fernet(self, *, create: bool) -> Fernet:
         try:
             key = _unprotect_key(self.key_path.read_bytes())
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
             if not create:
-                raise
+                raise SecretStorageError(
+                    "The saved credential encryption key is missing. Restore the "
+                    "secrets/settings.key file that belongs to this data directory, "
+                    "or re-enter the API key in Settings / Models and save."
+                ) from exc
             self.key_path.parent.mkdir(parents=True, exist_ok=True)
             key = Fernet.generate_key()
             try:

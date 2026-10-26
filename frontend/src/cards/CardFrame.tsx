@@ -144,7 +144,9 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
 
   const support = nodeSurfaceSupport(card.type, catalog);
   const presentation = cardPresentation(card, catalog);
-  const customFace = Boolean(cardStudio(card, catalog)) && !isMissingCard(card, catalog);
+  const authoredSlot = level === 'node' ? 'preview' : level === 'inspector' ? 'body' : level;
+  const authoredFace = definition?.authoring && definition.frontend?.[authoredSlot] === 'oaw.authoring-card';
+  const customFace = Boolean(cardStudio(card, catalog)) && (!definition?.authoring || authoredFace) && !isMissingCard(card, catalog);
   const contentSurface = !customFace && !isMissingCard(card, catalog) && hasContentSurface(definition)
     && (visualLevel === 'inspector' || visualLevel === 'workspace');
   const base = useNodeSurfaceStore(state => state.baseLevels[card.id]);
@@ -236,7 +238,7 @@ const WorldCardNodeComponent = memo(function WorldCardNodeComponent({ data, sele
       )) : null}
 
       {visualLevel !== "inspector" && <EquipmentToggle card={card} />}
-      {customFace ? <DesignedCard card={card} level={level} /> : visualLevel === "workspace" ? <WorkspaceSurface card={card} /> : <>
+      {customFace ? authoredFace ? <PluginSurface card={card} level={level} slot={authoredSlot} /> : <DesignedCard card={card} level={level} /> : visualLevel === "workspace" ? <WorkspaceSurface card={card} /> : <>
         {contentSurface ? <ContentSurfaceControls card={card} level="inspector" /> : <header className={`card-header node-surface-header node-drag-region ${visualLevel === "inspector" ? "card-finish-surface" : ""}`}>
           <div className="card-kind-icon" data-material-layer="top-print" aria-hidden="true"><CatalogIcon definition={definition} size={18} /></div>
           <div className="card-title-group" data-material-layer="top-print">

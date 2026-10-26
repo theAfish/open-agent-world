@@ -307,6 +307,42 @@ function unwrap<T>(input: unknown, key: string): T {
 }
 
 export const worldApi = {
+  listPackProjects(): Promise<import('../factory/projectTypes').ProjectList> {
+    return request('/packs/projects', { headers: { 'X-OAW-Pack-Install': '1' } });
+  },
+  createPackProject(input: { name: string; distribution_id?: string; directory?: string; design?: import('../factory/projectTypes').CardInterface }): Promise<import('../factory/projectTypes').PackProject> {
+    return request('/packs/projects/create', { method: 'POST', headers: { 'X-OAW-Pack-Install': '1' }, body: JSON.stringify(input) });
+  },
+  openPackProject(path: string): Promise<import('../factory/projectTypes').PackProject> {
+    return request('/packs/projects/open', { method: 'POST', headers: { 'X-OAW-Pack-Install': '1' }, body: JSON.stringify({ path }) });
+  },
+  getPackProject(id: string): Promise<import('../factory/projectTypes').PackProject> {
+    return request(`/packs/projects/${encodeURIComponent(id)}`, { headers: { 'X-OAW-Pack-Install': '1' } });
+  },
+  readPackProjectFile(id: string, path: string): Promise<import('../factory/projectTypes').ProjectTextFile> {
+    return request(`/packs/projects/${encodeURIComponent(id)}/file?${new URLSearchParams({ path })}`, { headers: { 'X-OAW-Pack-Install': '1' } });
+  },
+  writePackProjectFile(id: string, file: { path: string; content: string; expected_sha256: string | null }): Promise<import('../factory/projectTypes').ProjectTextFile> {
+    return request(`/packs/projects/${encodeURIComponent(id)}/file`, { method: 'PUT', headers: { 'X-OAW-Pack-Install': '1' }, body: JSON.stringify(file) });
+  },
+  savePackProjectDesign(id: string, input: { card_id: string; design: import('../factory/projectTypes').CardInterface; expected_revision: string }): Promise<import('../factory/projectTypes').PackProject> {
+    return request(`/packs/projects/${encodeURIComponent(id)}/design`, { method: 'POST', headers: { 'X-OAW-Pack-Install': '1' }, body: JSON.stringify(input) });
+  },
+  addPackProjectCard(id: string, input: { name: string; expected_revision: string }): Promise<import('../factory/projectTypes').PackProject> {
+    return request(`/packs/projects/${encodeURIComponent(id)}/cards`, { method: 'POST', headers: { 'X-OAW-Pack-Install': '1' }, body: JSON.stringify(input) });
+  },
+  versionPackProject(id: string, input: { version: string; expected_revision: string }): Promise<import('../factory/projectTypes').PackProject> {
+    return request(`/packs/projects/${encodeURIComponent(id)}/version`, { method: 'POST', headers: { 'X-OAW-Pack-Install': '1' }, body: JSON.stringify(input) });
+  },
+  checkPackProject(id: string, expected_revision: string): Promise<import('../factory/projectTypes').ProjectCheck> {
+    return request(`/packs/projects/${encodeURIComponent(id)}/check`, { method: 'POST', headers: { 'X-OAW-Pack-Install': '1' }, body: JSON.stringify({ expected_revision }) });
+  },
+  buildPackProject(id: string, input: { expected_revision: string; backend_wheel?: string; frontend_dir?: string }): Promise<Blob> {
+    return request(`/packs/projects/${encodeURIComponent(id)}/build`, { method: 'POST', headers: { 'X-OAW-Pack-Install': '1' }, body: JSON.stringify(input) });
+  },
+  previewPackProject(id: string, design: import('../factory/types').FunctionDesign, values: Record<string, import('../factory/types').Scalar>): Promise<{ result: import('../factory/types').Scalar; level: string }> {
+    return request(`/packs/projects/${encodeURIComponent(id)}/preview`, { method: 'POST', headers: { 'X-OAW-Pack-Install': '1' }, body: JSON.stringify({ design, values }) });
+  },
   backgroundJobs(id: string, sessionId: string | null): Promise<JobsSnapshot> {
     return request(`/nodes/${encodeURIComponent(id)}/jobs`, { headers: stateSessionHeaders(sessionId) });
   },

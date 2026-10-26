@@ -36,6 +36,13 @@ def main():
     commands = parser.add_subparsers(dest='command', required=True)
     initializer = commands.add_parser('init', help='Create an independent Schema 3 project from the Notes template')
     initializer.add_argument('directory', type=Path)
+    initializer.add_argument('--visual', action='store_true', help='Create a visual Card project without a frontend build step')
+    project = commands.add_parser('project', help='Inspect and edit the same source files used by Pack IDE; never imports source code')
+    project.add_argument('operation', choices=('inspect', 'read', 'write'))
+    project.add_argument('source', type=Path)
+    project.add_argument('--path', help='Project-relative source file')
+    project.add_argument('--content-file', type=Path, help='UTF-8 replacement text for write')
+    project.add_argument('--expected-sha256', help='Required existing hash for write; omit only to create a new file')
     project_builder = commands.add_parser('build-project', help='Package a declared source project using prebuilt artifacts')
     project_builder.add_argument('source', type=Path)
     project_builder.add_argument('output', type=Path)
@@ -74,7 +81,28 @@ def main():
             command.add_argument('id')
     args = parser.parse_args()
     if args.command == 'init':
-        print(init_project(args.directory))
+        if args.visual:
+            from backend.packs.projects import scaffold
+            scaffold(args.directory.resolve(), args.directory.name)
+            print(args.directory.resolve())
+        else:
+            print(init_project(args.directory))
+    elif args.command == 'project':
+        from backend.packs.projects import inspect_project, read_file, write_file
+        source = args.source.resolve(strict=True)
+        if not (source / 'oaw.pack.toml').is_file() or not (source / 'pyproject.toml').is_file():
+            parser.error('project requires a Schema 3 source directory')
+        if args.operation == 'inspect':
+            result = inspect_project(source)
+        elif not args.path:
+            parser.error('--path is required for project read/write')
+        elif args.operation == 'read':
+            result = read_file(source, args.path)
+        elif args.content_file is None:
+            parser.error('--content-file is required for project write')
+        else:
+            result = write_file(source, args.path, args.content_file.read_text(encoding='utf-8'), args.expected_sha256)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
     elif args.command == 'build-project':
         from backend.packs.build import build_project
         print(build_project(args.source, args.output, backend_wheel=args.backend_wheel,

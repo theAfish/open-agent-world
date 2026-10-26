@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, Stri
 
 from backend.card_finishes import CardFinish
 from backend.plugins.tutorials import Tutorials, validate_tutorials
-from backend.packs.manifest import CreatorMetadata
+from backend.packs.metadata import CreatorMetadata, PACK_ID
 from backend.packs.face_design import FaceStudio, Mode
 
 Scalar = StrictStr | StrictBool | StrictInt | StrictFloat
@@ -65,10 +65,13 @@ def validate_value(field: InputField, value):
 
 
 class ButtonBinding(Model):
-    """Reserved routing data; no custom logic is executed by the current runtime."""
+    """Schema 3 interfaces resolve logic_id to a registered resource action.
+
+    Legacy Schema 2 recipes retain their inert custom-button behavior.
+    """
     mode: Mode
     element_id: str = Field(pattern=r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
-    logic_id: str = Field(pattern=r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
+    logic_id: str = Field(pattern=r"^[a-zA-Z][a-zA-Z0-9_./:-]{0,127}$")
 
 
 class FunctionDesign(Model):
@@ -149,7 +152,7 @@ class CardRecipe(Model):
 
 
 class PackDesign(Model):
-    id: str = Field(default="local.mycards", pattern=r"^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$", max_length=100)
+    id: str = Field(default="local.mycards", pattern=PACK_ID, max_length=100)
     name: str = Field(default="我的卡包", min_length=1, max_length=120)
     version: str = Field(default="0.1.0", max_length=64)
     creator: CreatorMetadata = Field(default_factory=CreatorMetadata)

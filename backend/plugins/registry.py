@@ -33,7 +33,7 @@ from backend.plugins.deployment import NodeDeploymentDefinition
 from backend.plugins.containers import NodeContainerDefinition
 from backend.plugins.execution import NodeExecutionDefinition
 
-PLUGIN_API_VERSION = "1.38"
+PLUGIN_API_VERSION = "1.40"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$")
 _API_VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
@@ -199,6 +199,7 @@ class NodeTypeCatalogItem(BaseModel):
     icon_url: str | None = None
     card_face: CardFaceCatalog | None = None
     frontend: dict[str, str] = Field(default_factory=dict)
+    authoring: dict[str, Any] | None = None
     color: str
     deck_id: str
     deck_label: str
@@ -361,6 +362,7 @@ class NodeTypeDefinition:
     card_face: CardFaceSpec | Mapping[str, str] | None = None
     tutorials: Tutorials = ()
     default_equipment: tuple[DefaultEquipment, ...] = ()
+    authoring: Mapping[str, Any] | None = None
 
     def resolved_presentation(self) -> NodePresentation:
         if self.presentation is not None:
@@ -371,6 +373,10 @@ class NodeTypeDefinition:
         default_config = self.config_model().model_dump(mode="json")
         presentation = self.resolved_presentation()
         face = CardFaceSpec.model_validate(self.card_face) if self.card_face is not None else None
+        authoring = None
+        if self.authoring is not None:
+            from backend.packs.interfaces import CardInterface
+            authoring = CardInterface.model_validate(self.authoring).model_dump(mode="json")
         return NodeTypeCatalogItem(
             tutorials=validate_tutorials(self.tutorials),
             id=self.id,
@@ -382,6 +388,7 @@ class NodeTypeDefinition:
             card_face=CardFaceCatalog(variant=face.variant, tone=face.tone,
                 image_url=f"/api/plugins/{plugin_id}/assets/{face.image_asset}" if face.image_asset else None) if face else None,
             frontend=dict(self.frontend),
+            authoring=authoring,
             color=self.color,
             deck_id=self.deck_id,
             deck_label=self.deck_label,
@@ -606,6 +613,9 @@ class PluginRegistry:
             from backend.plugins.declarative import contribute_cards
             contribute_cards(staged, source_spec)
         register(staged)
+        if source_spec is not None and source_spec.designs:
+            from backend.packs.interfaces import apply_interfaces
+            apply_interfaces(staged, source_spec)
         declaration = distribution if distribution is not None else source_spec
         declared_nodes = getattr(declaration, "node_types", None)
         if declared_nodes is not None and set(staged.nodes) != set(declared_nodes):
@@ -811,6 +821,14 @@ class PluginRegistry:
                     asset = staged.assets.get(face.image_asset)
                     if asset is None or not asset.media_type.startswith("image/"):
                         raise ValueError("card face image must reference an image asset registered by the same plugin")
+            if definition.authoring is not None:
+                from backend.packs.interfaces import CardInterface
+                interface = CardInterface.model_validate(definition.authoring)
+                actions = {interface.action, *(binding.logic_id for binding in interface.function.button_bindings or [])}
+                if actions - definition.resource_actions.keys():
+                    raise ValueError("Card interfaces must bind registered resource actions")
+            elif 'oaw.authoring-card' in definition.frontend.values():
+                raise ValueError("The authoring renderer requires a validated Card interface")
             if definition.icon_asset is not None and definition.icon_asset not in staged.assets:
                 raise ValueError("node icon must reference an asset registered by the same plugin")
             for slot, reference in definition.frontend.items():

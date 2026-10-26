@@ -1,11 +1,10 @@
-"""MCP over stdio: the ten agent operations, as tools, for any harness that speaks MCP.
+"""MCP over stdio: agent operations as tools for any harness that speaks MCP.
 
 Tool names, descriptions and JSON Schemas come straight from
 :mod:`oaw_knowledge_base.operations`, so a harness calling ``knowledge_markdown``
 through MCP gets exactly what an OAW Agent gets calling the capability of the same
-name. ``ingest``, ``process``, ``groups``, ``settings`` and the review operations are absent for
-the same reason the OAW card gives them no capability kind: uploading raw data,
-converting it, managing groups and publishing a fact are human acts, not tool calls.
+name. Raw-byte upload, group/settings management and review operations stay absent.
+Selected-source conversion and draft preparation have narrower agent operations.
 
 The collection is bound when the server is launched (``kb mcp --collection default``)
 rather than added to every schema, which keeps the schemas identical to the card's.
@@ -34,7 +33,10 @@ def call(store, tool_name, arguments, *, collection=DEFAULT_COLLECTION, actor="m
     operation = next((item for item in AGENT_OPERATIONS if item.tool_name == tool_name), None)
     if operation is None:
         raise KnowledgeError(f"No such tool: {tool_name}")
-    result = store.run(operation.name, arguments or {}, collection=collection, actor=actor)
+    # Desktop handlers may accept a wider contract than the agent schema. Validate
+    # here as well as advertising it, so a raw MCP caller cannot reach those paths.
+    validated = operation.model.model_validate(arguments or {}).model_dump(exclude_unset=True)
+    result = store.run(operation.name, validated, collection=collection, actor=actor)
     return json.dumps(result, ensure_ascii=False, default=str)
 
 

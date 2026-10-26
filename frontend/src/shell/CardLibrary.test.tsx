@@ -15,6 +15,23 @@ beforeEach(() => {
   vi.spyOn(worldApi, 'getInstalledPacks').mockResolvedValue({ restart_required: false, versions: [] });
   vi.spyOn(worldApi, 'getPackUninstallPlan').mockImplementation(async id => ({ id, owner: id, can_uninstall: true, blockers: [], resources: [], restart_required: true, source: 'installed' }));
 });
+
+it('keeps the IDE in collapsed developer tools and returns to the Library after closing it', async () => {
+  useCardLibrary.setState({ snapshot: snapshot(), open: true, tab: 'packs', refresh: async () => {} });
+  useWorldStore.setState({ legions: [] });
+  vi.spyOn(worldApi, 'listPackProjects').mockResolvedValue({ projects: [], default_directory: '/projects' });
+  const { container } = render(<CardLibrary />);
+  expect(container.querySelector('.library-tab-row')!.textContent).not.toContain('Pack IDE');
+  const tools = screen.getByText('Developer tools').closest('details')!;
+  expect(tools.open).toBe(false);
+  tools.open = true;
+  await act(async () => fireEvent.click(within(tools).getByRole('button', { name: 'Pack IDE Experimental' })));
+  const ide = screen.getByRole('dialog', { name: 'Pack IDE' });
+  expect(within(ide).getByText('Visual authoring is still in development.')).toBeTruthy();
+  fireEvent.click(within(ide).getByRole('button', { name: 'Close Pack IDE' }));
+  expect(screen.queryByRole('dialog', { name: 'Pack IDE' })).toBeNull();
+  expect(screen.getByRole('dialog', { name: 'Pack & Card Library' })).toBeTruthy();
+});
 const installedContentPack = { id: 'local.research', name: 'Research kit', version: '1.0.0', selected: true, loaded: false,
   kind: 'content' as const, environment: null };
 

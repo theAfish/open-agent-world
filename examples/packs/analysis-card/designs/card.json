@@ -1,0 +1,22 @@
+{
+  "face": {
+    "title": "Cell Analysis",
+    "description": "Orthogonal unit-cell volume from three lengths in angstroms.",
+    "icon": "calculator",
+    "color": "#617b72",
+    "tone": "sage",
+    "layout": "stack",
+    "button_label": "Analyze structure"
+  },
+  "function": {
+    "fields": [
+      { "key": "a", "label": "Cell a (A)", "type": "number", "default": 3 },
+      { "key": "b", "label": "Cell b (A)", "type": "number", "default": 4 },
+      { "key": "c", "label": "Cell c (A)", "type": "number", "default": 5 }
+    ],
+    "operation": "multiply"
+  },
+  "action": "analyze_structure",
+  "result_key": "result",
+  "surfaces": ["preview", "body", "settings", "workspace"]
+}

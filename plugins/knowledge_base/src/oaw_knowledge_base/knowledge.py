@@ -1,6 +1,6 @@
 """Knowledge: the general concept graph a knowledge base extracts from its literature.
 
-The literature counterpart of ``insights.py``, and the same shape: a person picks
+The literature counterpart of ``insights.py``, and the same shape: a caller picks
 converted sources and opens a **knowledge draft** over them; ``knowledge_extract_prompt``
 hands a model (or a connected Lab assistant) one source's markdown with a fixed
 instruction and a closed vocabulary (``knowledge_prompt.py``); ``knowledge_save`` folds
@@ -9,8 +9,9 @@ by two papers is one node with both as evidence; a person edits the draft and
 publishes it. Publishing is the only write to the ``literature`` layer of the graph,
 and unpublishing removes exactly what no other published draft also asserts.
 
-``knowledge_draft_manage`` and ``knowledge_review`` have no tool name on any
-transport: an agent proposes and edits drafts, a person decides what the base asserts.
+``knowledge_draft_open`` lets an authorized agent prepare a draft. Destructive
+management and ``knowledge_review`` remain human-only: a person decides what the
+base asserts.
 """
 from __future__ import annotations
 
@@ -110,7 +111,7 @@ def _converted_sources(kb, group_id, source_ids):
 
 def knowledge_draft_manage(context, arguments):
     """Open a draft over a set of converted sources, change its title or source set,
-    or delete it. Human acts: an agent extracts into a draft a person opened."""
+    or delete it. Agents use the narrower knowledge_draft_open operation."""
     request = KnowledgeDraftManage.model_validate(arguments)
     if request.operation == "create":
         if not request.source_ids:
@@ -140,6 +141,24 @@ def knowledge_draft_manage(context, arguments):
         current["id"], title=request.title, source_ids=sources,
         run_id=None if request.clear_run else (request.run_id if request.run_id is not None else ...))
     return _bounded({"draft": _draft_json(kb, draft, sources=True)})
+
+
+class KnowledgeDraftOpen(Request):
+    source_ids: list[str] = Field(min_length=1, max_length=100)
+    group_id: str | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+
+
+def knowledge_draft_open(context, arguments):
+    """Open or reuse an unpublished draft over exactly these converted sources."""
+    request = KnowledgeDraftOpen.model_validate(arguments)
+    kb, group, _ = _base(context, request.group_id)
+    sources = _converted_sources(kb, group.id, request.source_ids)
+    for draft in kb.oaw_knowledge.list(group_id=str(group.id), status="draft", limit=500):
+        if (set(_source_ids(kb, draft["id"])) == set(sources)
+                and (request.title is None or draft["title"] == request.title)):
+            return _bounded({"draft": _draft_json(kb, draft, sources=True)})
+    return knowledge_draft_manage(context, {"operation": "create", **request.model_dump()})
 
 
 # ---------------------------------------------------------------- outline / lookup

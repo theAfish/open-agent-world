@@ -14,6 +14,7 @@ import type { CanvasNode } from './types';
 import './cardLOD.css';
 import { FaceArtwork } from '../factory/FaceArtwork';
 import type { PrintedDesign } from '../factory/types';
+import { faceStudio } from '../factory/faceDesign';
 import { WorldCardPrint } from './WorldCardPrint';
 
 /** Card model projection: no plugin bodies, editors, file requests or workspaces. */
@@ -26,8 +27,10 @@ export const CardLODView = memo(function CardLODView({ data, selected, type, isC
   const pointer = useRef<{ x: number; y: number; moved: boolean }>();
   const mid = data.renderLOD === 'mid';
   const workspace = level === 'workspace' || level === 'inspector';
-  const design = definition?.traits.includes('ui.factory-card.v1') ? card.config as unknown as PrintedDesign : undefined;
-  const surface = design?.face.studio?.modes[level];
+  const authoredSlot = level === 'node' ? 'preview' : level === 'inspector' ? 'body' : level;
+  const authoring = definition?.frontend?.[authoredSlot] === 'oaw.authoring-card' ? definition.authoring : undefined;
+  const design = authoring ?? (definition?.traits.includes('ui.factory-card.v1') ? card.config as unknown as PrintedDesign : undefined);
+  const surface = design && (authoring ? faceStudio(design.face) : design.face.studio)?.modes[level];
   const lighting = useCardFinish(!workspace && !container && !surface ? card.finish : 'normal', 'thumbnail');
   return <article className={`world-card node-surface card-finish-surface card-lod-view world-card--${card.type} is-${level} ${surface ? 'factory-custom-surface' : ''} ${selected ? 'is-selected' : ''} ${container ? 'container-frame' : ''}`}
     style={{ '--card-kind': definition?.color, borderRadius: NODE_SURFACE_RADIUS[level] } as CSSProperties}

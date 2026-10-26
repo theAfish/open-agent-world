@@ -23,6 +23,8 @@ import { LibraryCard as PhysicalLibraryCard, LibraryCardPreview } from "./Librar
 import "./cardLibrary.css";
 import { startPalettePointerDrag } from "../palette/pointerDrag";
 import { isHosted } from '../auth/hostedSession';
+import { Modal } from '../components/Modal';
+import { PackIDE } from '../factory/PackIDE';
 
 type Tab = "packs" | "cards" | "store";
 const PAGE_SIZE = 30;
@@ -54,6 +56,9 @@ export function CardLibrary() {
   const [installAction, setInstallAction] = useState<HTMLDivElement | null>(null);
   const [inspectedPack, setInspectedPack] = useState<string | null>(null);
   const [packNotice, setPackNotice] = useState('');
+  const [showPackIDE, setShowPackIDE] = useState(false);
+  const [projectBusy, setProjectBusy] = useState(false);
+  const [projectDirty, setProjectDirty] = useState(false);
   const installations = usePackInstallations(library.open && !hosted);
   const acceptInstallations = (value: PackInstallations) => {
     const removed = installations.state?.versions.some(previous => previous.selected
@@ -254,5 +259,12 @@ export function CardLibrary() {
         </> : null}
         {tab === "store" && library.open ? <PackStore installations={installations.state} /> : null}
       </div>}
-  </dialog></>;
+    {!hosted && <details className="library-developer-tools"><summary>{t('Developer tools')}</summary>
+      <button className="library-text-button" onClick={() => setShowPackIDE(true)}>Pack IDE <span className="pack-ide-experimental" title={t('Visual authoring is still in development.')}>{t('Experimental')}</span></button>
+    </details>}
+  </dialog>{showPackIDE && <Modal title="Pack IDE" className="pack-ide-modal" portalHost={document.body} busy={projectBusy} onClose={() => {
+    if (!projectDirty || window.confirm('Discard your unsaved project edits?')) setShowPackIDE(false);
+  }}><PackIDE onDirtyChange={setProjectDirty} onBusyChange={setProjectBusy} onClose={() => {
+    if (!projectDirty || window.confirm('Discard your unsaved project edits?')) setShowPackIDE(false);
+  }} /></Modal>}</>;
 }

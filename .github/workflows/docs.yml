@@ -45,10 +45,10 @@ jobs:
       - name: Validate sources, build strictly, and check generated site
         run: python scripts/docs.py check
       - name: Configure Pages
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
+        if: github.repository == 'theAfish/open-agent-world' && github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
         uses: actions/configure-pages@v5
       - name: Upload site
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
+        if: github.repository == 'theAfish/open-agent-world' && github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
         uses: actions/upload-pages-artifact@v4
         with:
           path: .tmp/docs-site
@@ -71,7 +71,7 @@ jobs:
         run: backend/.venv/bin/python -m pytest -p no:cacheprovider examples/plugins/hello_world/tests examples/plugins/greeter/tests
 
   deploy:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
+    if: github.repository == 'theAfish/open-agent-world' && github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
     needs: [build, tutorial-examples]
     runs-on: ubuntu-latest
     permissions:

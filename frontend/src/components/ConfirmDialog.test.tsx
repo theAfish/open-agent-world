@@ -3,10 +3,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, expect, it, vi } from 'vitest';
 import { ConfirmDialog } from './ConfirmDialog';
 
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 it('starts on Cancel, traps focus, and retains failed actions for retry', async () => {
   const run = vi.fn().mockRejectedValueOnce(new Error('Session is busy')).mockResolvedValue(undefined), close = vi.fn();
   render(<ConfirmDialog confirmation={{ title: 'Delete group?', items: ['Session A', 'Session B'], action: 'Delete group', run }} onClose={close} />);
+  // jsdom has no layout; give the visible buttons rectangles for Modal's focus filter.
+  for (const button of screen.getAllByRole('button')) {
+    vi.spyOn(button, 'getClientRects').mockReturnValue([new DOMRect(0, 0, 80, 24)] as unknown as DOMRectList);
+  }
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
   expect(screen.getByText('Session B')).toBeTruthy();
   const remove = screen.getByRole('button', { name: 'Delete group' });
@@ -15,6 +19,8 @@ it('starts on Cancel, traps focus, and retains failed actions for retry', async 
   expect(close).not.toHaveBeenCalled();
   remove.focus(); fireEvent.keyDown(document, { key: 'Tab' });
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close' }));
+  fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+  expect(document.activeElement).toBe(remove);
   fireEvent.click(remove);
   await waitFor(() => expect(close).toHaveBeenCalledOnce());
 });

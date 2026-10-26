@@ -9,9 +9,12 @@ re-targets the same rows instead of creating duplicates.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 
 PIPELINE_NAME = "oaw.to_markdown"
+RETRYABLE_STATUSES = {"FAILED", "CANCELLED", "INTERRUPTED"}
 NAMESPACE = uuid.UUID("7c5b2f9a-1d64-4a3e-9c8b-0f2a6d31e4c7")
 
 
@@ -107,12 +110,22 @@ def register_pipelines(kb):
 
 
 def submit_markdown_job(kb, source, collection_id, *, engine="auto", mineru_base_url=None,
-                        vision_model=""):
+                        vision_model="", previous_job=None):
     # A model reference is a name, not a credential: safe to persist with the job.
-    return kb.pipelines.submit(
-        PIPELINE_NAME,
-        inputs={"source_id": str(source.id), "collection_id": str(collection_id)},
-        parameters={"engine": engine, "mineru_base_url": mineru_base_url,
-                    "vision_model": vision_model or ""},
-        idempotency_key=f"markdown:{source.id}:{(source.sha256 or '')[:16]}",
-    )
+    inputs = {"source_id": str(source.id), "collection_id": str(collection_id)}
+    parameters = {"engine": engine, "mineru_base_url": mineru_base_url,
+                  "vision_model": vision_model or ""}
+    key = f"markdown:{source.id}:{(source.sha256 or '')[:16]}"
+    job = previous_job or kb.pipelines.submit(
+        PIPELINE_NAME, inputs=inputs, parameters=parameters, idempotency_key=key)
+    converted = bool((job.checkpoint.get("state") or {}).get("artifact_id"))
+    if job.status in RETRYABLE_STATUSES and job.parameters != parameters and not converted:
+        # Correcting a converter/model setting needs a new attempt with those
+        # parameters. Once conversion succeeded, resume indexing the retained
+        # artifact with its original provenance instead of converting it again.
+        settings_key = hashlib.sha256(json.dumps(parameters, sort_keys=True).encode()).hexdigest()[:16]
+        job = kb.pipelines.submit(PIPELINE_NAME, inputs=inputs, parameters=parameters,
+                                  idempotency_key=f"{key}:{job.id}:{settings_key}")
+    if job.status in RETRYABLE_STATUSES:
+        return kb.pipelines.resume(job.id)
+    return job

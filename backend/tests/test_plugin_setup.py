@@ -292,7 +292,7 @@ def test_source_batch_isolates_backend_and_frontend_failures_and_reuses_prepared
     result = subprocess.run(command, cwd=root, env=env, text=True, capture_output=True, timeout=60)
     assert result.returncode == 3, result.stdout + result.stderr
     rows = json.loads(report.read_text())
-    assert [row['ready'] for row in rows] == [False, False, True]
+    assert [row['ready'] for row in rows] == [False, False, True], rows
     assert 'fixture frontend failure' in rows[1]['error']
     assert (output / 'test.healthy/index.js').is_file()
     assert not (output / 'test.broken-frontend').exists()

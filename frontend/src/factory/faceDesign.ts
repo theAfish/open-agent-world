@@ -68,7 +68,9 @@ export function faceStudio(face: FaceDesign): FaceStudio {
 
 export type FaceCard = Pick<WorldCard, 'type'> & Partial<Pick<WorldCard, 'config'>>;
 export function cardStudio(card: FaceCard, catalog: PluginCatalog): FaceStudio | undefined {
-  if (!catalog.node_types.find(type => type.id === card.type)?.traits.includes('ui.factory-card.v1')) return;
+  const definition = catalog.node_types.find(type => type.id === card.type);
+  if (definition?.authoring?.surfaces.length) return faceStudio(definition.authoring.face);
+  if (!definition?.traits.includes('ui.factory-card.v1')) return;
   return (card.config?.face as FaceDesign | undefined)?.studio;
 }
 

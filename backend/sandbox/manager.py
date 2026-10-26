@@ -157,17 +157,18 @@ class SandboxManager(SandboxBackend):
             return None
         return self._validate_host_path(workspace_path, "folder")
 
-    def validate_environment_path(self, raw: str, kind: str = "folder") -> str:
+    def validate_environment_path(self, raw: str, kind: str = "folder", *, allow_missing: bool = False) -> str:
         from .environment import host_environment_path
-        return self._validate_host_path(host_environment_path(raw), kind)
+        return self._validate_host_path(host_environment_path(raw), kind, allow_missing=allow_missing)
 
-    def _validate_host_path(self, workspace_path: str, kind: str) -> str:
+    def _validate_host_path(self, workspace_path: str, kind: str, *, allow_missing: bool = False) -> str:
         path = Path(workspace_path)
         if not path.is_absolute() or "\x00" in workspace_path:
             raise SandboxValidationError("workspace_path must be an absolute directory on the backend host")
         try:
-            resolved = path.resolve(strict=True)
-            if kind not in ("folder", "file") or not (resolved.is_file() if kind == "file" else resolved.is_dir()):
+            resolved = path.resolve(strict=not allow_missing)
+            missing_folder = allow_missing and kind == 'folder' and not resolved.exists()
+            if kind not in ("folder", "file") or (not missing_folder and not (resolved.is_file() if kind == "file" else resolved.is_dir())):
                 raise SandboxValidationError(f"path must be an existing {kind}")
             if kind == "file" and resolved.stat().st_nlink != 1:
                 raise SandboxValidationError("file variables may not expose hard-linked files")

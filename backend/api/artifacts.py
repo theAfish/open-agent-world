@@ -54,7 +54,8 @@ async def release(collection_id: str, version_id: str, services=Depends(get_serv
 
 @router.delete('/artifact-collections/{collection_id}/references/{version_id}')
 async def remove_reference(collection_id: str, version_id: str, services=Depends(get_services)):
-    return services.resources.artifacts.remove_reference(services, collection_id, version_id)
+    async with services._node_mutation():
+        return services.resources.artifacts.remove_reference(services, collection_id, version_id)
 
 
 @router.get('/artifacts/retained')

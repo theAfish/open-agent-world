@@ -141,7 +141,7 @@ def _rewrite_wheel(data: bytes, spec: PackSpec, source: Path) -> tuple[bytes, tu
             if any(module == "backend" or module.startswith("backend.") for module in imports):
                 raise ValueError(f"{name} imports private host backend code; migrate it to the public Plugin API before publishing")
     files[f"{prefix}/entry_points.txt"] = f"[open_agent_world.plugins]\n{spec.owner} = {entry}\n".encode()
-    if spec.contributions.cards:
+    if spec.contributions.cards or spec.designs:
         files[f'{prefix}/oaw.pack.json'] = spec.model_dump_json().encode()
     # RECORD must describe the rewritten wheel, never retain upstream signatures.
     for name in (f"{prefix}/RECORD.jws", f"{prefix}/RECORD.p7s"):

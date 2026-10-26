@@ -2665,10 +2665,12 @@ class ApplicationServices:
     async def remove_conversation_session_participant(
         self, conversation_id: str, session_id: str, agent_id: str
     ) -> ConversationSession:
-        self._require_card_type(conversation_id, CardType.CONVERSATION)
-        updated = self.conversations.remove_participant(
-            conversation_id, session_id, agent_id
-        )
+        # Session access may authorize a plugin resource write using an attachment.
+        async with self._node_mutation():
+            self._require_card_type(conversation_id, CardType.CONVERSATION)
+            updated = self.conversations.remove_participant(
+                conversation_id, session_id, agent_id
+            )
         await self.events.publish(
             EventType.CONVERSATION_SESSION_UPDATED,
             node_id=conversation_id,
@@ -2687,13 +2689,14 @@ class ApplicationServices:
         return sessions
 
     async def delete_conversation_group(self, conversation_id: str, group_id: str) -> None:
-        self._require_card_type(conversation_id, CardType.CONVERSATION)
-        for session in self.conversations.list_sessions(conversation_id):
-            if session.group_id == group_id:
-                self.node_execution.assert_session_idle(session.id)
-        session_ids = self.conversations.delete_group(conversation_id, group_id)
-        for session_id in session_ids:
-            self.state.delete_scope("session", session_id)
+        async with self._node_mutation():
+            self._require_card_type(conversation_id, CardType.CONVERSATION)
+            for session in self.conversations.list_sessions(conversation_id):
+                if session.group_id == group_id:
+                    self.node_execution.assert_session_idle(session.id)
+            session_ids = self.conversations.delete_group(conversation_id, group_id)
+            for session_id in session_ids:
+                self.state.delete_scope("session", session_id)
         for session_id in session_ids:
             await self.events.publish(EventType.CONVERSATION_SESSION_DELETED, node_id=conversation_id,
                                       conversation_id=conversation_id, session_id=session_id,
@@ -2702,13 +2705,14 @@ class ApplicationServices:
     async def delete_conversation_session(
         self, conversation_id: str, session_id: str
     ) -> None:
-        self._require_card_type(conversation_id, CardType.CONVERSATION)
-        session = self.conversations.get_session(conversation_id, session_id)
-        if session.is_default:
-            raise ConversationValidationError("the default General session cannot be deleted")
-        self.node_execution.assert_session_idle(session_id)
-        self.conversations.delete_session(conversation_id, session_id)
-        self.state.delete_scope("session", session_id)
+        async with self._node_mutation():
+            self._require_card_type(conversation_id, CardType.CONVERSATION)
+            session = self.conversations.get_session(conversation_id, session_id)
+            if session.is_default:
+                raise ConversationValidationError("the default General session cannot be deleted")
+            self.node_execution.assert_session_idle(session_id)
+            self.conversations.delete_session(conversation_id, session_id)
+            self.state.delete_scope("session", session_id)
         await self.events.publish(
             EventType.CONVERSATION_SESSION_DELETED,
             node_id=conversation_id,

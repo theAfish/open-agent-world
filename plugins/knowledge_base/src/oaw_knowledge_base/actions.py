@@ -4,9 +4,9 @@ Each handler is deliberately short — validate, make a few MKB calls, return bo
 JSON — because the host holds the global node mutation lock for the whole call. Slow
 work belongs in the ``oaw.to_markdown`` job or in the host LLM bridge.
 
-``ingest``, ``process``, ``groups`` and the review actions carry no tool name in
-``operations.py``, which makes them desktop-only: uploading raw data, converting it,
-managing groups and publishing stay human acts.
+Raw-byte upload, unrestricted batch management, settings and publication remain
+desktop operations. Authorized agents import file references, convert selected
+sources and prepare unpublished drafts through their narrower operations.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from .client import DEFAULT_COLLECTION, collection, open_client
 from .errors import KnowledgeError
 from .graph_store import LAYERS
 from .markdown import available_engines
-from .pipelines import PIPELINE_NAME, submit_markdown_job
+from .pipelines import PIPELINE_NAME, RETRYABLE_STATUSES, submit_markdown_job
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ MAX_MARKDOWN_CHARS = 200_000
 # channel, but "" means off: a chat default model cannot embed.
 DEFAULT_SETTINGS = {"collection_name": DEFAULT_COLLECTION, "pdf_engine": "auto",
                     "mineru_base_url": "", "vision_model": "", "embedding_model": ""}
-ACTIVE_JOBS = {"QUEUED", "RUNNING", "PENDING", "RETRYING"}
+ACTIVE_JOBS = {"QUEUED", "RUNNING", "PENDING", "RETRYING", "CANCELLING"}
 
 
 class Request(BaseModel):
@@ -351,17 +351,19 @@ class ProcessSources(Request):
     group_id: str | None = None
 
 
+class ProcessSelected(Request):
+    source_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+def process_selected(context, arguments):
+    """Convert only the sources explicitly selected by an agent."""
+    request = ProcessSelected.model_validate(arguments)
+    return process_sources(context, request.model_dump())
+
+
 def _has_markdown(kb, source_id):
-    return any(a.processing_type == "MARKDOWN"
+    return any(a.processing_type == "MARKDOWN" and _record_link(kb, a.id) is not None
                for a in kb.artifacts.list(source_id=source_id, limit=10))
-
-
-def _active_job_for(jobs, source_id):
-    target = str(source_id)
-    for job in jobs:
-        if (job.inputs or {}).get("source_id") == target and job.status in ACTIVE_JOBS:
-            return job
-    return None
 
 
 def process_sources(context, arguments):
@@ -376,29 +378,43 @@ def process_sources(context, arguments):
 
     if request.source_ids:
         sources_to_run = [kb.sources.require(_uuid(value, "source_ids"))
-                          for value in request.source_ids]
+                          for value in dict.fromkeys(request.source_ids)]
     else:
-        sources_to_run = [source for source in
-                          kb.sources.list(collection_id=_any_group(request.group_id), limit=500)
-                          if not _has_markdown(kb, source.id)]
+        sources_to_run = kb.sources.list(collection_id=_any_group(request.group_id), limit=500)
 
-    active_jobs = kb.jobs.list(limit=200)
+    wanted = {str(source.id) for source in sources_to_run}
+    latest_jobs = {}
+    offset = 0
+    # MKB's portable store lists jobs newest first. Stop once every selected
+    # source has its latest conversion, or the history is exhausted.
+    while wanted - latest_jobs.keys():
+        page = kb.jobs.list(limit=200, offset=offset)
+        for job in page:
+            source_id = (job.inputs or {}).get("source_id")
+            if job.pipeline_name == PIPELINE_NAME and source_id in wanted:
+                latest_jobs.setdefault(source_id, job)
+        if len(page) < 200:
+            break
+        offset += len(page)
     results = []
     for source in sources_to_run:
-        if _has_markdown(kb, source.id):
+        previous = latest_jobs.get(str(source.id))
+        if previous is not None and previous.status in ACTIVE_JOBS:
             results.append({"source_id": str(source.id), "filename": source.filename,
-                            "skipped": "already converted"})
+                            "job": {"id": str(previous.id), "status": previous.status}})
             continue
-        active = _active_job_for(active_jobs, source.id)
-        if active is not None:
-            results.append({"source_id": str(source.id), "filename": source.filename,
-                            "job": {"id": str(active.id), "status": active.status}})
+        # A failed index step may already have committed markdown and evidence.
+        # Resume it before declaring the source ready, so search is repaired too.
+        if _has_markdown(kb, source.id) and (previous is None or previous.status not in RETRYABLE_STATUSES):
+            if request.source_ids:
+                results.append({"source_id": str(source.id), "filename": source.filename,
+                                "skipped": "already converted"})
             continue
         source_group_id = (source.collection_ids[0] if source.collection_ids
                            else collection(kb, settings["collection_name"]).id)
         job = submit_markdown_job(kb, source, source_group_id, engine=settings["pdf_engine"],
                                   mineru_base_url=settings["mineru_base_url"] or None,
-                                  vision_model=settings["vision_model"])
+                                  vision_model=settings["vision_model"], previous_job=previous)
         results.append({"source_id": str(source.id), "filename": source.filename,
                         "job": {"id": str(job.id), "status": job.status}})
     return _bounded({"jobs": results})
@@ -526,6 +542,16 @@ class Schemas(Request):
     kind: Literal["literature", "experiment"] | None = None
 
 
+class SchemaRead(Request):
+    operation: Literal["list", "get"] = "list"
+    schema_id: str | None = None
+    kind: Literal["literature", "experiment"] | None = None
+
+
+class SchemaManage(Schemas):
+    operation: Literal["create", "update"] = Field()
+
+
 def _schema_json(schema):
     return {"id": str(schema.id), "name": schema.name, "description": schema.description,
             "domain": schema.domain, "kind": _schema_kind(schema), "version": schema.version,
@@ -535,6 +561,20 @@ def _schema_json(schema):
 
 def schemas(context, arguments):
     request = Schemas.model_validate(arguments)
+    if context.actor_id is not None and request.operation not in {"list", "get"}:
+        raise KnowledgeError("knowledge_schemas is read-only; use knowledge_schema_manage to change a schema")
+    return _schemas(context, request)
+
+
+def schema_manage(context, arguments):
+    request = SchemaManage.model_validate(arguments)
+    if context.actor_id is not None and request.operation == "update" and request.schema_id:
+        if _client(context).oaw_experiments.list(schema_id=request.schema_id, status="published", limit=1):
+            raise KnowledgeError("This schema has published records; create a new schema instead of changing their definition")
+    return _schemas(context, request)
+
+
+def _schemas(context, request):
     kb, _, _ = _base(context)
     if request.operation == "list":
         items = kb.schemas.list(limit=100)
@@ -672,7 +712,7 @@ class ExperimentBundles(Request):
 
 def experiment_bundles(context, arguments):
     """List or read experiment uploads: the files in each and how far their conversion
-    has got. Read-only; creating one and filing files into it are human acts."""
+    has got. Creating or changing one requires a separate write capability."""
     request = ExperimentBundles.model_validate(arguments)
     kb, group, _ = _base(context, request.group_id)
     if request.operation == "get":
@@ -720,6 +760,46 @@ def experiment_bundle_manage(context, arguments):
         schema_id=str(_experiment_schema(kb, request.schema_id).id) if request.schema_id else None,
         run_id=request.run_id if request.status is not None else ...)
     return _bounded({"bundle": _bundle_json(kb, bundle)})
+
+
+class ExperimentBundlePrepare(Request):
+    operation: Literal["create", "update"] = "create"
+    bundle_id: str | None = None
+    schema_id: str | None = None
+    group_id: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=500)
+    notes: str | None = Field(default=None, max_length=20_000)
+
+
+def experiment_bundle_prepare(context, arguments):
+    """Prepare an unpublished upload without exposing deletion or run-state edits."""
+    request = ExperimentBundlePrepare.model_validate(arguments)
+    kb, group, _ = _base(context, request.group_id)
+    store = kb.oaw_experiments
+    if request.operation == "create":
+        if not (request.schema_id and request.name):
+            raise KnowledgeError("schema_id and name are required to create an experiment upload")
+        schema = _experiment_schema(kb, request.schema_id)
+        for bundle in store.list_bundles(group_id=group.id, schema_id=str(schema.id), limit=500):
+            if (bundle["name"] == request.name and bundle["notes"] == (request.notes or "")
+                    and not store.list(bundle_id=bundle["id"], status="published", limit=1)):
+                return _bounded({"bundle": _bundle_json(kb, bundle)})
+        return experiment_bundle_manage(context, request.model_dump(exclude_none=True))
+    if not request.bundle_id:
+        raise KnowledgeError("bundle_id is required")
+    bundle = store.require_bundle(request.bundle_id)
+    if bundle["status"] == "deleted":
+        raise KnowledgeError("That experiment upload was deleted")
+    if request.group_id is not None and bundle["group_id"] != str(group.id):
+        raise KnowledgeError("That experiment upload belongs to another group")
+    if store.list(bundle_id=bundle["id"], status="published", limit=1):
+        raise KnowledgeError("This upload has published records; its preparation cannot be changed by an agent")
+    # Repeating an update with the current schema must not fail just because draft
+    # records have since been saved. A genuine schema change keeps the store guard.
+    values = request.model_dump(exclude_none=True)
+    if request.schema_id == bundle["schema_id"]:
+        values.pop("schema_id", None)
+    return experiment_bundle_manage(context, values)
 
 
 class ExperimentIngest(Request):
@@ -1399,6 +1479,15 @@ class GraphIndex(Request):
     group_id: str | None = None
 
 
+class GraphIndexStatus(Request):
+    operation: Literal["status"] = "status"
+    group_id: str | None = None
+
+
+class GraphIndexBuild(Request):
+    group_id: str | None = None
+
+
 def _index_state(context):
     stored = context.state.get()["value"] if context.state is not None else {}
     saved = stored.get("semantic_index")
@@ -1415,6 +1504,17 @@ def graph_index(context, arguments):
     published graph it covers, and the last failure. ``build`` embeds everything that
     is missing or stale now, so the first search is not the slow one."""
     request = GraphIndex.model_validate(arguments)
+    if context.actor_id is not None and request.operation != "status":
+        raise KnowledgeError("knowledge_graph_index is read-only; use knowledge_graph_index_build to build the index")
+    return _graph_index(context, request)
+
+
+def graph_index_build(context, arguments):
+    request = GraphIndexBuild.model_validate(arguments)
+    return _graph_index(context, GraphIndex(operation="build", group_id=request.group_id))
+
+
+def _graph_index(context, request):
     kb = _client(context)
     scope = _any_group(request.group_id)
     store = kb.oaw_graph_store
@@ -1436,7 +1536,8 @@ def graph_index(context, arguments):
         result.update(embeddings.status(kb.oaw_engine, texts, connection[2]))
     except Exception as error:
         message = (str(error) or type(error).__name__)[:300]
-        _remember_index(context, last_error=message)
+        if request.operation == "build":
+            _remember_index(context, last_error=message)
         result["last_error"] = message
         if result["model_id"]:
             result.update(embeddings.status(kb.oaw_engine, texts, result["model_id"]))

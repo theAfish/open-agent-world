@@ -9,8 +9,8 @@ import pytest
 from backend.agents import GoogleAdkAgentRuntime
 from backend.errors import ResourceValidationError
 from backend.persistence.database import Database
-from backend.security.llm_settings import LlmSettingsStore
-from backend.security.model_connections import CatalogEdit, ModelConnectionStore
+from backend.security.llm_settings import LlmSettingsStore, SecretStorageError
+from backend.security.model_connections import CatalogEdit, ConnectionEdit, ModelConnectionStore
 
 
 def connection(cid="work", **changes):
@@ -33,6 +33,45 @@ def test_catalog_api_encrypts_keeps_and_clears_keys(client):
     cleared = client.put("/api/settings/models", json=kept).json()
     assert not cleared["connections"][0]["api_key_configured"]
     assert cleared["connections"][1]["api_key_configured"]
+
+
+@pytest.mark.parametrize("reader", ["runtime", "discovery", "legacy"])
+def test_missing_credential_key_reports_recovery_without_replacing_it(tmp_path, reader):
+    db = Database(tmp_path / "state.db")
+    try:
+        secrets = LlmSettingsStore(db, tmp_path)
+        store = ModelConnectionStore(secrets)
+        item = connection("legacy")
+        item["adapter"] = "legacy"
+        saved = store.save(CatalogEdit(connections=[item], default_model="oaw:model:legacy"))
+        secrets.key_path.unlink()
+        with pytest.raises(SecretStorageError, match="re-enter the API key in Settings / Models") as error:
+            if reader == "runtime":
+                store.resolve_runtime("oaw:default")
+            elif reader == "discovery":
+                store.discovery_key(ConnectionEdit(**saved.connections[0].model_dump()))
+            else:
+                store.legacy_options()
+        assert str(tmp_path) not in str(error.value)
+        assert not secrets.key_path.exists()
+        assert store.read() == saved
+    finally:
+        db.close()
+
+
+def test_reentering_model_api_key_recovers_after_key_file_loss(client):
+    saved = client.put("/api/settings/models", json=dict(
+        revision=0, connections=[connection()], default_model="oaw:model:work",
+    )).json()
+    secrets = client.app.state.services.llm_settings
+    secrets.key_path.unlink()
+    # Settings must remain readable so the user can explicitly replace the key.
+    assert client.get("/api/settings/models").json() == saved
+    saved["connections"][0]["api_key"] = "replacement-secret"
+    response = client.put("/api/settings/models", json=saved)
+    assert response.status_code == 200, response.text
+    assert "replacement-secret" not in response.text
+    assert ModelConnectionStore(secrets).resolve_runtime("oaw:default").api_key == "replacement-secret"
 
 
 def test_runtime_connection_carries_the_explicit_image_capability(client):

@@ -3,13 +3,18 @@ import { Download, Package, Plus, Printer as PrinterIcon, RefreshCw, Save, Share
 import { apiErrorMessage, worldApi } from '../api/client';
 import { finishLabel } from '../cards/cardFinish';
 import { FaceDesignerCanvas } from './FaceDesignerCanvas';
+import { FunctionControls } from './FunctionControls';
+import { PackIDE } from './PackIDE';
+import { Modal } from '../components/Modal';
+import { t, useLocale } from '../i18n';
 import { faceStudio, MODE_LABELS } from './faceDesign';
 import { faceButtonTargets } from './faceButtons';
 import { CoreButtonWarnings } from './CoreButtonWarnings';
 import { useWorldStore } from '../state/worldStore';
-import { useNodeSurfaceStore } from '../state/nodeSurfaces';
+import { surfaceDraftKey, useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { PackSurface } from '../shell/PackSurface';
 import { PACK_DESIGNS, PACK_PACKAGING } from '../shell/packDesign';
+import { exportedPackFile, MarketplacePublish, PACK_ID_PATTERN, PackIdGuidance } from '../shell/PackPublishing';
 import { FacePreview, FieldInput, FunctionForm } from './PrintedCardView';
 import type { PluginViewProps } from '../plugins/sdk';
 import type { LegionSummary, WorldCard } from '../types/world';
@@ -64,6 +69,17 @@ function ToolPreview({ id, children }: { id: string; children: ReactNode }) {
 }
 
 export function PackDesigner(props: PluginViewProps) {
+  useLocale();
+  const [showIDE, setShowIDE] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const closeIDE = () => setShowIDE(false);
+  return <><LegacyPackDesigner {...props} onOpenIDE={() => setShowIDE(true)} />
+    {showIDE && <Modal title="Pack IDE" className="pack-ide-modal" busy={busy} onClose={closeIDE}>
+      <PackIDE draftKey={surfaceDraftKey(props.card.id, 'pack-project')} onBusyChange={setBusy} onClose={closeIDE} />
+    </Modal>}</>;
+}
+
+function LegacyPackDesigner(props: PluginViewProps & { onOpenIDE: () => void }) {
   const editor = useEditor<PackDesign>(props), task = useTask(), { draft, change } = editor;
   const [opened, setOpened] = useState(false);
   const metadata = (key: keyof PackDesign['creator'], value: string) => change({ creator: { ...draft.creator, [key]: value } });
@@ -71,9 +87,10 @@ export function PackDesigner(props: PluginViewProps) {
   return <Frame title="卡包设计器" step="01 / 包装" task={task} level={props.level}>
     <div className="factory-design-grid"><div className="factory-controls">
       <label>卡包名称<input maxLength={120} value={draft.name} onChange={event => change({ name: event.target.value })} /></label>
-      <div className="factory-row"><label>Pack ID<input maxLength={100} value={draft.id} onChange={event => change({ id: event.target.value })} /></label>
+      <div className="factory-row"><label>Pack ID<input required maxLength={100} pattern={PACK_ID_PATTERN} value={draft.id} onChange={event => change({ id: event.target.value })} /></label>
         <label>版本<input maxLength={64} value={draft.version} onChange={event => change({ version: event.target.value })} /></label></div>
       <small>更新时保留 Pack ID，并递增版本号。</small>
+      <PackIdGuidance />
       <div className="factory-row"><label>包装<select value={draft.creator.packaging} onChange={event => metadata('packaging', event.target.value)}>
         {PACK_PACKAGING.map(value => <option key={value} value={value}>{PACK_DESIGNS[value].label}</option>)}</select></label>
         <label>主题色<input type="color" value={draft.creator.accent_color} onChange={event => metadata('accent_color', event.target.value)} /></label></div>
@@ -86,6 +103,9 @@ export function PackDesigner(props: PluginViewProps) {
       edition={draft.creator.author || '卡包工厂'} cards={[]} count={null} opened={opened} label="预览包装" sealLabel="预览包装" onClick={() => setOpened(!opened)} />
       <small>点击包装预览开合</small></div></div>
     <SaveButton editor={editor} task={task} /><p className="factory-hint">保存后，将此卡连接到打包器。</p>
+    <details className="factory-developer-tools"><summary>{t('Developer tools')}</summary>
+      <button type="button" onClick={props.onOpenIDE}>Pack IDE <span className="pack-ide-experimental" title={t('Visual authoring is still in development.')}>{t('Experimental')}</span></button>
+    </details>
   </Frame>;
 }
 
@@ -105,7 +125,6 @@ export function FunctionDesigner(props: PluginViewProps) {
   const inputs = useInputs(props.card.id);
   const linkedFace = inputs.context?.inputs.face?.config as FaceDesign | undefined;
   const buttons = linkedFace ? faceButtonTargets(linkedFace) : [];
-  const updateField = (index: number, patch: Partial<InputField>) => change({ fields: draft.fields.map((field, i) => i === index ? { ...field, ...patch } : field) });
   if (props.level === 'preview') return <ToolPreview id={props.card.id}><strong>{draft.fields.length} 个输入字段</strong><small>{draft.fields.map(field => field.label).join(' / ')}</small><p>{({ template: '文本模板', sum: '数值求和', multiply: '数值乘积', join: '内容拼接' })[draft.operation]}</p></ToolPreview>;
   return <Frame title="功能设计器" step="03 / 功能" task={task} level={props.level}>
     <p className="factory-hint">添加表单字段，再选择运行方式。模板使用 {'{{字段标识}}'} 插入内容。</p>
@@ -117,24 +136,7 @@ export function FunctionDesigner(props: PluginViewProps) {
       <p className="factory-hint">自定义按钮的逻辑挂载将在后续开放。当前运行按钮使用下方配置的功能。</p>
     </section>
     <div className="factory-function-editor"><div className="factory-controls">
-      {draft.fields.map((field, index) => <div className="factory-field-editor" key={index}>
-        <div className="factory-row"><label>字段标识<input maxLength={40} value={field.key} onChange={event => updateField(index, { key: event.target.value })} /></label>
-          <label>显示名称<input maxLength={80} value={field.label} onChange={event => updateField(index, { label: event.target.value })} /></label>
-          <button type="button" className="factory-icon-button" aria-label={`删除字段 ${index + 1}`} onClick={() => change({ fields: draft.fields.filter((_, i) => i !== index) })}><Trash2 size={15} /></button></div>
-        <div className="factory-row"><label>字段类型<select value={field.type} onChange={event => updateField(index, {
-          type: event.target.value as InputField['type'], default: event.target.value === 'number' ? 0 : event.target.value === 'boolean' ? false : '',
-        })}><option value="text">文本</option><option value="number">数值</option><option value="boolean">开关</option></select></label>
-          <FieldInput field={{ ...field, label: '默认值', required: false }} value={field.default} onChange={value => updateField(index, { default: value })} /></div>
-        <label className="factory-check"><input type="checkbox" checked={field.required} onChange={event => updateField(index, { required: event.target.checked })} />必填</label>
-      </div>)}
-      <button type="button" disabled={draft.fields.length >= 20} onClick={() => {
-        let index = draft.fields.length + 1; while (draft.fields.some(field => field.key === `field${index}`)) index++;
-        change({ fields: [...draft.fields, { key: `field${index}`, label: `字段 ${index}`, type: 'text', default: '', required: false }] });
-      }}><Plus size={14} />添加字段</button>
-      <label>运行方式<select value={draft.operation} onChange={event => change({ operation: event.target.value as FunctionDesign['operation'] })}>
-        <option value="template">填充文本模板</option><option value="sum">数值字段求和</option><option value="multiply">数值字段乘积</option><option value="join">按字段顺序拼接</option></select></label>
-      {draft.operation === 'template' && <label>输出模板<textarea rows={4} maxLength={10000} value={draft.template} onChange={event => change({ template: event.target.value })} /></label>}
-      {draft.operation === 'join' && <label>分隔符<input maxLength={100} value={draft.separator} onChange={event => change({ separator: event.target.value })} /></label>}
+      <FunctionControls value={draft} onChange={change} />
       <SaveButton editor={editor} task={task} />
     </div><div className="factory-test"><h4>功能试验台</h4><FunctionForm design={draft}
       run={async values => (await worldApi.factory<{ result: Scalar }>(props.card.id, 'try', { design: draft, values })).result} /></div></div>
@@ -202,11 +204,12 @@ export function Packer(props: PluginViewProps) {
     props.host.draft?.set({ factory_options: { rows: params, includeContent } });
   }, [params, includeContent, props.host.draft]);
   const [selection, setSelection] = useState(''), [legions, setLegions] = useState<LegionSummary[]>([]);
-  const [inspection, setInspection] = useState<FactoryInspection>(), [file, setFile] = useState<File>();
+  const [inspection, setInspection] = useState<FactoryInspection>(), [exported, setExported] = useState<{ key: string; file: File }>();
   const cards = useWorldStore(state => state.cards), catalog = useWorldStore(state => state.catalog);
-  const signature = JSON.stringify({ config, inputs: inputs.context, params, includeContent, sources: config.items.map(item =>
+  const signature = JSON.stringify({ items: config.items, inputs: inputs.context, params, includeContent, sources: config.items.map(item =>
     item.kind === 'node' ? cards.find(card => card.id === item.id)?.revision : legions.find(legion => legion.id === item.id)?.revision) });
-  useEffect(() => { setInspection(undefined); setFile(undefined); }, [signature]);
+  const file = exported?.key === signature ? exported.file : undefined;
+  useEffect(() => { setInspection(undefined); setExported(undefined); }, [signature]);
   useEffect(() => { void worldApi.getLegions().then(setLegions).catch(() => {}); }, []);
   const choices: BasketItem[] = [...cards.filter(card => !card.ephemeral && (!card.type.startsWith('oaw.factory.') || card.type === 'oaw.factory.card') && catalog.node_types.find(type => type.id === card.type)?.templateable)
     .map(card => ({ id: card.id, name: card.name, kind: 'node' as const })),
@@ -218,11 +221,12 @@ export function Packer(props: PluginViewProps) {
     if (JSON.stringify(next) !== JSON.stringify(config)) await props.host.updateConfig(next);
   };
   const createExport = async () => {
+    setExported(undefined);
     await saveOptions();
     const result = await worldApi.factory<FactoryInspection>(props.card.id, 'inspect'); setInspection(result);
     if (!result.can_export) throw new Error('请先解决发布检查中的错误。');
     const blob = await worldApi.factory<Blob>(props.card.id, 'export');
-    return new File([blob], `${result.manifest.id}-${result.manifest.version}.oawpack`, { type: 'application/vnd.oaw.pack' });
+    return exportedPackFile(blob, result.manifest);
   };
   if (props.level === 'preview') return <ToolPreview id={props.card.id}><div className="factory-dropzone" data-factory-packer={props.card.id}>
     <Package size={18} /><strong>拖入卡牌 / Legion</strong><small>{config.items.length} 份素材</small></div></ToolPreview>;
@@ -254,8 +258,8 @@ export function Packer(props: PluginViewProps) {
     <label className="factory-check"><input type="checkbox" checked={includeContent} onChange={event => setIncludeContent(event.target.checked)} />包含素材中的初始文档、资源与共享状态</label>
     <small>默认只携带配置；勾选后请检查内容是否适合公开分享。</small>
     <div className="factory-actions"><button type="button" onClick={() => void task.perform(async () => { await saveOptions(); task.setMessage('打包设置已保存。'); })}><Save size={14} />保存设置</button>
-      <button type="button" disabled={!config.items.length} onClick={() => void task.perform(async () => { await saveOptions(); setInspection(await worldApi.factory(props.card.id, 'inspect')); })}>检查卡包</button>
-      <button type="button" disabled={!config.items.length} onClick={() => void task.perform(async () => { const exported = await createExport(); setFile(exported); downloadFile(exported); task.setMessage('已导出，可发布到自己的仓库或发送给朋友。'); })}><Download size={14} />导出 .oawpack</button></div>
+      <button type="button" disabled={!config.items.length} onClick={() => void task.perform(async () => { setExported(undefined); setInspection(undefined); await saveOptions(); setInspection(await worldApi.factory(props.card.id, 'inspect')); })}>检查卡包</button>
+      <button type="button" disabled={!config.items.length} onClick={() => void task.perform(async () => { const artifact = await createExport(); downloadFile(artifact); setExported({ key: signature, file: artifact }); task.setMessage('已导出，可发布到自己的仓库或发送给朋友。'); })}><Download size={14} />导出 .oawpack</button></div>
     {inspection && <div className="factory-review"><strong>{inspection.can_export ? '可以导出' : '需要修正'} · {inspection.entries.length} 份素材</strong>
       {inspection.issues.map((issue, index) => <p key={index} className={issue.severity === 'error' ? 'factory-error' : ''}>{issue.path}：{issue.message}</p>)}
       <small>依赖卡包</small><ul>{inspection.manifest.dependencies?.packs.map(dep => <li key={dep.id}>{dep.id} {dep.version}</li>)}</ul></div>}
@@ -264,5 +268,8 @@ export function Packer(props: PluginViewProps) {
         if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: file.name }); task.setMessage('已完成分享。'); }
         else { downloadFile(file); task.setMessage('当前环境不支持系统分享，已下载文件，发送此文件即可。'); }
       })}><Share2 size={14} />分享文件</button></div>}
+    <p className="factory-hint">投稿前请在已连接的卡包设计器中设置授权命名空间下的 Pack ID，保存设计后重新检查并导出。</p>
+    <MarketplacePublish packId={inspection?.manifest.id ?? (inputs.context?.inputs.pack?.config as PackDesign | undefined)?.id ?? 'local.mycards'}
+      file={inspection?.can_export ? file : undefined} busy={task.busy} />
   </Frame>;
 }

@@ -5,6 +5,7 @@ tests are about what the HTTP layer adds on top of the pipeline rather than abou
 the pipeline, which ``test_pipeline.py`` already covers end to end.
 """
 import base64
+import json
 
 import pytest
 
@@ -78,10 +79,28 @@ def test_health_is_open_but_everything_else_needs_the_token(store):
 
 
 def test_the_manifest_lists_the_agent_operations_only(client):
-    names = {tool["name"] for tool in client.get("/v1/tools").json()["tools"]}
+    tools = {tool["name"]: tool for tool in client.get("/v1/tools").json()["tools"]}
+    names = set(tools)
     assert "knowledge_overview" in names
-    # Uploading, configuring and reviewing stay human acts on every transport.
+    assert {"knowledge_process", "knowledge_schema_manage", "knowledge_draft_open",
+            "knowledge_experiment_bundle_prepare", "knowledge_graph_index_build"} <= names
+    assert tools["knowledge_schemas"]["input_schema"]["properties"]["operation"]["enum"] == ["list", "get"]
+    # Raw-byte upload, configuring and reviewing stay human acts on every transport.
     assert not {name for name in names if name.endswith(("_ingest", "_settings", "_review"))}
+
+
+def test_mcp_enforces_the_read_contract_even_without_an_actor_label(store):
+    from oaw_knowledge_base.service import mcp
+
+    create = {"operation": "create", "name": "Sample", "definition": SCHEMA, "system_prompt": "Read samples."}
+    with pytest.raises(ValueError):
+        mcp.call(store, "knowledge_schemas", create, actor=None)
+    created = json.loads(mcp.call(store, "knowledge_schema_manage", create))["schema"]
+    assert json.loads(mcp.call(store, "knowledge_schemas", {"operation": "get", "schema_id": created["id"]}))["schema"] == created
+    with pytest.raises(ValueError):
+        mcp.call(store, "knowledge_graph_index", {"operation": "build"}, actor=None)
+    with pytest.raises(ValueError):
+        mcp.call(store, "knowledge_process", {})
 
 
 def test_an_unknown_operation_is_a_404_not_a_crash(client):

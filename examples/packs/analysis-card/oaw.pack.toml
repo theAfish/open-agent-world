@@ -1,0 +1,19 @@
+schema_version = 3
+
+[distribution]
+id = "example.analysis-card"
+name = "Cell Analysis"
+
+[compatibility]
+plugin_api = "1.39"
+oaw = ">=0.1.0,<1"
+
+[[contributions.cards]]
+id = "example.analysis-card"
+name = "Cell Analysis"
+description = "Calculate an orthogonal unit-cell volume with handwritten Python."
+icon = "calculator"
+color = "#617b72"
+
+[designs]
+"example.analysis-card" = "designs/card.json"

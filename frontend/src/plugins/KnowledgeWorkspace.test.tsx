@@ -228,7 +228,7 @@ it("still shows sources and groups when an older release has not published \"exp
   await waitFor(() => expect(action).toHaveBeenCalledWith("experiments", expect.anything(), undefined));
 });
 
-it("uploads a document and reads its markdown once a batch process job finishes", async () => {
+it("automatically converts only the uploaded document and reads it when ready", async () => {
   let uploaded = false;
   let converted = false;
   const action = open(async name => {
@@ -242,7 +242,7 @@ it("uploads a document and reads its markdown once a batch process job finishes"
       return { jobs: [{ source_id: "source-1", filename: "sintering.md",
         job: { id: "job-1", status: "QUEUED" } }] };
     }
-    if (name === "jobs") return { jobs: [{ id: "job-1", kind: "pipeline",
+    if (name === "jobs") return { jobs: !uploaded ? [] : [{ id: "job-1", kind: "pipeline",
       status: converted ? "COMPLETED" : "QUEUED", progress: 1, message: "markdown ready",
       error: null, source_id: "source-1", created_at: "2026-09-23T00:00:00Z", completed_at: null }] };
     if (name === "markdown") return DOCUMENT;
@@ -255,11 +255,9 @@ it("uploads a document and reads its markdown once a batch process job finishes"
   await waitFor(() => expect(action).toHaveBeenCalledWith("ingest", expect.objectContaining({
     filename: "sintering.md", media_type: "text/markdown" }), undefined));
 
-  // Uploading never converts on its own: select it and process it explicitly.
-  fireEvent.click(screen.getByLabelText("Select sintering.md"));
-  fireEvent.click(await screen.findByRole("button", { name: "Process 1 selected" }));
   await waitFor(() => expect(action).toHaveBeenCalledWith(
     "process", { source_ids: ["source-1"] }, undefined));
+  expect(action.mock.calls.filter(([name]) => name === "process")).toHaveLength(1);
 
   fireEvent.click(await screen.findByRole("button", { name: /sintering\.md.*Ready/ }));
   expect(await screen.findByRole("heading", { name: "Sintering of Si3N4" })).toBeTruthy();
@@ -268,7 +266,7 @@ it("uploads a document and reads its markdown once a batch process job finishes"
 });
 
 it("uploads selected files even when resetting the file input clears its FileList", async () => {
-  const action = open(async () => undefined);
+  const action = open(async name => name === "ingest" ? { source: { id: "source-1" } } : undefined);
   const input = await screen.findByLabelText("Add documents") as HTMLInputElement;
   const file = new File(["%PDF-1.4"], "sample.pdf", { type: "application/pdf" });
   const selected: File[] = [file];
@@ -284,8 +282,67 @@ it("uploads selected files even when resetting the file input clears its FileLis
     filename: "sample.pdf", media_type: "application/pdf" }), undefined));
 });
 
+it("keeps successful dropped files when another file cannot start conversion and offers a retry", async () => {
+  const stored: typeof SOURCE[] = [];
+  const action = open(async (name, args) => {
+    if (name === "sources") return { sources: stored };
+    if (name === "ingest") {
+      const item = { ...SOURCE, id: String(args.filename), filename: String(args.filename) };
+      stored.push(item);
+      return { source: item };
+    }
+    if (name === "process") {
+      if ((args.source_ids as string[])[0] === "broken.pdf") throw new Error("Converter unavailable");
+      return { jobs: [] };
+    }
+    if (name === "jobs") return { jobs: stored.filter(item => item.id === "broken.pdf").map(item => ({
+      id: "failed-job", source_id: item.id, status: "FAILED", error: "Converter unavailable" })) };
+    return undefined;
+  });
+  await screen.findByText("Add your first document");
+  fireEvent.drop(document.querySelector(".knowledge-sources")!, { dataTransfer: { files: [
+    new File(["bad"], "broken.pdf"), new File(["# Note"], "note.md"),
+  ] } });
+  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "broken.pdf: Converter unavailable");
+  expect(screen.getByRole("button", { name: /note.md.*awaiting conversion/ })).toBeTruthy();
+  expect(action).toHaveBeenCalledWith("process", { source_ids: ["note.md"] }, undefined);
+  fireEvent.click(screen.getByRole("button", { name: "Retry broken.pdf" }));
+  await waitFor(() => expect(action.mock.calls.filter(([name, args]) => name === "process"
+    && (args.source_ids as string[])[0] === "broken.pdf")).toHaveLength(2));
+});
+
+it("opens a converting document once its text becomes ready without reopening the reader", async () => {
+  let converted = false;
+  const action = open(async name => {
+    if (name === "sources") return { sources: [converted ? CONVERTED : SOURCE] };
+    if (name === "jobs") return { jobs: [{ id: "job-1", source_id: "source-1", status: converted ? "COMPLETED" : "RUNNING" }] };
+    if (name === "markdown") return DOCUMENT;
+    return undefined;
+  });
+  fireEvent.click(await screen.findByRole("button", { name: /sintering.md.*Converting/ }));
+  expect(await screen.findByText("Preparing your document")).toBeTruthy();
+  expect(action.mock.calls.some(([name]) => name === "markdown")).toBe(false);
+  converted = true;
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  expect(await screen.findByRole("heading", { name: "Sintering of Si3N4" })).toBeTruthy();
+});
+
+it("routes empty result views to the material and record setup actions", async () => {
+  open(async () => undefined);
+  await screen.findByText("Add your first document");
+  fireEvent.click(screen.getByRole("tab", { name: "Records" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Add sources" }));
+  expect(await screen.findByText("Add your first document")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Experiment" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Insights" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Open experiments" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Define record fields" }));
+  expect(screen.getByRole("tab", { name: "Schemas" }).getAttribute("aria-selected")).toBe("true");
+});
+
 it("searches converted documents and shows attributable excerpts", async () => {
   const action = open(async (name, args) => {
+    if (name === "sources") return { sources: [CONVERTED] };
     if (name === "search") return { query: args.query, results: [
       { source_id: "source-1", filename: "sintering.md", record_id: "record-1",
         group_id: "group-1", group_name: "Knowledge base",
@@ -307,6 +364,7 @@ it("searches converted documents and shows attributable excerpts", async () => {
 
 it("shows a search error inline instead of crashing the workspace", async () => {
   const action = open(async name => {
+    if (name === "sources") return { sources: [CONVERTED] };
     if (name === "search") throw new Error("search index is not ready");
     return undefined;
   });
@@ -354,6 +412,53 @@ it("opens a knowledge draft over a source and extracts it through the host bridg
   // The card never writes the draft itself: the bridge hands the model's answer to the plugin.
   expect(action.mock.calls.some(([name]) => name === "knowledge_save")).toBe(false);
   expect(await region.findByText(/Read 1 source\(s\) in 1 part\(s\) · 2 concepts added/)).toBeTruthy();
+});
+
+it.each(["extract", "research"])("extracts a literature draft through a %s agent", async access => {
+  useWorldStore.setState({
+    cards: [{ id: "card-1", type: "knowledge.base", name: "Knowledge" },
+      { id: "librarian", type: "agent", name: "Librarian" },
+      { id: "researcher", type: "agent", name: "Researcher" }] as unknown as WorldCard[],
+    edges: [{ id: "read", source: "librarian", target: "card-1", relationship: "knowledge.base.read" },
+      { id: "write", source: "researcher", target: "card-1", relationship: `knowledge.base.${access}` }] as unknown as WorldEdge[],
+  });
+  const runAgent = vi.fn(async () => undefined);
+  open(async name => {
+    if (name === "sources") return { sources: [CONVERTED] };
+    if (name === "knowledge_drafts") return { drafts: [{ ...DRAFT, entities: [], relations: [],
+      sources: [{ ...DRAFT.sources[0], extracted_at: null }] }] };
+    return undefined;
+  }, { host: { runAgent, getAgentInfo: vi.fn(async () => ({ status: "running" })) } });
+  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
+  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
+  fireEvent.click(await region.findByRole("button", { name: /Draft sintering\.md/ }));
+  fireEvent.click(await region.findByRole("button", { name: "Extract 1 unread source(s)" }));
+  await waitFor(() => expect(runAgent).toHaveBeenCalledTimes(1));
+  const [agentId, prompt] = runAgent.mock.calls[0] as unknown as [string, string];
+  expect(agentId).toBe("researcher");
+  expect(prompt).toContain("KNOWLEDGE EXTRACTION REQUEST");
+  expect(JSON.parse(prompt.split("\n")[2])).toMatchObject({ draft_id: "draft-1", source_ids: ["source-1"] });
+});
+
+it("keeps a failed agent extraction on its current step and makes retry available", async () => {
+  useWorldStore.setState({
+    cards: [{ id: "card-1", type: "knowledge.base", name: "Knowledge" },
+      { id: "researcher", type: "agent", name: "Researcher" }] as unknown as WorldCard[],
+    edges: [{ id: "write", source: "researcher", target: "card-1", relationship: "knowledge.base.research" }] as unknown as WorldEdge[],
+  });
+  const runAgent = vi.fn(async () => undefined);
+  open(async name => name === "knowledge_drafts" ? { drafts: [{ ...DRAFT, entities: [], relations: [],
+    sources: [{ ...DRAFT.sources[0], extracted_at: null }] }] } : undefined,
+  { host: { runAgent, getAgentInfo: vi.fn(async () => ({ status: "error", last_error: "Model connection unavailable" })) } });
+  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
+  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
+  fireEvent.click(await region.findByRole("button", { name: /Draft sintering\.md/ }));
+  fireEvent.click(region.getByRole("button", { name: "Extract 1 unread source(s)" }));
+  expect(await region.findByText("This step did not finish", {}, { timeout: 4000 })).toBeTruthy();
+  expect(region.getByRole("button", { name: "Extraction stage" }).getAttribute("aria-current")).toBe("step");
+  expect(region.getByRole("button", { name: "Publication stage" }).hasAttribute("disabled")).toBe(true);
+  fireEvent.click(region.getByRole("button", { name: "Extract 1 unread source(s)" }));
+  await waitFor(() => expect(runAgent).toHaveBeenCalledTimes(2));
 });
 
 it("reviews a knowledge draft through the host bridge and shows the applied operations", async () => {
@@ -500,13 +605,12 @@ const RECORD = { id: "record-x", group_id: "collection-1", schema_id: "schema-2"
 const EXPERIMENT_DEFINITION = { type: "object", required: ["sample_id"],
   properties: { sample_id: { type: "string" }, conductivity: { type: "number", description: "S/cm" } } };
 
-it("extracts records from an upload through a connected Lab assistant run, then publishes one on confirmation", async () => {
-  // The Lab assistant is connected with the experiment relationship; the Librarian
-  // (read only) is not offered for extraction.
+it.each(["experiment", "research"])("extracts records through a %s agent, then publishes on confirmation", async access => {
+  // Both writing roles can extract; the read-only Librarian cannot.
   useWorldStore.setState({
     cards: [{ id: "card-1", type: "knowledge.base", name: "Knowledge" }, { id: "lab", type: "agent", name: "Lab assistant" },
       { id: "librarian", type: "agent", name: "Librarian" }] as unknown as WorldCard[],
-    edges: [{ id: "e1", source: "lab", target: "card-1", relationship: "knowledge.base.experiment" },
+    edges: [{ id: "e1", source: "lab", target: "card-1", relationship: `knowledge.base.${access}` },
       { id: "e2", source: "librarian", target: "card-1", relationship: "knowledge.base.read" }] as unknown as WorldEdge[],
     catalog: TEST_CATALOG,
   });

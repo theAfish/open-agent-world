@@ -4,6 +4,18 @@
 
 A plugin is a Python package that registers cards and other contributions with OAW. You can start with a card and an editable field; add Agent tools or React views when your idea needs them.
 
+## Recommended: external IDE, SDKs and Coding Agents
+
+For complete Python/React Card Apps, develop in an external IDE or with a Coding
+Agent using `open_agent_world.plugin_api`, `@oaw/plugin-api` and the guides below.
+Implement behavior, connections and UI in source, build the Python wheel and
+frontend bundle, then package them as `.oawpack` with the
+[standard build workflow](../pack-distribution.md). This does not require the
+visual editor.
+
+The optional [Pack IDE (Experimental)](pack-ide.md), including Design / Function /
+Code and visual logic editing, is still in development.
+
 ## Fastest start: share a card without writing code
 
 [Make your first Pack in 10 minutes](quickstart-pack.md) creates a

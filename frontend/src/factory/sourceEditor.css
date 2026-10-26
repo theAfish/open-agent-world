@@ -1,0 +1,24 @@
+.pack-source-editor { display:flex; flex-direction:column; flex:1; height:100%; min-width:0; min-height:0; overflow:hidden; background:var(--card-surface,#fff); }
+.pack-source-editor-host { flex:1; min-height:0; min-width:0; overflow:hidden; }
+.pack-source-editor-status { display:flex; align-items:center; gap:18px; flex-shrink:0; padding:4px 12px; min-height:28px; border-top:1px solid var(--line,#dfe3da); background:var(--surface,#f6f7f4); color:var(--muted,#7c847e); font-size:10px; }
+.pack-source-editor-status button { margin-left:auto; border:0; background:transparent; padding:0 3px; min-height:22px!important; font-size:10px; color:inherit; }
+.pack-source-editor .cm-search input[type=checkbox] { min-height:0; width:auto; }
+.pack-source-editor .cm-search input:not([type=checkbox]) { width:160px; max-width:40%; }
+.pack-source-editor .cm-search button { min-height:24px; padding:2px 7px; }
+.pack-source-editor .cm-search label { font-size:11px; }
+
+.pack-source-editor { --code-keyword:#72449b; --code-string:#326b45; --code-function:#235d89; --code-number:#965326; --code-type:#7a4c14; --code-property:#354f77; --code-comment:#626f63; --code-invalid:#b32636; }
+:root[data-theme="dark"] .pack-source-editor { --code-keyword:#d5b6f2; --code-string:#b5d8a4; --code-function:#9dccf2; --code-number:#efc18a; --code-type:#e7d18d; --code-property:#becde8; --code-comment:#b0b9a8; --code-invalid:#ffaaa6; }
+.pack-source-editor .oaw-code-keyword { color:var(--code-keyword); }
+.pack-source-editor .oaw-code-string { color:var(--code-string); }
+.pack-source-editor .oaw-code-function { color:var(--code-function); }
+.pack-source-editor .oaw-code-number { color:var(--code-number); }
+.pack-source-editor .oaw-code-type { color:var(--code-type); }
+.pack-source-editor .oaw-code-property { color:var(--code-property); }
+.pack-source-editor .oaw-code-comment { color:var(--code-comment); }
+.pack-source-editor .oaw-code-invalid { color:var(--code-invalid); text-decoration:underline wavy; }
+.pack-source-editor .oaw-code-heading { color:var(--code-function); font-weight:600; }
+.pack-source-editor .oaw-code-link { color:var(--code-function); text-decoration:underline; }
+.pack-source-editor .oaw-code-strong { font-weight:700; }
+.pack-source-editor .oaw-code-emphasis { font-style:italic; }
+.pack-source-editor .oaw-code-strike { text-decoration:line-through; }

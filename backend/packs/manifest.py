@@ -11,10 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from backend import __version__
 from backend.plugins.registry import _supports_plugin_api
-from backend.plugins.tutorials import Tutorials, validate_tutorials
+from backend.packs.metadata import CreatorMetadata, PACK_ID
 from backend.sandbox.python_runtime import validate_requirements
 
-PACK_ID = r"^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$"
 FRONTEND_API_VERSION = 1
 
 
@@ -174,23 +173,6 @@ class Content(Model):
             if not value.startswith("content/") or not value.endswith(".json"):
                 raise ValueError("Content must be JSON files under content/")
         return values
-
-
-class CreatorMetadata(Model):
-    tutorials: Tutorials = ()
-
-    @model_validator(mode="after")
-    def validate_tutorial_content(self) -> Self:
-        validate_tutorials(self.tutorials)
-        return self
-
-    description: str = Field(default="", max_length=500)
-    author: str = Field(default="", max_length=120)
-    preparation: str = Field(default="", max_length=2000)
-    example: str = Field(default="", max_length=2000)
-    expected_result: str = Field(default="", max_length=2000)
-    accent_color: str = Field(default="#617b72", pattern=r"^#[0-9a-fA-F]{6}$")
-    packaging: Literal["standard", "premium", "paper", "collector"] = "standard"
 
 
 class PackManifest(Model):

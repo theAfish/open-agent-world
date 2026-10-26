@@ -740,7 +740,7 @@ class PackInstallationManager:
                 if (spec.owner, spec.version, spec.distribution_id, spec.packs, spec.node_types) != (
                         manifest.owner_id, manifest.version, manifest.id, manifest.provided_pack_ids, manifest.node_types):
                     raise ValueError('Wheel contributions differ from distribution ownership')
-                if not spec.entrypoints or not spec.contributions.cards:
+                if not spec.entrypoints or not (spec.contributions.cards or spec.designs):
                     raise ValueError('Expected advanced entrypoint with declarative contributions')
                 if (tuple(spec.entrypoints.values()) != (entry,)
                         or spec.compatibility.plugin_api != manifest.compatibility.plugin_api):

@@ -63,3 +63,9 @@
 .factory-error { color: #c34f42; overflow-wrap: anywhere; }.factory-message { color: #5d8a60; }.factory-review { border-left: 3px solid #8ca381; padding: 8px 12px; overflow-wrap: anywhere; }
 @container (min-width: 580px) { .factory-design-grid { grid-template-columns: minmax(0,1fr) 240px; }.factory-function-editor { grid-template-columns: minmax(0,1.2fr) minmax(0,1fr); } }
 @container (max-width: 320px) { .factory-row { flex-wrap: wrap; }.factory-row > label { flex-basis: 40%; } }
+
+/* Dense authored forms scroll instead of collapsing controls below a usable height. */
+.authoring-card .factory-artwork[data-print-proof] .factory-face-fields { grid-auto-rows: minmax(3.6em, 1fr); }
+.factory-developer-tools { margin-top:16px; border-top:1px solid var(--line); padding-top:10px; color:var(--muted); font-size:12px; }
+.factory-developer-tools summary { cursor:pointer; }
+.factory-developer-tools button { margin-top:8px; background:transparent; border:0; }

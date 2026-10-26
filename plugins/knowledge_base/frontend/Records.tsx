@@ -2,7 +2,7 @@ import { t, WorkspaceEmptyState, WorkspaceToolbar } from "@oaw/plugin-api";
 import type { PluginViewProps } from "@oaw/plugin-api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronDown, ChevronRight, Pencil, Sparkles, Table2 } from "lucide-react";
+import { ArrowRight, Check, CheckCircle2, ChevronDown, ChevronRight, FileText, LoaderCircle, Pencil, Sparkles, Table2 } from "lucide-react";
 import { InsightsSection } from "./Insights";
 import type { InsightKind } from "./Insights";
 import { RecordForm } from "./RecordForm";
@@ -10,6 +10,7 @@ import { RecordTable, flattenValues } from "./RecordView";
 import type { Definition } from "./RecordView";
 import { SchemaEditor } from "./SchemaEditor";
 import type { SchemaDetail, SchemaItem } from "./SchemaEditor";
+import "./ResultsFlow.css";
 
 export type RecordItem = { id: string; group_id: string; schema_id: string; bundle_id: string | null; name: string;
   data: Record<string, unknown>; validation: { valid?: boolean; errors?: string[]; missing?: string[] } | null;
@@ -36,6 +37,7 @@ type Props = {
   modelSelect: ReactNode; groupSelect: ReactNode; refreshControls: ReactNode; banner: ReactNode;
   setNotice: (value: string) => void; setError: (value: string) => void;
   onOpenSource: (sourceId: string) => void;
+  onAddSources?: () => void;
   kindLabel: (kind: InsightKind) => string;
   /** A record another part of the card asked to open here (an insight's evidence). */
   focusRecordId: string; onFocused: () => void;
@@ -51,12 +53,13 @@ const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 export function RecordsSection({
   host, cardId, deployed, busy, version, schemas, records, sources, schemaId, onSchemaChange, activeGroup, groupCount,
   groupArgs, groupFilter, call, perform, request, refresh, extractAgent, labAgent, selectedModel,
-  modelSelect, groupSelect, refreshControls, banner, setNotice, setError, onOpenSource, kindLabel, focusRecordId, onFocused,
+  modelSelect, groupSelect, refreshControls, banner, setNotice, setError, onOpenSource, onAddSources, kindLabel, focusRecordId, onFocused,
 }: Props) {
   const [schemaDetails, setSchemaDetails] = useState<Record<string, SchemaDetail>>({});
   const [picked, setPicked] = useState<string[]>([]);
   const [replace, setReplace] = useState(false);
   const [extracting, setExtracting] = useState<{ agent_id: string }>();
+  const [requesting, setRequesting] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [details, setDetails] = useState<Record<string, RecordDetail>>({});
   const [editingId, setEditingId] = useState("");
@@ -66,9 +69,25 @@ export function RecordsSection({
   const [query, setQuery] = useState("");
   const [insightSchemaId, setInsightSchemaId] = useState("");
   const generation = useRef(0);
+  const schemaPanel = useRef<HTMLDetailsElement>(null);
+  const extractionPanel = useRef<HTMLDetailsElement>(null);
+  const recordPanel = useRef<HTMLElement>(null);
+  const insightPanel = useRef<HTMLElement>(null);
 
   const currentSchema = schemas.find(item => item.id === schemaId);
   const scoped = records.filter(item => !currentSchema || item.schema_id === currentSchema.id);
+  const draftCount = scoped.filter(item => item.status === "draft").length;
+  const approvedCount = scoped.length - draftCount;
+  const processing = !!extracting || requesting;
+  const reveal = (panel: HTMLDetailsElement | null) => {
+    if (!panel) return;
+    panel.open = true;
+    panel.scrollIntoView?.({ block: "nearest", behavior: "auto" });
+  };
+  const showRecords = (nextStatus: "" | "draft" | "published" = "draft") => {
+    setStatus(nextStatus); setQuery("");
+    recordPanel.current?.scrollIntoView?.({ block: "start", behavior: "auto" });
+  };
 
   // Definitions by schema id: the tables and the edit form need the properties.
   useEffect(() => {
@@ -85,6 +104,13 @@ export function RecordsSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [call, schemas]);
   useEffect(() => () => { generation.current += 1; }, []);
+  useEffect(() => {
+    const available = new Set(sources.map(item => item.id));
+    setPicked(previous => {
+      const next = previous.filter(id => available.has(id));
+      return next.length === previous.length ? previous : next;
+    });
+  }, [sources]);
 
   const loadDetail = useCallback(async (id: string) => {
     const current = generation.current;
@@ -112,9 +138,10 @@ export function RecordsSection({
 
   const extract = () => perform(async () => {
     if (!currentSchema) throw new Error(t("Choose a schema first"));
-    if (!picked.length) throw new Error(t("Select at least one converted source first"));
+    const sourceIds = picked.filter(id => sources.some(item => item.id === id));
+    if (!sourceIds.length) throw new Error(t("Select at least one converted source first"));
     if (extractAgent && host.runAgent && !deployed) {
-      const body = { schema_id: currentSchema.id, schema_name: currentSchema.name, source_ids: picked, knowledge_card: cardId, replace_drafts: replace };
+      const body = { schema_id: currentSchema.id, schema_name: currentSchema.name, source_ids: sourceIds, knowledge_card: cardId, replace_drafts: replace };
       await host.runAgent(extractAgent.id, [
         "Perform the record extraction described by the JSON data below.",
         "RECORD EXTRACTION REQUEST", JSON.stringify(body), "END RECORD EXTRACTION REQUEST",
@@ -124,19 +151,21 @@ export function RecordsSection({
         "(an empty list when the document reports nothing for the schema). Then report what you saved and what was unclear.",
       ].join("\n"));
       setExtracting({ agent_id: extractAgent.id });
-      setNotice(t("{v0} is reading {v1} source(s) with \"{v2}\"…", { v0: extractAgent.name, v1: picked.length, v2: currentSchema.name }));
+      setNotice(t("{v0} is reading {v1} source(s) with \"{v2}\"…", { v0: extractAgent.name, v1: sourceIds.length, v2: currentSchema.name }));
       return;
     }
     if (!selectedModel) throw new Error(deployed
       ? t("This deployment has no default model configured yet")
       : t("Configure a model connection first, or connect an Agent with the Knowledge extract relationship"));
+    setRequesting(true);
     const result = await request(`knowledge/${cardId}/records`, {
-      schema_id: currentSchema.id, source_ids: picked, model: selectedModel, replace_drafts: replace }, deployed);
+      schema_id: currentSchema.id, source_ids: sourceIds, model: selectedModel, replace_drafts: replace }, deployed)
+      .finally(() => setRequesting(false));
     const saved = result.records as unknown[];
     const invalid = result.invalid as number;
     setNotice(invalid
       ? t("Read {v0} record(s); {v1} do not satisfy the schema — open them to see why", { v0: saved.length, v1: invalid })
-      : t("Read {v0} record(s) from {v1} source(s) · review and publish them below", { v0: saved.length, v1: picked.length }));
+      : t("Read {v0} record(s) from {v1} source(s) · review and publish them below", { v0: saved.length, v1: sourceIds.length }));
     setPicked([]);
     await refresh();
   });
@@ -211,7 +240,7 @@ export function RecordsSection({
   }, {});
   const canRunAgent = !deployed && typeof host.runAgent === "function" && !!extractAgent;
   const blocker = !currentSchema ? t("Choose a schema above to extract records with.")
-    : extracting ? t("An extraction is already running.")
+    : processing ? t("An extraction is already running.")
     : (!canRunAgent && !selectedModel) ? (deployed ? t("This deployment has no default model configured yet.")
       : t("Configure a model connection in OAW Settings, or connect an Agent to this card with the Knowledge extract relationship."))
     : "";
@@ -219,9 +248,9 @@ export function RecordsSection({
   return <>
     <WorkspaceToolbar label={t("Records")} className="knowledge-section-toolbar">
       {groupSelect}
-      <label className="knowledge-groupselect">
+      <label className="knowledge-groupselect knowledge-result-schema" data-needed={!currentSchema && !!sources.length || undefined}>
         <span className="knowledge-visually-hidden">{t("Record schema")}</span>
-        <select aria-label={t("Record schema")} value={currentSchema?.id ?? ""} disabled={busy} onChange={event => onSchemaChange(event.target.value)}>
+        <select aria-label={t("Record schema")} value={currentSchema?.id ?? ""} disabled={busy || processing} onChange={event => onSchemaChange(event.target.value)}>
           <option value="">{schemas.length ? t("All schemas") : t("No schema yet")}</option>
           {schemas.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
@@ -230,50 +259,78 @@ export function RecordsSection({
     </WorkspaceToolbar>
     {banner}
 
-    <details className="knowledge-disclosure knowledge-workflow" open={!schemas.length || undefined}>
-      <summary>{t("Schemas")} {!!schemas.length && <span className="knowledge-total">{schemas.length}</span>}</summary>
-      <p className="knowledge-meta">{t("A schema names the fields to read out of each source — say, the ionic conductivity of every solid electrolyte a paper reports — as a JSON Schema plus the prompt that explains it.")}</p>
-      <SchemaEditor busy={busy} schemas={schemas} kind="literature" call={call} perform={perform} compact
-        onSaved={async saved => { setSchemaDetails(previous => { const next = { ...previous }; delete next[saved.id]; return next; }); onSchemaChange(saved.id); await refresh(); }} />
-    </details>
+    <ol className="knowledge-result-steps" aria-label={t("Record workflow")}>
+      <li data-state={sources.length ? "complete" : "current"}><button type="button" disabled={busy || (!sources.length && !onAddSources)}
+        onClick={() => sources.length ? reveal(extractionPanel.current ?? schemaPanel.current) : onAddSources?.()}>
+        <span className="knowledge-result-step-icon">{sources.length ? <Check size={17} /> : <FileText size={17} />}</span>
+        <span><strong>{t("Sources")}</strong><small>{t("{v0} ready", { v0: sources.length })}</small></span></button></li>
+      <li data-state={processing ? "running" : scoped.length ? "complete" : sources.length ? "current" : undefined}><button type="button" disabled={busy || !sources.length}
+        onClick={() => reveal(schemas.length ? extractionPanel.current : schemaPanel.current)}>
+        <span className="knowledge-result-step-icon">{processing ? <LoaderCircle size={17} /> : <Table2 size={17} />}</span>
+        <span><strong>{t("Extract records")}</strong><small>{currentSchema?.name ?? t("Choose fields")}</small></span></button></li>
+      <li data-state={draftCount ? "current" : approvedCount ? "complete" : undefined}><button type="button" disabled={busy || !scoped.length}
+        onClick={() => showRecords(draftCount ? "draft" : "published")}>
+        <span className="knowledge-result-step-icon">{approvedCount && !draftCount ? <Check size={17} /> : <CheckCircle2 size={17} />}</span>
+        <span><strong>{t("Review and publish")}</strong><small>{draftCount ? t("{v0} to review", { v0: draftCount }) : t("{v0} published", { v0: approvedCount })}</small></span></button></li>
+    </ol>
 
-    {!!schemas.length && <details className="knowledge-disclosure knowledge-workflow" open={!scoped.length || undefined}>
-      <summary>{t("Extract records")}</summary>
+    {!sources.length && !scoped.length && <WorkspaceEmptyState className="knowledge-results-start" icon={<FileText size={30} />}
+      title={t("Compare what your papers report")}
+      description={t("Start with a converted source, then choose the fields to collect.")}
+      actions={onAddSources && <button type="button" className="knowledge-primary" disabled={busy} onClick={onAddSources}>
+        {t("Add sources")}<ArrowRight size={15} /></button>} />}
+
+    {(!!sources.length || !!schemas.length) && <details ref={schemaPanel} className="knowledge-disclosure knowledge-workflow knowledge-results-setup" open={!schemas.length || undefined}>
+      <summary>{t("Schemas")} {!!schemas.length && <span className="knowledge-total">{schemas.length}</span>}</summary>
+      <p className="knowledge-empty">{t("Choose the fields you want to compare.")}</p>
+      <SchemaEditor busy={busy || processing} schemas={schemas} kind="literature" call={call} perform={perform} compact
+        onSaved={async saved => { setSchemaDetails(previous => { const next = { ...previous }; delete next[saved.id]; return next; }); onSchemaChange(saved.id); await refresh(); }} />
+    </details>}
+
+    {!!schemas.length && !!sources.length && <details ref={extractionPanel} className="knowledge-disclosure knowledge-workflow knowledge-results-setup" open={!scoped.length || undefined}>
+      <summary>{t("Extract records")}{!!picked.length && <span className="knowledge-total">{t("{v0} selected", { v0: picked.length })}</span>}</summary>
       <p className="knowledge-meta">{canRunAgent && extractAgent
         ? t("Runs the connected {v0}, which reads each source against the schema and saves draft records itself.", { v0: extractAgent.name })
         : t("Reads each selected source against the schema with one model call through the selected model.")}</p>
       {!canRunAgent && !deployed && modelSelect}
       {deployed && <p className="knowledge-meta">{t("Model: {v0}", { v0: selectedModel || t("none configured") })}</p>}
-      {!sources.length ? <p className="knowledge-empty">{t("Convert a source in Sources first.")}</p> : <ul className="knowledge-list">
-        {sources.map(item => <li key={item.id} className="knowledge-checkrow">
-          <label><input type="checkbox" checked={picked.includes(item.id)} disabled={busy}
-            onChange={event => setPicked(event.target.checked ? [...picked, item.id] : picked.filter(value => value !== item.id))} />
-            <span className="knowledge-visually-hidden">{t("Select {v0}", { v0: item.filename })}</span>
-          </label>
+      {!sources.length ? <p className="knowledge-empty">{t("Convert a source in Sources first.")}</p> : <ul className="knowledge-list knowledge-result-sources">
+        {sources.map(item => <li key={item.id} className="knowledge-checkrow" data-selected={picked.includes(item.id) || undefined}>
+          <label className="knowledge-result-source"><input type="checkbox" checked={picked.includes(item.id)} disabled={busy || processing}
+            aria-label={t("Select {v0}", { v0: item.filename })}
+            onChange={event => { const checked = event.target.checked; setPicked(previous => checked ? [...previous, item.id] : previous.filter(value => value !== item.id)); }} />
+          <FileText size={19} aria-hidden="true" />
           <span className="knowledge-checkrow-label"><span>{item.filename}</span>
             <small>{!activeGroup && item.group_name && groupCount > 1 ? `${item.group_name} · ` : ""}{t("{v0} records", { v0: item.records })}</small></span>
+          </label>
         </li>)}
       </ul>}
+      {processing && <div role="status" className="knowledge-results-running"><LoaderCircle size={17} />{t("Reading the selected sources…")}<progress /></div>}
       <div className="knowledge-formbar">
         <button type="button" className="knowledge-primary" disabled={busy || !!blocker || !picked.length} onClick={() => void extract()}>
-          <Sparkles size={14} />{extracting ? t("Extracting…") : t("Extract from {v0} selected", { v0: picked.length })}</button>
-        <label className="knowledge-checkrow"><input type="checkbox" checked={replace} disabled={busy} onChange={event => setReplace(event.target.checked)} />
+          <Sparkles size={14} />{processing ? t("Extracting…") : t("Extract from {v0} selected", { v0: picked.length })}</button>
+        <label className="knowledge-checkrow"><input type="checkbox" checked={replace} disabled={busy || processing} onChange={event => setReplace(event.target.checked)} />
           {t("Replace these sources' draft records for this schema (published ones stay)")}</label>
       </div>
       {blocker && <p className="knowledge-empty">{blocker}</p>}
     </details>}
 
-    {!!schemas.length && <section className="knowledge-insight-block">
-      <h4>{t("Records")} {!!scoped.length && <span className="knowledge-total">{scoped.length}</span>}</h4>
+    {!!schemas.length && (!!sources.length || !!scoped.length) && <section ref={recordPanel} className="knowledge-insight-block knowledge-result-review">
+      <div className="knowledge-result-heading"><h4>{t("Records")} {!!scoped.length && <span className="knowledge-total">{scoped.length}</span>}</h4>
+        {!!approvedCount && <button type="button" disabled={busy} onClick={() => insightPanel.current?.scrollIntoView?.({ block: "start", behavior: "auto" })}>
+          <Sparkles size={14} />{t("Explore insights")}<ArrowRight size={14} /></button>}</div>
       {!!scoped.length && <div className="knowledge-formbar knowledge-record-filters">
         <input type="search" value={query} disabled={busy} aria-label={t("Filter records")} placeholder={t("Filter records…")}
           onChange={event => setQuery(event.target.value)} />
         <span className="knowledge-kind-filter" role="group" aria-label={t("Status")}>
           {(["", "draft", "published"] as const).map(value => <button key={value} type="button" aria-pressed={status === value} disabled={busy}
-            onClick={() => setStatus(value)}>{value === "" ? t("All") : value === "draft" ? t("Drafts") : t("Published")}</button>)}
+            onClick={() => setStatus(value)}>{value === "" ? t("All") : value === "draft" ? t("Drafts") : t("Published")}
+            <span className="knowledge-result-count">{value === "" ? scoped.length : value === "draft" ? draftCount : approvedCount}</span></button>)}
         </span>
       </div>}
-      {!scoped.length && <p className="knowledge-empty">{t("No records yet. Extract some above.")}</p>}
+      {!scoped.length && !!sources.length && <WorkspaceEmptyState className="knowledge-results-start is-compact" icon={<Table2 size={25} />}
+        title={t("Your comparison starts here")}
+        actions={<button type="button" disabled={busy} onClick={() => reveal(extractionPanel.current)}>{t("Select sources")}<ArrowRight size={14} /></button>} />}
       <ul className="knowledge-record-rows">
         {filtered.map(record => {
           const open = expanded.has(record.id);
@@ -341,7 +398,7 @@ export function RecordsSection({
       </ul>
     </section>}
 
-    {!!schemas.length && <section className="knowledge-insight-block knowledge-embedded-insights">
+    {!!schemas.length && !!scoped.length && <section ref={insightPanel} className="knowledge-insight-block knowledge-embedded-insights">
       <h4>{t("Insights")}</h4>
       <InsightsSection host={host} cardId={cardId} deployed={deployed} busy={busy} version={version} embedded schemaKind="literature"
         schemas={schemas} schemaId={schemas.some(item => item.id === insightSchemaId) ? insightSchemaId : ""} onSchemaChange={setInsightSchemaId}
@@ -349,9 +406,8 @@ export function RecordsSection({
         labAgent={labAgent} canRunAgent={!deployed && typeof host.runAgent === "function" && !!labAgent} selectedModel={selectedModel}
         modelSelect={modelSelect} groupSelect={groupSelect} refreshControls={refreshControls} banner={null}
         setNotice={setNotice} setError={setError} kindLabel={kindLabel}
+        onOpenExperiments={() => showRecords("draft")}
         onOpenRecord={id => { if (!expanded.has(id)) toggle(id); }} />
     </section>}
-    {!schemas.length && <WorkspaceEmptyState icon={<Table2 size={24} />} title={t("Structured data from your sources")}
-      description={t("Create a schema above, read your converted sources with it, publish the records, and extract insights over them.")} />}
   </>;
 }

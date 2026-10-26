@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FACE_MODES, faceStudio, presetSurface, resizeDesign, snapBox } from './faceDesign';
+import { FACE_MODES, cardStudio, faceStudio, presetSurface, resizeDesign, snapBox } from './faceDesign';
 import { cardPresentation, useNodeSurfaceStore } from '../state/nodeSurfaces';
 import { TEST_CATALOG } from '../state/catalog.fixture';
 import type { FaceDesign } from './types';
@@ -44,5 +44,19 @@ describe('authored face geometry', () => {
     useNodeSurfaceStore.getState().syncCards([next], catalog);
     expect(useNodeSurfaceStore.getState().surfaceLevels.authored).toBe('preview');
     expect(useNodeSurfaceStore.getState().surfaceSizes.authored.preview).toEqual({ width: 600, height: 200 });
+  });
+
+  it('uses Schema 3 project geometry without putting the design into instance configuration', () => {
+    const type = { ...TEST_CATALOG.node_types[0], id: 'example.visual.card', authoring: {
+      face: { ...face, studio: faceStudio(face) }, function: { fields: [], operation: 'template' as const, template: '', separator: '' },
+      action: 'run', result_key: 'result', surfaces: ['body' as const],
+    } };
+    const catalog = { ...TEST_CATALOG, node_types: [type] };
+    const card = { id: 'project-card', type: type.id, config: {} };
+    useNodeSurfaceStore.getState().syncCards([card], catalog);
+    expect(cardPresentation(card, catalog).open).toBe('workspace');
+    expect(useNodeSurfaceStore.getState().surfaceSizes[card.id].inspector).toEqual({ width: 438, height: 570 });
+    type.authoring.surfaces = [];
+    expect(cardStudio(card, catalog)).toBeUndefined();
   });
 });

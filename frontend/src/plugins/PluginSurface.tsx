@@ -19,6 +19,7 @@ import { useWorkspaceAccess } from "../workspace/WorkspaceAccess";
 import { useWorkspaceNavigation } from '../workspace/WorkspaceNavigation';
 import { useExecutionSources } from './executionSources';
 import { registerPluginVisualCapture } from "./visualCapture";
+import { AuthoringCardView } from '../factory/AuthoringCardView';
 
 function subscribeToDocumentChanges(listener: (change: PluginDocumentChange) => void): () => void {
   // Events are prepended and bounded by the world store. Snapshot existing IDs
@@ -238,7 +239,8 @@ export function PluginSurface({ card, slot, level, children }: {
   const reference = definition?.frontend?.[slot];
   if (covered && !inWorkspace && card.type.startsWith('xrd.')) return null;
   if (!reference || !definition) return <>{children}</>;
-  const View = definition.traits.includes('ui.factory-card.v1') && reference === 'factory-card'
+  const View = definition.authoring && reference === 'oaw.authoring-card' ? AuthoringCardView
+    : definition.traits.includes('ui.factory-card.v1') && reference === 'factory-card'
     ? PrintedCardView : pluginView(definition.plugin_id, reference, runtime);
   return <PluginBoundary key={`${card.id}:${definition.plugin_id}:${runtime?.version}:${reference}:${card.state_scope}:${sessionId ?? ""}`}>
     <Suspense fallback={<p role="status">{t("Loading Pack view...")}</p>}>

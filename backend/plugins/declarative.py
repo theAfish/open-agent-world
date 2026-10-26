@@ -71,14 +71,30 @@ def config_model(schema: dict):
 def contribute_cards(registration, spec):
     """Populate the same staging collector before an advanced register hook."""
     from backend.plugins.registry import NodeTypeDefinition
+    from backend.plugins.resources import NodeResourceAction
     for card in spec.contributions.cards:
         name = card.name or spec.name
+        interface = spec.designs.get(card.id)
+        actions = {}
+        schema = card.config_schema
+        # Advanced hooks own their behavior. A passive contribution gets the
+        # bounded Function Designer operation through the ordinary dispatcher.
+        if interface is not None and not spec.entrypoints:
+            schema = {**schema, 'properties': dict(schema.get('properties', {}))}
+            for input_field in interface.function.fields:
+                schema['properties'].setdefault(input_field.key, {
+                    'type': {'text': 'string', 'number': 'number', 'boolean': 'boolean'}[input_field.type],
+                    'title': input_field.label, 'default': input_field.default})
+            def run(context, arguments, design=interface):
+                return {design.result_key: design.function.run(arguments)}
+            actions[interface.action] = NodeResourceAction(run)
         registration.register_node_type(NodeTypeDefinition(
             id=card.id, label=name, description=card.description, icon=card.icon, color=card.color,
             deck_id=card.deck_id or spec.owner + '.cards', deck_label=card.deck_name or spec.name, deck_icon=card.icon,
             default_name=card.default_name or name, default_size=card.size,
             default_status=card.default_status or card.statuses[0],
-            statuses=frozenset(card.statuses), config_model=config_model(card.config_schema), frontend=card.frontend,
+            statuses=frozenset(card.statuses), config_model=config_model(schema), frontend=card.frontend,
+            resource_actions=actions,
             surfaces={'preview': True, 'inspector': True, 'workspace': 'workspace' in card.frontend}))
 
 
@@ -95,6 +111,8 @@ def declarative_plugin(spec):
 
     def register(registration):
         contribute_cards(registration, spec)
+        from backend.packs.interfaces import apply_interfaces
+        apply_interfaces(registration, spec)
         registration.register_pack(PackDefinition(id=spec.packs[0], name=spec.name,
                                                  cards=tuple(card.id for card in spec.contributions.cards)))
     return PluginDefinition(descriptor, register)

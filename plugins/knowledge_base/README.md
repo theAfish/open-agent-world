@@ -111,20 +111,21 @@ base, a **Lab assistant** Agent and a Conversation, already wired and already la
 the card on one side with a rail for its two workflows, **Literature** and
 **Experiment**, and the conversation beside it.
 
-**You drive the pipeline; the Lab assistant reads, and drafts experiment records
-only when you ask.** Uploading a file, converting it, opening a knowledge draft,
-extracting it, publishing it and publishing a record are buttons in the workspace.
-The Lab assistant holds **Knowledge experiment**: every read tool — it can tell you
-what the base contains, search or read a converted document back to you, read
-knowledge drafts, records and insights (and the statistics behind them) and query
-the published graph — plus the experiment half: it is what the Experiment workflow's
-**Extract records** and **Extract insights** buttons start when it is connected, and
-the one you ask in the conversation to fix a draft record or a draft insight. It
-cannot ingest, convert, write a knowledge draft or publish anything. Nothing enters
-the graph, and no record or insight is published, except by your click. Connect a
-second Agent with **Knowledge extract** to hand it the literature half — naming a
-source's concepts into a knowledge draft you opened, reading records out of a source
-with a schema — or with **Knowledge read** for a strictly read-only one beside it.
+**Ask the Lab assistant to work with your files.** The formation uses **Knowledge
+research**: attach a PDF, text file, spreadsheet or supported image in the
+Conversation and ask for reading, comparison or extraction. The assistant imports
+the authorized attachment and starts conversion, follows the job, then reads and
+cites its contents. No Sandbox or second upload through Sources is required.
+Reading and document search do not require schemas, a graph or publication.
+
+For structured work the assistant can prepare a schema, an experiment upload or a
+knowledge draft, extract the requested records or concepts, and review drafts.
+It can also inspect and query a separately connected database through that card's
+own tools and read permission. It never receives arbitrary database/file access.
+You still review and publish records, knowledge and insights. Model settings and
+destructive management remain outside the assistant's tools. The narrower
+**Knowledge read**, **Knowledge extract** and **Knowledge experiment** relationships
+retain their existing scopes for assistants that need less access.
 
 Saving your own knowledge Legion works too, but note what a copy is: the node type is
 templateable while the database is not captured, so **a deployed copy is an empty
@@ -144,10 +145,12 @@ ever shows.
 1. **Sources** — organize documents into **groups** (create, rename or delete one
    from **Manage groups** beside the group selector), then add PDF,
    markdown, text, CSV, TSV, Excel (`.xlsx`), image or JSON files up to 32 MiB each.
-   Uploading never converts a file on its own: select one or more sources and press
-   **Process** — alone or in a batch — to queue their markdown conversion. The
-   conversion jobs and their progress or failures live in this same section, right
-   below the source list, not in a tab of their own. Sources also holds full-text
+   Drop files onto the source area or choose **Add documents**. Each uploaded file
+   starts conversion automatically; the source row shows its status and offers
+   **Retry** after a failure. Existing pending files can still be processed alone
+   or in a batch. Detailed conversion jobs are available below the source list.
+   Ready documents offer **Read documents**, **Build knowledge**, and **Extract
+   records**; reading does not require a schema or a published graph. Sources also holds full-text
    **search** over every already-converted document — ranked, each result carrying
    the source filename and the heading it falls under, and a click jumps straight
    to that source. Click a converted source to read its formatted document (a
@@ -155,7 +158,9 @@ ever shows.
    switches to the raw text.
 2. **Knowledge** — the concept graph of your literature, with no schema to write.
    **New draft** picks one or more converted sources and opens a **knowledge
-   draft** over them; **Extract** reads each source a few sections at a time —
+   draft** over them. **Build knowledge** in Sources preselects your ready materials.
+   The draft's **Extract → Review → Publish** stages show actual source and review
+   progress, with the current action beside it. **Extract** reads each source a few sections at a time —
    through a connected Agent holding **Knowledge extract** when there is one, else
    one model call per chunk of sections (a short document is one call) — and names
    the concepts it is about and the relations it states between them. Nodes are
@@ -332,6 +337,8 @@ rebuilds the literature layer from all published drafts; neither action has a to
 name, as rewriting published knowledge is a person's decision. `knowledge_update` is how a connected
 agent edits a draft when asked to; `knowledge_draft_manage` (open, retitle, delete)
 and `knowledge_review` (publish, unpublish) have no tool name on any transport.
+Research agents open or reuse an unpublished draft with the separate
+`knowledge_draft_open` tool, which does not expose deletion or publication.
 Publishing a concept another published draft already wrote unions its aliases and
 sources with the node's. Databases from before this model are re-keyed once on open
 (`knowledge_migration.py`): typed nodes with one name collapse onto one concept, and
@@ -487,10 +494,12 @@ it proxies instead of opening the store itself.
 {"command": "kb", "args": ["mcp", "--store", "/home/you/kb", "--collection", "default"]}
 ```
 
-The server exposes the same tools with the same names and schemas an OAW Agent
-sees, on stdio. `ingest`, `process`, `groups`, `settings`, `knowledge_draft_manage`,
-`knowledge_review`, the experiment upload/publish actions and `insight_review` are
-absent, exactly as they are absent from every relationship in OAW.
+The server exposes the shared operation table's agent tools on stdio, including
+selected-source processing, schema management, draft opening and upload preparation.
+Raw file bodies, broad management actions and publication are not tools.
+`knowledge_import_artifact` is OAW-only: it requires the host's independently
+authorized Conversation/Artifact reference. OAW also adds bounded `wait_seconds`
+to `knowledge_jobs`; standalone callers can poll jobs after ingesting through CLI/HTTP.
 
 ### The two modes coexist — one writer per store
 
@@ -523,6 +532,23 @@ conversion, create/delete) is covered by
 | Knowledge read | `knowledge_overview`, `knowledge_sources`, `knowledge_markdown`, `knowledge_document_search`, `knowledge_schemas`, `knowledge_drafts`, `knowledge_source_outline`, `knowledge_lookup`, `knowledge_experiments`, `knowledge_experiment_bundles`, `knowledge_insights`, `knowledge_graph`, `knowledge_jobs` |
 | Knowledge extract | Read tools plus `knowledge_extract_prompt`, `knowledge_save`, `knowledge_update`, `knowledge_audit_prompt`, `knowledge_audit_apply`, `knowledge_record_extract_prompt`, `knowledge_record_save` |
 | Knowledge experiment | Read tools plus `knowledge_experiment_extract_prompt`, `knowledge_experiment_save`, `knowledge_experiment_update`, `knowledge_insight_prompt`, `knowledge_insight_save`, `knowledge_insight_update` |
+| Knowledge research | Both extraction paths plus `knowledge_import_artifact`, `knowledge_process`, `knowledge_schema_manage`, `knowledge_draft_open`, `knowledge_experiment_bundle_prepare` and `knowledge_graph_index_build` |
+
+`knowledge_schemas` allows only list/get for agents. Schema writes require the
+separate management capability; schemas used by published records cannot be
+changed by an agent. `knowledge_graph_index` reports status; explicit index
+building requires its own capability. The existing desktop actions stay compatible.
+
+An import takes a live `source` selector, `version_id` and `path`, plus an optional
+group or experiment upload. The host validates the source session, reference,
+manifest, size and checksum; only then can the plugin retain the bytes. Both
+source and destination permissions are rechecked before persistence. File bytes
+never appear in the tool arguments or results. A repeated reference in the same
+group/upload reuses its persisted source, including after restart. The result
+includes the source, conversion job and `next_step`; poll `knowledge_jobs` with
+`job_id` and `wait_seconds` (up to 30) to await completion without holding the
+resource mutation lock. A failed conversion can resume through `knowledge_process`;
+changing converter settings creates a separate attempt and retains failure history.
 
 `knowledge_graph` answers "what does the base say about X (and Y)" and is the first
 tool the Lab assistant calls for any question about the base. It has **one search
@@ -554,9 +580,13 @@ above the mean cosine) *and* clear an absolute floor (0.45, tuned on qwen3
 text-embedding), so an unrelated question matches nothing. The graph text is sent to
 the chosen endpoint. Empty means off, and a chat default model is never used for this.
 
-The Lab assistant's instruction is copied into the agent when the Lab Manager
-formation is created, so an existing formation keeps its old guidance: recreate it, or
-paste the current instruction from `preset.py` into the agent's system instruction.
+The Lab assistant's instruction and connection are copied when the formation is
+created. Existing formations keep their saved instructions and narrower grants;
+updating the Pack does not silently broaden them or overwrite custom instructions.
+To upgrade an existing assistant while preserving its KB and history, change its
+connection to **Knowledge research** and replace its old stock instruction with
+`INSTRUCTION` from `preset.py` (merge deliberately if it was customized). Do not
+delete or recreate the Knowledge Base card to upgrade its assistant.
 
 Uploading raw data (`ingest`, `experiment_ingest`), converting it (`process`),
 managing groups (`groups`), knowledge drafts (`knowledge_draft_manage`) and
@@ -565,14 +595,16 @@ experiment uploads (`experiment_bundle_manage`), changing card settings
 (`knowledge_review`), reviewing the published graph (`knowledge_graph_audit_prompt`,
 `knowledge_graph_audit_apply`), a record (`experiment_review`) or an insight
 (`insight_review`) have **no capability kind at all**, so no relationship can reach
-them and no Agent can call them. Publishing anything stays a human act performed on
+them directly. The research connection instead grants the bounded import,
+selected-source conversion, schema management, draft opening and upload preparation
+operations described above. Publishing anything stays a human act performed on
 the canvas. Agents
 cannot pass desktop confirmation arguments. `knowledge_overview` still reports every
 group by name and count, and every read tool accepts an optional `group_id` to
 narrow its answer to one group, so the Lab assistant can talk about how the base is
 organized without being able to reorganize it.
 
-Every Agent connected by a Knowledge read, extract or experiment edge is listed under
+Every Agent connected by a Knowledge read, extract, experiment or research edge is listed under
 **Connected agents** in the engineering Settings section, each with its own model
 picker — the same catalog of connections configured on the canvas. This exists
 because the Agent's own card is not part of this workspace's layout, so there would

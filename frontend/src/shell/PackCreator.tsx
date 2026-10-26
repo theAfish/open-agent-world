@@ -5,6 +5,7 @@ import { t } from '../i18n';
 import type { LegionSummary } from '../types/world';
 import type { CreatorInspection, CreatorMetadata, CreatorRequest } from '../types/packs';
 import { PACK_DESIGNS, PACK_PACKAGING, packPackaging } from './packDesign';
+import { exportedPackFile, MarketplacePublish, PACK_ID_PATTERN, PackIdGuidance } from './PackPublishing';
 import './packCreator.css';
 
 export function PackGuide({ creator }: { creator?: CreatorMetadata | null }) {
@@ -26,24 +27,25 @@ export function PackCreator({ legion }: { legion: LegionSummary }) {
   const [review, setReview] = useState<{ key: string; result: CreatorInspection }>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [downloaded, setDownloaded] = useState(false);
-  const key = JSON.stringify(draft);
+  const [downloaded, setDownloaded] = useState<{ key: string; file: File }>();
+  const key = JSON.stringify({ draft, revision: legion.revision });
   const current = review?.key === key;
-  const change = (patch: Partial<CreatorRequest>) => { setDraft(value => ({ ...value, ...patch })); setDownloaded(false); };
+  const change = (patch: Partial<CreatorRequest>) => { setDraft(value => ({ ...value, ...patch })); setDownloaded(undefined); };
   const metadata = (field: keyof CreatorMetadata, value: string) => change({ creator: { ...draft.creator, [field]: value } });
   const inspect = async () => {
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setDownloaded(undefined); setReview(undefined);
     try { setReview({ key, result: await worldApi.inspectContentPack(draft) }); }
     catch (cause) { setError(apiErrorMessage(cause)); }
     finally { setBusy(false); }
   };
   const download = async () => {
-    setBusy(true); setError('');
+    if (!current || !review?.result.can_export) return;
+    setBusy(true); setError(''); setDownloaded(undefined);
     try {
-      const blob = await worldApi.exportContentPack(draft);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a'); link.href = url; link.download = `${draft.id}-${draft.version}.oawpack`;
-      link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); setDownloaded(true);
+      const file = exportedPackFile(await worldApi.exportContentPack(draft), review.result.manifest);
+      const url = URL.createObjectURL(file);
+      const link = document.createElement('a'); link.href = url; link.download = file.name;
+      link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); setDownloaded({ key, file });
     } catch (cause) { setError(apiErrorMessage(cause)); }
     finally { setBusy(false); }
   };
@@ -64,9 +66,10 @@ export function PackCreator({ legion }: { legion: LegionSummary }) {
           {([['preparation', 'Preparation'], ['example', 'Example task'], ['expected_result', 'Expected result']] as const).map(([field, label]) =>
             <label key={field}>{t(label)}<textarea rows={2} maxLength={2000} value={draft.creator[field]} onChange={event => metadata(field, event.target.value)} /></label>)}
         </details>
-        <details><summary>{t('Pack identity')}</summary>
-          <label>{t('Pack ID')}<input required maxLength={120} pattern="[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+" value={draft.id} onChange={event => change({ id: event.target.value })} /></label>
+        <details open><summary>{t('Pack identity')}</summary>
+          <label>{t('Pack ID')}<input required maxLength={120} pattern={PACK_ID_PATTERN} value={draft.id} onChange={event => change({ id: event.target.value })} /></label>
           <p>{t('Keep this ID for updates; increase the version for each release.')}</p>
+          <PackIdGuidance />
         </details>
         {review?.result.nodes.some(node => node.has_state) && <div className="pack-creator-content"><strong>{t('Include initial content')}</strong>
           <p>{t('Only select documents and resources you intend to share.')}</p>
@@ -84,7 +87,8 @@ export function PackCreator({ legion }: { legion: LegionSummary }) {
         <button className="secondary-button" type="button" disabled={busy || !review.result.can_export} onClick={() => void download()}><Download size={14} />{t('Export .oawpack')}</button>
       </div>}
       {error && <p className="library-error" role="alert">{error}</p>}
-      {downloaded && <p role="status">{t('Pack exported. Share the file; recipients can install it from the Library.')}</p>}
+      {downloaded?.key === key && <p role="status">{t('Pack exported. Share the file; recipients can install it from the Library.')}</p>}
+      <MarketplacePublish packId={draft.id} file={downloaded?.key === key && current && review?.result.can_export ? downloaded.file : undefined} busy={busy} />
     </form>}
   </section>;
 }

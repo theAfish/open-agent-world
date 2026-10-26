@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ValidationError
 
@@ -46,6 +46,8 @@ def _validate_tool_request(model: type[BaseModel], arguments):
 class _CapabilityContext:
     services: ApplicationServices
     capability: Any = None
+    arguments: Mapping[str, Any] | None = None
+    _artifact_reads: list[tuple[str, str]] = field(default_factory=list, repr=False, compare=False)
 
     @property
     def state(self):
@@ -58,9 +60,15 @@ class _CapabilityContext:
         return self.services.card_state.bind(self.capability.target_id, authorize=authorize)
 
     async def node_resource_action(self, capability, action, arguments):
+        from backend.capabilities.projection import authorize_invocation
         from backend.node_resources import ResourceActionRequest, invoke_resource_action
-        return await invoke_resource_action(self.services, capability.target_id, action,
-            ResourceActionRequest(arguments=arguments), capability=capability)
+        async with self.services._node_mutation():
+            authorize_invocation(self.services, capability.agent_id, capability.id, self.arguments or {})
+            for collection_id, version_id in self._artifact_reads:
+                self.services.resources.artifacts.authorize(
+                    self.services, collection_id, capability.agent_id, version_id=version_id)
+            return await invoke_resource_action(self.services, capability.target_id, action,
+                ResourceActionRequest(arguments=arguments), capability=capability)
 
     async def capture_plugin_view(self, capability, *, capture_kind, required_capability_kind, capture_options=None):
         from backend.visual_observation import observe_plugin_view
@@ -121,7 +129,8 @@ class _CapabilityContext:
                 return store.add_reference(self.services, collection, version, agent, args.get('source_collection_id'))
             if args.get('action', 'remove') != 'remove':
                 raise ResourceValidationError('Choose add or remove for collection references')
-            return store.remove_reference(self.services, collection, version, agent)
+            async with self.services._node_mutation():
+                return store.remove_reference(self.services, collection, version, agent)
         if capability.kind == 'artifact.materialize':
             return await store.materialize(self.services, collection, version, _validate_tool_request(ArtifactMaterialize, args), agent)
         if args.get('path') is not None:
@@ -262,6 +271,56 @@ class _CapabilityContext:
         if len(data) > DOWNLOAD_LIMIT:
             raise ResourceValidationError("Sandbox file exceeds the 16 MiB transfer limit")
         return data
+
+    async def read_artifact_file(self, capability, collection_id: str, version_id: str,
+                                 path: str, *, max_bytes: int = 32 * 1024 * 1024) -> bytes:
+        """Read verified artifact bytes for trusted plugin code, never as model input.
+
+        Destination and independently granted source access must remain live through
+        the entire read. ArtifactStore owns session visibility, the version lease,
+        pinned file access and the checksum check at EOF.
+        """
+        from contextlib import aclosing
+        from backend.capabilities.projection import authorize_invocation
+        from backend.errors import NotFoundError, PermissionDeniedError
+
+        if type(max_bytes) is not int or not 0 < max_bytes <= 32 * 1024 * 1024:
+            raise ResourceValidationError("Artifact transfer limit must be between 1 byte and 32 MiB")
+        store = self.services.resources.artifacts
+
+        def authorize():
+            live = authorize_invocation(self.services, capability.agent_id, capability.id,
+                                        self.arguments or {})
+            if live.kind != capability.kind or live.target_id != capability.target_id:
+                raise PermissionDeniedError("Destination capability was revoked")
+            store.authorize(self.services, collection_id, capability.agent_id, version_id=version_id)
+
+        async with self.services._node_mutation(read_only=True):
+            authorize()
+            entry = next((item for item in store.get(version_id)["manifest"]
+                          if item["path"] == path and not item["directory"]), None)
+            if entry is None:
+                raise NotFoundError("File is not in this artifact manifest")
+            if entry["size"] > max_bytes:
+                raise ResourceValidationError(f"Artifact file exceeds the {max_bytes}-byte transfer limit")
+
+        content = bytearray()
+        # Never enter ArtifactStore's lock while holding the graph lock: publication
+        # acquires them in the opposite order. Recheck after each awaited read instead.
+        async with aclosing(store.read(self.services, collection_id, version_id, path,
+                                       capability.agent_id)) as stream:
+            async for chunk in stream:
+                async with self.services._node_mutation(read_only=True):
+                    authorize()
+                if len(content) + len(chunk) > max_bytes:
+                    raise ResourceValidationError(f"Artifact file exceeds the {max_bytes}-byte transfer limit")
+                content.extend(chunk)
+        async with self.services._node_mutation(read_only=True):
+            authorize()
+            reference = (collection_id, version_id)
+            if reference not in self._artifact_reads:
+                self._artifact_reads.append(reference)
+        return bytes(content)
 
     async def communicate(
         self, source_agent_id: str, target_agent_id: str, message: str
@@ -660,7 +719,8 @@ class WorldAgentCapabilityProvider:
         try:
             from backend.runs.tool_receipts import bind_tool_receipt
             with bind_tool_receipt(receipt_id):
-                result = await handler(_CapabilityContext(self.services, capability), capability, dict(arguments))
+                result = await handler(_CapabilityContext(self.services, capability, dict(arguments)),
+                                       capability, dict(arguments))
         except SandboxOperationError as exc:
             result = exc.feedback()
         except SandboxSecurityError as exc:

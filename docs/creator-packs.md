@@ -13,7 +13,11 @@ and references to the original Packs that supply its cards and tools.
 1. Build and configure a Legion on the canvas, then save it to the Library.
 2. In **Library → Cards**, select your saved Legion and choose **Make a Pack…**.
 3. Enter a name, version, description and optional author. Use **First-use guide**
-   for preparation steps, an example task and its expected result.
+   for preparation steps, an example task and its expected result. Under **Pack
+   identity**, keep the default `local.*` ID for offline sharing, or enter an ID
+   under a Marketplace namespace you are authorized to publish under, such as
+   `your-namespace.my-pack`. Confirm the namespace on the Marketplace author
+   website; the author name is descriptive and grants no publishing permission.
 4. Choose **Check Pack**. Dependencies are derived from the template and pinned to
    the currently loaded plugin versions. Install missing dependencies and restart
    OAW before preparing a release.
@@ -35,6 +39,23 @@ addresses; they cannot identify every secret in prose, binary resources or
 arbitrary plugin data. Conversation histories and run logs are not serialized by
 the standard Legion capture path. Selected documents use each card's capture
 contract, including its rules for resetting task progress.
+
+## Submit to Marketplace
+
+After checking and exporting a Pack with your authorized namespace ID, choose
+**Publish on Marketplace**. OAW opens the official
+[submission page](https://open-agent-world.space/marketplace/publish/new) in a
+browser. Sign in there, select the saved `.oawpack` file manually, and enter its
+distribution ID, version and listing details. Submission enters maintainer review;
+it does not immediately make the Pack public. OAW does not upload the file or pass
+credentials to the website. If navigation is blocked or unavailable, copy the
+address shown beside the action into your normal browser.
+
+Changes to the Pack require another check and export. Browsers cannot confirm
+that you saved a download or still have the file; if it is missing, export again.
+Ordinary offline export and file sharing remain available with `local.*` IDs.
+This handoff does not change the existing Schema 2 content or Schema 3 plugin
+distribution formats; the visual creator continues to export content Packs.
 
 ## Install and use
 

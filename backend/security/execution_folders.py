@@ -52,12 +52,13 @@ class PathRequirement(BaseModel):
 PATH_REQUIREMENTS = (FolderRequirement, FileRequirement, PathRequirement)
 
 
-def inspect_environment_path(raw, validator, *, kind=None):
+def inspect_environment_path(raw, validator, *, kind=None, allow_missing=False):
     """Resolve and validate a host resource for both preview and binding."""
     from backend.sandbox.environment import host_environment_path
     source = host_environment_path(raw)
     detected = "file" if Path(source).is_file() else "folder"
-    path = Path(validator.validate_environment_path(source, kind or detected))
+    options = {'allow_missing': True} if allow_missing else {}
+    path = Path(validator.validate_environment_path(source, kind or detected, **options))
     protected = [Path(os.environ[key]).resolve() for key in
         ("SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData") if os.environ.get(key)] if os.name == "nt" else [
         Path(p).resolve() for p in ("/proc", "/sys", "/dev", "/run", "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64")]

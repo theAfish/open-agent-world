@@ -169,6 +169,7 @@ export interface WorldSnapshot {
 }
 
 export interface NodeTypeCatalogItem {
+  authoring?: import('../factory/projectTypes').CardInterface | null;
   data_consumer?: import('../plugins/dataSources').DataConsumer | null;
   tutorials?: import('../tutorials/types').TutorialDefinition[];
   /** Layout and colour are independent of the owned card's material finish. */
