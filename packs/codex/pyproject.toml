@@ -1,6 +1,6 @@
 [project]
 name = "open-agent-world-plugin-codex"
-version = "0.3.0"
+version = "0.3.1"
 description = "Codex App Server runtime for Open Agent World Agents"
 requires-python = ">=3.11"
 dependencies = ["pydantic>=2.11,<3"]

@@ -1,0 +1,7 @@
+{
+  "id": "openai.codex.default",
+  "name": "Codex Agent",
+  "description": "A Codex worker with connected OAW tools.",
+  "cards": ["openai.codex.agent"],
+  "packaging": "premium"
+}

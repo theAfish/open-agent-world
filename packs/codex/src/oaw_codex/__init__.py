@@ -11,7 +11,7 @@ from .card import CodexCardConfig, CodexCardTemplate
 
 class CodexPlugin:
     descriptor = PluginDescriptor(
-        id="openai.codex", version="0.3.0", plugin_api_version="1.35",
+        id="openai.codex", version="0.3.1", plugin_api_version="1.35",
         name="Codex", description="Run Codex in a local project with OAW graph tools.",
     )
 
@@ -32,8 +32,7 @@ class CodexPlugin:
             lifecycle=AgentNodeBehavior(), templateable=True, template_status="idle",
             template_handler=CodexCardTemplate(),
         ))
-        registration.register_pack(PackDefinition(id='openai.codex.default', name='Codex Agent',
-            description='A Codex worker with connected OAW tools.', cards=tuple(registration.nodes), packaging='premium'))
+        registration.register_pack(PackDefinition.model_validate_json(files(__package__).joinpath('pack.json').read_bytes()))
 
 
 def create_plugin() -> CodexPlugin:

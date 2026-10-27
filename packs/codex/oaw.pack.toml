@@ -8,6 +8,7 @@ oaw = ">=0.1.0,<1"
 [distribution]
 id = "theafish.codex"
 name = "Codex Agent"
+presentation = "src/oaw_codex/pack.json"
 
 [plugin]
 owner = "openai.codex"

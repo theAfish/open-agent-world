@@ -14,6 +14,13 @@ reader does not import the Pack or run setup hooks. Python dependencies remain
 in native `pyproject.toml`/requirements files and frontend dependencies remain
 in the Pack's own `frontend/package.json` and lockfile.
 
+`distribution.presentation` may name a Pack-relative JSON `PackDefinition` for
+one of `plugin.packs`. Reuse that file when registering the runtime Pack so its
+appearance has one authority. The builder embeds it as `manifest.presentation`;
+Marketplace previews read its packaging, accent color and card count without
+executing Pack code or loading arbitrary artwork URLs. Codex demonstrates this
+with `src/oaw_codex/pack.json` and premium packaging.
+
 Default setup prepares Core, bundled Packs and optional runtime SDKs. Use
 `--core-only` for Core alone, or `--plugin-path` for selected projects. Schema 3 source loading does not require
 editable installation. The setup scripts prepare dependencies in the same `--profile`

@@ -21,6 +21,7 @@ from packaging.version import Version
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator, model_serializer
 
 from backend.packs.interfaces import CardInterface
+from backend.plugins.registry import PackDefinition
 
 ENTRY_POINT_GROUP = "open_agent_world.plugins"
 MAX_METADATA_BYTES = 2 * 1024 * 1024
@@ -294,6 +295,7 @@ class PackSpec(SpecModel):
     compatibility: CompatibilitySpec | None = None
     contributions: Contributions = Field(default_factory=Contributions)
     designs: dict[str, CardInterface] = Field(default_factory=dict)
+    presentation: PackDefinition | None = None
 
     @model_serializer(mode="wrap")
     def serialize(self, handler):
@@ -301,6 +303,8 @@ class PackSpec(SpecModel):
         if not self.designs:
             # Preserve historical source receipts and generated adapter bytes.
             data.pop("designs", None)
+        if self.presentation is None:
+            data.pop("presentation", None)
         return data
 
     @field_validator("version")
@@ -312,6 +316,8 @@ class PackSpec(SpecModel):
 
     @model_validator(mode="after")
     def references(self) -> Self:
+        if self.presentation is not None and self.presentation.id not in self.packs:
+            raise ValueError("Presentation must describe a provided Pack")
         if self.designs and (self.compatibility is None or Version(self.compatibility.plugin_api) < Version('1.39')):
             raise ValueError("Card interface resources require Plugin API 1.39 or newer")
         if any(not re.fullmatch(IDENTIFIER, key) for key in self.designs):
@@ -409,6 +415,7 @@ class _Distribution(SpecModel):
     id: str
     version: str | None = None
     name: str | None = None
+    presentation: str | None = None
 
 
 class _Plugin(SpecModel):
@@ -611,6 +618,8 @@ def read_source_pack(root: Path) -> PackSpec:
     designs = {identifier: CardInterface.model_validate_json(reader.read(path).decode('utf-8-sig'))
                for identifier, path in declaration.designs.items()}
     compatibility = declaration.compatibility
+    presentation = (PackDefinition.model_validate_json(reader.read(declaration.distribution.presentation))
+                    if declaration.distribution.presentation else None)
     if cards or designs:
         required_api = '1.39' if designs else '1.38' if entrypoints else '1.37'
         compatibility = compatibility or CompatibilitySpec(plugin_api=required_api)
@@ -694,6 +703,7 @@ def read_source_pack(root: Path) -> PackSpec:
     return PackSpec(distribution_id=declaration.distribution.id, version=version,
                     name=declaration.distribution.name or project["name"], owner=owner,
                     packs=packs, node_types=node_types, contributions=contributions, designs=designs,
+                    presentation=presentation,
                     entrypoints=entrypoints, backend=backend, frontend=frontend,
                     environments=environments, features=declaration.features, prerequisites=declaration.prerequisites,
                     dependencies=declaration.dependencies, dependency_groups=groups, source_files=reader.files,

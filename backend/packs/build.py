@@ -335,6 +335,7 @@ def build_project(source: Path, output: Path, *, backend_wheel: Path | None = No
         "environments": environments, "features": {name: value.model_dump() for name, value in spec.features.items()},
         "prerequisites": {name: value.model_dump() for name, value in spec.prerequisites.items()},
         "adapter": adapter.model_dump(),
+        "presentation": spec.presentation,
     })
     files["manifest.json"] = manifest.model_dump_json(indent=2).encode()
     files["checksums.json"] = json.dumps({name: hashlib.sha256(data).hexdigest() for name, data in files.items()},

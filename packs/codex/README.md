@@ -6,6 +6,10 @@ Agents library and has its own settings schema. It prefers the desktop App's
 native Codex installation, creates a new OAW session using local Codex login and
 configuration, and exposes live OAW graph capabilities to that session.
 
+The Pack definition in `src/oaw_codex/pack.json` is shared by runtime registration
+and the archive's static presentation metadata. Its `premium` packaging selects
+the same geometry and materials in the Library and Marketplace.
+
 Its settings view lives in `frontend/index.tsx` and uses the public
 `@oaw/plugin-api` SDK. Its OpenAI icon is packaged in
 `src/oaw_codex/assets/openai.svg` (from the official
@@ -22,8 +26,8 @@ From the OAW checkout, using the prepared backend and frontend dependencies:
 uv build --wheel --out-dir .outputs/codex-marketplace/wheels packs/codex
 node frontend/scripts/source-packs.mjs --frontend-path packs/codex/frontend --prepare --build
 backend/.venv/Scripts/python.exe -m open_agent_world.pack build-project packs/codex `
-  .outputs/codex-marketplace/theafish.codex-0.3.0.oawpack `
-  --backend-wheel .outputs/codex-marketplace/wheels/open_agent_world_plugin_codex-0.3.0-py3-none-any.whl `
+  .outputs/codex-marketplace/theafish.codex-0.3.1.oawpack `
+  --backend-wheel .outputs/codex-marketplace/wheels/open_agent_world_plugin_codex-0.3.1-py3-none-any.whl `
   --frontend-dir packs/codex/frontend/dist
 ```
 
@@ -57,7 +61,7 @@ From the repository root:
 ./scripts/setup.ps1 -SkipBuild # Once, or after dependency changes.
 # Build the archive above, then explicitly install it into the isolated trial:
 backend/.venv/Scripts/python.exe -m open_agent_world.pack install `
-  .outputs/codex-marketplace/theafish.codex-0.3.0.oawpack `
+  .outputs/codex-marketplace/theafish.codex-0.3.1.oawpack `
   --data-root .open-agent-world/codex-card-demo/world
 ./packs/codex/try.ps1
 ```

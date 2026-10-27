@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import shutil
 import subprocess
 import sys
@@ -61,6 +62,23 @@ python = ["numpy>=2"]
     assert spec.environments["analysis"].python == ("numpy>=2",)
     assert "source_root" not in spec.model_dump()
     assert spec.entrypoints["example"].startswith("missing_plugin")
+
+
+def test_static_pack_presentation_is_bounded_and_does_not_import_plugin(tmp_path):
+    root = source(tmp_path)
+    declaration = root / 'oaw.pack.toml'
+    declaration.write_text(declaration.read_text(encoding='utf-8').replace(
+        'id = "example.release"', 'id = "example.release"\npresentation = "pack.json"'), encoding='utf-8')
+    definition = {'id': 'example.cards', 'name': 'Example', 'cards': ['example.runtime.card'], 'packaging': 'premium'}
+    (root / 'pack.json').write_text(json.dumps(definition), encoding='utf-8')
+    spec = read_source_pack(root)
+    assert spec.presentation.packaging == 'premium'
+    assert spec.presentation.cards == ('example.runtime.card',)
+    assert 'pack.json' in spec.source_files
+    # The same source metadata cannot advertise an unrelated Pack identity.
+    (root / 'pack.json').write_text(json.dumps({**definition, 'id': 'another.pack'}), encoding='utf-8')
+    with pytest.raises(ValueError, match='provided Pack'):
+        read_source_pack(root)
 
 
 def test_groups_reuse_project_optional_pep_and_requirements_sources(tmp_path):

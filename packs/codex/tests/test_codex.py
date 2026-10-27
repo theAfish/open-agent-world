@@ -52,8 +52,14 @@ async def collect(provider, cfg, prompt='hello', ctx=None):
 def test_packaged_discovery():
     from backend.packs.spec import read_source_pack
     source = Path(__file__).resolve().parents[1]
-    assert read_source_pack(source).entrypoints['openai-codex'] == 'oaw_codex:create_plugin'
-    assert load_plugin_registry(plugin_directories=(source,)).has_runtime_provider('openai.codex')
+    spec = read_source_pack(source)
+    assert spec.entrypoints['openai-codex'] == 'oaw_codex:create_plugin'
+    registry = load_plugin_registry(plugin_directories=(source,))
+    assert registry.has_runtime_provider('openai.codex')
+    pack = next(p for p in registry.catalog().packs if p.id == 'openai.codex.default')
+    assert pack.packaging == spec.presentation.packaging == 'premium'
+    assert pack.accent_color == spec.presentation.accent_color
+    assert pack.cards == spec.presentation.cards
 
 
 @pytest.mark.asyncio
