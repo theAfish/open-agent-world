@@ -93,7 +93,7 @@ def test_catalog_default_details_and_pack(client):
 def test_schema_preview_handles_nullable_type_arrays_without_granting_data_access(client):
     source = create_node(client, "knowledge.base")
     chart = create_node(client, "data.visualization.line")
-    response = client.post(f"/api/nodes/{source['id']}/resource/schemas", json={"arguments": {
+    response = client.post(f"/api/nodes/{source['id']}/resource/schema_manage", json={"arguments": {
         "operation": "create", "name": "Nullable readings", "kind": "experiment",
         "definition": {"type": "object", "properties": {
             "samples": {"type": ["array", "null"], "items": {"type": ["object", "null"], "properties": {
@@ -133,7 +133,7 @@ def test_knowledge_datasets_use_real_schema_and_published_graph(client):
     kb.oaw_graph_store.upsert_entity(a)
     kb.oaw_graph_store.upsert_entity(b)
     kb.oaw_graph_store.upsert_relation(Relation(id=uuid4(), source_id=a.id, target_id=b.id, type="has", **dates))
-    schema = actions.schemas(context, {"operation": "create", "name": "Measurements", "kind": "experiment",
+    schema = actions.schema_manage(context, {"operation": "create", "name": "Measurements", "kind": "experiment",
         "definition": {"type": "object", "properties": {"sample": {"type": "string"}, "reading": {"type": "number"}}},
         "system_prompt": "Extract sample and reading."})["schema"]
     result = read(client, chart, source, "schemas")
@@ -174,7 +174,7 @@ def test_knowledge_schema_references_and_nested_array_records(client):
     definition = {"type": "object", "$defs": {"Reading": {"type": "object", "properties": {
         "step": {"type": "integer"}, "value": {"anyOf": [{"type": "number"}, {"type": "null"}]}}}},
         "properties": {"samples": {"type": "array", "items": {"$ref": "#/$defs/Reading"}}}}
-    schema = actions.schemas(context, {"operation": "create", "name": "Series", "kind": "experiment",
+    schema = actions.schema_manage(context, {"operation": "create", "name": "Series", "kind": "experiment",
         "definition": definition, "system_prompt": "Extract the readings."})["schema"]
     kb = actions._client(context)
     record = kb.oaw_experiments.create(group_id=uuid4(), schema_id=schema['id'], name="Run",
