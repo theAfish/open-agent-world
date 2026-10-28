@@ -1,14 +1,17 @@
 /* Printed collectible cards: stock, ink, selective tooling, optical film, top print.
    Paper and ink are authored colours; application theme never recolours the print. */
-:root { --compact-card-width:106px; --compact-card-height:122px; --compact-card-state:#353535; }
+:root { --compact-card-width:96px; --compact-card-height:calc(var(--compact-card-width) * 7 / 5); --compact-card-state:#353535; }
 :root[data-theme="dark"] { --compact-card-state:#d6d6d6; }
-@media(max-width:620px) { :root { --compact-card-width:96px; } }
-@media(max-height:650px) { :root { --compact-card-height:101px; } }
+@media(max-width:620px) { :root { --compact-card-width:88px; } }
+/* The hand keeps its existing height and hit slots; only the paper gets narrower. */
+.component-palette { --compact-card-height:122px; --compact-card-width:calc(var(--compact-card-height) * 5 / 7); }
+@media(max-height:650px) { .component-palette { --compact-card-height:101px; } }
 .card-stock.card-stock {
   position:relative; display:flex; container-type:inline-size; padding:0;
   border:1px solid var(--stock-edge,#d3ccbc); border-radius:9px;
   background:var(--stock-paper,#f5f3e9);
-  box-shadow:0 2px 4px #162d2414,0 12px 24px #162d2414;
+  /* Stock owns the only exterior shadow. Hard offset shadows create a second card. */
+  box-shadow:var(--card-stock-shadow,0 3px 8px #17231d1a);
 }
 .card-face {
   --face-accent:#5a7761; --face-paper:var(--stock-paper,#f5f3e9); --face-ink:var(--stock-ink,#293d37); --face-muted:var(--stock-muted,#66746a);
@@ -75,3 +78,48 @@
 .card-stock--compact .card-face-copy strong { font-size:10px; line-height:1.15; }
 .card-stock--compact .card-face-copy small,.card-stock--compact .card-face-detail,.card-stock--compact .card-face-badge { display:none; }
 @media(max-height:650px) { .card-stock--compact .card-face-edition { display:none; } .card-stock--compact .card-face-symbol { width:25px; --face-symbol:18px; } }
+
+/* Default collection print. Authored faces above retain their original treatment.
+   All measurements follow the stock width, so a preview is the same printed card. */
+.card-stock:has(> .card-face[data-design="archival"]) {
+  border-radius:5px;
+  border-color:#d3cebf;
+}
+.card-face[data-design="archival"] {
+  --face-pad:10cqi; --face-accent:#4c6d60;
+  --face-paper:var(--stock-paper,#f5f3e9); --face-ink:var(--stock-ink,#2e3d38);
+  padding:var(--face-pad);
+  background:var(--face-paper);
+}
+.card-face[data-design="archival"][data-tone="sand"] { --face-accent:#a06e50; }
+.card-face[data-design="archival"][data-tone="midnight"],
+.card-face[data-design="archival"][data-tone="sky"] { --face-accent:#536e85; }
+.card-face[data-design="archival"][data-tone="rose"] { --face-accent:#9e696b; }
+.card-face[data-design="archival"][data-tone="stone"] { --face-accent:#697367; }
+.card-face[data-design="archival"]::before {
+  opacity:.025;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23000' filter='url(%23n)' opacity='.6' d='M0 0h160v160H0z'/%3E%3C/svg%3E");
+}
+.card-face[data-design="archival"] .card-face-edition {
+  display:flex; margin:0; gap:4cqi; background:none;
+  font-size:4.1cqi; line-height:1; letter-spacing:.08em; color:var(--face-accent);
+}
+.card-face[data-design="archival"] .card-face-edition b { font-size:6cqi; font-weight:750; letter-spacing:-.04em; }
+.card-face[data-design="archival"] .card-face-art {
+  flex:1 1 0; padding:0; border:0; border-radius:0; background:none;
+}
+.card-face-illustration { display:block; width:100%; height:100%; max-height:86cqi; overflow:visible; }
+.card-plate-tint { fill:color-mix(in srgb,currentColor 32%,var(--face-paper)); }
+.card-face[data-design="archival"] .card-face-symbol {
+  width:100%; height:100%; aspect-ratio:auto; --face-symbol:49cqi;
+  color:var(--face-accent); background:none; border:0; border-radius:0; box-shadow:none;
+}
+.card-face[data-design="archival"] .card-face-symbol > svg { stroke-width:1.15; }
+.card-face[data-design="archival"] .card-face-copy {
+  flex:0 0 25cqi; justify-content:flex-end; align-items:flex-start; padding:0; gap:0; background:none; text-align:left;
+}
+.card-face[data-design="archival"] .card-face-copy strong {
+  width:100%; font-family:Georgia,"Noto Serif SC","Source Han Serif SC",SimSun,serif;
+  font-size:11.5cqi; font-weight:600; letter-spacing:-.035em; line-height:1.12;
+  text-wrap:balance;
+}

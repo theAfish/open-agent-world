@@ -1678,8 +1678,7 @@ body:has(.tutorial-bubble[data-step="place-demo"]) .component-palette .deck-stag
 }
 
 .deck-hover-slot[data-active] .palette-item {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-  box-shadow: 0 14px 24px var(--shadow-deep), 0 0 0 3px var(--accent-soft), inset 0 1px 0 var(--highlight);
+  --card-stock-shadow: 0 5px 12px var(--shadow-deep);
 }
 .component-palette .palette-item:active { cursor: grabbing; }
 

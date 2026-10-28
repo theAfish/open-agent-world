@@ -33,7 +33,7 @@ function prepareCodexFixture() {
   // Codex is optional in the application. Browser suites that exercise it
   // explicitly build and install the real archive into their disposable world.
   const needsCodex = ministerSuite || !testArgs.some(arg => arg.endsWith('.spec.ts'))
-    || testArgs.some(arg => /(?:plugin-frontend|minister|card-library)\.spec\.ts$/.test(arg));
+    || testArgs.some(arg => /(?:plugin-frontend|minister|card-library|default-card-face)\.spec\.ts$/.test(arg));
   if (!needsCodex) return;
   const source = path.join(projectRoot, 'packs/codex');
   const wheels = path.join(dataRoot, 'codex-wheels');

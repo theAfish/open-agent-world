@@ -24,7 +24,7 @@
 .library-pack[data-renderer="fallback"] .pack-reveal-card { top: 50%; left: 50%; transform-origin: center; animation: packFlatCollect 2100ms ease-in-out both; }
 .library-pack[data-renderer="fallback"][data-preview-opening] .pack-reveal-card { animation-play-state: paused; animation-delay: calc(var(--pack-opening) * -2100ms); }
 @keyframes packLoadingIn { to { opacity: .6; } }
-@keyframes packOpeningDip { 0%, 8% { translate: none; } 31%, 100% { translate: 0 72px; } }
+@keyframes packOpeningDip { 0%, 8% { translate: none; } 31%, 100% { translate: 0 var(--pack-opening-dip); } }
 @keyframes packFlatCollect {
   0%, 16% { opacity: 0; transform: translate(-50%, calc(-50% + 40px)); }
   38%, 78% { opacity: 1; transform: translate(calc(-50% + var(--card-offset) * 35px), calc(-50% - 52px)) rotate(calc(var(--card-offset) * 8deg)); }
@@ -33,7 +33,7 @@
 @media (prefers-reduced-motion: reduce) {
   .pack-webgl, .pack-reveal-cards { transition: none; transform: none; }
   .pack-loading { animation: none; opacity: .6; }
-  .library-pack.is-revealing :is(.pack-webgl, .pack-cover, .pack-reveal-cards) { animation: none; translate: 0 72px; }
+  .library-pack.is-revealing :is(.pack-webgl, .pack-cover, .pack-reveal-cards) { animation: none; translate: 0 var(--pack-opening-dip); }
   .library-pack[data-renderer="fallback"] .pack-reveal-cards { translate: none; }
   .library-pack[data-renderer="fallback"] .pack-reveal-card { animation: none; opacity: 1; transform: translate(calc(-50% + var(--card-offset) * 35px), calc(-50% - 52px)) rotate(calc(var(--card-offset) * 8deg)); }
 }

@@ -8,6 +8,7 @@ import { PACK_DESIGNS, packPackaging } from './packDesign';
 import { PackViewContext, type PackNotice, type PackRenderHandle, type PackRenderOptions } from './pack3d/types';
 import { packModelKey, packPreviewKey, restorePackPreview } from './pack3d/preview';
 import { paintPackCover } from './pack3d/artwork';
+import { PACK_OPENING_PRESETS } from './pack3d/motion';
 import './libraryPack.css';
 
 export type PackPhase = 'idle' | 'pending' | 'revealing';
@@ -43,6 +44,7 @@ export function PackSurface({ definition, edition, cards, count, opened, phase =
   const gesture = useRef<{ x: number; y: number; yaw: number; pitch: number; moved: boolean }>();
   const suppressClick = useRef(false);
   const packaging = packPackaging(definition.packaging);
+  const opening = PACK_OPENING_PRESETS[packaging];
   const color = definition.accent_color ?? PACK_DESIGNS[packaging].color;
   const options = useRef<() => PackRenderOptions>();
   options.current = () => ({ id: definition.id, name: definition.name, description: definition.description || t('A collection of possibilities.'),
@@ -103,7 +105,8 @@ export function PackSurface({ definition, edition, cards, count, opened, phase =
     renderer.current?.update(next);
   });
   return <article ref={article} aria-label={definition.name} data-pack-id={definition.id} data-pack-issue={issue} data-pack-notice={printedNotice?.kind} data-pack-version={version} data-packaging={packaging} data-renderer={renderState} data-preview-opening={view.opening}
-    className={`library-pack ${opened ? 'is-opened' : ''} is-${phase}`} style={{ '--pack-color': color, '--pack-opening': view.opening } as CSSProperties}>
+    className={`library-pack ${opened ? 'is-opened' : ''} is-${phase}`} style={{ '--pack-color': color, '--pack-opening': view.opening,
+      '--pack-opening-dip': `${opening.dip}px` } as CSSProperties}>
     <button type="button" className="pack-touch-area" aria-label={label} title={title} aria-describedby={version || printedNotice ? metadataId : undefined}
       aria-busy={phase === 'pending' || renderState === 'loading'} disabled={disabled}
       onPointerDown={event => {

@@ -43,25 +43,24 @@
 .library-card-grid { display: grid; grid-template-columns: repeat(auto-fill, min(100%, var(--compact-card-width))); gap: 10px; }
 .library-card { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .library-card-stock { position: relative; width: 100%; height: 100%; transition: box-shadow 160ms ease, border-color 160ms ease; }
-.library-card.is-in-deck .library-card-stock { border-color: var(--compact-card-state); background-color: color-mix(in srgb, var(--compact-card-state) 12%, var(--card-surface)); }
 .library-card.is-selected { position: relative; z-index: 1; }
-.library-card-inspect { display: flex; width: 100%; height: var(--compact-card-height); padding: 0; border: 0; border-radius: 10px; background: transparent; text-align: left; transition: transform 260ms cubic-bezier(.2, .7, .25, 1); }
+.library-card-inspect { display: flex; width: 100%; height: var(--compact-card-height); padding: 0; border: 0; border-radius: 5px; background: transparent; text-align: left; transition: transform 260ms cubic-bezier(.2, .7, .25, 1); }
 .library-card.is-selected .library-card-inspect { transform: translateY(-6px) scale(1.06); }
-.library-card-inspect:hover .library-card-stock, .library-card-inspect:focus-visible .library-card-stock { border-color: var(--compact-card-state); box-shadow: 0 8px 16px var(--shadow), inset 0 1px 0 var(--highlight); }
-.library-card.is-selected .library-card-stock { box-shadow: 0 18px 28px -8px var(--shadow-deep), 0 7px 12px -3px var(--shadow); }
+.library-card-inspect:hover .library-card-stock, .library-card-inspect:focus-visible .library-card-stock { --card-stock-shadow: 0 5px 12px var(--shadow); }
+.library-card.is-selected .library-card-stock { --card-stock-shadow: 0 8px 16px var(--shadow); }
 .library-card-add { display: flex; align-items: center; justify-content: center; gap: 5px; width: 100%; min-height: 30px; padding: 4px 2px; font-size: 11px !important; border: 0; border-radius: 6px; background: transparent; color: var(--ink-soft); }
 .library-card-add:hover { background: var(--surface-soft); }
 .library-card-add.is-in-deck { color: var(--compact-card-state); }
 .library-card-usage { padding: 4px 2px; color: var(--ink-faint); font-size: 10px; text-align: center; }
 .library-card-stock > .library-unavailable { position: absolute; top: 5px; right: 5px; padding: 2px 4px; border-radius: 4px; background: var(--surface-solid); color: var(--ink-soft); font-size: 9px; }
 .library-usage-detail { display: grid; gap: 8px; padding: 12px; border-left: 2px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--surface-solid); }
-.library-card-detail { min-width: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-raised); display: flex; flex-direction: column; }
+.library-card-detail { min-width: 0; display: flex; flex-direction: column; }
 .library-card-detail > * { flex-shrink: 0; max-width: 100%; }
 .library-card-detail h3, .library-card-detail p { margin: 0; }
 .library-card-detail p { color: var(--ink-soft); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
 .library-card-detail small { font-size: 10px; color: var(--ink-faint); }
 .library-card-detail .library-unavailable { color: var(--warning); }
-.library-detail-stage { display: grid; place-items: center; padding: 24px 18px; border-bottom: 1px solid var(--line); border-radius: 16px 16px 0 0; background: radial-gradient(ellipse at 50% 35%, var(--highlight), transparent 75%), var(--surface-soft); }
+.library-detail-stage { display: grid; place-items: center; padding: 24px 18px; border-bottom: 1px solid var(--line); background: radial-gradient(ellipse at 50% 35%, var(--highlight), transparent 75%), var(--surface-soft); }
 .library-detail-formation { display: grid; place-items: center; width: 88px; aspect-ratio: 1; border: 1px solid var(--line); border-radius: 24px; background: var(--surface-raised); color: var(--accent-strong); box-shadow: 0 8px 20px var(--shadow); }
 .library-detail-content { display: flex; flex-direction: column; min-width: 0; gap: 16px; padding: 18px; }
 .library-detail-heading { min-width: 0; }
@@ -86,12 +85,11 @@
 .library-detail-collected { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 12px; border-top: 1px dashed var(--line); color: var(--ink-faint); font-size: 10px; }
 .library-detail-collected > svg { flex-shrink: 0; }
 .library-detail-collected time { margin-left: auto; color: var(--ink-soft); font-family: var(--font-mono); font-size: 10px; font-variant-numeric: tabular-nums; }
-/* Cover the sidebar's 12px bottom padding while content scrolls behind the actions. */
-.library-detail-actions { position: sticky; bottom: -12px; z-index: 1; display: grid; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); border-radius: 0 0 16px 16px; background: var(--surface-solid); }
+.library-detail-actions { position: sticky; bottom: 0; z-index: 1; display: grid; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); background: var(--surface-solid); }
 .library-detail-deck-action { width: 100%; min-height: 40px; line-height: 1.5; }
 .library-detail-empty { display: flex; grid-column: 1 / -1; min-width: 0; min-height: 300px; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 32px 20px; text-align: center; }
 .library-detail-empty > .library-detail-formation { width: 64px; border-radius: 20px; margin-bottom: 6px; }
-.library-card-preview.card-stock { width: min(100%, clamp(112px, 52cqh, 184px)); height: auto; min-height: 0; aspect-ratio: 41 / 50; align-self: center; padding: 0; margin: 0; border-radius: 14px; }
+.library-card-preview.card-stock { width: min(100%, clamp(112px, 46cqh, 184px)); height: auto; min-height: 0; aspect-ratio: 5 / 7; align-self: center; padding: 0; margin: 0; }
 .library-card-preview .card-face { height: auto; min-height: 100%; }
 .library-dependencies { min-width: 0; width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .library-dependencies h4 { margin: 0; font-size: 11px; }
@@ -118,7 +116,8 @@
 .library-source-actions > span { margin-right: auto; }
 .library-source-actions .secondary-button { padding: 6px 10px; font-size: 11px; }
 
-.library-card-sidebar { min-width: 0; min-height: 0; container-type: size; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-gutter: stable; padding: 5px 7px 12px 5px; }
+/* Clip every layer, including the sticky actions, at the visible panel corners. */
+.library-card-sidebar { min-width: 0; min-height: 0; container-type: size; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-gutter: stable; margin: 5px 7px 0 5px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-raised); }
 .library-card-inspect[data-can-drag="true"] { cursor: grab; touch-action: none; }
 .library-card-inspect[data-can-drag="true"]:active { cursor: grabbing; }
 .library-card, .library-card * { user-select: none; -webkit-user-select: none; }

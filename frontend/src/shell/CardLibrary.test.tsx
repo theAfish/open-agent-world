@@ -417,11 +417,12 @@ it("identifies internal cards by their exact container, retains descriptions and
   expect(screen.queryByRole("button", { name: "Inspect Review toolbox · Skill" })).toBeNull();
   fireEvent.click(screen.getByRole("checkbox", { name: /Show internal cards/ }));
   const inspect = screen.getByRole("button", { name: "Inspect Review toolbox · Skill" });
-  expect(inspect.textContent).toContain("Review code with the toolbox's shared conventions.");
+  expect(inspect.getAttribute('aria-description')).toBe("Review code with the toolbox's shared conventions.");
   expect(screen.getByRole("button", { name: "Inspect Simulation toolbox · Skill" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Add Review toolbox · Skill to deck" })).toBeNull();
   fireEvent.click(inspect);
   const detail = within(screen.getByRole("complementary", { name: "Card details" }));
+  expect(detail.getByText("Review code with the toolbox's shared conventions.")).toBeTruthy();
   expect(detail.getByText(/Open Review toolbox to use this card/)).toBeTruthy();
   fireEvent.click(detail.getByRole("button", { name: "Inspect Review toolbox" }));
   expect(detail.getByRole("heading", { name: "Review toolbox" })).toBeTruthy();
@@ -433,7 +434,10 @@ it("keeps disabled cards visible with their purpose, and distinguishes unavailab
   state.available_card_ids = [];
   openCards(state);
   fireEvent.change(screen.getByLabelText("Source pack"), { target: { value: "pack:alpha" } });
-  expect(screen.getByRole("button", { name: "Inspect Review toolbox" }).textContent).toContain(state.card_definitions["card.1"].description);
+  const inspect = screen.getByRole("button", { name: "Inspect Review toolbox" });
+  expect(inspect.getAttribute('aria-description')).toBe(state.card_definitions["card.1"].description);
+  fireEvent.click(inspect);
+  expect(within(screen.getByRole("complementary", { name: "Card details" })).getByText(state.card_definitions["card.1"].description)).toBeTruthy();
   expect(screen.getByRole("button", { name: "Add Review toolbox to deck" }).hasAttribute("disabled")).toBe(true);
   fireEvent.click(screen.getByRole("checkbox", { name: /Show internal cards/ }));
   fireEvent.click(screen.getByRole("button", { name: "Inspect Review toolbox · Skill" }));

@@ -4,12 +4,12 @@ type Point = [number, number, number];
 export const ease = (value: number) => { const t = Math.max(0, Math.min(1, value)); return t * t * (3 - 2 * t); };
 const phase = (progress: number, start: number, end: number) => ease((progress - start) / (end - start));
 
-/** Paths are in the package's local space: +Y is the mouth, +Z is the box face. */
+/** Paths use package-local space (+Y mouth, +Z face); dip is the surface offset in CSS pixels. */
 export const PACK_OPENING_PRESETS = {
-  standard: { exit: 'top', release: .18, clear: .57, display: .78, height: 2.64, fan: .32 },
-  premium: { exit: 'top', release: .22, clear: .60, display: .80, height: 2.64, fan: .30 },
-  paper: { exit: 'top', release: .30, clear: .66, display: .82, height: 2.68, fan: .26 },
-  collector: { exit: 'front', release: .44, clear: .63, display: .82, height: 2.64, fan: .32 },
+  standard: { dip: 72, exit: 'top', release: .18, clear: .57, display: .78, height: 2.64, fan: .32 },
+  premium: { dip: 72, exit: 'top', release: .22, clear: .60, display: .80, height: 2.64, fan: .30 },
+  paper: { dip: 72, exit: 'top', release: .30, clear: .66, display: .82, height: 2.68, fan: .26 },
+  collector: { dip: 0, exit: 'front', release: .44, clear: .63, display: .82, height: 2.64, fan: .32 },
 } as const;
 
 export function openingPose(packaging: PackPackaging, progress: number, count: number) {

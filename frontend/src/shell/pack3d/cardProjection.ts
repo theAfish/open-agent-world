@@ -1,7 +1,7 @@
 import { Vector3, type Matrix4, type OrthographicCamera } from 'three';
 
 export const PACK_CARD_WIDTH = 1.64;
-export const PACK_CARD_HEIGHT = PACK_CARD_WIDTH * 122 / 106;
+export const PACK_CARD_HEIGHT = PACK_CARD_WIDTH * 7 / 5;
 export const PACK_CARD_DEPTH = .026;
 
 /** Orthographic projection of the actual card plane into its native DOM layer. */

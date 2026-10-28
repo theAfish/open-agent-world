@@ -62,6 +62,18 @@ test('collection and card details scroll independently while the preview fits sm
       return card.width <= 185 && card.x >= panel.x && card.x + card.width <= panel.x + panel.width
         && card.y >= panel.y && card.y + card.height <= panel.y + panel.height;
     }).toBe(true);
+    // The scroll viewport must clip the panel behind the sticky actions too.
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+      expect(await sidebar.evaluate(element => {
+        const { left, right, top, bottom } = element.getBoundingClientRect();
+        return [[left + 2, top + 2], [right - 2, top + 2], [left + 2, bottom - 2], [right - 2, bottom - 2]]
+          .map(([x, y]) => Boolean(document.elementFromPoint(x, y)?.closest('.library-card-sidebar')));
+      })).toEqual([false, false, false, false]);
+      await expect(library.getByRole('button', { name: 'Add inspected card to deck' })).toBeInViewport();
+      await page.screenshot({ path: `test-results/library-preview-rounded-${viewport.width}-${theme}.png` });
+    }
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
     await page.screenshot({ path: `test-results/library-preview-layout-${viewport.width}.png` });
     const collectionScroll = await collection.evaluate(element => element.scrollTop);
     await sidebar.hover();

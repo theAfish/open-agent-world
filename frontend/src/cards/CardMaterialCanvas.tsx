@@ -84,7 +84,7 @@ export function CardMaterialCanvas({ finish, quality, restrained = false, roughn
       if (records.some(record => record.attributeName !== 'style' || (record.target !== host && !layer.contains(record.target)))) observeLayout();
     });
     mutation.observe(host, { childList: true, subtree: true, characterData: true,
-      attributes: true, attributeFilter: ['data-material-region', 'data-material-layer', 'data-face-shape', 'class', 'hidden', 'style'] });
+      attributes: true, attributeFilter: ['data-material-region', 'data-material-layer', 'data-face-shape', 'data-design', 'class', 'hidden', 'style'] });
     const intersection = new IntersectionObserver(entries => {
       visible = entries[0].isIntersecting;
       if (visible) { observeLayout(); queue(); }
