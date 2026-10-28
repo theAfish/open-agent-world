@@ -13,7 +13,7 @@ export interface LibrarySnapshot {
   revision: number;
   migration_pending: boolean;
   plugins: Record<string, { descriptor: PluginCatalog["plugins"][number]; installed: boolean; enabled: boolean }>;
-  packs: Record<string, { definition: PackDefinition; owned: boolean; opened: boolean; opened_at: string | null }>;
+  packs: Record<string, { definition: PackDefinition; owned: boolean; opened: boolean; opened_at: string | null; dismissed?: boolean }>;
   card_definitions: Record<string, NodeTypeCatalogItem>;
   collection: Record<string, { card_id: string; plugin_id: string; source_pack_ids: string[]; unlocked: boolean; unlocked_at: string; finish?: CardFinish }>;
   decks: CardDeck[];
@@ -24,7 +24,7 @@ export interface LibrarySnapshot {
   preset_pack_ids?: Record<string, string[]>;
 }
 export interface LibraryEdit {
-  action: "open_pack" | "create_deck" | "update_deck" | "delete_deck" | "activate_deck" | "move_entry" | "import_legacy" | "set_plugin_enabled";
+  action: "open_pack" | "dismiss_pack" | "create_deck" | "update_deck" | "delete_deck" | "activate_deck" | "move_entry" | "import_legacy" | "set_plugin_enabled";
   id?: string;
   name?: string;
   icon?: string;

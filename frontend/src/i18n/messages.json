@@ -707,6 +707,8 @@
   "Pack file": ["Pack file", "Pack 文件"],
   "Install Pack from File...": ["Install Pack from File...", "从文件安装 Pack..."],
   "Install Pack": ["Install Pack", "安装 Pack"],
+  "About this Pack": ["About this Pack", "卡包介绍"],
+  "Pack actions": ["Pack actions", "卡包管理"],
   "Inspecting": ["Inspecting", "正在检查文件"],
   "Validating": ["Validating", "正在验证"],
   "Installing": ["Installing", "正在安装"],
@@ -1394,10 +1396,6 @@
   "CARDS": [
     "CARDS",
     "卡片"
-  ],
-  "COLLECTED CARD": [
-    "COLLECTED CARD",
-    "已收藏卡片"
   ],
   "Cached": [
     "Cached",
@@ -7959,6 +7957,9 @@
   "Uninstall plan": ["Uninstall plan", "卸载计划"],
   "Uninstall {name}?": ["Uninstall {name}?", "卸载 {name}？"],
   "Restore Pack": ["Restore Pack", "恢复卡包"],
+  "Remove Pack": ["Remove Pack", "移除卡包"],
+  "Uninstalled Packs": ["Uninstalled Packs", "已卸载的卡包"],
+  "Remove this uninstalled Pack from the inventory. Saved cards and connections are retained.": ["Remove this uninstalled Pack from the inventory. Saved cards and connections are retained.", "从列表中移除此已卸载卡包，已保存的卡片和连线会保留。"],
   "Restart OAW to finish removing unused dependencies.": ["Restart OAW to finish removing unused dependencies.", "重启 OAW 以完成清理不再使用的依赖。"],
   "Source files stay in your checkout. You can restore this Pack later.": ["Source files stay in your checkout. You can restore this Pack later.", "源文件保留在项目中，之后可以恢复此卡包。"],
   "Retain": ["Retain", "保留"],

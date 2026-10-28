@@ -1,16 +1,16 @@
-import { BufferGeometry, CylinderGeometry, Group, Material, Mesh, MeshPhysicalMaterial, MeshStandardMaterial, Vector3 } from 'three';
+import { Box3, BufferGeometry, CylinderGeometry, Group, Material, Mesh, MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, NoBlending, Vector3 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { boxWallGeometry, paperFlapGeometry, pouchGeometry } from './geometry';
-import { createPrint, cardPrint } from './print';
+import { createPrint } from './print';
 import { createMicrostructure, createPackMaterials } from './materials';
 import type { PackRenderOptions } from './types';
 import { openingPose, ease } from './motion';
+import { PACK_CARD_WIDTH, PACK_CARD_HEIGHT, PACK_CARD_DEPTH } from './cardProjection';
 
 export function createPackModel(options: PackRenderOptions, micro: ReturnType<typeof createMicrostructure>, invalidate: () => void) {
   const root = new Group(), body = new Group(), closure = new Group(); root.add(body, closure);
   root.name = `pack:${options.packaging}`;
   const print = createPrint(options, invalidate), materials = createPackMaterials(options, print, micro);
-  const cardPrints: ReturnType<typeof cardPrint>[] = [];
   const cardGroup = new Group(); root.add(cardGroup);
   function mesh(parent: Group, geometry: BufferGeometry, material: Material | Material[], name: string, position?: Vector3) {
     const object = new Mesh(geometry, material); object.name = name;
@@ -70,21 +70,21 @@ export function createPackModel(options: PackRenderOptions, micro: ReturnType<ty
     const bladeGeometry = new RoundedBoxGeometry(.058, .10, .009, 1, .025);
     for (const sign of [-1, 1]) { const blade = leaf.clone(); blade.geometry = bladeGeometry; blade.position.set(sign * .035, -.85, .052); blade.rotation.z = sign * -.55; closure.add(blade); }
   }
+  const framingBounds = new Box3().setFromObject(root);
   const originalMaterials = new Map<Mesh, Material | Material[]>(); root.traverse(object => { if (object instanceof Mesh) originalMaterials.set(object, object.material); });
-  // Sealed packs and empty wrappers never show their cards. Prepare those
-  // textures, geometries and materials only when a reveal actually needs them.
+  // These depth masks let the real CardStock DOM show through the pack canvas.
+  // They carry no card artwork or finish; the shared card components own both.
   const createCards = () => options.cards.slice(0, 3).map(card => {
-    const cardMap = cardPrint(card, invalidate); cardPrints.push(cardMap);
     const edge = new MeshStandardMaterial({ color: '#e7e1d1', roughness: .85, name: 'card-stock' });
-    const face = new MeshPhysicalMaterial({ map: cardMap.map, roughness: .73, clearcoat: .1, name: 'collected-card' });
-    const back = materials.back.clone();
-    const result = mesh(cardGroup, new RoundedBoxGeometry(1.64, 2.28, .026, 3, .045), [edge, edge, edge, edge, face, back], `card:${card.id}`);
+    // Alpha-zero faces must also write zero RGB into the premultiplied GPU buffer.
+    const face = new MeshBasicMaterial({ color: '#000000', opacity: 0, blending: NoBlending, premultipliedAlpha: true, name: 'card-face-mask' });
+    const result = mesh(cardGroup, new RoundedBoxGeometry(PACK_CARD_WIDTH, PACK_CARD_HEIGHT, PACK_CARD_DEPTH, 3, .045), [edge, edge, edge, edge, face, edge], `card:${card.id}`);
     originalMaterials.set(result, result.material);
-    return { mesh: result, face, stock: [face, edge, back], finish: card.finish };
+    return { mesh: result, edge, opacity: 0 };
   });
   let cardMeshes: ReturnType<typeof createCards> | undefined;
   function surface(override?: Material) { originalMaterials.forEach((material, object) => { object.material = override ?? material; }); }
-  function pose(progress: number, revealing: boolean, finishVisible: boolean) {
+  function pose(progress: number, revealing: boolean) {
     const motion = openingPose(parts, progress, Math.min(options.cards.length, 3));
     closure.position.fromArray(motion.closurePosition); closure.rotation.set(...motion.closureRotation);
     closure.visible = motion.closureVisible;
@@ -95,29 +95,24 @@ export function createPackModel(options: PackRenderOptions, micro: ReturnType<ty
     }
     cardGroup.visible = revealing && progress > .01 && progress < 1;
     if (cardGroup.visible) cardMeshes ??= createCards();
-    cardMeshes?.forEach(({ mesh: card, face, stock, finish }, i) => {
+    cardMeshes?.forEach((item, i) => {
+      const { mesh: card, edge } = item;
       const pose = motion.cards[i];
       card.position.fromArray(pose.position); card.rotation.set(...pose.rotation); card.scale.setScalar(pose.scale);
-      stock.forEach(material => {
-        const transparent = pose.opacity < 1;
-        if (material.transparent !== transparent) { material.transparent = transparent; material.needsUpdate = true; }
-        material.opacity = pose.opacity; material.depthWrite = !transparent;
-      });
-      const shiny = finishVisible && finish && finish !== 'normal';
-      face.metalness = shiny ? .68 : 0; face.roughness = shiny ? .23 : .73;
-      const iridescence = shiny && ['rainbow', 'laser'].includes(finish) ? .85 : 0;
-      if (Boolean(face.iridescence) !== Boolean(iridescence)) face.needsUpdate = true;
-      face.iridescence = iridescence;
+      item.opacity = cardGroup.visible ? pose.opacity : 0;
+      const transparent = pose.opacity < 1;
+      if (edge.transparent !== transparent) { edge.transparent = transparent; edge.needsUpdate = true; }
+      edge.opacity = pose.opacity; edge.depthWrite = !transparent;
     });
   }
-  return { root, materials, pose, surface,
+  return { root, framingBounds, materials, pose, surface, get cards() { return cardMeshes ?? []; },
     dispose() {
       surface(); const geometries = new Set<BufferGeometry>(), mats = new Set<Material>();
       root.traverse(object => { if (object instanceof Mesh) { geometries.add(object.geometry); (Array.isArray(object.material) ? object.material : [object.material]).forEach(material => mats.add(material)); } });
       // A preset may not use every prepared material.
       Object.values(materials).forEach(material => mats.add(material));
       geometries.forEach(geometry => geometry.dispose()); mats.forEach(material => material.dispose());
-      print.dispose(); cardPrints.forEach(print => print.dispose());
+      print.dispose();
     },
   };
 }

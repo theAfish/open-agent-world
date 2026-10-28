@@ -8,7 +8,7 @@
   position:relative; display:flex; container-type:inline-size; padding:0;
   border:1px solid var(--stock-edge,#d3ccbc); border-radius:9px;
   background:var(--stock-paper,#f5f3e9);
-  box-shadow:0 1px 0 var(--stock-edge,#d3ccbc),0 3px 0 -1px var(--stock-paper,#f5f3e9),0 4px 0 -1px var(--stock-edge,#d3ccbc),0 12px 24px #162d2414;
+  box-shadow:0 2px 4px #162d2414,0 12px 24px #162d2414;
 }
 .card-face {
   --face-accent:#5a7761; --face-paper:var(--stock-paper,#f5f3e9); --face-ink:var(--stock-ink,#293d37); --face-muted:var(--stock-muted,#66746a);

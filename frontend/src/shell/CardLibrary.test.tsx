@@ -10,6 +10,8 @@ import { worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import * as hostedAuth from '../auth/hostedSession';
 
+vi.mock('./pack3d/artwork', () => ({ paintPackCover: vi.fn() }));
+
 const originalRefresh = useCardLibrary.getState().refresh;
 beforeEach(() => {
   vi.spyOn(worldApi, 'getInstalledPacks').mockResolvedValue({ restart_required: false, versions: [] });
@@ -89,8 +91,8 @@ it('opens installed packs and browses their cards before entering secondary mana
   expect(screen.queryByRole('region', { name: 'Pack details' })).toBeNull();
   expect(within(pack).getByRole('button', { name: 'View cards in Alpha pack' }).hasAttribute('disabled')).toBe(true);
   const animationEnd = new Event('animationend', { bubbles: true });
-  Object.defineProperty(animationEnd, 'animationName', { value: 'packDeflate' });
-  fireEvent(pack.querySelector('.pack-object')!, animationEnd);
+  Object.defineProperty(animationEnd, 'animationName', { value: 'packOpeningDip' });
+  fireEvent(pack.querySelector('.pack-cover')!, animationEnd);
   fireEvent.click(within(pack).getByRole('button', { name: 'View cards in Alpha pack' }));
   expect((screen.getByLabelText('Source pack') as HTMLSelectElement).value).toBe('pack:alpha');
   expect(screen.queryByRole('button', { name: 'Uninstall Pack' })).toBeNull();
@@ -178,10 +180,37 @@ it('restores an unenrolled source Pack using its distribution identity', async (
   const restore = vi.spyOn(worldApi, 'managePack').mockResolvedValue({ restart_required: true, versions: [], inventory: [{ ...source, enrolled: true }] });
   useCardLibrary.setState({ snapshot: state, open: true, tab: 'packs', refresh: async () => {} });
   await act(async () => { render(<CardLibrary />); });
+  expect(screen.queryByRole('article', { name: 'Alpha pack' })).toBeNull();
+  const uninstalled = screen.getByText('Uninstalled Packs (2)').closest('details')!;
+  expect(uninstalled.open).toBe(false);
+  uninstalled.open = true;
   fireEvent.click(screen.getByRole('button', { name: 'View pack Alpha pack' }));
   expect(screen.queryByRole('button', { name: 'Uninstall Pack' })).toBeNull();
   await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Restore Pack' })));
   expect(restore).toHaveBeenCalledWith('distribution.alpha/restore', 'POST', undefined);
+});
+
+it('removes an orphaned Pack entry while retaining collected cards and surfaces failures', async () => {
+  const state = packSnapshot();
+  const owner = state.packs.alpha.definition.plugin_id;
+  state.plugins[owner].installed = false;
+  useCardLibrary.setState({ snapshot: state, open: true, tab: 'packs', refresh: async () => {} });
+  useWorldStore.setState({ legions: [] });
+  const saved = structuredClone(state);
+  saved.revision++;
+  saved.packs.alpha.dismissed = true;
+  const remove = vi.spyOn(worldApi, 'editCardLibrary').mockRejectedValueOnce(new Error('Inventory update failed')).mockResolvedValueOnce(saved);
+  await act(async () => { render(<CardLibrary />); });
+  fireEvent.click(screen.getByRole('button', { name: 'View pack Alpha pack' }));
+  expect(screen.queryByRole('button', { name: 'Uninstall Pack' })).toBeNull();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Remove Pack' })));
+  expect(screen.getByRole('alert').textContent).toContain('Inventory update failed');
+  expect(screen.getByRole('region', { name: 'Pack details' })).toBeTruthy();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Remove Pack' })));
+  expect(remove).toHaveBeenLastCalledWith({ action: 'dismiss_pack', id: 'alpha', expected_revision: state.revision });
+  expect(screen.queryByRole('article', { name: 'Alpha pack' })).toBeNull();
+  expect(screen.getByRole('article', { name: 'Beta pack' })).toBeTruthy();
+  expect(useCardLibrary.getState().snapshot?.collection).toEqual(state.collection);
 });
 
 it('keeps loaded local packs in the regular inventory without duplicates and manages them inside', async () => {
@@ -277,33 +306,38 @@ it("keeps the collected finish across library, detail and deck rerenders with no
   expect(normal.getAttribute("data-finish")).toBe("normal");
   expect(normal.querySelector(".card-finish-layer")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Inspect Tool 01" }));
-  expect(screen.getByText("Finish: Rainbow")).toBeTruthy();
+  expect(screen.getByText("Rainbow", { selector: ".library-finish-metadata" })).toBeTruthy();
   expect(container.querySelector('.library-card-preview .card-finish-layer')?.getAttribute("data-quality")).toBe("showcase");
   act(() => useCardLibrary.setState({ snapshot: { ...structuredClone(state), revision: state.revision + 1 } }));
   expect(stock().getAttribute("data-finish")).toBe("rainbow");
   expect(deck().getAttribute("data-finish")).toBe("rainbow");
-  expect(screen.getByText("Finish: Rainbow")).toBeTruthy();
+  expect(screen.getByText("Rainbow", { selector: ".library-finish-metadata" })).toBeTruthy();
 });
 
-it("browses a large collection in bounded pages and resets pagination for search and filters", () => {
-  HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
-  HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };
-  useCardLibrary.setState({ snapshot: snapshot(), open: true, refresh: async () => {} });
-  useWorldStore.setState({ legions: [] });
-  render(<CardLibrary />);
-  fireEvent.click(screen.getByRole("button", { name: /^Cards/ }));
-  expect(screen.getAllByRole("button", { name: /^Inspect Tool/ })).toHaveLength(30);
-  fireEvent.click(screen.getByLabelText("Next cards"));
-  fireEvent.click(screen.getByLabelText("Next cards"));
-  expect(screen.getAllByRole("button", { name: /^Inspect Tool/ })).toHaveLength(15);
-  expect(screen.getByText("Page 3 of 3")).toBeTruthy();
+it("keeps complete source groups together, including packs larger than the former page limit", () => {
+  const state = snapshot();
+  const ids = Object.keys(state.collection);
+  for (const [id, name, cards] of [["alpha", "Alpha pack", ids.slice(0, 28)], ["beta", "Beta pack", ids.slice(28)]] as const) {
+    state.packs[id] = { definition: { id, name, plugin_id: TEST_CATALOG.plugins[0].id, cards: [...cards], description: "Research tools" }, owned: true, opened: true, opened_at: null };
+    for (const card of cards) state.collection[card].source_pack_ids = [id];
+  }
+  openCards(state);
+  for (const [name, count] of [["Alpha pack", 28], ["Beta pack", 47]] as const) {
+    const group = screen.getByRole("heading", { name }).closest("details")!;
+    expect(group.open).toBe(false);
+    group.open = true;
+    expect(within(group).getByText(`${count} cards`)).toBeTruthy();
+    expect(within(group).getAllByRole("button", { name: /^Inspect Tool/ })).toHaveLength(count);
+  }
+  expect(screen.queryByLabelText("Next cards")).toBeNull();
+  fireEvent.change(screen.getByLabelText("Source pack"), { target: { value: "pack:beta" } });
+  expect(screen.getAllByRole("button", { name: /^Inspect Tool/ })).toHaveLength(47);
   fireEvent.change(screen.getByLabelText("Search cards"), { target: { value: "Tool 75" } });
   expect(screen.getAllByRole("button", { name: /^Inspect Tool/ })).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "Inspect Tool 75" }));
   expect(screen.getByRole("complementary", { name: "Card details" }).textContent).toContain("Tool 75");
   fireEvent.change(screen.getByLabelText("Card category"), { target: { value: "Even" } });
   expect(screen.getByText("No matching cards")).toBeTruthy();
-  expect(screen.queryByLabelText("Next cards")).toBeNull();
 });
 
 function packSnapshot() {
@@ -361,7 +395,11 @@ it("groups by collected pack provenance, deduplicates shared cards and filters b
   expect(screen.getByRole("heading", { name: "Alpha pack" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Beta pack" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Alpha pack" }).closest("details")?.hasAttribute("open")).toBe(false);
-  for (const name of ["Alpha pack", "Beta pack"]) fireEvent.click(screen.getByRole("heading", { name }).closest("summary")!);
+  for (const name of ["Alpha pack", "Beta pack"]) {
+    const summary = screen.getByRole("heading", { name }).closest("summary")!;
+    expect(summary.querySelector("small")).toBeNull();
+    fireEvent.click(summary);
+  }
   expect(screen.getAllByRole("button", { name: "Inspect Review toolbox" })).toHaveLength(1);
   expect(screen.getAllByRole("button", { name: /^Inspect / })).toHaveLength(2);
   fireEvent.change(screen.getByLabelText("Source pack"), { target: { value: "pack:beta" } });

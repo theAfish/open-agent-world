@@ -32,28 +32,7 @@
 .pack-design-study header > small { display: block; margin-left: 33px; font-size: 10px; color: #617c96; }
 .pack-design-study header > p { font-size: 10px; color: #83919b; line-height: 1.7; margin: 9px 0 0; }
 .pack-design-grid:not(.is-compact) .pack-design-study .pack-touch-area { height: 347px; padding: 17px 10px 26px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .pack-object { width: min(100%, 216px); height: 304px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .pack-print { padding: 19px 15px 15px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .pack-brand b { font-size: 10px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .pack-brand small { font-size: 5px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .pack-emblem { width: 66px; height: 66px; margin: 20px 0 14px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .pack-emblem > svg { width: 39px; height: 39px; stroke-width: 1.6; }
-.pack-design-grid:not(.is-compact) .pack-design-study .pack-title { font-size: 27px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .pack-subtitle { font-size: 8px; line-height: 1.7; }
-.pack-design-grid:not(.is-compact) .pack-design-study .pack-print-footer b { font-size: 23px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .pack-print-footer b small { font-size: 8px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .pack-print-footer > span { font-size: 5px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .library-pack[data-packaging="premium"] .pack-print { padding-right: 26px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .library-pack[data-packaging="paper"] .pack-print { padding-top: 100px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .library-pack[data-packaging="paper"] .pack-emblem { width: 53px; height: 53px; margin: 15px 0 11px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .pack-paper-flap { height: 87px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .pack-paper-flap > .pack-brand { padding-top: 21px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .pack-paper-stamp { width: 36px; height: 36px; left: calc(50% - 18px); bottom: -17px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .library-pack[data-packaging="collector"] .pack-object { width: min(87%, 195px); }
-.pack-design-grid:not(.is-compact) .pack-design-study .library-pack[data-packaging="collector"] .pack-print { padding: 25px 12px 13px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .library-pack[data-packaging="collector"] .pack-emblem { margin-top: 24px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .library-pack[data-packaging="collector"] .pack-print-footer { width: calc(100% + 24px); padding-inline: 12px; margin-bottom: -13px; padding-bottom: 13px; }
-.pack-design-grid:not(.is-compact) .pack-design-study .library-pack.is-revealing .pack-touch-area { height: 477px; padding-top: 147px; }
+.pack-design-grid:not(.is-compact) .pack-design-study .pack-cover { width: min(100%, 216px); height: 304px; }
 .pack-design-study .pack-edition { font-size: 8px; letter-spacing: .04em; color: #8b9b9f; padding: 4px 0 0; }
 .pack-design-study > ul { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 5px; padding: 21px 0 15px; margin: 0; }
 .pack-design-study > ul > li { display: flex; align-items: center; gap: 5px; font-size: 8px; color: #6e8395; white-space: nowrap; }
@@ -69,11 +48,8 @@
 .pack-design-opened-scene { position: relative; margin: 0; }
 .pack-design-opened-scene > .library-pack { width: 100%; }
 .pack-design-opened-scene .pack-touch-area { height: 233px; }
-.pack-design-opened-scene .pack-object { height: 214px; }
+.pack-design-opened-scene .pack-cover { height: 214px; }
 .pack-design-opened-scene .pack-edition { display: none; }
-.pack-design-opened-scene .pack-print { padding: 9px 10px; }
-.pack-design-opened-scene .pack-title { font-size: 20px; }
-.pack-design-opened-scene .pack-emblem { margin: 7px 0 6px; width: 38px; height: 38px; }
 .pack-design-scrub { display: flex; align-items: center; gap: 10px; color: #647e96; font-size: 10px; }
 .pack-design-scrub input { flex: 1; min-width: 0; accent-color: #779697; }
 .pack-design-scrub output { width: 28px; text-align: right; font-variant-numeric: tabular-nums; }

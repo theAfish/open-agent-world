@@ -24,6 +24,8 @@ select:disabled { cursor: not-allowed !important; opacity: 0.48; }
 
 .ui-select-menu {
   position: fixed;
+  inset: auto;
+  margin: 0;
   z-index: 20000;
   padding: 4px;
   overflow: auto;

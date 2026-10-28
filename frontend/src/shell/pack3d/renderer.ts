@@ -5,12 +5,15 @@ import { createMicrostructure } from './materials';
 import { createPackModel } from './model';
 import { createContactShadow } from './contactShadow';
 import { hoverAngles } from './motion';
+import { cardProjection, PACK_CARD_WIDTH, PACK_CARD_HEIGHT } from './cardProjection';
+import { MATERIAL_LIGHT_EVENT } from '../../cards/cardMaterialRenderer';
 import { packModelKey, packPreviewKey, packViewKey, rememberPackPreview } from './preview';
 import type { PackRenderHandle, PackRenderOptions } from './types';
 
 type Model = ReturnType<typeof createPackModel>;
 interface Slot {
   canvas: HTMLCanvasElement; context: CanvasRenderingContext2D; options: PackRenderOptions;
+  cardLayer: HTMLElement;
   model?: Model; key: string; viewKey: string; visible: boolean; dirty: boolean; ready: boolean; opening: number;
   prepared?: string; preparing?: { key: string; programs: NonNullable<WebGLRenderer['info']['programs']> };
   yaw: number; pitch: number; hoverX: number; hoverY: number; tiltX: number; tiltY: number; drawnAt: number;
@@ -34,7 +37,6 @@ class PackRenderer {
   readonly fill = new DirectionalLight('#dceeff', .65);
   readonly contact = createContactShadow();
   readonly bounds = new Box3();
-  readonly partBounds = new Box3();
   environment!: WebGLRenderTarget;
   private frame = 0;
   private lost = false;
@@ -155,7 +157,11 @@ class PackRenderer {
         if (!tilting) { slot.tiltX = slot.hoverX; slot.tiltY = slot.hoverY; }
         const progress = o.view.opening ?? (o.revealing ? o.reducedMotion ? .6 : Math.min(1, (now - slot.opening) / 2000) : o.opened ? 1 : 0);
         const revealing = o.view.opening !== undefined ? progress > 0 && progress < 1 : o.revealing;
-        slot.model.pose(progress, revealing, o.finishVisible || o.view.opening !== undefined);
+        slot.model.pose(progress, revealing);
+        slot.model.cards.forEach(({ mesh }, index) => {
+          const element = slot.cardLayer.children[index] as HTMLElement | undefined;
+          if (element?.offsetWidth) mesh.scale.y *= element.offsetHeight / element.offsetWidth * PACK_CARD_WIDTH / PACK_CARD_HEIGHT;
+        });
         slot.model.surface(o.view.surface === 'clay' ? this.clay : o.view.surface === 'wireframe' ? this.wire : undefined);
         // Static views can wait for compilation. A reveal is already timed by
         // its owner; retain immediate drawing so waiting cannot skip the reveal.
@@ -166,26 +172,30 @@ class PackRenderer {
         const light = (o.view.light ?? 0) * degrees;
         this.scene.environmentRotation.set(0, light, 0);
         this.key.position.set(-3.5 * Math.cos(light) + 4 * Math.sin(light), 5.5, 5 * Math.cos(light) + 3.5 * Math.sin(light));
-        const zoom = Math.min(1, progress / .28);
-        const spread = revealing ? 2.48 * zoom * zoom * (3 - 2 * zoom) : o.opened && (o.packaging === 'paper' || o.packaging === 'collector') ? .8 : 0;
         slot.model.root.rotation.set((slot.pitch + slot.tiltY) * degrees, (slot.yaw + slot.tiltX) * degrees, 0);
         slot.model.root.updateMatrixWorld(true); this.camera.updateMatrixWorld();
-        this.bounds.makeEmpty();
-        slot.model.root.traverseVisible(object => {
-          if (!(object instanceof Mesh)) return;
-          if (!object.geometry.boundingBox) object.geometry.computeBoundingBox();
-          this.partBounds.copy(object.geometry.boundingBox!).applyMatrix4(object.matrixWorld).applyMatrix4(this.camera.matrixWorldInverse);
-          this.bounds.union(this.partBounds);
-        });
-        // Include the opened lid and emerging cards from every inspection angle.
-        const aspect = width / height, margin = .16;
-        const viewHeight = Math.max(4.12 + spread, this.bounds.max.y - this.bounds.min.y + margin * 2,
+        // Frame the sealed package so moving cards and closures never move the body.
+        this.bounds.copy(slot.model.framingBounds).applyMatrix4(slot.model.root.matrixWorld).applyMatrix4(this.camera.matrixWorldInverse);
+        const frameHeight = canvas.parentElement!.clientHeight;
+        const aspect = width / frameHeight, margin = .16;
+        const viewHeight = Math.max(4.12, this.bounds.max.y - this.bounds.min.y + margin * 2,
           (this.bounds.max.x - this.bounds.min.x + margin * 2) / aspect);
         const halfWidth = viewHeight * aspect / 2;
         const centerX = Math.max(this.bounds.max.x - halfWidth + margin, Math.min(0, this.bounds.min.x + halfWidth - margin));
-        const centerY = Math.max(this.bounds.max.y - viewHeight / 2 + margin, Math.min(spread * .44, this.bounds.min.y + viewHeight / 2 - margin));
+        const centerY = Math.max(this.bounds.max.y - viewHeight / 2 + margin, Math.min(0, this.bounds.min.y + viewHeight / 2 - margin));
         this.camera.left = centerX - halfWidth; this.camera.right = centerX + halfWidth;
-        this.camera.top = viewHeight / 2 + centerY; this.camera.bottom = -viewHeight / 2 + centerY; this.camera.updateProjectionMatrix();
+        this.camera.top = viewHeight / 2 + centerY + viewHeight * (height / frameHeight - 1);
+        this.camera.bottom = -viewHeight / 2 + centerY; this.camera.updateProjectionMatrix();
+        slot.model.cards.forEach(({ mesh, opacity }, index) => {
+          const element = slot.cardLayer.children[index] as HTMLElement | undefined;
+          if (!element?.offsetWidth || !element.offsetHeight) return;
+          element.style.transform = cardProjection(mesh.matrixWorld, this.camera, width, height, element.offsetWidth, element.offsetHeight);
+          element.style.opacity = String(o.view.surface && o.view.surface !== 'material' ? 0 : opacity);
+          element.firstElementChild?.dispatchEvent(new CustomEvent(MATERIAL_LIGHT_EVENT, { detail: {
+            x: Math.max(-1, Math.min(1, (slot.yaw + slot.tiltX) / 28)),
+            y: Math.max(-1, Math.min(1, (slot.pitch + slot.tiltY) / 22)), active: true, immediate: true,
+          } }));
+        });
         this.scene.add(slot.model.root);
         this.contact.render(this.renderer, this.scene, this.key.position);
         this.renderer.setViewport(0, 0, w, h); this.renderer.setScissor(0, 0, w, h); this.renderer.setScissorTest(true);
@@ -198,7 +208,7 @@ class PackRenderer {
         canvas.dataset.tiltYaw = slot.tiltX.toFixed(2); canvas.dataset.tiltPitch = slot.tiltY.toFixed(2);
         canvas.dataset.opening = progress.toFixed(3);
         if (!slot.ready) { slot.ready = true; slot.onReady(true); }
-        if (!o.revealing && !tilting && !slot.tiltX && !slot.tiltY
+        if (!revealing && !tilting && !slot.tiltX && !slot.tiltY
           && slot.yaw === defaultYaw(o) && slot.pitch === (o.view.pitch ?? -3)) {
           rememberPackPreview(packPreviewKey(o), canvas);
         }
@@ -211,10 +221,10 @@ class PackRenderer {
     }
     if (animate) this.invalidate();
   };
-  attach(canvas: HTMLCanvasElement, options: PackRenderOptions, onReady: Slot['onReady']): PackRenderHandle {
+  attach(canvas: HTMLCanvasElement, options: PackRenderOptions, onReady: Slot['onReady'], cardLayer: HTMLElement): PackRenderHandle {
     const context = canvas.getContext('2d', { alpha: true });
     if (!context) throw new Error('Pack canvas unavailable');
-    const slot: Slot = { canvas, context, options, key: packModelKey(options), viewKey: packViewKey(options), dirty: true, visible: false, ready: false, opening: performance.now(),
+    const slot: Slot = { canvas, context, options, cardLayer, key: packModelKey(options), viewKey: packViewKey(options), dirty: true, visible: false, ready: false, opening: performance.now(),
       yaw: defaultYaw(options), pitch: options.view.pitch ?? -3, hoverX: 0, hoverY: 0, tiltX: 0, tiltY: 0, drawnAt: performance.now(), onReady };
     this.slots.add(slot);
     const resize = new ResizeObserver(() => { slot.dirty = true; this.invalidate(); }); resize.observe(canvas);
@@ -254,10 +264,10 @@ function scheduleDispose(renderer: PackRenderer) {
   window.clearTimeout(disposal);
   disposal = window.setTimeout(() => { if (shared === renderer && !renderer.slots.size) { renderer.dispose(); shared = undefined; } }, 5000);
 }
-export function attachPackRenderer(canvas: HTMLCanvasElement, options: PackRenderOptions, onReady: (ready: boolean) => void) {
+export function attachPackRenderer(canvas: HTMLCanvasElement, options: PackRenderOptions, onReady: (ready: boolean) => void, cardLayer: HTMLElement) {
   window.clearTimeout(disposal);
   shared ??= new PackRenderer();
-  return shared.attach(canvas, options, onReady);
+  return shared.attach(canvas, options, onReady, cardLayer);
 }
 
 /** Development diagnostics: no model or renderer references escape this module. */

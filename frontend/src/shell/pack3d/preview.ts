@@ -1,7 +1,7 @@
 import type { PackRenderOptions } from './types';
 
 export const packModelKey = (o: PackRenderOptions) => JSON.stringify([
-  o.id, o.name, o.description, o.edition, o.packaging, o.color, o.count, o.countLabel, o.icon, o.artwork, o.issue, o.cards,
+  o.id, o.name, o.description, o.edition, o.packaging, o.color, o.count, o.countLabel, o.icon, o.artwork, o.version, o.notice, o.cards,
 ]);
 export const packViewKey = (o: PackRenderOptions) => JSON.stringify([
   o.opened, o.revealing, o.finishVisible, o.reducedMotion,

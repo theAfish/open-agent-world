@@ -26,6 +26,14 @@ it('does not synthesize an inventory pack for retained files from an uninstalled
     .map(item => item.pack.definition.id)).toEqual(['core', 'installed:local.tools']);
 });
 
+it('hides dismissed historical packs without deleting their saved metadata', () => {
+  const state = snapshot();
+  state.packs.local.definition.source = 'bundled';
+  state.packs.local.dismissed = true;
+  expect(packInventory(state, { restart_required: false, versions: [] }).map(item => item.pack.definition.id)).toEqual(['core']);
+  expect(state.packs.local.opened).toBe(true);
+});
+
 it('keeps selected packs without duplicating older retained versions', () => {
   const inventory = packInventory(snapshot(), { restart_required: true,
     versions: [version, { ...version, version: '2.0.0', selected: true }] });

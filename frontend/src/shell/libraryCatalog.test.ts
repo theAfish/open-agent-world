@@ -51,7 +51,7 @@ describe("pack formations in the Library", () => {
     expect(cards[0].available).toBe(true);
   });
 
-  it("orders formations before ordinary cards before pagination", () => {
+  it("orders formations before ordinary cards and internal cards within a pack", () => {
     const state = snapshot();
     state.packs.one.opened = true;
     const [preset] = collectedLibraryLegions(state, [formation()]);

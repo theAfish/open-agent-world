@@ -84,7 +84,7 @@ test('presets open, scrub, reset and fit small screens without backend requests'
     await expect(page.locator('.pack-design-opened .library-pack')).toHaveAttribute('data-packaging', preset);
     await study.locator('.pack-touch-area').click();
     await expect(study.locator('.library-pack')).toHaveClass(/is-opened is-revealing/);
-    await expect(study.locator('.pack-drawn-card').first()).toBeHidden();
+    await expect(study.locator('.pack-reveal-card .card-stock--compact')).toHaveCount(preset === 'collector' ? 3 : preset === 'paper' ? 2 : 1);
     await expect(study.locator('.pack-touch-area')).toBeDisabled();
     await expect(study.locator('.pack-touch-area')).toBeEnabled();
     await expect(study.locator('.pack-webgl')).toHaveAttribute('data-opening', '1.000');
@@ -118,26 +118,27 @@ test('keeps opening accessible when WebGL is unavailable', async ({ page }) => {
   await page.goto('/?pack-design');
   const pack = page.locator('.pack-design-study').first().locator('.library-pack');
   await expect(pack).toHaveAttribute('data-renderer', 'fallback');
-  await expect(pack.locator('.pack-title')).toBeVisible();
+  await expect(pack.locator('.pack-cover')).toBeVisible();
+  await expect.poll(() => pack.locator('.pack-cover').evaluate((canvas: HTMLCanvasElement) => canvas.getContext('2d')!.getImageData(384, 544, 1, 1).data[3])).toBe(255);
   await pack.locator('button').focus(); await page.keyboard.press('Enter');
   await expect(pack).toHaveClass(/is-opened/);
   await expect(pack.locator('button')).toBeEnabled();
 });
 
-test('waits for the first 3D frame without flashing the legacy cover', async ({ page }) => {
+test('waits for the first 3D frame without flashing a flat cover', async ({ page }) => {
   let release!: () => void;
   const blocked = new Promise<void>(resolve => { release = resolve; });
   await page.route('**/pack3d/renderer.ts*', async route => { await blocked; await route.continue(); });
   await page.goto('/?pack-design', { waitUntil: 'domcontentloaded' });
   const pack = page.locator('.pack-design-study').first().locator('.library-pack');
   await expect(pack).toHaveAttribute('data-renderer', 'loading');
-  await expect(pack.locator('.pack-fallback')).toBeHidden();
+  await expect(pack.locator('.pack-cover')).toBeHidden();
   await expect(pack.locator('canvas')).toHaveCSS('opacity', '0');
   await expect(pack.locator('.pack-loading')).toBeVisible();
   release();
   await expect(pack).toHaveAttribute('data-renderer', 'webgl');
   await expect(pack.locator('canvas')).toHaveCSS('opacity', '1');
-  await expect(pack.locator('.pack-fallback')).toBeHidden();
+  await expect(pack.locator('.pack-cover')).toBeHidden();
 });
 
 test('recovers after a lost GPU context', async ({ page }) => {
@@ -154,7 +155,8 @@ test('recovers after a lost GPU context', async ({ page }) => {
   await expect(pack).toHaveAttribute('data-renderer', 'webgl');
   await page.evaluate(() => (window as unknown as { packTestExtension: WEBGL_lose_context }).packTestExtension.loseContext());
   await expect(pack).toHaveAttribute('data-renderer', 'fallback');
-  await expect(pack.locator('.pack-title')).toBeVisible();
+  await expect(pack.locator('.pack-cover')).toBeVisible();
+  await expect.poll(() => pack.locator('.pack-cover').evaluate((canvas: HTMLCanvasElement) => canvas.getContext('2d')!.getImageData(384, 544, 1, 1).data[3])).toBe(255);
   await page.waitForTimeout(200);
   await page.evaluate(() => (window as unknown as { packTestExtension: WEBGL_lose_context }).packTestExtension.restoreContext());
   await expect(pack).toHaveAttribute('data-renderer', 'webgl');

@@ -43,10 +43,17 @@ export function ComponentPalette() {
     const element = root.current;
     const shell = element?.closest<HTMLElement>('.world-shell');
     if (!element || !shell || !library.open) return;
-    const measure = () => shell.style.setProperty('--library-deck-space', `${window.innerHeight - element.getBoundingClientRect().top + 16}px`);
+    const tabs = element.querySelector<HTMLElement>('.deck-tabs')!;
+    // Reserve only the resting tray, even while the stage expands over Library.
+    const measure = () => {
+      const style = getComputedStyle(element);
+      const chrome = [style.paddingTop, style.paddingBottom, style.borderTopWidth, style.borderBottomWidth, style.bottom]
+        .reduce((height, value) => height + parseFloat(value), 0);
+      shell.style.setProperty('--library-deck-space', `calc(var(--library-deck-peek-height) + ${tabs.getBoundingClientRect().height + chrome + 21}px)`);
+    };
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(element);
+    observer.observe(tabs);
     window.addEventListener('resize', measure);
     return () => { observer.disconnect(); window.removeEventListener('resize', measure); shell.style.removeProperty('--library-deck-space'); };
   }, [library.open]);
@@ -95,6 +102,7 @@ export function ComponentPalette() {
       <div className="deck-tab-scroll" role="tablist" aria-label={t("Card decks")}>
         {snapshot?.decks.map(item => <button type="button" role="tab" key={item.id} data-deck-destination={item.id} aria-selected={item.id === deck?.id}
           aria-controls="active-card-deck" className={`${item.id === deck?.id ? "is-active" : ""} ${dropDeck === item.id ? "is-drop-target" : ""}`} disabled={library.busy}
+          onFocus={event => event.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" })}
           onClick={() => { setEditingDeck(null); void library.edit({ action: "activate_deck", id: item.id }); }}>
           <span className="deck-tab-summary"><DeckIcon icon={item.icon} /><small>{item.entries.length}</small></span>
           <span className="deck-tab-label">{displayDeckName(item)}</span>

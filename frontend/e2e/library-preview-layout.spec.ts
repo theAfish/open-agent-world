@@ -2,6 +2,11 @@ import { expect, test } from '@playwright/test';
 import type { LibrarySnapshot } from '../src/state/cardLibrary';
 
 test('collection and card details scroll independently while the preview fits smaller screens', async ({ page, request }) => {
+  const profile = await (await request.get('/api/application')).json();
+  await request.patch('/api/application/preferences', { data: {
+    profile_id: profile.profile_id, generation: profile.generation,
+    changes: { 'oaw.locale': 'en', 'oaw-onboarding-v1': JSON.stringify({ version: 1, state: { status: 'skipped' } }) },
+  } });
   const initial = await (await request.get('/api/card-library')).json() as LibrarySnapshot;
   const pack = Object.values(initial.packs).find(item => item.definition.cards.includes('text'))!;
   const opened = await request.post('/api/card-library/actions', { data: {

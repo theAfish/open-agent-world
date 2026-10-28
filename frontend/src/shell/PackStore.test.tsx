@@ -5,6 +5,8 @@ import { worldApi } from '../api/client';
 import { PackStore } from './PackStore';
 import type { StoreDetail, StorePack, StorePage, StoreState, StoreVersion } from '../types/packs';
 
+vi.mock('./pack3d/artwork', () => ({ paintPackCover: vi.fn() }));
+
 const state: StoreState = { installed_version: null, loaded_version: null, available_version: '0.10.0', update_available: false, restart_required: false, can_install: true };
 const pack: StorePack = { ...state, id: 'example.greeter', name: 'Greeter', summary: 'External Greeter Pack', description: 'A greeting card.', latest_version: '0.10.0' };
 const detail: StoreDetail = { ...pack, versions: ['0.10.0'], versions_next_cursor: null };
@@ -25,6 +27,10 @@ it('uses authored packaging in the catalog and the reviewed version preview in d
   expect(view.container.querySelector('.library-pack')?.getAttribute('data-packaging')).toBe('premium');
   expect(view.container.querySelector('.library-pack')?.getAttribute('style')).toContain('#aa3366');
   expect(view.container.querySelector('.library-pack')?.getAttribute('data-renderer')).toBe('fallback');
+  const copy = view.container.querySelector('.pack-catalog-copy')!;
+  expect(copy.textContent).toBe(pack.name);
+  expect(view.container.querySelector('.library-pack')?.getAttribute('data-pack-version')).toBe('0.10.0');
+  expect(screen.getByText('Version 0.10.0')).toBeTruthy();
   fireEvent.click(open);
   await screen.findByText('colorama==0.4.6');
   expect(view.container.querySelector('.library-pack')?.getAttribute('data-packaging')).toBe('collector');
@@ -58,7 +64,7 @@ it('displays requirements and installs an explicit version with restart state', 
   expect(install.mock.calls[0].slice(0, 2)).toEqual([pack.id, '0.10.0']);
   expect((screen.getByRole('button', { name: 'Installed' }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Back to Store' }));
-  expect(screen.getByText('Installed · Restart required')).toBeTruthy();
+  expect(screen.getByText('Restart required').closest('.library-pack')?.getAttribute('data-pack-notice')).toBe('restart');
 });
 
 it('uses backend update decisions and contains a failed install', async () => {
@@ -67,7 +73,7 @@ it('uses backend update decisions and contains a failed install', async () => {
   vi.spyOn(worldApi, 'getStoreVersion').mockResolvedValue(version);
   const install = vi.spyOn(worldApi, 'installStorePack').mockRejectedValue(new Error('Pack requires missing dependency'));
   render(<PackStore />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Update' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'View Greeter details' }));
   expect(install).not.toHaveBeenCalled();
   fireEvent.click(await screen.findByRole('button', { name: 'Update' }));
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Pack requires missing dependency');
@@ -85,7 +91,7 @@ it('shows the same environment plan as local installs and blocks an unresolved d
   } });
   const install = vi.spyOn(worldApi, 'installStorePack');
   render(<PackStore />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Get' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'View Greeter details' }));
   expect(await screen.findByRole('region', { name: 'Installation plan' })).toBeTruthy();
   expect(screen.getByText('Prepared when used')).toBeTruthy();
   expect(screen.getByRole('alert').textContent).toContain('Install science.viewer first');

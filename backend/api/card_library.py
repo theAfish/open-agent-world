@@ -54,6 +54,13 @@ async def edit_library(request: LibraryEdit, services: ApplicationServices = Dep
     # unrelated world cleanup. Only disabling changes runtime availability.
     disabling = request.action == "set_plugin_enabled" and request.enabled is False
     async with services._node_mutation(read_only=not disabling):
+        if request.action == "dismiss_pack":
+            pack = services.card_library.read().packs.get(request.id or "")
+            if pack and (any(manifest.owner_id == pack.definition.plugin_id
+                             for manifest in services.pack_installations.selected().values())
+                         or any(spec.owner == pack.definition.plugin_id and services.pack_installations.source_enrolled(key)
+                                for key, spec in services.pack_installations.source_specs().items())):
+                raise ConflictError("Uninstall this Pack before removing its inventory entry")
         if (request.action == "set_plugin_enabled" and request.enabled
                 and (any(manifest.owner_id == request.id and manifest.id not in services.pack_installations.selected()
                          for manifest in services.plugins.installed_packs.values())

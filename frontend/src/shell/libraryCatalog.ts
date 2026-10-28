@@ -70,7 +70,7 @@ export function collectedLibraryLegions(snapshot: LibrarySnapshot, legions: Legi
   });
 }
 
-/** Order within a source pack, before pagination: formations, ordinary cards, internal cards. */
+/** Order within a source pack: formations, ordinary cards, internal cards. */
 export function compareLibraryCards(a: LibraryCard, b: LibraryCard): number {
   return Number(a.internal) - Number(b.internal)
     || Number(b.kind === "legion") - Number(a.kind === "legion")

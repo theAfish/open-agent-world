@@ -57,3 +57,69 @@ test('missing and failed packs use the checker material and retain recovery cont
   await expect(failed).not.toHaveAttribute('data-pack-issue');
   await expect(failed.locator('.pack-print')).not.toHaveCSS('background-image', /conic-gradient/);
 });
+
+test('removes an uninstalled Pack entry and uninstalls a failed source Pack from the current inventory', async ({ page, request }, testInfo) => {
+  const profile = await (await request.get('/api/application')).json();
+  await request.patch('/api/application/preferences', { data: {
+    profile_id: profile.profile_id, generation: profile.generation,
+    changes: { 'oaw-onboarding-v1': JSON.stringify({ version: 1, state: { status: 'skipped' } }), 'oaw.locale': 'en' },
+  } });
+  const snapshot: LibrarySnapshot = await (await request.get('/api/card-library')).json();
+  const template = Object.values(snapshot.packs)[0];
+  snapshot.packs = Object.fromEntries(['literature.research', 'fixture.source'].map(owner => [owner, {
+    ...template, definition: { ...template.definition, id: owner, plugin_id: owner,
+      name: owner === 'literature.research' ? 'Literature Research' : 'Failed source Pack' },
+  }]));
+  for (const owner of Object.keys(snapshot.packs)) snapshot.plugins[owner] = {
+    descriptor: { id: owner, name: owner, description: '', version: '1.0.0', plugin_api_version: '1.0' },
+    installed: false, enabled: true,
+  };
+  snapshot.available_pack_ids = [];
+  const installations: PackInstallations = { restart_required: false, versions: [], inventory: [{
+    id: 'fixture.source', owner: 'fixture.source', name: 'Failed source Pack', version: '1.0.0',
+    source: 'development', loaded: false, enabled: false, enrolled: true,
+    environments: [{ id: 'worker', target: 'host-worker', provider: 'python', management: 'managed',
+      state: 'failed', error: 'Source environment failed', python: [], node: [] }],
+    backend_requirements: [], frontend_dependencies: [], warnings: [],
+  }] };
+  await page.route('**/api/card-library', route => route.fulfill({ json: snapshot }));
+  await page.route('**/api/card-library/actions', route => {
+    const change = route.request().postDataJSON();
+    expect(change).toEqual({ action: 'dismiss_pack', id: 'literature.research', expected_revision: snapshot.revision });
+    snapshot.packs[change.id].dismissed = true;
+    snapshot.revision++;
+    return route.fulfill({ json: snapshot });
+  });
+  await page.route('**/api/packs', route => route.fulfill({ json: installations }));
+  await page.route('**/api/packs/fixture.source/uninstall-plan', route => route.fulfill({ json: {
+    id: 'fixture.source', owner: 'fixture.source', can_uninstall: true, blockers: [], resources: [],
+    restart_required: false, source: 'development',
+  } }));
+  await page.route('**/api/packs/fixture.source', route => {
+    expect(route.request().method()).toBe('DELETE');
+    installations.inventory![0].enrolled = false;
+    return route.fulfill({ json: installations });
+  });
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Open Pack and Card Library' }).click();
+  const library = page.getByRole('dialog', { name: 'Pack & Card Library' });
+  await library.getByRole('button', { name: 'View pack Literature Research', exact: true }).click();
+  await library.getByRole('button', { name: 'Remove Pack', exact: true }).click();
+  await expect(library.getByRole('article', { name: 'Literature Research', exact: true })).toHaveCount(0);
+  await library.getByRole('button', { name: 'View pack Failed source Pack', exact: true }).click();
+  await library.getByRole('button', { name: 'Uninstall Pack', exact: true }).click();
+  await library.getByRole('button', { name: 'Confirm uninstall', exact: true }).click();
+  await expect(library.locator('.pack-grid > .library-pack')).toHaveCount(0);
+  const removedSources = library.locator('details').filter({ has: page.locator('summary', { hasText: 'Uninstalled Packs' }) });
+  await expect(removedSources).not.toHaveAttribute('open');
+  await page.reload();
+  await page.getByRole('button', { name: 'Open Pack and Card Library' }).click();
+  await expect(library.locator('.pack-grid > .library-pack')).toHaveCount(0);
+  await removedSources.locator('summary').click();
+  await removedSources.getByRole('button', { name: 'View pack Failed source Pack' }).click();
+  await expect(library.getByRole('button', { name: 'Restore Pack', exact: true })).toBeVisible();
+  await expect(library.getByRole('button', { name: 'Uninstall Pack', exact: true })).toHaveCount(0);
+  expect(await library.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('removed-packs-mobile.png') });
+});

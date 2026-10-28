@@ -37,6 +37,7 @@ class UserPackState(Model):
     owned: bool = True
     opened: bool = False
     opened_at: str | None = None
+    dismissed: bool = False
 
 
 class CollectionEntry(Model):
@@ -77,7 +78,7 @@ class LibraryState(Model):
 
 class LibraryEdit(Model):
     expected_revision: int = Field(ge=0)
-    action: Literal["open_pack", "create_deck", "update_deck", "delete_deck", "activate_deck", "move_entry", "import_legacy", "set_plugin_enabled"]
+    action: Literal["open_pack", "dismiss_pack", "create_deck", "update_deck", "delete_deck", "activate_deck", "move_entry", "import_legacy", "set_plugin_enabled"]
     id: str | None = Field(default=None, max_length=128)
     name: str | None = Field(default=None, min_length=1, max_length=120)
     icon: str | None = Field(default=None, min_length=1, max_length=40)
@@ -191,6 +192,7 @@ class CardLibraryStore:
                     raise ConflictError(f"Pack {pack.id!r} changed plugin ownership")
                 if saved:
                     saved.definition = pack
+                    saved.dismissed = False
                 else:
                     state.packs[pack.id] = UserPackState(definition=pack)
             for card in catalog.node_types:
@@ -319,6 +321,14 @@ class CardLibraryStore:
                 if not self.registry.is_enabled(pack.definition.plugin_id):
                     raise GraphValidationError("Enable the pack's plugin before opening it")
                 self._unlock(state, pack, roll_finishes=True)
+            elif request.action == "dismiss_pack":
+                pack = state.packs.get(request.id or "")
+                if pack is None:
+                    raise NotFoundError("Pack no longer exists")
+                if self.registry.has_plugin(pack.definition.plugin_id):
+                    raise ConflictError("Uninstall this Pack before removing its inventory entry")
+                # Keep provenance, collected finishes and Deck references for reinstall.
+                pack.dismissed = True
             elif request.action == "create_deck":
                 if not request.name or len(state.decks) >= 100:
                     raise GraphValidationError("Provide a deck name; at most 100 decks are supported")

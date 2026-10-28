@@ -12,6 +12,8 @@ Placement through `/card-library/nodes` copies the owned finish to the new `Card
 
 ## Material rendering
 
+Library cards, the active deck, detail previews and pack reveals share `CardStock` / `CardFace` and `CardFinishLayer`. A reveal receives the catalog card definition and saved collection finish from the successful `open_pack` response. The pack renderer projects those DOM cards into its scene with depth masks for wrapper occlusion; it does not paint separate card textures or approximate finishes with pack materials. Browsers without WebGL position the same card components over the flat pack cover.
+
 The v1 surface engine is a layered, parameter-driven model. Material IDs do not appear in either optical kernel: a preset supplies weights to the same reflection, interference, diffraction, flake and clearcoat lobes.
 
 ### Shared print stack

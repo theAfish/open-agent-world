@@ -100,7 +100,7 @@ function LegacyPackDesigner(props: PluginViewProps & { onOpenIDE: () => void }) 
         <label key={key}>{label}<textarea rows={2} maxLength={2000} value={draft.creator[key]} onChange={event => metadata(key, event.target.value)} /></label>)}</details>
     </div><div className="factory-pack-preview"><PackSurface definition={{ id: props.card.id, plugin_id: 'oaw.factory', name: draft.name,
       description: draft.creator.description, cards: [], packaging: draft.creator.packaging, accent_color: draft.creator.accent_color }}
-      edition={draft.creator.author || '卡包工厂'} cards={[]} count={null} opened={opened} label="预览包装" sealLabel="预览包装" onClick={() => setOpened(!opened)} />
+      edition={draft.creator.author || '卡包工厂'} cards={[]} count={null} opened={opened} label="预览包装" onClick={() => setOpened(!opened)} />
       <small>点击包装预览开合</small></div></div>
     <SaveButton editor={editor} task={task} /><p className="factory-hint">保存后，将此卡连接到打包器。</p>
     <details className="factory-developer-tools"><summary>{t('Developer tools')}</summary>

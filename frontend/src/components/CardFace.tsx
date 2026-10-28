@@ -13,9 +13,9 @@ import "./cardTilt.css";
 const ProductionContext = createContext(productionForFinish());
 
 /** One compact card surface shared by the Library and the active hand. */
-export function CardStock({ className = "", finish, quality = "thumbnail", size = 'compact', reveal = false, children, materialOptions,
+export function CardStock({ className = "", finish, quality = "thumbnail", size = 'compact', reveal = false, finishVisible = true, children, materialOptions,
   onPointerEnter, onPointerMove, onPointerLeave, onPointerCancel, style, ...props }: HTMLAttributes<HTMLSpanElement> & {
-  finish?: CardFinish; quality?: "thumbnail" | "standard" | "showcase"; size?: 'compact' | 'standard'; reveal?: boolean;
+  finish?: CardFinish; quality?: "thumbnail" | "standard" | "showcase"; size?: 'compact' | 'standard'; reveal?: boolean; finishVisible?: boolean;
   materialOptions?: CardMaterialOptions;
 }) {
   const controlledPose = materialOptions?.pose !== undefined;
@@ -29,7 +29,7 @@ export function CardStock({ className = "", finish, quality = "thumbnail", size 
     onPointerMove={event => { material.onPointerMove?.(event); onPointerMove?.(event); }}
     onPointerLeave={event => { material.onPointerLeave?.(); onPointerLeave?.(event); }}
     onPointerCancel={event => { material.onPointerCancel?.(); onPointerCancel?.(event); }}>
-    {children}<CardFinishLayer finish={finish} quality={quality} reveal={reveal} {...materialOptions} />
+    {children}{finishVisible && <CardFinishLayer finish={finish} quality={quality} reveal={reveal} {...materialOptions} />}
   </span></ProductionContext.Provider>;
 }
 

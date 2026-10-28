@@ -1,10 +1,17 @@
 // @vitest-environment jsdom
 import { useState } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SelectMenuLayer } from './SelectMenuLayer';
 
-afterEach(cleanup);
+beforeEach(() => {
+  // jsdom has no browser top layer; real positioning is covered in Playwright.
+  Object.defineProperty(HTMLElement.prototype, 'showPopover', { configurable: true, value: vi.fn() });
+});
+afterEach(() => {
+  cleanup();
+  delete (HTMLElement.prototype as Partial<HTMLElement>).showPopover;
+});
 
 function Form({ change = vi.fn() }: { change?: (value: string) => void }) {
   const [value, setValue] = useState('one');

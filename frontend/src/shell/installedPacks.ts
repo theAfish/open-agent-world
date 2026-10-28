@@ -1,7 +1,15 @@
 import type { LibrarySnapshot } from '../state/cardLibrary';
 import type { PackInstallations } from '../types/packs';
+import type { PackNotice } from './pack3d/types';
 
 export type InstalledPack = PackInstallations['versions'][number];
+
+export function packNotice(status?: string): PackNotice | undefined {
+  if (!status || status === 'Installed' || status === 'Loaded') return undefined;
+  const kind = ['Pack uninstalled', 'Pack unavailable', 'Environment failed', 'Uninstall pending restart'].includes(status) ? 'warning'
+    : status === 'Update available' ? 'update' : status === 'Restart required' ? 'restart' : 'info';
+  return { kind, label: status };
+}
 
 /** Keep pending restarts and intentional disabling separate from broken packs. */
 export function packIssue(pack: LibrarySnapshot['packs'][string], snapshot: LibrarySnapshot, versions: InstalledPack[] = []) {
@@ -38,6 +46,7 @@ export function packInventory(snapshot: LibrarySnapshot, installations?: PackIns
     byPlugin.set(owner, [...(byPlugin.get(owner) ?? []), item]);
   }
   const packs = Object.values(snapshot.packs).filter(pack => {
+    if (pack.dismissed) return false;
     const versions = byPlugin.get(pack.definition.plugin_id);
     // Loaded runtimes and saved collection records can outlive an uninstall.
     if (versions) return versions.some(item => item.selected);

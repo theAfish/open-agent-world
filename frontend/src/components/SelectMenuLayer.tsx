@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { overlayHost } from './Modal';
 
@@ -188,6 +188,15 @@ export function SelectMenuLayer() {
       window.removeEventListener('resize', reposition);
     };
   }, [id]);
+
+  useLayoutEffect(() => {
+    // The top layer keeps viewport coordinates independent of animated dialogs
+    // and lets the menu extend beyond their clipped scrolling content.
+    if (menu) {
+      popup.current!.setAttribute('popover', 'manual');
+      popup.current!.showPopover();
+    }
+  }, [menu?.select]);
 
   useEffect(() => {
     if (menu) document.getElementById(`${id}-${menu.active}`)?.scrollIntoView?.({ block: 'nearest' });
