@@ -23,9 +23,8 @@
 .card-lod-view.is-node .card-lod-emblem > svg { width: 22px; height: 22px; }
 .card-lod-view.is-node .card-eyebrow, .card-lod-view.is-node .card-lod-status { display: none; }
 .card-lod-view.is-preview .card-lod-heading.node-surface-header { position: relative; box-sizing: border-box; }
-.card-lod-view.is-preview .node-surface-header .card-lod-kind { width: 54px; height: 54px; margin: 0 auto; border-radius: 12px; }
-.card-lod-view.is-preview .node-surface-header .card-lod-title strong { font-size: 15px; }
-.card-lod-view.is-preview .card-lod-heading.node-surface-header .card-lod-status { position: absolute; top: 22px; right: 18px; }
+.card-lod-view.is-preview .node-surface-header .card-lod-title { flex: 1; }
+.card-lod-view.is-preview .node-surface-header .card-lod-title strong { font-size: 14px; letter-spacing: -.015em; }
 .card-lod-view .workspace-titlebar { display: flex; gap: 10px; min-height: 40px; padding: 7px 12px; }
 .card-lod-view .workspace-titlebar .card-lod-kind { width: 26px; height: 26px; border-radius: 7px; }
 .card-lod-view .workspace-titlebar .card-lod-kind svg { width: 17px; height: 17px; }
@@ -34,7 +33,7 @@
 .card-lod-view .workspace-titlebar .card-eyebrow { font-size: 8px; }
 .card-lod-view .container-header { pointer-events: auto; }
 .card-static-preview, .card-static-workspace { pointer-events: none; }
-.card-lod-view .card-static-preview { display: flex; flex: 1; min-height: 0; overflow: hidden; margin: 6px 16px 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+.card-lod-view .card-static-preview { display: flex; flex: 1; min-height: 0; overflow: hidden; margin: 0 12px 12px; padding-top: 10px; border-top: 1px solid var(--line); }
 .card-static-preview .node-preview-body { display: flex; flex: 1; flex-direction: column; justify-content: space-between; }
 .card-static-preview p, .card-static-workspace main > p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.55; color: var(--ink-soft); }
 .card-static-metadata { display: flex; justify-content: space-between; gap: 8px; margin-top: 12px; color: var(--ink-faint); font-size: 9px; }

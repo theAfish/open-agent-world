@@ -110,6 +110,7 @@ def register(registration):
         traits=frozenset({'core.jobs-viewer'}), templateable=True,
         state=ScopedStateSpec(supported_scopes=('session',), default_scope='session'),
         presentation=NodePresentation(states=('node', 'preview', 'inspector', 'workspace'), initial='preview', open='workspace',
+            sizes={'preview': {'width': 320, 'height': 336}},
             workspace_layout=WorkspaceLayoutMetadata(min_width=210, min_height=250, ideal_width=340, ideal_height=480)),
     ))
     for name, label, description in (

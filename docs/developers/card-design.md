@@ -29,6 +29,12 @@ Collectible and factory stock stays the same in light and dark application surro
 
 Tones (`midnight / sage / sand / sky / rose / stone`) determine the print accent. Layout, stock, ink and finishing have distinct responsibilities. Canvas preview/node cards use `WorldCardPrint` for a continuous printed board, subdued contour artwork and a selective foil rule. Their title, icon and description are transparent top print, allowing the film to remain continuous around the ink. They retain the canvas theme's stock/ink palette and interaction geometry. Full and simplified LOD views share this layer contract. Canvas workspace chrome and plugin-owned functional layouts keep their existing structure.
 
+Default canvas instance previews use a 50px title bar, with the type icon inside a small status ring at the upper left. The ring is green for available/ready/completed, accent-coloured for running, amber for waiting/paused/modified, red for failures and muted for other states; its accessible label and tooltip also name the status. Content fills the remaining area. Inventory faces and authored factory layouts retain their own compositions.
+
+The emblem sits almost flush with the card: a shallow convex surface and a thin luminous ring, without an outer bezel. Theme tokens supply its restrained highlight, shadow and state colour; it stays above the card's finishing layer with the other functional top print.
+
+Types can declare `NodePresentation(sizes={'preview': {'width': 384, 'height': 440}}, ...)` to suit their content. The Agent graph uses a taller 384×440 preview so more execution nodes remain visible; Jobs uses a near-square 320×336. Types without a preview size keep the 224×300 default, and a saved manual resize takes priority over the declared size.
+
 ## Production schema
 
 `cards/cardProduction.ts` owns the portable, versioned `CardProduction` model:

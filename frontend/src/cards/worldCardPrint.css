@@ -12,6 +12,8 @@
   position:absolute; top:149px; left:16px; right:16px; height:1px;
   background:color-mix(in srgb,currentColor 28%,transparent);
 }
+.is-preview > .world-card-print .world-card-print-art { height:50px; opacity:.18; }
+.is-preview > .world-card-print .world-card-print-rule { top:49px; left:12px; right:12px; }
 .is-node > .world-card-print .world-card-print-art { height:100%; }
 .is-node > .world-card-print .world-card-print-rule { display:none; }
 .world-card-print[data-full-bleed] { color:var(--face-accent,var(--stock-ink)); background:none; }
