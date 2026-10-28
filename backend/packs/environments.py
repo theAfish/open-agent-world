@@ -360,6 +360,12 @@ class PackEnvironmentManager:
             return {"status": "missing", "fingerprint": spec.fingerprint}
 
     def _verify(self, spec, handle, env, verifier):
+        root = handle.root.resolve()
+        # Deep imports and dependency cache writes can exceed MAX_PATH in
+        # staging. Keep the same extended root when recording relative files.
+        if os.name == "nt" and not str(root).startswith("\\\\?\\"):
+            path = str(root)
+            root = Path("\\\\?\\UNC\\" + path[2:] if path.startswith("\\\\") else "\\\\?\\" + path)
         probe = (
             "import importlib,json,pathlib,site,sys; "
             "site.addsitedir(str(pathlib.Path(sys.argv[1])/'packages')); "
@@ -369,17 +375,17 @@ class PackEnvironmentManager:
         )
         result = self.root / "operations" / (handle.fingerprint + ".verify-" + uuid4().hex + ".json")
         result.parent.mkdir(parents=True, exist_ok=True)
-        self.runner([handle.python, "-I", "-S", "-B", "-c", probe, handle.root,
+        self.runner([handle.python, "-I", "-S", "-B", "-c", probe, root,
                      json.dumps(spec.verify_imports), result], env=env)
         if spec.verify_script:
-            self.runner([handle.python, "-I", "-S", "-B", spec.verify_script, "--check", handle.root], env=env)
+            self.runner([handle.python, "-I", "-S", "-B", spec.verify_script, "--check", root], env=env)
         if verifier:
             verifier(handle)
         verified = []
         for item in json.loads(result.read_text(encoding="utf-8")):
             path = Path(item).resolve()
-            if path.is_relative_to(handle.root.resolve()):
-                verified.append({"path": path.relative_to(handle.root.resolve()).as_posix(), "sha256": _digest(path)})
+            if path.is_relative_to(root):
+                verified.append({"path": path.relative_to(root).as_posix(), "sha256": _digest(path)})
         result.unlink()
         return verified
 

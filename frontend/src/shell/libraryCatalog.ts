@@ -6,6 +6,7 @@ import { normalizeCardFinish, type CardFinish } from "../cards/cardFinish";
 export interface LibrarySource { id: string; name: string; pluginName: string }
 export interface LibraryCard extends DeckEntry {
   finish?: CardFinish;
+  artworkUrl?: string;
   label: string;
   description: string;
   category: string;
@@ -63,6 +64,7 @@ export function collectedLibraryLegions(snapshot: LibrarySnapshot, legions: Legi
     // preset category, nor infer ownership from the types of its member cards.
     if (!sources.length) return [];
     return [{ kind: "legion", id: item.id, label: item.name,
+      artworkUrl: packIds.map(id => snapshot.packs[id].definition.artwork_url).find(Boolean) ?? undefined,
       description: t("{v0} cards · {v1} links", { v0: String(item.node_count), v1: String(item.edge_count) }),
       category: item.preset ? "Legions" : "Saved Legions",
       available: item.compatible && (!item.preset || packIds.some(id => snapshot.available_pack_ids.includes(id))),

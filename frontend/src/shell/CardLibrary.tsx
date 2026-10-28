@@ -234,7 +234,7 @@ export function CardLibrary() {
             </details>)}
             {!filtered.length ? <div className="library-empty"><LibraryBig size={30} /><strong>{allCards.length ? t("No matching cards") : t("Your collection starts with a pack")}</strong><p>{!showInternal && internalCount ? t("{v0} matching internal cards are hidden. Show internal cards to inspect their purpose and container.", { v0: String(internalCount) }) : allCards.length ? t("Try another search, source pack or category.") : t("Visit Packs and open one to discover its cards.")}</p><button className="secondary-button" onClick={() => { if (!showInternal && internalCount) setShowInternal(true); else { setTab("packs"); setQuery(""); } }}>{!showInternal && internalCount ? t("Show internal cards") : t("Browse packs")}</button></div> : null}
           </div><div ref={detailSidebar} className="library-card-sidebar"><aside className="library-card-detail" aria-label={t("Card details")}>{detail ? <>
-            <div className="library-detail-stage">{detail.kind === "legion" ? <span className="library-detail-formation"><Layers3 size={44} aria-hidden="true" /></span> : <LibraryCardPreview key={detail.id} card={detail} />}</div>
+            <div className="library-detail-stage">{detail.kind === "legion" && !detail.artworkUrl ? <span className="library-detail-formation"><Layers3 size={44} aria-hidden="true" /></span> : <LibraryCardPreview key={detail.id} card={detail} />}</div>
             <div className="library-detail-content">
             <header className="library-detail-heading">
               <div className="library-detail-tags"><span className="library-detail-category"><Tag size={11} aria-hidden="true" />{t(detail.category)}</span>

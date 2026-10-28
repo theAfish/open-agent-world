@@ -7,7 +7,7 @@ import { DECK_ICONS, DeckIcon } from "../components/DeckIcon";
 import { DeckHand } from "./DeckHand";
 import type { PaletteDragPayload } from "./dragPayload";
 import { useWorldStore } from "../state/worldStore";
-import { displayDeckName } from "../shell/libraryCatalog";
+import { collectedLibraryLegions, displayDeckName } from "../shell/libraryCatalog";
 import { useCardLibrary } from "../state/cardLibrary";
 import { CatalogIcon } from "../components/CatalogIcon";
 import { useEquipmentDrag } from "../state/equipment";
@@ -58,6 +58,7 @@ export function ComponentPalette() {
     return () => { observer.disconnect(); window.removeEventListener('resize', measure); shell.style.removeProperty('--library-deck-space'); };
   }, [library.open]);
   const snapshot = library.snapshot;
+  const formationCards = snapshot ? collectedLibraryLegions(snapshot, legions) : [];
   const deck = snapshot?.decks.find(item => item.id === snapshot.active_deck_id);
   useEffect(() => () => cancelPointer.current?.(), [deck?.id]);
   const moveToDeck = async (id: string, entry: PalettePointerItem['entry']) => {
@@ -138,6 +139,7 @@ export function ComponentPalette() {
         {deck.entries.map(entry => {
           const definition = entry.kind === "node" ? snapshot?.card_definitions[entry.id] : undefined;
           const legion = entry.kind === "legion" ? legions.find(item => item.id === entry.id) : undefined;
+          const artworkUrl = entry.kind === "legion" ? formationCards.find(card => card.id === entry.id)?.artworkUrl : undefined;
           const available = entry.kind === "node" ? snapshot?.available_card_ids.includes(entry.id) : legion?.compatible;
           const label = definition ? t(entry.id === "xrd.match" ? "XRD 谱解析" : definition.label) : legion?.name ?? entry.id;
           const payload: PaletteDragPayload = entry.kind === "node" ? { version: 1, kind: "node", type: entry.id }
@@ -170,7 +172,7 @@ export function ComponentPalette() {
             aria-label={available ? t("Place {v0}", { v0: String(label) }) : t("{v0} unavailable", { v0: String(label) })} title={legion ? undefined : available ? (definition ? t(definition.description) : undefined) : t("Content unavailable. Inspect it in the Library.")}>
             <CardStock finish={entry.kind === "node" ? normalizeCardFinish(snapshot?.collection[entry.id]?.finish) : undefined}
               style={{ "--collection-color": definition?.color ?? "#78967b" } as CSSProperties} className={`palette-item palette-item--${entry.kind === "node" ? entry.id : "legion"}`} data-deck-visual>
-              <CardFace definition={definition} icon={available ? definition ? <CatalogIcon definition={definition} /> : <Layers3 /> : <AlertTriangle />} label={label}
+              <CardFace definition={definition} imageUrl={artworkUrl} imageAlt={label} variant={artworkUrl ? "image" : undefined} icon={available ? definition ? <CatalogIcon definition={definition} /> : <Layers3 /> : <AlertTriangle />} label={label}
                 description={available ? (definition ? t(definition.description) : undefined) ?? t(legion?.preset ? "Preset formation" : "Saved formation") : t("Unavailable")} />
             </CardStock>
           </button>;

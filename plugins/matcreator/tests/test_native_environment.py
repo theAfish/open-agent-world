@@ -120,6 +120,33 @@ print(json.dumps({'value': private_probe.value, 'paths': sys.path}))
     assert not any("site-packages" in path for path in value["paths"])
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows MAX_PATH regression")
+def test_worker_tokenizer_cache_writes_use_extended_paths_after_relocation(tmp_path):
+    root = tmp_path / ("environment-" + "x" * 70)
+    root.mkdir()
+    script = """
+import os, sys
+from pathlib import Path
+from uuid import uuid4
+sys.path.insert(0, sys.argv[1])
+from native_environment import activate
+activate(Path(sys.argv[2]))
+cache = Path(os.environ['CUSTOM_TIKTOKEN_CACHE_DIR'])
+assert os.environ['TIKTOKEN_CACHE_DIR'] == str(cache)
+cache.mkdir(parents=True, exist_ok=True)
+target = cache / ('9b5ad71b2ce5302211f9c61530b329a4922fc6a4.' + str(uuid4()) + '.tmp')
+assert len(str(target)) > 260
+target.write_bytes(b'tokenizer')
+assert target.read_bytes() == b'tokenizer'
+"""
+    for destination in (root, tmp_path / ("relocated-" + "x" * 70)):
+        if destination != root:
+            root.rename(destination)
+        subprocess.run([sys.executable, "-I", "-S", "-B", "-c", script,
+                        str(environment.PACKAGE), str(destination)], check=True)
+        assert len(list(destination.rglob("*.tmp"))) == (1 if destination == root else 2)
+
+
 @pytest.mark.asyncio
 async def test_missing_runtime_never_falls_back_to_host_or_installs_during_run(installer, monkeypatch):
     _, calls, _ = installer

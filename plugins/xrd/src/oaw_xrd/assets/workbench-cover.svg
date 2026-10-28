@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000" viewBox="0 0 800 1000" role="img" aria-label="XRD diffraction workbench cover">
+<defs>
+ <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#173f43"/><stop offset=".55" stop-color="#102d34"/><stop offset="1" stop-color="#091c25"/></linearGradient>
+ <linearGradient id="gold" x2="1" y2=".2"><stop stop-color="#e7c39a"/><stop offset="1" stop-color="#b97851"/></linearGradient>
+ <radialGradient id="halo"><stop stop-color="#5faf9f" stop-opacity=".22"/><stop offset="1" stop-color="#5faf9f" stop-opacity="0"/></radialGradient>
+ <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#b0d8ce" stroke-opacity=".055"/></pattern>
+</defs>
+<rect width="800" height="1000" rx="30" fill="url(#bg)"/>
+<rect width="800" height="1000" fill="url(#grid)"/>
+<circle cx="470" cy="385" r="340" fill="url(#halo)"/>
+<rect x="26" y="26" width="748" height="948" rx="18" fill="none" stroke="#b8a185" stroke-opacity=".38"/>
+<path d="M65 104H145" stroke="url(#gold)" stroke-width="3"/>
+<text x="61" y="224" font-family="sans-serif" font-weight="700" font-size="116" letter-spacing="8" fill="#f1eee3">XRD</text>
+<g fill="none" stroke-linejoin="round">
+ <g stroke="#7db9ad" stroke-width="2" opacity=".65">
+  <path d="M278 387 451 296 634 393 466 495Z M278 387V575L466 685 634 581V393 M466 495V685 M451 296V481L278 575 M451 481 634 581"/>
+  <path d="M365 342 545 441V631 M368 440 539 346V532L368 631Z M278 481 466 590 634 488 M365 532 539 440" stroke-dasharray="4 7" opacity=".5"/>
+ </g>
+ <g stroke="url(#gold)" stroke-width="3"><path d="M278 387 466 495 634 393 M466 495V685"/></g>
+</g>
+<g fill="#a8d6c7" stroke="#1e4c4a" stroke-width="4">
+ <circle cx="278" cy="387" r="11"/><circle cx="451" cy="296" r="10"/><circle cx="634" cy="393" r="11"/><circle cx="278" cy="575" r="10"/><circle cx="634" cy="581" r="10"/>
+</g>
+<g fill="#d5ad83" stroke="#6a5747" stroke-width="3"><circle cx="466" cy="495" r="16"/><circle cx="466" cy="685" r="12"/><circle cx="451" cy="481" r="9"/></g>
+<path d="M65 819H735" stroke="#94b8af" stroke-opacity=".28"/>
+<path d="M65 815 111 815 118 805 123 814 164 814 171 797 176 814 215 814 223 773 230 814 272 814 282 691 291 813 315 814 323 780 331 814 369 814 379 735 388 814 435 814 445 641 454 814 489 814 497 790 504 814 548 814 556 754 565 814 611 814 619 786 627 814 675 814 684 803 691 814 735 814" fill="none" stroke="#9dcfc9" stroke-width="3"/>
+<path d="M65 830 272 830 282 720 291 830 369 830 379 760 388 830 435 830 445 675 454 830 548 830 556 773 565 830 735 830" fill="none" stroke="url(#gold)" stroke-width="2" opacity=".85"/>
+</svg>

@@ -21,7 +21,7 @@ class DatabaseConfig(BaseModel):
 
 
 class SQLitePlugin:
-    descriptor = PluginDescriptor(id=PREFIX, version="0.1.0", plugin_api_version="1.27",
+    descriptor = PluginDescriptor(id=PREFIX, version="0.1.1", plugin_api_version="1.27",
         name="SQLite database", description="Persistent SQL databases with schema-first, scoped Agent tools.")
 
     def register(self, registration):
@@ -52,6 +52,8 @@ class SQLitePlugin:
             statuses=frozenset({"available", "error"}), config_model=DatabaseConfig,
             traits=frozenset({"data.database", "data.source"}), lifecycle=DatabaseLifecycle(), resource_actions=actions,
             data_source=DATA_SOURCE,
+            # Configuration only; lifecycle creates an empty database for each copy.
+            templateable=True, template_status="available",
             deletion_warning="Deleting this database permanently removes its tables and data. Canvas undo and copy do not preserve database files. Back up your profile before deleting data you need.",
             frontend={"preview": "preview", "body": "database", "workspace": "database"},
             surfaces={"preview": True, "inspector": True, "workspace": True}))

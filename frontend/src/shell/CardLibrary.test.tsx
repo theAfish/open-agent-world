@@ -314,6 +314,22 @@ it("keeps the collected finish across library, detail and deck rerenders with no
   expect(screen.getByText("Rainbow", { selector: ".library-finish-metadata" })).toBeTruthy();
 });
 
+it("shows preset artwork in the grouped collection detail stage", () => {
+  const state = packSnapshot();
+  const artwork = '/api/plugins/xrd/assets/workbench-cover.svg';
+  state.packs.alpha.definition.artwork_url = artwork;
+  state.preset_pack_ids = { workbench: ['alpha'] };
+  openCards(state);
+  act(() => useWorldStore.setState({ legions: [{ id: 'workbench', name: 'XRD workbench', preset: true,
+    node_count: 2, edge_count: 1, bounds: { width: 600, height: 400 }, node_types: ['card.1'],
+    plugin_ids: [TEST_CATALOG.plugins[0].id], compatible: true, issues: [], revision: 1 }] }));
+  fireEvent.change(screen.getByLabelText('Source pack'), { target: { value: 'pack:alpha' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Inspect XRD workbench' }));
+  const cover = within(screen.getByRole('complementary', { name: 'Card details' })).getByRole('img', { name: 'XRD workbench' });
+  expect(cover.getAttribute('src')).toBe(artwork);
+  expect(cover.closest('.library-detail-stage')).not.toBeNull();
+});
+
 it("keeps complete source groups together, including packs larger than the former page limit", () => {
   const state = snapshot();
   const ids = Object.keys(state.collection);
