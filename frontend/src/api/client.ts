@@ -543,6 +543,7 @@ export const worldApi = {
   },
 
   async getLegions(): Promise<LegionSummary[]> {
+    if (API_BASE !== BUILDER_API_BASE) return [];
     const body = await request<unknown>("/legions");
     const source = asRecord(body);
     const legions = Array.isArray(body) ? body : Array.isArray(source.legions) ? source.legions : [];
@@ -568,6 +569,7 @@ export const worldApi = {
   },
 
   async getBlueprintPresets(): Promise<LegionSummary[]> {
+    if (API_BASE !== BUILDER_API_BASE) return [];
     return (await request<unknown[]>("/legions/presets")).map(normalizeLegionSummary);
   },
 

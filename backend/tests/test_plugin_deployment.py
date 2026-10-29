@@ -9,6 +9,7 @@ from backend.deployment_workspace import workspace_router
 from backend.deployments import PublishRequest, release_spec
 from backend.errors import ResourceValidationError
 from open_agent_world.plugin_api import DeploymentSurface, NodeDeploymentDefinition
+from pydantic import BaseModel
 
 
 def test_plugin_sections_freeze_only_visible_access():
@@ -20,9 +21,11 @@ def test_plugin_sections_freeze_only_visible_access():
         "version": 2, "root": {"kind": "pane", "view": {"card_id": "plugin"}},
         "hidden_sections": [{"card_id": "plugin", "section_id": "private"}]}})
     node = SimpleNamespace(id="plugin", type="vendor.widget", name="Widget", parent_id="legion")
-    definition = SimpleNamespace(deployment=contract)
+    class Config(BaseModel):
+        heading: str = ""
+    definition = SimpleNamespace(deployment=contract, config_model=Config, document=None, resource_actions={}, execution=None, traits=set())
     services = SimpleNamespace(
-        world=SimpleNamespace(get_card=lambda id: legion if id == "legion" else node),
+        world=SimpleNamespace(get_card=lambda id: legion if id == "legion" else node, owned_descendants=lambda id: [node]),
         plugins=SimpleNamespace(node_type=lambda type: definition, catalog=lambda: SimpleNamespace(plugins=[])),
         settings=SimpleNamespace(agent_runtime="core.mock", sandbox_runtime=None, plugin_directories=[]))
     release = release_spec(services, PublishRequest(legion_id="legion", name="Test"))
@@ -35,8 +38,10 @@ def test_plugin_sections_freeze_only_visible_access():
     release = release_spec(services, PublishRequest(legion_id="legion", name="Test"))
     assert release["plugin_access"]["plugin"]["config_fields"] == []
     legion.config["workspace_layout"]["root"]["view"]["section_id"] = "unknown"
-    with pytest.raises(ResourceValidationError):
-        release_spec(services, PublishRequest(legion_id="legion", name="Test"))
+    # An administrator may publish an ordinary section without a second plugin declaration.
+    release = release_spec(services, PublishRequest(legion_id="legion", name="Test"))
+    assert release["permissions"]["plugin"] == ["unknown"]
+    assert release["plugin_access"]["plugin"]["config_fields"] == ["heading"]
 
 
 def test_resource_results_projected_and_section_names_cannot_grant_builtin_access(monkeypatch):

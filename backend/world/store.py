@@ -85,7 +85,8 @@ class WorldStore:
             raise GraphValidationError("Only an Agent can receive the Minister role")
 
     def _require_structure_edit(self, patch=None):
-        if self.structure_locked and (patch is None or patch.model_fields_set - {"status", "expected_revision"}):
+        from backend.publication_scope import in_business_mutation
+        if self.structure_locked and not in_business_mutation() and (patch is None or patch.model_fields_set - {"status", "expected_revision"}):
             raise PermissionDeniedError("Published application structure is locked")
 
     @staticmethod

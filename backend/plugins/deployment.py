@@ -1,6 +1,25 @@
 """Opt-in public surfaces for existing plugin views and business handlers."""
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
+from backend.publication_scope import public_value
+
+
+def default_deployment(node):
+    """The administrator publishes the node's existing registered business API."""
+    fields = node.config_model.model_json_schema().get("properties", {})
+    return NodeDeploymentDefinition(surface=DeploymentSurface(
+        config_fields=frozenset(key for key in public_value(fields) if not fields[key].get("writeOnly")),
+        document="edit" if node.document is not None else "none",
+        resource_actions={name: frozenset({"*"}) for name in node.resource_actions},
+        execution=node.execution is not None, file_preview="core.file-viewer" in node.traits,
+    ), shared_sections=True)
+
+
+def deployment_for(node, section=None):
+    contract = node.deployment
+    if contract is not None and ((contract.surface is not None and (section is None or contract.shared_sections)) or section in contract.sections):
+        return contract
+    return default_deployment(node)
 
 
 class DeploymentSurface(BaseModel):

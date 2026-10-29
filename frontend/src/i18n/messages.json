@@ -1,4 +1,5 @@
 {
+  "Publishing gives users access to the workspaces’ business operations and computation. Review their configuration and data access before sharing.": ["Publishing gives users access to the workspaces’ business operations and computation. Review their configuration and data access before sharing.", "发布后，用户可使用所选工作区的业务操作与计算能力。分享前请确认配置和数据访问范围符合你的设计。"],
   "Switch workspace": ["Switch workspace", "切换工作区"],
   "Workspaces": ["Workspaces", "工作区"],
   "Default": ["Default", "默认"],

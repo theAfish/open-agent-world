@@ -10,8 +10,10 @@ from backend.api.knowledge_bridge import (
 )
 from backend.node_documents import DocumentActionRequest, read_document, invoke_document_action
 from backend.node_resources import ResourceActionRequest, invoke_resource_action
-from backend.plugins.deployment import project_document
+from backend.plugins.deployment import default_deployment, project_document
+from backend.deployment_business import business_access, business_router
 from backend.deployments import published_workspaces
+from backend.publication_scope import PublicationScope, public_value
 
 
 def frontend_catalog(manifest, services, catalog=None):
@@ -23,7 +25,7 @@ def frontend_catalog(manifest, services, catalog=None):
     """
     if catalog is None:
         catalog = services.plugins.catalog().model_dump(mode="json", by_alias=True)
-    types = {services.world.get_card(node_id).type for node_id in manifest["permissions"]}
+    types = {card.type for card in PublicationScope(manifest).cards(services)}
     descriptors = {plugin["id"]: plugin for plugin in catalog["plugins"]}
     enabled = set(catalog.get("enabled_plugin_ids", []))
     pending = [node["plugin_id"] for node in catalog["node_types"] if node["id"] in types]
@@ -51,36 +53,44 @@ def workspace_snapshot(manifest, services):
     workspaces = published_workspaces(manifest)
     parents = {node_id: workspace["legion_id"] for workspace in workspaces for node_id in workspace["permissions"]}
     cards = []
-    types = set()
     hidden = []
-    plugin_types = set()
     for node_id, grants in manifest["permissions"].items():
         card = services.world.get_card(node_id)
-        types.add(card.type)
         # Only resource presentation metadata crosses the boundary, never config.
         config = {key: card.config[key] for key in
                   ("filename", "revision", "mime_type", "bytes", "image_width", "image_height")
                   if key in card.config and card.type in {"text", "image"}}
         access = manifest.get("plugin_access", {}).get(node_id)
         if access is not None:
-            plugin_types.add(card.type)
             config = {key: value for key, value in card.config.items() if key in access["config_fields"]}
         cards.append({"id": card.id, "type": card.type, "name": card.name, "status": card.status,
-                      "parent_id": parents[node_id], "config": config, "state_scope": card.state_scope,
+                      "parent_id": parents[node_id], "config": public_value(config), "state_scope": card.state_scope,
                       "finish": card.finish})
         sections = {"conversation": ("sessions", "conversation", "participants"),
                     "sandbox": ("files", "preview", "terminal")}.get(card.type, ())
         if access is not None:
-            sections = services.plugins.node_type(card.type).deployment.sections
+            node = services.plugins.node_type(card.type)
+            sections = (node.deployment or default_deployment(node)).sections
         hidden.extend({"card_id": node_id, "section_id": section} for section in sections if section not in grants)
     catalog = services.plugins.catalog().model_dump(mode="json", by_alias=True)
-    presentation_keys = {"id", "plugin_id", "label", "icon", "color", "traits", "surfaces", "presentation", "has_execution", "state"}
+    runtime_types = {card.type for card in PublicationScope(manifest).cards(services)}
+    presentation_keys = {"id", "plugin_id", "label", "icon", "color", "traits", "surfaces", "presentation", "has_execution", "has_document", "state", "frontend", "config_schema", "default_config", "transformations"}
     definitions = [{key: value for key, value in node.items() if key in presentation_keys}
-                   for node in catalog["node_types"] if node["id"] in types]
+                   for node in catalog["node_types"] if node["id"] in runtime_types]
     for definition in definitions:
-        if definition["id"] in plugin_types:
-            node = services.plugins.node_type(definition["id"])
-            definition["frontend"] = {key: value for key, value in node.frontend.items() if key in {"body", "workspace"}}
+        node = services.plugins.node_type(definition["id"])
+        definition["frontend"] = {key: value for key, value in node.frontend.items() if key in {"body", "workspace", "preview", "settings"}}
+        if "properties" not in definition.get("config_schema", {}):
+            definition.pop("config_schema", None)
+        else:
+            access = [manifest["plugin_access"][card["id"]] for card in cards
+                      if card["type"] == definition["id"] and card["id"] in manifest.get("plugin_access", {})]
+            fields = {key for item in access for key in item["config_fields"]} if access else default_deployment(node).surface.config_fields
+            schema = deepcopy(definition["config_schema"])
+            schema["properties"] = {key: value for key, value in schema["properties"].items() if key in fields}
+            schema["required"] = [key for key in schema.get("required", []) if key in fields]
+            definition["config_schema"] = schema
+            definition["default_config"] = {key: value for key, value in definition.get("default_config", {}).items() if key in fields}
     legions = []
     for workspace in workspaces:
         layout = deepcopy(workspace["layout"])
@@ -100,14 +110,18 @@ def workspace_snapshot(manifest, services):
                     and {"files", "preview", "conversation"}.intersection(manifest["permissions"].get(edge.target, []))):
                 edges.append({key: getattr(edge, key) for key in ("id", "source", "target", "relationship", "direction")})
     return {"cards": cards, "edges": edges, "plugin_access": manifest.get("plugin_access", {}), "legion": legions[0], "legions": legions,
-            "catalog": {"node_types": definitions, "relationships": [], "packs": [],
+            "catalog": {"node_types": public_value(definitions), "relationships": [], "packs": [],
                         **frontend_catalog(manifest, services, catalog)}}
 
 
 def workspace_router(manifest):
+    scope = PublicationScope(manifest)
+
     async def state_access(request: Request, services=Depends(get_services)):
         session_id = request.headers.get("X-OAW-State-Session") or request.query_params.get("state_session")
         node_id = request.path_params.get("node_id") or request.path_params.get("viewer_id")
+        if node_id:
+            scope.require(node_id, services)
         if not session_id or session_id == "default" or not node_id:
             return
         card = services.world.get_card(node_id)
@@ -119,6 +133,7 @@ def workspace_router(manifest):
             raise HTTPException(404, "This conversation session is not published")
 
     router = APIRouter(prefix="/workspace", dependencies=[Depends(state_access)])
+    router.include_router(business_router(manifest))
 
     def require(node_id, *operations):
         if node_id in manifest.get("plugin_access", {}) or not set(operations).intersection(manifest["permissions"].get(node_id, [])):
@@ -240,22 +255,23 @@ def workspace_router(manifest):
 
     @router.get("/nodes/{node_id}/document")
     async def document(node_id: str, services=Depends(get_services), summary_only: bool = False):
-        access = manifest.get("plugin_access", {}).get(node_id)
+        access = business_access(manifest, services, node_id)
         if access is not None:
             if not access["document_fields"] and not access["summary_fields"] and access.get("document", "none") == "none":
                 raise HTTPException(404, "This operation is not published")
             projected = project_document(await node_documents.get_document(node_id, services), access)
-            return {"revision": projected["revision"], "summary": projected["summary"]} if summary_only else projected
+            return public_value({"revision": projected["revision"], "summary": projected["summary"]} if summary_only else projected)
         require(node_id, "tasks")
         return await node_documents.get_document(node_id, services, summary_only)
 
     @router.post("/nodes/{node_id}/actions/{action}")
     async def action(node_id: str, action: str, request: DocumentActionRequest, services=Depends(get_services)):
-        access = manifest.get("plugin_access", {}).get(node_id)
+        scope.validate_references(request.arguments, services)
+        access = business_access(manifest, services, node_id)
         if access is not None:
             if action not in access["document_actions"]:
                 raise HTTPException(404, "This operation is not published")
-            return project_document(await invoke_document_action(services, node_id, action, request), access)
+            return public_value(project_document(await invoke_document_action(services, node_id, action, request), access))
         require(node_id, "tasks")
         if action not in {"upsert", "progress", "remove"}:
             raise HTTPException(403, "Execution configuration is locked")
@@ -271,26 +287,27 @@ def workspace_router(manifest):
                         raise HTTPException(403, "Execution configuration is locked")
         return await invoke_document_action(services, node_id, action, request)
 
-    def tasks_scope(request: Request):
-        access = manifest.get("plugin_access", {}).get(request.path_params["node_id"])
+    def tasks_scope(request: Request, services=Depends(get_services)):
+        access = business_access(manifest, services, request.path_params["node_id"])
         if access is not None and access["execution"]:
             return
         require(request.path_params["node_id"], "tasks")
 
     @router.get("/nodes/{node_id}/document/downloads/{name}")
     async def download(node_id: str, name: str, services=Depends(get_services)):
-        access = manifest.get("plugin_access", {}).get(node_id, {})
+        access = business_access(manifest, services, node_id)
         if name not in access.get("downloads", []):
             raise HTTPException(404, "This operation is not published")
         return await node_documents.download_document(node_id, name, services)
 
     @router.post("/nodes/{node_id}/resource/{action}")
     async def resource_action(node_id: str, action: str, request: ResourceActionRequest, services=Depends(get_services)):
-        actions = manifest.get("plugin_access", {}).get(node_id, {}).get("resource_actions", {})
+        scope.validate_references(request.arguments, services)
+        actions = business_access(manifest, services, node_id).get("resource_actions", {})
         if action not in actions:
             raise HTTPException(404, "This operation is not published")
         result = await invoke_resource_action(services, node_id, action, request)
-        return {key: value for key, value in result.items() if key in actions[action]}
+        return public_value(result if "*" in actions[action] else {key: value for key, value in result.items() if key in actions[action]})
 
     @router.post("/knowledge/{node_id}/project-space")
     async def knowledge_project_space(node_id: str, request: ProjectSpaceRequest, services=Depends(get_services)):

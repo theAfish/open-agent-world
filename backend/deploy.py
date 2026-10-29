@@ -56,6 +56,8 @@ def validate_manifest(value):
             plugin_access.update(workspace.get("plugin_access", {}))
         if permissions != value["permissions"] or plugin_access != value.get("plugin_access", {}):
             raise ValueError("Workspace access must match the deployment grants")
+        if "runtime_nodes" in value and set(value["runtime_nodes"]) != {node_id for workspace in workspaces for node_id in workspace.get("runtime_nodes", [])}:
+            raise ValueError("Workspace runtime scope must match the deployment")
     from backend.plugins.deployment import DeploymentAccess
     for node_id, access in value.get("plugin_access", {}).items():
         if node_id not in value["permissions"]:

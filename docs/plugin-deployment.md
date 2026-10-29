@@ -1,14 +1,16 @@
 # Plugin deployment
 
-Use this contract to expose an existing plugin view in a
-[published application](deployment.md). Backend-only plugins keep their nodes,
-connections, configuration, and runtime in the copied profile. A public custom
-view opts in with `NodeDeploymentDefinition`, available since **Plugin API 1.21**.
+Existing plugin views and registered business operations can be used directly in a
+[published application](deployment.md). The project owner chooses the workspaces
+and reviews a reminder about their data access and computation. Plugins do not need
+an additional publication declaration. Backend dependencies keep their nodes,
+connections, configuration, and runtime in the copied profile.
 The editor and deployed application load the same `frontend.workspace` or
 `frontend.body` component; the publisher does not maintain a plugin-name allowlist.
 
-An undeclared custom view fails publication. Its plugin can still operate as a
-hidden backend dependency.
+The runtime API is scoped to the selected workspace graph. Credentials and private
+instructions remain server-side, and global management APIs are unavailable.
+`NodeDeploymentDefinition` is an optional restriction on exposed fields or actions.
 
 ## Document-backed cards (Plugin API 1.36)
 
@@ -28,12 +30,11 @@ mode selects only actions marked `read_only`; edit mode selects registered actio
 The host's generic `replace` operation is not added. Search/detail actions retain
 their original response shapes, revision checks and persistence.
 
-This is an **explicit whole-document opt-in**, not automatic exposure of existing
-plugins. It includes full document summaries, projected action responses, nested
-data and exports; review those as public business content. Configuration, native
-resource actions, execution, state replacement, transformations and management
-APIs remain closed. For mixed public/private data, use the precise declaration
-below instead.
+Undeclared cards default to their registered document actions, downloads, native
+business operations and computation. This shorthand is useful for explicitly
+restricting a view, especially with `read_only=True`. For mixed public/private data,
+use the precise declaration below. Project ownership decides publication; the
+runtime enforces workspace membership and protects host management and credentials.
 
 The shorthand sets `shared_sections=True`: ordinary `WorkspaceSection` IDs can be
 composed without repeating permission declarations. All such sections share the

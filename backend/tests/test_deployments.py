@@ -223,7 +223,7 @@ def test_runtime_conversation_tasks_and_restart(deployed):
         assert client.get(document + "?summary_only=true").json() == {
             "revision": updated.json()["revision"], "summary": updated.json()["summary"]}
         assert client.post(action, json=payload).status_code == 409
-        assert client.post(action.replace("upsert", "configure_execution"), json={"arguments": {}}).status_code == 403
+        assert client.post(action.replace("upsert", "configure_execution"), json={"arguments": {}}).status_code == 422
         assert client.post(action, json={"arguments": {"tasks": [{"id": "report", "title": "Bad", "executor_id": records["hidden"]["id"]}]}}).status_code == 403
     with TestClient(create_app(settings(target))) as client:
         sign_in(client)
@@ -258,13 +258,17 @@ def test_shared_workspace_routes_keep_scope_and_configuration_locked(deployed):
         sign_in(client)
         summary = client.get(f"{root}/conversations/{chat}").json()
         assert summary["agents"][0]["model"] == "" and summary["context_statuses"] == {}
-        for path in ("/world", "/nodes", "/catalog", "/settings/models", f"/agents/{records['agent']['id']}"):
-            assert client.get(root + path).status_code == 404
+        for path in ("/world", "/catalog", "/settings/models", f"/agents/{records['agent']['id']}"):
+            response = client.get(root + path)
+            assert response.status_code == 200, response.text
+            assert records["hidden"]["id"] not in response.text and "PRIVATE INSTRUCTION" not in response.text
+        assert client.get(root + "/nodes").status_code == 405
         assert client.get(f"{root}/conversations/{records['hidden']['id']}").status_code == 404
         assert client.get(f"{root}/resources/{records['hidden']['id']}/text").status_code == 404
-        assert client.put(f"{root}/resources/{text_id}/text", json={"content": "overwrite"}).status_code in {404, 405}
+        revision = client.get(f"{root}/resources/{text_id}/text").json()["revision"]
+        assert client.put(f"{root}/resources/{text_id}/text", json={"content": "overwrite", "expected_revision": revision}).status_code == 200
         assert client.get(f"{root}/resources/{text_id}/history").json() == []
-        assert client.post(f"{root}/nodes/{board}/actions/configure_execution", json={"arguments": {}}).status_code == 403
+        assert client.post(f"{root}/nodes/{board}/actions/configure_execution", json={"arguments": {}}).status_code == 422
         assert client.post(f"{root}/nodes/{board}/actions/upsert", json={"arguments": {"tasks": None}}).status_code == 422
         response = client.post(f"{root}/conversations/{chat}/sessions", json={"title": "Shared session", "participant_ids": [records["agent"]["id"]]})
         assert response.status_code == 201
@@ -400,7 +404,7 @@ def test_cloned_windows_sandbox_identity_and_permissions_only_touch_copy(tmp_pat
     assert (sandbox / "workspace" / "result.txt").read_text() == "keep"
 
 
-def test_unsupported_surface_and_hidden_terminal_permissions(tmp_path):
+def test_custom_sections_publish_and_hidden_terminal_permissions_are_preserved(tmp_path):
     with TestClient(create_app(settings(tmp_path / "source"))) as client:
         card = node(client, "sandbox", "Compute")
         response = client.post("/api/legion-groups", json={"name": "Workspace", "node_ids": [card["id"]]})
@@ -408,8 +412,9 @@ def test_unsupported_surface_and_hidden_terminal_permissions(tmp_path):
         request = {"legion_id": legion["id"], "name": "App", "allow_terminal": True}
         layout = {"version": 2, "root": {"kind": "pane", "view": {"card_id": card["id"], "section_id": "custom-admin-panel"}}}
         client.patch(f"/api/nodes/{legion['id']}", json={"config": {"workspace_layout": layout}})
-        denied = client.post("/api/deployments", json=request)
-        assert denied.status_code == 422 and "public runtime surface" in denied.text
+        custom = client.post("/api/deployments", json=request)
+        assert custom.status_code == 201, custom.text
+        assert custom.json()["permissions"][card["id"]] == ["custom-admin-panel"]
         layout["root"]["view"].pop("section_id")
         layout["hidden_sections"] = [{"card_id": card["id"], "section_id": "terminal"}]
         client.patch(f"/api/nodes/{legion['id']}", json={"config": {"workspace_layout": layout}})

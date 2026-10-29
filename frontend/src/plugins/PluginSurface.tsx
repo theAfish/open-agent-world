@@ -62,7 +62,9 @@ export function PluginSurface({ card, slot, level, children }: {
   const sessionId = useCardStateSession(card.id);
   const inWorkspace = useContext(WorkspaceSurfaceContext);
   const navigation = useWorkspaceNavigation();
-  const executionSources = useExecutionSources(card.id, access.deployed);
+  // Deployed requests use /runtime-app/workspace; its server validates both the
+  // owning card and every connected source (test_default_publication.py).
+  const executionSources = useExecutionSources(card.id, access.deployed && !(card.id in access.permissions));
   const covered = useLegionWorkspace(s => Boolean(s.activeId));
   const definition = useWorldStore((s) => s.catalog.node_types.find((d) => d.id === card.type));
   const runtime = useWorldStore((s) => definition ? s.catalog.frontend_modules?.[definition.plugin_id] : undefined);
@@ -101,7 +103,7 @@ export function PluginSurface({ card, slot, level, children }: {
         return useNodeSurfaceStore.subscribe((state, previous) => { if (state.drafts[key] !== previous.drafts[key]) listener(); });
       },
     },
-    state: access.deployed || definition?.state?.mode === 'none' ? undefined : {
+    state: (access.deployed && !(card.id in access.permissions)) || definition?.state?.mode === 'none' ? undefined : {
       get: () => worldApi.cardState(card.id, 'GET', undefined, undefined, sessionId ?? null),
       set: (value, revision) => worldApi.cardState(card.id, 'PUT', value, revision, sessionId ?? null),
       update: (value, revision) => worldApi.cardState(card.id, 'PATCH', value, revision, sessionId ?? null),
@@ -143,7 +145,7 @@ export function PluginSurface({ card, slot, level, children }: {
           await worldApi.editCardLibrary({action:'open_pack', id:'research.xrd.default', expected_revision:library.revision});
         }
         const origin = world.nodes.find(n => n.id === card.id);
-        target = await state.createCard(type, {x:(origin?.position.x ?? 0)+1600, y:(origin?.position.y ?? 0)+(type === 'xrd.structure-canvas' ? 650 : 0)});
+        target = await state.createCard(type, {x:(origin?.position.x ?? 0)+1600, y:(origin?.position.y ?? 0)+(type === 'xrd.structure-canvas' ? 650 : 0)}, { parent_id: origin?.parent_id });
         if (!target) throw new Error('无法创建画布');
         await state.updateCard(target.id, {name, config:{source_node_id:card.id}}, {throwOnError:true});
       }
@@ -172,7 +174,7 @@ export function PluginSurface({ card, slot, level, children }: {
       let canvas=current?.type==='xrd.spectrum-canvas'?current:world.nodes.find(n=>n.type==='xrd.spectrum-canvas' &&
         (n.config.source_node_id===owner!.id || world.edges.some(e=>e.relationship==='xrd.frames'&&e.source===owner!.id&&e.target===n.id)));
       if(!canvas){
-        canvas=await state.createCard('xrd.spectrum-canvas',owner.position)??undefined;
+        canvas=await state.createCard('xrd.spectrum-canvas',owner.position,{parent_id:owner.parent_id})??undefined;
         if(!canvas)throw Error('无法创建谱画布');
         await state.updateCard(canvas.id,{config:{source_node_id:owner.id},parent_id:owner.parent_id},{throwOnError:true});
       }
@@ -213,7 +215,7 @@ export function PluginSurface({ card, slot, level, children }: {
       }
       if (!target) {
         const origin = nodes.find(node => node.id === card.id);
-        target = await state.createCard(type, { x: (origin?.position.x ?? 0) + 1100, y: origin?.position.y ?? 0 });
+        target = await state.createCard(type, { x: (origin?.position.x ?? 0) + 1100, y: origin?.position.y ?? 0 }, { parent_id: origin?.parent_id });
         if (!target) throw new Error("无法创建结构节点");
         try {
           const document = await worldApi.getNodeDocument(target.id);

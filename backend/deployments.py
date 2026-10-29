@@ -13,7 +13,7 @@ from backend.api.dependencies import get_services
 from backend.application import write_setting
 from backend.errors import DomainError, ResourceValidationError
 from backend.legion_workspace import WorkspaceLayout
-from backend.plugins.deployment import merged_surfaces, resolve_surface
+from backend.plugins.deployment import deployment_for, merged_surfaces, resolve_surface
 
 PREFIX = "deployment.release."
 MANIFEST = "deployment.json"
@@ -72,16 +72,13 @@ def configuration_digest(db):
 def panel_kind(services, card, section):
     definition = services.plugins.node_type(card.type)
     if definition.deployment is not None:
-        contract = definition.deployment
-        if ((section is None or contract.shared_sections) and contract.surface is not None) or section in contract.sections:
-            return "plugin"
-        raise ResourceValidationError(f"{card.name}: this plugin has not published this surface")
+        return "plugin"
     if card.type == "conversation" and section in (None, "sessions", "conversation", "participants"):
         return "conversation"
     if card.type == "sandbox" and section in (None, "files", "preview", "terminal"):
         return "sandbox"
     if definition.frontend.get("workspace") or definition.frontend.get("body"):
-        raise ResourceValidationError(f"{card.name}: declare NodeDeploymentDefinition to publish this plugin view")
+        return "plugin"
     if section is None:
         if card.type in ("core.execution-graph", "core.jobs", "core.artifact-collection"):
             return {"core.execution-graph": "execution_graph", "core.jobs": "jobs",
@@ -92,10 +89,7 @@ def panel_kind(services, card, section):
             return "tasks"
         if services.plugins.has_trait(card.type, "core.agent"):
             return "agent"
-    raise ResourceValidationError(
-        f"{card.name}: this card/section does not yet have a public runtime surface. "
-        "Remove it from the published layout; it can continue working in the background."
-    )
+    return "plugin"
 
 
 def inspect_workspace(services, request: PublishRequest, legion_id: str):
@@ -140,7 +134,7 @@ def workspace_spec(services, request: PublishRequest, legion_id: str):
         panel["sections"] = []
         if kind == "plugin":
             definition = services.plugins.node_type(services.world.get_card(node_id).type)
-            contract = definition.deployment
+            contract = deployment_for(definition, section)
             selected = plugin_surfaces.setdefault(node_id, [])
             if section is None or contract.shared_sections:
                 selected.append(resolve_surface(contract.surface, definition))
@@ -177,6 +171,7 @@ def workspace_spec(services, request: PublishRequest, legion_id: str):
         if plugin_access.get(view["card_id"], {}).get("shared_sections")
     ]
     return {"legion_id": legion.id, "name": legion.name,
+            "runtime_nodes": [node.id for node in services.world.owned_descendants(legion.id)],
             "layout": layout, "panels": panels, "permissions": permissions, "plugin_access": plugin_access}
 
 
@@ -184,6 +179,7 @@ def release_spec(services, request: PublishRequest):
     workspaces = [workspace_spec(services, request, node_id) for node_id in request.workspace_ids]
     return {**workspaces[0], "schema_version": 1, "id": str(uuid4()), "name": request.name.strip() or workspaces[0]["name"],
             "created_at": datetime.now(UTC).isoformat(), "workspaces": workspaces,
+            "runtime_nodes": sorted({node_id for workspace in workspaces for node_id in workspace["runtime_nodes"]}),
             "panels": [panel for workspace in workspaces for panel in workspace["panels"]],
             "permissions": {key: value for workspace in workspaces for key, value in workspace["permissions"].items()},
             "plugin_access": {key: value for workspace in workspaces for key, value in workspace["plugin_access"].items()},
@@ -233,4 +229,5 @@ async def preview(request: PublishRequest, services=Depends(get_services)):
                 workspaces.append({"legion_id": node_id, "panels": [], "issues": [{"message": str(error)}]})
         issues = [{**issue, "legion_id": workspace["legion_id"]} for workspace in workspaces for issue in workspace["issues"]]
         return {"ready": not issues, "workspaces": workspaces,
+                "warnings": [{"message": "Published workspaces include their registered business operations and computation. Review their configuration and data access before giving users access."}],
                 "panels": [panel for workspace in workspaces for panel in workspace["panels"]], "issues": issues}

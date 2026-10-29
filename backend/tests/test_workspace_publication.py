@@ -79,8 +79,8 @@ def test_full_research_workspace_reuses_handlers_and_scopes_cross_card_access(tm
             assert response.json()["sources"][0]["id"] == agent
             assert client.get(ROOT + path, headers={"X-OAW-State-Session": records["hidden_session"]}).status_code == 404
         assert client.get(f"{ROOT}/nodes/{graph}/execution-sources/{agent}", headers=headers).status_code == 200
-        assert client.get(f"{ROOT}/nodes/{graph}/execution-sources/{records['stranger']['id']}", headers=headers).status_code == 403
-        assert client.get(f"{ROOT}/nodes/{agent}/execution-sources").status_code == 404
+        assert client.get(f"{ROOT}/nodes/{graph}/execution-sources/{records['stranger']['id']}", headers=headers).status_code == 404
+        assert client.get(f"{ROOT}/nodes/{agent}/execution-sources").status_code == 403
         assert client.get(f"{ROOT}/nodes/{agent}/jobs").status_code == 404
         assert client.post(f"{ROOT}/nodes/{jobs}/jobs/unknown/actions",
                            json={"action": "cancel", "revision": 1}, headers=headers).status_code == 404
@@ -101,7 +101,7 @@ def test_full_research_workspace_reuses_handlers_and_scopes_cross_card_access(tm
         for action in ("replace", "configure"):
             assert client.post(f"{ROOT}/nodes/{knowledge}/actions/{action}",
                                json={"arguments": {}, "expected_revision": 0}).status_code == 404
-        assert client.post(f"{ROOT}/nodes/{knowledge}/transformations/assimilate", json={}).status_code == 404
+        assert client.post(f"{ROOT}/nodes/{knowledge}/transformations/assimilate", json={}).status_code == 422
 
         reference = {"kind": "conversation", "source_id": nodes["conversation"]["id"],
                      "session_id": records["session"], **{key: records["file"][key] for key in ("version_id", "path")}}
@@ -126,7 +126,9 @@ def test_full_research_workspace_reuses_handlers_and_scopes_cross_card_access(tm
         assert client.delete(version_url).status_code == 404
         assert client.get(ROOT + "/artifacts/retained").status_code == 404
         for path in ("/world", "/settings/models", f"/agents/{agent}"):
-            assert client.get(ROOT + path).status_code == 404
+            response = client.get(ROOT + path)
+            assert response.status_code == 200, response.text
+            assert records["stranger"]["id"] not in response.text and "system_instruction" not in response.text
     with TestClient(create_app(settings(target))) as client:
         sign_in(client)
         assert "Published review" in client.get(f"{ROOT}/nodes/{knowledge}/document").text
@@ -228,15 +230,16 @@ def test_document_shorthand_is_explicit_freezes_registered_operations_and_preser
 
 def test_preview_collects_all_blockers_and_publish_rechecks(client):
     first = node(client, "data.sqlite", "Database")
+    outside = node(client, "text", "Outside this workspace")
     second = node(client, "sandbox", "Terminal")
     grouped = client.post("/api/legion-groups", json={"name": "Check", "node_ids": [first["id"], second["id"]]}).json()
     legion = next(item for item in grouped if item["type"] == "legion")
-    views = [{"card_id": first["id"]}, {"card_id": second["id"], "section_id": "terminal"}]
+    views = [{"card_id": outside["id"]}, {"card_id": second["id"], "section_id": "terminal"}]
     layout = {"version": 2, "root": {"kind": "tabs", "views": views, "active_view": views[0]}}
     assert client.patch(f"/api/nodes/{legion['id']}", json={"config": {"workspace_layout": layout}}).status_code == 200
     request = {"legion_id": legion["id"], "name": "Check"}
     preview = client.post("/api/deployments/preview", json=request).json()
     assert not preview["ready"] and len(preview["issues"]) == 2
-    assert {issue["card_id"] for issue in preview["issues"]} == {first["id"], second["id"]}
+    assert {issue["card_id"] for issue in preview["issues"]} == {outside["id"], second["id"]}
     assert client.get("/api/deployments").json() == []
     assert client.post("/api/deployments", json=request).status_code == 422

@@ -12,7 +12,7 @@ test('deployment reuses Legion workspace and business controls without engineeri
   await expect(page.locator('.legion-window-titlebar')).toContainText('Operations');
   await expect(page.locator('.text-editor:visible')).toHaveValue('Operations workspace content');
   await page.getByRole('button', { name: 'Switch workspace', exact: true }).click();
-  await expect(page.getByRole('menuitemradio')).toHaveText(['Operations', 'Published studio']);
+  await expect(page.getByRole('menuitemradio')).toHaveText(['Operations', 'Published studio', 'XRD 分析工作台']);
   await page.screenshot({ path: testInfo.outputPath('workspace-switcher.png'), fullPage: true, animations: 'disabled' });
   await page.getByRole('menuitemradio', { name: 'Published studio' }).click();
   for (const name of ['Edit layout', 'Back to canvas', 'Open settings', 'Publish application']) {
@@ -20,7 +20,7 @@ test('deployment reuses Legion workspace and business controls without engineeri
   }
   await expect(page.locator('.published-layout, .runtime-conversation')).toHaveCount(0);
   await expect(page.locator('.text-editor:visible')).toHaveValue('# Welcome\nThis is the published guide.');
-  await expect(page.locator('.text-editor:visible')).toHaveAttribute('readonly', '');
+  await expect(page.locator('.text-editor:visible')).toBeEditable();
   await page.getByRole('button', { name: /^Switch group:/ }).click();
   await page.getByRole('button', { name: 'New group', exact: true }).click();
   await page.getByRole('button', { name: 'Create group', exact: true }).click();
@@ -79,4 +79,21 @@ test('deployment reuses Legion workspace and business controls without engineeri
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.getByLabel('Access password')).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test('published XRD uses the original canvases and imports a spectrum', async ({ page }, testInfo) => {
+  const failures: string[] = [];
+  page.on('response', response => { if (response.url().includes('/api/runtime-app/workspace') && response.status() >= 400) failures.push(`${response.status()} ${response.url()}`); });
+  await page.request.post('/api/deployment/session', { data: { password: 'test-operator-password-93841' } });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Switch workspace', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: 'XRD 分析工作台' }).click();
+  await expect(page.locator('.xrd-independent-canvas')).toHaveCount(2);
+  const pattern = Array.from({ length: 30 }, (_, i) => `${10 + i * .1} ${1 + i % 7}`).join('\n');
+  await page.getByRole('tabpanel', { name: 'XRD 谱画布' }).locator('input[type=file]').setInputFiles({ name: 'published-spectrum.txt', mimeType: 'text/plain', buffer: Buffer.from(pattern) });
+  await page.getByRole('button', { name: '是，开启新流程' }).click();
+  await expect(page.getByRole('dialog', { name: '是否开启新的流程？' })).toHaveCount(0);
+  await expect(page.getByRole('img', { name: '同步 XRD 谱画布' })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('published-xrd.png'), fullPage: true });
+  expect(failures).toEqual([]);
 });

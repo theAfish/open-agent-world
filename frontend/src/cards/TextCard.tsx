@@ -66,7 +66,7 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
   const filename = String(card.config.filename ?? `${card.name}.txt`);
 
   const performSave = async () => {
-    if (deployed || !ready || !draft.current.dirty || saving.current) return;
+    if (!ready || !draft.current.dirty || saving.current) return;
     saving.current = true;
     const submitted = draft.current.content;
     setStoredDraft(current => current ? { ...current, saving: true } : current);
@@ -108,7 +108,6 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
           className="text-editor"
           value={content}
           disabled={!ready}
-          readOnly={deployed}
           spellCheck
           onChange={(event) => {
             draft.current = { content: event.target.value, dirty: true };
@@ -125,7 +124,7 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
           aria-describedby={`text-save-state-${card.id}`}
         />
       </label>
-      {!deployed && <><div className="editor-actions">
+      <div className="editor-actions">
         <span id={`text-save-state-${card.id}`}>{content.length.toLocaleString(useLocale.getState().locale)} {t("characters · r")}{revision ?? "—"}</span>
         <button
           type="button"
@@ -137,7 +136,7 @@ export function TextCardBody({ card, level }: { card: WorldCard; level: NodeSurf
         </button>
       </div>
 
-      <details className="resource-details">
+      {!deployed && <><details className="resource-details">
         <summary>{t("Relationships")}</summary>
         <RelationshipList card={card} />
       </details>

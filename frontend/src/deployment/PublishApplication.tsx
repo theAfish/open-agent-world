@@ -13,6 +13,7 @@ interface Readiness {
   ready: boolean;
   panels: { card_id: string; name: string; section_id?: string }[];
   issues: { card_id?: string; section_id?: string; message: string }[];
+  warnings?: { message: string }[];
   workspaces?: { legion_id: string; name?: string; panels: Readiness['panels']; issues: Readiness['issues'] }[];
 }
 const quote = (value: string) => /^[A-Za-z]:/.test(value) ? `'${value.replaceAll("'", "''")}'` : `'${value.replaceAll("'", "'\"'\"'")}'`;
@@ -101,6 +102,7 @@ export function PublishApplication({ card, disabled }: { card: WorldCard; disabl
         <p>{t('Published pages')}: {selected.reduce((count, item) => count + paneViews(readWorkspaceLayout(item.config.workspace_layout).root).length, 0)}</p>
         <label className="publish-checkbox"><input type="checkbox" disabled={busy} checked={terminal} onChange={event => setTerminal(event.target.checked)} />{t('Allow users to run Sandbox terminal commands')}</label>
         <p className="publish-hint">{t('Published pages reuse their existing views and business APIs. Configuration and management access remain locked.')}</p>
+        {!!readiness?.warnings?.length && <p className="publish-hint" role="note">{t('Publishing gives users access to the workspaces’ business operations and computation. Review their configuration and data access before sharing.')}</p>}
         <div className="publish-readiness" aria-live="polite">
           {checking ? <p role="status">{t('Checking workspace…')}</p> : readiness && <>
             <p>{t(readiness.ready ? 'Workspace is ready to publish' : 'Resolve these pages before publishing')}</p>

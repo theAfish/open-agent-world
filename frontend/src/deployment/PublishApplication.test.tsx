@@ -9,16 +9,16 @@ import { useWorldStore } from '../state/worldStore';
 
 afterEach(() => { cleanup(); useWorldStore.setState({ cards: [] }); vi.unstubAllGlobals(); });
 
-test('lists every incompatible pane before allowing release creation', async () => {
+test('lists invalid workspace panes before allowing release creation', async () => {
   useLocale.setState({ locale: 'en' });
   const fetch = vi.fn(async (url: string) => ({ ok: true, json: async () => url.endsWith('/preview')
-    ? { ready: false, panels: [], issues: [{ card_id: 'a', message: 'Database: no public surface' }, { card_id: 'b', message: 'Terminal requires permission' }] }
+    ? { ready: false, panels: [], issues: [{ card_id: 'a', message: 'Page belongs to another Legion' }, { card_id: 'b', message: 'Terminal requires permission' }] }
     : [] }));
   vi.stubGlobal('fetch', fetch);
   const card = { id: 'team', name: 'Team', type: 'legion', config: {} } as WorldCard;
   render(<PublishApplication card={card} disabled={false} />);
   fireEvent.click(screen.getByRole('button', { name: 'Publish application' }));
-  await screen.findByText('Database: no public surface');
+  await screen.findByText('Page belongs to another Legion');
   expect(screen.getByText('Terminal requires permission')).toBeVisible();
   expect(screen.getByRole('button', { name: 'Create release' })).toBeDisabled();
   expect(fetch.mock.calls.filter(([url]) => url === '/api/deployments')).toHaveLength(1); // history only
@@ -28,7 +28,7 @@ test('publishes the saved Legion with explicit terminal permission and gives a q
   useLocale.setState({ locale: 'en' });
   const release = { id: 'release-123', legion_id: 'team', name: 'Customer app', source_path: 'D:\\Projects\\Customer $data', created_at: '2026-09-20T00:00:00Z' };
   const fetch = vi.fn(async (url: string, options?: RequestInit) => ({ ok: true, json: async () => url.endsWith('/preview')
-    ? { ready: true, panels: [{ card_id: 'chat', name: 'Conversation' }], issues: [] }
+    ? { ready: true, panels: [{ card_id: 'chat', name: 'Conversation' }], issues: [], warnings: [{ message: 'Business access' }] }
     : options?.method === 'POST' ? release : [] }));
   vi.stubGlobal('fetch', fetch);
   const card: WorldCard = { id: 'team', name: 'Team', type: 'legion', position: { x: 0, y: 0 }, size: { width: 800, height: 550 }, expanded: false, status: 'available', config: { workspace_layout: { version: 2, root: { kind: 'pane', view: { card_id: 'chat' } } } } };
@@ -37,6 +37,7 @@ test('publishes the saved Legion with explicit terminal permission and gives a q
   fireEvent.change(screen.getByLabelText('Application name'), { target: { value: 'Customer app' } });
   fireEvent.click(screen.getByLabelText('Allow users to run Sandbox terminal commands'));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Create release' })).toBeEnabled());
+  expect(screen.getByRole('note')).toHaveTextContent('business operations and computation');
   fireEvent.click(screen.getByRole('button', { name: 'Create release' }));
   await screen.findByText('Deploy this release');
   await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/deployments', expect.objectContaining({
