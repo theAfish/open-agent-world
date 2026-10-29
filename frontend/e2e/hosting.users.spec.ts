@@ -10,6 +10,12 @@ async function login(page: Page, username: string) {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 }
 
+async function signOut(page: Page) {
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await page.waitForURL(`${origin}/auth/login`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByLabel('Username', { exact: true })).toBeVisible();
+}
+
 async function runtime(page: Page) {
   await page.bringToFront();
   await expect(page.locator('.legion-workspace')).toBeVisible();
@@ -102,8 +108,7 @@ test('hosted accounts isolate runtime data, invalidate other tabs and share auth
     await otherTab.goto(origin);
     await runtime(otherTab);
     await page.bringToFront();
-    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-    await expect(page.getByLabel('Username', { exact: true })).toBeVisible();
+    await signOut(page);
     await expect(otherTab.getByLabel('Username', { exact: true })).toBeVisible();
     await expect(otherTab.locator('.legion-workspace')).toHaveCount(0);
     await otherTab.close();
@@ -116,8 +121,7 @@ test('hosted accounts isolate runtime data, invalidate other tabs and share auth
     await expect(page.getByText('Alice private task', { exact: true })).toHaveCount(0);
     const stored = await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).map(key => [key, localStorage.getItem(key)])));
     expect(JSON.stringify(stored)).not.toMatch(/Alice|Bob|private task|test-hosted-password/);
-    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-    await expect(page.getByLabel('Username', { exact: true })).toBeVisible();
+    await signOut(page);
 
     await login(page, 'carol');
     await expect(page.locator('.world-canvas')).toBeVisible();
@@ -138,8 +142,7 @@ test('hosted accounts isolate runtime data, invalidate other tabs and share auth
     await page.getByRole('button', { name: 'Close Library', exact: true }).click();
     await expect(page.locator('.card-library-modal')).not.toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('hosting-canvas.png'), fullPage: true });
-    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-    await expect(page.getByLabel('Username', { exact: true })).toBeVisible();
+    await signOut(page);
     await page.screenshot({ path: testInfo.outputPath('hosting-login.png'), fullPage: true });
     expect(errors).toEqual([]);
   } finally { await bobContext.close(); }
