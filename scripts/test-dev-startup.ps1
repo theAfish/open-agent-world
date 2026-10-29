@@ -115,3 +115,87 @@ try {
     Remove-Item -LiteralPath Function:\Get-Process, Function:\taskkill.exe
     $global:LASTEXITCODE = $savedExitCode
 }
+
+# Run the real orchestration in an isolated runspace. Only preparation and
+# process launch are replaced; no application process is started or stopped.
+$definitions = ($ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.FunctionDefinitionAst] } | ForEach-Object { $_.Extent.Text }) -join "`n"
+$main = ($ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] }).Extent.Text
+$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('oaw-dev-outcomes-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $testRoot | Out-Null
+try {
+    foreach ($mode in @('preflight-failure', 'backend-failure', 'cancelled')) {
+        $caseRoot = Join-Path $testRoot $mode
+        New-Item -ItemType Directory -Path $caseRoot | Out-Null
+        $logPath = Join-Path $caseRoot 'dev.log'
+        Set-Content -LiteralPath $logPath -Value 'Earlier session must survive.'
+        foreach ($name in @('backend.out.log', 'backend.err.log')) {
+            Set-Content -LiteralPath (Join-Path $caseRoot $name) -Value 'Previous backend attempt.'
+        }
+        $runner = [powershell]::Create()
+        try {
+            $null = $runner.AddScript({
+                param($definitions, $main, $caseRoot, $mode)
+                $ErrorActionPreference = 'Stop'
+                Invoke-Expression $definitions
+                $projectRoot = $caseRoot
+                $backendStatePath = Join-Path $caseRoot 'backend.process.json'
+                $devLogPath = Join-Path $caseRoot 'dev.log'
+                $backendOut = Join-Path $caseRoot 'backend.out.log'
+                $backendError = Join-Path $caseRoot 'backend.err.log'
+                $backend = $null
+                $backendState = $null
+                $devPhase = 'preparing source environments'
+                $devOutcome = 'interrupted'
+                $PluginPath = @()
+                $Profile = 'fixture'
+                $StartupTimeoutSeconds = 0
+                function Initialize-BackendEnvironment {
+                    if ($mode -eq 'preflight-failure') { throw 'Fixture preflight failure.' }
+                    if ($mode -eq 'cancelled') { Start-Sleep -Seconds 30 }
+                    return $env:ComSpec
+                }
+                function Get-BackendListener { return $null }
+                function Get-AvailableLocalPort { param([int]$PreferredPort) return $PreferredPort }
+                function Start-Process {
+                    Set-Content -LiteralPath $backendError -Value 'Fixture backend failure.'
+                    $process = Microsoft.PowerShell.Management\Start-Process -FilePath $env:ComSpec -ArgumentList '/c exit 7' -WindowStyle Hidden -PassThru
+                    $process.WaitForExit()
+                    return $process
+                }
+                Push-Location $projectRoot
+                Invoke-Expression $main
+            }).AddArgument($definitions).AddArgument($main).AddArgument($caseRoot).AddArgument($mode)
+            $pending = $runner.BeginInvoke()
+            if ($mode -eq 'cancelled') {
+                $timer = [Diagnostics.Stopwatch]::StartNew()
+                while ((Get-Content -Raw -LiteralPath $logPath) -notmatch 'Starting development session' -and $timer.Elapsed.TotalSeconds -lt 5) {
+                    Start-Sleep -Milliseconds 20
+                }
+                if ($timer.Elapsed.TotalSeconds -ge 5) { throw 'Fixture did not enter startup.' }
+                $runner.Stop()
+            }
+            $failure = $null
+            try { $runner.EndInvoke($pending) | Out-Null } catch { $failure = $_ }
+            if ($null -eq $failure) { throw "Expected $mode to terminate the pipeline." }
+            $log = Get-Content -Raw -LiteralPath $logPath
+            if ($log -notmatch 'Earlier session must survive') { throw 'A retry erased earlier session diagnostics.' }
+            if ($mode -eq 'cancelled') {
+                if ($log -notmatch 'Interrupted while preparing source environments; backend before cleanup: not launched' -or $log -notmatch 'outcome=interrupted' -or $runner.Streams.Warning.Count -ne 1) { throw 'Cancellation exited without a durable reason and visible warning.' }
+            } else {
+                $expected = if ($mode -eq 'backend-failure') { 'exit code 7' } else { 'Fixture preflight failure' }
+                if ($failure.Exception.Message -notmatch $expected -or $log -notmatch $expected -or $log -notmatch 'outcome=failed' -or $runner.Streams.Warning.Count -ne 0) { throw "Original $mode was lost or misreported as cancellation." }
+            }
+            if ($mode -eq 'backend-failure') {
+                foreach ($name in @('backend.out.log', 'backend.err.log')) {
+                    if ((Get-Content -Raw -LiteralPath (Join-Path $caseRoot "$name.previous")) -notmatch 'Previous backend attempt') { throw 'A retry erased previous backend output.' }
+                }
+            }
+        } finally {
+            $runner.Dispose()
+        }
+    }
+    Write-Host 'PASS: preflight/backend failures and pipeline cancellation retain their reasons; retries preserve previous logs.'
+} finally {
+    if ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($testRoot)) -ne [IO.Path]::GetTempPath().TrimEnd('\')) { throw 'Test cleanup escaped the temporary directory.' }
+    Remove-Item -LiteralPath $testRoot -Recurse -Force
+}

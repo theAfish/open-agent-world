@@ -18,6 +18,18 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $runtimeDirectory = Join-Path $projectRoot ".open-agent-world"
 New-Item -ItemType Directory -Force -Path $runtimeDirectory | Out-Null
 $backendStatePath = Join-Path $runtimeDirectory "backend.process.json"
+$devLogPath = Join-Path $runtimeDirectory "dev.log"
+
+function Write-DevLog {
+    param([string]$Message)
+
+    try {
+        Add-Content -LiteralPath $devLogPath -Encoding utf8 -Value ("{0:o} shell={1} {2}" -f [DateTimeOffset]::Now, $PID, $Message)
+    }
+    catch {
+        Write-Warning "Unable to write development log: $($_.Exception.Message)"
+    }
+}
 
 function Get-ProcessRecord {
     param([int]$ProcessId)
@@ -236,9 +248,13 @@ $backendError = Join-Path $runtimeDirectory "backend.err.log"
 
 $backend = $null
 $backendState = $null
+$devPhase = 'preparing source environments'
+# Pipeline cancellation bypasses catch, but PowerShell still runs finally.
+$devOutcome = 'interrupted'
 
 Push-Location $projectRoot
 try {
+    Write-DevLog "Starting development session; profile=$Profile."
     $resolvedPluginPaths = @(foreach ($candidate in $PluginPath) {
         $candidatePath = if ([System.IO.Path]::IsPathRooted($candidate)) {
             $candidate
@@ -252,6 +268,7 @@ try {
         $resolved.Path
     })
     $backendPython = Initialize-BackendEnvironment -Root $projectRoot -DevelopmentProfile $Profile -AdditionalPlugins $resolvedPluginPaths
+    $devPhase = 'recovering previous backend'
     # Recover a backend left by an earlier invocation. The recorded start time
     # prevents a recycled PID from causing an unrelated process to be killed.
     $previousState = Read-BackendState
@@ -280,6 +297,14 @@ try {
         throw "Selected backend port $backendPort is already in use by PID $($existingListener.OwningProcess). Please rerun the script."
     }
 
+    # Start-Process truncates these files. Retain the previous attempt so a
+    # retry does not erase the evidence of a startup failure or interruption.
+    foreach ($logPath in @($backendOut, $backendError)) {
+        if (Test-Path -LiteralPath $logPath) {
+            Copy-Item -LiteralPath $logPath -Destination "$logPath.previous" -Force
+        }
+    }
+    $devPhase = "starting backend at $backendHttpUrl"
     $backend = Start-Process `
         -FilePath $backendPython `
         -ArgumentList $backendArguments `
@@ -297,6 +322,8 @@ try {
     }
     $backendState | ConvertTo-Json | Set-Content -LiteralPath $backendStatePath -Encoding utf8
 
+    $devPhase = "waiting for backend readiness at $backendHttpUrl"
+    Write-DevLog "Backend launched; root=$($backend.Id); phase=$devPhase."
     $listener = Wait-BackendListener -Backend $backend -Port $backendPort -TimeoutMilliseconds ($StartupTimeoutSeconds * 1000) -LogPath $backendError
     if ($null -eq $listener) {
         $detail = Get-Content -Raw $backendError -ErrorAction SilentlyContinue
@@ -318,6 +345,7 @@ try {
         listener = if ($null -ne $listener) { Get-ProcessRecord $listener.OwningProcess } else { $null }
     }
     $backendState | ConvertTo-Json | Set-Content -LiteralPath $backendStatePath -Encoding utf8
+    Write-DevLog "Backend ready; root=$($backend.Id); listener=$($listener.OwningProcess)."
 
     Write-Host "Open Agent World: http://127.0.0.1:$frontendPort/"
     Write-Host "Backend API: $backendHttpUrl"
@@ -326,12 +354,27 @@ try {
         Write-Host "Backend plugins: $($resolvedPluginPaths -join ', ')"
     }
     Write-Host "Backend activity: $backendOut"
+    Write-Host "Development session log: $devLogPath"
     # Shared predev preparation already completed. Start Vite directly, without
     # repeating npm hooks or passing ignore-scripts into Pack build children.
+    $devPhase = "running frontend at http://127.0.0.1:$frontendPort/"
+    Write-DevLog $devPhase
     & node (Join-Path $projectRoot 'frontend/node_modules/vite/bin/vite.js') (Join-Path $projectRoot 'frontend') --host 127.0.0.1 --port $frontendPort --strictPort
     if ($LASTEXITCODE -ne 0) { throw "Frontend development server failed (exit code $LASTEXITCODE). See the build error above." }
+    $devOutcome = 'completed'
+}
+catch {
+    $devOutcome = 'failed'
+    Write-DevLog "Failed while $devPhase`: $($_.Exception.Message)`n$($_.ScriptStackTrace)"
+    throw
 }
 finally {
+    if ($devOutcome -eq 'interrupted') {
+        $backendStatus = if ($null -eq $backend) { 'not launched' } elseif ($backend.HasExited) { "exited with code $($backend.ExitCode)" } else { "running (PID $($backend.Id))" }
+        Write-DevLog "Interrupted while $devPhase; backend before cleanup: $backendStatus."
+        Write-Warning "Development session interrupted while $devPhase. Details: $devLogPath"
+    }
+    Write-DevLog "Cleaning up development session; outcome=$devOutcome."
     if ($null -ne $backendState) {
         Stop-RecordedProcessTree $backendState.root
         if ($null -ne $backendState.listener -and
