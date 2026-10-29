@@ -204,7 +204,7 @@ def build(cfg, tree, base, args):
         raise ValueError('Python changes require relevant tests; add --pytest-path')
     print(json.dumps({'stage': 'testing', 'commit': commit, 'pytest_paths': tests}), flush=True)
     python = cfg['python']
-    code = "from pathlib import Path;import sys;sys.path[:0]=[str(Path.cwd()),*[str(p.parent/'src') for p in Path('plugins').glob('*/pyproject.toml')],*[str(p.parent) for p in Path('plugins').glob('*/pyproject.toml')]];import pytest;raise SystemExit(pytest.main(sys.argv[1:]))"
+    code = "from pathlib import Path;import sys;packs=[p for root in ('plugins','packs') for p in Path(root).glob('*/pyproject.toml')];sys.path[:0]=[str(Path.cwd()),*[str(p.parent/'src') for p in packs],*[str(p.parent) for p in packs]];import pytest;raise SystemExit(pytest.main(sys.argv[1:]))"
     if tests:
         run([python, '-c', code, *tests, '-q', '-o', 'addopts='], cwd=tree)
     prepare_npm(tree)
