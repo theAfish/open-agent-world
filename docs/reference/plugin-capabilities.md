@@ -109,9 +109,29 @@ changing a granting edge revokes permission for subsequent invocations, includin
 calls through a tool exposed before that change.
 
 Connection gestures are unordered. The host stores the endpoints in the canonical
-orientation defined by the relationship. A `bidirectional` edge grants the same
-relationship capabilities in reverse; use separate relationships for different
-meanings.
+orientation defined by the relationship. By default a `bidirectional` edge grants
+the same relationship capabilities in reverse, preserving existing behavior.
+
+With Plugin API 1.41, a relationship may instead declare
+`reverse_relationship="core.execution-source"` (or another registered relationship)
+and include `"bidirectional"` in `directions`. A two-way edge then uses its own
+contract from source to target and the referenced relationship's forward contract
+from target to source. Each contract's endpoint types/traits are validated; reverse
+references must resolve to an ordinary, forward-capable relationship without a
+nested reverse reference. This is a plugin declaration, not a model-selected
+permission. It does not create a second stored edge or require a database migration.
+
+For example, an Agent-to-library news relationship grants news tools forward and
+observes Agent execution in reverse. The library declares `core.execution-viewer`
+and the Agent declares `core.execution-source`. Switching the edge back to
+`forward` revokes observation while retaining news tools; deleting it revokes both.
+Existing one-way edges keep their current permissions until explicitly changed.
+The execution-source SDK and session boundaries remain unchanged. Connection
+dialogs describe both grants, and scoped canvas control/review checks both.
+The lifecycle SDK's `list_edges_from()` still returns stored, canonical edges;
+plugins enforcing their own business rules must account for their declared two-way
+relationships when inspecting that raw graph.
+
 
 ## Runtime providers
 

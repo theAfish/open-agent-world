@@ -14,6 +14,12 @@ export interface NodePresentation {
 }
 
 export type AgentStatus = "idle" | "running" | "waiting" | "error";
+/** Immediate admission receipt, not the eventual outcome of the Run. */
+export interface AgentRunReceipt {
+  accepted: true;
+  agent_id: string;
+  run_id: string;
+}
 export type SandboxStatus = "stopped" | "ready" | "running" | "error";
 export type SandboxWorkspaceAccess = "read_write" | "read_only";
 
@@ -218,6 +224,8 @@ export interface NodeTypeCatalogItem {
 export interface RelationshipCatalogItem {
   data_read?: boolean;
   generated?: boolean;
+  /** Forward contract used in the reverse direction when this edge is two-way. */
+  reverse_relationship?: Relationship | null;
   id: Relationship;
   plugin_id: string;
   label: string;

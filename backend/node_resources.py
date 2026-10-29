@@ -63,11 +63,13 @@ async def invoke_resource_action(services, node_id, action, request, *, capabili
                 raise PermissionDeniedError("This connection does not allow that resource action")
             if request.confirm:
                 raise PermissionDeniedError("Agents cannot supply desktop confirmation")
+        invocation = services.run_manager.current_context if capability and services.run_manager else None
         context = NodeResourceContext(node_id, services.resources.node_storage_path(node_id), Event(),
             actor_id=capability.agent_id if capability else None, confirmed=request.confirm,
             state=services.card_state.bind(node_id),
             resolve_secret=resource_secret_resolver(services, node),
-            resolve_model=resource_model_resolver(services, node))
+            resolve_model=resource_model_resolver(services, node),
+            run_id=invocation.run_id if invocation and invocation.agent_id == capability.agent_id else None)
         task = asyncio.create_task(asyncio.to_thread(operation.handler, context, request.arguments))
         try:
             return await asyncio.shield(task)

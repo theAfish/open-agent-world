@@ -5,6 +5,7 @@ import { fetchWithRetry } from './fetchWithRetry';
 import { hostedInstanceUrl, isHosted } from '../auth/hostedSession';
 import type { SummoningSnapshot, SummonedInstance } from "../cards/Barracks";
 import type {
+  AgentRunReceipt,
   CardConfig,
   CardStatus,
   CardType,
@@ -806,8 +807,8 @@ export const worldApi = {
     return asRecord(body);
   },
 
-  runAgent(nodeId: string, prompt: string): Promise<Record<string, unknown>> {
-    return request<Record<string, unknown>>(`/agents/${encodeURIComponent(nodeId)}/run`, {
+  runAgent(nodeId: string, prompt: string): Promise<AgentRunReceipt> {
+    return request<AgentRunReceipt>(`/agents/${encodeURIComponent(nodeId)}/run`, {
       method: "POST",
       body: JSON.stringify({ prompt }),
     });

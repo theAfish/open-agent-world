@@ -19,6 +19,7 @@ from backend.plugins.documents import NodeDocumentAction, NodeDocumentDefinition
 from backend.plugins.documents import NodeDocumentTransformation
 from backend.plugins.equipment import DefaultEquipment
 from backend.plugins.deployment import DeploymentSurface, NodeDeploymentDefinition
+from backend.plugins.run_observation import ObservedRun, RunObservations, RunSubscription
 from backend.plugins.resources import NodeResourceAction, NodeResourceContext
 from backend.plugins.data_sources import DataQuery, NodeDataConsumer, NodeDataSource
 from backend.plugins.execution_graph import ExecutionEdge, ExecutionNode, ExecutionSnapshot, NodeExecutionSource
@@ -117,6 +118,7 @@ __all__ = [
     "DeploymentSurface", "NodeDeploymentDefinition",
     "LegionPresetDefinition", "PresetNode", "PresetEdge",
     "NodeResourceAction", "NodeResourceContext",
+    "ObservedRun", "RunObservations", "RunSubscription",
     "ToolImage", "VisualToolResult", "codex_tool_content",
     "PackDefinition",
     "NodePresentation",

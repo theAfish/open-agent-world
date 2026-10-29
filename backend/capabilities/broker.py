@@ -9,7 +9,7 @@ from backend.legions.runtime import member_team
 from backend.plugins import PluginRegistry
 from backend.resources.manager import ManagedResourceStore
 from backend.resources.models import ResourceRecord, TextDocument, TextEdit
-from backend.world.models import Card, CardType, Edge, EdgeDirection, Relationship
+from backend.world.models import Card, CardType, Edge, Relationship
 from backend.world.store import WorldStore
 
 
@@ -35,9 +35,7 @@ class CapabilityBroker:
         """Authorize a direct node-to-node operation, including non-Agent viewers."""
         self.world.get_card(node_id)
         self.world.get_card(target_id)
-        edges = [(edge, edge.target) for edge in self.world.connections_from(node_id)]
-        edges.extend((edge, edge.source) for edge in self.world.connections_to(node_id)
-                     if edge.direction == EdgeDirection.BIDIRECTIONAL)
+        edges = [(edge, edge.target) for edge in self.world.directed_connections_from(node_id)]
         for edge, target in edges:
             relationship = self.plugins.relationship(edge.relationship)
             if target == target_id and not relationship.generated and any(grant.kind == kind for grant in relationship.capabilities):
@@ -50,12 +48,7 @@ class CapabilityBroker:
         if agent.minister is not None:
             from backend.minister import capabilities as minister_capabilities
             capabilities.extend(minister_capabilities(self, agent).capabilities)
-        directed_edges = [(edge, edge.target) for edge in self.world.connections_from(agent_id)]
-        directed_edges.extend(
-            (edge, edge.source)
-            for edge in self.world.connections_to(agent_id)
-            if edge.direction == EdgeDirection.BIDIRECTIONAL
-        )
+        directed_edges = [(edge, edge.target) for edge in self.world.directed_connections_from(agent_id)]
         capability_ids: set[str] = set()
         visited: set[tuple[str, str]] = set()
         for edge, target_id in directed_edges:

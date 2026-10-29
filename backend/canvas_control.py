@@ -127,9 +127,16 @@ class CanvasControl:
         scope, schema or revision checks, and is never supplied by tool callers.
         """
         if self._reviewer is not None:
+            def permissions(edges):
+                for edge in edges:
+                    if edge.direction == "bidirectional" and self._services.plugins.relationship(edge.relationship).reverse_relationship:
+                        yield self._services.world.directed_edge(edge)
+                        yield self._services.world.directed_edge(edge, reverse=True)
+                    else:
+                        yield edge
             self._reviewer(dict(operation=operation, before=list(before), after=list(after),
                 affected_cards=list(self._affected_cards.values()), affected_edges=list(self._affected_edges.values()),
-                removed_edges=list(removed_edges), added_edges=list(added_edges), **details))
+                removed_edges=list(permissions(removed_edges)), added_edges=list(permissions(added_edges)), **details))
         self._affected_cards.clear()
         self._affected_edges.clear()
 
@@ -156,7 +163,10 @@ class CanvasControl:
                 version = expected.get(item.id)
                 if version is None or version.revision != item.revision or version.created_at != item.created_at:
                     raise RevisionConflictError("Affected canvas objects changed or were not read; query again")
-                (self._affected_cards if isinstance(item, Card) else self._affected_edges)[item.id] = item
+                if isinstance(item, Card):
+                    self._affected_cards[item.id] = item
+                else:
+                    self._affected_edges[(item.id, item.relationship)] = item
 
     def _related_cards(self, cards):
         world = self._services.world
@@ -189,8 +199,9 @@ class CanvasControl:
         """Include implicit forwarding and selectable members of resource containers."""
         services = self._services
         cards, connections, visited = {}, {}, set()
-        pending = [(edge, edge.target) for edge in edges]
-        pending += [(edge, edge.source) for edge in edges if edge.direction == "bidirectional"]
+        directed = [services.world.directed_edge(edge) for edge in edges]
+        directed += [services.world.directed_edge(edge, reverse=True) for edge in edges if edge.direction == "bidirectional"]
+        pending = [(edge, edge.target) for edge in directed]
         while pending:
             edge, target_id = pending.pop()
             if (edge.id, target_id) in visited:
@@ -199,7 +210,7 @@ class CanvasControl:
             definition = services.plugins.relationship(edge.relationship)
             if definition.generated or edge.relationship not in scope.relationships:
                 raise PermissionDeniedError("This relationship is not authorized for canvas control")
-            connections[edge.id] = edge
+            connections[(edge.id, edge.relationship)] = edge
             for key in (edge.source, edge.target):
                 node = services.world.get_card(key)
                 if scope.principal_relationships and key == self._actor_id:
@@ -214,9 +225,10 @@ class CanvasControl:
                     cards[card.id] = card
             pending.extend(services.capabilities.forwarded_connections(edge, target_id))
             # Editing a shared adapter also changes grants held by upstream actors.
-            upstream = [(parent, parent.target) for parent in services.world.connections_to(edge.source)]
-            upstream += [(parent, parent.source) for parent in services.world.connections_from(edge.source)
-                         if parent.direction == "bidirectional"]
+            parents = [services.world.directed_edge(parent) for parent in services.world.connections_to(edge.source)]
+            parents += [services.world.directed_edge(parent, reverse=True) for parent in services.world.connections_from(edge.source)
+                        if parent.direction == "bidirectional"]
+            upstream = [(parent, parent.target) for parent in parents]
             pending.extend((parent, via) for parent, via in upstream
                            if services.capabilities.forwards_connection(parent, via, edge))
         return list(cards.values()), list(connections.values())

@@ -60,6 +60,7 @@ export function ConnectionDialog() {
   if (!pending) return null;
   const selectedOption = pending.options.find((option) => option.value === selected);
   const canBeBidirectional = selectedOption?.directions.includes("bidirectional") ?? false;
+  const reverse = catalog.relationships.find(item => item.id === selectedOption?.reverseRelationship);
 
   return (
     <div
@@ -95,7 +96,7 @@ export function ConnectionDialog() {
         </div>
 
         <fieldset className="permission-options" disabled={busy}>
-          <legend>{t("The backend will grant exactly one permission")}</legend>
+          <legend>{reverse ? t("Choose a capability") : t("The backend will grant exactly one permission")}</legend>
           {pending.options.map((option) => (
             <label key={option.value} className={selected === option.value ? "is-selected" : ""}>
               <input
@@ -129,10 +130,10 @@ export function ConnectionDialog() {
 
         {canBeBidirectional && (
           <fieldset className="permission-options direction-options">
-            <legend>{t("Communication direction")}</legend>
+            <legend>{t("Direction")}</legend>
             {([
-              ["forward", t("One-way"), t("{v0} can message {v1}.", { v0: String(source?.name), v1: String(target?.name) })],
-              ["bidirectional", t("Two-way"), t("Both agents can message each other directly.")],
+              ["forward", t("One-way"), reverse ? `${source?.name} → ${target?.name}：${t(selectedOption!.label)}` : t("{v0} can message {v1}.", { v0: String(source?.name), v1: String(target?.name) })],
+              ["bidirectional", t("Two-way"), reverse ? `${source?.name} → ${target?.name}：${t(selectedOption!.label)}；${target?.name} → ${source?.name}：${t(reverse.label)}` : t("Both agents can message each other directly.")],
             ] as const).map(([value, label, description]) => (
               <label key={value} className={direction === value ? "is-selected" : ""}>
                 <input

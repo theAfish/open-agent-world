@@ -4,7 +4,7 @@
 def connected_sources(services, reader_id):
     services.world.get_card(reader_id)
     sources = {}
-    for edge in services.world.list_edges_from(reader_id):
+    for edge in services.world.directed_connections_from(reader_id):
         relation = services.plugins.relationship(edge.relationship)
         if not relation.data_read or edge.direction not in {"forward", "bidirectional"}:
             continue

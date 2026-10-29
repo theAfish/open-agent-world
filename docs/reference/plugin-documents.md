@@ -211,3 +211,14 @@ materialization and explicit retention release. See [lifecycle and artifact
 contracts](../lifecycle-artifacts.md) for authorization, idempotency, migration and
 recovery guarantees. Ordinary document `artifacts` metadata does not grant access
 or retain file bytes.
+
+
+### Trusted Run identity (API 1.41)
+
+`NodeResourceContext.run_id` is an optional, host-supplied Run identity for the
+current Agent capability invocation. It is populated only when the active Run
+belongs to the calling Agent; desktop calls and capability calls outside a Run
+receive `None`. A tool argument named `run_id` cannot override this field.
+The field is appended with a default of `None`, preserving existing positional
+constructors. It identifies the invocation only; it does not subscribe to Run
+events, query execution status, or change a plugin's business task.

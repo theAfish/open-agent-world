@@ -291,3 +291,59 @@ These are trusted in-process plugins, without an Extension Host crash boundary.
 
 Manifest contributions can be combined with advanced registration in one atomic
 collector; see [mixed contributions](../developers/declarative-packs.md#mixed-contributions-api-138).
+
+
+## Backend Run observation (API 1.41)
+
+`NodeLifecycleContext.run_observations` provides `read(viewer_id, agent_id,
+run_id)` and `watch(viewer_id, agent_id, run_id, callback)`. The public types
+`ObservedRun`, `RunObservations`, and `RunSubscription` are exported from
+`open_agent_world.plugin_api`. Older/manually constructed lifecycle contexts
+may leave this optional field as `None`.
+
+The viewer must have `core.execution-viewer` and a live directed
+`core.execution-source` grant to the Agent. Composite reverse relationships
+use the same permission checks as existing execution views. The Run must belong
+to that Agent. Reads target the exact Run across sessions; they do not use the
+currently selected frontend session. No control permission is granted.
+
+`ObservedRun` contains only `run_id`, `agent_id`, `status`, `updated_at`,
+`started_at`, and `finished_at` (ISO timestamps), plus optional `error`.
+For failed Runs, `error` is a bounded, host-generated category summary (such as
+invalid model, authentication, timeout or rate limit), never the raw exception.
+Unknown errors receive a generic message directing the user to Run details.
+It excludes prompts, output, credentials, raw error detail and provider internals. Run success is not proof
+that a plugin business task completed.
+
+```python
+async def on_startup(self, context, node):
+    async def changed(run):
+        # Match the saved task attempt/run_id before updating business state.
+        # Use the plugin's existing safe persistence path for any blocking write.
+        await self.update_task(run)
+
+    self.watch = await context.run_observations.watch(
+        node.id, self.saved_agent_id, self.saved_run_id, changed)
+
+async def on_shutdown(self, context, node):
+    if self.watch:
+        await self.watch.close()
+```
+
+Registration first subscribes to EventHub and delivers an authoritative initial
+snapshot before returning the handle. It then serializes changed snapshots to
+the async callback, rechecking live grants before delivery. Permission revocation
+pauses delivery without ending the subscription. Restoring a live grant
+automatically reconciles the same Run, including terminal changes while revoked.
+Deletion stops the subscription. Callbacks must be bounded and idempotent;
+a failed later callback is logged and retried on a subsequent event/check.
+Initial callback errors propagate to the registering caller. Callbacks run under
+the host node-mutation lock; do not block or wait for other Run transitions there.
+
+EventHub is a wake-up signal, not a durable event log. The host rereads Run state
+on events and every 30 seconds to reconcile dropped events. Intermediate
+transitions may coalesce; this is current-state delivery, not exactly-once event
+replay. Subscriptions are process-local: restore saved task/run associations and
+register again at startup to reconcile restart-interrupted Runs. Close handles on
+node shutdown/removal; host shutdown also cancels remaining subscriptions. This
+SDK does not start Agents or create threads in plugins.

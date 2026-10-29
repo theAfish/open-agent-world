@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence
+from backend.plugins.run_observation import RunObservations
 
 if TYPE_CHECKING:
     from backend.world.models import Card, CardCreate, CardPatch, Edge
@@ -104,6 +105,7 @@ class NodeLifecycleContext:
     conversations: ConversationNodeLifecycle
     agents: AgentNodeLifecycle | None = None
     sandboxes: SandboxNodeLifecycle | None = None
+    run_observations: RunObservations | None = None
 
 
 class NodeLifecycleTransaction:

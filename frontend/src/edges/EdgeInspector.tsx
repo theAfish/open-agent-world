@@ -21,6 +21,7 @@ export const EdgeInspector = memo(function EdgeInspector() {
   const options = getRelationshipOptions(catalog, source.type, target.type);
   const activeOption = getRelationshipOption(catalog, edge.relationship);
   const generated = catalog.relationships.find((item) => item.id === edge.relationship)?.generated;
+  const reverse = catalog.relationships.find(item => item.id === activeOption.reverseRelationship);
 
   return (
     <aside className="edge-inspector" aria-label={t("Selected relationship")}>
@@ -59,11 +60,12 @@ export const EdgeInspector = memo(function EdgeInspector() {
           <span className="sr-only">{t("Direction")}</span>
           <select
             aria-label={t("Relationship direction")}
+            title={reverse ? `${source.name} → ${target.name}：${t(activeOption.label)}；${target.name} → ${source.name}：${t(reverse.label)}` : undefined}
             value={edge.direction}
             onChange={(event) => void updateSelectedEdge({ direction: event.target.value as EdgeDirection })}
           >
             <option value="forward">{t("One-way")}</option>
-            <option value="bidirectional">{t("Two-way")}</option>
+            <option value="bidirectional">{reverse ? `${t("Two-way")} · ${t(reverse.label)}` : t("Two-way")}</option>
           </select>
         </label>
       )}

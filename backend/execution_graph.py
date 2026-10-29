@@ -26,7 +26,7 @@ def connected_sources(services, viewer_id):
     if not services.plugins.has_trait(viewer.type, 'core.execution-viewer'):
         raise PermissionDeniedError('This card is not an execution viewer')
     sources = {}
-    for edge in services.world.list_edges_from(viewer_id):
+    for edge in services.world.directed_connections_from(viewer_id):
         if edge.missing_plugin or edge.relationship != 'core.execution-source' or edge.direction not in {'forward', 'bidirectional'}:
             continue
         node = services.world.get_card(edge.target)

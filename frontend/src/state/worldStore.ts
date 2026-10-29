@@ -12,6 +12,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { profileStorage } from "./profileStorage";
 import { apiErrorMessage, normalizeCard, resourceContentUrl, worldApi, type CardCreateInput } from "../api/client";
 import type {
+  AgentRunReceipt,
   CardType,
   EdgeDirection,
   FlowViewportState,
@@ -403,6 +404,7 @@ interface WorldState {
   loadText: (id: string) => Promise<void>;
   saveText: (id: string, content: string, expectedRevision?: number) => Promise<boolean>;
   uploadImage: (id: string, file: File) => Promise<boolean>;
+  requestAgentRun: (id: string, prompt: string) => Promise<AgentRunReceipt>;
   runAgent: (id: string, prompt: string) => Promise<void>;
   stopAgent: (id: string) => Promise<void>;
   loadSandboxRuntimes: (refresh?: boolean) => Promise<void>;
@@ -1559,17 +1561,22 @@ export const useWorldStore = create<WorldState>()(persist((set, get) => ({
     }
   },
 
+  requestAgentRun: async (id, prompt) => {
+    const receipt = await worldApi.runAgent(id, prompt);
+    set((state) => ({
+      cards: state.cards.map((card) =>
+        card.id === id
+          ? mergeCardPatch(card, { status: "running", config: { prompt } })
+          : card,
+      ),
+      activityOpen: true,
+    }));
+    return receipt;
+  },
+
   runAgent: async (id, prompt) => {
     try {
-      await worldApi.runAgent(id, prompt);
-      set((state) => ({
-        cards: state.cards.map((card) =>
-          card.id === id
-            ? mergeCardPatch(card, { status: "running", config: { prompt } })
-            : card,
-        ),
-        activityOpen: true,
-      }));
+      await get().requestAgentRun(id, prompt);
     } catch (error) {
       get().pushToast({ tone: "error", title: "Agent did not start", detail: apiErrorMessage(error) });
     }

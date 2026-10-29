@@ -15,6 +15,7 @@ export interface RelationshipOption {
   shortLabel: string;
   description: string;
   directions: EdgeDirection[];
+  reverseRelationship?: Relationship | null;
 }
 
 function option(definition: RelationshipCatalogItem): RelationshipOption {
@@ -24,6 +25,7 @@ function option(definition: RelationshipCatalogItem): RelationshipOption {
     shortLabel: definition.short_label,
     description: definition.description,
     directions: definition.directions,
+    reverseRelationship: definition.reverse_relationship,
   };
 }
 
@@ -61,7 +63,15 @@ export function getRelationshipOptions(
 
 export function getConnectionOptions(catalog: PluginCatalog, sourceType: CardType, targetType: CardType): RelationshipOption[] {
   const forward = getRelationshipOptions(catalog, sourceType, targetType);
-  return forward.length ? forward : getRelationshipOptions(catalog, targetType, sourceType);
+  const reverse = getRelationshipOptions(catalog, targetType, sourceType);
+  return preferReverse(forward, reverse) ? reverse : forward;
+}
+
+// Offer the compound relationship from either drag direction, rather than its
+// reverse-only component (for example Observe execution instead of news work).
+function preferReverse(forward: RelationshipOption[], reverse: RelationshipOption[]): boolean {
+  return (!forward.length && reverse.length > 0) || reverse.some(option =>
+    option.reverseRelationship && forward.some(item => item.value === option.reverseRelationship));
 }
 
 export function getRelationshipOption(
@@ -104,7 +114,7 @@ export function validateConnection(
 
   const forwardOptions = getRelationshipOptions(catalog, sourceType, targetType);
   const reverseOptions = getRelationshipOptions(catalog, targetType, sourceType);
-  const reversed = forwardOptions.length === 0 && reverseOptions.length > 0;
+  const reversed = preferReverse(forwardOptions, reverseOptions);
   const options = reversed ? reverseOptions : forwardOptions;
   if (options.length === 0) {
     return {

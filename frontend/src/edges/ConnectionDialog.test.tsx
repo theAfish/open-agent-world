@@ -26,6 +26,26 @@ beforeEach(()=>{
 });
 afterEach(cleanup);
 function open(){useWorldStore.getState().requestConnection('db','chart');render(<ConnectionDialog/>);}
+it('shows both directional contracts and creates one asymmetric edge from a reverse drag', async () => {
+  const forward = { ...relationship, id: 'test.work', label: 'Process news', data_read: false,
+    directions: ['forward' as const, 'bidirectional' as const], reverse_relationship: 'test.observe' };
+  const reverse = { ...relationship, id: 'test.observe', label: 'Observe execution', data_read: false,
+    source_types: [db.type], target_types: [chart.type], directions: ['forward' as const] };
+  useWorldStore.setState({ catalog: { ...useWorldStore.getState().catalog, relationships: [forward, reverse] } });
+  vi.mocked(worldApi.createEdge).mockResolvedValue({ ...edge, relationship: 'test.work', direction: 'bidirectional' });
+  open();
+  const twoWay = screen.getByRole('radio', { name: /Two-way/ });
+  expect(twoWay.closest('label')?.textContent).toContain('Process news');
+  expect(twoWay.closest('label')?.textContent).toContain('Observe execution');
+  expect(screen.queryByText('Both agents can message each other directly.')).toBeNull();
+  fireEvent.click(twoWay);
+  fireEvent.click(screen.getByRole('button', { name: 'Grant capability' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(worldApi.createEdge).toHaveBeenCalledTimes(1);
+  expect(worldApi.createEdge).toHaveBeenCalledWith(expect.objectContaining({
+    source: 'chart', target: 'db', relationship: 'test.work', direction: 'bidirectional',
+  }));
+});
 it('asks for a compatible schema before creating a connection or changing config',async()=>{
   open();
   await screen.findByRole('option',{name:'main / samples'});

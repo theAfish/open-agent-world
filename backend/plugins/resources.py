@@ -27,6 +27,9 @@ class NodeResourceContext:
     # example to transcribe an image inside its own conversion job). Same rules as
     # ``resolve_secret``: the connection's key never leaves the handler.
     resolve_model: Callable[[str], Any] | None = None
+    # Host-supplied identity of this Agent invocation, never a tool argument.
+    # Desktop/standalone calls have no Run. Appended for positional compatibility.
+    run_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

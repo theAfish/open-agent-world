@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import type { PluginVisualCapture, PluginVisualCaptureRequest, PluginVisualCaptureResult } from "./visualCapture";
-import type { NodeSurfaceLevel, NodeTypeCatalogItem, WorldCard } from "../types/world";
+import type { AgentRunReceipt, NodeSurfaceLevel, NodeTypeCatalogItem, WorldCard } from "../types/world";
+export type { AgentRunReceipt } from "../types/world";
 export type { TutorialDefinition, TutorialStep, TutorialText } from '../tutorials/types';
 export type { DataConsumer, DataSchema, DataQuery, Dataset, DataSourceHost } from './dataSources';
 export type { ExecutionNode, ExecutionEdge, ExecutionPage, ExecutionSnapshot, ExecutionSourceHost } from './executionSources';
@@ -210,8 +211,9 @@ export interface PluginViewProps {
     documentDownloadUrl(name: string, nodeId?: string): string;
     /** Select a card and open its normal OAW workspace surface. */
     openWorkspace(nodeId: string): void;
-    /** Start an Agent through the ordinary OAW run lifecycle. */
-    runAgent(nodeId: string, prompt: string): Promise<void>;
+    /** Return the immediate Run admission receipt; reject on request failure.
+     * Does not wait for execution or imply business completion. Never auto-retry. */
+    runAgent(nodeId: string, prompt: string): Promise<AgentRunReceipt>;
     /** Observe future node-document mutations received by the OAW event stream. */
     onDocumentChange(listener: (change: PluginDocumentChange) => void): () => void;
     /**

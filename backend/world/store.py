@@ -206,6 +206,31 @@ class WorldStore:
         bindings = [self.equipment_edge(card) for card in [self.get_card(node_id), *self.equipment_for(node_id)]]
         return [*[edge for edge in self.list_edges_to(node_id) if not edge.missing_plugin], *[edge for edge in bindings if edge and edge.target == node_id]]
 
+    def directed_edge(self, edge: Edge, *, reverse: bool = False) -> Edge:
+        """Project one authorization direction; keep the stored edge unchanged."""
+        relationship = self.registry.relationship(edge.relationship)
+        if reverse:
+            if edge.direction != EdgeDirection.BIDIRECTIONAL:
+                raise GraphValidationError("A one-way edge has no reverse grant")
+            reverse_id = relationship.reverse_relationship or edge.relationship
+            if relationship.reverse_relationship:
+                self.registry.validate_relationship_order(self.get_card(edge.target).type, self.get_card(edge.source).type, reverse_id)
+            return edge.model_copy(update={"source": edge.target, "target": edge.source,
+                                           "relationship": reverse_id, "direction": EdgeDirection.FORWARD})
+        return edge.model_copy(update={"direction": EdgeDirection.FORWARD})
+
+    def directed_connections_from(self, node_id: str) -> list[Edge]:
+        """Live per-direction permissions, including asymmetric reverse grants."""
+        result = [self.directed_edge(edge) for edge in self.connections_from(node_id)]
+        for edge in self.connections_to(node_id):
+            if edge.direction == EdgeDirection.BIDIRECTIONAL:
+                try:
+                    result.append(self.directed_edge(edge, reverse=True))
+                except (GraphValidationError, PluginUnavailableError):
+                    # A missing/disabled reverse provider grants no reverse access.
+                    continue
+        return result
+
     def equipment_for(self, owner_id):
         with self.database.locked() as connection:
             rows = connection.execute("SELECT * FROM cards WHERE json_extract(equipment_json, '$.owner_id') = ? ORDER BY created_at, id", (owner_id,)).fetchall()
@@ -791,7 +816,9 @@ class WorldStore:
         _definition, reversed_endpoints = self.registry.resolve_relationship(
             source.type, target.type, request.relationship
         )
-        self.registry.validate_direction(request.relationship, request.direction.value)
+        self._assert_valid_direction(target.type if reversed_endpoints else source.type,
+                                     source.type if reversed_endpoints else target.type,
+                                     request.relationship, request.direction)
         if not reversed_endpoints:
             return request
         return request.model_copy(update={"source": request.target, "target": request.source})
@@ -816,6 +843,9 @@ class WorldStore:
     ) -> None:
         self.registry.validate_relationship_order(source_type, target_type, relationship)
         self.registry.validate_direction(relationship, direction.value)
+        definition = self.registry.relationship(relationship)
+        if direction == EdgeDirection.BIDIRECTIONAL and definition.reverse_relationship:
+            self.registry.validate_relationship_order(target_type, source_type, definition.reverse_relationship)
 
     def _card_from_row(self, row: sqlite3.Row) -> Card:
         card_type = str(row["type"])

@@ -119,3 +119,7 @@ See [Packs and cards](user-guide/plugins.md).
 ## Bundled plugin guides
 
 See the [bundled Pack directory](user-guide/plugins.md#choose-a-tool).
+
+## Backend Run observation (API 1.41)
+
+See [backend Run observation](reference/plugin-lifecycle.md#backend-run-observation-api-141).

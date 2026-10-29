@@ -1,8 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { getRelationshipOptions, validateConnection } from "./relationships";
+import { getConnectionOptions, getRelationshipOptions, validateConnection } from "./relationships";
 import { TEST_CATALOG } from "./catalog.fixture";
 
 describe("semantic relationship rules", () => {
+  it('offers an asymmetric relationship from either drag direction without allowing a second edge', () => {
+    const forward = { ...TEST_CATALOG.relationships[0], id: 'test.work', source_types: ['agent'], target_types: ['text'],
+      source_traits: [], target_traits: [], directions: ['forward' as const, 'bidirectional' as const], reverse_relationship: 'test.observe' };
+    const reverse = { ...forward, id: 'test.observe', source_types: ['text'], target_types: ['agent'],
+      directions: ['forward' as const], reverse_relationship: null };
+    const catalog = { ...TEST_CATALOG, relationships: [forward, reverse] };
+    for (const [source, target, sourceType, targetType] of [['a', 't', 'agent', 'text'], ['t', 'a', 'text', 'agent']]) {
+      expect(getConnectionOptions(catalog, sourceType, targetType).map(item => item.value)).toEqual(['test.work']);
+      const result = validateConnection(catalog, source, target, sourceType, targetType);
+      expect(result).toMatchObject({ valid: true, source: 'a', target: 't' });
+      expect(result.options[0].reverseRelationship).toBe('test.observe');
+      expect(validateConnection(catalog, source, target, sourceType, targetType,
+        [{ id: 'edge', source: 'a', target: 't', relationship: 'test.work', direction: 'forward' }]).valid).toBe(false);
+    }
+  });
   it("offers only the closed permission set for each direction", () => {
     expect(getRelationshipOptions(TEST_CATALOG, "agent", "agent").map((item) => item.value)).toEqual([
       "communicate",
