@@ -1,4 +1,4 @@
-import { ACESFilmicToneMapping, Box3, DirectionalLight, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, OrthographicCamera,
+import { ACESFilmicToneMapping, DirectionalLight, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, OrthographicCamera,
   PCFShadowMap, PMREMGenerator, Scene, SRGBColorSpace, WebGLRenderer, type BufferGeometry, type Material, type WebGLRenderTarget } from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createMicrostructure } from './materials';
@@ -36,7 +36,6 @@ class PackRenderer {
   readonly key = new DirectionalLight('#fff3df', 2.0);
   readonly fill = new DirectionalLight('#dceeff', .65);
   readonly contact = createContactShadow();
-  readonly bounds = new Box3();
   environment!: WebGLRenderTarget;
   private frame = 0;
   private lost = false;
@@ -177,18 +176,13 @@ class PackRenderer {
         this.key.position.set(-3.5 * Math.cos(light) + 4 * Math.sin(light), 5.5, 5 * Math.cos(light) + 3.5 * Math.sin(light));
         slot.model.root.rotation.set((slot.pitch + slot.tiltY) * degrees, (slot.yaw + slot.tiltX) * degrees, 0);
         slot.model.root.updateMatrixWorld(true); this.camera.updateMatrixWorld();
-        // Frame the sealed package so moving cards and closures never move the body.
-        this.bounds.copy(slot.model.framingBounds).applyMatrix4(slot.model.root.matrixWorld).applyMatrix4(this.camera.matrixWorldInverse);
+        // Keep scale and pivot fixed while rotating, even when the package leaves the frame.
         const frameHeight = canvas.parentElement!.clientHeight;
-        const aspect = width / frameHeight, margin = .16;
-        const viewHeight = Math.max(4.12, this.bounds.max.y - this.bounds.min.y + margin * 2,
-          (this.bounds.max.x - this.bounds.min.x + margin * 2) / aspect);
+        const aspect = width / frameHeight, viewHeight = 4.12;
         const halfWidth = viewHeight * aspect / 2;
-        const centerX = Math.max(this.bounds.max.x - halfWidth + margin, Math.min(0, this.bounds.min.x + halfWidth - margin));
-        const centerY = Math.max(this.bounds.max.y - viewHeight / 2 + margin, Math.min(0, this.bounds.min.y + viewHeight / 2 - margin));
-        this.camera.left = centerX - halfWidth; this.camera.right = centerX + halfWidth;
-        this.camera.top = viewHeight / 2 + centerY + viewHeight * (height / frameHeight - 1);
-        this.camera.bottom = -viewHeight / 2 + centerY; this.camera.updateProjectionMatrix();
+        this.camera.left = -halfWidth; this.camera.right = halfWidth;
+        this.camera.top = viewHeight / 2 + viewHeight * (height / frameHeight - 1);
+        this.camera.bottom = -viewHeight / 2; this.camera.updateProjectionMatrix();
         slot.model.cards.forEach(({ mesh, opacity }, index) => {
           const element = slot.cardLayer.children[index] as HTMLElement | undefined;
           if (!element?.offsetWidth || !element.offsetHeight) return;

@@ -1,4 +1,4 @@
-import { Box3, BufferGeometry, CylinderGeometry, Group, Material, Mesh, MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, NoBlending, Vector3 } from 'three';
+import { BufferGeometry, CylinderGeometry, Group, Material, Mesh, MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, NoBlending, Vector3 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { boxWallGeometry, paperFlapGeometry, pouchGeometry } from './geometry';
 import { createPrint } from './print';
@@ -70,7 +70,6 @@ export function createPackModel(options: PackRenderOptions, micro: ReturnType<ty
     const bladeGeometry = new RoundedBoxGeometry(.058, .10, .009, 1, .025);
     for (const sign of [-1, 1]) { const blade = leaf.clone(); blade.geometry = bladeGeometry; blade.position.set(sign * .035, -.85, .052); blade.rotation.z = sign * -.55; closure.add(blade); }
   }
-  const framingBounds = new Box3().setFromObject(root);
   const originalMaterials = new Map<Mesh, Material | Material[]>(); root.traverse(object => { if (object instanceof Mesh) originalMaterials.set(object, object.material); });
   // These depth masks let the real CardStock DOM show through the pack canvas.
   // They carry no card artwork or finish; the shared card components own both.
@@ -105,7 +104,7 @@ export function createPackModel(options: PackRenderOptions, micro: ReturnType<ty
       edge.opacity = pose.opacity; edge.depthWrite = !transparent;
     });
   }
-  return { root, framingBounds, materials, pose, surface, get cards() { return cardMeshes ?? []; },
+  return { root, materials, pose, surface, get cards() { return cardMeshes ?? []; },
     dispose() {
       surface(); const geometries = new Set<BufferGeometry>(), mats = new Set<Material>();
       root.traverse(object => { if (object instanceof Mesh) { geometries.add(object.geometry); (Array.isArray(object.material) ? object.material : [object.material]).forEach(material => mats.add(material)); } });
