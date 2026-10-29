@@ -1,13 +1,16 @@
 /* Shared WebGL presentation and a flat printed bag for browsers without WebGL. */
-.library-pack { min-width: 0; }
-.pack-touch-area { position: relative; width: 100%; height: 294px; padding: 26px 10px 22px; border: 0; background: transparent; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.library-pack { position: relative; min-width: 0; }
+.library-pack:is(:hover, :focus-within, .is-revealing) { z-index: 2; }
+/* Fixed layers use this containing block without expanding the surrounding scroll bounds. */
+.pack-touch-area { position: relative; container-type: size; contain: size layout; width: 100%; height: 294px; padding: 26px 10px 22px; border: 0; background: transparent; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .library-pack .pack-touch-area:disabled { opacity: 1; }
 .pack-touch-area:focus-visible { outline: 2px solid var(--accent, #617b72); outline-offset: 3px; border-radius: 8px; }
-/* Transparent headroom lets collected cards rise without resizing the grid. */
+/* Transparent space lets rotated packs and collected cards overlap the fixed grid. */
 .pack-webgl, .pack-reveal-cards { position: absolute; inset: auto 0 0; display: block; width: 100%; height: 165%; opacity: 0; transform: translateY(5px); pointer-events: none; transition: opacity 280ms ease, transform 280ms ease; }
+.pack-webgl, .library-pack[data-renderer="webgl"] .pack-reveal-cards { position: fixed; left: -75cqh; right: auto; bottom: -20%; width: calc(100% + 150cqh); height: 185%; }
 .pack-webgl { z-index: 1; }
 .library-pack[data-renderer="webgl"] :is(.pack-webgl, .pack-reveal-cards) { opacity: 1; transform: none; }
-.library-pack[data-renderer="webgl"] .pack-touch-area { cursor: grab; touch-action: pan-y; }
+.library-pack[data-renderer="webgl"] .pack-touch-area { z-index: 1; cursor: grab; touch-action: pan-y; }
 .library-pack[data-renderer="webgl"] .pack-touch-area:active { cursor: grabbing; }
 .pack-cover { display: block; width: min(100%, 178px); height: 246px; margin: auto; pointer-events: none; }
 .library-pack.is-opened .pack-cover { clip-path: polygon(0 3%, 9% 1%, 18% 3%, 27% 1%, 36% 3%, 45% 1%, 54% 3%, 63% 1%, 72% 3%, 81% 1%, 90% 3%, 100% 1%, 100% 100%, 0 100%); }
