@@ -24,7 +24,7 @@ def refresh_manifest(old, new):
     for node, grants in old['permissions'].items():
         if node not in previous and grants != new['permissions'][node]:
             raise ValueError('Core public permissions changed')
-    result = {**old, **{k: new[k] for k in ('panels', 'permissions', 'plugin_access', 'plugin_versions') if k in new}}
+    result = {**old, **{k: new[k] for k in ('panels', 'permissions', 'plugin_access', 'plugin_versions', 'runtime_nodes') if k in new}}
     if 'workspaces' in old:
         current_workspaces = new.get('workspaces', [])
         if [w['legion_id'] for w in old['workspaces']] != [w['legion_id'] for w in current_workspaces]:

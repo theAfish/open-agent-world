@@ -196,21 +196,29 @@ def build(cfg, tree, base, args):
         import runpy
         runpy.run_path(str(OPERATOR / 'release_remote.py'))['routine_guard'](changed)
     tests, frontend = test_scope(changed, routine=routine)
-    tests.update([*cfg.get('backend_tests', []), *args.pytest_path])
+    plan_path = getattr(args, 'test_plan', None)
+    if plan_path:
+        plan = read(plan_path)
+        tests, frontend = set(plan.get('backend', [])), set(plan.get('frontend', []))
+        for name in [*tests, *frontend]:
+            relative = Path(name.split('::')[0])
+            if relative.is_absolute() or '..' in relative.parts or name.startswith('-'):
+                raise ValueError('Test plan paths must be relative to the build checkout')
+    tests.update([*([] if plan_path else cfg.get('backend_tests', [])), *args.pytest_path])
     tests = sorted(p for p in tests if (tree / p.split('::')[0]).exists())
     tests = [p for p in tests if not any((tree / parent).is_dir() and p.startswith(parent + '/')
                                        for parent in tests)]
-    if not tests and any(p.endswith('.py') for p in changed):
+    if not plan_path and not tests and any(p.endswith('.py') for p in changed):
         raise ValueError('Python changes require relevant tests; add --pytest-path')
     print(json.dumps({'stage': 'testing', 'commit': commit, 'pytest_paths': tests}), flush=True)
     python = cfg['python']
     code = "from pathlib import Path;import sys;packs=[p for root in ('plugins','packs') for p in Path(root).glob('*/pyproject.toml')];sys.path[:0]=[str(Path.cwd()),*[str(p.parent/'src') for p in packs],*[str(p.parent) for p in packs]];import pytest;raise SystemExit(pytest.main(sys.argv[1:]))"
     if tests:
-        run([python, '-c', code, *tests, '-q', '-o', 'addopts='], cwd=tree)
+        run([python, '-c', code, *tests, '-q', '-o', 'addopts=', '-p', 'no:cacheprovider'], cwd=tree)
     prepare_npm(tree)
-    frontend = sorted(frontend | set(cfg.get('frontend_tests', [])))
+    frontend = sorted(frontend | set([] if plan_path else cfg.get('frontend_tests', [])))
     if frontend:
-        run(['node', 'node_modules/vitest/vitest.mjs', 'run', *frontend], cwd=tree / 'frontend')
+        run(['node', 'node_modules/vitest/vitest.mjs', 'run', '--no-cache', *frontend], cwd=tree / 'frontend')
     npm(tree, 'run', 'build')
     clean(tree)
     release = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + commit[:12] + '-' + uuid4().hex[:8]
@@ -342,6 +350,8 @@ def main(argv=None):
     prepare_parser.add_argument('--merge', help='For example origin/dev, or an exact reviewed commit')
     prepare_parser.add_argument('--resolved', action='store_true', help='Continue after manually resolving the build worktree merge')
     prepare_parser.add_argument('--pytest-path', action='append', default=[])
+    prepare_parser.add_argument('--test-plan', type=Path,
+        help='Operator-selected JSON {backend: [...], frontend: [...]}; replaces automatic test selection, retaining full deployment safeguards')
     prepare_parser.add_argument('--routine', action='store_true',
         help='Operator reviewed: no schema/publication changes. Focus tests, retain contracts and verify current login entries')
     deploy_parser = commands.add_parser('deploy')

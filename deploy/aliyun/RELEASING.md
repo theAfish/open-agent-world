@@ -41,6 +41,10 @@ $releasePython = 'D:/AI/open-agent-world/backend/.venv/Scripts/python.exe'
 合并冲突会停在构建工作树：在那里解决并提交后，用 `prepare --resolved` 继续。
 
 默认运行部署/鉴权/Sandbox/发布相关后端测试、发生修改的插件测试，以及 hosted 前端测试和正式前端构建。
+项目拥有者也可使用 `prepare --test-plan 路径.json` 指定本次需要的检查，替代自动扩大的测试列表。
+文件格式为 `{"backend": ["backend/tests/test_default_publication.py"], "frontend": ["src/deployment/PublishApplication.test.tsx"]}`；
+列表可包含具体测试函数，也可为空（例如当前提交已完成对应验证）。该选项保持正常构建、备份、迁移、版本与线上验证，
+适用于发布机制等核心改动，不受 `--routine` 的文件路径限制。完整跨项目回归仍交给 PR CI。
 可用 `--pytest-path` 或配置中的 `backend_tests`、`frontend_tests` 增加检查；这不等同于完整 PR CI。
 每次记录提交、测试路径、部署包 SHA-256、目标服务器和线上基线；线上版本变化后必须重新 prepare。
 
