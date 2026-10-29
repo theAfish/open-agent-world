@@ -2,12 +2,13 @@
 from pathlib import Path
 from dataclasses import replace
 import tempfile
+import os
 
 import uvicorn
 
 from backend.deploy import create_deployment
 from backend.main import create_app
-from backend.tests.test_deployments import PASSWORD, prepare_source, settings
+from backend.tests.test_deployments import PASSWORD, prepare_multiple_workspaces, settings
 
 
 def main():
@@ -17,9 +18,10 @@ def main():
     directory = Path(tempfile.mkdtemp(prefix="deployment-browser-", dir=temporary))
     source, runtime = directory / "source", directory / "runtime"
     plugin_directories = (repository / "examples/deployed-workspace/plugins",)
-    records = prepare_source(source, plugin_directories=plugin_directories)
+    records = prepare_multiple_workspaces(source, plugin_directories=plugin_directories)
     create_deployment(source, runtime, records["release"]["id"], password=PASSWORD)
-    app = create_app(replace(settings(runtime), plugin_directories=plugin_directories), frontend_directory=repository / "frontend/dist")
+    app = create_app(replace(settings(runtime), plugin_directories=plugin_directories),
+                     frontend_directory=Path(os.environ.get("OAW_TEST_FRONTEND_DIR", repository / "frontend/dist")))
     uvicorn.run(app, host="127.0.0.1", port=5183, proxy_headers=False)
 
 

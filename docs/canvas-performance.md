@@ -47,13 +47,5 @@ process CPU. An improvement in one does not establish an improvement in all of
 them. Report which focused checks, production builds, and browser scenarios ran;
 do not describe focused evidence as a complete regression run or a universal FPS guarantee.
 
-## Historical evidence
-
-The [canvas investigation record](internal/performance/canvas.md) preserves the
-earlier SVG, drag, and Deck comparisons with their original validation boundaries.
-The [terrain measurements](internal/performance/terrain-webgl.md) and
-[1,000-card input investigation](internal/performance/stress-zoom.md) cover later
-changes. These are dated repository records, not current acceptance results.
-
 Continue with [Contribute to OAW](contributing/index.md) for the change workflow
 and [the CI guide](../.github/CI.md) for broader checks.

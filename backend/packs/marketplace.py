@@ -5,7 +5,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import hashlib
 import re
-from typing import Annotated, TypeVar
+from typing import Annotated, Literal, TypeVar
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -33,7 +33,14 @@ class Identity(BaseModel):
         return value
 
 
+class PackPreview(BaseModel):
+    packaging: Literal["standard", "premium", "paper", "collector"] = "standard"
+    accent_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    count: int | None = Field(default=None, ge=0, le=100, strict=True)
+
+
 class Listing(BaseModel):
+    preview: PackPreview | None = None
     id: PackId
     name: str = Field(min_length=1, max_length=120)
     summary: str = Field(default="", max_length=500)
@@ -107,6 +114,7 @@ class DisplayManifest(BaseModel):
 
 
 class PackVersion(Identity):
+    preview: PackPreview | None = None
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     size_bytes: int = Field(gt=0, le=MAX_ARCHIVE_BYTES, strict=True)
     manifest: DisplayManifest

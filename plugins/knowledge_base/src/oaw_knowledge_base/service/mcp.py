@@ -3,11 +3,8 @@
 Tool names, descriptions and JSON Schemas come straight from
 :mod:`oaw_knowledge_base.operations`, so a harness calling ``knowledge_markdown``
 through MCP gets exactly what an OAW Agent gets calling the capability of the same
-name. Raw-byte upload, group/settings management and review operations stay absent.
-Selected-source conversion and draft preparation have narrower agent operations.
-
-The collection is bound when the server is launched (``kb mcp --collection default``)
-rather than added to every schema, which keeps the schemas identical to the card's.
+name. Raw-byte upload, settings and human publication stay absent. Projects,
+Space definitions, conversion and optional result review share the card contract.
 """
 from __future__ import annotations
 
@@ -15,7 +12,6 @@ import json
 
 from ..errors import KnowledgeError
 from ..operations import AGENT_OPERATIONS
-from .store import DEFAULT_COLLECTION
 
 INSTALL_HINT = ("The MCP server needs the `mcp` package: "
                 "`pip install \"oaw-knowledge-base[service]\"`.")
@@ -28,7 +24,7 @@ def tools_for(module):
             for operation in AGENT_OPERATIONS]
 
 
-def call(store, tool_name, arguments, *, collection=DEFAULT_COLLECTION, actor="mcp"):
+def call(store, tool_name, arguments, *, actor="mcp"):
     """Run one tool call and return its JSON text, or a message the model can act on."""
     operation = next((item for item in AGENT_OPERATIONS if item.tool_name == tool_name), None)
     if operation is None:
@@ -36,11 +32,11 @@ def call(store, tool_name, arguments, *, collection=DEFAULT_COLLECTION, actor="m
     # Desktop handlers may accept a wider contract than the agent schema. Validate
     # here as well as advertising it, so a raw MCP caller cannot reach those paths.
     validated = operation.model.model_validate(arguments or {}).model_dump(exclude_unset=True)
-    result = store.run(operation.name, validated, collection=collection, actor=actor)
+    result = store.run(operation.name, validated, actor=actor)
     return json.dumps(result, ensure_ascii=False, default=str)
 
 
-def build_server(store, *, collection=DEFAULT_COLLECTION):
+def build_server(store):
     try:
         import mcp.types as types
         from mcp.server.lowlevel import Server
@@ -60,16 +56,16 @@ def build_server(store, *, collection=DEFAULT_COLLECTION):
         from anyio import to_thread
 
         text = await to_thread.run_sync(
-            lambda: call(store, name, arguments, collection=collection))
+            lambda: call(store, name, arguments))
         return [types.TextContent(type="text", text=text)]
 
     return server, types
 
 
-def serve_stdio(store, *, collection=DEFAULT_COLLECTION):
+def serve_stdio(store):
     import anyio
 
-    server, _ = build_server(store, collection=collection)
+    server, _ = build_server(store)
 
     async def run():
         from mcp.server.stdio import stdio_server

@@ -115,7 +115,7 @@ desktop/src-tauri/target/release/bundle/nsis/
 
 The payload starts with the interpreter and standard library from the build machine, excluding its global site-packages. Backend packages are installed from `backend/uv.lock` with wheel hashes enforced. The payload self-test imports Google ADK/LiteLLM, discovers the bundled plugins, and creates a separate Sandbox Python environment. The backend remains ordinary Python so plugin discovery, file-based WSL helpers, and `sys.base_prefix` continue to work after installation.
 
-The build retains previous payloads under `.open-agent-world/desktop-previous-*` until manually removed. `-SkipFrontend` and `-SkipPayload` are available when rebuilding only the desktop shell; use them only when those inputs have not changed. The initial package is unsigned; no certificate, publishing destination, or automatic update service is configured.
+The build retains previous payloads under `.open-agent-world/desktop-previous-*` until manually removed. `-SkipFrontend` and `-SkipPayload` are available when rebuilding only the desktop shell; use them only when those inputs have not changed. Signing and updater availability depend on the build configuration. See [Releasing](releasing.md) for the optional signing and publication inputs.
 
 `scripts/package-backend.py --cache-dir <uv-cache>` can reuse an existing download
 cache while still enforcing the locked wheel hashes. See [Store acceptance](pack-store.md#acceptance)

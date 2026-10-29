@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
 
-test("local plugin assets and settings work through the host window", async ({ page, request }) => {
+test("installed Codex assets and settings work through the host window", async ({ page, request }) => {
   await page.setViewportSize({ width: 1800, height: 1200 });
   const api = "http://127.0.0.1:8017/api";
   const catalog = await (await request.get(`${api}/catalog`)).json();
+  expect(catalog.frontend_modules['openai.codex'].distribution_id).toBe('theafish.codex');
   const definition = catalog.node_types.find((d: { id: string }) => d.id === "openai.codex.agent");
   expect(definition.frontend).toEqual({ settings: "settings" });
   const asset = await request.get(`http://127.0.0.1:8017${definition.icon_url}`);

@@ -24,7 +24,13 @@ def refresh_manifest(old, new):
     for node, grants in old['permissions'].items():
         if node not in previous and grants != new['permissions'][node]:
             raise ValueError('Core public permissions changed')
-    result = {**old, **{k: new[k] for k in ('panels', 'permissions', 'plugin_access', 'plugin_versions')}}
+    result = {**old, **{k: new[k] for k in ('panels', 'permissions', 'plugin_access', 'plugin_versions') if k in new}}
+    if 'workspaces' in old:
+        current_workspaces = new.get('workspaces', [])
+        if [w['legion_id'] for w in old['workspaces']] != [w['legion_id'] for w in current_workspaces]:
+            raise ValueError('Published workspace scope or order changed')
+        result['workspaces'] = [refresh_manifest(previous, current)[0]
+                                for previous, current in zip(old['workspaces'], current_workspaces)]
     # Keep release identity, source lineage, runtime settings and saved layout.
     changes = [node for node in previous if previous[node] != current[node]
                or old['permissions'][node] != new['permissions'][node]]
@@ -79,7 +85,7 @@ def prepare(source, previous, scratch):
 async def migrate(config_path):
     from backend.config import Settings
     from backend.deploy import validate_manifest
-    from backend.deployments import PublishRequest, release_spec
+    from backend.deployments import PublishRequest, release_spec, published_workspaces
     from backend.hosting.configuration import write_private_json
     from backend.hosting.worker import WorkerConfig, hosted_scope, create_worker_services
     value = json.loads(config_path.read_text())
@@ -107,7 +113,7 @@ async def migrate(config_path):
         if config.mode == 'runtime':
             target = config.data_root / 'deployment.json'
             old = json.loads(target.read_text())
-            new = release_spec(services, PublishRequest(legion_id=old['legion_id'], name=old['name'],
+            new = release_spec(services, PublishRequest(legion_ids=[w['legion_id'] for w in published_workspaces(old)], name=old['name'],
                 allow_terminal=any('terminal' in p for p in old['permissions'].values())))
             result, changed = refresh_manifest(old, new)
             validate_manifest(result)

@@ -40,7 +40,7 @@ For backend source iteration, set `OPEN_AGENT_WORLD_PLUGIN_DIRS` to this project
 root or parent folder and restart the host. The loader discovers `oaw.pack.toml` without
 an editable Python install. To test the independent frontend, install a built
 archive in a dedicated profile; frontend hot reload for external source folders
-is not part of this batch. Avoid loading the source and installed archive with
+is not provided by this example. Avoid loading the source and installed archive with
 the same identity in one profile.
 
 Every config property needs a valid default for palette creation. The initial

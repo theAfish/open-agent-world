@@ -1,65 +1,56 @@
-# Test and distribute
+# Test and distribute a Card App
 
-For an independently installable frontend + backend artifact, follow
-[Local Pack distribution](../pack-distribution.md) and the
-[external Greeter fixture](../../examples/packs/greeter/README.md). The wheel-only
-instructions below remain useful for source-checkout development.
+Complete the [Card App tutorial](card-app.md) first. Its direct integration test
+checks behavior and permission revocation; its installed-host checklist checks
+the artifact that recipients actually load.
 
-## Test the first-card package
+## Choose tests for your boundary
 
-From the repository root:
-
-```sh
-uv run --project backend --with-editable ./examples/plugins/hello_world python -m pytest -p no:cacheprovider examples/plugins/hello_world/tests
-```
-
-The [test](../../examples/plugins/hello_world/tests/test_hello.py) loads real entry-point metadata, checks the pack and card owner, creates and edits a card, closes the host, and verifies its configuration after reopening the same store. For a renamed copy, change the editable path, test path, and expected IDs to match your package.
-
-## Choose meaningful checks
-
-| Your plugin adds… | Verify |
+| Changed behavior | Check |
 | --- | --- |
-| Configuration | Valid defaults, rejected invalid input, persistence after restart |
-| Agent tools | Authorized calls and revocation after the connection or resource is removed |
-| Managed resources | Create/update rollback, restart recovery, deletion cleanup |
-| Frontend views | Save failures, reload, unavailable views, and production build |
-| Templates | Clone behavior, remapped IDs, and exclusion of private bindings |
+| Configuration and tools | Defaults, invalid input, authorized call and revoked access |
+| Documents/state | Persistence after restart, revision conflict and session isolation |
+| Frontend view | Save failure, saved value after reload and missing capability handling |
+| Archive | Build outside the host, inspect identity/dependencies, install in a clean profile |
+| Native execution | Run on the actual target runtime; a skipped native test is not acceptance |
 
-Keep plugin tests with the package. Host integration tests belong in the host suite when they exercise multiple parts of OAW. See [Greeter's integration test](../../examples/plugins/greeter/tests/test_greeter_plugin.py) for a complete tool path.
+Use the existing [Greeter integration test](../../examples/plugins/greeter/tests/test_greeter_plugin.py)
+and host fixtures. Do not duplicate every assertion across unit, service and browser
+layers. Mock-runtime checks do not verify real model selection or output quality.
 
-For a custom frontend, run the production build and exercise the view in OAW. Browser interaction tests, backend tests, real model trials, and native Sandbox tests cover different things; report which ones you actually ran.
+## Reproduce the existing packaged example
 
-## Build a Python package
-
-For the included example:
+From the OAW root, after preparing its backend and frontend dependencies:
 
 ```sh
-uv build ./examples/plugins/hello_world --out-dir .tmp/hello-dist
+npm --prefix frontend run build:pack-sdk
+npm pack ./frontend/pack-sdk --pack-destination .outputs
 ```
 
-For your own package, replace the input path. Include any declared package resources in the wheel. Check the built artifact in a clean compatible OAW checkout before sharing it.
+Create `.outputs` first if it does not exist. Run
+`scripts/build-external-greeter.py` with `backend/.venv/Scripts/python.exe` on
+Windows or `backend/.venv/bin/python` on Linux/macOS. It copies
+`examples/packs/greeter` outside the host, builds the wheel/frontend and writes
+`.outputs/pack-acceptance/build.json`.
 
-Source development and publication use the same `oaw.pack.toml` declaration:
+```sh
+npm --prefix frontend run build
+node frontend/scripts/run-pack-e2e.mjs
+node frontend/scripts/run-pack-e2e.mjs --store-fake
+```
 
-- Put the source package directly in `plugins/` and prepare its declared adapter
-  dependencies with the backend interpreter running
-  `scripts/install-plugins.py plugins/hello_world`. Startup itself never installs.
-- Build the wheel and any frontend bundle, then use
-  `python -m open_agent_world.pack build-project` to produce `.oawpack`. Include
-  additional adapter wheels resolved with `resolve-adapter`. Install that artifact
-  through the Pack Library or Store and restart OAW.
+These runners need the configured Playwright browser. They install through the
+local host, restart Python, collect/place a card and check its saved UI behavior.
+The fake Store runner also checks unavailable-Store behavior. They do not publish
+a Pack or prove a native installed desktop app or a live Marketplace service.
+Use an unused `OAW_PACK_E2E_PORT` when other hosts are running.
 
-See [the complete author workflow](../pack-distribution.md). A bare Python wheel
-is a build input, not a complete Pack distribution. Test installation from the
-artifact in a clean profile to catch dependencies hidden by a developer environment.
+## Prepare the release
 
-## Write the plugin README
+Use a stable distribution ID and increase the version for a changed artifact.
+Build the exact artifact you tested; include its host compatibility, required
+Packs and execution environments in the README. Schema 3 is for code/declarative
+projects; Schema 2 is for code-free content exports. Schema 1 is rejected.
 
-Include its purpose, compatible OAW/API version, dependencies, installation path, pack/card names, the connections users should create, and a short working example. Explain storage, external services, and removal steps when relevant.
-
-Users must remove active uses before uninstalling through the Pack Library. The
-host checks references and reclaims only unused managed dependencies. Registration
-must not create resources as a side effect. Do not include credentials, generated
-user data, or private machine paths in a distribution.
-
-Check licensing before publishing: OAW currently has no repository license file. A package manifest alone does not establish redistribution rights for code you copy.
+Share the `.oawpack`, or follow the separate [Marketplace submission](../creator-packs.md#submit-to-marketplace)
+workflow. Submitting enters review; it is not an immediate publication.

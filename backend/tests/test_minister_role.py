@@ -14,7 +14,8 @@ from backend.tests.test_minister import call, create_minister
 
 
 @pytest.mark.parametrize('agent_type', ['agent', 'openai.codex.agent'])
-def test_role_card_is_inert_and_is_consumed_when_applied(client, agent_type):
+def test_role_card_is_inert_and_is_consumed_when_applied(codex_client, agent_type):
+    client = codex_client
     role = create_node(client, 'core.minister-role')
     agent = create_node(client, agent_type)
     catalog = client.get('/api/catalog').json()

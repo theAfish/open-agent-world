@@ -83,13 +83,20 @@ export interface StoreState {
   restart_required: boolean;
   can_install: boolean;
 }
+export interface StorePreview {
+  packaging: import('./world').PackPackaging;
+  accent_color?: string | null;
+  count?: number | null;
+}
 export interface StorePack extends StoreState {
+  preview?: StorePreview | null;
   id: string; name: string; summary: string; description: string;
   latest_version: string | null;
 }
 export interface StorePage { items: StorePack[]; next_cursor: string | null }
 export interface StoreDetail extends StorePack { versions: string[]; versions_next_cursor: string | null }
 export interface StoreVersion extends StoreState {
+  preview?: StorePreview | null;
   plan?: PackInstallationPlan;
   pack_id: string; version: string; sha256: string; size_bytes: number;
   manifest: {

@@ -57,9 +57,13 @@ export const CardLODView = memo(function CardLODView({ data, selected, type, isC
         aria-label={t('Start a relationship from the {v0} edge of {v1}', { v0: side, v1: card.name })} />)}
     {surface && design ? <FaceArtwork face={design.face} surface={surface} /> : <><header data-status={card.status} title={t(card.status)} className={`card-lod-heading node-drag-region ${mid ? workspace ? 'workspace-titlebar' : 'card-header node-surface-header' : 'card-lod-symbol'} ${container ? 'container-header container-drag-region' : ''} ${workspace || container ? 'card-finish-surface' : ''}`}>
       {isConnectable && container && <ConnectionDropSurface nodeId={card.id} />}
-      {mid ? <><span className="card-lod-kind" data-material-layer="top-print" aria-hidden="true"><CatalogIcon definition={definition} size={24} /></span>
-      <div className="card-lod-title" data-material-layer="top-print"><span className="card-eyebrow">{t(definition?.label ?? card.type)}</span><strong>{card.name}</strong></div>
-      <span className="card-lod-status" data-material-layer="top-print" data-status={card.status} /></>
+      {mid ? <>{level !== 'preview' && <span className="card-lod-kind" data-material-layer="top-print" aria-hidden="true"><CatalogIcon definition={definition} size={24} /></span>}
+      <div className="card-lod-title" data-material-layer="top-print">{level !== 'preview' && <span className="card-eyebrow">{t(definition?.label ?? card.type)}</span>}<strong>{card.name}</strong></div>
+      <span className={level === 'preview' ? 'card-status-emblem' : 'card-lod-status'} data-material-layer="top-print" data-status={card.status}
+        role={level === 'preview' ? 'img' : undefined} aria-label={level === 'preview' ? `${t(definition?.label ?? card.type)} · ${t('Status')}: ${t(card.status)}` : undefined}
+        title={`${t(definition?.label ?? card.type)} · ${t('Status')}: ${t(card.status)}`}>
+        {level === 'preview' && <CatalogIcon definition={definition} size={16} />}
+      </span></>
         : <><span className="card-lod-emblem" data-material-layer="top-print"><CatalogIcon definition={definition} size={34} /></span><strong data-material-layer="top-print">{card.name}</strong></>}
       {(workspace || container) && <CardFinishLayer finish={card.finish} quality="thumbnail" surface="chrome" />}
     </header>

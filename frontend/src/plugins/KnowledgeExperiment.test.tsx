@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RecordGrid, RecordTable, flattenValues, formatCell } from "../../../plugins/knowledge_base/frontend/RecordView";
 import { ExtractDialog } from "../../../plugins/knowledge_base/frontend/ExtractDialog";
@@ -16,6 +16,29 @@ const definition = { type: "object", required: ["sample_id", "yield"], propertie
 } };
 
 describe("RecordTable", () => {
+  it("keeps long cells compact and opens the complete original value and nested row on request", () => {
+    const note = "Reported mechanisms and uncertainty. ".repeat(30) + "<script>literal text</script>";
+    const record = { composition: "Li2O–TaCl5", notes: note, evidence: [{ source: "source-a", sections: ["Results", "SI"] }] };
+    render(<RecordTable definition={{ properties: { records: { type: "array", items: { type: "object" } } } }} data={{ records: [record] }} />);
+    const preview = screen.getByRole("button", { name: "View records · 1 · notes" });
+    expect(preview).toHaveAttribute("title", note);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(preview);
+    expect(within(screen.getByRole("dialog")).getByText(note)).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View row 1" }));
+    expect(screen.getByRole("dialog").querySelector("pre")?.textContent).toBe(JSON.stringify(record, null, 2));
+  });
+
+  it("renders root arrays in schema column order without losing fields outside the schema", () => {
+    render(<RecordTable definition={{ items: { properties: { sample: { title: "Sample" }, value: { type: "number" } } } }}
+      data={[{ value: 0.123456789, sample: "A", extra: "source evidence" }]} />);
+    expect(screen.getAllByRole("columnheader").map(cell => cell.textContent)).toEqual(["#", "Sample", "value", "extra"]);
+    expect(screen.getByText("0.123457")).toHaveAttribute("title", "0.123456789");
+    expect(screen.getByText("source evidence")).toBeInTheDocument();
+  });
+
   it("renders schema order, nested structures and flags a missing required field", () => {
     render(<RecordTable definition={definition} data={{ sample_id: "A1", pass: true, tags: ["x", "y"],
       xrd: [{ phase: "LLZO", fraction: 0.9 }, { phase: "La2Zr2O7", fraction: 0.1 }], meta: { operator: "wr" }, extra: 5 }}

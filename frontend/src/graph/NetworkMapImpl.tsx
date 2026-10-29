@@ -100,7 +100,12 @@ const NetworkMapImpl = forwardRef<NetworkMapHandle, NetworkMapProps>((props, ref
       <button type="button" aria-label={t('Zoom out')} onClick={() => engine.current?.zoom(1.25)}>−</button>
       <button type="button" aria-label={t('Fit View')} onClick={() => engine.current?.fit()}>⌖</button>
     </div>
-    <div className="network-map-key" aria-label={t('Knowledge type legend')}>{kinds.slice(0, 8).map(k => <span key={k}><i style={{ background: nodeColor(k) }} />{k}</span>)}</div>
+    {!!kinds.length && <details className="network-map-key" onKeyDown={e => {
+      if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary')?.focus(); }
+    }}>
+      <summary aria-label={t('Knowledge type legend')}>{t('Legend')} <small>{kinds.length}</small></summary>
+      <ul>{kinds.map(k => <li key={k}><i style={{ background: nodeColor(k) }} /><span>{k}</span></li>)}</ul>
+    </details>}
   </section>;
 });
 NetworkMapImpl.displayName = 'NetworkMapImpl';

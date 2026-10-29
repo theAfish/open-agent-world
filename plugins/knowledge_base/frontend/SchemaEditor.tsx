@@ -29,8 +29,7 @@ type Props = {
   compact?: boolean;
 };
 
-/** The schema list and its edit form, shared by Literature → Records and
- * Experiment → Schemas. The kind is fixed by the section that mounts it. */
+/** Experiment record fields. General project extraction is configured in Spaces. */
 export function SchemaEditor({ busy, schemas, kind, call, perform, onSaved, compact }: Props) {
   const [editor, setEditor] = useState<Editor>();
 
@@ -49,8 +48,8 @@ export function SchemaEditor({ busy, schemas, kind, call, perform, onSaved, comp
     const payload = { name: editor.name, description: editor.description || null,
       system_prompt: editor.system_prompt, definition, kind: editor.kind };
     const result = editor.id
-      ? await call("schemas", { operation: "update", schema_id: editor.id, ...payload })
-      : await call("schemas", { operation: "create", ...payload });
+      ? await call("schema_manage", { operation: "update", schema_id: editor.id, ...payload })
+      : await call("schema_manage", { operation: "create", ...payload });
     setEditor(undefined);
     await onSaved(result.schema as SchemaItem);
   });
@@ -77,21 +76,14 @@ export function SchemaEditor({ busy, schemas, kind, call, perform, onSaved, comp
         </ul>
       </div>
       {editor && <div className="knowledge-form">
-        <label>{t("Name")}<input value={editor.name} disabled={busy}
+        <label>{t("Name")}<input aria-label={t("Name")} value={editor.name} disabled={busy}
           onChange={event => setEditor({ ...editor, name: event.target.value })} /></label>
-        <label>{t("Description")}<input value={editor.description} disabled={busy}
+        <label>{t("Description")}<input aria-label={t("Description")} value={editor.description} disabled={busy}
           onChange={event => setEditor({ ...editor, description: event.target.value })} /></label>
-        <label>{t("Kind")}
-          <select value={editor.kind} disabled={busy}
-            onChange={event => setEditor({ ...editor, kind: event.target.value as Kind })}>
-            <option value="literature">{t("Literature")}</option>
-            <option value="experiment">{t("Experiment")}</option>
-          </select>
-        </label>
-        <label>{t("System prompt")}<textarea value={editor.system_prompt} disabled={busy} rows={3}
+        <label>{t("System prompt")}<textarea aria-label={t("System prompt")} value={editor.system_prompt} disabled={busy} rows={3}
           placeholder={t("What the model should read out, in the words of your field…")}
           onChange={event => setEditor({ ...editor, system_prompt: event.target.value })} /></label>
-        <label>{t("JSON Schema definition")}<textarea value={editor.definition} disabled={busy} rows={8} spellCheck={false}
+        <label>{t("JSON Schema definition")}<textarea aria-label={t("JSON Schema definition")} value={editor.definition} disabled={busy} rows={8} spellCheck={false}
           onChange={event => setEditor({ ...editor, definition: event.target.value })} /></label>
         <div className="knowledge-formbar">
           <button type="button" className="knowledge-primary" disabled={busy || !editor.name || !editor.system_prompt}

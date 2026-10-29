@@ -12,6 +12,8 @@ from urllib.parse import urlsplit
 from google.adk.models.lite_llm import LiteLlm
 from google.genai import types
 
+from .adk_tool_errors import append_argument_feedback, invalid_tool_arguments
+
 
 def _transient_provider_failure(error: BaseException) -> bool:
     """Only retry failures for which a fresh, unpublished request is useful."""
@@ -86,15 +88,17 @@ class ResilientLiteLlm(LiteLlm):
     """
 
     transport_retry_limit: int = 2
+    argument_retry_limit: int = 2
     context_preflight: Any = Field(default=None, exclude=True)
     _auto_tool_choice_models: set[str] = PrivateAttr(default_factory=set)
 
-    def __init__(self, model: str, *, context_preflight=None, transport_retry_limit=2, **kwargs):
+    def __init__(self, model: str, *, context_preflight=None, transport_retry_limit=2, argument_retry_limit=2, **kwargs):
         # LiteLlm forwards constructor kwargs to the provider. These local
         # control hooks must never enter an HTTP completion payload.
         super().__init__(model, **kwargs)
         self.context_preflight = context_preflight
         self.transport_retry_limit = transport_retry_limit
+        self.argument_retry_limit = argument_retry_limit
 
     @property
     def requires_tool_reasoning(self) -> bool:
@@ -140,39 +144,17 @@ class ResilientLiteLlm(LiteLlm):
             except json.JSONDecodeError as exc:
                 # Only ADK's tool-argument decoder is recoverable here. Provider
                 # transport JSON errors and already-published actions propagate.
-                traceback = exc.__traceback__
-                tool_arguments = False
-                while traceback is not None:
-                    frame = traceback.tb_frame
-                    if (frame.f_globals.get("__name__") == "google.adk.models.lite_llm"
-                            and frame.f_code.co_name == "_parse_tool_call_arguments"):
-                        tool_arguments = True
-                    traceback = traceback.tb_next
-                if not tool_arguments or published_non_thought:
+                if not invalid_tool_arguments(exc) or published_non_thought or self.argument_retry_limit == 0:
                     raise
-                if parse_retries == 2:
+                if parse_retries >= self.argument_retry_limit:
                     raise RuntimeError(
-                        "Tool arguments remained invalid after 2 correction attempts "
+                        f"Tool arguments remained invalid after {parse_retries} correction attempts "
                         f"({exc.msg}, line {exc.lineno}, column {exc.colno}). "
                         "No tools from the rejected responses were executed. "
                         "Try splitting the operation into smaller tool calls."
                     ) from None
                 parse_retries += 1
-                # Bound context growth and never quote the raw payload in errors
-                # sent to the UI/logs. It goes only to the same configured model.
-                excerpt = exc.doc[:12000]
-                request.contents.extend([
-                    types.Content(role="user", parts=[types.Part.from_text(
-                        text="Rejected tool argument payload (possibly truncated):\n" + excerpt
-                    ), types.Part.from_text(text=(
-                        "Runtime feedback: your last tool-call response could not be parsed: "
-                        f"{exc.msg}, line {exc.lineno}, column {exc.colno}. "
-                        "No tool in that response was executed. Regenerate the required tool "
-                        "calls using valid JSON objects matching their schemas. Escape quotes, "
-                        "backslashes and newlines inside strings. Do not repeat tools from "
-                        "earlier successful responses. Split large operations if needed."
-                    ))]),
-                ])
+                append_argument_feedback(request, exc)
             except Exception as exc:
                 if not published and not adapted_choice and _unsupported_tool_choice(exc) and _automatic_tool_choice(request):
                     # Learn only for this model/adapter instance. Tools and host

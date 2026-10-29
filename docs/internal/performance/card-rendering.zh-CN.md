@@ -1,5 +1,8 @@
 # 1000 卡片渲染重构与验证
 
+> Historical record, not current product or deployment instructions. Verify against the current source before use.
+
+
 本次将相机覆盖范围、卡片世界几何和具体视图的生命周期分开。远视野使用轻量表示；选中、焦点、编辑和操作中的卡片可以保留完整视图。`surfaceLevels`、保存的尺寸、卡片配置和坐标不由 LOD 修改。
 
 ## 渲染策略
@@ -65,7 +68,7 @@ node scripts/summarize-card-rendering.mjs ../.outputs/card-rendering-comparison.
 
 以下表格记录第一轮虚拟化重构的结果；后续视觉与阈值修订的增量对比见文末，不能将这组原始数据当作修订后源码的测量。
 
-Values use before → after. Frame cells are **p95 / max, ms**. Raw measurements and source reports: [comparison.json](../../../.outputs/card-rendering-comparison.json).
+Values use before → after. Frame cells are **p95 / max, ms**. Raw measurements and source reports: comparison.json（原本地文件：`.outputs/card-rendering-comparison.json`，未入库）.
 
 ### Pan and zoom, without tracing
 
@@ -190,7 +193,7 @@ Far 是类型图标和名称；普通 mid 沿用真实卡片的标题栏比例�
 
 这一阶段不会主动访问文件或插件。第三方工作区没有宿主可读的轻量内容模型时，显示其图标、名称和公开摘要；不宣称任意插件都拥有像素级截图。放大或交互后仍使用原插件 renderer。
 
-可查看浏览器实际截图：[中距离](../../../.outputs/semantic-lod-mid.png)、[常用距离](../../../.outputs/semantic-lod-near.png)。其中同一 zoom 下，大 Sandbox 可以是 full，小 Sandbox 是 mid；普通卡片在常用距离已经 full。
+可查看浏览器实际截图：中距离（原本地文件：`.outputs/semantic-lod-mid.png`，未入库）、常用距离（原本地文件：`.outputs/semantic-lod-near.png`，未入库）。其中同一 zoom 下，大 Sandbox 可以是 full，小 Sandbox 是 mid；普通卡片在常用距离已经 full。
 
 同尺寸卡片集中越过阈值时，自动 renderer 替换会分批完成：每次策略更新最多 12 个轻量切换、3 个 full 升级，剩余工作在后续动画帧重新按最新 camera 计算。反向缩放不会执行旧目标，交互 pin 始终立即升级；卸载画布会取消待执行工作。Preview 的 mid 退出阈值高于最远视野下的默认投影尺寸，避免缩回总览后仍保留整批中距离视图。
 
@@ -198,7 +201,7 @@ Far 是类型图标和名称；普通 mid 沿用真实卡片的标题栏比例�
 
 本轮验证：全量 134 个 Vitest 文件、838 项测试通过，生产构建通过。10 项独立 Edge/Playwright 测试通过，包含普通距离的大小卡片分级、图片解码、按下即升级、首次点击选择并打开、Workspace 标题拖拽、Ctrl 点击、pointercancel、离屏边缘、草稿恢复、连线、6 种卡片的文本选择/仅标题拖拽及滚轮锚定。最终合成层标记与 CSS 修改后，再次通过 4 项卡片分级/滚轮测试，并断言静态图片允许缓存、完整 Workspace 不进入该缓存。连接测试现在恢复原 viewport preferences，避免影响后续用例。不是全量 E2E 或桌面运行时验收。
 
-增量 benchmark 与第一轮完成后的源码快照比较，沿用上述浏览器、1000 卡输入和无 tracing 测量方法。zoom=0.12 检查远视野，zoom=0.35 检查常用距离；camera、尺寸和持久展示配置保持一致。DOM 比最简占位更丰富，不能将“仍没有重 Workspace”理解为所有指标零成本。原始数据见 [semantic-lod-comparison.json](../../../.outputs/semantic-lod-comparison.json)。
+增量 benchmark 与第一轮完成后的源码快照比较，沿用上述浏览器、1000 卡输入和无 tracing 测量方法。zoom=0.12 检查远视野，zoom=0.35 检查常用距离；camera、尺寸和持久展示配置保持一致。DOM 比最简占位更丰富，不能将“仍没有重 Workspace”理解为所有指标零成本。原始数据见 semantic-lod-comparison.json（原本地文件：`.outputs/semantic-lod-comparison.json`，未入库）。
 
 
 ### Incremental frame comparison (previous LOD → current semantic LOD)

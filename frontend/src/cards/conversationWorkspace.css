@@ -67,10 +67,10 @@
 .conversation-thread .conversation-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-body, 13px); }
 /* Share a centered column; bubbles sit just inside the composer edges.
    Reserve outer space for the scrollbar and avatars. Only set the start margin: symmetric fixed margins overflow when a scrollbar takes space. */
-.conversation-thread > :is(.conversation-transcript-region, .workspace-composer) { --conversation-avatar-gutter: 40px; --conversation-bubble-inset: 12px; --conversation-column-width: min(80ch, calc(100cqw - 2 * var(--conversation-avatar-gutter) - 32px)); }
+.conversation-thread > :is(.conversation-transcript-region, .workspace-composer) { --conversation-avatar-gutter: 40px; --conversation-bubble-inset: 12px; --conversation-column-width: min(80ch, calc(100% - 2 * var(--conversation-avatar-gutter) - 32px)); }
 .conversation-thread .workspace-transcript { padding: 0 0 20px; isolation: isolate; }
 .conversation-thread [data-sticky-disclosure] { position: sticky; top: var(--disclosure-top, 0px); z-index: calc(100 - var(--disclosure-depth, 0)); box-sizing: border-box; width: 100%; background: var(--surface-solid); }
-.conversation-thread .conversation-transcript-content { width: calc(var(--conversation-column-width) - 2 * var(--conversation-bubble-inset)); min-height: 100%; padding-top: 12px; margin-left: calc((100cqw - var(--conversation-column-width)) / 2 + var(--conversation-bubble-inset)); margin-right: 0; }
+.conversation-thread .conversation-transcript-content { width: calc(var(--conversation-column-width) - 2 * var(--conversation-bubble-inset)); min-height: 100%; padding-top: 12px; margin-left: calc((100% - var(--conversation-column-width)) / 2 + var(--conversation-bubble-inset)); margin-right: 0; }
 .conversation-thread .conversation-transcript-content > button { font-size: var(--font-size-small, 12px); }
 .conversation-thread .conversation-transcript-content[data-empty] { display: grid; align-content: center; }
 .conversation-empty { min-height: 0; padding-block: 24px; }
@@ -86,18 +86,22 @@
 .conversation-thread .workspace-message.is-system > .conversation-system-notice { padding: 10px 12px; border-left: 2px solid var(--line); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--surface-soft) 55%, transparent); }
 .conversation-system-label { display: inline-flex; width: fit-content; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; color: var(--ink-soft); background: var(--surface-raised); font-size: 10px; font-weight: 600; line-height: 1.3; }
 .conversation-thread .workspace-message.is-system > div > p { margin: 8px 0 0; color: var(--ink-soft); font-size: var(--font-size-small, 12px); white-space: pre-wrap; overflow-wrap: anywhere; }
-.conversation-message-actions { position: absolute; top: 0; right: 0; z-index: 1; display: flex; gap: 2px; border-radius: 5px; background: var(--surface-raised); opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
-.workspace-message.is-user .conversation-message-actions { top: auto; bottom: -10px; right: 0; }
+/* Float along the lower edge without adding a row to the transcript. */
+.conversation-message-actions { position: absolute; right: 10px; bottom: -14px; z-index: 2; display: flex; align-items: center; width: fit-content; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); box-shadow: 0 2px 6px var(--shadow); opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
+.conversation-message-actions .icon-button { width: 25px; height: 22px; border: 0; border-radius: 0; color: var(--ink-soft); }
+/* The end buttons follow the inside of the toolbar's 1px border. */
+.conversation-message-actions .icon-button:first-child { border-radius: 7px 0 0 7px; }
+.conversation-message-actions .icon-button:last-child { border-radius: 0 7px 7px 0; }
+.conversation-message-actions .icon-button:only-child { border-radius: 7px; }
+.conversation-message-actions .icon-button:hover:not(:disabled) { color: var(--accent-strong); border-color: transparent; background: var(--accent-soft); }
 .conversation-agent-turn { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin-bottom: 14px; min-width: 0; }
 .conversation-speaker-avatar { position: absolute; top: 0; left: calc(-1 * (var(--conversation-avatar-gutter) + var(--conversation-bubble-inset))); width: 28px; height: 24px; display: grid; place-items: center; color: var(--agent); }
 .conversation-speaker-name { grid-column: 1; min-width: 0; color: var(--ink-soft); font-size: var(--conversation-caption-size); font-weight: 550; }
 .conversation-agent-content { grid-column: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .conversation-message-bubble { box-sizing: border-box; width: fit-content; max-width: 100%; min-width: 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 4px 12px 12px; background: var(--surface-raised); }
 .conversation-agent-content .workspace-message { display: block; width: fit-content; max-width: 100%; margin: 0; }
-.conversation-agent-content .conversation-message-actions { top: -10px; right: 4px; }
 .conversation-message-bubble .conversation-markdown { overflow-x: auto; }
 .conversation-thread .conversation-message-bubble .conversation-markdown > :last-child { margin-bottom: 0; }
-.workspace-message.is-user .conversation-message-actions { justify-content: flex-end; }
 .workspace-message:hover .conversation-message-actions,
 .workspace-message:focus-within .conversation-message-actions,
 .workspace-message[data-actions-open] .conversation-message-actions { opacity: 1; pointer-events: auto; }
@@ -137,10 +141,17 @@
   .conversation-workspace-grid[data-compact-view="sessions"] > :is(.conversation-thread-section, .conversation-participants-section),
   .conversation-workspace-grid[data-compact-view="participants"] > :is(.conversation-thread-section, .conversation-sessions-section) { display: none; }
 }
+@container conversation-thread (max-width: 600px) {
+  .conversation-thread > :is(.conversation-transcript-region, .workspace-composer) { --conversation-avatar-gutter: 0px; --conversation-bubble-inset: 4px; --conversation-column-width: 100%; }
+  /* Put avatars in the heading row instead of reserving two side gutters. */
+  .conversation-thread .workspace-message > span { position: static; width: 24px; height: 24px; margin-bottom: 4px; }
+  .conversation-thread .workspace-message.is-user > span { margin-left: auto; }
+  .conversation-agent-turn { grid-template-columns: 24px minmax(0, 1fr); }
+  .conversation-speaker-avatar { position: static; width: 24px; }
+  .conversation-speaker-name { grid-column: 2; align-self: center; }
+  .conversation-agent-content { grid-column: 1 / -1; }
+}
 @container conversation-thread (max-width: 420px) {
-  .conversation-thread > :is(.conversation-transcript-region, .workspace-composer) { --conversation-avatar-gutter: 32px; }
-  .conversation-thread .workspace-message > span { width: 24px; height: 24px; }
-  .conversation-speaker-avatar { width: 24px; }
   .conversation-message-bubble { padding: 10px; }
   .conversation-thread .workspace-composer footer { align-items: flex-end; }
   .conversation-thread .workspace-composer textarea { min-height: 56px; }

@@ -85,6 +85,12 @@ class LegionTemplateDependency(BaseModel):
     id: str = Field(min_length=1, max_length=128)
     plugin_id: str = Field(min_length=1, max_length=128)
 
+    @model_validator(mode="after")
+    def migrate_core_owner(self):
+        from backend.migrations.core_essentials import migrated_owner
+        self.plugin_id = migrated_owner(self.kind, self.id, self.plugin_id)
+        return self
+
 
 class LegionTemplateNode(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -114,6 +120,8 @@ class LegionTemplateNode(BaseModel):
 
     @model_validator(mode="after")
     def require_payload_version_pair(self) -> "LegionTemplateNode":
+        from backend.migrations.core_essentials import migrated_owner
+        self.plugin_id = migrated_owner("node_type", self.type, self.plugin_id)
         if len(json.dumps(self.plugin_defaults, allow_nan=False).encode("utf-8")) > 64 * 1024:
             raise ValueError("Default equipment metadata is limited to 64 KiB")
         if self.type == "legion":
@@ -139,6 +147,12 @@ class LegionTemplateEdge(BaseModel):
     relationship: str
     plugin_id: str
     direction: EdgeDirection
+
+    @model_validator(mode="after")
+    def migrate_core_owner(self):
+        from backend.migrations.core_essentials import migrated_owner
+        self.plugin_id = migrated_owner("relationship", self.relationship, self.plugin_id)
+        return self
 
 
 class LegionBlueprint(BaseModel):

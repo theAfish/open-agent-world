@@ -30,6 +30,31 @@ export function createContactShadow() {
   // Flipping the plane here would mirror the shadow across the pack.
   plane.rotation.x = Math.PI / 2; plane.position.y = -1.73;
   return { plane, camera,
+    prepare(renderer: WebGLRenderer, scene: Scene) {
+      const previousTarget = renderer.getRenderTarget();
+      const previousFace = renderer.getActiveCubeFace(), previousLevel = renderer.getActiveMipmapLevel();
+      const shadowEnabled = renderer.shadowMap.enabled;
+      const normal = plane.geometry.getAttribute('normal');
+      try {
+        // Match the offscreen passes: linear output, no tone mapping or shadows.
+        // compile() does not visit overrideMaterial, so reference it explicitly.
+        renderer.shadowMap.enabled = false;
+        renderer.setRenderTarget(target);
+        renderer.compile(new Mesh(plane.geometry, depth), camera, scene);
+        // FullScreenQuad renders without the main scene's lights/environment.
+        // Its triangle also has no normals; match that shader variant without
+        // allocating another geometry. All compilation here is synchronous.
+        plane.geometry.deleteAttribute('normal');
+        renderer.setRenderTarget(scratch);
+        renderer.compile(new Mesh(plane.geometry, horizontal), camera);
+        renderer.setRenderTarget(target);
+        renderer.compile(new Mesh(plane.geometry, vertical), camera);
+      } finally {
+        plane.geometry.setAttribute('normal', normal);
+        renderer.setRenderTarget(previousTarget, previousFace, previousLevel);
+        renderer.shadowMap.enabled = shadowEnabled;
+      }
+    },
     render(renderer: WebGLRenderer, scene: Scene, light: Vector3) {
       depth.uniforms.slope.value.set(light.x / light.y, light.z / light.y);
       plane.visible = false;

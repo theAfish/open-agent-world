@@ -1,5 +1,8 @@
 # Fullscreen PDF transition
 
+> Historical record, not current product or deployment instructions. Verify against the current source before use.
+
+
 ## Preview and scope
 
 Run the existing local frontend/backend, open a Paper inspector, then click the

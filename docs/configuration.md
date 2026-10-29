@@ -26,7 +26,7 @@ Google ADK is the default Agent runtime. Its adapter uses native model support f
 
 For native Google credential configuration, `GOOGLE_API_KEY` can be set before launch. ADK's Vertex AI path uses `GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, and `GOOGLE_CLOUD_LOCATION` with the required Google credentials. These backend credentials are not inherited by Sandbox commands.
 
-Model connections configure model access; runtime providers control Agent execution. Plugins may register other providers per Agent, so not every Run uses ADK. See [Runs and runtime providers](runs.md) and the [Codex plugin](../plugins/codex/README.md). The [mock launch mode](getting-started.md#try-without-model-credentials) supports credential-free debugging.
+Model connections configure model access; runtime providers control Agent execution. Plugins may register other providers per Agent, so not every Run uses ADK. See [Runs and runtime providers](runs.md) and the [Codex plugin](../packs/codex/README.md). The [mock launch mode](getting-started.md#try-without-model-credentials) supports credential-free debugging.
 
 ## Application storage
 

@@ -14,7 +14,7 @@ import pytest
 pytest.importorskip("mkb", reason="Install mat-know-base into this environment")
 pytest.importorskip("sqlalchemy")
 
-from oaw_knowledge_base import actions, client, insights, knowledge  # noqa: E402
+from oaw_knowledge_base import actions, client, insights, projects, spaces  # noqa: E402
 from oaw_knowledge_base.context import KnowledgeContext, MemorySettings  # noqa: E402
 from oaw_knowledge_base.errors import KnowledgeError
 from oaw_knowledge_base.experiment_store import ConflictingRevision  # noqa: E402
@@ -50,8 +50,24 @@ def run(context, handler, **arguments):
     return handler(context, arguments)
 
 
+def _ingest(context, arguments):
+    values = dict(arguments)
+    project_id = values.pop("group_id", None)
+    file = projects.ImportFile.model_validate(values)
+    preview = projects.project_import_preview(context, {"files": [file.model_dump()], "grouping": "single"})
+    target = {"key": "__all__", "name": file.filename}
+    if project_id:
+        target["project_id"] = project_id
+    imported = projects.project_import_commit(context, {"token": preview["token"], "grouping": "single",
+        "projects": [target], "auto_process": False})
+    kb = client.open_client(context.node_id, context.storage_path)
+    source = kb.sources.require(imported["source_ids"][0])
+    return {"source": {"id": str(source.id), "filename": source.filename,
+        "size": source.size, "sha256": source.sha256}, "group_id": imported["projects"][0]["id"]}
+
+
 def ingest_document(context, text=DOCUMENT, filename="sintering.md"):
-    ingested = run(context, actions.ingest, filename=filename,
+    ingested = run(context, _ingest, filename=filename,
                    content_base64=base64.b64encode(text.encode()).decode(),
                    media_type="text/markdown")
     source_id = ingested["source"]["id"]
@@ -72,8 +88,10 @@ def test_agent_schema_writes_require_the_management_operation(card):
         run(agent, actions.schemas, operation="update", schema_id=created["id"], name="Changed")
     changed = run(agent, actions.schema_manage, operation="update", schema_id=created["id"], name="Changed")["schema"]
     assert run(agent, actions.schemas, operation="get", schema_id=created["id"])["schema"] == changed
-    # The existing UI action remains compatible.
-    assert run(card, actions.schemas, operation="update", schema_id=created["id"], name="Desktop")["schema"]["name"] == "Desktop"
+    # Desktop and deployed read surfaces obey the same read-only contract.
+    with pytest.raises(KnowledgeError, match="read-only"):
+        run(card, actions.schemas, operation="update", schema_id=created["id"], name="Desktop")
+    assert run(card, actions.schema_manage, operation="update", schema_id=created["id"], name="Desktop")["schema"]["name"] == "Desktop"
 
 
 def test_agent_cannot_change_the_schema_of_published_records(card):
@@ -85,7 +103,7 @@ def test_agent_cannot_change_the_schema_of_published_records(card):
     card.confirmed = True
     run(card, actions.experiment_review, operation="publish", record_id=record["id"])
     agent = replace(card, actor_id="researcher", confirmed=False)
-    for patch in ({"definition": {"type": "object", "properties": {}}}, {"kind": "literature"}):
+    for patch in ({"definition": {"type": "object", "properties": {}}}, {"system_prompt": "Changed extraction rule"}):
         with pytest.raises(KnowledgeError, match="published records"):
             run(agent, actions.schema_manage, operation="update", schema_id=schema["id"], **patch)
     assert run(agent, actions.schemas, operation="get", schema_id=schema["id"])["schema"] == schema
@@ -93,8 +111,8 @@ def test_agent_cannot_change_the_schema_of_published_records(card):
 
 def test_agent_conversion_requires_selected_sources_and_leaves_other_uploads_pending(card):
     agent = replace(card, actor_id="researcher")
-    selected = run(card, actions.ingest, filename="chosen.md", content_base64=base64.b64encode(DOCUMENT.encode()).decode())["source"]
-    pending = run(card, actions.ingest, filename="later.md", content_base64=base64.b64encode(b"Later document").decode())["source"]
+    selected = run(card, _ingest, filename="chosen.md", content_base64=base64.b64encode(DOCUMENT.encode()).decode())["source"]
+    pending = run(card, _ingest, filename="later.md", content_base64=base64.b64encode(b"Later document").decode())["source"]
     for values in ({}, {"source_ids": []}):
         with pytest.raises(ValueError):
             actions.process_selected(agent, values)
@@ -113,7 +131,7 @@ def test_agent_conversion_retries_a_failed_pdf_with_corrected_engine_settings(ca
         document.new_page().insert_text((50, 50), "Measured conductivity 1.0 S/cm")
         data = document.tobytes()
     run(card, actions.update_settings, pdf_engine="mineru", mineru_base_url="")
-    source = run(card, actions.ingest, filename="measurement.pdf", media_type="application/pdf",
+    source = run(card, _ingest, filename="measurement.pdf", media_type="application/pdf",
                  content_base64=base64.b64encode(data).decode())["source"]
     agent = replace(card, actor_id="researcher")
     kb = client.open_client(card.node_id, card.storage_path)
@@ -142,7 +160,7 @@ def test_agent_conversion_resumes_an_index_failure_without_duplicating_the_artif
         return index(*args, **kwargs)
 
     monkeypatch.setattr(search_store, "index_record", temporarily_unavailable)
-    source = run(card, actions.ingest, filename="notes.md", content_base64="IyBOb3Rlcw==")["source"]
+    source = run(card, _ingest, filename="notes.md", content_base64="IyBOb3Rlcw==")["source"]
     agent = replace(card, actor_id="researcher")
     kb = client.open_client(card.node_id, card.storage_path)
     failed = run(agent, actions.process_selected, source_ids=[source["id"]])["jobs"][0]["job"]
@@ -173,47 +191,6 @@ def test_agent_conversion_resumes_an_index_failure_without_duplicating_the_artif
     assert completed.status == "COMPLETED" and completed.parameters["engine"] == "auto"
     assert run(agent, actions.search, query="Notes")["results"][0]["source_id"] == source["id"]
     assert len(kb.artifacts.list(source_id=source["id"], limit=10)) == 1
-
-
-def test_agent_draft_open_reuses_unpublished_sources_and_preserves_published_drafts(card):
-    first, _ = ingest_document(card)
-    second, _ = ingest_document(card, "# Second\n\nA second paper.", "second.md")
-    agent = replace(card, actor_id="researcher")
-    draft = run(agent, knowledge.knowledge_draft_open, source_ids=[first, second], title="Review")["draft"]
-    again = run(agent, knowledge.knowledge_draft_open, source_ids=[second, first, first], title="Review")["draft"]
-    assert again["id"] == draft["id"] and draft["created_by"] == "agent:researcher"
-    run(agent, knowledge.knowledge_save, draft_id=draft["id"], source_id=first, entities=[{"name": "Si3N4"}])
-    card.confirmed = True
-    run(card, knowledge.knowledge_review, operation="publish", draft_id=draft["id"])
-    reopened = run(agent, knowledge.knowledge_draft_open, source_ids=[first, second], title="Review")["draft"]
-    assert reopened["id"] != draft["id"] and reopened["status"] == "draft"
-    assert run(card, knowledge.knowledge_drafts, operation="get", draft_id=draft["id"])["draft"]["status"] == "published"
-    raw = run(card, actions.ingest, filename="raw.md", content_base64="cmF3")["source"]
-    with pytest.raises(KnowledgeError):
-        run(agent, knowledge.knowledge_draft_open, source_ids=[raw["id"]])
-
-
-def test_card_open_continues_the_same_source_set_and_revalidates_sources(card):
-    first, _ = ingest_document(card)
-    second, _ = ingest_document(card, "# Other paper", "other.md")
-    single = run(card, knowledge.knowledge_draft_manage, operation="open", source_ids=[first])["draft"]
-    combined = run(card, knowledge.knowledge_draft_manage, operation="open", source_ids=[first, second])["draft"]
-    run(card, knowledge.knowledge_save, draft_id=combined["id"], source_id=first, entities=[{"name": "Si3N4"}])
-    reopened = run(card, knowledge.knowledge_draft_manage, operation="open", source_ids=[second, first, first])["draft"]
-    assert reopened["id"] == combined["id"] and reopened["entities"][0]["name"] == "Si3N4"
-    assert reopened["id"] != single["id"]
-    card.confirmed = True
-    run(card, knowledge.knowledge_review, operation="publish", draft_id=combined["id"])
-    published = run(card, knowledge.knowledge_draft_manage, operation="open", source_ids=[first, second])["draft"]
-    assert published["id"] == combined["id"] and published["status"] == "published"
-    assert len(run(card, knowledge.knowledge_drafts)["drafts"]) == 2
-    raw = run(card, actions.ingest, filename="pending.md", content_base64="cmF3")["source"]
-    with pytest.raises(KnowledgeError):
-        run(card, knowledge.knowledge_draft_manage, operation="open", source_ids=[first, raw["id"]])
-    other_group = run(card, actions.groups, operation="create", name="Other group")["group"]
-    with pytest.raises(KnowledgeError, match="another group"):
-        run(card, knowledge.knowledge_draft_manage, operation="open", source_ids=[first], group_id=other_group["id"])
-    assert len(run(card, knowledge.knowledge_drafts, all_groups=True)["drafts"]) == 2
 
 
 def test_agent_bundle_preparation_reuses_drafts_and_refuses_published_or_destructive_changes(card):
@@ -280,7 +257,7 @@ def test_mineru_job_resolves_a_private_token_without_persisting_it(card, monkeyp
         return "# Converted paper"
     monkeypatch.setattr(markdown, "_mineru_markdown", convert)
     run(card, actions.update_settings, pdf_engine="mineru", mineru_base_url="https://mineru.example")
-    source = run(card, actions.ingest, filename="paper.pdf", media_type="application/pdf",
+    source = run(card, _ingest, filename="paper.pdf", media_type="application/pdf",
                  content_base64=base64.b64encode(b"%PDF-test").decode())["source"]
     result = run(card, actions.process_sources, source_ids=[source["id"]])
     kb = client.open_client(card.node_id, card.storage_path)
@@ -328,8 +305,8 @@ def test_reopening_the_client_backfills_records_indexed_before_search_existed(ca
 
 def test_search_action_returns_attributable_excerpts_scoped_to_a_group(card):
     source_id, _ = ingest_document(card, filename="sintering.md")
-    alloys = run(card, actions.groups, operation="create", name="Alloys")["group"]
-    ingested = run(card, actions.ingest, filename="alloy.md",
+    alloys = run(card, projects.project_manage, operation="create", name="Alloys")["project"]
+    ingested = run(card, _ingest, filename="alloy.md",
                    content_base64=base64.b64encode(
                        b"# Alloy notes\n\nA different microstructure entirely.\n").decode(),
                    media_type="text/markdown", group_id=alloys["id"])
@@ -341,7 +318,7 @@ def test_search_action_returns_attributable_excerpts_scoped_to_a_group(card):
     found = run(card, actions.search, query="sintered")["results"]
     assert found and found[0]["source_id"] == source_id
     assert found[0]["filename"] == "sintering.md"
-    assert found[0]["group_name"] == "Knowledge base"
+    assert found[0]["group_name"] == "sintering.md"
     assert "Method" in (found[0]["heading_path"] or "")
 
     # Scoped to a group with nothing matching: no results, even though the term
@@ -366,295 +343,28 @@ def test_conversion_job_is_idempotent(card):
 
 def test_projection_requires_a_schema_shaped_definition(card):
     with pytest.raises(KnowledgeError):
-        run(card, actions.schemas, operation="create", name="bad",
+        run(card, actions.schema_manage, operation="create", name="bad",
             definition={"type": "string"}, system_prompt="x")
 
 
-def test_schemas_default_to_literature_and_can_be_tagged_and_filtered(card):
-    literature = run(card, actions.schemas, operation="create", name="Process graph",
+def test_experiment_schemas_and_projection_spaces_have_separate_contracts(card):
+    experiment = run(card, actions.schema_manage, operation="create", name="Synthesis run",
                      definition=SCHEMA, system_prompt="x")["schema"]
-    assert literature["kind"] == "literature"
-
-    experiment = run(card, actions.schemas, operation="create", name="Synthesis run",
-                     definition=SCHEMA, system_prompt="x", kind="experiment")["schema"]
     assert experiment["kind"] == "experiment"
-
-    # A schema created before "kind" existed carries MKB's own "freeform" purpose;
-    # that must still read back as literature, with no migration needed.
-    kb = client.open_client(card.node_id, card.storage_path)
-    legacy = kb.schemas.create(name="Legacy", domain="materials", definition=SCHEMA,
-                               system_prompt="x")
-    assert legacy.purpose == "freeform"
-    legacy_json = run(card, actions.schemas, operation="get", schema_id=str(legacy.id))["schema"]
-    assert legacy_json["kind"] == "literature"
-
-    all_names = {item["name"] for item in run(card, actions.schemas)["schemas"]}
-    assert all_names == {"Process graph", "Synthesis run", "Legacy"}
-    experiment_only = run(card, actions.schemas, kind="experiment")["schemas"]
-    assert [item["name"] for item in experiment_only] == ["Synthesis run"]
-
-    retagged = run(card, actions.schemas, operation="update", schema_id=experiment["id"],
-                   kind="literature")["schema"]
-    assert retagged["kind"] == "literature"
-
-
-def _knowledge(card, source_id, entities, relations=(), **extra):
-    draft = run(card, knowledge.knowledge_draft_manage, operation="create", source_ids=[source_id],
-                **extra)["draft"]
-    return run(card, knowledge.knowledge_save, draft_id=draft["id"], source_id=source_id,
-               entities=entities, relations=list(relations))["draft"]
-
-
-def test_a_knowledge_draft_over_two_sources_merges_and_publishes_into_the_literature_layer(card):
-    first, _ = ingest_document(card, filename="sintering.md")
-    second, _ = ingest_document(card, "# Hot pressing\n\nSi3N4 densified by hot pressing.", "hot.md")
-
-    # A draft is opened by a person over converted sources only; its title defaults
-    # to the first file's name, counting the rest.
+    space = run(card, spaces.space_manage, operation="create", name="Report table", kind="table",
+                definition=SCHEMA, system_prompt="Extract a report.")["space"]
+    assert [item["name"] for item in run(card, actions.schemas)["schemas"]] == ["Synthesis run"]
+    assert [item["name"] for item in run(card, spaces.spaces)["spaces"]] == ["Report table"]
     with pytest.raises(KnowledgeError):
-        run(card, knowledge.knowledge_draft_manage, operation="create", source_ids=[str(uuid.uuid4())])
-    draft = run(card, knowledge.knowledge_draft_manage, operation="create",
-                source_ids=[first, second])["draft"]
-    assert draft["title"] == "sintering.md +1" and draft["status"] == "draft"
-    assert [item["source_id"] for item in draft["sources"]] == [first, second]
-    assert all(item["extracted_at"] is None for item in draft["sources"])
-
-    prompt = run(card, knowledge.knowledge_extract_prompt, source_id=first, draft_id=draft["id"])
-    assert "related_to" in prompt["suggested_predicates"] and prompt["existing_predicates"] == []
-    assert "Si3N4" in prompt["markdown"] and prompt["existing"] == [] and prompt["filename"] == "sintering.md"
-    with pytest.raises(KnowledgeError):
-        run(card, knowledge.knowledge_extract_prompt, source_id=str(uuid.uuid4()), draft_id=draft["id"])
-
-    # Predicates are normalised and concepts keyed by name; each source adds itself as evidence.
-    saved = run(card, knowledge.knowledge_save, draft_id=draft["id"], source_id=first,
-                entities=[{"name": "Si3N4", "description": "a ceramic"},
-                          {"name": "Sintering"}, {"name": "Density"}],
-                relations=[{"source": "Si3N4", "target": "Sintering", "predicate": "is processed by",
-                            "evidence_level": 2, "snippet": "Si3N4 was sintered"},
-                           {"source": "Density", "target": "Si3N4", "type": "measured_by"}])
-    assert saved["added"] == {"entities": 3, "relations": 2}
-    saved = run(card, knowledge.knowledge_save, draft_id=draft["id"], source_id=second,
-                entities=[{"name": "silicon nitride", "aliases": ["Si3N4"]}, {"name": "Hot pressing"}],
-                relations=[{"source": "Si3N4", "target": "Hot pressing", "predicate": "densified by"}])["draft"]
-    by_name = {item["name"]: item for item in saved["entities"]}
-    assert set(by_name) == {"Si3N4", "Sintering", "Density", "silicon nitride", "Hot pressing"}
-    assert by_name["Sintering"]["source_ids"] == [first] and by_name["silicon nitride"]["aliases"] == ["Si3N4"]
-    assert len(saved["relations"]) == 3 and all(item["extracted_at"] for item in saved["sources"])
-    processed = next(item for item in saved["relations"] if item["predicate"] == "processed_by")
-    assert processed["evidence_level"] == 2 and processed["snippet"] == "Si3N4 was sintered"
-    prompt = run(card, knowledge.knowledge_extract_prompt, source_id=second, draft_id=draft["id"])
-    assert prompt["existing"][0] == {"name": "Si3N4", "aliases": []}
-    assert {"predicate": "measured_by", "count": 1} in prompt["existing_predicates"]
-
-    # A person merges the duplicate by renaming it onto the other: relations follow the old id.
-    edited = run(card, knowledge.knowledge_update, draft_id=draft["id"], expected_revision=saved["revision"],
-                 entities=[{**item, "name": "Si3N4"} if item["name"] == "silicon nitride" else item
-                           for item in saved["entities"]], relations=saved["relations"])["draft"]
-    assert sorted(item["name"] for item in edited["entities"]) == ["Density", "Hot pressing", "Si3N4", "Sintering"]
-    si3n4 = next(item for item in edited["entities"] if item["name"] == "Si3N4")
-    assert sorted(si3n4["source_ids"]) == sorted([first, second]) and si3n4["aliases"] == []
-    assert {(r["source"], r["predicate"], r["target"]) for r in edited["relations"]} == {
-        ("concept:si3n4", "processed_by", "concept:sintering"),
-        ("concept:density", "measured_by", "concept:si3n4"),
-        ("concept:si3n4", "densified_by", "concept:hot_pressing")}
-
-    # Nothing reaches the graph until a person confirms publishing.
-    assert run(card, actions.graph)["entities"] == []
-    pending = run(card, knowledge.knowledge_review, operation="publish", draft_id=draft["id"])
-    assert pending["status"] == "confirmation_required"
-    assert run(card, actions.graph)["entities"] == []
-    confirmed = KnowledgeContext(card.node_id, card.storage_path, state=card.state, confirmed=True)
-    published = run(confirmed, knowledge.knowledge_review, operation="publish", draft_id=draft["id"])
-    assert published["graph"] == {"entities": 4, "relations": 3} and published["draft"]["status"] == "published"
-
-    result = run(card, actions.graph, layer="literature")
-    assert sorted(item["name"] for item in result["entities"]) == ["Density", "Hot pressing", "Si3N4", "Sintering"]
-    node = next(item for item in result["entities"] if item["name"] == "Si3N4")
-    assert node["type"] == "concept" and sorted(node["properties"]["source_ids"]) == sorted([first, second])
-    assert node["properties"]["description"] == "a ceramic"
-    edge = next(item for item in result["relations"] if item["type"] == "processed_by")
-    assert edge["properties"]["evidence_level"] == 2 and edge["properties"]["snippet"] == "Si3N4 was sintered"
-    neighbours = run(card, actions.graph, operation="traverse", entity_id=node["id"])
-    assert {item["name"] for item in neighbours["entities"]} == {"Si3N4", "Sintering", "Density", "Hot pressing"}
-    summary = run(card, actions.overview)["counts"]
-    assert summary["knowledge_drafts"] == 1 and summary["published_knowledge"] == 1
-    assert summary["entities"] == 4 and summary["layers"]["literature"]["relations"] == 3
-
-    # A published draft is read-only until unpublished; republishing upserts.
-    for handler, arguments in ((knowledge.knowledge_update, {"title": "x"}),
-                               (knowledge.knowledge_save, {"source_id": first, "entities": [{"name": "A"}]}),
-                               (knowledge.knowledge_draft_manage, {"operation": "delete"})):
-        with pytest.raises(KnowledgeError):
-            run(card, handler, draft_id=draft["id"], **arguments)
-    run(card, knowledge.knowledge_review, operation="unpublish", draft_id=draft["id"])
-    assert run(card, actions.graph)["entities"] == []
-    assert run(card, knowledge.knowledge_drafts, operation="get", draft_id=draft["id"])["draft"]["status"] == "draft"
-    run(confirmed, knowledge.knowledge_review, operation="publish", draft_id=draft["id"])
-    run(confirmed, knowledge.knowledge_review, operation="unpublish", draft_id=draft["id"])
-    run(confirmed, knowledge.knowledge_review, operation="publish", draft_id=draft["id"])
-    assert run(card, actions.overview)["counts"]["entities"] == 4
-
-
-def test_outline_section_prompts_and_lookup_consult_the_draft_and_the_published_graph(card):
-    text = ("Preamble before any heading.\n\n# Title\n\n## 1 Introduction\n\nLLZO is a garnet electrolyte.\n\n"
-            "## 2 Methods\n\nSintering at 1200 C improves the ionic conductivity of LLZO.\n\n"
-            "### 2.1 XRD\n\nPhase purity was checked by XRD.\n")
-    first, _ = ingest_document(card, text, "llzo.md")
-    second, _ = ingest_document(card, "# Other\n\nLi7La3Zr2O12 pellets were hot pressed.\n", "other.md")
-
-    sections = run(card, knowledge.knowledge_source_outline, source_id=first)
-    assert sections["filename"] == "llzo.md" and sections["total_characters"] == len(text)
-    paths = [item["heading_path"] for item in sections["sections"]]
-    assert paths == ["", "Title", "Title > 1 Introduction", "Title > 2 Methods", "Title > 2 Methods > 2.1 XRD"]
-    methods = sections["sections"][3]
-    assert text[methods["offset"]:methods["offset"] + methods["length"]].startswith("## 2 Methods")
-
-    # A section-scoped prompt returns exactly that section; by index or by heading.
-    prompt = run(card, knowledge.knowledge_extract_prompt, source_id=first, section=3)
-    assert prompt["heading_path"] == "Title > 2 Methods" and prompt["section"] == 3
-    assert prompt["markdown"].startswith("## 2 Methods") and "XRD" not in prompt["markdown"]
-    assert prompt["total_characters"] == methods["length"] and prompt["has_more"] is False
-    assert run(card, knowledge.knowledge_extract_prompt, source_id=first, heading="2.1 XRD")["section"] == 4
-    with pytest.raises(KnowledgeError):
-        run(card, knowledge.knowledge_extract_prompt, source_id=first, section=99)
-
-    # A published draft over the first source, then a second draft over the other.
-    one = _knowledge(card, first, [{"name": "LLZO", "aliases": ["Li7La3Zr2O12"]}, {"name": "ionic conductivity"},
-                                   {"name": "Sintering"}],
-                     [{"source": "Sintering", "target": "ionic conductivity", "predicate": "improves"},
-                      {"source": "LLZO", "target": "ionic conductivity", "predicate": "has property"}])
-    confirmed = KnowledgeContext(card.node_id, card.storage_path, state=card.state, confirmed=True)
-    run(confirmed, knowledge.knowledge_review, operation="publish", draft_id=one["id"])
-    two = run(card, knowledge.knowledge_draft_manage, operation="create", source_ids=[second])["draft"]
-    run(card, knowledge.knowledge_save, draft_id=two["id"], source_id=second,
-        entities=[{"name": "Hot pressing"}], relations=[])
-
-    found = run(card, knowledge.knowledge_lookup, terms=["li7la3zr2o12", "pressing", "nothing-here"], draft_id=two["id"])
-    assert found["in_draft"] == [{"name": "Hot pressing", "aliases": [], "matched": ["pressing"], "predicates": []}]
-    assert found["published"] == [{"name": "LLZO", "aliases": ["Li7La3Zr2O12"], "matched": ["li7la3zr2o12"],
-                                   "predicates": ["has_property"]}]
-    assert found["predicates"] == [{"predicate": "has_property", "count": 1}, {"predicate": "improves", "count": 1}]
-
-    # The extract prompt for the second draft points at the published names its text mentions.
-    prompt = run(card, knowledge.knowledge_extract_prompt, source_id=second, draft_id=two["id"])
-    assert prompt["published"] == [{"name": "LLZO", "aliases": ["Li7La3Zr2O12"]}]
-    assert prompt["existing"] == [{"name": "Hot pressing", "aliases": []}]
-
-
-def test_an_audit_reviews_a_draft_against_the_published_graph_and_logs_what_it_applied(card):
-    first, _ = ingest_document(card, filename="a.md")
-    second, _ = ingest_document(card, "# B\n\nLLZO again.", "b.md")
-    one = _knowledge(card, first, [{"name": "Li7La3Zr2O12", "aliases": ["garnet"]}, {"name": "ionic conductivity"}],
-                     [{"source": "Li7La3Zr2O12", "target": "ionic conductivity", "predicate": "has property"}])
-    confirmed = KnowledgeContext(card.node_id, card.storage_path, state=card.state, confirmed=True)
-    run(confirmed, knowledge.knowledge_review, operation="publish", draft_id=one["id"])
-    two = _knowledge(card, second, [{"name": "LLZO", "aliases": ["Li7La3Zr2O12"]}, {"name": "Ionic conductivities"},
-                                    {"name": "Table 2"}, {"name": "sintering"}],
-                     [{"source": "LLZO", "target": "Ionic conductivities", "predicate": "exhibits", "evidence_level": 2},
-                      {"source": "sintering", "target": "Ionic conductivities", "predicate": "improves"},
-                      {"source": "sintering", "target": "Ionic conductivities", "predicate": "degrades"}])
-
-    # The published draft is not reviewable in place; the open one yields findings.
-    with pytest.raises(KnowledgeError):
-        run(card, knowledge.knowledge_audit_prompt, draft_id=one["id"])
-    prompt = run(card, knowledge.knowledge_audit_prompt, draft_id=two["id"])
-    assert prompt["revision"] == two["revision"] and "merge_concepts" in prompt["operations"]
-    stats = prompt["statistics"]
-    assert stats["isolated"] == ["Table 2"]
-    assert stats["contradictions"] == [{"a": "Ionic conductivities", "b": "sintering", "predicates": ["improves", "degrades"]}]
-    assert stats["published_matches"] == [{"draft_name": "LLZO", "published_name": "Li7La3Zr2O12", "published_aliases": ["garnet"]}]
-    assert prompt["draft"]["relations"][0]["snippet"] is None and len(prompt["draft"]["entities"]) == 4
-
-    applied = run(card, knowledge.knowledge_audit_apply, draft_id=two["id"], expected_revision=two["revision"], operations=[
-        {"op": "merge_concepts", "keep": "Li7La3Zr2O12", "drop": ["LLZO"], "reason": "published name"},
-        {"op": "rename_predicate", "from": "exhibits", "to": "has_property"},
-        {"op": "delete_relation", "source": "sintering", "predicate": "degrades", "target": "Ionic conductivities"},
-        {"op": "delete_concept", "name": "Table 2", "reason": "metadata"},
-        {"op": "delete_concept", "name": "nothing"},
-        {"op": "flag", "message": "check sintering"}])
-    assert applied["applied"] == 5 and applied["skipped"] == 1
-    draft = applied["draft"]
-    assert sorted(item["name"] for item in draft["entities"]) == ["Ionic conductivities", "Li7La3Zr2O12", "sintering"]
-    kept = next(item for item in draft["entities"] if item["name"] == "Li7La3Zr2O12")
-    assert kept["aliases"] == ["LLZO"] and kept["source_ids"] == [second]
-    assert {(item["source"], item["predicate"]) for item in draft["relations"]} == {
-        ("concept:li7la3zr2o12", "has_property"), ("concept:sintering", "improves")}
-    assert len(draft["review_log"]) == 1 and draft["review_log"][0]["before"] == {"concepts": 4, "relations": 3}
-    assert draft["review_log"][0]["after"] == {"concepts": 3, "relations": 2}
-    assert draft["review_log"][0]["skipped"][0]["op"] == "delete_concept"
-    assert draft["revision"] == two["revision"] + 1
-    with pytest.raises(ConflictingRevision):
-        run(card, knowledge.knowledge_audit_apply, draft_id=two["id"], expected_revision=two["revision"], operations=[])
-    with pytest.raises(KnowledgeError):
-        run(card, knowledge.knowledge_audit_apply, draft_id=two["id"], operations=[
-            {"op": "delete_concept", "name": name} for name in ("Li7La3Zr2O12", "Ionic conductivities", "sintering")])
-
-    # Publishing the reviewed draft joins the published node instead of duplicating it.
-    run(confirmed, knowledge.knowledge_review, operation="publish", draft_id=two["id"])
-    names = sorted(item["name"] for item in run(card, actions.graph, layer="literature")["entities"])
-    assert names == ["Ionic conductivities", "Li7La3Zr2O12", "ionic conductivity", "sintering"]
-    node = next(item for item in run(card, actions.graph, layer="literature")["entities"] if item["name"] == "Li7La3Zr2O12")
-    assert sorted(node["properties"]["aliases"]) == ["LLZO", "garnet"]
-
-
-def test_a_graph_review_rewrites_every_published_draft_and_rebuilds_the_layer_on_confirmation(card):
-    first, _ = ingest_document(card, filename="a.md")
-    second, _ = ingest_document(card, "# B\n\nLLZO again.", "b.md")
-    one = _knowledge(card, first, [{"name": "Li7La3Zr2O12"}, {"name": "ionic conductivity"}],
-                     [{"source": "Li7La3Zr2O12", "target": "ionic conductivity", "predicate": "has property"}])
-    two = _knowledge(card, second, [{"name": "LLZO"}, {"name": "ionic conductivity"}, {"name": "Figure 1"}],
-                     [{"source": "LLZO", "target": "ionic conductivity", "predicate": "exhibits"}])
-    with pytest.raises(KnowledgeError):  # nothing published yet
-        run(card, knowledge.knowledge_graph_audit_prompt)
-    confirmed = KnowledgeContext(card.node_id, card.storage_path, state=card.state, confirmed=True)
-    for draft in (one, two):
-        run(confirmed, knowledge.knowledge_review, operation="publish", draft_id=draft["id"])
-    assert run(card, actions.overview)["counts"]["entities"] == 4
-
-    prompt = run(card, knowledge.knowledge_graph_audit_prompt)
-    assert sorted(prompt["draft_ids"]) == sorted([one["id"], two["id"]])
-    assert prompt["draft"]["title"] == "Published knowledge" and len(prompt["draft"]["entities"]) == 4
-    assert prompt["statistics"]["isolated"] == ["Figure 1"]
-    assert {item["predicate"] for item in prompt["statistics"]["predicates"]} == {"has_property", "exhibits"}
-
-    operations = [{"op": "merge_concepts", "keep": "Li7La3Zr2O12", "drop": ["LLZO"], "reason": "acronym"},
-                  # A model that thinks aloud inside the field is trimmed, not refused.
-                  {"op": "rename_predicate", "from": "exhibits", "to": "has_property", "reason": "wait, " * 400},
-                  {"op": "delete_concept", "name": "Figure 1"},
-                  {"op": "delete_concept", "name": "nowhere"}]
-    # Rewriting published knowledge is gated like publishing: nothing moves without confirmation.
-    pending = run(card, knowledge.knowledge_graph_audit_apply, operations=operations)
-    assert pending["status"] == "confirmation_required" and "2 published draft(s)" in pending["reasons"][0]
-    assert run(card, actions.overview)["counts"]["entities"] == 4
-
-    result = run(confirmed, knowledge.knowledge_graph_audit_apply, operations=operations)
-    assert result["drafts"] == [two["id"]] and result["applied"] == 3
-    reviewed_log = run(card, knowledge.knowledge_drafts, operation="get", draft_id=two["id"])["draft"]["review_log"][0]
-    assert len(next(item for item in reviewed_log["operations"] if item["op"] == "rename_predicate")["reason"]) <= 300
-    assert result["skipped"] == [{"index": 3, "op": "delete_concept", "name": "nowhere",
-                                 "skipped": "no published draft holds that element"}]
-    assert result["graph"] == {"entities": 2, "relations": 1}
-    graph = run(card, actions.graph, layer="literature")
-    node = next(item for item in graph["entities"] if item["name"] == "Li7La3Zr2O12")
-    assert node["properties"]["aliases"] == ["LLZO"] and sorted(node["properties"]["source_ids"]) == sorted([first, second])
-    assert graph["relations"][0]["type"] == "has_property" and sorted(graph["relations"][0]["properties"]["source_ids"]) == sorted([first, second])
-    reviewed = run(card, knowledge.knowledge_drafts, operation="get", draft_id=two["id"])["draft"]
-    assert reviewed["status"] == "published" and [item["name"] for item in reviewed["entities"]] == ["Li7La3Zr2O12", "ionic conductivity"]
-    assert reviewed["review_log"][0]["scope"] == "graph" and reviewed["review_log"][0]["after"] == {"concepts": 2, "relations": 1}
-    assert run(card, knowledge.knowledge_drafts, operation="get", draft_id=one["id"])["draft"]["review_log"] == []
-
-    # Draft and graph ids still agree: unpublishing removes exactly the rewritten draft's claim.
-    run(card, knowledge.knowledge_review, operation="unpublish", draft_id=two["id"])
-    remaining = run(card, actions.graph, layer="literature")
-    assert sorted(item["name"] for item in remaining["entities"]) == ["Li7La3Zr2O12", "ionic conductivity"]
-    run(card, knowledge.knowledge_review, operation="unpublish", draft_id=one["id"])
-    assert run(card, actions.graph)["entities"] == []
+        _bundle(card, space)
+    with pytest.raises(ValueError):
+        run(card, actions.schema_manage, operation="update", schema_id=experiment["id"], kind="literature")
 
 
 def test_a_name_query_returns_every_relation_touching_the_concept_with_names_and_statements(card):
     """What the Lab assistant asks: "what does the base say about DPA-SSE and NEB?"."""
     first, _ = ingest_document(card, "# Paper\n\nDPA-SSE and NEB.", "dpa.md")
-    draft = _knowledge(card, first,
+    entities, relations = (
         [{"name": "DPA-SSE", "aliases": ["DPA SSE model"], "description": "A pre-trained deep potential for sulfide electrolytes."},
          {"name": "Hopping barrier"}, {"name": "NEB", "aliases": ["nudged elastic band"]}, {"name": "Li7La3Zr2O12"}],
         [{"source": "DPA-SSE", "target": "Hopping barrier", "predicate": "computes",
@@ -663,8 +373,14 @@ def test_a_name_query_returns_every_relation_touching_the_concept_with_names_and
          {"source": "NEB", "target": "DPA-SSE", "predicate": "used with",
           "description": "NEB calculations are driven by DPA-SSE forces to find the migration path."},
          {"source": "Li7La3Zr2O12", "target": "Hopping barrier", "predicate": "has property"}])
-    confirmed = KnowledgeContext(card.node_id, card.storage_path, state=card.state, confirmed=True)
-    run(confirmed, knowledge.knowledge_review, operation="publish", draft_id=draft["id"])
+    kb = client.open_client(card.node_id, card.storage_path)
+    payload = {"entities": [{"type": "concept", "name": entity["name"], "properties": {
+        **{key: value for key, value in entity.items() if key != "name"}, "source_ids": [first]}}
+        for entity in entities], "relations": [{"source": relation["source"], "target": relation["target"],
+        "type": relation["predicate"].replace(" ", "_"), "properties": {
+            **{key: value for key, value in relation.items() if key not in {"source", "target", "predicate"}},
+            "source_ids": [first]}} for relation in relations]}
+    kb.graph.extract(payload, extractor=lambda value: value)
 
     # One name, spelled loosely: the concept, both relations touching it, and the
     # concepts on their other ends — each relation readable without joining ids.
@@ -692,9 +408,9 @@ def test_a_name_query_returns_every_relation_touching_the_concept_with_names_and
     assert [(r["source_name"], r["target_name"]) for r in hopping["relations"]] == [("NEB", "DPA-SSE")]
     assert sorted(item["name"] for item in hopping["entities"]) == ["DPA-SSE", "NEB"]
 
-    # The single-needle form keeps working and no longer drops one-sided relations.
-    legacy = run(card, actions.graph, name_contains="DPA-SSE", full=True)
-    assert len(legacy["relations"]) == 2
+    # A single search term includes incoming and outgoing claims.
+    single_term = run(card, actions.graph, name_contains="DPA-SSE", full=True)
+    assert len(single_term["relations"]) == 2
     # Nothing matched: an honest empty answer, not a guess.
     assert run(card, actions.graph, names=["graphene"]) == {
         "entities": [], "relations": [], "matched": 0, "truncated": False, "connections": [], "search_text": "graphene"}
@@ -1032,35 +748,6 @@ def test_the_agent_gets_a_compact_result_that_fits_the_host_window_however_big_t
     assert full["relations"][0]["properties"]["evidence_level"] == 1 and full["entities"][0]["properties"]
 
 
-def test_unpublishing_one_draft_keeps_what_another_published_draft_asserts(card):
-    first, _ = ingest_document(card, filename="a.md")
-    second, _ = ingest_document(card, filename="b.md")
-    one = _knowledge(card, first, [{"type": "entity", "name": "Cu"}, {"type": "quantity", "name": "Hardness"}],
-                     [{"source": "Hardness", "target": "Cu", "type": "measured_by"}])
-    two = _knowledge(card, second, [{"type": "entity", "name": "Cu"}, {"type": "method", "name": "Annealing"},
-                                    {"type": "quantity", "name": "Hardness"}],
-                     [{"source": "Hardness", "target": "Cu", "type": "measured_by"},
-                      {"source": "Cu", "target": "Annealing", "type": "related_to"}])
-    card.confirmed = True
-    run(card, knowledge.knowledge_review, operation="publish", draft_id=one["id"])
-    run(card, knowledge.knowledge_review, operation="publish", draft_id=two["id"])
-    card.confirmed = False
-    assert run(card, actions.overview)["counts"]["layers"]["literature"] == {"entities": 3, "relations": 2}
-
-    run(card, knowledge.knowledge_review, operation="unpublish", draft_id=two["id"])
-    remaining = run(card, actions.graph, layer="literature")
-    assert {item["name"] for item in remaining["entities"]} == {"Cu", "Hardness"}
-    assert [item["type"] for item in remaining["relations"]] == ["measured_by"]
-
-    # Re-extracting from scratch empties the draft; a deleted draft is gone, its graph untouched.
-    replaced = run(card, knowledge.knowledge_save, draft_id=two["id"], source_id=second, replace=True,
-                   entities=[{"type": "concept", "name": "Fresh"}])["draft"]
-    assert [item["name"] for item in replaced["entities"]] == ["Fresh"]
-    run(card, knowledge.knowledge_draft_manage, operation="delete", draft_id=two["id"])
-    assert [d["id"] for d in run(card, knowledge.knowledge_drafts)["drafts"]] == [one["id"]]
-    assert run(card, actions.overview)["counts"]["entities"] == 2
-
-
 def test_graph_survives_a_client_restart(card):
     kb = client.open_client(card.node_id, card.storage_path)
     group = client.collection(kb)
@@ -1114,31 +801,6 @@ def test_graph_elements_default_to_the_literature_layer_and_can_be_retagged(card
     assert facts.entities[0].name == "Cu" and store.get_entity(facts.entities[0].id) is not None
 
 
-def test_a_graph_from_before_layers_existed_is_migrated_on_open(tmp_path):
-    from sqlalchemy import create_engine, text
-
-    from oaw_knowledge_base.graph_store import SqlGraphStore
-
-    path = tmp_path / "old.db"
-    engine = create_engine(f"sqlite:///{path}")
-    with engine.begin() as connection:
-        connection.execute(text(
-            "CREATE TABLE oaw_kg_entity (id VARCHAR(36) PRIMARY KEY, type VARCHAR(255) NOT NULL, "
-            "name VARCHAR(1024) NOT NULL, properties TEXT NOT NULL, created_at DATETIME NOT NULL, "
-            "updated_at DATETIME NOT NULL)"))
-        connection.execute(text(
-            "CREATE TABLE oaw_kg_relation (id VARCHAR(36) PRIMARY KEY, source_id VARCHAR(36) NOT NULL, "
-            "target_id VARCHAR(36) NOT NULL, type VARCHAR(255) NOT NULL, properties TEXT NOT NULL, "
-            "created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)"))
-        connection.execute(text(
-            "INSERT INTO oaw_kg_entity VALUES ('e1', 'material', 'Cu', '{}', "
-            "'2026-01-01 00:00:00', '2026-01-01 00:00:00')"))
-    store = SqlGraphStore(engine)
-    assert store.counts(layer="literature") == {"entities": 1, "relations": 0}
-    assert store.list_entities(group_id="nope") == []
-    engine.dispose()
-
-
 def test_relations_need_both_endpoints(card):
     import uuid
 
@@ -1174,18 +836,18 @@ def test_uploads_are_bounded_and_validated(card):
     # Handlers raise KnowledgeError for their own rules and pydantic's ValidationError
     # for the request shape; both are ValueErrors, which is what every caller sees.
     with pytest.raises(ValueError):
-        run(card, actions.ingest, filename="../escape.md", content_base64="aGk=")
+        run(card, _ingest, filename="../escape.md", content_base64="aGk=")
     with pytest.raises(ValueError):
-        run(card, actions.ingest, filename="x.md", content_base64="not base64!!")
+        run(card, _ingest, filename="x.md", content_base64="not base64!!")
     with pytest.raises(ValueError):
-        run(card, actions.ingest, filename="empty.md", content_base64="")
+        run(card, _ingest, filename="empty.md", content_base64="")
     with pytest.raises(ValueError):
-        run(card, actions.ingest, filename="x.md", content_base64="aGk=", sql="DROP")
+        run(card, _ingest, filename="x.md", content_base64="aGk=", sql="DROP")
 
 
 def test_an_unconvertible_upload_fails_in_the_job_not_the_action(card):
     # Ingest must stay fast and never convert: the mutation lock is held for its duration.
-    submitted = run(card, actions.ingest, filename="scan.bin",
+    submitted = run(card, _ingest, filename="scan.bin",
                     content_base64=base64.b64encode(b"\x00\x01\x02").decode(),
                     media_type="application/octet-stream")
     assert "job" not in submitted
@@ -1226,7 +888,7 @@ def test_an_image_upload_converts_through_a_configured_vision_engine(card, monke
     monkeypatch.setenv("OAW_VISION_BASE_URL", "https://vision.example/v1")
     monkeypatch.setattr("httpx.Client", _FakeClient)
 
-    submitted = run(card, actions.ingest, filename="notebook.jpg",
+    submitted = run(card, _ingest, filename="notebook.jpg",
                     content_base64=base64.b64encode(b"fake-jpeg-bytes").decode(),
                     media_type="image/jpeg")
     processed = run(card, actions.process_sources, source_ids=[submitted["source"]["id"]])
@@ -1254,62 +916,11 @@ def test_jobs_report_progress_events(card):
     assert json.dumps(detail)  # the payload must stay JSON serializable
 
 
-def test_groups_can_be_created_renamed_and_deleted(card):
-    listed = run(card, actions.groups)["groups"]
-    assert len(listed) == 1 and listed[0]["is_default"]
-    default_id = listed[0]["id"]
-
-    created = run(card, actions.groups, operation="create", name="Alloys")["group"]
-    assert created["name"] == "Alloys" and created["source_count"] == 0
-
-    with pytest.raises(KnowledgeError):
-        run(card, actions.groups, operation="create", name="Alloys")
-
-    renamed = run(card, actions.groups, operation="rename",
-                  group_id=created["id"], name="Alloys v2")["group"]
-    assert renamed["name"] == "Alloys v2"
-
-    run(card, actions.groups, operation="delete", group_id=created["id"])
-    assert {item["id"] for item in run(card, actions.groups)["groups"]} == {default_id}
-
-    with pytest.raises(KnowledgeError):
-        run(card, actions.groups, operation="delete", group_id=default_id)
-
-
-def test_sources_are_filed_into_the_chosen_group_and_listed_separately(card):
-    alloys = run(card, actions.groups, operation="create", name="Alloys")["group"]
-
-    default_source, _ = ingest_document(card, filename="default.md")
-    ingested = run(card, actions.ingest, filename="alloy.md",
-                  content_base64=base64.b64encode(DOCUMENT.encode()).decode(),
-                  media_type="text/markdown", group_id=alloys["id"])
-    assert ingested["group_id"] == alloys["id"]
-    assert "job" not in ingested  # a batch of one still needs an explicit process step
-
-    # The default view stays scoped to the default group, exactly as a plain card
-    # without any groups behaves.
-    default_only = run(card, actions.sources)["sources"]
-    assert [item["filename"] for item in default_only] == ["default.md"]
-
-    scoped = run(card, actions.sources, group_id=alloys["id"])["sources"]
-    assert [item["filename"] for item in scoped] == ["alloy.md"]
-    assert scoped[0]["group_name"] == "Alloys"
-
-    everything = run(card, actions.sources, all_groups=True)["sources"]
-    assert {item["filename"] for item in everything} == {"default.md", "alloy.md"}
-
-    overview_default = run(card, actions.overview)
-    assert overview_default["counts"]["sources"] == 1
-    assert {group["name"] for group in overview_default["groups"]} == {"Knowledge base", "Alloys"}
-    overview_all = run(card, actions.overview, all_groups=True)
-    assert overview_all["counts"]["sources"] == 2
-
-
 def test_process_sources_runs_in_batch_and_skips_what_is_already_converted(card):
-    alloys = run(card, actions.groups, operation="create", name="Alloys")["group"]
+    alloys = run(card, projects.project_manage, operation="create", name="Alloys")["project"]
     ids = []
     for name in ("a.md", "b.md"):
-        result = run(card, actions.ingest, filename=name,
+        result = run(card, _ingest, filename=name,
                      content_base64=base64.b64encode(DOCUMENT.encode()).decode(),
                      media_type="text/markdown", group_id=alloys["id"])
         ids.append(result["source"]["id"])
@@ -1327,46 +938,11 @@ def test_process_sources_runs_in_batch_and_skips_what_is_already_converted(card)
     assert all(entry.get("skipped") == "already converted" for entry in again["jobs"])
 
     # With no source_ids, "process all pending" only picks up unconverted sources.
-    run(card, actions.ingest, filename="c.md",
+    run(card, _ingest, filename="c.md",
         content_base64=base64.b64encode(DOCUMENT.encode()).decode(),
         media_type="text/markdown", group_id=alloys["id"])
     pending = run(card, actions.process_sources, group_id=alloys["id"])
     assert len(pending["jobs"]) == 1 and pending["jobs"][0]["filename"] == "c.md"
-
-
-def test_knowledge_drafts_and_the_graph_stay_scoped_to_the_group_that_built_them(card):
-    default_source, _ = ingest_document(card, filename="default.md")
-    alloys = run(card, actions.groups, operation="create", name="Alloys")["group"]
-    result = run(card, actions.ingest, filename="alloy.md",
-                 content_base64=base64.b64encode(DOCUMENT.encode()).decode(),
-                 media_type="text/markdown", group_id=alloys["id"])
-    processed = run(card, actions.process_sources, source_ids=[result["source"]["id"]])
-    kb = client.open_client(card.node_id, card.storage_path)
-    kb.jobs.wait(processed["jobs"][0]["job"]["id"], timeout=60)
-    alloy_source = result["source"]["id"]
-
-    # Mixing groups in one draft is refused, so a published graph traces back to
-    # exactly one group's sources.
-    with pytest.raises(KnowledgeError):
-        run(card, knowledge.knowledge_draft_manage, operation="create",
-            source_ids=[default_source, alloy_source])
-
-    default_draft = _knowledge(card, default_source, [{"type": "entity", "name": "Cu"}])
-    alloy_draft = _knowledge(card, alloy_source, [{"type": "entity", "name": "Steel"}], group_id=alloys["id"])
-    assert alloy_draft["group_id"] == alloys["id"]
-    assert [d["id"] for d in run(card, knowledge.knowledge_drafts, group_id=alloys["id"])["drafts"]] == [alloy_draft["id"]]
-    assert len(run(card, knowledge.knowledge_drafts, all_groups=True)["drafts"]) == 2
-
-    card.confirmed = True
-    for built in (default_draft, alloy_draft):
-        run(card, knowledge.knowledge_review, operation="publish", draft_id=built["id"])
-    card.confirmed = False
-
-    all_entities = run(card, actions.graph)["entities"]
-    assert {item["name"] for item in all_entities} == {"Cu", "Steel"}
-    default_group_id = run(card, actions.overview)["collection"]["id"]
-    assert {item["name"] for item in run(card, actions.graph, group_id=default_group_id)["entities"]} == {"Cu"}
-    assert {item["name"] for item in run(card, actions.graph, group_id=alloys["id"])["entities"]} == {"Steel"}
 
 
 CONDUCTIVITY_SCHEMA = {
@@ -1383,57 +959,6 @@ PAPER = """# Solid electrolytes
 """
 
 
-def test_records_are_read_from_a_literature_source_with_a_schema_and_yield_insights(card):
-    source_id, _ = ingest_document(card, PAPER, "electrolytes.md")
-    schema = run(card, actions.schemas, operation="create", name="Ionic conductivity",
-                 definition=CONDUCTIVITY_SCHEMA, system_prompt="Read conductivities.")["schema"]
-    experiment = run(card, actions.schemas, operation="create", name="Run", definition=CONDUCTIVITY_SCHEMA,
-                     system_prompt="x", kind="experiment")["schema"]
-
-    prompt = run(card, actions.record_extract_prompt, schema_id=schema["id"], source_id=source_id)
-    assert prompt["system_prompt"] == "Read conductivities." and "LGPS" in prompt["markdown"]
-    assert prompt["filename"] == "electrolytes.md" and "one record per specimen" in prompt["instruction"]
-    # Only a literature schema reads sources; experiment schemas read uploads.
-    with pytest.raises(KnowledgeError):
-        run(card, actions.record_extract_prompt, schema_id=experiment["id"], source_id=source_id)
-
-    saved = run(card, actions.record_save, schema_id=schema["id"], source_id=source_id, records=[
-        {"name": "LGPS", "data": {"material": "LGPS", "conductivity": 0.012, "temperature": 298}},
-        {"name": "LLZO", "data": {"material": "LLZO", "conductivity": 0.0005, "temperature": 298}},
-        {"name": "bad", "data": {"material": "x"}, "note": "no value given"}])
-    assert saved["invalid"] == 1 and saved["source_id"] == source_id
-    assert all(r["bundle_id"] is None and r["sources"] == [{"source_id": source_id, "filename": "electrolytes.md"}]
-               for r in saved["records"])
-    assert run(card, actions.sources)["sources"][0]["records"] == 3
-    listed = run(card, actions.experiments, source_id=source_id, schema_id=schema["id"])["experiments"]
-    assert {r["name"] for r in listed} == {"LGPS", "LLZO", "bad"}
-
-    # Re-extracting replaces this source's drafts for this schema only.
-    run(card, actions.record_save, schema_id=schema["id"], source_id=source_id, replace_drafts=True,
-        records=[{"name": "LGPS", "data": {"material": "LGPS", "conductivity": 0.012, "temperature": 298}},
-                 {"name": "LLZO", "data": {"material": "LLZO", "conductivity": 0.0005, "temperature": 298}}])
-    listed = run(card, actions.experiments, source_id=source_id)["experiments"]
-    assert {r["name"] for r in listed} == {"LGPS", "LLZO"}
-    # An empty extraction is a valid "nothing here" answer.
-    assert run(card, actions.record_save, schema_id=schema["id"], source_id=source_id, records=[])["records"] == []
-
-    card.confirmed = True
-    for record in listed:
-        run(card, actions.experiment_review, operation="publish", record_id=record["id"])
-    card.confirmed = False
-
-    # Insights scope to the literature schemas when asked; the experiment-side default is unchanged.
-    with pytest.raises(KnowledgeError):
-        run(card, insights.insight_prompt)
-    prompt = run(card, insights.insight_prompt, schema_kind="literature")
-    assert prompt["schema_ids"] == [schema["id"]] and prompt["record_count"] == 2
-    assert run(card, insights.insights, operation="stats", schema_id=schema["id"])["statistics"]["records"] == 2
-    drafted = run(card, insights.insight_save, schema_id=schema["id"], insights=[
-        {"kind": "threshold", "title": "LGPS leads", "statement": "LGPS is 24x more conductive than LLZO.",
-         "fields": ["conductivity"], "evidence": [{"record_id": listed[0]["id"]}, {"record_id": listed[1]["id"]}]}])
-    assert drafted["insights"][0]["schema_id"] == schema["id"]
-
-
 EXPERIMENT_SCHEMA = {
     "type": "object", "required": ["sample_id", "conductivity"],
     "properties": {"sample_id": {"type": "string"}, "conductivity": {"type": "number"}},
@@ -1441,7 +966,7 @@ EXPERIMENT_SCHEMA = {
 
 
 def _experiment_schema(card):
-    return run(card, actions.schemas, operation="create", name="Conductivity run",
+    return run(card, actions.schema_manage, operation="create", name="Conductivity run",
               definition=EXPERIMENT_SCHEMA, system_prompt="x", kind="experiment")["schema"]
 
 
@@ -1469,8 +994,8 @@ def test_an_experiment_upload_is_projected_into_several_reviewed_records(card):
     note = _upload(card, bundle, "# Notes\n\nA2 was cracked after pressing.\n\n"
                    + "Pressing log line.\n" * 40, "notes.md")
 
-    # The upload's files are the Experiment section's, not Literature's.
-    assert run(card, actions.sources)["sources"] == []
+    # Experiment materials share the project inventory and remain identifiable.
+    assert len(run(card, actions.sources)["sources"]) == 2
     tagged = run(card, actions.sources, workflow="experiment")["sources"]
     assert {item["filename"] for item in tagged} == {"batch7.csv", "notes.md"}
     assert {item["workflow"] for item in tagged} == {"experiment"}
@@ -1562,10 +1087,10 @@ def test_a_record_that_fails_its_schema_cannot_be_published(card):
 
 
 def test_extraction_waits_for_every_file_and_an_upload_needs_an_experiment_schema(card):
-    literature = run(card, actions.schemas, operation="create", name="Literature schema",
-                     definition=SCHEMA, system_prompt="x")["schema"]
+    projection_space = run(card, spaces.space_manage, operation="create", name="Report schema",
+                           definition=SCHEMA, system_prompt="x")["space"]
     with pytest.raises(KnowledgeError):
-        _bundle(card, literature)
+        _bundle(card, projection_space)
 
     schema = _experiment_schema(card)
     bundle = _bundle(card, schema)
@@ -1587,7 +1112,7 @@ def test_extraction_waits_for_every_file_and_an_upload_needs_an_experiment_schem
     assert run(card, actions.experiment_extract_prompt, bundle_id=bundle["id"])["has_more"] is False
 
 
-def test_deleting_an_upload_removes_its_records_and_keeps_its_files_out_of_literature(card):
+def test_deleting_an_upload_removes_its_records_but_retains_project_materials(card):
     schema = _experiment_schema(card)
     bundle = _bundle(card, schema)
     _upload(card, bundle, "A1 1.0\n", "a.md")
@@ -1601,17 +1126,17 @@ def test_deleting_an_upload_removes_its_records_and_keeps_its_files_out_of_liter
                   name="Batch 7b")["bundle"]
     assert renamed["run_id"] == "run-1" and renamed["name"] == "Batch 7b"
     # The schema is fixed once records exist, and can only ever be an experiment schema.
-    other = run(card, actions.schemas, operation="create", name="Other run",
+    other = run(card, actions.schema_manage, operation="create", name="Other run",
                 definition=EXPERIMENT_SCHEMA, system_prompt="x", kind="experiment")["schema"]
     with pytest.raises(KnowledgeError, match="already has records"):
         run(card, actions.experiment_bundle_manage, operation="update", bundle_id=bundle["id"],
             schema_id=other["id"])
     empty = _bundle(card, schema, name="Empty")
-    literature = run(card, actions.schemas, operation="create", name="Lit", definition=SCHEMA,
-                     system_prompt="x")["schema"]
+    projection_space = run(card, spaces.space_manage, operation="create", name="Reports", definition=SCHEMA,
+                           system_prompt="x")["space"]
     with pytest.raises(KnowledgeError):
         run(card, actions.experiment_bundle_manage, operation="update", bundle_id=empty["id"],
-            schema_id=literature["id"])
+            schema_id=projection_space["id"])
     moved = run(card, actions.experiment_bundle_manage, operation="update", bundle_id=empty["id"],
                 schema_id=other["id"])["bundle"]
     assert moved["schema_id"] == other["id"]
@@ -1621,8 +1146,9 @@ def test_deleting_an_upload_removes_its_records_and_keeps_its_files_out_of_liter
     assert removed["records_removed"] == 1
     assert run(card, actions.experiment_bundles)["bundles"] == []
     assert run(card, actions.experiments)["experiments"] == []
-    assert run(card, actions.sources)["sources"] == []
+    assert len(run(card, actions.sources)["sources"]) == 1
     assert len(run(card, actions.sources, workflow="experiment")["sources"]) == 1
+    assert projects.projects(card, {"project_id": bundle["group_id"]})["project"]["source_count"] == 1
     with pytest.raises(KnowledgeError):
         run(card, actions.experiment_ingest, bundle_id=bundle["id"], filename="b.md",
             content_base64=base64.b64encode(b"x").decode())
@@ -1667,7 +1193,7 @@ def _published_batch(card, count=8):
     and one draft record that must stay invisible to insights."""
     from oaw_knowledge_base import insights
 
-    schema = run(card, actions.schemas, operation="create", name="Electrolyte batch",
+    schema = run(card, actions.schema_manage, operation="create", name="Electrolyte batch",
                  definition=INSIGHT_SCHEMA, system_prompt="x", kind="experiment")["schema"]
     bundle = _bundle(card, schema, name="July")
     _upload(card, bundle, "log\n", "log.md")
@@ -1710,7 +1236,7 @@ def test_insights_are_drafted_from_published_records_and_published_into_the_grap
             {"kind": "note", "title": "x", "statement": "y", "evidence": [{"record_id": draft["id"]}]}])
     with pytest.raises(KnowledgeError):
         run(card, insights.insight_prompt, schema_id=run(
-            card, actions.schemas, operation="create", name="Lit", definition=SCHEMA,
+            card, actions.schema_manage, operation="create", name="Lit", definition=SCHEMA,
             system_prompt="x")["schema"]["id"])
     saved = run(card, insights.insight_save, schema_id=schema["id"], run_id="run-1", insights=[
         {"kind": "anomaly", "title": "B7 moisture high",
@@ -1807,7 +1333,7 @@ def test_an_insight_whose_record_was_unpublished_is_stale_and_cannot_be_publishe
 
 def test_insights_scoped_to_a_group_see_only_that_groups_records(card):
     insights, schema, records = _published_batch(card, count=4)
-    other = run(card, actions.groups, operation="create", name="Other")["group"]
+    other = run(card, projects.project_manage, operation="create", name="Other")["project"]
     with pytest.raises(KnowledgeError):
         run(card, insights.insight_prompt, schema_id=schema["id"], group_id=other["id"])
     everywhere = run(card, insights.insight_prompt, schema_id=schema["id"], all_groups=True)
@@ -1829,7 +1355,7 @@ XRD_SCHEMA = {"type": "object", "required": ["sample_id"],
 def test_insights_can_span_several_schemas_matched_by_specimen_name(card):
     insights, synthesis, records = _published_batch(card, count=6)
     # A second schema describing the same specimens B0..B5, published too.
-    xrd = run(card, actions.schemas, operation="create", name="XRD", definition=XRD_SCHEMA,
+    xrd = run(card, actions.schema_manage, operation="create", name="XRD", definition=XRD_SCHEMA,
               system_prompt="x", kind="experiment")["schema"]
     bundle = _bundle(card, xrd, name="XRD July")
     _upload(card, bundle, "xrd\n", "xrd.md")
@@ -1841,7 +1367,7 @@ def test_insights_can_span_several_schemas_matched_by_specimen_name(card):
         run(card, actions.experiment_review, operation="publish", record_id=record["id"])
     card.confirmed = False
     # An experiment schema with no published records is left out of an open scope.
-    run(card, actions.schemas, operation="create", name="Empty", definition=XRD_SCHEMA,
+    run(card, actions.schema_manage, operation="create", name="Empty", definition=XRD_SCHEMA,
         system_prompt="x", kind="experiment")
 
     # No schema named: every schema with published records, each with its own table

@@ -1,0 +1,164 @@
+{
+  "nav": [
+    {
+      "User guide": [
+        "README.md",
+        "user-guide/index.md",
+        "install.md",
+        "user-guide/first-team.md",
+        "user-guide/models.md",
+        "user-guide/canvas.md",
+        "user-guide/plugins.md",
+        "agent-barracks.md",
+        "skill-toolboxes.md",
+        "task-board.md",
+        "creator-packs.md",
+        "card-factory.md",
+        "user-guide/troubleshooting.md",
+        "product-first-use.md",
+        "user-guide/matcreator-example.md"
+      ]
+    },
+    {
+      "Card / Pack developer guide": [
+        "developers/index.md",
+        "developers/card-app.md",
+        "developers/setup.md",
+        "developers/quickstart-pack.md",
+        "developers/declarative-packs.md",
+        "developers/testing.md",
+        "developers/pack-ide.md",
+        "developers/first-plugin.md",
+        "developers/agent-tools.md",
+        "developers/frontend.md"
+      ]
+    },
+    {
+      "Technical reference": [
+        "reference/index.md",
+        "plugins.md",
+        "reference/plugin-registration.md",
+        "reference/plugin-documents.md",
+        "reference/plugin-capabilities.md",
+        "reference/plugin-lifecycle.md",
+        "reference/plugin-frontend.md",
+        "reference/plugin-compatibility.md",
+        "pack-distribution.md",
+        "reference/pack-manifest.md",
+        "pack-store.md",
+        "reference/factory-recipes.md",
+        "canvas-control.md",
+        "card-library.md",
+        "card-state.md",
+        "concepts.md",
+        "configuration.md",
+        "context-management.md",
+        "developers/card-design.md",
+        "developers/card-finishes.md",
+        "developers/context-compaction.md",
+        "developers/data-sources.md",
+        "developers/execution-graph.md",
+        "developers/extension-points.md",
+        "developers/progressive-tutorials.md",
+        "developers/workspace-design.md",
+        "execution-configuration.md",
+        "execution.md",
+        "layout.md",
+        "legions.md",
+        "lifecycle-artifacts.md",
+        "macos-seatbelt-network-extension.md",
+        "minister.md",
+        "node-effects.md",
+        "plugin-deployment.md",
+        "runs.md",
+        "sandbox-networking.md",
+        "sandbox-workspace.md",
+        "security.md",
+        "shared-python-runtime.md",
+        "state.md",
+        "tool-execution.md"
+      ]
+    },
+    {
+      "Contribute to OAW": [
+        "contributing/index.md",
+        "getting-started.md",
+        "architecture.md",
+        "desktop.md",
+        "deployment.md",
+        "contributing/hosting.md",
+        "releasing.md",
+        "release-notes.md",
+        "tutorial.md",
+        "enterprise-foundations.md",
+        "canvas-performance.md",
+        "graph-architecture.md",
+        "terrain-webgl.md",
+        "developers/documentation.md",
+        "contributing/docs-checklist.md"
+      ]
+    }
+  ],
+  "plugins": {
+    "search": {
+      "lang": [
+        "en",
+        "zh"
+      ]
+    },
+    "i18n": {
+      "docs_structure": "suffix",
+      "fallback_to_default": true,
+      "languages": [
+        {
+          "locale": "en",
+          "name": "English",
+          "default": true,
+          "build": true,
+          "theme": {
+            "language": "en"
+          },
+          "extra": {
+            "documentation": {
+              "language": "Documentation language",
+              "follow_app": "Follow application language",
+              "fallback": "This topic is not available in {requested}. Showing {available}.",
+              "development": "Development documentation · follows dev. Your installed release may differ."
+            }
+          }
+        },
+        {
+          "locale": "zh-CN",
+          "name": "简体中文",
+          "default": false,
+          "build": true,
+          "theme": {
+            "language": "zh"
+          },
+          "extra": {
+            "documentation": {
+              "language": "文档语言",
+              "follow_app": "跟随应用语言",
+              "fallback": "此主题暂无 {requested} 译文，当前显示 {available}。",
+              "development": "开发版文档 · 跟随 dev 分支。已安装的发行版本可能不同。"
+            }
+          },
+          "nav_translations": {
+            "User guide": "用户指南",
+            "Card / Pack developer guide": "卡片与卡包开发",
+            "Technical reference": "技术参考",
+            "Contribute to OAW": "贡献与维护"
+          }
+        }
+      ]
+    }
+  },
+  "extra": {
+    "documentation": {
+      "language": "Documentation language",
+      "follow_app": "Follow application language",
+      "fallback": "This topic is not available in {requested}. Showing {available}.",
+      "development": "Development documentation · follows dev. Your installed release may differ."
+    }
+  }
+}

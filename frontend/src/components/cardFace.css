@@ -1,21 +1,24 @@
 /* Printed collectible cards: stock, ink, selective tooling, optical film, top print.
    Paper and ink are authored colours; application theme never recolours the print. */
-:root { --compact-card-width:106px; --compact-card-height:122px; --compact-card-state:#353535; }
+:root { --compact-card-width:96px; --compact-card-height:calc(var(--compact-card-width) * 7 / 5); --compact-card-state:#353535; }
 :root[data-theme="dark"] { --compact-card-state:#d6d6d6; }
-@media(max-width:620px) { :root { --compact-card-width:96px; } }
-@media(max-height:650px) { :root { --compact-card-height:101px; } }
+@media(max-width:620px) { :root { --compact-card-width:88px; } }
+/* The hand keeps its existing height and hit slots; only the paper gets narrower. */
+.component-palette { --compact-card-height:122px; --compact-card-width:calc(var(--compact-card-height) * 5 / 7); }
+@media(max-height:650px) { .component-palette { --compact-card-height:101px; } }
 .card-stock.card-stock {
   position:relative; display:flex; container-type:inline-size; padding:0;
   border:1px solid var(--stock-edge,#d3ccbc); border-radius:9px;
   background:var(--stock-paper,#f5f3e9);
-  box-shadow:0 1px 0 var(--stock-edge,#d3ccbc),0 3px 0 -1px var(--stock-paper,#f5f3e9),0 4px 0 -1px var(--stock-edge,#d3ccbc),0 12px 24px #162d2414;
+  /* Stock owns the only exterior shadow. Hard offset shadows create a second card. */
+  box-shadow:var(--card-stock-shadow,0 3px 8px #17231d1a);
 }
 .card-face {
   --face-accent:#5a7761; --face-paper:var(--stock-paper,#f5f3e9); --face-ink:var(--stock-ink,#293d37); --face-muted:var(--stock-muted,#66746a);
-  --face-pad:clamp(8px,6cqi,21px); --face-symbol:clamp(24px,20cqi,64px);
+  --face-pad:6cqi; --face-symbol:20cqi;
   position:relative; display:flex; flex-direction:column; width:100%; height:100%; min-width:0; min-height:0;
   overflow:hidden; border-radius:inherit; padding:var(--face-pad); background:var(--face-paper); color:var(--face-ink); text-align:left;
-  font-family:"Segoe UI Variable","Aptos","Segoe UI",ui-sans-serif,system-ui,sans-serif;
+  font-family:"Segoe UI Variable","Aptos","Segoe UI",ui-sans-serif,system-ui,sans-serif; font-size:5.5cqi;
 }
 .card-face::before { content:""; position:absolute; inset:0; pointer-events:none; opacity:calc(var(--stock-grain,.32)*.17);
   background-image:repeating-linear-gradient(13deg,#4d483e44 0 .5px,transparent .5px 3px),repeating-linear-gradient(97deg,#fff8 0 .5px,transparent .5px 4px); }
@@ -24,54 +27,93 @@
 .card-face[data-tone="sky"] { --face-accent:#5b8593; }
 .card-face[data-tone="rose"] { --face-accent:#a57077; }
 .card-face[data-tone="stone"] { --face-accent:#7b8273; }
-.card-face-edition { position:relative; display:flex; align-items:center; justify-content:space-between; gap:8px; flex:none;
-  margin-bottom:clamp(8px,4cqi,14px); background:var(--face-paper); font-size:clamp(6px,3.2cqi,9px); line-height:1.1; letter-spacing:.13em; text-transform:uppercase; }
+.card-face-edition { position:relative; display:flex; align-items:center; justify-content:space-between; gap:4.4cqi; flex:none;
+  margin-bottom:4.4cqi; background:var(--face-paper); font-size:3.3cqi; line-height:1.1; letter-spacing:.13em; text-transform:uppercase; }
 .card-face-edition b { font-size:1.25em; font-weight:750; letter-spacing:.05em; }
 .card-face-edition > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .card-face-art { position:relative; display:flex; align-items:center; justify-content:center; flex:1 1 0; min-height:0;
-  border:1px solid color-mix(in srgb,var(--face-accent) 45%,var(--face-paper)); border-radius:2px;
+  border:.55cqi solid color-mix(in srgb,var(--face-accent) 45%,var(--face-paper)); border-radius:1.1cqi;
   background:color-mix(in srgb,var(--face-accent) 16%,var(--face-paper)); color:var(--face-accent); }
 .card-print-art { position:absolute; inset:0; pointer-events:none; overflow:hidden; color:var(--face-accent,#687e68); }
 .card-print-art > svg { display:block; width:100%; height:100%; opacity:calc(.2 + var(--print-density,.38)*.6); }
 .card-print-field { fill:currentColor; opacity:.18; }
 .card-print-rail { position:absolute; top:7%; left:7%; right:7%; height:1px; background:currentColor; opacity:.65; }
 .card-print-rail.is-bottom { top:auto; bottom:7%; }
-.card-face-symbol { position:relative; display:grid; place-items:center; flex:none; width:clamp(38px,34cqi,110px); aspect-ratio:1;
-  border:1px solid color-mix(in srgb,var(--face-accent) 55%,var(--face-paper)); border-radius:50%;
-  color:var(--face-ink); background:var(--face-paper); box-shadow:0 0 0 5px color-mix(in srgb,var(--face-paper) 75%,transparent); }
+.card-face-symbol { position:relative; display:grid; place-items:center; flex:none; width:34cqi; aspect-ratio:1;
+  border:.55cqi solid color-mix(in srgb,var(--face-accent) 55%,var(--face-paper)); border-radius:50%;
+  color:var(--face-ink); background:var(--face-paper); box-shadow:0 0 0 2.7cqi color-mix(in srgb,var(--face-paper) 75%,transparent); }
 .card-face-symbol > svg,.card-face-symbol > img { width:var(--face-symbol); height:var(--face-symbol); object-fit:contain; }
 .card-face-symbol > svg { stroke-width:1.35; }
 .card-face-symbol > .catalog-asset-icon { --catalog-icon-size:var(--face-symbol); }
-.card-face-copy { position:relative; display:flex; flex-direction:column; flex:0 0 auto; gap:clamp(5px,2.5cqi,9px);
-  min-width:0; padding-top:clamp(10px,5cqi,18px); background:var(--face-paper); }
+.card-face-copy { position:relative; display:flex; flex-direction:column; flex:0 0 auto; gap:2.7cqi;
+  min-width:0; padding-top:5.5cqi; background:var(--face-paper); }
 .card-face-copy strong { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere;
-  font-size:clamp(12px,8cqi,25px); font-weight:650; letter-spacing:-.03em; line-height:1.18; }
+  font-size:8cqi; font-weight:650; letter-spacing:-.03em; line-height:1.18; }
 .card-face-copy small { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere;
-  font-size:clamp(10px,4.6cqi,14px); line-height:1.6; color:var(--face-muted); }
-.card-face-detail { display:flex; align-items:center; gap:6px; border-top:1px solid color-mix(in srgb,var(--face-accent) 28%,var(--face-paper));
-  padding-top:clamp(7px,3cqi,12px); margin-top:clamp(3px,2cqi,8px); font-size:clamp(5px,2.6cqi,8px); line-height:1.3; letter-spacing:.08em; color:var(--face-muted); }
-.card-face-detail i { width:4px; height:4px; background:var(--face-accent); }
+  font-size:5.5cqi; line-height:1.6; color:var(--face-muted); }
+.card-face-detail { display:flex; align-items:center; gap:3.3cqi; border-top:.55cqi solid color-mix(in srgb,var(--face-accent) 28%,var(--face-paper));
+  padding-top:3.8cqi; margin-top:2cqi; font-size:2.75cqi; line-height:1.3; letter-spacing:.08em; color:var(--face-muted); }
+.card-face-detail i { width:2.2cqi; height:2.2cqi; background:var(--face-accent); }
 .card-face-detail > span { margin-left:auto; white-space:nowrap; }
-.card-face-badge { position:absolute; top:calc(var(--face-pad) + clamp(18px,8cqi,28px)); right:calc(var(--face-pad) + 8px); z-index:4;
-  max-width:55%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-radius:2px; padding:4px 6px;
+.card-face-badge { position:absolute; top:calc(var(--face-pad) + 10cqi); right:calc(var(--face-pad) + 4.4cqi); z-index:4;
+  max-width:55%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-radius:1.1cqi; padding:2.2cqi 3.3cqi;
   background:var(--face-paper); color:var(--face-ink); border:1px solid var(--stock-edge,#d3ccbc);
-  font-size:clamp(7px,3cqi,10px); line-height:1.2; letter-spacing:.04em; }
+  font-size:3.8cqi; line-height:1.2; letter-spacing:.04em; }
 .card-face-art.has-image { display:block; overflow:hidden; }
 .card-face-image { display:block; position:relative; width:100%; height:100%; object-fit:cover; }
+.card-face-cover { position:absolute; inset:0; display:block; width:100%; height:100%; object-fit:cover; border-radius:inherit; }
 .card-face--image .card-print-art { z-index:1; }
 .card-face--image .card-print-art > svg { display:none; }
 .card-face--image .card-print-rail { background:var(--face-paper); }
-.card-face--text .card-face-art { flex-basis:24%; align-items:center; justify-content:flex-start; padding:12px; }
-.card-face--text .card-face-symbol { width:clamp(28px,20cqi,60px); --face-symbol:clamp(18px,12cqi,34px); }
+.card-face--text .card-face-art { flex-basis:24%; align-items:center; justify-content:flex-start; padding:6.6cqi; }
+.card-face--text .card-face-symbol { width:20cqi; --face-symbol:12cqi; }
 .card-face--text .card-face-copy small { -webkit-line-clamp:3; }
 .card-face--compact .card-face-copy { text-align:center; align-items:center; }
 .card-face--compact .card-face-detail { width:100%; }
 .card-face--compact .card-face-copy small { -webkit-line-clamp:1; }
 .card-face.card-face--dark { --face-paper:#233332; --face-ink:#edf0e4; --face-muted:#b7c5b9; --face-accent:#9eb2a6; }
-.card-stock--compact .card-face { --face-pad:7px; --face-symbol:22px; }
-.card-stock--compact .card-face-edition { font-size:5px; margin-bottom:5px; }
-.card-stock--compact .card-face-symbol { width:30px; box-shadow:none; }
-.card-stock--compact .card-face-copy { padding-top:7px; gap:0; }
-.card-stock--compact .card-face-copy strong { font-size:10px; line-height:1.15; }
-.card-stock--compact .card-face-copy small,.card-stock--compact .card-face-detail,.card-stock--compact .card-face-badge { display:none; }
-@media(max-height:650px) { .card-stock--compact .card-face-edition { display:none; } .card-stock--compact .card-face-symbol { width:25px; --face-symbol:18px; } }
+
+/* Default collection print. Authored faces above retain their original treatment.
+   All measurements follow the stock width, so a preview is the same printed card. */
+.card-stock:has(> .card-face[data-design="archival"]) {
+  border-radius:5px;
+  border-color:#d3cebf;
+}
+.card-face[data-design="archival"] {
+  --face-pad:10cqi; --face-accent:#4c6d60;
+  --face-paper:var(--stock-paper,#f5f3e9); --face-ink:var(--stock-ink,#2e3d38);
+  padding:var(--face-pad);
+  background:var(--face-paper);
+}
+.card-face[data-design="archival"][data-tone="sand"] { --face-accent:#a06e50; }
+.card-face[data-design="archival"][data-tone="midnight"],
+.card-face[data-design="archival"][data-tone="sky"] { --face-accent:#536e85; }
+.card-face[data-design="archival"][data-tone="rose"] { --face-accent:#9e696b; }
+.card-face[data-design="archival"][data-tone="stone"] { --face-accent:#697367; }
+.card-face[data-design="archival"]::before {
+  opacity:.025;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23000' filter='url(%23n)' opacity='.6' d='M0 0h160v160H0z'/%3E%3C/svg%3E");
+}
+.card-face[data-design="archival"] .card-face-edition {
+  display:flex; margin:0; gap:4cqi; background:none;
+  font-size:4.1cqi; line-height:1; letter-spacing:.08em; color:var(--face-accent);
+}
+.card-face[data-design="archival"] .card-face-edition b { font-size:6cqi; font-weight:750; letter-spacing:-.04em; }
+.card-face[data-design="archival"] .card-face-art {
+  flex:1 1 0; padding:0; border:0; border-radius:0; background:none;
+}
+.card-face-illustration { display:block; width:100%; height:100%; max-height:86cqi; overflow:visible; }
+.card-plate-tint { fill:color-mix(in srgb,currentColor 32%,var(--face-paper)); }
+.card-face[data-design="archival"] .card-face-symbol {
+  width:100%; height:100%; aspect-ratio:auto; --face-symbol:49cqi;
+  color:var(--face-accent); background:none; border:0; border-radius:0; box-shadow:none;
+}
+.card-face[data-design="archival"] .card-face-symbol > svg { stroke-width:1.15; }
+.card-face[data-design="archival"] .card-face-copy {
+  flex:0 0 25cqi; justify-content:flex-end; align-items:flex-start; padding:0; gap:0; background:none; text-align:left;
+}
+.card-face[data-design="archival"] .card-face-copy strong {
+  width:100%; font-family:Georgia,"Noto Serif SC","Source Han Serif SC",SimSun,serif;
+  font-size:11.5cqi; font-weight:600; letter-spacing:-.035em; line-height:1.12;
+  text-wrap:balance;
+}

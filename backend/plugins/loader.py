@@ -136,9 +136,13 @@ def load_plugin_registry(plugin_directory: Path | None = None, *, plugin_directo
             from urllib.request import url2pathname
             direct = entry.dist.read_text('direct_url.json') if entry.dist else None
             if direct:
-                location = urlsplit(json.loads(direct)['url'])
-                if location.scheme == 'file' and Path(url2pathname(location.path)).resolve() in seen_roots:
-                    continue
+                direct = json.loads(direct)
+                location = urlsplit(direct['url'])
+                if location.scheme == 'file':
+                    source = Path(url2pathname(location.path)).resolve()
+                    if source in seen_roots or (direct.get('dir_info', {}).get('editable')
+                                               and not (source / 'pyproject.toml').is_file()):
+                        continue
             candidates.append((entry, "installed distribution"))
         except (Exception, SystemExit) as exc:
             _failure(registry, entry.name, 'installed distribution metadata', 'discovery', exc)
@@ -326,7 +330,8 @@ def load_installed_packs(registry: PluginRegistry, data_root: Path, *, strict: b
                 finally:
                     sys.dont_write_bytecode = previous_bytecode
                 descriptor = plugin.descriptor
-                dependencies = tuple(registry.owner_id("pack", d.id) for d in manifest.dependencies.packs)
+                from backend.migrations.core_essentials import pack_owner
+                dependencies = tuple(pack_owner(registry, d.id) for d in manifest.dependencies.packs)
                 if (descriptor.id != manifest.owner_id or descriptor.version != manifest.version
                         or descriptor.plugin_api_version != manifest.compatibility.plugin_api
                         or set(descriptor.requires_plugins) != set(dependencies)

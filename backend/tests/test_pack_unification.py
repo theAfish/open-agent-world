@@ -65,6 +65,16 @@ def test_schema3_install_restart_owner_frontend_and_inventory(tmp_path):
     assert row['id'] == 'test.greeter-release'
 
 
+def test_schema3_presentation_cannot_advertise_an_unprovided_pack():
+    files = dict(inspect_archive(unified()).files)
+    files.pop('checksums.json')
+    manifest = json.loads(files['manifest.json'])
+    manifest['presentation'] = {'id': 'other.publisher.pack', 'name': 'Other Pack', 'packaging': 'premium'}
+    files['manifest.json'] = json.dumps(manifest).encode()
+    with pytest.raises(ValueError, match='provided Schema 3 Pack'):
+        inspect_archive(artifact(files=files))
+
+
 def test_failed_worker_preparation_preserves_previous_selection(tmp_path):
     manager = PackInstallationManager(tmp_path)
     manager.install(unified())

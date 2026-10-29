@@ -68,46 +68,28 @@ to include bundled Packs. `--runtime adk` or `--runtime litellm` selects optiona
 SDK preparation. Portable Python flags can be passed through the PowerShell
 wrapper, for example `./scripts/setup.ps1 --runtime adk --skip-build`.
 
-Ordinary `dev` launches only check the environment and build source assets; they do
-not run uv sync, editable installs, setup hooks, or npm ci. Missing or stale
-dependencies produce an error pointing back to setup. The launchers and `npm run dev`
-share one frontend preparation step; the launchers do not repeat npm's `predev` hook.
-SDK and Pack builds reuse successful local receipts when their source, build tools,
-lockfiles, installed dependency manifests and complete output trees are unchanged.
-Changed Packs rebuild independently; missing/damaged assets and failed builds cannot
-reuse a receipt. Source edits still rebuild the affected artifact and reload the page.
-Receipts live under `node_modules/.cache/oaw` and are never shipped in Pack artifacts.
-To force a rebuild, use `npm --prefix frontend run build:pack-sdk -- --force` and
-`npm --prefix frontend run build:packs -- --force` (neither command installs packages).
-The Windows research launcher also reuses the complete built frontend through
-`node frontend/scripts/build-source-frontend.mjs`; host source/configuration, Pack
-sources and copied artifacts invalidate it. `start.ps1` / `start.sh` simply serve
-the existing production build. Desktop packaging and CI retain their explicit
-installation steps; those commands are not ordinary application launchers.
-Offline entrypoint tests run with `python scripts/test-source-launchers.py` and
-`node --test frontend/scripts/source-startup.test.mjs`, including a Windows/Linux/macOS
-CI matrix. These fixture tests do not establish full native application acceptance.
-Setup and dev both accept Node 22+. The current `matterviz` dependency declares
-Node 24+, so Node 22 displays a compatibility notice instead of blocking setup.
-This does not change the dependency's own engine declaration.
+Ordinary `dev` launches check dependencies and rebuild changed source assets. They
+do not install packages. If dependencies are missing or stale, rerun setup for
+the same profile. To force an SDK or Pack rebuild without reinstalling, use:
+
+```sh
+npm --prefix frontend run build:pack-sdk -- --force
+npm --prefix frontend run build:packs -- --force
+```
+
+`start.ps1` / `start.sh` serve the existing production build. Setup and dev accept
+Node 22+, but the bundled `matterviz` dependency declares Node 24+; use Node 24
+when developing those Packs.
 
 Keep `.open-agent-world` for application state: development profiles, their Pack
 environments, backups, and launcher logs. It is not a disposable test directory;
 partially deleting a profile can remove its identity marker or prepared runtimes.
 Use the F3 reset controls to reset development data with a backup.
 
-Put ad hoc test worlds, pytest `--basetemp` directories, and diagnostic exports
-under `.tmp/`, or use the operating system's temporary directory. The standard
-E2E runner uses `.tmp/playwright/data`; Playwright screenshots, downloads, and
-traces go through `testInfo.outputPath(...)` into `.tmp/playwright/results`.
-Use the default Playwright browser cache rather than storing browser downloads
-inside `.open-agent-world`.
-
-Setup and plugin preparation use the persistent `backend/.venv` interpreter.
-The bare setup command prepares production data for
-`start`; development Pack environments belong to the explicitly selected profile.
-
-The mock runtime is for deterministic debugging; it is not a language model. The named development profile keeps these experiments separate from your normal app data. Reuse the same profile to keep your test world.
+Put disposable test worlds and diagnostic exports under `.tmp/` or the operating
+system's temporary directory. Keep the same named profile when you want to retain
+your development world. The mock runtime provides deterministic debugging without
+model credentials; it is not a language model.
 
 ## Locate the public APIs
 
@@ -118,7 +100,7 @@ The mock runtime is for deterministic debugging; it is not a language model. The
 
 Application internals are useful for debugging the host, but plugin implementation should use these public imports. Integration tests can use host services to verify discovery and persistence.
 
-Continue with [Your first plugin](first-plugin.md). For host development and broader checks, see [Run from source](../getting-started.md#development-and-verification).
+Continue with [the complete Card App tutorial](card-app.md). For host development and broader checks, see [Run from source](../getting-started.md#development-and-verification).
 
 ## Setup results
 

@@ -8,7 +8,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from backend.config import Settings
-from backend.deployments import PREFIX, PublishRequest, configuration_digest, release_spec
+from backend.deployments import PREFIX, PublishRequest, configuration_digest, release_spec, published_workspaces
 from backend.legions.models import LegionBlueprint, LegionCapture, LegionInstantiate, LegionRecord
 from backend.storage_location import LOCK, file_lock
 from .configuration import write_private_json
@@ -35,8 +35,8 @@ def validate_template(template) -> tuple[dict, LegionBlueprint]:
     """Validate the complete import before creating any user database or files."""
     from backend.security.model_connections import CatalogEdit, ModelCatalog
     fields = {"version", "name", "source_release_id", "root_key", "created_at",
-              "allow_terminal", "blueprint", "model_connections"}
-    required = fields - {"model_connections", "allow_terminal"}
+              "root_keys", "allow_terminal", "blueprint", "model_connections"}
+    required = fields - {"model_connections", "allow_terminal", "root_keys"}
     if (not isinstance(template, dict) or set(template) - fields or not required <= set(template)
             or type(template.get("version")) is not int or template["version"] != 1):
         raise ValueError("Unsupported or incomplete hosted template")
@@ -54,12 +54,15 @@ def validate_template(template) -> tuple[dict, LegionBlueprint]:
     if type(blueprint.format_version) is not int or blueprint.format_version != 1 or not 1 <= len(blueprint.nodes) <= 101:
         raise ValueError("Unsupported hosted blueprint version or size")
     nodes = {node.key: node for node in blueprint.nodes}
-    root_key = template["root_key"]
-    if root_key not in nodes or nodes[root_key].type != "legion" or nodes[root_key].parent_key or nodes[root_key].owner_key:
+    root_keys = template.get("root_keys", [template["root_key"]])
+    if (not isinstance(root_keys, list) or not root_keys or len(root_keys) > 100
+            or any(not isinstance(key, str) for key in root_keys)
+            or len(set(root_keys)) != len(root_keys) or root_keys[0] != template["root_key"]
+            or any(key not in nodes or nodes[key].type != "legion" for key in root_keys)):
         raise ValueError("Template must identify its published Legion root")
     for node in blueprint.nodes:
         parent = node
-        while parent.key != root_key:
+        while parent.key not in root_keys:
             parent = nodes.get(parent.owner_key or parent.parent_key)
             if parent is None:
                 raise ValueError("Hosted template contains nodes outside the published Legion")
@@ -115,9 +118,9 @@ async def capture_template(services, release_id: str) -> dict:
                 if release["configuration_digest"] != configuration_digest(db):
                     raise ValueError("Configuration changed; publish a new release before deploying")
                 if db.execute("SELECT 1 FROM runs WHERE status IN ('created','running','waiting') LIMIT 1").fetchone():
-                    raise ValueError("Finish or stop active runs in the engineering workspace before deploying")
-            group = services.world.get_card(release["legion_id"])
-            nodes = [group, *services.world.owned_descendants(group.id)]
+                    raise ValueError("Finish or stop active runs before exporting")
+            groups = [services.world.get_card(workspace["legion_id"]) for workspace in published_workspaces(release)]
+            nodes = list({node.id: node for group in groups for node in [group, *services.world.owned_descendants(group.id)]}.values())
             ids = {node.id for node in nodes}
             if any((edge.source in ids) != (edge.target in ids) for edge in services.world.list_edges()):
                 raise ValueError("Include external dependencies inside the published Legion before deploying")
@@ -142,7 +145,8 @@ async def capture_template(services, release_id: str) -> dict:
             for connection in models["connections"]:
                 connection.pop("api_key_configured", None)
             value = {"version": 1, "name": release["name"], "source_release_id": release_id,
-                     "root_key": node_keys[group.id], "created_at": datetime.now(UTC).isoformat(),
+                     "root_key": node_keys[groups[0].id], "root_keys": [node_keys[group.id] for group in groups],
+                     "created_at": datetime.now(UTC).isoformat(),
                      "allow_terminal": any("terminal" in operations for operations in release["permissions"].values()),
                      "blueprint": blueprint.model_dump(mode="json"), "model_connections": models}
             validate_template(value)
@@ -180,7 +184,7 @@ async def initialize_runtime(config: WorkerConfig, template_path: Path, *, servi
                 with services.database.transaction(immediate=True) as db:
                     write_setting(db, "model_connections", clean)
             manifest = release_spec(services, PublishRequest(
-                legion_id=instance.node_ids[template["root_key"]], name=template["name"],
+                legion_ids=[instance.node_ids[key] for key in template.get("root_keys", [template["root_key"]])], name=template["name"],
                 allow_terminal=template.get("allow_terminal", False)))
             manifest.update(schema_version=2, auth_mode="hosted", source_release_id=template["source_release_id"])
             manifest["runtime_settings"] = {"agent_runtime": config.agent_runtime, "sandbox_runtime": None, "plugin_directories": []}

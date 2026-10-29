@@ -7,8 +7,8 @@ Open Agent World is a spatial capability system. The graph is not a workflow dia
 The application uses React, TypeScript, Vite, React Flow, and Zustand in the frontend; FastAPI, SQLite, and registered Agent runtime providers in the backend. Google ADK is the default provider.
 
 Knowledge and data relationship maps share Sigma and Graphology infrastructure;
-the world editor retains React Flow. See the [graph audit and architecture](graph-architecture.md)
-for the migration matrix, data ownership, interaction and validation boundaries.
+the world editor retains React Flow. See the [graph architecture](graph-architecture.md)
+for data ownership, interaction and validation boundaries.
 
 ## Runtime boundaries
 

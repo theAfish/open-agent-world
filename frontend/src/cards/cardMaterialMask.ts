@@ -24,6 +24,7 @@ export function createMaterialMask(host: HTMLElement, layer: HTMLElement, width:
   const make=() => { const c=document.createElement('canvas'); c.width=width; c.height=height; return c; };
   const regions=make(), protection=make();
   const ctx=regions.getContext('2d')!, protect=protection.getContext('2d')!;
+  const collectionFace=host.querySelector(':scope > .card-face[data-design="archival"]');
   const w=Math.max(1,layer.offsetWidth), h=Math.max(1,layer.offsetHeight), origin=layoutOrigin(layer);
   for (const context of [ctx,protect]) {
     context.scale(width/w,height/h); context.fillStyle='#000'; context.fillRect(0,0,w,h);
@@ -39,16 +40,18 @@ export function createMaterialMask(host: HTMLElement, layer: HTMLElement, width:
   // Additive channels allow overlapping semantic regions without erasing one another.
   ctx.globalCompositeOperation='lighter';
   select(ART).forEach(e => rect(ctx,e,'#f00'));
-  if (host.matches('.factory-artwork') && !host.querySelector(ART)) { ctx.fillStyle='#f00'; ctx.fillRect(0,0,w,h); }
+  // Collection stock is laminated edge to edge; its transparent foreground ink
+  // already sits above the film. Authored faces retain their selected regions.
+  if (collectionFace || (host.matches('.factory-artwork') && !host.querySelector(ART))) { ctx.fillStyle='#f00'; ctx.fillRect(0,0,w,h); }
   select(FRAME).forEach(e => rect(ctx,e,'#0f0'));
   select(ACCENT).forEach(e => rect(ctx,e,'#00f'));
   const radius=parseFloat(getComputedStyle(host).borderTopLeftRadius)||0;
   ctx.beginPath(); ctx.roundRect(.75,.75,Math.max(0,w-1.5),Math.max(0,h-1.5),Math.max(0,radius-.75));
   ctx.strokeStyle='#0f0'; ctx.lineWidth=1; ctx.stroke();
-  // Protection always wins, independent of region order or material parameters.
+  // Backed print excludes coating; transparent collection ink stays above it.
   // Padding covers antialiased edges and texture filtering, including at thumbnail size.
   const factory = host.matches('.factory-artwork');
-  select(PROTECTED).filter(e => !factory || !e.closest('[data-face-element]')).forEach(e => rect(protect,e,'#fff',Math.max(2,w/width*2)));
+  select(PROTECTED).filter(e => !collectionFace?.contains(e) && (!factory || !e.closest('[data-face-element]'))).forEach(e => rect(protect,e,'#fff',Math.max(2,w/width*2)));
   if (factory) paintFactoryInkMask(host,layer,protect);
   select(CONTROLS).filter(e => {
     const style=getComputedStyle(e);

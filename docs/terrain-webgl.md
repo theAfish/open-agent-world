@@ -1,10 +1,8 @@
 # WebGL2 terrain background
 
-The world background uses one native WebGL2 canvas under React Flow. The legacy
-SVG renderer, its path cache and the Canvas2D experiment have been removed. Cards,
-edges, selection, hit testing, wheel normalization and viewport persistence remain
-owned by React Flow and the existing canvas controllers. No new runtime dependency
-is required.
+The world background uses one native WebGL2 canvas under React Flow. React Flow
+and the canvas controllers own cards, edges, selection, hit testing, wheel
+normalization and viewport persistence.
 
 ## Rendering and resource ownership
 
@@ -13,9 +11,8 @@ camera store. Camera updates schedule one animation frame; they do not set React
 state or write background DOM styles. `TerrainRendererWebGL` draws a procedural
 world-anchored dot grid, then the visible terrain tile quads.
 
-The terrain worker only returns scalar tiles, sampling the original seeded field
-without marching squares or SVG path construction. Each 2048-world-unit tile
-retains the existing resolution of 56 cells and adds a one-sample halo:
+The terrain worker returns scalar tiles sampled from a seeded field. Each
+2048-world-unit tile has a resolution of 56 cells and a one-sample halo:
 a 59 x 59 `Float32Array`. The worker
 transfers a copy while retaining its bounded cache. Adjacent halos sample the same
 world coordinates, including negative coordinates.
@@ -23,8 +20,7 @@ world coordinates, including negative coordinates.
 Each tile becomes one `R32F` texture. The fragment shader interpolates the field,
 fills elevation bands and computes contour coverage from screen derivatives.
 Contour widths remain 1.15 / 1.65 CSS pixels throughout a zoom gesture, including
-DPR compensation. Colors and opacity use the existing theme tokens. The accepted
-WebGL visual style is retained; it does not reproduce every smoothed SVG path.
+DPR compensation. Colors and opacity use the theme tokens.
 Grid density changes continuously between nested world-coordinate dot lattices.
 
 Panning and zooming only update camera/draw uniforms for resident tiles. Crossing
@@ -50,8 +46,7 @@ remain available. There is no secondary terrain renderer to mount or rasterize.
 
 ## Diagnostics
 
-Renderer selection by URL or `VITE_TERRAIN_RENDERER` has been removed. Old
-`terrainRenderer` query parameters are ignored. The canvas exposes
+URL parameters and `VITE_TERRAIN_RENDERER` do not select a renderer. The canvas exposes
 `data-terrain-status` (`loading`, `ready`, `context-lost`, `unavailable`) and
 `data-terrain-error` on failures. No ordinary user-facing configuration is needed.
 
@@ -73,9 +68,8 @@ node scripts/run-e2e.mjs e2e/terrain-webgl.spec.ts
 
 The benchmark starts an isolated backend on 8028 and frontend on 5188, retains
 its data and reports under `.outputs/terrain-webgl-<timestamp>`, and never changes
-the user's world. Ports and browser channel are configurable. It uses the same
-1600 x 1000 viewport, pan trajectory and wheel sequence as the original empty
-canvas investigation. It now runs WebGL-only repetitions. Separate trace runs
+the user's world. Ports and browser channel are configurable. It uses a
+1600 x 1000 viewport with repeatable pan and wheel sequences. Separate trace runs
 record raster activity; traced timing is not mixed into ordinary frame timings.
 
 Scenes include near and wide zoom, DPR 2, dark theme, 48 real text cards, and
@@ -84,15 +78,7 @@ streams are held fixed during measurement. Frame intervals are `requestAnimation
 observations, not measured display presentation times. GPU process CPU is reported
 as a percentage of one CPU core, not hardware GPU utilization.
 
-The focused Playwright tests also cover card dragging/persistence, cursor-anchored
-zoom, texture reuse, live theme/seed changes, resize, DPR, cache eviction, forced
-context loss/restoration, procedural grid anchoring, and interaction without WebGL2. CDP's DPR
-override does not emit a monitor-change event in headless Edge, so that test
-explicitly dispatches resize after changing DPR.
-
 ## Related reading
 
 Read [canvas control](canvas-control.md) for camera ownership and
 [canvas performance](canvas-performance.md) for profiling guidance.
-The [terrain measurement record](internal/performance/terrain-webgl.md) preserves
-dated comparisons and their validation boundaries in the repository.

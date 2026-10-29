@@ -1,6 +1,7 @@
 # Hello World plugin
 
-The smallest card used in [Your first plugin](../../../docs/developers/first-plugin.md).
+A small Python-only configuration card. For the continuous Python/React workflow,
+use [the Card App tutorial](../../../docs/developers/card-app.md).
 The host supplies configuration editing and persistence. There are no Agent tools,
 custom UI, external resources, or lifecycle callbacks in this example.
 
@@ -12,10 +13,11 @@ From the repository root, copy this package into an immediate child of `plugins/
 
 ```powershell
 Copy-Item -Recurse examples/plugins/hello_world plugins/hello_world
+./scripts/setup.ps1 -Profile plugin-tutorial -SkipBuild -PluginPath ./plugins/hello_world
 ./scripts/dev.ps1 -AgentRuntime mock -Profile plugin-tutorial
 ```
 
-On Linux/macOS: `cp -R examples/plugins/hello_world plugins/hello_world`, then
+On Linux/macOS: `cp -R examples/plugins/hello_world plugins/hello_world`, run setup with `--profile plugin-tutorial --skip-build --plugin-path plugins/hello_world`, then
 `python3 scripts/dev.py --agent-runtime core.mock --profile plugin-tutorial`.
 
 Open **Pack & Card Library**, open **Hello World**, add **Hello card** to your

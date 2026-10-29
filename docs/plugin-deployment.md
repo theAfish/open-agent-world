@@ -1,7 +1,5 @@
 # Plugin deployment
 
-**English** | [简体中文](plugin-deployment.zh-CN.md)
-
 Use this contract to expose an existing plugin view in a
 [published application](deployment.md). Backend-only plugins keep their nodes,
 connections, configuration, and runtime in the copied profile. A public custom

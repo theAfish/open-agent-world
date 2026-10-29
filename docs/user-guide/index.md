@@ -1,31 +1,19 @@
 # Use Open Agent World
 
-**English** | [简体中文](index.zh-CN.md)
-
-OAW is a canvas for working with AI agents. Put an Agent next to a document, connect them, and ask it to help. Add conversations, tools, and teammates as your work grows.
-
-## Start here
+Use an Agent to read a document and help with a task. You need a model connection
+for its reply; the first exercise needs no Sandbox or programming.
 
 1. [Install OAW](../install.md).
-2. [Add your model connection](models.md).
-3. [Build your first team](first-team.md).
+2. [Connect a model](models.md).
+3. [Build your first team](first-team.md): an Agent, a Text card and a Conversation.
 
-You can explore cards and the canvas before adding a model. Receiving a real Agent response requires access to a model service.
+After that, learn [cards and connections](canvas.md), [Packs and cards](plugins.md),
+or [make cards in Card Factory](../card-factory.md). To share a configured team,
+[export a Legion as a Pack](../creator-packs.md).
 
-## Everyday tasks
+Use **Help (?) → Tutorial** to replay the interactive canvas tutorial. It also
+covers Sandbox, Minister and Legion workspaces; you can configure a model later
+and leave Sandbox stopped. **Help → Card tutorials & docs** opens tutorials supplied
+by installed cards. **Help → Documentation** opens this manual offline.
 
-| I want to… | Read |
-| --- | --- |
-| Move around, add cards, or make a connection | [Cards and connections](canvas.md) |
-| Choose a model or update a saved key | [Models and settings](models.md) |
-| Find tools and add cards to the tray | [Plugins and packs](plugins.md) |
-| Fix an empty tray or an Agent that cannot respond | [Troubleshooting](troubleshooting.md) |
-
-**Help (?) → Tutorial** replays the interactive tutorial on your real canvas. Your cards remain available after the tutorial.
-
-**Help → Documentation** opens the built-in manual. Choose a topic in the left
-directory or search its text, then read the details on the right. Pages and images
-ship with your version of OAW and work without an internet connection. Links to
-other manual pages stay in the panel; links marked with an external-link icon
-open online and require internet access. Status-check repair guides and the
-installation guide open in the same reader.
+If something fails, start with [Troubleshooting](troubleshooting.md).

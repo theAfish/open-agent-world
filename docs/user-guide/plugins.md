@@ -19,13 +19,11 @@ Availability depends on your installed build and the Pack's requirements.
 
 | Pack | What you can do |
 | --- | --- |
-| Task Board | Track tasks and dependencies with connected Agents |
-| Skill Toolboxes | Give Agents reusable skills and instructions |
-| Agent Barracks | Prepare Agents with equipment and summon them when needed |
+| Core essentials | Agents, resources and workspaces, plus [Task Board](../task-board.md), [Skill Toolboxes](../skill-toolboxes.md) and [Agent Barracks](../agent-barracks.md) |
 | Structure Viewer | View supported structure files opened in connected cards |
 | MatCreator | Work with a materials research team and task workflow |
 | SQLite | Keep a database card and grant scoped database operations |
-| Codex | Use an alternative Agent runtime, when its requirements are installed |
+| Codex (optional install) | Use a local Codex runtime after installing its Pack and configuring Codex |
 
 ## Install a local Pack
 
@@ -61,8 +59,7 @@ Open it, add its cards to your Deck and place them in your World.
 **Update available** offers an explicit **Update** action; OAW does not update
 Packs automatically. If the Store is unavailable, use **Retry** later. Your
 existing Packs, Cards, Deck and World keep working. OAW connects to the official
-Marketplace at `https://open-agent-world.space` automatically. Development host
-overrides are described in [Pack Store Client V0](../pack-store.md).
+Marketplace at `https://open-agent-world.space` automatically. Install required dependency Packs first if the installation plan reports them.
 
 ## Disable or remove a Pack
 
@@ -78,4 +75,5 @@ An inactive version can be removed after it is neither selected nor loaded.
 Core functionality stays enabled. Source, bundled and downloaded Packs share
 the same enrollment and cleanup checks.
 
-To create your own, see [Pack installation and distribution](../pack-distribution.md).
+Create cards without code in [Card Factory](../card-factory.md), or build a
+Python/React Card App with the [developer guide](../developers/index.md).

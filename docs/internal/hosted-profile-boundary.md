@@ -1,5 +1,8 @@
 # Hosted profile boundary (Issue #38, first POC slice)
 
+> Historical record, not current product or deployment instructions. Verify against the current source before use.
+
+
 Audit at `b218fa5`: the Sandbox Card already calls host APIs, and
 `SandboxManager` already persists a pinned backend per Card. No second manager
 is needed. `SandboxBackend.file_operation` is the portable file boundary;

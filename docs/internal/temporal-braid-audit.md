@@ -1,5 +1,8 @@
 # Temporal Braid: model audit and implementation
 
+> Historical record, not current product or deployment instructions. Verify against the current source before use.
+
+
 Date: 2026-10-15. Scope: OAW's built-in Agent graph and the existing execution-source
 contract. This supersedes the presentation mapping in the October 13 audit;
 provider scheduling, persistence and authorization remain authoritative.

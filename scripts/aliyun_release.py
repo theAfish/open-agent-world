@@ -138,7 +138,8 @@ def test_scope(changed, *, routine=False):
         if name.startswith(('backend/hosting/', 'backend/security/', 'backend/cloud/')):
             backend.update(BACKEND_TESTS)
         parts = Path(name).parts
-        if not routine and len(parts) > 2 and parts[0] == 'plugins':
+        if (not routine and len(parts) > 2 and parts[0] == 'plugins'
+                and Path(name).suffix in {'.py', '.toml', '.json'} and parts[2] != 'frontend'):
             backend.add('plugins/' + parts[1] + '/tests')
     if any(p.startswith('plugins/knowledge_base/frontend/') for p in changed):
         frontend.add('src/plugins/KnowledgeWorkspace.test.tsx')
@@ -197,6 +198,8 @@ def build(cfg, tree, base, args):
     tests, frontend = test_scope(changed, routine=routine)
     tests.update([*cfg.get('backend_tests', []), *args.pytest_path])
     tests = sorted(p for p in tests if (tree / p.split('::')[0]).exists())
+    tests = [p for p in tests if not any((tree / parent).is_dir() and p.startswith(parent + '/')
+                                       for parent in tests)]
     if not tests and any(p.endswith('.py') for p in changed):
         raise ValueError('Python changes require relevant tests; add --pytest-path')
     print(json.dumps({'stage': 'testing', 'commit': commit, 'pytest_paths': tests}), flush=True)

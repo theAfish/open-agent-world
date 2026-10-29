@@ -284,14 +284,14 @@ test("equipped Summoning skill uses its own connector and Barracks tests create 
   await page.getByRole('button', { name: 'Open Pack and Card Library', exact: true }).click();
   const library = page.getByRole('dialog', { name: 'Pack & Card Library', exact: true });
   await library.getByRole('button', { name: /^Packs/ }).click();
-  const pack = library.getByRole('article', { name: 'Agent Barracks', exact: true });
+  const pack = library.getByRole('article', { name: 'Core essentials', exact: true });
   await expect(pack).toBeVisible();
   if (!(await pack.getAttribute('class'))?.includes('is-opened')) {
     await pack.getByRole('button').click();
     await expect(pack).toHaveClass(/is-opened/);
   }
   await library.getByRole('button', { name: /^Cards/ }).click();
-  await library.getByRole('combobox', { name: 'Source pack', exact: true }).selectOption({ label: 'Agent Barracks' });
+  await library.getByRole('combobox', { name: 'Source pack', exact: true }).selectOption({ label: 'Core essentials' });
   // Card Library derives categories from the same deck_label metadata that
   // classified Summoning under Tools in the original default deck UI.
   await library.getByRole('combobox', { name: 'Card category', exact: true }).selectOption('Tools');

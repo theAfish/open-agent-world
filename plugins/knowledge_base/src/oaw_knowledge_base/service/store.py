@@ -1,8 +1,8 @@
 """One store directory, opened in this process, shared by every front door.
 
-A store is a folder holding ``knowledge.db`` (documents, records, drafts and the
-graph, all in SQLite) and a ``settings/`` folder with one small JSON file per
-collection. It is the standalone equivalent of an OAW card's storage directory, and
+A store is a folder holding ``knowledge.db`` (projects, records, projections and the
+graph, all in SQLite) and one ``settings.json`` file.
+It is the standalone equivalent of an OAW card's storage directory, and
 it is deliberately the same shape: the service calls the very same handlers the card
 does, with a :class:`~oaw_knowledge_base.context.KnowledgeContext` in place of OAW's
 ``NodeResourceContext``.
@@ -20,23 +20,19 @@ Two rules live here because they are about the file, not about any one transport
 from __future__ import annotations
 
 import errno
-import hashlib
 import json
 import os
-import re
 import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
 from ..client import close_client, open_client
-from ..context import JsonSettings, KnowledgeContext, PinnedSettings
+from ..context import JsonSettings, KnowledgeContext
 from ..operations import BY_NAME
 
 LOCK_NAME = ".kb-service.lock"
 STORE_ENV = "KB_SERVICE_STORE"
-DEFAULT_COLLECTION = "default"
-UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def default_store() -> Path:
@@ -106,21 +102,13 @@ def hold_lock(store, url=None):
             pass
 
 
-def settings_file(store, collection):
-    """A stable file name per collection: readable prefix, hash to keep it unique."""
-    digest = hashlib.sha256(collection.encode("utf-8")).hexdigest()[:8]
-    stem = UNSAFE.sub("_", collection).strip("_").lower()[:40] or "collection"
-    return Path(store) / "settings" / f"{stem}-{digest}.json"
-
-
 class Store:
-    """An open store: one MKB client, one settings file per collection."""
+    """An open knowledge base: projects share one client and settings authority."""
 
     def __init__(self, path, *, key="service"):
         self.path = Path(path).expanduser()
         self.key = key
-        self._settings: dict[str, JsonSettings] = {}
-        self._settings_lock = threading.Lock()
+        self._settings = JsonSettings(self.path / "settings.json")
         # Mirrors OAW's global node mutation lock, for the same reason.
         self._mutation = threading.Lock()
 
@@ -128,31 +116,16 @@ class Store:
         """Materialize the database now so a caller sees a bad store immediately."""
         return open_client(self.key, self.path)
 
-    def settings(self, collection):
-        with self._settings_lock:
-            existing = self._settings.get(collection)
-            if existing is None:
-                existing = JsonSettings(settings_file(self.path, collection))
-                self._settings[collection] = existing
-            return existing
-
-    def context(self, collection, *, actor=None, confirmed=False):
-        state = PinnedSettings(self.settings(collection), {"collection_name": collection})
-        return KnowledgeContext(node_id=self.key, storage_path=self.path, state=state,
+    def context(self, *, actor=None, confirmed=False):
+        return KnowledgeContext(node_id=self.key, storage_path=self.path, state=self._settings,
                                 actor_id=actor, confirmed=confirmed)
 
-    def run(self, operation, arguments, *, collection=DEFAULT_COLLECTION, actor=None,
-            confirmed=False):
-        """Run one named operation, one at a time, against one collection."""
+    def run(self, operation, arguments, *, actor=None, confirmed=False):
+        """Run one named operation, one at a time, against this knowledge base."""
         handler = BY_NAME[operation].handler
-        context = self.context(collection, actor=actor, confirmed=confirmed)
+        context = self.context(actor=actor, confirmed=confirmed)
         with self._mutation:
             return handler(context, arguments or {})
-
-    def collections(self):
-        kb = self.open()
-        return [{"id": str(item.id), "name": item.name}
-                for item in kb.collections.list(limit=100)]
 
     def close(self):
         close_client(self.key)

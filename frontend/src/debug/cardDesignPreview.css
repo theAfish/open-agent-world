@@ -21,7 +21,7 @@
 .design-card-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: clamp(14px, 2vw, 28px); }
 .design-card-grid > figure { margin: 0; min-width: 0; }
 .design-card-grid > figure > figcaption { margin-bottom: 13px; font-size: 9px; letter-spacing: .12em; color: var(--ink-soft); }
-.design-example.card-stock { width: 100%; aspect-ratio: 0.85; }
+.design-example.card-stock { width: 100%; aspect-ratio: 5 / 7; }
 .design-example .card-face { height: auto; }
 .design-card-grid.is-compact .design-example { width: var(--compact-card-width); height: var(--compact-card-height); max-width: 100%; }
 .design-foundations { margin-top: 42px; display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 18px; }

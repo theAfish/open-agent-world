@@ -1,10 +1,12 @@
-import { t } from "@oaw/plugin-api";
+import { Modal, t } from "@oaw/plugin-api";
+import { useState } from "react";
+import { Expand } from "lucide-react";
 import type { ReactNode } from "react";
 
 /** A JSON Schema property, as far as the table needs to read it. */
 export type SchemaProperty = { type?: string | string[]; enum?: unknown[]; description?: string;
   title?: string; unit?: string; items?: SchemaProperty; properties?: Record<string, SchemaProperty> };
-export type Definition = { properties?: Record<string, SchemaProperty>; required?: string[] };
+export type Definition = { properties?: Record<string, SchemaProperty>; required?: string[]; items?: SchemaProperty };
 export type Validation = { valid?: boolean; errors?: string[]; missing?: string[] } | null | undefined;
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -38,30 +40,48 @@ export const flattenValues = (value: unknown, into: string[] = []): string[] => 
 const propertyLabel = (key: string, property?: SchemaProperty) =>
   property?.unit ? `${property.title || key} (${property.unit})` : (property?.title || key);
 
-/** One value, rendered as richly as its shape allows: primitives inline, arrays of
- * primitives as chips, arrays of objects as a nested table (columns = union of keys),
- * objects as a nested key/value table. */
-function Value({ value, property, depth = 0 }: { value: unknown; property?: SchemaProperty; depth?: number }) {
+type InspectedValue = { label: string; value: unknown; description?: string };
+type Inspect = (value: InspectedValue) => void;
+
+/** Cells stay small; the original, unformatted value is available on hover and click. */
+function CompactValue({ value, property, label, onInspect }: { value: unknown; property?: SchemaProperty; label: string; onInspect: Inspect }) {
+  const full = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  return <button type="button" className="knowledge-cell-preview" title={full} aria-label={t("View {v0}", { v0: label })}
+    onClick={() => onInspect({ value, label, description: property?.description })}><span>{formatCell(value)}</span><Expand size={12} aria-hidden="true" /></button>;
+}
+
+/** Each array has its own scroll boundary; nested content never expands a table cell. */
+function ArrayTable({ value, property, label, onInspect }: { value: Record<string, unknown>[]; property?: SchemaProperty; label: string; onInspect: Inspect }) {
+  const itemProperties = property?.items?.properties ?? {};
+  const columns = [...Object.keys(itemProperties), ...Array.from(new Set(value.flatMap(item => Object.keys(item)))).filter(key => !(key in itemProperties))];
+  return <div className="knowledge-kv-scroll" role="region" aria-label={t("{v0} table", { v0: label })} tabIndex={0}>
+    <table className="knowledge-kv-table knowledge-array-table" style={{ width: Math.max(1, columns.length) * 180 + 46 }}>
+      <colgroup><col style={{ width: 46 }} />{columns.map(column => <col key={column} />)}</colgroup>
+      <thead><tr><th scope="col">#</th>{columns.map(column => <th key={column} scope="col" title={[propertyLabel(column, itemProperties[column]), itemProperties[column]?.description].filter(Boolean).join("\n")}>
+        <span>{propertyLabel(column, itemProperties[column])}</span></th>)}</tr></thead>
+      <tbody>{value.map((item, index) => <tr key={index}>
+        <th scope="row" className="knowledge-kv-index"><button type="button" aria-label={t("View row {v0}", { v0: index + 1 })} onClick={() => onInspect({ label: `${label} · ${index + 1}`, value: item })}>{index + 1}</button></th>
+        {columns.map(column => <td key={column} className={typeof item[column] === "number" ? "knowledge-kv-number" : undefined}>
+          <Value value={item[column]} property={itemProperties[column]} label={`${label} · ${index + 1} · ${propertyLabel(column, itemProperties[column])}`} compact onInspect={onInspect} />
+        </td>)}
+      </tr>)}</tbody>
+    </table>
+  </div>;
+}
+
+function Value({ value, property, label, onInspect, compact = false, depth = 0 }: { value: unknown; property?: SchemaProperty; label: string; onInspect: Inspect; compact?: boolean; depth?: number }) {
   if (value === undefined || value === null || value === "") return <span className="knowledge-kv-empty">—</span>;
   if (typeof value === "boolean") return <span className={`knowledge-kv-bool is-${value}`}>{value ? "✓ true" : "✗ false"}</span>;
-  if (typeof value === "number") return <span className="knowledge-kv-number">{formatCell(value)}</span>;
+  if (typeof value === "number") return <span className="knowledge-kv-number" title={String(value)}>{formatCell(value)}</span>;
+  if (compact || (typeof value === "string" && (value.length > 160 || value.includes("\n")))) return <CompactValue value={value} property={property} label={label} onInspect={onInspect} />;
   if (typeof value === "string") return <span className="knowledge-kv-text">{value}</span>;
   if (Array.isArray(value)) {
     if (!value.length) return <span className="knowledge-kv-empty">{t("empty list")}</span>;
+    if (value.every(isPrimitive) && (value.length > 4 || formatCell(value).length > 160)) return <CompactValue value={value} property={property} label={label} onInspect={onInspect} />;
     if (value.every(isPrimitive)) return <span className="knowledge-chips">
       {value.map((item, index) => <span key={index} className="knowledge-chip">{formatCell(item)}</span>)}</span>;
-    if (value.every(isObject) && depth < 3) {
-      const columns = Array.from(new Set(value.flatMap(item => Object.keys(item as object))));
-      const itemProperties = property?.items?.properties ?? {};
-      return <div className="knowledge-kv-scroll"><table className="knowledge-kv-table knowledge-kv-nested">
-        <thead><tr><th scope="col">#</th>{columns.map(column => <th key={column} scope="col">{propertyLabel(column, itemProperties[column])}</th>)}</tr></thead>
-        <tbody>{(value as Record<string, unknown>[]).map((item, index) => <tr key={index}>
-          <td className="knowledge-kv-index">{index + 1}</td>
-          {columns.map(column => <td key={column}><Value value={item[column]} property={itemProperties[column]} depth={depth + 1} /></td>)}
-        </tr>)}</tbody>
-      </table></div>;
-    }
-    return <pre className="knowledge-kv-json">{JSON.stringify(value, null, 2)}</pre>;
+    if (value.every(isObject) && depth < 3) return <ArrayTable value={value} property={property} label={label} onInspect={onInspect} />;
+    return <CompactValue value={value} property={property} label={label} onInspect={onInspect} />;
   }
   if (isObject(value) && depth < 3) {
     const entries = Object.entries(value);
@@ -70,31 +90,36 @@ function Value({ value, property, depth = 0 }: { value: unknown; property?: Sche
     return <table className="knowledge-kv-table knowledge-kv-nested"><tbody>
       {entries.map(([key, item]) => <tr key={key}>
         <th scope="row">{propertyLabel(key, nested[key])}</th>
-        <td><Value value={item} property={nested[key]} depth={depth + 1} /></td>
+        <td><Value value={item} property={nested[key]} label={`${label} · ${propertyLabel(key, nested[key])}`} onInspect={onInspect} depth={depth + 1} /></td>
       </tr>)}
     </tbody></table>;
   }
-  return <pre className="knowledge-kv-json">{JSON.stringify(value, null, 2)}</pre>;
+  return <CompactValue value={value} property={property} label={label} onInspect={onInspect} />;
 }
 
 /** A record's data as a key/value table in schema order, then whatever the record
  * carries that the schema does not name. A required field the record lacks is
  * flagged in place, so the validation message above has somewhere to point. */
 export function RecordTable({ definition, data, validation }: {
-  definition: Definition | undefined; data: Record<string, unknown>; validation?: Validation;
+  definition: Definition | undefined; data: Record<string, unknown> | unknown[]; validation?: Validation;
 }) {
+  const [inspected, setInspected] = useState<InspectedValue>();
   const properties = definition?.properties ?? {};
   const required = new Set(definition?.required ?? []);
   const missing = new Set(validation?.missing ?? []);
-  const keys = [...Object.keys(properties), ...Object.keys(data).filter(key => !(key in properties))];
-  if (!keys.length) return <p className="knowledge-empty">{t("This record has no data")}</p>;
-  return <table className="knowledge-kv-table">
+  const keys = Array.isArray(data) ? [] : [...Object.keys(properties), ...Object.keys(data).filter(key => !(key in properties))];
+  if (!keys.length && !Array.isArray(data)) return <p className="knowledge-empty">{t("This record has no data")}</p>;
+  return <div className="knowledge-record-data">{Array.isArray(data) ? <Value value={data} property={{ items: definition?.items }} label={t("Results")} onInspect={setInspected} /> : <table className="knowledge-kv-table">
     <tbody>
       {keys.map(key => {
         const property = properties[key];
         const value = data[key];
         const absent = value === undefined || value === null || value === "";
         const flagged = absent && (required.has(key) || missing.has(key));
+        if (Array.isArray(value) && value.length > 0 && value.every(isObject)) return <tr key={key} className="knowledge-kv-array-row"><td colSpan={2}>
+          <div className="knowledge-array-heading"><strong title={property?.description}>{propertyLabel(key, property)}</strong><span>{t("{v0} items", { v0: value.length })}</span></div>
+          <ArrayTable value={value} property={property} label={propertyLabel(key, property)} onInspect={setInspected} />
+        </td></tr>;
         return <tr key={key} className={flagged ? "is-missing" : undefined}>
           <th scope="row">
             <span className="knowledge-kv-label">
@@ -103,11 +128,16 @@ export function RecordTable({ definition, data, validation }: {
               {!property && <small>{t("Not in the schema")}</small>}
             </span>
           </th>
-          <td>{flagged ? <span className="knowledge-kv-missing">{t("missing")}</span> : <Value value={value} property={property} />}</td>
+          <td>{flagged ? <span className="knowledge-kv-missing">{t("missing")}</span> : <Value value={value} property={property} label={propertyLabel(key, property)} onInspect={setInspected} />}</td>
         </tr>;
       })}
     </tbody>
-  </table>;
+  </table>}
+    {inspected && <Modal title={inspected.label} className="knowledge-modal knowledge-value-dialog" onClose={() => setInspected(undefined)}>
+      {inspected.description && <p className="knowledge-meta">{inspected.description}</p>}
+      {typeof inspected.value === "string" ? <div className="knowledge-value-fulltext">{inspected.value}</div> : <pre className="knowledge-value-json">{JSON.stringify(inspected.value, null, 2)}</pre>}
+    </Modal>}
+  </div>;
 }
 
 export type GridRecord = { id: string; name: string; status: "draft" | "published"; data: Record<string, unknown>;

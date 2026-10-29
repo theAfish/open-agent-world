@@ -1,57 +1,52 @@
-# Build a plugin
+# Build a Card App
 
-**English** | [简体中文](index.zh-CN.md)
+A Card App adds behavior and optionally a custom interface to an OAW card. A Pack
+is the installable distribution containing those contributions. Develop in an
+external IDE with the public Python and React/TypeScript SDKs; a Coding Agent
+can use the same files and commands.
 
-A plugin is a Python package that registers cards and other contributions with OAW. You can start with a card and an editable field; add Agent tools or React views when your idea needs them.
+## Build one complete app
 
-## Recommended: external IDE, SDKs and Coding Agents
+Follow [the Greeter Card App tutorial](card-app.md). It takes one project through:
 
-For complete Python/React Card Apps, develop in an external IDE or with a Coding
-Agent using `open_agent_world.plugin_api`, `@oaw/plugin-api` and the guides below.
-Implement behavior, connections and UI in source, build the Python wheel and
-frontend bundle, then package them as `.oawpack` with the
-[standard build workflow](../pack-distribution.md). This does not require the
-visual editor.
+1. A runnable Python card in a separate development profile.
+2. Validated settings and lifecycle state.
+3. A relationship that grants an Agent a tool, with revocation tests.
+4. A React editor using the host SDK.
+5. A Schema 3 `.oawpack` containing its wheel and frontend.
+6. Installation, restart and behavior checks in a clean host.
 
-The optional [Pack IDE (Experimental)](pack-ide.md), including Design / Function /
-Code and visual logic editing, is still in development.
+The tutorial and APIs here track **dev**. Build against the host version you
+intend to support; a minimum Plugin API version is a compatibility requirement,
+not proof that the feature has shipped in every desktop release.
 
-## Fastest start: share a card without writing code
+## Choose a smaller path when it fits
 
-[Make your first Pack in 10 minutes](quickstart-pack.md) creates a
-configuration-only card and packages it as an installable `.oawpack`. Choose the
-Python path below when you need Agent tools, lifecycle logic or other advanced
-contributions.
-
-## Follow the learning path
-
-| Step | You will finish with |
+| Need | Path |
 | --- | --- |
-| 1. [Set up development](setup.md) | OAW running in an isolated development profile |
-| 2. [Create your first plugin](first-plugin.md) | A discoverable package, a pack, and a persistent card |
-| 3. [Give an Agent a tool](agent-tools.md) | A connection that authorizes a working tool |
-| 4. [Add a custom interface](frontend.md) | A view using the public frontend SDK |
-| 5. [Test and distribute](testing.md) | Checks and clear installation instructions for your package |
+| A form with saved fields and no Python behavior | [Declarative Pack quickstart](quickstart-pack.md) |
+| A card face and basic form operations without programming | [Card Factory](../card-factory.md) |
+| Reuse a configured group of cards | [Content Pack export](../creator-packs.md) |
+| Visual source editing inside OAW | [Pack IDE (Experimental)](pack-ide.md) |
 
-**Start with Python.** React and TypeScript are only needed for a custom interface. The first example uses OAW's standard card controls and needs no model credentials.
+Factory remains available for visual card creation. Pack IDE is an experimental
+source editor under **Developer tools**; use the external SDK workflow for a
+complete Python/React project.
 
-For distribution, add `oaw.pack.toml` and keep Python dependencies in
-`pyproject.toml` and frontend dependencies in the Pack's `frontend/package.json`.
-Use the public Python and frontend SDKs; avoid imports from private host source
-directories. [The unified author/build/install guide](../pack-distribution.md)
-covers shared adapter wheels, isolated workers, explicit Sandbox dependency
-groups, independent frontend builds and the same lifecycle for checkout Packs
-and `.oawpack` releases.
+## Give a Coding Agent the right context
 
-## Find the right example
+Start it with this page and [the complete tutorial](card-app.md), then give it your
+host revision, desired card behavior and installation target. Require it to:
 
-| Example | Learn from it |
-| --- | --- |
-| [Hello World](../../examples/plugins/hello_world/README.md) | A minimal card and pack |
-| [Greeter](../../examples/plugins/greeter/README.md) | Agent tool, relationship, lifecycle, and integration test |
-| [Structure Viewer](../../plugins/structure_viewer/README.md) | Connected file viewing |
-| [SQLite](../../plugins/sqlite/README.md) | Managed native files and scoped resource actions |
-| [Task Board](../../plugins/task_board/README.md) | Documents, actions, and work-source execution |
-| [Deployed workspace](../../examples/deployed-workspace/README.md) | A scoped interface for a published workspace |
+- import public Python APIs from `open_agent_world.plugin_api`, frontend contracts
+  and helpers from `@oaw/plugin-api`, and React hooks from `react`;
+- keep distribution ID, runtime owner, Pack ID and card type ID explicit;
+- use host configuration, documents/state and live graph authorization;
+- inspect the [API directory](../plugins.md) and [Pack contract](../pack-distribution.md)
+  instead of inventing endpoints or importing private host modules;
+- build and install the artifact in a disposable profile, and report checks it
+  actually ran, including unavailable model/native validation.
 
-After the first tutorial, use [Choose an extension point](extension-points.md) to find advanced patterns. [Technical reference](../reference/index.md) contains the full contracts.
+For larger apps, continue with [documents and actions](../reference/plugin-documents.md),
+[workspace interfaces](workspace-design.md), [data sources](data-sources.md),
+[execution sources](execution-graph.md) or [card tutorials](progressive-tutorials.md).

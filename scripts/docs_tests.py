@@ -1,14 +1,17 @@
 """Small, backend-independent checks for documentation publishing behavior."""
 
 from pathlib import Path
+import json
 from tempfile import TemporaryDirectory
 from unittest import TestCase, main
 
 import markdown
 from mkdocs.exceptions import PluginError
+from mkdocs.config import load_config
+from mkdocs.commands.build import build
 
 from docs_hooks import RepositoryLinksExtension
-from docs import validate_source, navigation_pages
+from docs import validate_source, navigation_pages, topic_path, CATALOG, ROOT
 
 
 class RepositoryLinksTest(TestCase):
@@ -85,6 +88,12 @@ class RepositoryLinksTest(TestCase):
 
 
 class SourcePolicyTest(TestCase):
+    def test_locale_tags_do_not_change_topic_identity(self):
+        languages = [{'locale': 'en'}, {'locale': 'ja'}, {'locale': 'pt-BR'}]
+        self.assertEqual(topic_path('guide.ja.md', languages), 'guide.md')
+        self.assertEqual(topic_path('guide.pt-BR.md', languages), 'guide.md')
+        self.assertEqual(topic_path('guide.md', languages), 'guide.md')
+
     def test_examples_do_not_count_as_prose_or_headings(self):
         self.assertEqual(validate_source('guide.md',
             '# Guide\n\n```md\n# 中文示例\n```\n\n## Result\n'), [])
@@ -107,6 +116,38 @@ class SourcePolicyTest(TestCase):
         self.assertEqual(list(navigation_pages([
             {'Guide': ['user-guide/index.md', {'Install': 'install.md'}]},
         ])), ['user-guide/index.md', 'install.md'])
+
+
+class MultilingualSiteTest(TestCase):
+    def test_partial_third_language_builds_topic_links_and_visible_fallback(self):
+        # Exercise the real publisher with a third language, not another hardcoded
+        # English/Chinese mapping. No application backend or network is involved.
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            docs = root / 'docs'
+            docs.mkdir()
+            (docs / 'README.md').write_text('# Home\n\n[Guide](guide.md)\n', encoding='utf-8')
+            (docs / 'guide.md').write_text('# Guide\n\n[Home](README.md)\n', encoding='utf-8')
+            (docs / 'guide.ja.md').write_text('# ガイド\n\n[ホーム](README.md)\n', encoding='utf-8')
+            config_data = json.loads(json.dumps(CATALOG))
+            config_data['nav'] = [{'Guides': ['README.md', 'guide.md']}]
+            japanese = json.loads(json.dumps(config_data['plugins']['i18n']['languages'][0]))
+            japanese.update(locale='ja', name='日本語', default=False, theme={'language': 'ja'})
+            config_data['plugins']['i18n']['languages'].append(japanese)
+            config_data.update(site_name='Test', site_url='https://example.invalid/manual/',
+                               docs_dir=str(docs), site_dir=str(root / 'site'),
+                               theme={'name': 'material', 'custom_dir': str(ROOT / 'scripts/docs_theme')})
+            path = root / 'mkdocs.yml'
+            path.write_text(json.dumps(config_data), encoding='utf-8')
+            build(load_config(config_file=str(path), strict=True))
+            guide = (root / 'site/ja/guide/index.html').read_text(encoding='utf-8')
+            home = (root / 'site/ja/index.html').read_text(encoding='utf-8')
+            self.assertIn('<div lang="ja">', guide)
+            self.assertIn('ガイド', guide)
+            self.assertIn('hreflang="ja"', guide)
+            self.assertIn('This topic is not available in 日本語. Showing English.', home)
+            self.assertIn('<div lang="en">', home)
+            self.assertIn('href="guide/"', home)
 
 
 if __name__ == "__main__":

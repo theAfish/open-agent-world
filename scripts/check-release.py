@@ -1,4 +1,4 @@
-"""Check committed app versions and exact-commit CI before desktop packaging."""
+"""Prepare app versions or check committed versions and exact-commit release CI."""
 from __future__ import annotations
 
 import argparse
@@ -14,6 +14,10 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ("ci.yml", "docs.yml", "desktop-check.yml")
 SEMVER = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:alpha|beta|rc)\.(0|[1-9]\d*))?")
+
+
+def python_version(version: str) -> str:
+    return re.sub(r"-(alpha|beta|rc)\.", lambda m: {"alpha": "a", "beta": "b", "rc": "rc"}[m[1]], version)
 
 
 def check_versions(root: Path = ROOT, tag: str = "") -> str:
@@ -42,14 +46,50 @@ def check_versions(root: Path = ROOT, tag: str = "") -> str:
     if not SEMVER.fullmatch(version):
         raise ValueError("Use X.Y.Z or X.Y.Z-{alpha,beta,rc}.N for the application version")
     # Python's equivalent spelling is required for Pack compatibility and metadata.
-    python_version = re.sub(r"-(alpha|beta|rc)\.", lambda m: {"alpha": "a", "beta": "b", "rc": "rc"}[m[1]], version)
     for name, value in versions.items():
-        expected = python_version if name.startswith("backend") else version
+        expected = python_version(version) if name.startswith("backend") else version
         if value != expected:
             raise ValueError(f"{name}: {value!r} does not match application version {expected!r}")
     if tag and tag != "v" + version:
         raise ValueError(f"Tag {tag!r} must match committed application version v{version}")
     return version
+
+
+def set_version(version: str, root: Path = ROOT) -> str:
+    version = version.removeprefix("v")
+    if not SEMVER.fullmatch(version):
+        raise ValueError("Use X.Y.Z or X.Y.Z-{alpha,beta,rc}.N for the application version")
+    previous = check_versions(root)
+    updates = {}
+    for folder in ("frontend", "desktop"):
+        for filename in ("package.json", "package-lock.json"):
+            path = root / folder / filename
+            count = 2 if filename == "package-lock.json" else 1
+            updates[path] = re.sub(r'("version"\s*:\s*")[^"]+(")',
+                                   lambda m: m[1] + version + m[2],
+                                   path.read_text(encoding="utf-8"), count=count)
+    path = root / "desktop/src-tauri/tauri.conf.json"
+    updates[path] = re.sub(r'("version"\s*:\s*")[^"]+(")',
+                           lambda m: m[1] + version + m[2], path.read_text(encoding="utf-8"), count=1)
+    for filename in ("backend/pyproject.toml", "desktop/src-tauri/Cargo.toml"):
+        path = root / filename
+        updates[path] = re.sub(r'(?m)^version = "[^"]+"$',
+                               f'version = "{python_version(version) if filename.startswith("backend") else version}"',
+                               path.read_text(encoding="utf-8"), count=1)
+    package = tomllib.loads((root / "desktop/src-tauri/Cargo.toml").read_text(encoding="utf-8"))["package"]["name"]
+    for filename, name in (("backend/uv.lock", "open-agent-world-backend"),
+                           ("desktop/src-tauri/Cargo.lock", package)):
+        path = root / filename
+        old = python_version(previous) if filename.startswith("backend") else previous
+        new = python_version(version) if filename.startswith("backend") else version
+        updates[path] = path.read_text(encoding="utf-8").replace(
+            f'name = "{name}"\nversion = "{old}"', f'name = "{name}"\nversion = "{new}"', 1)
+    path = root / "backend/__init__.py"
+    updates[path] = re.sub(r'(?m)^__version__ = "[^"]+"$', f'__version__ = "{python_version(version)}"',
+                           path.read_text(encoding="utf-8"))
+    for path, content in updates.items():
+        path.write_text(content, encoding="utf-8")
+    return check_versions(root, "v" + version)
 
 
 def verified_run(runs: list[dict], workflow: str, sha: str) -> dict:
@@ -93,8 +133,13 @@ def verify_ci(version: str, tag: str) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--verify-ci", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--verify-ci", action="store_true")
+    mode.add_argument("--set-version", metavar="VERSION", help="Update application versions before committing a release")
     args = parser.parse_args()
+    if args.set_version:
+        print(f"Prepared application version: {set_version(args.set_version)}")
+        return
     tag = os.environ.get("GITHUB_REF_NAME", "") if os.environ.get("GITHUB_REF_TYPE") == "tag" else ""
     version = check_versions(tag=tag)
     print(f"Committed application version: {version}")

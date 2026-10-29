@@ -1,5 +1,8 @@
 # Official Marketplace integration — 2026-10-23
 
+> Historical record, not current product or deployment instructions. Verify against the current source before use.
+
+
 OAW now defaults to `https://open-agent-world.space`. This is the service origin,
 without `/marketplace` or `/v1`. The source base was latest `origin/dev`,
 `0464d0adb6f1591ca696e1a274681c8cbec2bf31`, verified by fetching `dev`.

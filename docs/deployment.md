@@ -2,9 +2,9 @@
 
 Try the ready-to-run, key-free example with `python examples/deployed-workspace/run.py`. It opens <http://127.0.0.1:38475>; the demo password is `oaw-demo-2026`. See the [example instructions](../examples/deployed-workspace/README.md). For a real (model-calling) published Legion, see the [Lab Manager deployment example](../examples/knowledge-legion-deploy/README.md).
 
-[Documentation](README.md) · [简体中文 / complete deployment guide](deployment.zh-CN.md)
+[Documentation](README.md)
 
-For separate accounts, conversations and files with direct entry to a published page, use the native Linux systemd [hosted multi-user setup (Chinese)](contributing/hosting.zh-CN.md); Docker is not required. This page describes shared-password access to an individual deployment.
+For separate accounts, conversations and files with direct entry to a published page, use the native Linux systemd [hosted multi-user setup](contributing/hosting.md); Docker is not required. This page describes shared-password access to an individual deployment.
 
 Publish a saved Legion workspace as a locked application. The operator service runs an independent profile copy and exposes a small authenticated business API. It does not mount the editor, management APIs, model settings, or world event stream. Source-profile edits do not affect an existing deployment.
 
@@ -53,7 +53,7 @@ The runtime has its own password login; never proxy the engineering API or distr
 - The deployed UI reuses Legion Workspace, WorkspaceSection and the existing business components. Layout splits are fixed; users can switch tabs without losing drafts. Only engineering controls are omitted. Text uses the original editor in read-only mode. Hidden/unplaced cards have no fallback inspector. Graph structure and configuration changes are rejected even through internal Agent graph operations.
 - Graph/configuration snapshots do not freeze normal business state: conversations, authorized documents, tasks and workspace files remain writable. Plugin versions are checked at startup. Preserve the release's code checkout/build as well as its data.
 
-Stop the service before backing up the entire deployment directory, matching code, keys and external data. Runtime logs are under `logs/launcher.log`. See the [Chinese guide](deployment.zh-CN.md) for troubleshooting and detailed operational steps.
+Stop the service before backing up the entire deployment directory, matching code, keys and external data. Runtime logs are under `logs/launcher.log`. See the [Chinese guide](deployment.md) for troubleshooting and detailed operational steps.
 
 ## Verification
 

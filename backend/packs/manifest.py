@@ -7,10 +7,10 @@ from typing import Literal, Self
 from packaging.specifiers import SpecifierSet
 from packaging.requirements import Requirement
 from packaging.version import Version
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator, model_serializer
 
 from backend import __version__
-from backend.plugins.registry import _supports_plugin_api
+from backend.plugins.registry import PackDefinition, _supports_plugin_api
 from backend.packs.metadata import CreatorMetadata, PACK_ID
 from backend.sandbox.python_runtime import validate_requirements
 
@@ -187,6 +187,7 @@ class PackManifest(Model):
     entrypoints: Entrypoints | None = None
     content: Content | None = None
     creator: CreatorMetadata | None = None
+    presentation: PackDefinition | None = None
     # Version 3 separates the immutable distribution from persisted runtime IDs.
     owner: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9]*(?:[._:/-][a-z0-9]+)*$", max_length=128)
     packs: tuple[str, ...] = Field(default=(), max_length=100)
@@ -197,8 +198,17 @@ class PackManifest(Model):
     prerequisites: dict[str, "PrerequisiteSpec"] = Field(default_factory=dict, max_length=100)
     adapter: AdapterDependencies = Field(default_factory=AdapterDependencies)
 
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        data = handler(self)
+        if self.presentation is None:
+            data.pop("presentation", None)
+        return data
+
     @model_validator(mode="after")
     def pack_kind(self) -> Self:
+        if self.presentation is not None and (self.schema_version != 3 or self.presentation.id not in self.packs):
+            raise ValueError("Presentation must describe a provided Schema 3 Pack")
         if self.kind == "plugin":
             if self.schema_version != 3 or self.entrypoints is None or self.content is not None or self.creator is not None:
                 raise ValueError("Plugin Packs require schema 3 and code entrypoints")

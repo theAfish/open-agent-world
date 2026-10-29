@@ -1,63 +1,21 @@
----
-hide:
-  - navigation
-  - toc
----
+# Open Agent World documentation
 
-<div class="hero" markdown>
+These pages describe the **dev branch**. The manual bundled with an installed OAW
+build describes that build; use its **Help → Documentation** when a website step
+does not match your app. Check the release notes before expecting a dev feature
+in a downloaded release.
 
-# Your AI team, on one canvas.
-
-Connect agents, files, and tools. Give each agent a role and a place to work together.
-
-[Start using OAW](user-guide/index.md){ .md-button .md-button--primary }
-[Build a plugin](developers/index.md){ .md-button }
-
-[简体中文](README.zh-CN.md)
-
-</div>
-
-![An OAW workspace with agents, a conversation, documents, and a task board](assets/demos/world-overview.png#only-light)
-![An OAW workspace in dark mode](assets/demos/world-overview-dark.png#only-dark)
-
-<div class="grid cards" markdown>
-
-- **Use Open Agent World**
-
-    Install the app, choose a model, and connect your first team. No programming required.
-
-    [User guide →](user-guide/index.md)
-
-- **Develop a plugin**
-
-    Start with a small Python package. Make a card, give an Agent a tool, then add your own interface.
-
-    [Plugin developer guide →](developers/index.md)
-
-- **Look up a contract**
-
-    Find API details, lifecycle rules, runtime behavior, and host architecture when you need them.
-
-    [Technical reference →](reference/index.md)
-
-- **Contribute to OAW**
-
-    Change the host, maintain documentation, or prepare a release with the right checks.
-
-    [Contributor guide →](contributing/index.md)
-
-</div>
-
-## Pick your next step
-
-| Your goal | Start here |
+| What you want to do | Start here |
 | --- | --- |
-| Install the desktop app | [Download and install](install.md) |
-| Get an Agent working with a document | [Your first team](user-guide/first-team.md) |
-| Add a model connection | [Models and settings](user-guide/models.md) |
-| Find a card or plugin | [Plugins and packs](user-guide/plugins.md) |
-| Create a new kind of card | [Your first plugin](developers/first-plugin.md) |
-| Run or contribute to OAW itself | [Contributor guide](contributing/index.md) |
-| Write or reorganize documentation | [Documentation checklist](contributing/docs-checklist.md) |
+| Use OAW without programming | [User Guide](user-guide/index.md): install, connect a model, let an Agent read a brief |
+| Build your own Card App | [Card / Pack Developer Guide](developers/index.md): Python behavior, graph permissions, React UI, packaging and installation |
+| Look up an exact contract | [Technical Reference](reference/index.md): API, schemas, persistence and execution boundaries |
+| Change or operate OAW itself | [Contributor / Maintainer Guide](contributing/index.md): source setup, tests, CI, releases and deployment |
 
-OAW is experimental. See [GitHub Releases](https://github.com/theAfish/open-agent-world/releases) for available downloads and [report a problem](https://github.com/theAfish/open-agent-world/issues) with your app version and the steps to reproduce it.
+![An OAW workspace with agents, a conversation, documents, and a task board](assets/demos/world-overview.png)
+
+OAW organizes Agents, resources and tools as cards. Connections define access;
+Packs supply reusable cards; Decks choose what is available to place in your World.
+Start with one Agent and one resource before adding a larger team.
+
+Downloads and version notes are available in [GitHub Releases](https://github.com/theAfish/open-agent-world/releases).

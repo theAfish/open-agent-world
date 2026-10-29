@@ -51,7 +51,16 @@ describe("pack formations in the Library", () => {
     expect(cards[0].available).toBe(true);
   });
 
-  it("orders formations before ordinary cards before pagination", () => {
+  it("uses the collected source pack artwork for preset covers only", () => {
+    const state = snapshot();
+    state.packs.one.opened = true;
+    state.packs.one.definition.artwork_url = '/api/plugins/example/assets/cover';
+    const cards = collectedLibraryLegions(state, [formation(), formation('saved', false)]);
+    expect(cards[0].artworkUrl).toBe('/api/plugins/example/assets/cover');
+    expect(cards[1].artworkUrl).toBeUndefined();
+  });
+
+  it("orders formations before ordinary cards and internal cards within a pack", () => {
     const state = snapshot();
     state.packs.one.opened = true;
     const [preset] = collectedLibraryLegions(state, [formation()]);

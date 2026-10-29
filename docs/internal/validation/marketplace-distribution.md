@@ -1,5 +1,8 @@
 # Schema 1 removal follow-up - 2026-10-23
 
+> Historical record, not current product or deployment instructions. Verify against the current source before use.
+
+
 Current implementation supports Schema 2 content and Schema 3 code-capable Packs
 only. Schema 3 is the canonical authoring workflow; Schema 2 remains temporary.
 There is no Schema 1 reader, conversion path or archive loader.

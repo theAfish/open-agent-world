@@ -1,7 +1,5 @@
 # Progressive card tutorials
 
-[简体中文](progressive-tutorials.zh-CN.md)
-
 Plugin API **1.26** lets card and Pack authors ship optional tutorials and offline reference documents through the ordinary catalog. No frontend module or tutorial-specific API route is required. Existing plugins remain compatible.
 
 ## User experience

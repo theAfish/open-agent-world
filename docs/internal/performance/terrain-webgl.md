@@ -1,5 +1,8 @@
 # Terrain renderer measurements
 
+> Historical record, not current product or deployment instructions. Verify against the current source before use.
+
+
 Historical evidence from 2026-09-29. For the maintained renderer contract, see
 [WebGL2 terrain background](../../terrain-webgl.md). Raw `.outputs` paths below
 refer to local artifacts from that run; they are not distributed with the repository.

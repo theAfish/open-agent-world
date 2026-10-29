@@ -1,6 +1,7 @@
 """Run pytest with local plugin sources available during test collection.
 
-The application loader discovers these same trusted source packages at startup.
+The application loader discovers bundled sources at startup. Optional Marketplace
+sources are included here for explicit tests without enrolling them in the host.
 Some plugin tests import their package before an application fixture is started,
 so collection must not depend on test order or an editable developer install.
 """
@@ -47,7 +48,10 @@ class FileShards:
 def main() -> int:
     repository = Path(__file__).resolve().parents[1]
     sources = [str(repository)]
-    for manifest in sorted((repository / "plugins").glob("*/pyproject.toml")):
+    # Optional Marketplace projects remain importable to their explicit tests;
+    # they are not installed as entrypoints or added to application discovery.
+    for manifest in sorted([*(repository / "plugins").glob("*/pyproject.toml"),
+                            *(repository / "packs").glob("*/pyproject.toml")]):
         with manifest.open("rb") as stream:
             project = tomllib.load(stream).get("project", {})
         if project.get("entry-points", {}).get("open_agent_world.plugins"):

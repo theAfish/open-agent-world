@@ -1,5 +1,8 @@
 # Legion 实例化与密集画布性能排查
 
+> Historical record, not current product or deployment instructions. Verify against the current source before use.
+
+
 2026-09-25。对应场景：保存 MatCreator 为 Legion 预设后，从牌组拖回画布；卡片密集时平移、缩放卡顿。
 
 本文先保留优化前的诊断记录，文末记录随后完成的正式优化和验证。测量使用独立数据目录、Python 性能分析及 Chrome 实际拖放；数字来自本机开发环境，不是生产构建或所有硬件的性能保证。第 1–4 节的“当前实现”均指优化前代码。

@@ -1,5 +1,8 @@
 # Native shadow collections
 
+> Historical record, not current product or deployment instructions. Verify against the current source before use.
+
+
 Entry: **Fields → Shadow collection** in the normal canvas at http://127.0.0.1:5173/.
 The historical browser checks used a separate disposable world (frontend 5174/backend 8002).
 That preview is not a shipped service and is not assumed to be running. Test PDFs were placeholders,

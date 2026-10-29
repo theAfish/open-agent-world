@@ -15,7 +15,7 @@ from backend.hosting.configuration import default_upstream, read_gateway_setting
 from backend.hosting.systemd import render_units, service_user
 from backend.hosting.templates import export_template
 from backend.hosting.worker import create_worker_app, mint_worker_token
-from backend.tests.test_deployments import prepare_source
+from backend.tests.test_deployments import prepare_source, prepare_multiple_workspaces
 
 
 def test_provision_independent_builder_profiles_and_private_systemd_services(tmp_path):
@@ -104,9 +104,42 @@ def test_published_template_creates_private_fresh_runtime_without_source_history
         assert bob["id"] in titles and alice["id"] not in titles and "PRIVATE HISTORY" not in titles
 
 
+def test_multi_workspace_template_preserves_order_and_remaps_each_layout(tmp_path):
+    records = prepare_multiple_workspaces(tmp_path / "source")
+    template_path = tmp_path / "portal.json"
+    template = asyncio.run(export_template(tmp_path / "source", records["release"]["id"], template_path))
+    assert len(template["root_keys"]) == 2 and template["root_keys"][0] == template["root_key"]
+    assert "Unpublished workspace" not in template_path.read_text(encoding="utf-8")
+    directory = tmp_path / "hosting"
+    config_path = initialize(directory, "https://oaw.example")
+    user = AccountStore(config_path.parent / "accounts.sqlite3").create_user("operator")
+    profile = asyncio.run(provision(directory, user["id"], mode="runtime", template=template_path, agent_runtime="core.mock"))
+    root = directory / "instances" / profile.profile_id / "data"
+    manifest = json.loads((root / "deployment.json").read_text())
+    assert [workspace["name"] for workspace in manifest["workspaces"]] == ["Operations", "Published studio"]
+    assert manifest["legion_id"] == manifest["workspaces"][0]["legion_id"]
+    assert not set(records["release"]["permissions"]) & set(manifest["permissions"])
+    config = json.loads((root.parent / "worker.json").read_text())
+    config["data_root"] = root
+    headers = {"Authorization": "Bearer " + mint_worker_token(profile.secret, profile.profile_id, profile.user_id)}
+    with TestClient(create_worker_app(config)) as client:
+        response = client.get("/api/runtime-app", headers=headers)
+        assert response.status_code == 200, response.text
+        snapshot = response.json()
+        assert [legion["name"] for legion in snapshot["legions"]] == ["Operations", "Published studio"]
+        for legion in snapshot["legions"]:
+            layout = legion["config"]["workspace_layout"]["root"]
+            if layout["kind"] == "pane":
+                assert next(card for card in snapshot["cards"] if card["id"] == layout["view"]["card_id"])["parent_id"] == legion["id"]
+
+
 @pytest.mark.parametrize("mutation", [
     lambda value: value.update(password="embedded credential"),
     lambda value: value.update(allow_terminal="false"),
+    lambda value: value.update(root_keys=[]),
+    lambda value: value.update(root_keys=["root", "root"]),
+    lambda value: value.update(root_keys=["root", "note"]),
+    lambda value: value.update(root_keys=["missing", "root"]),
     lambda value: value["blueprint"].update(format_version=99),
     lambda value: value["blueprint"]["nodes"][1].update(parent_key=None),
     lambda value: value["blueprint"]["nodes"][1].update(plugin_defaults={"api_key": "embedded credential"}),

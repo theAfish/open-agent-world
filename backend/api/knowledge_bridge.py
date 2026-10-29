@@ -5,7 +5,7 @@ never see API credentials. Each route resolves the OAW model connection, calls t
 provider, and hands the result straight back to the plugin's own save action, so
 what was extracted is validated and evidence-linked by the plugin as usual.
 
-The prompts themselves are built by the plugin (``oaw_knowledge_base.knowledge_prompt``,
+The prompts themselves are built by the plugin (``oaw_knowledge_base.spaces``,
 ``experiment_prompt``, ``insight_prompt``), which is also what the ``kb`` CLI uses
 outside OAW, so the two paths cannot drift.
 
@@ -85,29 +85,17 @@ def _builders(module, *names):
     return tuple(getattr(imported, name) for name in names)
 
 
-class KnowledgeExtractRequest(BaseModel):
-    draft_id: str = Field(min_length=1, max_length=64)
-    model: str = Field(min_length=1, max_length=200)
-    # Empty the draft and read every source again; otherwise only the sources not yet extracted.
-    replace: bool = False
+class ProjectSpaceRequest(BaseModel):
+    space_id: str = Field(min_length=1, max_length=64)
+    project_ids: list[str] = Field(min_length=1, max_length=100)
+    model: str = Field(default="", max_length=200)
+    rerun: bool = False
 
 
-class KnowledgeAuditRequest(BaseModel):
-    draft_id: str = Field(min_length=1, max_length=64)
-    model: str = Field(min_length=1, max_length=200)
-
-
-class KnowledgeGraphAuditRequest(BaseModel):
-    model: str = Field(min_length=1, max_length=200)
-    group_id: str | None = Field(default=None, max_length=64)
-    all_groups: bool = False
-
-
-class RecordExtractRequest(BaseModel):
-    schema_id: str = Field(min_length=1, max_length=64)
-    source_ids: list[str] = Field(min_length=1, max_length=100)
-    model: str = Field(min_length=1, max_length=200)
-    replace_drafts: bool = False
+class ProjectionReviewRequest(BaseModel):
+    projection_id: str = Field(min_length=1, max_length=64)
+    model: str = Field(default="", max_length=200)
+    instruction: str = Field(default="", max_length=4000)
 
 
 class ExperimentExtractRequest(BaseModel):
@@ -234,199 +222,77 @@ def _stream(run: Callable[[Progress], Awaitable[dict]]) -> StreamingResponse:
 # One chunk of a document per knowledge call: consecutive sections are grouped up to
 # this many characters, so a long paper is read a few sections at a time (as MKB's
 # agent does) instead of as one 400k-character prompt that dilutes the model's attention.
-KNOWLEDGE_CHUNK_CHARS = 40_000
-
-
-def _chunks(sections, total_characters, *, chunk_chars=KNOWLEDGE_CHUNK_CHARS, max_chars=EXTRACT_MAX_CHARS):
-    """``[(offset, length, heading_paths)]`` covering the document in reading order.
-
-    A document that fits one chunk is one call, as before. Otherwise consecutive
-    sections are grouped until the next would overflow; a single section longer than
-    a chunk is split by character windows. Reading stops at ``max_chars``; the caller
-    reports the document as truncated when it does.
-    """
-    limit = min(total_characters, max_chars)
-    if limit <= chunk_chars:
-        return [(0, limit, [])] if limit else []
-    chunks, start, length, paths = [], None, 0, []
-
-    def flush():
-        nonlocal start, length, paths
-        if start is not None and length:
-            chunks.append((start, length, paths))
-        start, length, paths = None, 0, []
-
-    for section in sections:
-        offset, size, path = section["offset"], section["length"], section["heading_path"]
-        if offset >= limit:
-            break
-        size = min(size, limit - offset)
-        if size > chunk_chars:
-            flush()
-            for window in range(offset, offset + size, chunk_chars):
-                chunks.append((window, min(chunk_chars, offset + size - window), [path]))
-            continue
-        if length and length + size > chunk_chars:
-            flush()
-        if start is None:
-            start = offset
-        length += size
-        if path and path not in paths:
-            paths.append(path)
-    flush()
-    return chunks
-
-
-async def run_knowledge_extract(node_id: str, request: KnowledgeExtractRequest, services,
-                                progress: Progress = None) -> dict:
-    """The agent-free **Extract knowledge**: for each source of the draft not yet
-    extracted (every one, when replacing), the document's outline is read, grouped
-    into chunks of a few sections, and each chunk goes through one JSON-mode model
-    call handed to the plugin's own ``knowledge_save`` — the same
-    ``knowledge_extract_prompt`` → ``knowledge_save`` pair a connected Lab assistant
-    drives section by section through its tools, so the draft merges identically
-    whichever path produced it. Each prompt already carries the draft's names and the
-    published concepts the chunk mentions, so later chunks reuse earlier ones."""
+async def run_project_space(node_id: str, request: ProjectSpaceRequest, services,
+                            progress: Progress = None) -> dict:
+    """Project source Markdown through the plugin's versioned Space operations."""
     await _check_node(node_id, services)
-    draft = (await invoke_resource_action(services, node_id, "knowledge_drafts",
-        ResourceActionRequest(arguments={"operation": "get", "draft_id": request.draft_id})))["draft"]
-    pending = [item["source_id"] for item in draft["sources"]
-               if request.replace or item["extracted_at"] is None]
-    if not pending:
-        raise HTTPException(422, "Every source of this draft is extracted already; choose Replace to read them again")
-    base_url, api_key, model = _credentials(services, request.model)
-    build_messages, parse_graph = _builders("knowledge_prompt", "build_messages", "parse_graph")
-
-    await _report(progress, stage="outline", message=f"Reading the outline of {len(pending)} source(s)", done=0, total=None)
-    outlines = {}
-    for source_id in pending:
-        outline = await invoke_resource_action(services, node_id, "knowledge_source_outline",
-            ResourceActionRequest(arguments={"source_id": source_id}))
-        outlines[source_id] = (outline, _chunks(outline["sections"], outline["total_characters"]))
-    total = sum(len(chunks) for _, chunks in outlines.values())
-    step = 0
-
-    results, saved = [], None
-    first_save = True
-    for source_id in pending:
-        outline, chunks = outlines[source_id]
-        added = {"entities": 0, "relations": 0}
-        for position, (offset, length, paths) in enumerate(chunks, start=1):
-            where = " / ".join(paths) if paths else None
-            await _report(progress, stage="read", done=step, total=total, source_id=source_id,
-                          filename=outline.get("filename"), chunk=position, chunks=len(chunks), heading=where,
-                          message=(f"Reading {outline.get('filename') or source_id}"
-                                   + (f" · part {position}/{len(chunks)}" if len(chunks) > 1 else "")
-                                   + (f" · {where}" if where else "")))
-            prompt = await invoke_resource_action(services, node_id, "knowledge_extract_prompt",
-                ResourceActionRequest(arguments={"source_id": source_id, "draft_id": request.draft_id,
-                                                 "offset": offset, "limit": max(500, length)}))
-            prompt["heading_path"] = " / ".join(paths) if paths else None
-            entities, relations = await _complete(
-                base_url, api_key, model, build_messages(prompt),
-                lambda answer: parse_graph(answer, allow_empty=len(chunks) > 1))
-            if not entities:
-                # One chunk naming nothing (a reference list, a figure index) is not a failure.
-                step += 1
+    reference = request.model or services.world.get_card(node_id).config.get("default_model", "")
+    if not reference:
+        raise HTTPException(422, "Configure a model connection or connect an Agent first")
+    base_url, api_key, model = _credentials(services, reference)
+    build_messages, parse_output = _builders("spaces", "build_messages", "parse_output")
+    prepared = await invoke_resource_action(services, node_id, "projection_prepare",
+        ResourceActionRequest(arguments={"project_ids": request.project_ids,
+            "space_id": request.space_id, "rerun": request.rerun}))
+    results = []
+    owned = {item["id"] for item in prepared["projections"] if item["disposition"] == "created"}
+    try:
+        for index, item in enumerate(prepared["projections"]):
+            if item["disposition"] != "created":
+                results.append(item)
                 continue
-            saved = await invoke_resource_action(services, node_id, "knowledge_save",
-                ResourceActionRequest(arguments={"draft_id": request.draft_id, "source_id": source_id,
-                                                 "entities": entities, "relations": relations,
-                                                 "replace": request.replace and first_save}))
-            first_save = False
-            added["entities"] += saved["added"]["entities"]
-            added["relations"] += saved["added"]["relations"]
-            step += 1
-            await _report(progress, stage="saved", done=step, total=total, source_id=source_id,
-                          filename=outline.get("filename"), chunk=position, chunks=len(chunks),
-                          entities=added["entities"], relations=added["relations"],
-                          message=f"{outline.get('filename') or source_id}: {added['entities']} concepts, {added['relations']} relations so far")
-        results.append({"source_id": source_id, "filename": outline.get("filename"), "chunks": len(chunks),
-                        "truncated": outline["total_characters"] > EXTRACT_MAX_CHARS, **added})
-    if saved is None:
-        raise HTTPException(502, "The model named no concepts in any source of this draft")
-    return {"draft": saved["draft"], "sources": results}
+            await _report(progress, step="project", current=index + 1, done=index + 1, total=len(prepared["projections"]),
+                project_id=item["project_id"], message=f"Projecting {item.get('project_name', 'project')}")
+            try:
+                prompt, markdown, truncated = await _paged_prompt(services, node_id, "projection_prompt",
+                    {"projection_id": item["id"]})
+                if truncated:
+                    raise HTTPException(422, "This project exceeds the direct model input limit. Use a connected Agent to read all Markdown windows.")
+                data = await _complete(base_url, api_key, model, build_messages(prompt, markdown=markdown), parse_output)
+                saved = await invoke_resource_action(services, node_id, "projection_save",
+                    ResourceActionRequest(arguments={"projection_id": item["id"], "data": data,
+                        "expected_revision": prompt["expected_revision"]}))
+                results.append(saved["projection"])
+            except Exception as error:
+                detail = error.detail if isinstance(error, HTTPException) else "Projection failed; check the Space definition and source conversion."
+                failed = await invoke_resource_action(services, node_id, "projection_fail",
+                    ResourceActionRequest(arguments={"projection_id": item["id"], "error": str(detail)}))
+                results.append(failed["projection"])
+            owned.discard(item["id"])
+            await _report(progress, step="project", current=index + 1, done=index + 1, total=len(prepared["projections"]),
+                project_id=item["project_id"], message=f"Processed {index + 1} / {len(prepared['projections'])} projects")
+    finally:
+        for projection_id in owned:
+            # A disconnected client must not leave a permanently running task.
+            try:
+                await asyncio.shield(invoke_resource_action(services, node_id, "projection_fail",
+                    ResourceActionRequest(arguments={"projection_id": projection_id,
+                        "error": "Execution interrupted. Retry this project."})))
+            except Exception:
+                pass
+    return {"projections": results, "space_id": request.space_id}
 
 
-async def run_knowledge_audit(node_id: str, request: KnowledgeAuditRequest, services,
-                              progress: Progress = None) -> dict:
-    """The agent-free **Review draft**: the plugin's findings and the draft go through
-    one JSON-mode model call whose typed operations are handed to the plugin's own
-    ``knowledge_audit_apply`` — the same pair a connected Agent drives through its
-    tools, minus the agent's option of checking a source section before a merge."""
+async def run_projection_review(node_id: str, request: ProjectionReviewRequest, services,
+                                progress: Progress = None) -> dict:
     await _check_node(node_id, services)
-    await _report(progress, stage="findings", message="Computing findings over the draft", done=0, total=3)
-    prompt = await invoke_resource_action(services, node_id, "knowledge_audit_prompt",
-        ResourceActionRequest(arguments={"draft_id": request.draft_id}))
-    base_url, api_key, model = _credentials(services, request.model)
-    build_messages, parse_operations = _builders("knowledge_audit", "build_messages", "parse_operations")
-    statistics = prompt["statistics"]
-    await _report(progress, stage="model", done=1, total=3,
-                  message=(f"Asking the model about {statistics['concepts']} concepts and {statistics['relations']} relations "
-                           f"({len(statistics['concept_clusters'])} look-alike group(s), {len(statistics['isolated'])} isolated)"))
-    operations = await _complete(base_url, api_key, model, build_messages(prompt), parse_operations)
-    await _report(progress, stage="apply", done=2, total=3, operations=len(operations),
-                  message=f"Applying {len(operations)} operation(s)" if operations else "Nothing to change")
-    if not operations:
-        draft = (await invoke_resource_action(services, node_id, "knowledge_drafts",
-            ResourceActionRequest(arguments={"operation": "get", "draft_id": request.draft_id})))["draft"]
-        return {"draft": draft, "applied": 0, "skipped": 0, "review": None}
-    return await invoke_resource_action(services, node_id, "knowledge_audit_apply",
-        ResourceActionRequest(arguments={"draft_id": request.draft_id, "operations": operations,
-                                         "expected_revision": prompt["revision"]}))
-
-
-async def run_knowledge_graph_audit(node_id: str, request: KnowledgeGraphAuditRequest, services,
-                                    progress: Progress = None) -> dict:
-    """**Review graph**: findings over the whole published literature layer go through
-    one JSON-mode model call. Unlike a draft review, nothing is applied here — the
-    proposed operations go back to the card, which applies them through the plugin's
-    ``knowledge_graph_audit_apply`` only after the person confirms, since they rewrite
-    published knowledge."""
-    await _check_node(node_id, services)
-    scope = {"all_groups": request.all_groups, **({"group_id": request.group_id} if request.group_id else {})}
-    await _report(progress, stage="findings", message="Computing findings over the published knowledge", done=0, total=2)
-    prompt = await invoke_resource_action(services, node_id, "knowledge_graph_audit_prompt",
-        ResourceActionRequest(arguments=scope))
-    base_url, api_key, model = _credentials(services, request.model)
-    build_messages, parse_operations = _builders("knowledge_audit", "build_messages", "parse_operations")
-    statistics = prompt["statistics"]
-    await _report(progress, stage="model", done=1, total=2,
-                  message=(f"Asking the model about {statistics['concepts']} concepts and {statistics['relations']} relations "
-                           f"from {len(prompt['draft_ids'])} published draft(s)"))
-    operations = await _complete(base_url, api_key, model, build_messages(prompt), parse_operations)
-    return {"operations": operations, "drafts": prompt["draft_ids"], "statistics": prompt["statistics"]}
-
-
-async def run_record_extract(node_id: str, request: RecordExtractRequest, services) -> dict:
-    """The agent-free **Extract records** from literature: one JSON-mode call per
-    source, each handed to the plugin's own ``record_save``."""
-    await _check_node(node_id, services)
-    base_url, api_key, model = _credentials(services, request.model)
-    build_messages, parse_extract = _builders("experiment_prompt", "build_messages", "parse_extract")
-
-    results, records, invalid = [], [], 0
-    for source_id in request.source_ids:
-        prompt, markdown, truncated = await _paged_prompt(services, node_id, "record_extract_prompt",
-                                                          {"schema_id": request.schema_id, "source_id": source_id})
-        extracted = await _complete(base_url, api_key, model, build_messages(prompt, markdown=markdown), _parse_records(parse_extract))
-        saved = await invoke_resource_action(services, node_id, "record_save",
-            ResourceActionRequest(arguments={"schema_id": request.schema_id, "source_id": source_id,
-                                             "records": extracted, "replace_drafts": request.replace_drafts}))
-        records.extend(saved["records"])
-        invalid += saved["invalid"]
-        results.append({"source_id": source_id, "filename": prompt.get("filename"),
-                        "records": len(saved["records"]), "invalid": saved["invalid"], "truncated": truncated})
-    return {"records": records, "invalid": invalid, "sources": results, "schema_id": request.schema_id}
-
-
-def _parse_records(parse_extract):
-    """A literature source may legitimately report nothing for a schema; the records
-    themselves carry no ``source_ids`` because the source is the request's."""
-    def parse(answer):
-        return [{"name": item["name"], "data": item["data"], "note": item["note"]}
-                for item in parse_extract(answer, allow_empty=True)]
-    return parse
+    reference = request.model or services.world.get_card(node_id).config.get("default_model", "")
+    if not reference:
+        raise HTTPException(422, "Configure a model connection or connect an Agent first")
+    base_url, api_key, model = _credentials(services, reference)
+    build_messages, parse_output = _builders("spaces", "build_messages", "parse_output")
+    prompt, markdown, truncated = await _paged_prompt(services, node_id, "projection_review_prompt",
+        {"projection_id": request.projection_id})
+    if truncated:
+        raise HTTPException(422, "This project exceeds the direct model input limit. Use a connected Agent to review all source windows.")
+    await _report(progress, step="review", message="Reviewing the selected result against its sources")
+    messages = build_messages(prompt, markdown=markdown, review=True)
+    if request.instruction.strip():
+        messages.append({"role": "user", "content": request.instruction.strip()})
+    data = await _complete(base_url, api_key, model, messages, parse_output)
+    return await invoke_resource_action(services, node_id, "projection_revise",
+        ResourceActionRequest(arguments={"projection_id": request.projection_id, "data": data,
+            "expected_revision": prompt["expected_revision"], "note": request.instruction.strip() or "Optional source evidence review"}))
 
 
 async def run_experiment_extract(node_id: str, request: ExperimentExtractRequest, services) -> dict:
@@ -470,24 +336,14 @@ async def run_insight_extract(node_id: str, request: InsightExtractRequest, serv
             "schema_ids": saved["schema_ids"], "truncated": truncated}
 
 
-@router.post("/knowledge/{node_id}/knowledge")
-async def extract_knowledge(node_id: str, request: KnowledgeExtractRequest, services=Depends(get_services)):
-    return _stream(lambda progress: run_knowledge_extract(node_id, request, services, progress))
+@router.post("/knowledge/{node_id}/project-space")
+async def project_space(node_id: str, request: ProjectSpaceRequest, services=Depends(get_services)):
+    return _stream(lambda progress: run_project_space(node_id, request, services, progress))
 
 
-@router.post("/knowledge/{node_id}/audit")
-async def audit_knowledge(node_id: str, request: KnowledgeAuditRequest, services=Depends(get_services)):
-    return _stream(lambda progress: run_knowledge_audit(node_id, request, services, progress))
-
-
-@router.post("/knowledge/{node_id}/graph-audit")
-async def audit_knowledge_graph(node_id: str, request: KnowledgeGraphAuditRequest, services=Depends(get_services)):
-    return _stream(lambda progress: run_knowledge_graph_audit(node_id, request, services, progress))
-
-
-@router.post("/knowledge/{node_id}/records")
-async def extract_records(node_id: str, request: RecordExtractRequest, services=Depends(get_services)):
-    return await run_record_extract(node_id, request, services)
+@router.post("/knowledge/{node_id}/review-projection")
+async def review_projection(node_id: str, request: ProjectionReviewRequest, services=Depends(get_services)):
+    return _stream(lambda progress: run_projection_review(node_id, request, services, progress))
 
 
 @router.post("/knowledge/{node_id}/extract")

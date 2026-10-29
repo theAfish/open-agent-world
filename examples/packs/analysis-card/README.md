@@ -5,7 +5,7 @@ volume. Python validates the dimensions and performs the calculation. The card's
 fields, button, layout and colors live in `designs/card.json`. No Python is
 generated when that resource is edited.
 
-Open this directory using **Pack & Card Library → Pack IDE → Open project**.
+Open this directory using **Pack & Card Library → Developer tools → Pack IDE (Experimental) → Open project**.
 Select **Cell Analysis**, change its appearance in Design, and save. Function
 binds the visible button to the handwritten `analyze_structure` resource action;
 the result component reads its `result` response key. The `multiply` setting is

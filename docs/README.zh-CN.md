@@ -1,38 +1,12 @@
 # Open Agent World 文档
 
-[English](README.md) | **简体中文**
+本站对应 **dev 分支**。已安装软件的 **帮助 → 文档** 随该版本打包；网站步骤与软件不一致时，先看软件内文档和发行说明。dev 中的功能不代表下载的发行版已经包含。
 
-在同一张画布上连接智能体、文件和工具，让你的 AI 团队协作。
+| 你的目标 | 从这里开始 |
+| --- | --- |
+| 不写代码，使用 OAW | [用户指南](user-guide/index.md)：安装、连接模型、让 Agent 读取任务说明 |
+| 开发自己的 Card App | [Card / Pack 开发指南](developers/index.md)：Python 行为、连接授权、React 界面、打包与安装 |
+| 查询准确的技术契约 | [技术参考](reference/index.md)：API、Schema、持久化与执行边界，部分内容为英文 |
+| 修改或维护 OAW 宿主 | [贡献者与维护者指南](contributing/index.md)：源码运行、测试、CI、发布与部署 |
 
-## 使用 OAW
-
-从 [中文使用入门](user-guide/index.zh-CN.md) 开始：安装应用、配置模型、收集卡片，再让智能体读一份文档。无需了解内部架构或编写代码。
-
-- [下载与安装](install.zh-CN.md)
-- [第一支团队（英文）](user-guide/first-team.md)
-- [模型与设置（英文）](user-guide/models.md)
-- [插件与卡包（英文）](user-guide/plugins.md)
-- [常见问题（英文）](user-guide/troubleshooting.md)
-
-## 开发插件
-
-从 [中文插件开发路线](developers/index.zh-CN.md) 开始。先做一张最小卡片，再逐步添加工具和界面。
-
-- [开发环境（英文）](developers/setup.md)
-- [从零创建插件（英文）](developers/first-plugin.md)
-- [为 Agent 提供工具（英文）](developers/agent-tools.md)
-- [添加自定义界面（英文）](developers/frontend.md)
-- [测试和分发（英文）](developers/testing.md)
-
-## 深入阅读
-
-站点以英文文档为主，中文页面保留独立入口；尚未翻译的内容明确标注为英文。
-
-[技术参考（英文）](reference/index.md) 面向开发者，包含 API、运行时和架构说明。[从源码运行](getting-started.zh-CN.md)、[交互教程与实现](tutorial.zh-CN.md)、[工作区部署](deployment.zh-CN.md) 保留中文版本。
-
-需要在服务器上提供独立账号、画布或部署页面时，参见[多用户托管](contributing/hosting.zh-CN.md)。
-
-## 参与维护
-
-修改宿主或准备发布时，从[贡献者指南（英文）](contributing/index.md)进入。
-新增或整理文档请遵循[文档编写规范](contributing/docs-checklist.zh-CN.md)：按读者归类、分离中英文正文，并在提交前运行与 CI 相同的检查。
+先完成一个 Agent 与资源连接的任务，再增加协作者和工具。卡包提供可复用的卡片，牌组决定底部可放置的条目，画布上的卡片才是实际工作的实例。

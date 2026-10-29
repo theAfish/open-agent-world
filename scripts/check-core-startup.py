@@ -60,6 +60,7 @@ asyncio.run(main())
                     time.sleep(.1)
                 catalog = response.json()
                 assert {p['id'] for p in catalog['plugins']} == {'open-agent-world.core'}
+                assert {'oaw.barracks', 'oaw.barracks.summoner', 'oaw.skills', 'oaw.skills.skill', 'oaw.tasks'} <= {n['id'] for n in catalog['node_types']}
                 assert client.get('/api/packs').status_code == 200
                 assert client.get('/api/world?chunks=0:0').status_code == 200
                 print(json.dumps({'core_http': 'passed', 'optional_plugins': 0,

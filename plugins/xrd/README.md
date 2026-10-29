@@ -1,8 +1,17 @@
 # XRD workflow
 
-The plugin integrates experimental input into `xrd.spectrum-canvas` and library mounts into `xrd.match`. `xrd.reference` and `xrd.cif` remain available for explicit reference inputs; legacy pattern/library cards remain readable. The `xrd.analysis` fit card uses the bundled OAW_XRDfit engine. Both algorithms use OAW Run/Stop without an artificial prompt.
+Compare experimental diffraction spectra with reference cards or a local library,
+then fit selected candidate structures with the bundled OAW_XRDfit engine.
+Matching and fitting use OAW's Run/Stop controls and do not require a model prompt.
 
-1. Import an experimental spectrum: ascending, nonnegative, two-column
+Install **XRD analysis** and its required dependencies through the Library. Open
+the Pack, collect **XRD 检索与比对**, add it to your deck and place it. For a complete
+workspace, use the [reusable XRD workbench](TEMPLATE_CONTRACT.md).
+
+## Compare reference cards
+
+1. Open the match card and click its **实验谱** input to import an ascending,
+   nonnegative, two-column
    2theta/intensity CSV or whitespace text, including SmartLab RAS_RAW text.
    Binary RAW/RASX and encrypted TXT must first be exported using the instrument software.
 2. Import user-supplied text reference cards containing 2-Theta, d, I and (h k l).
@@ -25,18 +34,13 @@ Matching screens connected reference cards or a connected local reference librar
 It does not establish phase identity, phase fractions or refinement. It uses a single wavelength, does not automatically
 correct zero shift and does not model K-alpha doublets. Thresholds influence both
 detected and unexplained peaks. The standalone fitting card accepts one CIF; the match workspace also supports independently processing several candidates.
-PyWPEM's lattice-update peak bounds are not a whole-pattern crop range. A completed
+OAW_XRDfit's lattice-update peak bounds are not a whole-pattern crop range. A completed
 run, iteration-limit stop or low Rwp is not evidence of convergence or unique identity.
 
 Inputs retain original bytes, SHA256, parsed data and revision. Each run snapshots
 the authorized documents and parameters. A deleted or disconnected reference does
 not grant access through a CIF's association; all inputs require their own edge.
 Template capture remaps internal reference IDs and clears external references.
-
-The normal OAW backend loader discovers this plugin in `plugins/xrd`; the regular
-frontend build includes its UI. No additional web service or alternate port is
-required. New cards are available from OAW's XRD card pack after rebuilding the
-frontend and restarting the existing application against its existing data store.
 
 The declared `scientific` environment is prepared automatically before the first
 worker starts. OAW selects a private Python 3.10/3.11 and installs the pinned
@@ -52,20 +56,11 @@ Run directories default to `<OAW_XRD_ROOT>/runs`. Run archives contain result JS
 full input snapshots; individual history-file downloads are limited to 30 MiB.
 
 
-Validation: `backend/.venv/Scripts/python.exe -m pytest backend/tests/test_xrd.py -q`;
-`npm --prefix frontend run test:e2e -- xrd-match.spec.ts` with the installed browser
-channel selected through `PLAYWRIGHT_CHANNEL`. The end-to-end test uses an isolated
-OAW store and should set `OAW_XRD_RUN_ROOT` to a test output directory.
-Scientific-runtime tests explicitly skip when no configured interpreter exists;
-document and capability tests still run. Real experimental files and local result
-directories are not distributed with the plugin or used as required CI fixtures.
-Managed runtime tests separately install a local fixture wheel and exercise the
-actual isolated worker protocol without downloading the scientific stack.
-# Local reference-library search
+## Local reference-library search
 
-Add **XRD PDF / 参考谱库**, enter the main `.sq` file path, and click **加载谱库**.
-Connect an `xrd.match` card to one experimental spectrum and the library using
-`XRD 输入`. Select **QualX3 快速检索** (default) or **OAW 逐条检索**.
+In the match card, click **挂载谱库 ＋**, choose an empty slot, enter the main `.sq`
+file path and click **插入并挂载**. The library is opened read-only. Import an
+experimental spectrum, then choose **快速检索** (QualX3) or **遍历检索** (OAW).
 The result keeps the best 20 library candidates by default (1–100).
 An optional allowed-element list, e.g. `Li Ti P O`, excludes entries containing
 other elements. Leave it empty for an unrestricted full-library search.
@@ -179,7 +174,7 @@ references require an associated, authorized CIF. The experimental samples and
 wavelength are frozen to the selected search run. Client-provided filesystem paths
 and CIF replacements are not used to select a parent run.
 
-Structure preoptimization calls the local PyWPEM `StructureSolve`. It can vary the
+Structure preoptimization calls the bundled OAW_XRDfit `StructureSolve`. It can vary the
 cell and fractional coordinates within configured bounds. Only an accepted result
 is adopted. A rejected attempt retains the original CIF for subsequent fitting;
 errors remain visible per candidate and do not suppress successful siblings.
@@ -198,10 +193,6 @@ Re-running a search starts a new lineage. Re-running preoptimization invalidates
 the displayed downstream fit associated with its old parent. Previous run folders
 remain available; failed re-runs do not silently supply a different stage's CIF.
 
-Focused regression checks:
-`backend/.venv/Scripts/python.exe -m pytest backend/tests/test_xrd_pipeline.py backend/tests/test_xrd_refinement.py -q`
-and the XRD frontend tests under `frontend/src/plugins`.
-
 ## Synchronized scientific frames
 
 The match node opens one `xrd.spectrum-canvas` and one `xrd.structure-canvas`, reusing
@@ -217,8 +208,8 @@ substituted calculated pattern. Preoptimization frames use the same rendered CIF
 for both structure and theoretical peaks. Fit frames contain the current lattice,
 unchanged input fractional coordinates, and the actual EM/Bragg profile.
 
-The local PyWPEM checkout requires the observer hooks recorded in
-`engines/pywpem-live-frames.patch`. These callbacks do not change the objective or
+The bundled engine includes frame-observation hooks; no external PyWPEM checkout
+or manual patch is required. These callbacks do not change the objective or
 optimizer. SciPy 1.15 has no least_squares iteration callback: preoptimization
 records objective-improving evaluations (relative improvement > 1e-5), **not a
 claim that every trial was an accepted optimizer iteration**. A final frame always

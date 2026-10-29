@@ -350,7 +350,8 @@ async def test_failed_or_cancelled_summary_preserves_checkpoint_and_request(fail
 
 
 @pytest.mark.asyncio
-async def test_parser_correction_is_checked_again_before_the_next_provider_call(monkeypatch):
+@pytest.mark.parametrize("request_recovery", [False, True])
+async def test_parser_correction_is_checked_again_before_the_next_provider_call(monkeypatch, request_recovery):
     from google.adk.models.lite_llm import LiteLLMClient
     from backend.agents.resilient_litellm import ResilientLiteLlm
     from litellm import ModelResponse
@@ -365,10 +366,15 @@ async def test_parser_correction_is_checked_again_before_the_next_provider_call(
     window = RequestWindow(ContextBudget(4096, 512), trace, "agent")
     model = ResilientLiteLlm("openai/fixture", context_preflight=window.prepare)
     req = request()
+    if request_recovery:
+        from backend.agents.request_recovery import recoverable_model
+        trace.begin("agent", req)
+        model = recoverable_model(model, trace, "agent", context_window=window)
     with pytest.raises(AgentRuntimeError, match="safe input window"):
         _ = [r async for r in model.generate_content_async(req)]
     assert len(sent) == 1 and len(req.contents) == 1
     assert "context_preflight" not in sent[0] and "transport_retry_limit" not in sent[0]
+    assert "argument_retry_limit" not in sent[0]
 
 
 @pytest.mark.asyncio

@@ -38,7 +38,7 @@ A **Legion** groups ordinary cards into a team space with shared instructions, o
 
 Save reusable formations as Legion templates, then instantiate them when needed. Templates describe reusable setup; they do not carry private credential bindings or external host folder bindings. See [Legion team spaces](legions.md).
 
-For task coordination, the bundled [Task Board](../plugins/task_board/README.md) supports shared tasks, dependencies, and optional Agent execution bindings. [Skill Toolboxes](../plugins/skill_packages/README.md) collect reusable instructions and skills.
+For task coordination, the Core essentials [Task Board](task-board.md) supports shared tasks, dependencies, and optional Agent execution bindings. [Skill Toolboxes](skill-toolboxes.md) collect reusable instructions and skills.
 
 ## Packs, the Library, and Decks
 

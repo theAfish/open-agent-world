@@ -4,12 +4,13 @@
   "engines": {
     "node": ">=22"
   },
-  "version": "0.1.0",
+  "version": "0.6.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "node scripts/typecheck.mjs && vite build",
     "build:pack-sdk": "node scripts/build-pack-sdk.mjs",
+    "build:store-preview": "node scripts/build-store-preview.mjs",
     "test:pack-sdk": "node --test pack-sdk/build.test.mjs",
     "test": "vitest run src",
     "test:e2e": "node scripts/run-e2e.mjs",

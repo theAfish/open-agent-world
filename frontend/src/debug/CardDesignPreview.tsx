@@ -1,17 +1,17 @@
 import { useState } from 'react';
-import { ArrowUpRight, Bot, Box, FileText, Image, Leaf, Moon, Sun, Terminal } from 'lucide-react';
+import { ArrowUpRight, Bot, Box, FileText, Image, Moon, Sun, Sparkles } from 'lucide-react';
 import { CardFace, CardStock, type CardFaceProps } from '../components/CardFace';
 import { CARD_FINISHES, type CardFinish } from '../cards/cardFinish';
 import landscape from './cardLandscape.svg';
 import './cardDesignPreview.css';
 
 const examples: (CardFaceProps & { kind: string })[] = [
-  { kind: 'AGENT / 图标', label: 'Sage', description: '让好奇心，有迹可循。', icon: <Bot />, variant: 'icon', tone: 'sage' },
-  { kind: 'TOOL / 图标', label: 'Python Console', description: '从一个想法，到一次运行。', icon: <Terminal />, variant: 'icon', tone: 'sand' },
+  { kind: 'AGENT / 默认卡面', label: 'Agent', definition: { id: 'agent', traits: ['core.agent'], deck_label: 'Agents' }, icon: <Bot /> },
+  { kind: 'TOOL / 默认卡面', label: 'Summoning', definition: { id: 'oaw.barracks.summoner', traits: ['oaw.summoner'], deck_label: 'Tools' }, icon: <Sparkles /> },
+  { kind: 'FIELD / 默认卡面', label: 'Sandbox', definition: { id: 'sandbox', traits: ['core.sandbox'], deck_label: 'Fields' }, icon: <Box /> },
   { kind: 'DATASET / 图片', label: 'World Landscapes', description: '山川之间，发现新的视角。', icon: <Image />, variant: 'image', tone: 'sky', imageUrl: landscape, badge: 'Collection' },
   { kind: 'NOTE / 文字', label: 'A quieter internet', description: '记录慢一点的思考，留一些空间给新的可能。', icon: <FileText />, variant: 'text', tone: 'rose' },
   { kind: 'UTILITY / 紧凑', label: 'Everyday tools', description: '小而有用，随手可取。', icon: <Box />, variant: 'compact', tone: 'stone' },
-  { kind: 'SKILL / 深色', label: 'Synthesis', description: '连接线索，让思路渐渐清晰。', icon: <Leaf />, variant: 'dark', tone: 'midnight' },
 ];
 const finishes: Record<CardFinish, string> = { normal: '原纸', foil: '烫箔', rainbow: '虹彩', starlight: '星光', laser: '镭射' };
 const palette = [ ['Midnight', '#303a46'], ['Sage', '#a1b29b'], ['Sand', '#e9d5b7'], ['Sky', '#a9c5d4'], ['Rose', '#d5a3ab'], ['Stone', '#d7d9d2'] ];
@@ -25,7 +25,7 @@ export function CardDesignPreview() {
     <header className="design-heading">
       <div><span className="design-overline">O A W <i /> CARD DESIGN SYSTEM</span>
         <h1>更少的形式，<br className="design-mobile-break" />更多的可能。</h1>
-        <p>先让纸张与印刷成立，再用局部工艺和薄膜赋予触感。</p></div>
+        <p>统一的纸面，独立的印记。让每一张卡，都值得收藏。</p></div>
       <span className="design-edition">OPEN AGENT WORLD<br />CARD STUDY — 01</span>
     </header>
     <section className="design-controls" aria-label="卡面预览设置">

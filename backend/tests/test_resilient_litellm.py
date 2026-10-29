@@ -10,6 +10,8 @@ from google.genai import types
 from litellm import ModelResponse, ModelResponseStream
 
 from backend.agents.resilient_litellm import ResilientLiteLlm
+from backend.agents.model_observation import ModelTrace, model_stream_disconnected
+from backend.agents.request_recovery import RequestRecoveryExhausted, RequestRetryPolicy, recoverable_model
 
 
 class UnsupportedChoice(Exception):
@@ -173,6 +175,93 @@ async def test_streamed_thoughts_do_not_disable_tool_argument_correction(monkeyp
     assert events[-1].custom_metadata["oaw_adapter"]["tool_argument_corrections"] == 1
     assert "No tool in that response was executed" in str(requests[1]["messages"])
     assert len(request.contents) == 1
+
+
+@pytest.mark.asyncio
+async def test_request_boundary_corrects_streamed_text_and_bad_batch_without_replaying_prior_tools(monkeypatch):
+    requests = []
+
+    async def chunks(attempt):
+        yield ModelResponseStream(choices=[{"index": 0, "delta": {
+            "role": "assistant", "content": "I will write the next files."}, "finish_reason": None}])
+        arguments = ([json.dumps({"content": "earlier write"})] if attempt == 1 else
+                     [json.dumps({"content": "valid sibling"}),
+                      '{"content":"private bad "quote""}' if attempt == 2 else json.dumps({"content": "fixed"})])
+        yield ModelResponseStream(choices=[{"index": 0, "delta": {"tool_calls": [
+            {"index": index, "id": f"call_{attempt}_{index}", "type": "function", "function": {
+                "name": "write_file", "arguments": args}} for index, args in enumerate(arguments)
+        ]}, "finish_reason": None}])
+        yield ModelResponseStream(choices=[{"index": 0, "delta": {}, "finish_reason": "tool_calls"}])
+
+    async def complete(self, **kwargs):
+        requests.append(kwargs)
+        return chunks(len(requests))
+
+    monkeypatch.setattr(LiteLLMClient, "acompletion", complete)
+    trace = ModelTrace(asyncio.Queue())
+    request = forced_request()
+    model = recoverable_model(ResilientLiteLlm("openai/test"), trace, "agent")
+    trace.begin("agent", request)
+    first = [event async for event in model.generate_content_async(request, stream=True)]
+    executed = [part.function_call.args for event in first for part in event.content.parts if part.function_call]
+    call = next(part.function_call for event in first for part in event.content.parts if part.function_call)
+    request.contents.extend([event.content for event in first] + [types.Content(role="user", parts=[
+        types.Part(function_response=types.FunctionResponse(id=call.id, name=call.name, response={"saved": True}))])])
+    before = request.model_dump_json()
+    trace.begin("agent", request)
+    second = [event async for event in model.generate_content_async(request, stream=True)]
+    executed.extend(part.function_call.args for event in second for part in event.content.parts if part.function_call)
+    assert executed == [{"content": "earlier write"}, {"content": "valid sibling"}, {"content": "fixed"}]
+    assert len(requests) == 3 and request.model_dump_json() == before
+    assert all(not event.partial for event in first + second)
+    assert requests[2]["messages"][:len(requests[1]["messages"])] == requests[1]["messages"]
+    assert "No tool in that response was executed" in str(requests[2]["messages"])
+    assert "earlier successful responses" in str(requests[2]["messages"])
+    assert all("argument_retry_limit" not in sent for sent in requests)
+    events = [trace.queue.get_nowait()[1] for _ in range(trace.queue.qsize())]
+    recovery = [event for event in events if event.get("phase") == "model_recovery"]
+    assert len(recovery) == 1 and recovery[0]["error_origin"] == "tool_arguments" and recovery[0]["retrying"]
+    assert "private bad" not in str(events)
+
+
+@pytest.mark.asyncio
+async def test_request_argument_corrections_share_retry_budget_and_do_not_restart_agent(monkeypatch):
+    requests = []
+    async def complete(self, **kwargs):
+        requests.append(kwargs)
+        if len(requests) == 1:
+            raise ConnectionResetError("private connection detail")
+        return response('{"private_payload":')
+    monkeypatch.setattr(LiteLLMClient, "acompletion", complete)
+    trace = ModelTrace(asyncio.Queue())
+    request = forced_request()
+    trace.begin("agent", request)
+    model = recoverable_model(ResilientLiteLlm("openai/test"), trace, "agent",
+        RequestRetryPolicy(max_attempts=3, initial_delay_seconds=0.0))
+    published = []
+    with pytest.raises(RequestRecoveryExhausted, match="Tool arguments remained invalid after 3") as error:
+        async for event in model.generate_content_async(request):
+            published.append(event)
+    assert len(requests) == 3 and not published and len(request.contents) == 1
+    assert not model_stream_disconnected(error.value)
+    events = [trace.queue.get_nowait()[1] for _ in range(trace.queue.qsize())]
+    assert "private" not in str(events) + str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_request_boundary_does_not_correct_transport_json(monkeypatch):
+    requests = []
+    async def complete(self, **kwargs):
+        requests.append(kwargs)
+        raise json.JSONDecodeError("transport", "bad", 0)
+    monkeypatch.setattr(LiteLLMClient, "acompletion", complete)
+    trace = ModelTrace(asyncio.Queue())
+    request = forced_request()
+    trace.begin("agent", request)
+    model = recoverable_model(ResilientLiteLlm("openai/test"), trace, "agent")
+    with pytest.raises(json.JSONDecodeError):
+        _ = [event async for event in model.generate_content_async(request)]
+    assert len(requests) == 1
 
 
 @pytest.mark.asyncio

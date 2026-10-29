@@ -18,6 +18,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from . import model_observation as observation
+from .adk_tool_errors import append_argument_feedback, invalid_tool_arguments
 from .models import AgentRuntimeError
 
 
@@ -132,6 +133,10 @@ async def recover_request(delegate: Any, request: Any, trace: observation.ModelT
             values.update(initial_delay_seconds=retry_delay, max_delay_seconds=max(retry_delay, policy.max_delay_seconds))
         policy = RequestRetryPolicy.model_validate(values)
     snapshot = _snapshot(request)
+    if hasattr(delegate, "argument_retry_limit"):
+        # This boundary owns the shared budget and buffers every response until
+        # clean EOF. The adapter alone cannot safely retry after visible text.
+        delegate = delegate.model_copy(update={"argument_retry_limit": 0})
     window = trace.context_windows.get(role)
     if window is not None:
         try:
@@ -262,9 +267,10 @@ async def recover_request(delegate: Any, request: Any, trace: observation.ModelT
                     "text": f"{role.replace('_', ' ')} · provider context overflow; compacted history and retrying the model request",
                 }))
                 continue
-            retryable = observation.model_stream_disconnected(error)
+            argument_error = invalid_tool_arguments(error)
+            retryable = argument_error or observation.model_stream_disconnected(error)
             retrying = retryable and attempt < attempt_limit
-            delay = _retry_delay(error, attempt - int(context_recovered), policy) if retrying else None
+            delay = (0.0 if argument_error else _retry_delay(error, attempt - int(context_recovered), policy)) if retrying else None
             now = time.monotonic()
             last = trace._last_activity.get(role)
             local = isinstance(error, observation.ModelStreamStalled)
@@ -277,7 +283,7 @@ async def recover_request(delegate: Any, request: Any, trace: observation.ModelT
                 "max_attempts": attempt_limit, "next_attempt": attempt + 1 if retrying else None,
                 "retry_delay_seconds": round(delay, 3) if delay is not None else None,
                 "recovery_scope": "model_request", "error_type": type(error).__name__,
-                "error_origin": "local_idle_watchdog" if local else "provider_or_adapter",
+                "error_origin": "tool_arguments" if argument_error else "local_idle_watchdog" if local else "provider_or_adapter",
                 "elapsed_seconds": round(now - started, 3),
                 "idle_seconds": round(now - (last if last is not None else started), 3),
                 "first_content_seconds": round(first_content - started, 3) if first_content else None,
@@ -294,6 +300,13 @@ async def recover_request(delegate: Any, request: Any, trace: observation.ModelT
                          + (f"reconnecting in {delay:.1f}s (next attempt {attempt + 1}/{attempt_limit}); completed tools will not be replayed"
                             if retrying else "request stopped; completed tools were not replayed")),
             }
+            if argument_error:
+                diagnostic["text"] = (
+                    f"{role.replace('_', ' ')} model request {request_id}: invalid tool arguments; "
+                    + (f"correcting response (next attempt {attempt + 1}/{attempt_limit}). "
+                       if retrying else "correction budget exhausted. ")
+                    + "No tools from the rejected response were executed; earlier completed tools will not be replayed."
+                )
             status = getattr(error, "status_code", None)
             if isinstance(status, int):
                 diagnostic["http_status"] = status
@@ -301,6 +314,12 @@ async def recover_request(delegate: Any, request: Any, trace: observation.ModelT
             if not retryable:
                 raise
             if not retrying:
+                if argument_error:
+                    raise RequestRecoveryExhausted(
+                        f"Tool arguments remained invalid after {attempt} model request attempts. "
+                        "No tools from the rejected responses were executed; earlier completed work is preserved. "
+                        "Try splitting the remaining operation into smaller tool calls."
+                    ) from error
                 raise RequestRecoveryExhausted(
                     f"{role} model request {request_id} failed after {attempt} attempts "
                     f"({type(error).__name__}); completed tools were not replayed. "
@@ -308,6 +327,12 @@ async def recover_request(delegate: Any, request: Any, trace: observation.ModelT
                 ) from error
             if active_deadline:
                 deadline.reschedule(None)  # Backoff is not model computation time.
+            if argument_error:
+                append_argument_feedback(snapshot, error)
+                if window is not None:
+                    # Corrective feedback also consumes context; compact or stop
+                    # before dispatching an oversized corrected request.
+                    await window.prepare(snapshot)
             await _wait_to_retry(trace, role, request_id, attempt + 1, attempt_limit, delay)
             continue
         if archive_id is not None:

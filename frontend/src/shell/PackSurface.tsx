@@ -1,17 +1,18 @@
-import { useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { ChevronRight, Leaf, Package } from 'lucide-react';
+import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Package } from 'lucide-react';
 import { t, useLocale } from '../i18n';
-import { useSurfaceTilt } from '../components/useSurfaceTilt';
-import { CardFinishLayer } from '../cards/CardFinishLayer';
+import { CardFace, CardStock, type CardFaceProps } from '../components/CardFace';
 import type { CardFinish } from '../cards/cardFinish';
 import type { PackDefinition } from '../types/world';
 import { PACK_DESIGNS, packPackaging } from './packDesign';
-import { PackViewContext, type PackRenderHandle, type PackRenderOptions } from './pack3d/types';
-import { packPreviewKey, restorePackPreview } from './pack3d/preview';
+import { PackViewContext, type PackNotice, type PackRenderHandle, type PackRenderOptions } from './pack3d/types';
+import { packModelKey, packPreviewKey, restorePackPreview } from './pack3d/preview';
+import { paintPackCover } from './pack3d/artwork';
+import { PACK_OPENING_PRESETS } from './pack3d/motion';
 import './libraryPack.css';
 
 export type PackPhase = 'idle' | 'pending' | 'revealing';
-export interface PackPreviewCard { id: string; label: string; icon: ReactNode; iconUrl?: string; color?: string; finish?: CardFinish }
+export interface PackPreviewCard extends Pick<CardFaceProps, 'definition' | 'label' | 'icon' | 'description'> { id: string; iconUrl?: string; finish?: CardFinish }
 
 function iconImage(element: Element | null) {
   const svg = element?.querySelector('svg');
@@ -23,32 +24,44 @@ function iconImage(element: Element | null) {
 
 /** The production pack surface, also used by the isolated developer design sheet. */
 export function PackSurface({ definition, edition, cards, count, opened, phase = 'idle', finishVisible = false,
-  issue, status, label, title, sealLabel, disabled, onClick, onSettled, actions }: {
+  issue, version, notice, label, title, disabled, onClick, onSettled, caption }: {
   definition: PackDefinition; edition: string; cards: PackPreviewCard[]; count: number | null;
-  opened: boolean; phase?: PackPhase; finishVisible?: boolean; issue?: 'missing' | 'error'; status?: string;
-  actions?: ReactNode; label: string; title?: string; sealLabel: string; disabled?: boolean; onClick: () => void; onSettled?: () => void;
+  opened: boolean; phase?: PackPhase; finishVisible?: boolean; issue?: 'missing' | 'error'; version?: string; notice?: PackNotice;
+  caption?: ReactNode; label: string; title?: string; disabled?: boolean; onClick: () => void; onSettled?: () => void;
 }) {
   useLocale();
-  const tilt = useSurfaceTilt(9);
+  const metadataId = useId();
+  const printedNotice = notice ? { ...notice, label: t(notice.label) } : issue
+    ? { kind: 'warning' as const, label: t(issue === 'missing' ? 'Pack unavailable' : 'Environment failed') } : undefined;
   const view = useContext(PackViewContext);
   const article = useRef<HTMLElement>(null), canvas = useRef<HTMLCanvasElement>(null);
+  const cover = useRef<HTMLCanvasElement>(null);
+  const cardLayer = useRef<HTMLSpanElement>(null);
   const renderer = useRef<PackRenderHandle>();
   const previewKey = useRef('');
   const [renderState, setRenderState] = useState<'loading' | 'webgl' | 'fallback'>(() => window.WebGL2RenderingContext ? 'loading' : 'fallback');
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
   const gesture = useRef<{ x: number; y: number; yaw: number; pitch: number; moved: boolean }>();
   const suppressClick = useRef(false);
-  const [failedArtwork, setFailedArtwork] = useState<string | null>(null);
   const packaging = packPackaging(definition.packaging);
+  const opening = PACK_OPENING_PRESETS[packaging];
   const color = definition.accent_color ?? PACK_DESIGNS[packaging].color;
-  const artwork = definition.artwork_url && definition.artwork_url !== failedArtwork ? definition.artwork_url : null;
   const options = useRef<() => PackRenderOptions>();
   options.current = () => ({ id: definition.id, name: definition.name, description: definition.description || t('A collection of possibilities.'),
-    edition, packaging, color, count, countLabel: t('CARDS'), icon: cards[0]?.iconUrl ?? iconImage(article.current?.querySelector('.pack-emblem') ?? null),
-    artwork: artwork ?? undefined, issue, opened, revealing: phase === 'revealing', finishVisible, reducedMotion, view,
-    cards: cards.map((card, index) => ({ id: card.id, label: card.label, color: card.color, finish: card.finish,
-      icon: card.iconUrl ?? iconImage(article.current?.querySelectorAll('.pack-drawn-card')[index] ?? null) })),
+    edition, packaging, color, count, countLabel: t('CARDS'), icon: cards[0]?.iconUrl ?? iconImage(article.current?.querySelector('.pack-icon-source') ?? null),
+    artwork: definition.artwork_url ?? undefined, version, notice: printedNotice, opened, revealing: phase === 'revealing', finishVisible, reducedMotion, view,
+    cards: cards.slice(0, 3).map(card => ({ id: card.id })),
   });
+  const modelKey = packModelKey(options.current());
+  useEffect(() => {
+    if (renderState !== 'fallback' || !cover.current) return;
+    // Drop the last GPU projection when context loss switches to the flat cover.
+    for (const element of cardLayer.current!.children) {
+      (element as HTMLElement).style.removeProperty('transform');
+      (element as HTMLElement).style.removeProperty('opacity');
+    }
+    return paintPackCover(cover.current, options.current!());
+  }, [renderState, modelKey]);
   useEffect(() => {
     const preference = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     const update = () => setReducedMotion(preference?.matches ?? false);
@@ -65,7 +78,7 @@ export function PackSurface({ definition, edition, cards, count, opened, phase =
       try {
         const { attachPackRenderer } = await import('./pack3d/renderer');
         if (cancelled || !visible || !canvas.current) return;
-        renderer.current = attachPackRenderer(canvas.current, options.current!(), value => { if (!cancelled) setRenderState(value ? 'webgl' : 'fallback'); });
+        renderer.current = attachPackRenderer(canvas.current, options.current!(), value => { if (!cancelled) setRenderState(value ? 'webgl' : 'fallback'); }, cardLayer.current!);
       } catch (error) {
         if (!cancelled) { setRenderState('fallback'); console.warn('Pack 3D unavailable; showing its cover.', error); }
       } finally { loading = false; }
@@ -91,9 +104,10 @@ export function PackSurface({ definition, edition, cards, count, opened, phase =
     }
     renderer.current?.update(next);
   });
-  return <article ref={article} aria-label={definition.name} data-pack-id={definition.id} data-pack-issue={issue} data-packaging={packaging} data-renderer={renderState}
-    className={`library-pack ${opened ? 'is-opened' : ''} is-${phase}`} style={{ '--pack-color': color } as CSSProperties}>
-    <button type="button" className="pack-touch-area" {...tilt} aria-label={label} title={title}
+  return <article ref={article} aria-label={definition.name} data-pack-id={definition.id} data-pack-issue={issue} data-pack-notice={printedNotice?.kind} data-pack-version={version} data-packaging={packaging} data-renderer={renderState} data-preview-opening={view.opening}
+    className={`library-pack ${opened ? 'is-opened' : ''} is-${phase}`} style={{ '--pack-color': color, '--pack-opening': view.opening,
+      '--pack-opening-dip': `${opening.dip}px` } as CSSProperties}>
+    <button type="button" className="pack-touch-area" aria-label={label} title={title} aria-describedby={version || printedNotice ? metadataId : undefined}
       aria-busy={phase === 'pending' || renderState === 'loading'} disabled={disabled}
       onPointerDown={event => {
         if (!renderer.current || event.button !== 0) return;
@@ -108,15 +122,14 @@ export function PackSurface({ definition, edition, cards, count, opened, phase =
           if (Math.hypot(dx, dy) > 5) { drag.moved = true; suppressClick.current = true; }
           if (drag.moved) renderer.current?.rotate(drag.yaw + dx * .55, drag.pitch + dy * .35);
         } else {
-          tilt.onPointerMove(event);
           if (event.pointerType !== 'touch') { const box = event.currentTarget.getBoundingClientRect(); renderer.current?.hover((event.clientX - box.left) / box.width - .5, (event.clientY - box.top) / box.height - .5); }
         }
       }}
       onPointerUp={event => { gesture.current = undefined; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
       onLostPointerCapture={() => { gesture.current = undefined; }}
-      onPointerCancel={() => { gesture.current = undefined; suppressClick.current = true; tilt.onPointerCancel(); renderer.current?.hover(0, 0); }}
-      onPointerLeave={() => { tilt.onPointerLeave(); if (!gesture.current) renderer.current?.hover(0, 0); }}
-      onBlur={() => { tilt.onBlur(); renderer.current?.hover(0, 0); }}
+      onPointerCancel={() => { gesture.current = undefined; suppressClick.current = true; renderer.current?.hover(0, 0); }}
+      onPointerLeave={() => { if (!gesture.current) renderer.current?.hover(0, 0); }}
+      onBlur={() => renderer.current?.hover(0, 0)}
       onKeyDown={event => {
         if (!renderer.current || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home'].includes(event.key)) return;
         event.preventDefault(); const angles = renderer.current.angles();
@@ -124,47 +137,28 @@ export function PackSurface({ definition, edition, cards, count, opened, phase =
           event.key === 'Home' ? view.pitch ?? -3 : angles.pitch + (event.key === 'ArrowUp' ? -10 : event.key === 'ArrowDown' ? 10 : 0));
       }}
       onClick={event => { if (suppressClick.current && event.detail !== 0) { suppressClick.current = false; return; } onClick(); }}>
+      <span className="pack-reveal-cards" ref={cardLayer} aria-hidden="true">{(phase === 'revealing' || (view.opening !== undefined && view.opening > 0 && view.opening < 1)) && cards.slice(0, 3).map((card, index, shown) =>
+        <span className="pack-reveal-card" key={card.id} data-reveal-card={card.id}
+          style={{ '--card-offset': index - (shown.length - 1) / 2 } as CSSProperties}>
+          <CardStock finish={card.finish} finishVisible={finishVisible || view.opening !== undefined} quality="standard" reveal>
+            <CardFace definition={card.definition} icon={card.icon} label={card.label} description={card.description} />
+          </CardStock>
+        </span>)}</span>
       <canvas className="pack-webgl" ref={canvas} aria-hidden="true" />
       {renderState === 'loading' && <span className="pack-loading" aria-hidden="true"><span /><small>{definition.name}</small></span>}
-      <span className="pack-fallback" aria-hidden="true">
-      <span className="pack-shadow" aria-hidden="true" />
-      <span className="pack-object" aria-hidden="true" onAnimationEnd={event => {
-        if (renderState === 'fallback' && event.target === event.currentTarget && event.animationName === 'packDeflate') onSettled?.();
-      }}>
-        <span className="pack-back" /><span className="pack-mouth" />
-        <span className="pack-card-pocket"><span className="pack-drawn-cards">{cards.map((card, index) =>
-          <span className="pack-drawn-card card-finish-surface" key={card.id}
-            style={{ '--card-offset': index - (cards.length - 1) / 2, '--collection-color': card.color ?? color } as CSSProperties}>
-            {card.icon}<strong>{card.label}</strong><small>{t('COLLECTED CARD')}</small>
-            {phase === 'revealing' && finishVisible && <CardFinishLayer finish={card.finish} quality="standard" reveal />}
-          </span>)}</span></span>
-        <span className="pack-facet pack-facet-left" /><span className="pack-facet pack-facet-right" />
-        <span className="pack-facet pack-facet-top" /><span className="pack-facet pack-facet-bottom" />
-        <span className="pack-box-side"><span>OAW</span><i /><small>PLAY<br />EXPLORE<br />CREATE</small></span>
-        <span className="pack-wrapper">
-          <span className="pack-print">
-            {!issue && (artwork ? <img className="pack-artwork" src={artwork} alt="" draggable={false} onError={() => setFailedArtwork(artwork)} /> : <>
-              <span className="pack-guilloche" />
-              {packaging === 'collector' && <span className="pack-landscape"><i /><i /><i /></span>}
-            </>)}
-            <span className="pack-brand"><b>OAW</b><small>OPEN AGENT WORLD</small></span>
-            <span className="pack-emblem">{issue ? <strong className="pack-issue-mark">{issue === 'missing' ? 'MISSING' : 'ERROR'}</strong> : cards[0]?.icon ?? <Package size={38} strokeWidth={1.5} />}</span>
-            <span className="pack-title">{definition.name}</span>
-            <span className="pack-subtitle">{definition.description || t('A collection of possibilities.')}</span>
-            <span className="pack-print-footer"><b>{count === null ? '—' : String(count).padStart(2, '0')} <small>{t('CARDS')}</small></b><span>OPEN AGENT<br />WORLD</span></span>
-          </span>
-          {packaging === 'premium' && <span className="pack-hologram"><span>EXPLORE · CREATE · GROW</span></span>}
-          <span className="pack-foil" />
-        </span>
-        <span className="pack-bottom-seal" />
-        <span className="pack-top-seal"><span>{sealLabel}</span><ChevronRight size={10} /></span>
-        {packaging === 'paper' && <span className="pack-paper-flap"><span className="pack-brand"><b>OAW</b><small>OPEN AGENT WORLD</small></span><span className="pack-paper-stamp"><Leaf size={17} strokeWidth={1.4} /></span></span>}
-        {packaging === 'collector' && <span className="pack-box-lid" />}
-      </span>
+      {renderState === 'fallback' && <>
+        <canvas className="pack-cover" ref={cover} aria-hidden="true" onAnimationEnd={event => {
+          if (event.animationName === 'packOpeningDip') onSettled?.();
+        }} />
+      </>}
+      <span hidden aria-hidden="true">
+        <span className="pack-icon-source">{cards[0]?.icon ?? <Package size={38} strokeWidth={1.5} />}</span>
       </span>
     </button>
-    <span className="pack-edition">{edition}</span>
-    {status && <span className="pack-inventory-status">{status}</span>}
-    {actions}
+    {(version || printedNotice) && <span className="sr-only" id={metadataId}>
+      {version && <span>{t('Version')} {version}</span>}{version && printedNotice && ' · '}
+      {printedNotice && <span>{printedNotice.label}</span>}
+    </span>}
+    {caption ?? <span className="pack-edition">{edition}</span>}
   </article>;
 }

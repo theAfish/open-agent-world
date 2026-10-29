@@ -4,14 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useModelOptions, useConnectedCards, updateCardConfig } from "@oaw/plugin-api";
 import { hostApiBase as deploymentApiBase } from "@oaw/plugin-api";
 import { ModelSelect, Modal } from "@oaw/plugin-api";
-import { DocumentMarkdown } from "@oaw/plugin-api";
 import { BookOpen, FlaskConical, Settings2, Plus, RefreshCw, MoreHorizontal, FileText, X, Square, ScrollText, Upload, Search, ChevronRight, ChevronDown, List, Table2, Pencil, Network, ArrowRight, CheckCircle2, CircleAlert, LoaderCircle } from "lucide-react";
 import { MineruCredentials } from "./MineruCredentials";
 import { InsightsSection } from "./Insights";
 import type { InsightKind } from "./Insights";
-import { KnowledgeSection } from "./Knowledge";
-import type { BridgeProgress } from "./Knowledge";
-import { RecordsSection } from "./Records";
+import { ProjectWorkspace } from "./ProjectWorkspace";
+import type { BridgeProgress, ProjectTab } from "./ProjectWorkspace";
 import { SchemaEditor } from "./SchemaEditor";
 import type { SchemaDetail, SchemaItem } from "./SchemaEditor";
 import { ExtractDialog } from "./ExtractDialog";
@@ -26,19 +24,11 @@ type IndexStatus = { enabled: boolean; embedding_model: string | null; model_id:
 type Group = { id: string; name: string; source_count: number; created_at: string; is_default: boolean };
 type Overview = { collection: { id: string; name: string }; groups: Group[]; settings: Settings;
   engines: string[]; counts: Record<string, number>; active_jobs: number };
-type Source = { id: string; filename: string; media_type: string; size: number; created_at: string;
-  group_id: string | null; group_name: string | null;
-  markdown: { artifact_id: string; size: number; engine: string | null } | null;
-  record_id: string | null; records: number };
-type Extracted = { record_id: string; filename: string | null; engine: string | null;
-  total_characters: number; offset: number; markdown: string; has_more: boolean };
 type Job = { id: string; kind: string; status: string; progress: number | null; message: string | null;
   error: string | null; source_id: string | null; group_id: string | null; created_at: string;
   completed_at: string | null };
 type JobEvent = { event: string; step: string | null; message: string | null; level: string | null;
   occurred_at: string };
-type SearchResult = { source_id: string; filename: string | null; record_id: string | null;
-  group_id: string | null; group_name: string | null; heading_path: string | null; excerpt: string };
 type ExperimentItem = { id: string; group_id: string; schema_id: string; bundle_id: string | null; name: string;
   data: Record<string, unknown>; validation: { valid?: boolean; errors?: string[]; missing?: string[] } | null;
   note: string | null; status: "draft" | "published";
@@ -58,18 +48,11 @@ type RunActivity = { id: string; type: string; timestamp: string; text?: string;
 /** An approval the card asked the person to confirm before it publishes a fact. */
 type Pending = { args: Record<string, unknown>; reasons: string[] };
 
-/** Literature reads papers: Knowledge drafts the general concept graph from chosen
- * sources, Records reads structured data out of them with a schema and draws
- * insights over it. Experiment turns one upload of several files into reviewed
- * records against a schema, then Insights extracts what those records show as a
- * whole. Both publish into the one graph, in their own layer. Settings only ever
- * appears for the engineering view. */
-type Category = "literature" | "experiment" | "settings";
-type LiteratureTab = "sources" | "knowledge" | "records";
+type Category = "materials" | "experiment" | "settings";
 type ExperimentTab = "experiments" | "insights" | "schemas";
-const LITERATURE_TABS: { id: LiteratureTab; label: () => string }[] = [
-  { id: "sources", label: () => t("Sources") }, { id: "knowledge", label: () => t("Knowledge") },
-  { id: "records", label: () => t("Records") },
+const PROJECT_TABS: { id: ProjectTab; label: () => string }[] = [
+  { id: "projects", label: () => t("Projects") }, { id: "spaces", label: () => t("Spaces") },
+  { id: "results", label: () => t("Results") },
 ];
 const EXPERIMENT_TABS: { id: ExperimentTab; label: () => string }[] = [
   { id: "experiments", label: () => t("Experiments") }, { id: "insights", label: () => t("Insights") },
@@ -186,10 +169,8 @@ function Preview({ host, card }: PluginViewProps) {
     {error ? <p role="alert" title={error}>{t("Knowledge base unavailable")}</p>
       : !summary ? <p role="status">{t("Opening knowledge base…")}</p>
       : <>
-        <strong>{summary.counts.entities} {summary.counts.entities === 1 ? t("published entity") : t("published entities")}</strong>
-        <p>{t("{v0} documents · {v1} relations · {v2} draft(s) awaiting review", {
-          v0: summary.counts.sources, v1: summary.counts.relations,
-          v2: (summary.counts.knowledge_drafts - summary.counts.published_knowledge) + (summary.counts.insights - summary.counts.published_insights) })}</p>
+        <strong>{t("{v0} projects", { v0: summary.counts.projects ?? 0 })}</strong>
+        <p>{t("{v0} files · {v1} Spaces · {v2} results", { v0: summary.counts.sources, v1: summary.counts.spaces ?? 0, v2: summary.counts.projections ?? 0 })}</p>
       </>}
   </div>;
 }
@@ -199,40 +180,18 @@ export function Workspace({ host, card }: PluginViewProps) {
   const { isInline, isDetached } = useWorkspaceSections();
   // The navigation switches which workflow is visible; each workflow remembers its
   // own last-opened tab so hopping to Experiment and back does not lose your place.
-  const [category, setCategory] = useState<Category>("literature");
-  const [literatureTab, setLiteratureTab] = useState<LiteratureTab>("sources");
+  const [category, setCategory] = useState<Category>("materials");
+  const [projectTab, setProjectTab] = useState<ProjectTab>("projects");
+  const clearSourceRequest = useCallback(() => setSelectedSource(""), []);
   const [experimentTab, setExperimentTab] = useState<ExperimentTab>("experiments");
   const [overview, setOverview] = useState<Overview>();
-  const [sources, setSources] = useState<Source[]>([]);
   const [schemas, setSchemas] = useState<SchemaItem[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
 
   // "" means every group; otherwise the id every list is narrowed to, so sources,
   // markdown, drafts, records and the graph all stay scoped to one group at a time.
   const [activeGroup, setActiveGroup] = useState("");
-  const [groupName, setGroupName] = useState("");
-  const [groupEditing, setGroupEditing] = useState(false);
-  const [groupCreating, setGroupCreating] = useState(false);
-  const [rawMarkdown, setRawMarkdown] = useState(false);
-  const [selectedSources, setSelectedSources] = useState<string[]>([]);
-  const [suggestedSourceIds, setSuggestedSourceIds] = useState<string[]>();
-  const [knowledgeVisited, setKnowledgeVisited] = useState(false);
-  const consumeSourceSuggestion = useCallback(() => {
-    setSuggestedSourceIds(undefined); setSelectedSources([]);
-  }, []);
-  const [sourceDrag, setSourceDrag] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number }>();
-  // Literature → Records: "" shows every literature schema's records; a chosen id narrows to it.
-  const [literatureSchemaId, setLiteratureSchemaId] = useState("");
-  // A record an insight's evidence asked Literature → Records to unfold.
-  const [focusRecordId, setFocusRecordId] = useState("");
-
   const [selectedSource, setSelectedSource] = useState("");
-  const [extracted, setExtracted] = useState<Extracted>();
-  const [documentError, setDocumentError] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchResult[]>();
-  const [searchError, setSearchError] = useState("");
   const [experiments, setExperiments] = useState<ExperimentItem[]>([]);
   // Records open in place: which rows are unfolded, the full detail (sources,
   // revision) fetched for each as it opens, and the one row being edited — its data
@@ -283,7 +242,6 @@ export function Workspace({ host, card }: PluginViewProps) {
   const [error, setError] = useState("");
 
   const generation = useRef(0);
-  const documentSequence = useRef(0);
   // A deployment mounts no model settings and no live picker, so extraction there
   // always uses whichever model was chosen ahead of time in the engineering Settings
   // section — never a value the deployed viewer can change.
@@ -300,9 +258,9 @@ export function Workspace({ host, card }: PluginViewProps) {
   // Research grants both extraction paths; keep the narrower roles eligible too.
   const researchAgents = useConnectedCards(card.id, { direction: "incoming", relationshipPrefix: "knowledge.base.research", trait: "core.agent" });
   const experimentAgents = useConnectedCards(card.id, { direction: "incoming", relationshipPrefix: "knowledge.base.experiment", trait: "core.agent" });
-  const literatureAgents = useConnectedCards(card.id, { direction: "incoming", relationshipPrefix: "knowledge.base.extract", trait: "core.agent" });
+  const projectionAgents = useConnectedCards(card.id, { direction: "incoming", relationshipPrefix: "knowledge.base.extract", trait: "core.agent" });
   const labAgents = [...new Map([...experimentAgents, ...researchAgents].map(agent => [agent.id, agent])).values()];
-  const extractAgents = [...new Map([...literatureAgents, ...researchAgents].map(agent => [agent.id, agent])).values()];
+  const extractAgents = [...new Map([...projectionAgents, ...researchAgents].map(agent => [agent.id, agent])).values()];
   const canRunAgents = !deployed && typeof host.runAgent === "function" && labAgents.length > 0;
   const canExtract = canRunAgents || !!selectedModel;
 
@@ -322,7 +280,7 @@ export function Workspace({ host, card }: PluginViewProps) {
   // record's evidence all point at a source, not at the tab.
   const viewSource = useCallback((id: string) => {
     setSelectedSource(id);
-    setCategory("literature"); setLiteratureTab("sources");
+    setCategory("materials"); setProjectTab("projects");
   }, []);
 
   const refresh = useCallback(async () => {
@@ -331,16 +289,15 @@ export function Workspace({ host, card }: PluginViewProps) {
     // published yet (or any single call could hiccup), and that must not wipe out
     // every other section's data — only whichever call actually failed stays empty.
     const results = await Promise.allSettled([
-      call("overview", groupArgs()), call("sources", { limit: 100, ...groupArgs() }),
+      call("overview", groupArgs()),
       call("schemas", { operation: "list" }), call("jobs", { limit: 20, ...groupFilter() }),
       call("experiments", { limit: 200, ...groupArgs() }),
       call("experiment_bundles", { limit: 100, ...groupArgs() }),
     ]);
     if (generation.current !== current) return;
-    const [summary, sourceList, schemaList, jobList, experimentList, bundleList] =
+    const [summary, schemaList, jobList, experimentList, bundleList] =
       results.map(result => result.status === "fulfilled" ? result.value : undefined);
     if (summary) { setOverview(summary as Overview); setSettings((summary as Overview).settings); }
-    if (sourceList) setSources((sourceList.sources as Source[]) ?? []);
     if (schemaList) setSchemas((schemaList.schemas as SchemaItem[]) ?? []);
     if (jobList) setJobs((jobList.jobs as Job[]) ?? []);
     setExperiments((experimentList?.experiments as ExperimentItem[]) ?? []);
@@ -348,7 +305,7 @@ export function Workspace({ host, card }: PluginViewProps) {
     setRefreshVersion(value => value + 1);
     // A core section failing is still worth surfacing; "experiments" not being
     // published on an older release is not a real error, so it never blocks this.
-    const coreFailure = results.slice(0, 4).find(result => result.status === "rejected");
+    const coreFailure = results.find(result => result.status === "rejected");
     if (coreFailure) throw (coreFailure as PromiseRejectedResult).reason;
   }, [call, groupArgs, groupFilter]);
 
@@ -362,7 +319,7 @@ export function Workspace({ host, card }: PluginViewProps) {
 
   useEffect(() => {
     void perform(refresh);
-    return () => { generation.current += 1; documentSequence.current += 1; };
+    return () => { generation.current += 1; };
   }, [card.id, perform, refresh]);
 
   // A conversion job runs on the card's own thread, so poll until nothing is active.
@@ -371,104 +328,6 @@ export function Workspace({ host, card }: PluginViewProps) {
     const timer = setTimeout(() => { void refresh().catch(reason => setError(message(reason))); }, 1500);
     return () => clearTimeout(timer);
   }, [jobs, refresh]);
-
-  const selectedDocumentId = sources.find(item => item.id === selectedSource)?.record_id;
-  useEffect(() => {
-    const sequence = ++documentSequence.current;
-    setExtracted(undefined); setDocumentError("");
-    if (!selectedSource || !selectedDocumentId) return;
-    call("markdown", { source_id: selectedSource, limit: 40000 }).then(value => {
-      if (sequence === documentSequence.current) setExtracted(value as Extracted);
-    }).catch(reason => { if (sequence === documentSequence.current) setDocumentError(message(reason)); });
-  }, [call, selectedSource, selectedDocumentId]);
-
-  const upload = (files: FileList | File[]) => perform(async () => {
-    const list = Array.from(files);
-    if (!list.length) return;
-    const currentGeneration = generation.current;
-    const failures: string[] = [];
-    setNotice(""); setUploadProgress({ done: 0, total: list.length });
-    try {
-      for (const [index, file] of list.entries()) {
-        if (generation.current !== currentGeneration) return;
-        try {
-          if (file.size > 32 * 1024 * 1024) throw new Error(t("Up to 32 MiB per file"));
-          const content = await fileBase64(file);
-          if (generation.current !== currentGeneration) return;
-          const result = await call("ingest", { filename: file.name, content_base64: content,
-            media_type: file.type || "application/octet-stream",
-            ...(activeGroup ? { group_id: activeGroup } : {}) });
-          if (generation.current !== currentGeneration) return;
-          const source = result.source as { id: string };
-          // Queue only this upload; existing pending documents remain an explicit choice.
-          await call("process", { source_ids: [source.id] });
-        } catch (reason) { failures.push(`${file.name}: ${message(reason)}`); }
-        if (generation.current === currentGeneration) setUploadProgress({ done: index + 1, total: list.length });
-      }
-      if (generation.current !== currentGeneration) return;
-      await refresh();
-      if (failures.length) throw new Error(failures.join("\n"));
-    } finally {
-      if (generation.current === currentGeneration) setUploadProgress(undefined);
-    }
-  });
-
-  const processSources = (sourceIds: string[]) => perform(async () => {
-    if (!sourceIds.length) return;
-    const result = await call("process", { source_ids: sourceIds });
-    const outcomes = result.jobs as { job?: { id: string } }[];
-    const queued = outcomes.filter(item => item.job).length;
-    setNotice(queued
-      ? ""
-      : t("Nothing to convert: already converted or already running"));
-    setSelectedSources([]);
-    await refresh();
-  });
-
-  const processPending = () => perform(async () => {
-    const result = await call("process", groupFilter());
-    const outcomes = result.jobs as unknown[];
-    setNotice(outcomes.length
-      ? ""
-      : t("Nothing pending to convert"));
-    await refresh();
-  });
-
-  const runSearch = () => perform(async () => {
-    setSearchError("");
-    if (!searchQuery.trim()) { setSearchResults(undefined); return; }
-    try {
-      const result = await call("search", { query: searchQuery.trim(), ...groupArgs() });
-      setSearchResults(result.results as SearchResult[]);
-    } catch (reason) { setSearchError(message(reason)); setSearchResults(undefined); }
-  });
-
-  const createGroup = () => perform(async () => {
-    if (!groupName.trim()) throw new Error(t("Name the group first"));
-    const result = await call("groups", { operation: "create", name: groupName.trim() });
-    setActiveGroup((result.group as Group).id);
-    setGroupName(""); setGroupEditing(false);
-    await refresh();
-  });
-
-  const renameGroup = () => activeGroup && perform(async () => {
-    if (!groupName.trim()) throw new Error(t("Name the group first"));
-    await call("groups", { operation: "rename", group_id: activeGroup, name: groupName.trim() });
-    setGroupName(""); setGroupEditing(false);
-    await refresh();
-  });
-
-  const deleteGroup = () => activeGroup && perform(async () => {
-    await call("groups", { operation: "delete", group_id: activeGroup });
-    setActiveGroup("");
-    await refresh();
-  });
-
-  const extend = () => extracted && perform(async () => {
-    const next = await call("markdown", { source_id: selectedSource,
-      offset: extracted.offset + extracted.markdown.length, limit: 40000 }) as Extracted;
-    setExtracted({ ...next, offset: extracted.offset, markdown: extracted.markdown + next.markdown });
-  });
 
   // The full record (sources, revision) behind a row, fetched as it opens and kept
   // until the list refreshes it.
@@ -500,10 +359,6 @@ export function Workspace({ host, card }: PluginViewProps) {
   // the row is in view.
   const jumpToRecord = (id: string) => {
     const record = experiments.find(item => item.id === id);
-    if (record && !experimentSchemaIds.has(record.schema_id)) {
-      setCategory("literature"); setLiteratureTab("records"); setFocusRecordId(id);
-      return;
-    }
     setCategory("experiment"); setExperimentTab("experiments");
     setBundleId(""); setRecordStatus(""); setRecordQuery("");
     if (record && currentExperimentSchemaId && record.schema_id !== currentExperimentSchemaId) setExperimentSchemaId("");
@@ -796,18 +651,8 @@ export function Workspace({ host, card }: PluginViewProps) {
   });
 
   const current = settings ?? { collection_name: "", pdf_engine: "auto", mineru_base_url: "", vision_model: "", embedding_model: "" };
-  const currentSource = sources.find(item => item.id === selectedSource);
   const running = jobs.filter(job => ACTIVE.has(job.status));
   const groups = overview?.groups ?? [];
-  const activeGroupObject = groups.find(item => item.id === activeGroup);
-  const sourceJob = (id: string) => jobs.find(job => job.source_id === id);
-  const sourceState = (item: Source) => {
-    const job = sourceJob(item.id);
-    return job && ACTIVE.has(job.status) ? "processing"
-      : job && ["FAILED", "CANCELLED"].includes(job.status) ? "failed"
-      : item.markdown && item.record_id ? "ready" : "pending";
-  };
-  const pendingSources = sources.filter(item => ["pending", "failed"].includes(sourceState(item)));
   const experimentSchemaIds = new Set(experimentSchemas.map(item => item.id));
   const schemaName = (id: string) => schemas.find(item => item.id === id)?.name ?? shortId(id);
   const schemaBundles = bundles.filter(item => !currentExperimentSchemaId || item.schema_id === currentExperimentSchemaId);
@@ -845,28 +690,23 @@ export function Workspace({ host, card }: PluginViewProps) {
     ? (deployed ? t("This deployment has no default model configured yet.")
       : t("Configure a model connection in OAW Settings, or connect an Agent to this card with the Knowledge experiment relationship, to extract records."))
     : (extracting || selectedBundle?.status === "extracting") ? t("An extraction is already running.") : "";
-  const literatureSchemas = schemas.filter(item => item.kind === "literature");
-  const literatureRecords = experiments.filter(item => !experimentSchemaIds.has(item.schema_id));
-  const convertedSources = sources.filter(item => item.markdown && item.record_id);
-  const activeSection = category === "settings" ? "settings" : category === "literature" ? literatureTab : experimentTab;
-  const knowledgeActive = activeSection === "knowledge" || isDetached("knowledge");
-  useEffect(() => { if (knowledgeActive) setKnowledgeVisited(true); }, [knowledgeActive]);
+  const activeSection = category === "settings" ? "settings" : category === "materials" ? projectTab : experimentTab;
   const publishedCounts = experiments.reduce<Record<string, number>>((counts, item) => {
     if (item.status === "published") counts[item.schema_id] = (counts[item.schema_id] ?? 0) + 1;
     return counts;
   }, {});
 
   const groupSelect = <label className="knowledge-groupselect">
-    <span className="knowledge-visually-hidden">{t("Group")}</span>
-    <select aria-label={t("Group")} value={activeGroup} disabled={busy}
-      onChange={event => { setActiveGroup(event.target.value); setGroupEditing(false); setSelectedSources([]); setSuggestedSourceIds(undefined); setSearchResults(undefined); }}>
-      <option value="">{t("All groups")}</option>
+    <span className="knowledge-visually-hidden">{t("Project")}</span>
+    <select aria-label={t("Project")} value={activeGroup} disabled={busy}
+      onChange={event => { setActiveGroup(event.target.value); }}>
+      <option value="">{t("All projects")}</option>
       {groups.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
     </select>
   </label>;
 
   const modelSelect = <label>{t("Model")}
-    <select value={selectedModel} disabled={busy || !models.length} onChange={event => setModel(event.target.value)}>
+    <select aria-label={t("Model")} value={selectedModel} disabled={busy || !models.length} onChange={event => setModel(event.target.value)}>
       {!models.length && <option value="">{t("No model configured")}</option>}
       {models.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
     </select>
@@ -885,31 +725,31 @@ export function Workspace({ host, card }: PluginViewProps) {
 
     <header className="knowledge-navigation">
       <nav className="knowledge-workflows" aria-label={t("Workflow")}>
-        <button type="button" aria-pressed={category === "literature"} onClick={() => setCategory("literature")}>
-          <BookOpen size={16} />{t("Literature")}</button>
+        <button type="button" aria-pressed={category === "materials"} onClick={() => setCategory("materials")}>
+          <BookOpen size={16} />{t("Materials")}</button>
         <button type="button" aria-pressed={category === "experiment"} onClick={() => setCategory("experiment")}>
           <FlaskConical size={16} />{t("Experiment")}</button>
-        {!deployed && <button type="button" aria-pressed={category === "settings"} onClick={() => setCategory("settings")}>
-          <Settings2 size={16} />{t("Settings")}</button>}
       </nav>
-        {category === "literature" && <div className="knowledge-tabstrip" role="tablist" aria-label={t("Literature sections")}>
-          {LITERATURE_TABS.map(tab => <button key={tab.id} type="button" role="tab"
-            aria-selected={literatureTab === tab.id} aria-pressed={literatureTab === tab.id}
-            onClick={() => setLiteratureTab(tab.id)}>{tab.label()}</button>)}
+        {category === "materials" && <div className="knowledge-tabstrip" role="tablist" aria-label={t("Material sections")}>
+          {PROJECT_TABS.map(tab => <button key={tab.id} type="button" role="tab"
+            aria-selected={projectTab === tab.id} aria-pressed={projectTab === tab.id}
+            onClick={() => setProjectTab(tab.id)}>{tab.label()}</button>)}
         </div>}
         {category === "experiment" && <div className="knowledge-tabstrip" role="tablist" aria-label={t("Experiment sections")}>
           {EXPERIMENT_TABS.map(tab => <button key={tab.id} type="button" role="tab"
             aria-selected={experimentTab === tab.id} aria-pressed={experimentTab === tab.id}
             onClick={() => setExperimentTab(tab.id)}>{tab.label()}</button>)}
         </div>}
+      {!deployed && <button type="button" className="knowledge-settings-link" aria-label={t("Settings")} aria-pressed={category === "settings"} onClick={() => setCategory("settings")}>
+        <Settings2 size={16} /><span>{t("Settings")}</span></button>}
     </header>
     <div className="knowledge-grid">
       {!isInline(activeSection) && <WorkspaceEmptyState className="knowledge-section-placeholder" icon={<BookOpen size={24} />}
         title={isDetached(activeSection) ? t("Continue alongside this section") : t("Choose a section to continue")}
         description={isDetached(activeSection) ? t("This section is open in its own pane. Choose another to work alongside it.")
           : t("Use the navigation above to choose available content.")}
-        actions={LITERATURE_TABS.filter(tab => isInline(tab.id)).map(tab => <button key={tab.id} type="button" onClick={() => {
-          setCategory("literature"); setLiteratureTab(tab.id);
+        actions={PROJECT_TABS.filter(tab => isInline(tab.id)).map(tab => <button key={tab.id} type="button" onClick={() => {
+          setCategory("materials"); setProjectTab(tab.id);
         }}>{tab.label()}</button>)} />}
       {!deployed && (category === "settings" || isDetached("settings")) && <WorkspaceSection id="settings" title={t("Settings")} className="knowledge-section knowledge-settings-section">
         {/* A detached section is portaled straight into its own tab, past ".knowledge-app": this
@@ -1000,198 +840,9 @@ export function Workspace({ host, card }: PluginViewProps) {
         </div>
         </div>
       </WorkspaceSection>}
-      {((category === "literature" && literatureTab === "sources") || isDetached("sources")) && <WorkspaceSection id="sources" title={t("Sources")} layout={{ min_width: 320, min_height: 280, ideal_width: 920, ideal_height: 640 }} className="knowledge-section">
-        <div className={`knowledge-section knowledge-sources${sourceDrag ? " is-file-over" : ""}`} data-detached={isDetached("sources") || undefined}
-          onDragOver={event => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); if (!busy) setSourceDrag(true); } }}
-          onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSourceDrag(false); }}
-          onDrop={event => {
-            const files = Array.from(event.dataTransfer.files ?? []);
-            if (!files.length) return;
-            event.preventDefault(); setSourceDrag(false);
-            if (!busy) void upload(files);
-          }}>
-        <WorkspaceToolbar label={t("Documents")} className="knowledge-section-toolbar">
-          <span className="knowledge-meta">{sources.length === 1 ? t("1 document") : t("{v0} documents", { v0: sources.length })}</span>
-          {!!running.length && <span className="knowledge-running" role="status">
-            {t("{v0} conversion running", { v0: running.length })}</span>}
-          <div className="knowledge-heading-actions">
-          <button type="button" className="knowledge-icon-button" aria-label={t("Refresh")} title={t("Refresh")}
-            disabled={busy} onClick={() => void perform(async () => { setNotice(""); await refresh(); })}>
-            <RefreshCw size={15} /></button>
-          </div>
-        </WorkspaceToolbar>
-        <Banner error={error} notice={notice} />
-        <div className="knowledge-source-toolbar">
-        <div className="knowledge-document-controls">
-          {groupSelect}
-          <details className="knowledge-group-menu">
-            <summary aria-label={t("Manage groups")} title={t("Manage groups")}><MoreHorizontal size={18} /></summary>
-            <div className="knowledge-group-actions">
-              <button type="button" disabled={busy} onClick={event => {
-                setGroupName(""); setGroupCreating(true); setGroupEditing(true);
-                event.currentTarget.closest("details")?.removeAttribute("open");
-              }}>{t("New group")}</button>
-              {activeGroupObject && <button type="button" disabled={busy} onClick={event => {
-                setGroupName(activeGroupObject.name); setGroupCreating(false); setGroupEditing(true);
-                event.currentTarget.closest("details")?.removeAttribute("open");
-              }}>{t("Rename group")}</button>}
-              {activeGroupObject && !activeGroupObject.is_default && <button type="button" disabled={busy}
-                onClick={() => void deleteGroup()}>{t("Delete group")}</button>}
-            </div>
-          </details>
-        </div>
-        {groupEditing && <div className="knowledge-formbar">
-          <input value={groupName} disabled={busy} placeholder={t("Group name")} aria-label={t("Group name")} autoFocus
-            onChange={event => setGroupName(event.target.value)} />
-          <button type="button" className="knowledge-primary" disabled={busy || !groupName.trim()}
-            onClick={() => void (groupCreating ? createGroup() : renameGroup())}>
-            {groupCreating ? t("Create") : t("Save")}</button>
-          <button type="button" disabled={busy} onClick={() => setGroupEditing(false)}>{t("Cancel")}</button>
-        </div>}
-        {/* Folded in from what used to be its own "Search" tab: Sources already
-            has almost every source-level action, so full-text search over the
-            converted documents belongs right here too, not behind another tab. */}
-        {!!sources.length && <div className="knowledge-search-inline">
-          <div className="knowledge-formbar">
-            <input type="search" value={searchQuery} disabled={busy} aria-label={t("Search converted documents")} placeholder={t("Search converted documents…")}
-              onChange={event => setSearchQuery(event.target.value)}
-              onKeyDown={event => { if (event.key === "Enter") void runSearch(); }} />
-            <button type="button" disabled={busy || !searchQuery.trim()}
-              onClick={() => void runSearch()}>{t("Search")}</button>
-          </div>
-          {searchError && <p role="alert" className="knowledge-error">{searchError}</p>}
-          {searchResults && !searchResults.length && <p className="knowledge-empty">{t("No matches.")}</p>}
-          {!!searchResults?.length && <ul className="knowledge-list">
-            {searchResults.map((item, index) => <li key={index}>
-              <button type="button" onClick={() => viewSource(item.source_id)}>
-                <span>{item.filename ?? shortId(item.source_id)}{item.group_name ? ` · ${item.group_name}` : ""}</span>
-                <small>{item.heading_path || t("(no heading)")} · {item.excerpt.slice(0, 160)}</small>
-              </button>
-            </li>)}
-          </ul>}
-        </div>}
-        </div>
-
-        <div className={`knowledge-source-dropzone${sources.length ? " is-compact" : ""}`} aria-busy={!!uploadProgress}>
-          {!sources.length && <div className="knowledge-file-illustration" aria-hidden="true">
-            <span><Table2 size={28} /></span><span><FileText size={34} /></span><span><BookOpen size={28} /></span>
-          </div>}
-          <div className="knowledge-source-intro">
-            {sources.length ? <strong><Upload size={18} />{t("Drop documents here")}</strong>
-              : <><h3>{t("Add your first document")}</h3><p>{t("Papers, notes, spreadsheets or images · up to 32 MiB each")}</p></>}
-          </div>
-          <label className={`knowledge-upload${busy ? " is-disabled" : ""}`}>
-            <Plus size={16} />{t("Add documents")}
-            <input className="knowledge-visually-hidden" type="file" multiple disabled={busy}
-              aria-label={t("Add documents")} title={t("Up to 32 MiB per file")}
-              onChange={event => {
-                const files = Array.from(event.target.files ?? []);
-                event.target.value = "";
-                if (files.length) void upload(files);
-              }} />
-          </label>
-          {!sources.length && <span className="knowledge-meta">{t("Or drop files here · conversion starts automatically")}</span>}
-          {uploadProgress && <div className="knowledge-upload-progress" role="status">
-            <span>{t("Preparing {v0} of {v1} files", { v0: uploadProgress.done, v1: uploadProgress.total })}</span>
-            <progress aria-label={t("Upload progress")} value={uploadProgress.done} max={uploadProgress.total} />
-          </div>}
-        </div>
-        {!!convertedSources.length && !currentSource && <div className="knowledge-source-goals" role="group" aria-label={t("Use your documents")}>
-          <button type="button" onClick={() => viewSource(convertedSources.find(item => selectedSources.includes(item.id))?.id ?? convertedSources[0].id)}>
-            <BookOpen size={22} /><span><strong>{t("Read documents")}</strong><small>{t("Open the full text")}</small></span><ArrowRight size={16} />
-          </button>
-          <button type="button" onClick={() => {
-            const selected = convertedSources.filter(item => selectedSources.includes(item.id));
-            // With no explicit selection, continue the workspace instead of silently
-            // starting another draft over every document in the collection.
-            setSuggestedSourceIds(selected.length ? selected.map(item => item.id) : undefined);
-            setLiteratureTab("knowledge"); setCategory("literature");
-          }}><Network size={22} /><span><strong>{t("Build knowledge")}</strong><small>{t("Connect ideas across sources")}</small></span><ArrowRight size={16} /></button>
-          <button type="button" onClick={() => { setLiteratureTab("records"); setCategory("literature"); }}>
-            <Table2 size={22} /><span><strong>{t("Extract records")}</strong><small>{t("Compare structured data")}</small></span><ArrowRight size={16} />
-          </button>
-        </div>}
-
-        <div className={`knowledge-document-layout${currentSource ? " has-document" : ""}`}>
-        <div className="knowledge-source-pane">
-        <ul className="knowledge-list knowledge-source-list">
-          {sources.map(item => <li key={item.id} className="knowledge-checkrow" data-state={sourceState(item)}>
-            <label><input type="checkbox" checked={selectedSources.includes(item.id)} disabled={busy}
-              onChange={event => setSelectedSources(event.target.checked
-                ? [...selectedSources, item.id] : selectedSources.filter(value => value !== item.id))} />
-              <span className="knowledge-visually-hidden">{t("Select {v0}", { v0: item.filename })}</span>
-            </label>
-            <button type="button" aria-pressed={selectedSource === item.id}
-              onClick={() => viewSource(item.id)}>
-              <span className="knowledge-source-name" title={item.filename}><FileText size={17} />{item.filename}</span>
-              <small className="knowledge-source-state">
-                {sourceState(item) === "ready" ? <CheckCircle2 size={13} /> : sourceState(item) === "processing" ? <LoaderCircle size={13} className="knowledge-spin" /> : sourceState(item) === "failed" ? <CircleAlert size={13} /> : <Upload size={13} />}
-                {bytes(item.size)} · {sourceState(item) === "ready" ? t("Ready") : sourceState(item) === "processing" ? t("Converting…") : sourceState(item) === "failed" ? t("Needs attention") : t("awaiting conversion")}
-                {!activeGroup && item.group_name && groups.length > 1 ? ` · ${item.group_name}` : ""}</small>
-            </button>
-            {sourceState(item) === "failed" && <button type="button" className="knowledge-source-retry" disabled={busy}
-              aria-label={t("Retry {v0}", { v0: item.filename })} onClick={() => void processSources([item.id])}><RefreshCw size={14} />{t("Retry")}</button>}
-          </li>)}
-        </ul>
-        {(selectedSources.length > 0 || pendingSources.length > 0) && <div className="knowledge-formbar knowledge-batchbar">
-          {selectedSources.length > 0 && <button type="button" className="knowledge-primary" disabled={busy}
-            onClick={() => void processSources(selectedSources)}>
-            {t("Process {v0} selected", { v0: selectedSources.length })}</button>}
-          {pendingSources.length > 0 && <button type="button" disabled={busy}
-            onClick={() => void processPending()}>
-            {t("Process all pending ({v0})", { v0: pendingSources.length })}</button>}
-        </div>}
-        </div>
-
-        {currentSource && <div className="knowledge-detail knowledge-reader">
-          <div className="knowledge-reader-heading">
-            <h4>{currentSource.filename}</h4>
-            <button type="button" className="knowledge-icon-button" aria-label={t("Close document")} title={t("Close document")}
-              onClick={() => setSelectedSource("")}><X size={16} /></button>
-          </div>
-          {!currentSource.record_id ? <WorkspaceEmptyState
-            icon={sourceState(currentSource) === "processing" ? <LoaderCircle className="knowledge-spin" size={24} /> : <FileText size={24} />}
-            busy={sourceState(currentSource) === "processing"}
-            title={sourceState(currentSource) === "processing" ? t("Preparing your document") : t("Document needs conversion")}
-            description={sourceState(currentSource) === "processing" ? t("The full text will appear here when it is ready.") : sourceJob(currentSource.id)?.error}
-            actions={sourceState(currentSource) !== "processing" && <button type="button" className="knowledge-primary" disabled={busy}
-              onClick={() => void processSources([currentSource.id])}>{t("Convert document")}</button>} />
-            : documentError ? <p role="alert" className="knowledge-error">{documentError}</p>
-            : !extracted ? <p role="status">{t("Loading markdown…")}</p> : <>
-            <div className="knowledge-reading-toolbar">
-              <span className="knowledge-meta">{t("{v0} characters", { v0: extracted.total_characters })}</span>
-              <button type="button" aria-pressed={rawMarkdown} onClick={() => setRawMarkdown(!rawMarkdown)}>{t("Markdown")}</button>
-            </div>
-            {rawMarkdown ? <pre className="knowledge-markdown">{extracted.markdown}</pre>
-              : <article className="knowledge-prose"><DocumentMarkdown content={extracted.markdown} /></article>}
-            {extracted.has_more && <button type="button" disabled={busy} onClick={() => void extend()}>{t("Load more")}</button>}
-          </>}
-        </div>}
-
-        </div>
-        {!!jobs.length && <details className="knowledge-disclosure knowledge-jobs">
-        <summary>{t("Conversion jobs")} <span className="knowledge-total">{jobs.length}</span></summary>
-        <ul className="knowledge-list">
-          {jobs.map(job => <li key={job.id}>
-            <button type="button" aria-pressed={jobDetail?.job.id === job.id} disabled={busy}
-              onClick={() => void openJob(job.id)}>
-              <span>{shortId(job.id)} · {job.status}</span>
-              <small>{job.error || job.message || job.kind}</small>
-            </button>
-          </li>)}
-        </ul>
-        {jobDetail && <div className="knowledge-detail">
-          <h4>{t("Job {v0}", { v0: shortId(jobDetail.job.id) })}</h4>
-          {jobDetail.job.error && <p role="alert" className="knowledge-error">{jobDetail.job.error}</p>}
-          <ul className="knowledge-events">
-            {jobDetail.events.map((event, index) => <li key={index}>
-              <code>{event.step ?? event.event}</code> {event.message}
-            </li>)}
-          </ul>
-        </div>}
-        </details>}
-        </div>
-      </WorkspaceSection>}
+      <ProjectWorkspace host={host} cardId={card.id} tab={projectTab} visible={category === "materials"} onTab={setProjectTab}
+        deployed={deployed} selectedModel={selectedModel} modelSelect={modelSelect} agent={extractAgents[0]}
+        version={refreshVersion} sourceToOpen={selectedSource} onSourceOpened={clearSourceRequest} onChanged={refresh} request={request} />
 
       {((category === "experiment" && experimentTab === "schemas") || isDetached("schemas")) && <WorkspaceSection id="schemas" title={t("Schemas")} className="knowledge-section">
         <div className="knowledge-section" data-detached={isDetached("schemas") || undefined}>
@@ -1206,35 +857,6 @@ export function Workspace({ host, card }: PluginViewProps) {
             setSchemaDetails(previous => { const next = { ...previous }; delete next[saved.id]; return next; });
             await refresh();
           }} />
-        </div>
-      </WorkspaceSection>}
-
-      {(knowledgeActive || knowledgeVisited) && <WorkspaceSection id="knowledge" title={t("Knowledge")} layout={{ min_width: 320, min_height: 320, ideal_width: 960, ideal_height: 640 }} className="knowledge-section knowledge-wide"
-        style={knowledgeActive ? undefined : { display: "none" }}>
-        <div className="knowledge-section knowledge-wide" data-detached={isDetached("knowledge") || undefined}>
-          <KnowledgeSection host={host} cardId={card.id} deployed={deployed} busy={busy} version={refreshVersion}
-            sources={convertedSources} activeGroup={activeGroup} groupCount={groups.length}
-            active={knowledgeActive} suggestedSourceIds={suggestedSourceIds} onSourcesHandled={consumeSourceSuggestion}
-            onAddSources={() => { setCategory("literature"); setLiteratureTab("sources"); }}
-            groupArgs={groupArgs} groupFilter={groupFilter} call={call} perform={perform} request={request}
-            extractAgent={extractAgents[0]} canRunAgent={!deployed && typeof host.runAgent === "function" && extractAgents.length > 0}
-            selectedModel={selectedModel} modelSelect={modelSelect} groupSelect={groupSelect} refreshControls={refreshControls}
-            banner={<Banner error={error} notice={notice} />} setNotice={setNotice} setError={setError} onOpenSource={viewSource} />
-        </div>
-      </WorkspaceSection>}
-
-      {((category === "literature" && literatureTab === "records") || isDetached("records")) && <WorkspaceSection id="records" title={t("Records")} layout={{ min_width: 320, min_height: 320, ideal_width: 960, ideal_height: 640 }} className="knowledge-section knowledge-wide">
-        <div className="knowledge-section knowledge-wide" data-detached={isDetached("records") || undefined}>
-          <RecordsSection host={host} cardId={card.id} deployed={deployed} busy={busy} version={refreshVersion}
-            schemas={literatureSchemas} records={literatureRecords} sources={convertedSources}
-            schemaId={literatureSchemas.some(item => item.id === literatureSchemaId) ? literatureSchemaId : ""} onSchemaChange={setLiteratureSchemaId}
-            activeGroup={activeGroup} groupCount={groups.length} groupArgs={groupArgs} groupFilter={groupFilter}
-            call={call} perform={perform} request={request} refresh={refresh}
-            extractAgent={extractAgents[0]} labAgent={labAgents[0]} selectedModel={selectedModel}
-            modelSelect={modelSelect} groupSelect={groupSelect} refreshControls={refreshControls}
-            banner={<Banner error={error} notice={notice} />} setNotice={setNotice} setError={setError}
-            onOpenSource={viewSource} onAddSources={() => { setCategory("literature"); setLiteratureTab("sources"); }} kindLabel={kind => KIND_LABELS[kind]()}
-            focusRecordId={focusRecordId} onFocused={() => setFocusRecordId("")} />
         </div>
       </WorkspaceSection>}
 

@@ -1,6 +1,47 @@
 import { expect, test } from '@playwright/test';
 import { mapReady, clickMapNode, expectMapPainted } from './network-map-helpers';
 
+test('type legend stays compact and exposes every type in a bounded vertical list', async ({ page }) => {
+  await page.goto('/?network-map');
+  const scope = page.locator('main');
+  const nodes = Array.from({ length: 24 }, (_, i) => ({
+    id: `legend-${i}`, label: `Entity ${i}`, kind: `type-${String(i).padStart(2, '0')}-long-characterization-technique`,
+  }));
+  await page.getByLabel('Open graph JSON').setInputFiles({
+    name: 'legend.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ nodes, edges: [] })),
+  });
+  await mapReady(scope);
+  const map = scope.locator('.network-map');
+  const legend = map.locator('.network-map-key');
+  const toggle = legend.locator('summary');
+  await expect(toggle).toContainText('24');
+  await expect(legend).not.toHaveAttribute('open');
+  await expect(legend.locator('li').first()).not.toBeVisible();
+  await toggle.focus();
+  await toggle.press('Enter');
+  await expect(legend).toHaveAttribute('open');
+  await expect(legend.locator('li')).toHaveCount(24);
+  for (const width of [900, 320]) {
+    await map.evaluate((element, width) => {
+      Object.assign((element as HTMLElement).style, { width: `${width}px`, height: '360px' });
+    }, width);
+    const bounds = await legend.boundingBox();
+    const controls = await map.locator('.network-map-scale').boundingBox();
+    expect(bounds!.height).toBeLessThanOrEqual(250);
+    expect(bounds!.x + bounds!.width).toBeLessThan(controls!.x);
+    const overflow = await legend.evaluate(el => ({ scroll: el.scrollHeight, height: el.clientHeight, width: el.clientWidth, scrollWidth: el.scrollWidth }));
+    expect(overflow.scroll).toBeGreaterThan(overflow.height);
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.width + 1);
+    await legend.locator('li').last().scrollIntoViewIfNeeded();
+    await expect(legend.locator('li').last()).toBeInViewport();
+    await expect(toggle).toBeInViewport();
+  }
+  await map.screenshot({ path: '../.outputs/graph-legend/narrow-expanded.png' });
+  await toggle.press('Escape');
+  await expect(legend).not.toHaveAttribute('open');
+  await expect(toggle).toBeFocused();
+});
+
 test('map repaints after container resize and reveal without pointer interaction', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
   await page.emulateMedia({ reducedMotion: 'reduce' });

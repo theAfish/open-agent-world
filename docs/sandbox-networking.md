@@ -363,19 +363,11 @@ native tests cover protocol traffic, host/IPv6 denial and retained isolation.
 
 ### Windows acceptance boundary
 
-The Windows AppContainer path has been exercised with the elevated networking
-broker, persistent Sandbox-scoped WFP deny rules, and ordinary unprivileged
-application and workload processes. It covers offline restoration, verified
-public HTTPS and non-HTTP TCP, manual/Agent/Skill policy routing, protected
-host and private-network denial, broker access denial, graceful and abnormal
-broker loss, and cleanup.
-
 The private-peer test requires `OAW_TEST_PRIVATE_URL` to name a controlled,
 reachable remote RFC1918 HTTP service and may set `OAW_TEST_PRIVATE_EVIDENCE_URL`
 for server-side request evidence. The host controls disable proxy use; an
 unreachable address, public endpoint or loopback listener is not acceptable.
 
-Native Linux has not been exercised on a standalone Linux host. WSL acceptance
-remains separately opt-in and depends on its installed distribution and public
-test endpoints. Store per-run logs, XML, filter snapshots and cleanup evidence
+Run checks on each target runtime; Windows, WSL and native Linux results are not
+interchangeable. Store per-run logs, XML, filter snapshots and cleanup evidence
 under `.outputs/` or in CI artifacts rather than this documentation.

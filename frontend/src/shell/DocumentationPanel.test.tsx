@@ -6,6 +6,7 @@ import { StrictMode } from 'react';
 import { DocumentationPanel } from './DocumentationPanel';
 
 beforeEach(() => {
+  localStorage.clear();
   useLocale.setState({ locale: 'en' });
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
 });
@@ -49,11 +50,11 @@ it('switches an open topic to Chinese and labels English-only topics', () => {
   expect(screen.getByRole('heading', { name: '使用入门', level: 1 })).toBeTruthy();
   fireEvent.click(screen.getByRole('link', { name: '下载与安装' }));
   expect(screen.getByRole('heading', { name: '下载与安装', level: 1 })).toBeTruthy();
-  expect(screen.queryByText('此主题目前提供英文文档。')).toBeNull();
-  expect(screen.getByRole('heading', { name: '参与维护', level: 3 })).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'Models and settings' }));
-  expect(screen.getByText('此主题目前提供英文文档。')).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Models and settings' }).getAttribute('aria-current')).toBe('page');
+  expect(screen.queryByText('此主题暂无 简体中文 译文，当前显示 English。')).toBeNull();
+  expect(screen.getByRole('heading', { name: '贡献与维护', level: 3 })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Troubleshooting' }));
+  expect(screen.getByText('此主题暂无 简体中文 译文，当前显示 English。')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Troubleshooting' }).getAttribute('aria-current')).toBe('page');
 });
 
 it('follows section anchors and marks external destinations as online', () => {
@@ -64,8 +65,33 @@ it('follows section anchors and marks external destinations as online', () => {
   fireEvent.click(screen.getByRole('link', { name: 'Configuration' }));
   expect(screen.getByRole('heading', { name: 'Application storage' }).id).toBe('application-storage');
   expect(document.activeElement?.id).toBe('application-storage');
-  fireEvent.click(screen.getByRole('button', { name: 'Your AI team, on one canvas.' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Open Agent World documentation' }));
   const link = screen.getByRole('link', { name: /GitHub Releases/ });
   expect(link.getAttribute('title')).toBe('Opens online (internet required)');
   expect(link.getAttribute('target')).toBe('_blank');
+});
+
+it('remembers an independent reading language and can resume following the app', () => {
+  const { unmount } = render(<DocumentationPanel />);
+  fireEvent.click(screen.getByRole('link', { name: 'Build your first team' }));
+  fireEvent.change(screen.getByRole('combobox', { name: 'Documentation language' }), { target: { value: 'zh-CN' } });
+  expect(screen.getByRole('heading', { name: '第一个 Agent 与资源任务', level: 1 })).toBeTruthy();
+  expect(useLocale.getState().locale).toBe('en');
+  expect(screen.getAllByRole('combobox')).toHaveLength(1);
+  expect(within(screen.getByRole('article')).queryByRole('link', { name: 'English' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Previous topic' }));
+  expect(screen.getByRole('heading', { name: '使用入门', level: 1 })).toBeTruthy();
+  unmount();
+  render(<DocumentationPanel />);
+  expect(screen.getByRole('heading', { name: '使用入门', level: 1 })).toBeTruthy();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Documentation language' }), { target: { value: '' } });
+  expect(screen.getByRole('heading', { name: 'Use Open Agent World', level: 1 })).toBeTruthy();
+  act(() => useLocale.setState({ locale: 'zh-CN' }));
+  expect(screen.getByRole('heading', { name: '使用入门', level: 1 })).toBeTruthy();
+});
+
+it('ignores a saved language that is no longer published', () => {
+  localStorage.setItem('oaw.documentation.locale', 'removed-language');
+  render(<DocumentationPanel />);
+  expect(screen.getByRole('heading', { name: 'Use Open Agent World', level: 1 })).toBeTruthy();
 });

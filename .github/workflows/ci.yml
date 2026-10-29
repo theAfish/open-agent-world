@@ -90,7 +90,7 @@ jobs:
         run: backend/.venv/bin/python -c "from backend.plugins.loader import load_plugin_registry; load_plugin_registry(strict=True)"
       - name: Run backend and public SDK test suites
         run: >-
-          backend/.venv/bin/python .github/run-backend-tests.py tests backend/tests
+          backend/.venv/bin/python .github/run-backend-tests.py tests backend/tests packs/codex/tests
           --shard ${{ matrix.shard }}/4 --durations=20
           --junitxml=.tmp/backend-linux-${{ matrix.shard }}.xml
       - name: Upload backend results

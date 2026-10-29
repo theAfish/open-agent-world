@@ -10,6 +10,8 @@ const frontendUrl = "http://127.0.0.1:5177";
 // Test worlds are disposable and must never share the application's state root.
 const dataRoot = path.resolve(projectRoot, ".tmp", "playwright", "data");
 const resultFile = path.join(dataRoot, "result.json");
+const backendPython = path.join(projectRoot, "backend", ".venv", ...(process.platform === "win32"
+  ? ["Scripts", "python.exe"] : ["bin", "python"]));
 const children = [];
 const ministerSuite = process.argv.includes("--minister");
 const args = process.argv.slice(2);
@@ -26,6 +28,35 @@ for (let i = 0; i < args.length; i++) {
   } else testArgs.push(args[i]);
 }
 if (ministerSuite) testArgs.unshift("e2e/minister.spec.ts");
+
+function prepareCodexFixture() {
+  // Codex is optional in the application. Browser suites that exercise it
+  // explicitly build and install the real archive into their disposable world.
+  const needsCodex = ministerSuite || !testArgs.some(arg => arg.endsWith('.spec.ts'))
+    || testArgs.some(arg => /(?:plugin-frontend|minister|card-library|default-card-face)\.spec\.ts$/.test(arg));
+  if (!needsCodex) return;
+  const source = path.join(projectRoot, 'packs/codex');
+  const wheels = path.join(dataRoot, 'codex-wheels');
+  const commands = [
+    ['uv', ['build', '--wheel', '--out-dir', wheels, source]],
+    [process.execPath, ['frontend/scripts/source-packs.mjs', '--frontend-path', path.join(source, 'frontend'), '--prepare', '--build']],
+    [backendPython, ['-c', `
+from pathlib import Path
+import sys
+from backend.packs.build import build_project
+from backend.packs.installation import PackInstallationManager
+from backend.plugins.builtin import create_builtin_registry
+source, root = map(Path, sys.argv[1:])
+artifact = build_project(source, root / 'codex.oawpack',
+    backend_wheel=next((root / 'codex-wheels').glob('*.whl')), frontend_dir=source / 'frontend/dist')
+PackInstallationManager(root, create_builtin_registry()).install(artifact.read_bytes())
+`, source, dataRoot]],
+  ];
+  for (const [command, arguments_] of commands) {
+    const result = spawnSync(command, arguments_, { cwd: projectRoot, stdio: 'inherit', windowsHide: true });
+    if (result.error || result.status !== 0) throw result.error ?? new Error('Codex browser fixture preparation failed');
+  }
+}
 
 async function resetDataRoot() {
   const relative = path.relative(projectRoot, dataRoot);
@@ -97,9 +128,9 @@ async function waitForResult(runner) {
 let exitCode = 1;
 try {
   await resetDataRoot();
+  prepareCodexFixture();
   start(
-    path.join(projectRoot, "backend", ".venv", ...(process.platform === "win32"
-      ? ["Scripts", "python.exe"] : ["bin", "python"])),
+    backendPython,
     ["-m", "uvicorn", ministerSuite ? "backend.tests.minister_app:app" : args.includes("--builtin-ui") ? "backend.tests.builtin_ui_app:app" : "backend.main:app", "--host", "127.0.0.1", "--port", "8017", "--no-proxy-headers"],
     {
       cwd: projectRoot,

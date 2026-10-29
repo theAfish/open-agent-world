@@ -1,7 +1,5 @@
 # 插件部署接入
 
-[English](plugin-deployment.md) | **简体中文**
-
 插件作为后台依赖时，部署副本保留其节点、连接和配置，继续使用原运行时。要让用户直接使用第三方或新增插件的页面，插件需通过 **Plugin API 1.21** 声明 `NodeDeploymentDefinition`。发布器不按插件名称维护白名单，也不另建 UI：工程端与部署端加载同一个 `frontend.workspace` / `frontend.body` 组件。
 
 旧插件没有声明时，不会自动公开其自定义页面；发布会给出错误，它仍可以留在后台运行。
@@ -111,7 +109,7 @@ deployment = NodeDeploymentDefinition(
 
 1. 按[现有插件安装流程](plugins.md#package-structure-and-discovery)安装 Python 包及依赖，声明需要的 `requires_plugins`，在工程端验证原 Workspace。
 2. 发布带前端的外部插件时，独立构建卡包 UI，将编译产物放入 [`.oawpack`](pack-distribution.md)，并在发布 Workspace 前安装到工程配置中，无需重新构建宿主前端。仅安装 Python wheel 不会带入浏览器组件。开发 OAW 源码工程本身时，`npm --prefix frontend run build` 也会准备工程内的源码卡包前端。
-3. 保存 Legion 布局并按[部署流程](deployment.zh-CN.md)发布、复制到新目录。复制的是数据，交付时同时保留匹配的源码、前端构建、Python 依赖和插件外部资源。
+3. 保存 Legion 布局并按[部署流程](deployment.md)发布、复制到新目录。复制的是数据，交付时同时保留匹配的源码、前端构建、Python 依赖和插件外部资源。
 4. 版本与公开权限在发布时固定。插件升级或开放范围改变后，更新插件版本号，在工程端重新验证并发布新副本；不要给正在运行的部署热装插件。启动会拒绝插件版本不匹配。
 
 ## 后续阅读

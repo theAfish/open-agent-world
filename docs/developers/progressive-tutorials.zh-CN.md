@@ -1,7 +1,5 @@
 # 渐进式卡片教程
 
-[English](progressive-tutorials.md)
-
 Plugin API **1.26** 为卡片与卡包增加可选的 `tutorials` 声明。宿主统一提供提示、阅读进度、关闭记录和离线文档，不需要为每个卡包开发教程界面。旧插件继续兼容。
 
 ## 用户如何使用

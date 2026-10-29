@@ -1,33 +1,35 @@
-# 插件开发路线
+# 开发 Card App
 
-[English](index.md) | **简体中文**
+Card App 为卡片提供行为和可选的自定义界面；Pack 是分发这些贡献的安装包。当前完整开发路线是**外部 IDE + 公开 Python / React SDK + Coding Agent**。
 
-插件是向 OAW 注册卡片、关系、工具或界面的 Python 包。先用 Python 做一张带配置字段的卡片；需要自定义界面时再加入 React / TypeScript。
+## 完成一个实际项目
 
-## 当前推荐：外部 IDE、SDK 与 Coding Agent
+从[Greeter Card App 完整教程](card-app.md)开始，在同一个项目里依次完成：
 
-完整 Python/React Card App 推荐通过外部 IDE 或 Coding Agent，使用
-`open_agent_world.plugin_api`、`@oaw/plugin-api` 和下方开发文档编写行为、连接协议与界面。
-独立构建 Python wheel 和前端资源后，按 [Pack 开发与发行指南（英文）](../pack-distribution.md)
-打包为 `.oawpack`，无需经过可视化编辑器。
+1. 最小可运行 Python 卡片与独立开发档案。
+2. 配置验证和生命周期数据。
+3. Agent 连接、关系、工具授权及撤销测试。
+4. 使用宿主 SDK 的 React/TypeScript 界面。
+5. 构建 wheel 与前端，再打包 Schema 3 `.oawpack`。
+6. 在干净宿主中安装、重启并检查运行结果。
 
-[Pack IDE（实验性，英文）](pack-ide.md) 的 Design / Function / Code 与可视化逻辑编辑仍在开发中，
-可从工厂的卡包设计器或 Library 底部的“开发工具”进入。
+这里对应 **dev**。按目标宿主版本开发；最低 Plugin API 要求不代表所有已发行安装包都包含该功能。
 
-## 从零开始
+## 根据任务选择路径
 
-1. [准备开发环境（英文）](setup.md)：克隆仓库，切换到文档对应的 `dev` 分支，运行 setup，使用独立的 `plugin-tutorial` 开发配置。
-2. [创建第一个插件（英文）](first-plugin.md)：创建 `pyproject.toml` 和 Python 入口，声明卡片与卡包；在 Library 开包、加入牌组、放置卡片，验证配置保存。
-3. [给 Agent 增加工具（英文）](agent-tools.md)：运行 Greeter 示例，了解连接如何授予对特定目标的工具权限。
-4. [添加自定义界面（英文）](frontend.md)：声明前端 manifest，通过 `@oaw/plugin-api` 编辑卡片配置。
-5. [测试与分发（英文）](testing.md)：验证真实入口发现、保存与重启、权限撤销和打包方式。
+| 需求 | 路径 |
+| --- | --- |
+| 只有可保存的表单字段，没有 Python 行为 | [声明式卡包快速入门](quickstart-pack.md)（英文） |
+| 不写代码设计卡面与基本表单运算 | [卡片工厂](../card-factory.md) |
+| 分享配置好的团队 | [内容卡包导出](../creator-packs.md)（英文） |
+| 在 OAW 内编辑源码项目 | [Pack IDE（实验性）](pack-ide.md)（英文） |
 
-最小示例在 [examples/plugins/hello_world](../../examples/plugins/hello_world/README.md)，不需要模型密钥。涉及 Agent 工具和生命周期的完整示例在 [Greeter](../../examples/plugins/greeter/README.md)。
+传统 Factory 制作工具继续提供用户操作流程。Pack IDE 位于 **Developer tools**，尚在开发；完整 Python/React 项目以外部 SDK 路线为主。
 
-## 需要更多功能时
+## 给 Coding Agent 的入口
 
-查看 [扩展点导航（英文）](extension-points.md)，按你要实现的功能找到 API 和现有插件示例。Python 插件使用 `open_agent_world.plugin_api`，界面使用 `@oaw/plugin-api`；不要直接依赖宿主内部状态。
+先给它本页、[完整教程](card-app.md)、宿主 revision、预期行为和安装目标。要求它使用 `open_agent_world.plugin_api` 与 `@oaw/plugin-api`，明确分发 ID、运行时 owner、Pack ID 和卡片类型 ID，复用宿主配置、文档、状态及实时图授权。
 
-源码开发和发布统一使用 `oaw.pack.toml`：Python 依赖保留在原生项目文件中，前端依赖由 Pack 自己的 `package.json` 与锁文件管理。宿主适配器、独立 worker 和 Sandbox 环境分别声明，可以通过依赖组复用同一份版本约束。
+需要精确字段时查[API 目录](../plugins.md)和[Pack 契约](../pack-distribution.md)，不要猜测私有端点或导入宿主内部实现。交付时实际构建并在独立数据目录安装，注明测试层次和未验证项目。
 
-前端独立构建后随 `.oawpack` 交付，安装后由宿主动态加载。开发脚本、文件安装和 Store 使用相同的依赖与卸载规则；Python wheel 是构建输入，完整发行物应为 `.oawpack`。具体命令、公共 API 和依赖回收规则见 [Pack 开发与发行指南（英文）](../pack-distribution.md)。
+进一步开发可查询[文档与动作](../reference/plugin-documents.md)、[工作区界面](workspace-design.md)、[数据源](data-sources.md)、[执行来源](execution-graph.md)和[卡片教程](progressive-tutorials.md)。这些参考部分为英文。

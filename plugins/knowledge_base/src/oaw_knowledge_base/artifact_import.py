@@ -16,24 +16,22 @@ ACTION = "import_artifact"
 KIND = f"knowledge.base.{ACTION}"
 TOOL_NAME = "knowledge_import_artifact"
 DESCRIPTION = (
-    "Read a file from an authorized conversation attachment or published artifact collection "
-    "into this knowledge base and start converting it to readable markdown. Use the attachment's "
-    "version_id and path; source selects its connected conversation or artifact collection. "
-    "PDF, text, CSV, TSV, XLSX and supported images use the existing conversion engines. "
-    "No Sandbox, re-upload or file bytes are needed. Repeating the same reference in the same "
-    "group/upload reuses its source. Omit bundle_id for literature or ordinary document reading; "
-    "for experiment files, prepare an upload with knowledge_experiment_bundle_prepare first. "
-    "Follow the returned next_step: wait with knowledge_jobs for conversion, then read with "
-    "knowledge_markdown or knowledge_document_search. Imported material is source evidence, "
-    "not published knowledge."
+    "Import an authorized conversation attachment or artifact by version_id and path, without exposing bytes or host paths. "
+    "A binary preview does not prevent import. Supply project_id to append related files to an existing project; "
+    "otherwise one stable project is created for this attachment. Files start Markdown conversion automatically. "
+    "Archives return a staged project preview: inspect the proposed boundaries, then call knowledge_project_import_commit. "
+    "For experiment files, prepare an upload with knowledge_experiment_bundle_prepare and pass bundle_id. "
+    "Retries reuse the source. Follow next_step and knowledge_jobs before reading Markdown or projecting a Space."
 )
+
 
 
 class ArtifactImport(actions.Request):
     source_collection_id: str = Field(min_length=1)
     version_id: UUID
     path: str = Field(min_length=1, max_length=1024)
-    group_id: UUID | None = None
+    project_id: UUID | None = None
+    relative_path: str | None = Field(default=None, min_length=1, max_length=1024)
     bundle_id: UUID | None = None
 
 
@@ -60,6 +58,8 @@ def store_import(context, arguments):
     filename = PurePosixPath(request.path).name
     if not filename or "\\" in filename or len(filename) > 255:
         raise KnowledgeError("The attachment must have a valid filename of at most 255 characters")
+    from .projects import _archive_kind, _path
+    relative_path = _path(request.relative_path or request.path)
     bundle_id = str(request.bundle_id) if request.bundle_id else None
     kb = actions._client(context)
     if bundle_id:
@@ -67,15 +67,33 @@ def store_import(context, arguments):
         if bundle["status"] == "deleted":
             raise KnowledgeError("That experiment upload was deleted")
         group_id = actions._uuid(bundle["group_id"], "group_id")
-        if request.group_id is not None and request.group_id != group_id:
-            raise KnowledgeError("group_id must match the experiment upload's group")
+        if request.project_id is not None and request.project_id != group_id:
+            raise KnowledgeError("project_id must match the experiment upload's project")
     else:
-        group_id = actions._resolve_group(kb, request.group_id, actions.settings_of(context)).id
+        from .projects import ensure_project, preview_files
+        if _archive_kind(filename):
+            if request.project_id is not None:
+                kb.collections.require(request.project_id)
+            preview = preview_files(context, [{"filename": filename, "data": request.data}],
+                grouping="single" if request.project_id else "top",
+                identity=f"attachment:{request.source_collection_id}:{request.version_id}:{request.path}")
+            if preview.get("committed"):
+                return {**preview["result"], "state": "imported", "next_step": {"tool": "knowledge_projects"}}
+            return {**preview, "state": "preview", "next_step": {
+                "tool": "knowledge_project_import_commit", "token": preview["token"],
+                "grouping": preview["grouping"], "depth": preview["depth"],
+                **({"projects": [{"key": item["key"], "name": item["name"],
+                    "project_id": str(request.project_id)} for item in preview["projects"]]} if request.project_id else {})}}
+        project_key = uuid5(NAMESPACE_URL,
+            f"oaw:knowledge:attachment-project:{request.source_collection_id}:{request.version_id}:{request.path}")
+        project = (kb.collections.get(project_key) if request.project_id is None else None) or ensure_project(kb, PurePosixPath(filename).stem or filename,
+            project_id=request.project_id, collection_id=project_key if request.project_id is None else None)
+        group_id = project.id
 
     # The existing source store accepts caller-owned IDs. This makes retries and
     # restarts idempotent without a second file store or an in-memory receipt.
     source_id = uuid5(NAMESPACE_URL,
-        f"oaw:knowledge:artifact:{group_id}:{bundle_id or 'literature'}:{request.version_id}:{request.path}")
+        f"oaw:knowledge:artifact:{group_id}:{bundle_id or 'project'}:{request.version_id}:{request.path}:{relative_path}")
     source = kb.sources.get(source_id)
     reused = source is not None
     digest = hashlib.sha256(request.data).hexdigest()
@@ -86,7 +104,7 @@ def store_import(context, arguments):
     if source is None:
         source = kb.sources.add_bytes(group_id, request.data, source_id=source_id,
             filename=filename, media_type=mimetypes.guess_type(filename)[0] or "application/octet-stream",
-            metadata={"uploaded_by": actions._actor(context),
+            metadata={"uploaded_by": actions._actor(context), "relative_path": relative_path,
                 "origin": {"collection_id": request.source_collection_id,
                     "version_id": str(request.version_id), "path": request.path},
                 **({"workflow": "experiment", "bundle_id": bundle_id} if bundle_id else {})})
@@ -101,9 +119,16 @@ def store_import(context, arguments):
         if not reused and bundle["status"] != "ready":
             kb.oaw_experiments.update_bundle(bundle_id, status="ready", run_id=None)
 
+    from .projects import project_sources, register_project_file
+    current = next((item for item in project_sources(kb, group_id)
+        if (item.metadata or {}).get("relative_path", item.filename) == relative_path), None)
+    if not reused or current is None:
+        register_project_file(kb, group_id, source, relative_path=relative_path)
+        current = source
+
     result = {"source": {"id": str(source.id), "filename": source.filename,
                           "size": source.size, "sha256": source.sha256},
-              "group_id": str(group_id), "reused": reused}
+              "project_id": str(group_id), "reused": reused, "current": str(current.id) == str(source.id)}
     if bundle_id:
         result["bundle_id"] = bundle_id
     try:

@@ -1,8 +1,6 @@
 # 入门指南
 
-[English](getting-started.md) | **简体中文**
-
-[文档目录](README.zh-CN.md) / [配置（英文）](configuration.md)
+[文档目录](README.md) / [配置（英文）](configuration.md)
 
 ## 环境要求与安装
 
@@ -38,7 +36,7 @@ Windows 桌面安装包自带 Python 运行时，并在独立的 Tauri 窗口中
 
 1. 打开启动器输出的地址，进入 **Settings > Models（设置 > 模型）**。添加连接，按需输入 API 密钥，添加服务端模型 ID，选择默认模型并保存。见[模型配置（英文）](configuration.md#models-and-connections)。
 2. 打开 **Pack & Card Library（卡包与卡牌库）**，打开已安装的卡包，将收集的卡牌加入当前牌组。全新安装时，卡包尚未打开，牌组为空。
-3. 从底部托盘放置 Agent，设置指令和模型，并连接希望它使用的资源。[核心概念（英文）](concepts.md) 介绍了可用的关系类型。也可以跟随[交互教程](tutorial.zh-CN.md) 操作。
+3. 从底部托盘放置 Agent，设置指令和模型，并连接希望它使用的资源。[核心概念（英文）](concepts.md) 介绍了可用的关系类型。也可以跟随[交互教程](tutorial.md) 操作。
 
 ## 不配置模型凭据也能体验
 

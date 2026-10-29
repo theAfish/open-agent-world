@@ -1,10 +1,15 @@
 import { expect, test } from '@playwright/test';
 import type { LibrarySnapshot } from '../src/state/cardLibrary';
 
-test('library adds directly to the visible bottom deck at desktop and narrow widths', async ({ page, request }) => {
+test('library keeps its size while the half-open deck expands over it for dragging at desktop and narrow widths', async ({ page, request }) => {
   test.setTimeout(60000);
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
+  const profile = await (await request.get('/api/application')).json();
+  expect((await request.patch('/api/application/preferences', { data: {
+    profile_id: profile.profile_id, generation: profile.generation,
+    changes: { 'oaw.locale': 'en', 'oaw-onboarding-v1': JSON.stringify({ version: 1, state: { status: 'skipped' } }) },
+  } })).ok()).toBe(true);
   const read = async (): Promise<LibrarySnapshot> => (await request.get('/api/card-library')).json();
   const initial = await read();
   const pack = Object.values(initial.packs).find(pack => pack.definition.cards.includes('text'))!;
@@ -26,9 +31,24 @@ test('library adds directly to the visible bottom deck at desktop and narrow wid
     const source = library.locator('[data-library-card="text"]');
     await expect(source).toHaveAttribute('data-can-drag', 'true');
     await source.scrollIntoViewIfNeeded();
-    const a = (await source.boundingBox())!, b = (await destination.boundingBox())!;
+    const libraryBox = (await library.boundingBox())!;
+    const collection = library.locator('.library-card-collection');
+    const scrollTop = await collection.evaluate(element => element.scrollTop);
+    const a = (await source.boundingBox())!;
     await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
     await page.mouse.down();
+    await page.mouse.move(a.x + a.width / 2 + 12, a.y + a.height / 2, { steps: 2 });
+    const expandedHeight = page.viewportSize()!.height <= 650 ? 120 : 142;
+    await expect.poll(async () => (await deck.locator('.deck-stage').boundingBox())!.height).toBe(expandedHeight);
+    const expanded = (await deck.boundingBox())!;
+    expect(expanded.y).toBeLessThan(libraryBox.y + libraryBox.height);
+    expect(await library.boundingBox()).toEqual(libraryBox);
+    expect(await collection.evaluate(element => element.scrollTop)).toBe(scrollTop);
+    // The expanded tray owns the overlap, so the Library cannot intercept a drop.
+    expect(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest('.component-palette.is-library-open')),
+      { x: expanded.x + expanded.width / 2, y: expanded.y + 8 })).toBe(true);
+    await page.screenshot({ path: `test-results/library-deck-expanded-${page.viewportSize()!.width}.png` });
+    const b = (await destination.boundingBox())!;
     await page.mouse.move(b.x + b.width * .7, b.y + b.height / 2, { steps: 12 });
     await expect(page.locator('.palette-drag-preview')).toBeVisible();
     await page.mouse.up();
@@ -43,13 +63,16 @@ test('library adds directly to the visible bottom deck at desktop and narrow wid
   await expect(deck.locator('[data-palette-card="text"]')).toHaveCount(0);
   expect((await read()).decks.find(item => item.id === 'saved-legions')!.entries).toEqual([]);
   await deck.getByRole('tab', { name: /Library destination/ }).click();
-  for (const width of [1280, 720, 390]) {
-    await page.setViewportSize({ width, height: 800 });
+  for (const { width, height } of [{ width: 1280, height: 800 }, { width: 720, height: 650 }, { width: 390, height: 800 }]) {
+    await page.setViewportSize({ width, height });
+    await page.mouse.move(1, 1);
     await expect(deck.locator('.deck-stage')).toBeVisible();
+    await expect.poll(async () => (await deck.locator('.deck-stage').boundingBox())!.height).toBe(64);
     await expect.poll(async () => {
       const a = (await library.boundingBox())!, b = (await deck.boundingBox())!;
       return a.y + a.height <= b.y;
     }).toBe(true);
+    await page.screenshot({ path: `test-results/library-deck-resting-${width}.png` });
     await drag(deck.locator('.deck-stage'));
     await expect(deck.locator('[data-palette-card="text"]')).toBeVisible();
     await expect(library.getByRole('button', { name: 'Remove Text file from deck', exact: true })).toBeVisible();
@@ -84,6 +107,8 @@ test('library adds directly to the visible bottom deck at desktop and narrow wid
   await expect(deck.getByRole('button', { name: 'Delete deck', exact: true })).toBeDisabled();
   await deck.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.setViewportSize({ width: 1280, height: 800 });
+  await deck.hover();
+  await expect.poll(async () => (await deck.locator('.deck-stage').boundingBox())!.height).toBe(142);
   const trash = deck.getByRole('region', { name: 'Discard card' });
   const card = deck.locator('[data-palette-card="text"]');
   const startDiscard = async () => {
@@ -118,6 +143,19 @@ test('library adds directly to the visible bottom deck at desktop and narrow wid
   await library.getByRole('button', { name: 'Close Library' }).click();
   await expect(library).not.toBeVisible();
   await page.getByRole('button', { name: 'Open Pack and Card Library' }).click();
+  await expect.poll(async () => (await deck.locator('.deck-stage').boundingBox())!.height).toBe(64);
+  const source = library.locator('[data-library-card="text"]');
+  const sourceBox = (await source.boundingBox())!;
+  const libraryBox = await library.boundingBox();
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2 + 12, sourceBox.y + sourceBox.height / 2);
+  await expect.poll(async () => (await deck.locator('.deck-stage').boundingBox())!.height).toBe(142);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await expect(library).toBeVisible();
+  await expect.poll(async () => (await deck.locator('.deck-stage').boundingBox())!.height).toBe(64);
+  expect(await library.boundingBox()).toEqual(libraryBox);
   await page.keyboard.press('Escape');
   await expect(library).not.toBeVisible();
   expect(errors).toEqual([]);

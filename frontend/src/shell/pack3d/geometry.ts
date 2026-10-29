@@ -108,7 +108,13 @@ export function paperFlapGeometry() {
   shape.bezierCurveTo(1.12, -.75, .48, -.89, 0, -.91);
   shape.bezierCurveTo(-.48, -.89, -1.12, -.75, -1.13, -.36); shape.closePath();
   const geometry = new ExtrudeGeometry(shape, { depth: .012, bevelEnabled: true, bevelSize: .012, bevelThickness: .004, bevelSegments: 3, curveSegments: 24 });
-  const p = geometry.getAttribute('position'), uv = geometry.getAttribute('uv');
+  const p = geometry.getAttribute('position'), uv = geometry.getAttribute('uv'), normals = geometry.getAttribute('normal');
   for (let i = 0; i < p.count; i++) uv.setXY(i, (p.getX(i) + 1.15) / 2.3, 1 + p.getY(i) / .95);
+  // The printed face and opaque paper can each draw in one batch. Reorder
+  // triangle indices, retaining the extrusion's normals, UVs and winding.
+  const face: number[] = [], paper: number[] = [];
+  for (let i = 0; i < p.count; i += 3) (normals.getZ(i) > .9 ? face : paper).push(i, i + 1, i + 2);
+  geometry.setIndex([...face, ...paper]); geometry.clearGroups();
+  geometry.addGroup(0, face.length, 0); geometry.addGroup(face.length, paper.length, 1);
   return geometry;
 }

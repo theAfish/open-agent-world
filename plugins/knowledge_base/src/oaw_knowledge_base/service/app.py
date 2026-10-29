@@ -1,6 +1,6 @@
 """The HTTP front door: every operation in the table, one route, one bearer token.
 
-The router is generic on purpose. ``POST /v1/collections/{collection}/{operation}``
+The router is generic on purpose. ``POST /v1/{operation}``
 looks the operation up in :mod:`oaw_knowledge_base.operations` and calls the same
 handler the OAW card calls, with the action's arguments as the request body — so an
 operation cannot drift between the card, MCP and HTTP, and adding one to the table
@@ -10,14 +10,13 @@ Two boundaries are enforced here rather than in the handlers:
 
 * **The token.** One bearer token from ``KB_SERVICE_TOKEN``. Binding anything other
   than loopback without it is refused in :mod:`~oaw_knowledge_base.service.cli`.
-* **Approval.** Publishing into the graph is a human act. ``knowledge_review`` and
-  ``insight_review`` with ``operation=publish``, and ``knowledge_graph_audit_apply``
-  (which rewrites the published layer), are rejected unless a separate
+* **Approval.** Publishing experimental records and insights is a human act.
+  Their ``operation=publish`` calls are rejected unless a separate
   ``KB_ADMIN_TOKEN`` is set *and* presented, so an out-of-the-box service has no
   network path to publishing at all.
 
 The service never holds model credentials and never calls a provider: callers take
-``knowledge_extract_prompt`` (or a record or insight prompt) to their own model and
+``projection_prompt`` (or an experiment or insight prompt) to their own model and
 bring the JSON back to the matching save operation, exactly as an OAW Agent does.
 """
 from __future__ import annotations
@@ -28,14 +27,13 @@ from fastapi.responses import JSONResponse
 from .. import __version__
 from ..errors import KnowledgeError, operator_message
 from ..operations import BY_NAME, tool_manifest
-from .store import DEFAULT_COLLECTION, Store
+from .store import Store
 
 # Operations a plain service token may reach. Everything else in the table is either
 # an agent operation (also allowed) or gated below.
-# Publishing a knowledge draft or an insight writes the graph; neither happens over
-# the network without the admin token.
-ADMIN_ONLY = {("knowledge_review", "publish"), ("insight_review", "publish"),
-              ("knowledge_graph_audit_apply", None)}
+# Projection results are directly usable. Publishing experimental records and
+# insights remains a deliberate human decision on every transport.
+ADMIN_ONLY = {("experiment_review", "publish"), ("insight_review", "publish")}
 
 
 def _presented(request: Request) -> str | None:
@@ -46,7 +44,7 @@ def _presented(request: Request) -> str | None:
 
 def create_app(store: Store, *, token: str | None = None, admin_token: str | None = None):
     app = FastAPI(title="Knowledge base", version=__version__,
-                  description="Documents to markdown, markdown to records and knowledge, knowledge to a reviewed graph.")
+                  description="Project files to Markdown and Space projections; experimental records to insights.")
 
     accepted = {value for value in (token, admin_token) if value}
 
@@ -73,12 +71,12 @@ def create_app(store: Store, *, token: str | None = None, admin_token: str | Non
         """The agent-facing manifest, in the shape a harness wants for tool registration."""
         return {"tools": tool_manifest()}
 
-    @app.get("/v1/collections")
-    def collections(admin: bool = Depends(authorize)):
-        return {"collections": store.collections()}
+    @app.get("/v1/projects")
+    def projects(admin: bool = Depends(authorize)):
+        return store.run("projects", {})
 
-    @app.post("/v1/collections/{collection}/{operation}")
-    def run(collection: str, operation: str, request: Request, response: Response,
+    @app.post("/v1/{operation}")
+    def run(operation: str, request: Request, response: Response,
             arguments: dict | None = None, confirm: bool = False,
             admin: bool = Depends(authorize)):
         entry = BY_NAME.get(operation)
@@ -89,11 +87,11 @@ def create_app(store: Store, *, token: str | None = None, admin_token: str | Non
         if ((operation, str(suboperation) if suboperation is not None else None) in ADMIN_ONLY) and not admin:
             raise HTTPException(
                 status_code=403,
-                detail="Approving a draft or publishing an insight writes the knowledge "
-                       "graph. It needs the admin token (set KB_ADMIN_TOKEN on the service), "
-                       "or do it in OAW or with `kb approve` / `kb insights publish` on the host.")
+                detail="Publishing experimental records or insights needs the admin token "
+                       "(set KB_ADMIN_TOKEN on the service), or explicit publication in OAW "
+                       "or the local CLI.")
         try:
-            result = store.run(operation, arguments, collection=collection,
+            result = store.run(operation, arguments,
                                actor=request.headers.get("x-kb-actor"),
                                confirmed=confirm and admin)
         except Exception as error:  # the status code is the only thing decided here

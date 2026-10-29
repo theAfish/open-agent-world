@@ -571,6 +571,41 @@ describe("ConversationWorkspace snapshots", () => {
     expect(disclosure.compareDocumentPosition(finalArticle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it('shows a failed Run notice once after its replies without blaming model settings', async () => {
+    const replies: ConversationMessage[] = [
+      { ...historicalMessage, id: 'progress-1', sequence: 2, run_id: 'failed-run', sender_kind: 'agent', content: 'Reading materials' },
+      { ...historicalMessage, id: 'progress-2', sequence: 3, run_id: 'failed-run', sender_kind: 'agent', content: 'Creating a graph' },
+      { ...historicalMessage, id: 'failure', sequence: 4, run_id: 'failed-run', sender_kind: 'system',
+        content: 'Tool arguments remained invalid after 5 model request attempts.' },
+    ];
+    vi.mocked(worldApi.getConversationTimeline).mockResolvedValue({
+      items: [historicalMessage, ...replies], has_before: false, has_after: false,
+      run_summaries: { 'failed-run': { run_id: 'failed-run', agent_id: 'atlas', status: 'failed', tool_count: 0, tool_trace: [] } },
+    });
+    const view = render(<ConversationWorkspace card={card} />);
+    await screen.findByText(replies[2].content);
+    expect(view.container.querySelectorAll('.conversation-recovery')).toHaveLength(1);
+    expect(screen.getByText(replies[2].content).closest('article')?.querySelector('.conversation-recovery')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Check model settings' })).toBeNull();
+  });
+
+  it('keeps safe continuation and uncertain-write receipts on the single interruption notice', async () => {
+    const reply: ConversationMessage = { ...historicalMessage, id: 'interrupted', sequence: 2, run_id: 'interrupted-run',
+      sender_kind: 'agent', content: 'Checking saved work' };
+    vi.mocked(worldApi.getConversationTimeline).mockResolvedValue({
+      items: [historicalMessage, reply], has_before: false, has_after: false,
+      run_summaries: { 'interrupted-run': { run_id: 'interrupted-run', agent_id: 'atlas', status: 'interrupted',
+        tool_count: 1, tool_trace: [], recovery_kind: 'model_stream_interrupted', recovery_classification: 'reconcile_required',
+        confirmed_tool_count: 1, recovery_receipts: [{ capability_kind: 'sandbox', target_id: 'saved-file', state: 'started', read_only: false }] } },
+    });
+    render(<ConversationWorkspace card={card} />);
+    await screen.findByText(reply.content);
+    expect(screen.getByText(/At least one write has an unconfirmed outcome/)).toBeTruthy();
+    expect(screen.getByText(/saved-file/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Review safe continuation' }));
+    expect((screen.getByLabelText('Conversation message') as HTMLTextAreaElement).value).toContain('Do not repeat a completed or uncertain side effect');
+  });
+
   it("creates independent sessions within the selected group and renames them", async () => {
     vi.mocked(worldApi.getConversation).mockResolvedValue({ conversation_id: card.id,
       sessions: [{ ...session, group_id: "group-1", group_title: "Research" }], agents: [] });

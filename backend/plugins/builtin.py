@@ -1183,8 +1183,14 @@ class CorePlugin:
         register_execution_graph(registration)
         from backend.job_board import register as register_job_board
         register_job_board(registration)
+        from backend.plugins.agent_barracks import register as register_barracks
+        from backend.plugins.task_board import register as register_task_board
+        from open_agent_world.skill_packages import SkillPackage, register_skill_package
+        register_barracks(registration)
+        register_skill_package(registration, node_type="oaw.skills", package=SkillPackage(), published=False)
+        register_task_board(registration)
         registration.register_pack(PackDefinition(id='open-agent-world.core.default', name='Core essentials',
-            description='Agents, resources and workspaces for your world.', cards=tuple(registration.nodes), packaging='collector'))
+            description='Agents, barracks, skills, task boards, resources and workspaces for your world.', cards=tuple(registration.nodes), packaging='collector'))
 
 
 def create_builtin_registry(*, sandbox_config_model: type[SandboxConfig] = SandboxConfig) -> PluginRegistry:

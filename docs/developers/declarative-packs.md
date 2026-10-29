@@ -157,14 +157,7 @@ saved cards and connections remain recoverable and cannot grant permissions.
 
 ## Validation boundaries
 
-The Notes acceptance harness copies the project outside OAW, installs a packed
-SDK, builds its UI, packages and inspects the archive, installs through the real
-Library, observes the new Pack in the same open page without reload, edits a note
-without restarting the host, then restarts to check identity,
-configuration and geometry. CI runs this alongside the existing advanced
-Greeter acceptance and strict official plugin activation/build checks.
-
-This contribution form does not isolate Python processes or support hot reload.
-Scientific plugins can retain their full SDK implementations. XRD still uses
-XRD-specific Host helpers such as `runAnalysis`, `getInputs` and `stopAnalysis`;
-those require a separate Host/Plugin boundary change.
+Follow [Pack verification](testing.md) to build and install your project in a
+disposable profile. Check configuration persistence after restart as well as
+initial activation. This contribution form does not isolate Python processes
+or support source hot reload.

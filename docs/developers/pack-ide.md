@@ -140,19 +140,10 @@ Never use a production profile to test unreviewed code.
 
 ## Compatibility and verification boundaries
 
-The experimental designation applies to the visual Pack IDE, not the Factory
-or traditional card production tools. The Face Designer's card faces, paper,
-process layers, decorations and finished proofs remain available, along with
-packaging, printing and saved designs. Opening the Pack Designer shows its
-packaging controls; the IDE is a secondary tool. Its existing workspace draft
-key retains project edits when the IDE closes and reopens.
-Existing Schema 2 content Packs use their existing consumer path.
-The new direct project workflow emits Schema 3; Schema 1 stays unsupported.
-The installer, ownership model and Marketplace authentication are unchanged.
+The IDE emits Schema 3 source projects and retains edits when closed and reopened.
+Schema 2 content Packs use the separate [content Pack workflow](../creator-packs.md);
+Schema 1 is unsupported. Traditional face design and printing are described in
+[Card Factory](../card-factory.md).
 
-The implementation's focused acceptance includes a generated visual adapter,
-a mixed Python adapter installed into a clean profile and invoked in a fresh
-process, source preservation, project conflicts and path restrictions. Browser
-acceptance separately exercises the IDE controls and ordinary installation.
-A browser test of a local host is not installed Tauri/WebView2 desktop evidence.
-Consult the delivery report for the tests and native environments actually run.
+Check the exported Pack in a disposable host profile, including installation,
+restart and saved-card behavior. See [Card App verification](testing.md).

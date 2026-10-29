@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import runpy
 import shutil
+import tomllib
 
 import pytest
 import yaml
@@ -62,9 +63,11 @@ def version_root(tmp_path):
 def test_version_drift_is_rejected(version_root, file):
     version = gate["check_versions"](version_root)
     path = version_root / file
-    if file == "backend/uv.lock":
-        path.write_text(path.read_text().replace('name = "open-agent-world-backend"\nversion = "' + version,
-                                                'name = "open-agent-world-backend"\nversion = "9.8.7'))
+    if file in ("backend/uv.lock", "desktop/src-tauri/Cargo.lock"):
+        name = "open-agent-world-backend" if file.startswith("backend") else tomllib.loads(
+            (version_root / "desktop/src-tauri/Cargo.toml").read_text())["package"]["name"]
+        path.write_text(path.read_text().replace(f'name = "{name}"\nversion = "{version}"',
+                                                f'name = "{name}"\nversion = "9.8.7"', 1))
     else:
         path.write_text(path.read_text().replace(version, "9.8.7", 1))
     with pytest.raises(ValueError, match="does not match"):
@@ -85,6 +88,40 @@ def test_prerelease_uses_equivalent_python_version(version_root):
             replacement = "1.2.3rc1" if "backend" in path.parts else "1.2.3-rc.1"
             path.write_text(path.read_text().replace(version, replacement))
     assert gate["check_versions"](version_root, "v1.2.3-rc.1") == "1.2.3-rc.1"
+
+
+@pytest.mark.parametrize("version", ["v1.2.3", "1.2.3-rc.1"])
+def test_prepare_version_updates_all_application_versions_and_preserves_dependencies(version_root, version):
+    previous = gate["check_versions"](version_root)
+    for folder in ("frontend", "desktop"):
+        path = version_root / folder / "package-lock.json"
+        data = json.loads(path.read_text())
+        data["packages"]["node_modules/unrelated"] = {"version": previous}
+        path.write_text(json.dumps(data, indent=2) + "\n")
+    for filename in ("backend/uv.lock", "desktop/src-tauri/Cargo.lock"):
+        path = version_root / filename
+        path.write_text(path.read_text() + f'\n[[package]]\nname = "unrelated"\nversion = "{previous}"\n')
+    before = {p: p.read_text() for p in version_root.rglob("*") if p.is_file()}
+    expected = version.removeprefix("v")
+    assert gate["set_version"](version, version_root) == expected
+    assert gate["check_versions"](version_root, "v" + expected) == expected
+    prepared = {p: p.read_text() for p in before}
+    assert all(prepared[p] != before[p] for p in before)
+    for folder in ("frontend", "desktop"):
+        data = json.loads((version_root / folder / "package-lock.json").read_text())
+        assert data["packages"]["node_modules/unrelated"]["version"] == previous
+    for filename in ("backend/uv.lock", "desktop/src-tauri/Cargo.lock"):
+        assert f'name = "unrelated"\nversion = "{previous}"' in (version_root / filename).read_text()
+    gate["set_version"](version, version_root)
+    assert prepared == {p: p.read_text() for p in before}
+
+
+@pytest.mark.parametrize("version", ["v0.6", "0.6.0+metadata"])
+def test_prepare_invalid_version_does_not_modify_sources(version_root, version):
+    before = {p: p.read_bytes() for p in version_root.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="Use X.Y.Z"):
+        gate["set_version"](version, version_root)
+    assert before == {p: p.read_bytes() for p in before}
 
 
 @pytest.fixture

@@ -11,6 +11,18 @@
 .legion-window-mark { display: grid; place-items: center; flex-shrink: 0; width: 22px; height: 22px; color: var(--accent-strong); }
 .legion-window-title { display: flex; min-width: 0; margin-right: auto; }
 .legion-window-title strong { font-size: 14px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.legion-workspace-switcher { position: relative; min-width: 0; }
+.legion-window-titlebar .legion-workspace-trigger { display: flex; align-items: center; padding: 0 5px; border: 0; background: transparent; color: var(--ink); cursor: pointer; }
+.legion-workspace-trigger > svg { flex-shrink: 0; color: var(--ink-faint); transition: transform 120ms ease; }
+.legion-workspace-trigger > svg.is-open { transform: rotate(180deg); }
+.legion-window-titlebar .legion-workspace-trigger:hover { background: var(--surface-soft); }
+.legion-workspace-menu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 20; width: min(300px, calc(100vw - 40px)); max-height: min(420px, calc(100dvh - 90px)); overflow-y: auto; padding: 6px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface-solid); box-shadow: 0 12px 32px var(--shadow); }
+.legion-workspace-menu-label { padding: 6px 9px 8px; color: var(--ink-faint); font-size: 10px; }
+.legion-window-titlebar .legion-workspace-menu button { display: flex; align-items: center; width: 100%; height: 38px; border: 0; background: transparent; color: var(--ink-soft); text-align: left; cursor: pointer; }
+.legion-workspace-menu button > span { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.legion-workspace-menu button > svg { flex-shrink: 0; }
+.legion-window-titlebar .legion-workspace-menu button[aria-checked="true"] { color: var(--accent-strong); background: var(--accent-soft); }
+.legion-window-titlebar .legion-workspace-menu button:hover, .legion-window-titlebar .legion-workspace-menu button:focus-visible { background: var(--surface-soft); outline: 1px solid var(--line-strong); outline-offset: -1px; }
 .legion-window-status { font-size: 12px; color: var(--ink-soft); }
 .legion-window-titlebar button { min-height: 30px; height: 30px; padding: 0 10px; gap: 6px; font-size: 12px; border-radius: 6px; box-shadow: none; white-space: nowrap; }
 .legion-window-main { position: relative; display: flex; flex: 1; min-height: 0; overflow: hidden; }

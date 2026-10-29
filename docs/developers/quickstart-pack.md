@@ -1,4 +1,4 @@
-# Make and share your first Pack in 10 minutes
+# Build a declarative Pack
 
 **Goal:** create a card with one saved setting, package it as a `.oawpack` file and
 give it to someone else. No Python code and no frontend build are needed for this
@@ -7,13 +7,14 @@ path. When you later want a custom interface, continue with
 
 ## Before you start
 
-You need Python 3.11 or newer and a checkout of OAW (the Pack tool currently ships
-inside it). Define two shell variables once:
+First complete [development setup](setup.md). The Pack tool ships in the OAW
+checkout and needs its prepared backend interpreter. The commands below use a
+POSIX shell; for PowerShell and a complete Python/React app, use [Card App](card-app.md).
+From the OAW root, define:
 
 ```sh
-git clone https://github.com/theAfish/open-agent-world.git
-export OAW_PYTHON=python3                              # or the interpreter you run OAW with
-export OAW_PACK="$PWD/open-agent-world/scripts/oaw-pack.py"
+export OAW_PYTHON="$PWD/backend/.venv/bin/python"
+export OAW_PACK="$PWD/scripts/oaw-pack.py"
 ```
 
 ## 1. Create the project
@@ -91,8 +92,10 @@ recipients:
 - that Packs run as trusted code, so they should only install files from sources
   they trust.
 
-There is no online Store yet, no publisher verification, and dependencies are not
-installed automatically. See [Pack installation and distribution](../pack-distribution.md).
+The Store downloads from the official Marketplace through the same installer.
+Required dependency Packs must already be available; they are not fetched recursively.
+Marketplace submission is a separate [author workflow](../creator-packs.md#submit-to-marketplace).
+Local `local.*` identities remain suitable for offline sharing.
 
 ## Next steps
 

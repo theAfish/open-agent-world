@@ -89,13 +89,18 @@ describe('physical packaging geometry', () => {
     geometry.dispose(); material.dispose();
   });
 
-  it('gives the curved flap thickness and an opaque reverse face', () => {
-    const geometry = paperFlapGeometry(), material = new MeshBasicMaterial(), mesh = new Mesh(geometry, material);
+  it('batches the printed flap face and opaque reverse without losing its thickness or triangles', () => {
+    const geometry = paperFlapGeometry(), materials = [new MeshBasicMaterial(), new MeshBasicMaterial()], mesh = new Mesh(geometry, materials);
+    expect(geometry.groups).toHaveLength(2);
+    const indices = [...geometry.index!.array];
+    expect(indices.slice().sort((a, b) => a - b)).toEqual(Array.from({ length: geometry.getAttribute('position').count }, (_, i) => i));
+    for (let i = 0; i < indices.length; i += 3) expect(indices.slice(i, i + 3)).toEqual([indices[i], indices[i] + 1, indices[i] + 2]);
     mesh.updateMatrixWorld();
     const front = new Raycaster(new Vector3(0, -.5, 1), new Vector3(0, 0, -1)).intersectObject(mesh);
     const back = new Raycaster(new Vector3(0, -.5, -1), new Vector3(0, 0, 1)).intersectObject(mesh);
     expect(front.length).toBeGreaterThan(0); expect(back.length).toBeGreaterThan(0);
+    expect(front[0].face!.materialIndex).toBe(0); expect(back[0].face!.materialIndex).toBe(1);
     expect(front[0].point.z - back[0].point.z).toBeGreaterThan(.01);
-    geometry.dispose(); material.dispose();
+    geometry.dispose(); materials.forEach(material => material.dispose());
   });
 });

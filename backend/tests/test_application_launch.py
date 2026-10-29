@@ -70,14 +70,14 @@ def test_preferences_survive_restart_and_reject_stale_windows(dev_settings):
     with TestClient(create_app(dev_settings)) as client:
         profile = client.get("/api/application").json()
         body = {k: profile[k] for k in ("profile_id", "generation")}
-        body["changes"] = {"oaw-theme": "dark", "oaw-onboarding-v1": '{"state":{"status":"completed"}}', "oaw-minister-role-learned": "true"}
+        body["changes"] = {"oaw.documentation.locale": "zh-CN", "oaw-theme": "dark", "oaw-onboarding-v1": '{"state":{"status":"completed"}}', "oaw-minister-role-learned": "true"}
         assert client.patch("/api/application/preferences", json=body).status_code == 200
     request = ResetRequest(scopes=["tutorial"], profile_id=profile["profile_id"], generation=profile["generation"])
     backup = reset_profile(dev_settings, request)
     assert (backup / "world.sqlite3").is_file()
     with TestClient(create_app(dev_settings)) as client:
         current = client.get("/api/application").json()
-        assert current["values"] == {"oaw-theme": "dark"}
+        assert current["values"] == {"oaw-theme": "dark", "oaw.documentation.locale": "zh-CN"}
         assert current["profile_id"] == profile["profile_id"]
         assert current["generation"] != profile["generation"]
         assert client.patch("/api/application/preferences", json=body).status_code == 409

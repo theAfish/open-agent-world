@@ -10,6 +10,8 @@ import { worldApi } from "../api/client";
 import { useWorldStore } from "../state/worldStore";
 import * as hostedAuth from '../auth/hostedSession';
 
+vi.mock('./pack3d/artwork', () => ({ paintPackCover: vi.fn() }));
+
 const originalRefresh = useCardLibrary.getState().refresh;
 beforeEach(() => {
   vi.spyOn(worldApi, 'getInstalledPacks').mockResolvedValue({ restart_required: false, versions: [] });
@@ -89,8 +91,8 @@ it('opens installed packs and browses their cards before entering secondary mana
   expect(screen.queryByRole('region', { name: 'Pack details' })).toBeNull();
   expect(within(pack).getByRole('button', { name: 'View cards in Alpha pack' }).hasAttribute('disabled')).toBe(true);
   const animationEnd = new Event('animationend', { bubbles: true });
-  Object.defineProperty(animationEnd, 'animationName', { value: 'packDeflate' });
-  fireEvent(pack.querySelector('.pack-object')!, animationEnd);
+  Object.defineProperty(animationEnd, 'animationName', { value: 'packOpeningDip' });
+  fireEvent(pack.querySelector('.pack-cover')!, animationEnd);
   fireEvent.click(within(pack).getByRole('button', { name: 'View cards in Alpha pack' }));
   expect((screen.getByLabelText('Source pack') as HTMLSelectElement).value).toBe('pack:alpha');
   expect(screen.queryByRole('button', { name: 'Uninstall Pack' })).toBeNull();
@@ -178,10 +180,37 @@ it('restores an unenrolled source Pack using its distribution identity', async (
   const restore = vi.spyOn(worldApi, 'managePack').mockResolvedValue({ restart_required: true, versions: [], inventory: [{ ...source, enrolled: true }] });
   useCardLibrary.setState({ snapshot: state, open: true, tab: 'packs', refresh: async () => {} });
   await act(async () => { render(<CardLibrary />); });
+  expect(screen.queryByRole('article', { name: 'Alpha pack' })).toBeNull();
+  const uninstalled = screen.getByText('Uninstalled Packs (2)').closest('details')!;
+  expect(uninstalled.open).toBe(false);
+  uninstalled.open = true;
   fireEvent.click(screen.getByRole('button', { name: 'View pack Alpha pack' }));
   expect(screen.queryByRole('button', { name: 'Uninstall Pack' })).toBeNull();
   await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Restore Pack' })));
   expect(restore).toHaveBeenCalledWith('distribution.alpha/restore', 'POST', undefined);
+});
+
+it('removes an orphaned Pack entry while retaining collected cards and surfaces failures', async () => {
+  const state = packSnapshot();
+  const owner = state.packs.alpha.definition.plugin_id;
+  state.plugins[owner].installed = false;
+  useCardLibrary.setState({ snapshot: state, open: true, tab: 'packs', refresh: async () => {} });
+  useWorldStore.setState({ legions: [] });
+  const saved = structuredClone(state);
+  saved.revision++;
+  saved.packs.alpha.dismissed = true;
+  const remove = vi.spyOn(worldApi, 'editCardLibrary').mockRejectedValueOnce(new Error('Inventory update failed')).mockResolvedValueOnce(saved);
+  await act(async () => { render(<CardLibrary />); });
+  fireEvent.click(screen.getByRole('button', { name: 'View pack Alpha pack' }));
+  expect(screen.queryByRole('button', { name: 'Uninstall Pack' })).toBeNull();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Remove Pack' })));
+  expect(screen.getByRole('alert').textContent).toContain('Inventory update failed');
+  expect(screen.getByRole('region', { name: 'Pack details' })).toBeTruthy();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Remove Pack' })));
+  expect(remove).toHaveBeenLastCalledWith({ action: 'dismiss_pack', id: 'alpha', expected_revision: state.revision });
+  expect(screen.queryByRole('article', { name: 'Alpha pack' })).toBeNull();
+  expect(screen.getByRole('article', { name: 'Beta pack' })).toBeTruthy();
+  expect(useCardLibrary.getState().snapshot?.collection).toEqual(state.collection);
 });
 
 it('keeps loaded local packs in the regular inventory without duplicates and manages them inside', async () => {
@@ -277,33 +306,76 @@ it("keeps the collected finish across library, detail and deck rerenders with no
   expect(normal.getAttribute("data-finish")).toBe("normal");
   expect(normal.querySelector(".card-finish-layer")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Inspect Tool 01" }));
-  expect(screen.getByText("Finish: Rainbow")).toBeTruthy();
+  expect(screen.getByText("Rainbow", { selector: ".library-finish-metadata" })).toBeTruthy();
   expect(container.querySelector('.library-card-preview .card-finish-layer')?.getAttribute("data-quality")).toBe("showcase");
   act(() => useCardLibrary.setState({ snapshot: { ...structuredClone(state), revision: state.revision + 1 } }));
   expect(stock().getAttribute("data-finish")).toBe("rainbow");
   expect(deck().getAttribute("data-finish")).toBe("rainbow");
-  expect(screen.getByText("Finish: Rainbow")).toBeTruthy();
+  expect(screen.getByText("Rainbow", { selector: ".library-finish-metadata" })).toBeTruthy();
 });
 
-it("browses a large collection in bounded pages and resets pagination for search and filters", () => {
-  HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
-  HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };
-  useCardLibrary.setState({ snapshot: snapshot(), open: true, refresh: async () => {} });
-  useWorldStore.setState({ legions: [] });
-  render(<CardLibrary />);
-  fireEvent.click(screen.getByRole("button", { name: /^Cards/ }));
-  expect(screen.getAllByRole("button", { name: /^Inspect Tool/ })).toHaveLength(30);
-  fireEvent.click(screen.getByLabelText("Next cards"));
-  fireEvent.click(screen.getByLabelText("Next cards"));
-  expect(screen.getAllByRole("button", { name: /^Inspect Tool/ })).toHaveLength(15);
-  expect(screen.getByText("Page 3 of 3")).toBeTruthy();
+it("shares preset covers, failed-cover fallback and replacement artwork across collection, detail and deck", () => {
+  vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+  const state = packSnapshot();
+  const artwork = '/api/plugins/xrd/assets/workbench-cover.svg';
+  state.packs.alpha.definition.artwork_url = artwork;
+  state.preset_pack_ids = { workbench: ['alpha'] };
+  state.decks[0].entries = [{ kind: 'legion', id: 'workbench' }];
+  openCards(state);
+  act(() => useWorldStore.setState({ legions: [{ id: 'workbench', name: 'XRD workbench', preset: true,
+    node_count: 2, edge_count: 1, bounds: { width: 600, height: 400 }, node_types: ['card.1'],
+    plugin_ids: [TEST_CATALOG.plugins[0].id], compatible: true, issues: [], revision: 1 }] }));
+  fireEvent.change(screen.getByLabelText('Source pack'), { target: { value: 'pack:alpha' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Inspect XRD workbench' }));
+  render(<ComponentPalette />);
+  const cover = within(screen.getByRole('complementary', { name: 'Card details' })).getByRole('img', { name: 'XRD workbench' });
+  expect(cover.getAttribute('src')).toBe(artwork);
+  expect(cover.closest('.library-detail-stage')).not.toBeNull();
+  const covers = screen.getAllByRole('img', { name: 'XRD workbench' });
+  expect(covers).toHaveLength(3);
+  for (const image of covers) {
+    expect(image.getAttribute('src')).toBe(artwork);
+    expect(image.parentElement?.querySelector('.card-face')).toBeNull();
+    fireEvent.error(image);
+  }
+  const faces = document.querySelectorAll('[data-library-card="workbench"] .card-face, .library-card-preview .card-face, [data-palette-card="workbench"] .card-face');
+  expect(faces).toHaveLength(3);
+  for (const face of faces) {
+    expect(face.querySelector('.lucide-layers')).toBeTruthy();
+    expect(face.innerHTML).toBe(faces[0].innerHTML);
+  }
+  const replacement = structuredClone(state);
+  replacement.packs.alpha.definition.artwork_url = '/replacement-cover.svg';
+  act(() => useCardLibrary.setState({ snapshot: replacement }));
+  const replaced = screen.getAllByRole('img', { name: 'XRD workbench' });
+  expect(replaced).toHaveLength(3);
+  for (const image of replaced) expect(image.getAttribute('src')).toBe('/replacement-cover.svg');
+});
+
+it("keeps complete source groups together, including packs larger than the former page limit", () => {
+  const state = snapshot();
+  const ids = Object.keys(state.collection);
+  for (const [id, name, cards] of [["alpha", "Alpha pack", ids.slice(0, 28)], ["beta", "Beta pack", ids.slice(28)]] as const) {
+    state.packs[id] = { definition: { id, name, plugin_id: TEST_CATALOG.plugins[0].id, cards: [...cards], description: "Research tools" }, owned: true, opened: true, opened_at: null };
+    for (const card of cards) state.collection[card].source_pack_ids = [id];
+  }
+  openCards(state);
+  for (const [name, count] of [["Alpha pack", 28], ["Beta pack", 47]] as const) {
+    const group = screen.getByRole("heading", { name }).closest("details")!;
+    expect(group.open).toBe(false);
+    group.open = true;
+    expect(within(group).getByText(`${count} cards`)).toBeTruthy();
+    expect(within(group).getAllByRole("button", { name: /^Inspect Tool/ })).toHaveLength(count);
+  }
+  expect(screen.queryByLabelText("Next cards")).toBeNull();
+  fireEvent.change(screen.getByLabelText("Source pack"), { target: { value: "pack:beta" } });
+  expect(screen.getAllByRole("button", { name: /^Inspect Tool/ })).toHaveLength(47);
   fireEvent.change(screen.getByLabelText("Search cards"), { target: { value: "Tool 75" } });
   expect(screen.getAllByRole("button", { name: /^Inspect Tool/ })).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "Inspect Tool 75" }));
   expect(screen.getByRole("complementary", { name: "Card details" }).textContent).toContain("Tool 75");
   fireEvent.change(screen.getByLabelText("Card category"), { target: { value: "Even" } });
   expect(screen.getByText("No matching cards")).toBeTruthy();
-  expect(screen.queryByLabelText("Next cards")).toBeNull();
 });
 
 function packSnapshot() {
@@ -361,7 +433,11 @@ it("groups by collected pack provenance, deduplicates shared cards and filters b
   expect(screen.getByRole("heading", { name: "Alpha pack" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Beta pack" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Alpha pack" }).closest("details")?.hasAttribute("open")).toBe(false);
-  for (const name of ["Alpha pack", "Beta pack"]) fireEvent.click(screen.getByRole("heading", { name }).closest("summary")!);
+  for (const name of ["Alpha pack", "Beta pack"]) {
+    const summary = screen.getByRole("heading", { name }).closest("summary")!;
+    expect(summary.querySelector("small")).toBeNull();
+    fireEvent.click(summary);
+  }
   expect(screen.getAllByRole("button", { name: "Inspect Review toolbox" })).toHaveLength(1);
   expect(screen.getAllByRole("button", { name: /^Inspect / })).toHaveLength(2);
   fireEvent.change(screen.getByLabelText("Source pack"), { target: { value: "pack:beta" } });
@@ -379,11 +455,12 @@ it("identifies internal cards by their exact container, retains descriptions and
   expect(screen.queryByRole("button", { name: "Inspect Review toolbox · Skill" })).toBeNull();
   fireEvent.click(screen.getByRole("checkbox", { name: /Show internal cards/ }));
   const inspect = screen.getByRole("button", { name: "Inspect Review toolbox · Skill" });
-  expect(inspect.textContent).toContain("Review code with the toolbox's shared conventions.");
+  expect(inspect.getAttribute('aria-description')).toBe("Review code with the toolbox's shared conventions.");
   expect(screen.getByRole("button", { name: "Inspect Simulation toolbox · Skill" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Add Review toolbox · Skill to deck" })).toBeNull();
   fireEvent.click(inspect);
   const detail = within(screen.getByRole("complementary", { name: "Card details" }));
+  expect(detail.getByText("Review code with the toolbox's shared conventions.")).toBeTruthy();
   expect(detail.getByText(/Open Review toolbox to use this card/)).toBeTruthy();
   fireEvent.click(detail.getByRole("button", { name: "Inspect Review toolbox" }));
   expect(detail.getByRole("heading", { name: "Review toolbox" })).toBeTruthy();
@@ -395,7 +472,10 @@ it("keeps disabled cards visible with their purpose, and distinguishes unavailab
   state.available_card_ids = [];
   openCards(state);
   fireEvent.change(screen.getByLabelText("Source pack"), { target: { value: "pack:alpha" } });
-  expect(screen.getByRole("button", { name: "Inspect Review toolbox" }).textContent).toContain(state.card_definitions["card.1"].description);
+  const inspect = screen.getByRole("button", { name: "Inspect Review toolbox" });
+  expect(inspect.getAttribute('aria-description')).toBe(state.card_definitions["card.1"].description);
+  fireEvent.click(inspect);
+  expect(within(screen.getByRole("complementary", { name: "Card details" })).getByText(state.card_definitions["card.1"].description)).toBeTruthy();
   expect(screen.getByRole("button", { name: "Add Review toolbox to deck" }).hasAttribute("disabled")).toBe(true);
   fireEvent.click(screen.getByRole("checkbox", { name: /Show internal cards/ }));
   fireEvent.click(screen.getByRole("button", { name: "Inspect Review toolbox · Skill" }));

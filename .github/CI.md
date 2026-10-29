@@ -1,11 +1,11 @@
 # Pull request checks
 
-Required merge contexts are `CI required`, `Docs required`, and `Native required`.
+Workflow aggregate contexts are `CI required`, `Docs required`, and `Native required`.
 They run without path filters on PRs to and pushes to `dev`/`main`, and on manual
 dispatch. Each aggregate fails unless every dependency succeeds, including all
-matrix targets. Enable them in GitHub rulesets using the
-[administrator instructions](../docs/contributing/index.md#repository-administrator-setup);
-repository code cannot enable those settings.
+matrix targets. Whether they are required for a particular PR is controlled by live GitHub
+rulesets. See [repository settings](../docs/contributing/index.md#repository-administrator-setup);
+repository code cannot establish their current enforcement.
 
 Frontend CI builds first, using the existing preparation step to install each
 Pack's declared dependencies in its own directory. Source-component tests then

@@ -190,12 +190,13 @@ mutually exclusive. Normal library deployment retains Legion membership.
 
 ## First-world blueprints
 
-The welcome screen offers **General assistant**, **Coding workspace**, and
-**Multi-Agent collaboration**, along with **Start Tutorial** and **Start Empty**.
-Users can also choose a saved Legion. Blueprints use the same template deployment
-path with `unwrap: true`; no Legion wrapper remains on the canvas. The operation
-supports undo/redo, uses the user's default model, and opens model setup when
-needed. Creating a formation does not start its Agents or Sandbox.
+The welcome screen offers **Start Tutorial**, **Choose a workspace** and **Start blank**.
+The workspace chooser lists General assistant, Coding workspace, Multi-Agent
+collaboration and compatible saved Legions. It supports selecting several and
+placing them on the canvas. Creating a formation does not send a model task or
+start a Sandbox. Instantiation uses the ordinary Legion and Library mechanisms;
+the guide arranges the returned cards and retains successful placements if a later
+selection fails.
 
 ```text
 POST /api/legion-groups                      {name, node_ids}

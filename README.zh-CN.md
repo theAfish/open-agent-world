@@ -13,7 +13,7 @@
 
 连接智能体、文件和工具，让每个智能体各司其职，在同一个工作空间里协作。
 
-[下载](https://github.com/theAfish/open-agent-world/releases) · [使用指南](https://theafish.github.io/open-agent-world/user-guide/index.zh-CN/) · [开发插件](https://theafish.github.io/open-agent-world/developers/index.zh-CN/) · [文档](https://theafish.github.io/open-agent-world/README.zh-CN/)
+[下载](https://github.com/theAfish/open-agent-world/releases) · [使用指南](docs/user-guide/index.zh-CN.md) · [开发卡片与卡包](docs/developers/index.zh-CN.md) · [在线文档](https://theafish.github.io/open-agent-world/zh-CN/)
 
 </div>
 
@@ -62,10 +62,21 @@
 
 1. [下载桌面应用](https://github.com/theAfish/open-agent-world/releases)，按[安装指南](docs/install.zh-CN.md)完成安装。
 2. 在 **设置 → 模型** 中添加你的模型连接。
-3. 跟随画布教程连接第一组卡片、组建 Legion，并布置它的工作区。
+3. 跟随画布教程连接第一组卡片、组建 Legion，并布置它的工作区，也可以按[第一个团队任务](docs/user-guide/first-team.zh-CN.md)上手。
 
-Linux 用户可在源码目录运行 `bash scripts/setup.sh` 安装，再用 `bash scripts/start.sh` 启动。前置依赖和各平台的源码运行方式见[入门指南](docs/getting-started.zh-CN.md)。
+Linux 用户可在源码目录运行 `bash scripts/setup.sh` 安装，再用 `bash scripts/start.sh` 启动。前置依赖和各平台的源码运行方式见[源码指南](docs/getting-started.zh-CN.md)。
 
-[交互教程](docs/tutorial.zh-CN.md) · [插件（英文）](docs/plugins.md) · [参与贡献](docs/getting-started.zh-CN.md#开发与验证)
+## 文档
 
-OAW 是一个实验性项目，仓库目前尚未包含许可证文件。
+| 目标 | 入口 |
+| --- | --- |
+| 安装并完成第一个任务 | [用户指南](docs/user-guide/index.zh-CN.md) |
+| 开发 Python/React 卡片并打包 | [Card / Pack 开发指南](docs/developers/index.zh-CN.md) |
+| 查询 API、格式与安全边界 | [技术参考](docs/reference/index.md) |
+| 开发、测试、发布或部署宿主 | [贡献者与维护者](docs/contributing/index.zh-CN.md) |
+
+[第一个团队任务](docs/user-guide/first-team.zh-CN.md) · [卡包与卡牌](docs/user-guide/plugins.zh-CN.md) · [Card / Pack 开发](docs/developers/index.zh-CN.md) · [参与贡献](docs/contributing/index.zh-CN.md)
+
+这里的文档跟随 **dev**。已安装版本的 **帮助 → 文档** 随版本打包；dev 功能可能尚未发布。
+
+OAW 是实验性项目。仓库目前未包含许可证文件。

@@ -91,6 +91,30 @@ def test_manifest_updates_pack_contract_without_replacing_saved_identity():
             worker.refresh_manifest(old, altered)
 
 
+def test_multiple_workspace_upgrade_preserves_each_layout_and_scope():
+    workspaces = [{'legion_id': node, 'name': node, 'layout': {'root': node},
+        'panels': [{'card_id': node, 'sections': ['read']}], 'permissions': {node: ['read']},
+        'plugin_access': {node: {'actions': ['read']}}} for node in ('one', 'two')]
+    old = {**workspaces[0], 'id': 'stable', 'workspaces': workspaces,
+        'panels': [p for w in workspaces for p in w['panels']],
+        'permissions': {k: v for w in workspaces for k, v in w['permissions'].items()},
+        'plugin_access': {k: v for w in workspaces for k, v in w['plugin_access'].items()}, 'plugin_versions': {'pack': '1'}}
+    new = deepcopy(old)
+    new['plugin_versions']['pack'] = '2'
+    new['workspaces'][1]['plugin_access']['two']['actions'].append('search')
+    result, _ = worker.refresh_manifest(old, new)
+    assert result['id'] == 'stable' and result['workspaces'][1]['layout'] == old['workspaces'][1]['layout']
+    assert result['workspaces'][1]['plugin_access']['two']['actions'] == ['read', 'search']
+    altered = deepcopy(new)
+    altered['workspaces'].reverse()
+    with pytest.raises(ValueError, match='workspace scope or order'):
+        worker.refresh_manifest(old, altered)
+    altered = deepcopy(new)
+    altered['workspaces'][1]['layout'] = {}
+    with pytest.raises(ValueError, match='layout changed'):
+        worker.refresh_manifest(old, altered)
+
+
 @pytest.fixture
 def installation(tmp_path, monkeypatch):
     app, hosting, releases = (tmp_path / name for name in ('app', 'hosting', 'releases'))
@@ -344,6 +368,47 @@ def test_routine_guard_rejects_core_contract_schema_and_dependency_changes():
                  'plugins/sample/src/schema.py', 'plugins/sample/src/__init__.py']:
         with pytest.raises(ValueError, match='Routine release cannot change'):
             remote.routine_guard({path})
+
+
+def test_documentation_edits_do_not_select_unrelated_pack_backend_suites():
+    backend, _ = client.test_scope(['plugins/matcreator/README.md', 'plugins/xrd/docs/install.md',
+                                    'plugins/knowledge_base/frontend/ProjectWorkspace.tsx'])
+    assert not any(path.startswith('plugins/') for path in backend)
+    backend, _ = client.test_scope(['plugins/xrd/src/oaw_xrd/workbench.json'])
+    assert 'plugins/xrd/tests' in backend
+
+
+@pytest.mark.parametrize('mutation', ['root_version', 'dependency_version', 'wheel_hash', 'python_version'])
+def test_release_allows_only_virtual_project_version_changes(installation, mutation):
+    f = installation
+    project = '[project]\nname="open-agent-world-backend"\nversion="0.1.0"\ndependencies=[]\n'
+    lock = ('version=1\nrequires-python=">=3.11"\n[[package]]\n'
+            'name="open-agent-world-backend"\nversion="0.1.0"\nsource={virtual="."}\n'
+            '[[package]]\nname="dependency"\nversion="1.0"\n'
+            'wheels=[{url="https://example.invalid/a.whl",hash="sha256:original"}]\n')
+    (f.app / 'backend/pyproject.toml').write_text(project)
+    (f.app / 'backend/uv.lock').write_text(lock)
+    (f.stage / 'backend/pyproject.toml').write_text(project.replace('0.1.0', '0.6.0'))
+    altered = lock.replace('0.1.0', '0.6.0')
+    if mutation == 'dependency_version':
+        altered = altered.replace('version="1.0"', 'version="2.0"')
+    elif mutation == 'wheel_hash':
+        altered = altered.replace('sha256:original', 'sha256:changed')
+    elif mutation == 'python_version':
+        altered = altered.replace('>=3.11', '>=3.12')
+    (f.stage / 'backend/uv.lock').write_text(altered)
+    old = remote.read(f.app / '.oaw-deployment.json')
+    for name in ('backend/pyproject.toml', 'backend/uv.lock'):
+        old['source_files'][name] = remote.digest(f.app / name)
+        f.manifest['files'][name] = remote.digest(f.stage / name)
+    remote.write(f.app / '.oaw-deployment.json', old)
+    f.manifest['baseline_receipt'] = remote.digest(f.app / '.oaw-deployment.json')
+    remote.write(f.stage / 'release-manifest.json', f.manifest)
+    if mutation == 'root_version':
+        assert remote.plan(f.request)['offline_migration']
+    else:
+        with pytest.raises(ValueError, match='uv.lock dependencies changed'):
+            remote.plan(f.request)
 
 
 def test_routine_transaction_keeps_backup_and_verification_without_offline_migration(installation):

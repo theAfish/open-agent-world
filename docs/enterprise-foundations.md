@@ -1,30 +1,14 @@
-# Enterprise foundations: implementation sequence
+# Request identity and operational boundaries
 
-Integrated with `dev` at `096e53a` (2026-09-28). This change is the first foundation
-slice, not an enterprise deployment release. The current database still owns
-one world per profile; shared-database multi-tenancy is not enabled.
+OAW's local runtime owns one World per profile database. Hosted access can route
+users to separate profiles; this is not shared-database multi-tenancy or an
+implemented general enterprise RBAC service. See [hosting](contributing/hosting.md).
 
-## Verified starting point
+Socket peer/host-token authentication, deployment sessions and Agent graph grants
+remain distinct. Forwarding or caller-supplied identity headers never create authority.
+Run caller IDs and state session IDs are not human or tenant identities.
 
-- `backend/control_plane.py` authenticates the actual socket peer or a host
-  bearer token. Forwarding headers do not confer local trust.
-- `backend/deployment_runtime.py` checks an in-memory shared-password session,
-  release surfaces and allowed nodes. A session is not a named employee.
-- `backend/api/dependencies.py` carries the trusted context alongside its existing card-state session.
-- `backend/services.py` constructs SQLite stores and orchestrates mutations.
-  The stores generally do not accept tenant or human authorization context.
-- `backend/persistence/database.py` uses a connection-level `RLock`, SQLite
-  transactions and additive startup migrations. An `RLock` is not an asyncio
-  task lock. Never keep these synchronous transactions open across `await`.
-- `/api/health` already exists as a compatibility liveness endpoint.
-- Existing PR CI from #25 covers backend and frontend checks; this slice extends it with public SDK tests, deployment E2E and Windows smoke.
-- Run `caller_id` identifies an execution trigger (such as a conversation),
-  and card-state owner/session identifies state placement. Neither is a tenant
-  or a human principal; they must not be repurposed as one.
-
-## This slice
-
-### Trusted request metadata
+## Trusted request metadata
 
 `ActorRef(kind, id, display_name)`, `TenantScope(organization_id, workspace_id, world_id)` and
 `RequestContext(request_id, actor, tenant, auth_method)` are immutable values.
@@ -33,13 +17,12 @@ It is not a globally unique organization identity or a database isolation layer.
 
 The existing `ActorKind`, local principal/scope, `create_local_request_context`
 and `bind_request_context` APIs are retained. HTTP/WebSocket correlation uses
-one middleware; it never creates an identity. The earlier middleware that
-assigned the local principal to every request is replaced. Only successful
+one middleware; it never creates an identity. Only successful
 server authentication (or an explicitly public route) establishes the context:
 
 | Entry | Actor | Meaning |
 | --- | --- | --- |
-| Literal local peer | `user` / `local-user` | Existing trusted desktop principal from #24 |
+| Literal local peer | `user` / `local-user` | Existing trusted desktop principal  |
 | Valid host bearer | `host_credential` | Host integration credential |
 | Valid deployment cookie | `deployment_session` | Pseudonymous shared-password session |
 | Explicit public deployment metadata/login route | `anonymous` | Public visitor, no operator authority |
@@ -54,7 +37,7 @@ tasks can inherit them, so future business authorization must receive an
 explicit context/provenance and revalidate current permissions. Persisting an
 old request context does not preserve authorization after membership revocation.
 
-### Correlation, errors and health
+## Correlation, errors and health
 
 - Every HTTP response receives `X-Request-ID`; a single incoming ID containing
   1-128 ASCII letters, digits, dots, underscores, colons or hyphens, starting
@@ -79,7 +62,7 @@ mutation had no effect. The client performs no new automatic POST retries.
 Uniform timeouts for long-running commands, frontend cancellation semantics,
 diagnostic exports and metrics require separate work.
 
-### Durable idempotency: conversation session creation
+## Durable idempotency: conversation session creation
 
 The conversation session creation API accepts optional `Idempotency-Key`.
 Old clients keep working without it. The client API accepts an explicit key;
@@ -105,72 +88,5 @@ This guarantee applies only to the implemented session operation. It does not
 cover node creation, message delivery, run starts, plugins or external effects.
 Events are still emitted after commit on a best-effort basis; a transactional
 outbox is needed to repair a crash between commit and event publication.
-Idempotency records have no automatic expiry in this slice. A future retention
+Idempotency records have no automatic expiry for this operation. A future retention
 policy must specify when key reuse is allowed and how replayed data is removed.
-
-### CI
-
-The PR workflow checks the locked backend and frontend dependency installations,
-backend tests, frontend type/build and Vitest checks, deployment E2E, and Windows
-backend smoke coverage. It retains the existing `Backend tests` and `Frontend
-tests and build` check names and the installation of repository plugins for
-their declared dependencies. Checks must pass; no `continue-on-error` bypass is used.
-Repository administrators still need to configure these checks as required on
-`dev`; adding a workflow does not alter GitHub branch protection.
-The current checks and the baseline reconciliation are recorded in
-[the validation report](internal/validation/enterprise-foundations.md). Local focused
-checks and complete remote jobs remain distinct evidence.
-
-## Next changes, in dependency order
-
-| Priority / change | Concrete work | Acceptance gate |
-| --- | --- | --- |
-| P0: durable identity and provenance | Bootstrap per-profile organization/workspace/world and local principal, add a versioned migration ledger and backup/restore procedure; add initiating actor/request columns to messages, runs and resource history without changing existing trigger IDs | Old profile migration preserves resource IDs, messages and run semantics; restart preserves identity |
-| P0: tenant-owned repositories | Introduce explicit `TenantScope` on repository boundaries, backfill business tables, add composite keys/FKs, cover attachments/state/secrets/settings/deployment copies | Knowing another tenant's UUID returns the same 404 as absence; cross-world edges/session/artifact links fail in the database |
-| P0: AuthorizationService | Apply the contract below at use-case boundaries; require scoped repository lookups before policy evaluation | HTTP, Agent tools and background calls cannot bypass checks; desktop compatibility has explicit local policy |
-| P1: RBAC and audit | Persist users/groups/service accounts, role permissions and scoped bindings; append audit events in the business transaction; add WebSocket subscription filtering | Role removal affects subsequent operations and running Agent tool calls; no cross-tenant events |
-| P1: durable operations | Extend idempotency by operation, add outbox/replay and frontend resync; persist requester provenance and worker leases before multiple workers | Lost response/restart does not duplicate mutations; lost event repairs; only one worker holds a valid lease |
-| P1: enterprise adapters | OIDC and durable sessions, PostgreSQL repository/unit-of-work adapter, object storage and external secret store; separate releases from runtime data | SSO/session restart, restore, upgrade/rollback and two-instance integration tests |
-
-Do not advertise a multi-user enterprise mode until tenant ownership,
-authorization, event isolation and durable identity/session gates pass. Swapping
-the SQLite driver alone cannot satisfy these conditions.
-
-## RBAC architecture contract
-
-The next use-case boundary should take explicit context and ask one service:
-
-```python
-authorization.require(
-    context,
-    action="run.start",
-    resource=ResourceRef(kind="agent", id=agent_id, tenant=context.tenant),
-)
-```
-
-This is the proposed contract, not an authorization implementation in this PR.
-The resource tenant in this example must be verified by a scoped repository
-lookup; constructing `ResourceRef` from caller input is not sufficient.
-
-1. Resolve the resource within the trusted context scope; foreign and missing
-   resources both return 404. Never perform an unscoped existence check first.
-2. Resolve current subject memberships and role bindings for the organization,
-   workspace and world hierarchy. Unknown actions and missing grants deny.
-3. Intersect human grants with release surfaces and enterprise policy. Agent
-   tool calls additionally require the current graph-derived capability.
-4. Revalidate the initiating user's authority for each delegated sensitive
-   operation; do not copy user permissions into an Agent's capability set.
-5. Write an audit event with actor, initiator, delegation chain, request ID,
-   run ID, action and scoped resource. Never log secret values or credentials.
-
-Suggested first roles: organization owner/admin, workspace admin, builder,
-operator, member, viewer and auditor. Bind roles to an explicit scope; a workspace
-binding cannot grant organization administration. Start with a finite permission
-registry (`world.read/edit`, `conversation.read/post/manage`, `run.start/cancel`,
-`sandbox.execute`, `secret.use/manage`, `plugin.install`, `release.publish`,
-`member.manage`, `audit.read`) and prohibit undefined/wildcard expansion by default.
-
-`secret.use` and `secret.manage` remain separate. Release allowlists and Agent
-capabilities continue to restrict access even when a human has a broad role.
-Shared deployment cookies are transitional credentials, not employee accounts;
-OIDC identities and durable sessions will replace them for enterprise use.

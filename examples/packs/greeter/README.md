@@ -11,15 +11,16 @@ Copy it outside OAW before building; no host source aliases are required.
 4. With OAW's Python interpreter, package and inspect:
 
 ```sh
-python -m open_agent_world.pack build-project /path/to/greeter /path/to/greeter-0.2.0.oawpack \
+python /absolute/path/to/OAW/scripts/oaw-pack.py build-project /path/to/greeter /path/to/greeter-0.2.0.oawpack \
   --backend-wheel /path/to/greeter/dist/backend/oaw_pack_example_greeter-0.2.0-py3-none-any.whl \
   --frontend-dir /path/to/greeter/dist/frontend
-python -m open_agent_world.pack inspect /path/to/greeter-0.2.0.oawpack
+python /absolute/path/to/OAW/scripts/oaw-pack.py inspect /path/to/greeter-0.2.0.oawpack
 ```
 
 Install from the Pack Library, restart OAW, add Greeter to your deck and use
 **Greet**. The existing distribution, runtime owner and card IDs are preserved;
-0.2.0 is a new immutable release. Historical Schema 1 archives are unsupported.
+Schema 1 archives are unsupported. Use the [Card App tutorial](../../../docs/developers/card-app.md)
+for a separate example that also grants an Agent capability.
 
 `scripts/build-external-greeter.py` performs this build in an external temporary
 directory. `npm run test:e2e:packs` validates installation, restart, frontend

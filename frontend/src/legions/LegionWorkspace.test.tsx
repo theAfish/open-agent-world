@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { useState } from 'react';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
-import { WorkspaceWindow } from './LegionWorkspace';
+import { LegionWorkspace, WorkspaceWindow } from './LegionWorkspace';
 import { WorkspaceSection } from '../workspace/WorkspaceSection';
 import { useWorldStore } from '../state/worldStore';
+import { useLegionWorkspace } from '../state/legionWorkspace';
 import { useLocale } from '../i18n';
 import type { WorldCard } from '../types/world';
 import { useWorkspaceNavigation, type WorkspaceNavigation } from '../workspace/WorkspaceNavigation';
@@ -31,7 +32,7 @@ function ConditionalCard({ card }: { card: WorldCard }) {
 }
 
 const initialStore = useWorldStore.getState();
-afterEach(() => { cleanup(); useWorldStore.setState(initialStore, true); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); useWorldStore.setState(initialStore, true); useLegionWorkspace.setState({ activeId: undefined }); vi.restoreAllMocks(); });
 
 test('conditional sections retain geometry while missing, accept explicit new hints and forget removed owners', () => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function (this: HTMLDialogElement) { this.open = true; } });
@@ -96,4 +97,36 @@ test('operation activation reveals existing tabs without saving geometry or rese
   expect(screen.getByRole('button', { name: 'drawer' }).getAttribute('aria-expanded')).toBe('true');
   fireEvent.click(screen.getByRole('button', { name: 'Edit layout' }));
   act(() => expect(navigation?.activate({ card_id: 'owner', section_id: 'graph' })).toBe(false));
+});
+
+test('switching protects unsaved layouts and only switches after a successful save', async () => {
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function (this: HTMLDialogElement) { this.open = true; } });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value: function (this: HTMLDialogElement) { this.open = false; } });
+  useLocale.setState({ locale: 'en' });
+  const member = { id: 'neighbor', name: 'Neighbor', type: 'sandbox', parent_id: 'team', config: {} } as WorldCard;
+  const team: WorldCard = { id: 'team', name: 'Team', type: 'legion', position: { x: 0, y: 0 }, size: { width: 800, height: 550 }, expanded: false, status: 'available', config: { workspace_layout: { version: 2, root: { kind: 'pane', view: { card_id: member.id } } } } };
+  const other = { ...team, id: 'operations', name: 'Operations', config: {} };
+  const updateCard = vi.fn().mockRejectedValueOnce(new Error('Save failed')).mockImplementation(async (id, patch) => {
+    useWorldStore.setState(state => ({ cards: state.cards.map(card => card.id === id ? { ...card, config: { ...card.config, ...patch.config } } : card) }));
+  });
+  useWorldStore.setState({ cards: [team, member, other], catalog: { plugins: [], packs: [], relationships: [], node_types: [] }, updateCard });
+  useLegionWorkspace.setState({ activeId: team.id });
+  render(<LegionWorkspace />);
+  fireEvent.click(screen.getByRole('button', { name: 'Edit layout' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Neighbor from layout' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Switch workspace' }));
+  fireEvent.click(screen.getByRole('menuitemradio', { name: 'Operations' }));
+  expect(useLegionWorkspace.getState().activeId).toBe('team');
+  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Switch workspace' }));
+  fireEvent.click(screen.getByRole('menuitemradio', { name: 'Operations' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save and switch' }));
+  await screen.findByText('Save failed');
+  expect(useLegionWorkspace.getState().activeId).toBe('team');
+  fireEvent.click(screen.getByRole('button', { name: 'Save and switch' }));
+  await waitFor(() => expect(useLegionWorkspace.getState().activeId).toBe('operations'));
+  fireEvent.click(screen.getByRole('button', { name: 'Switch workspace' }));
+  fireEvent.keyDown(screen.getByRole('menu'), { key: 'Home' });
+  fireEvent.click(screen.getByRole('menuitemradio', { name: 'Team' }));
+  expect(useLegionWorkspace.getState().activeId).toBe('team');
 });

@@ -113,12 +113,11 @@ retain explicit scope overrides, and seed the new graph's default namespace.
 
 ## UI and remaining boundaries
 
-No scope badge, session label, creation question or settings panel is added.
+The host does not add a scope badge, session label or creation question.
 `host.setDataPersistence` exists only for an eligible policy; plugin authors may
-use it inside an existing settings view with behavioral wording. No bundled card
-adds this optional control in this iteration.
+use it inside an existing settings view with behavioral wording. Bundled cards do not expose this optional control.
 
-The audit found older mixed representations outside this migration: operational
+Some operational fields remain outside scoped storage:
 `status` still shares `config_json` with configuration for compatibility; Sandbox
 config includes its workspace location and operational status; frontend
 `normalizeCard` projects resource previews/revisions into `CardConfig`. These are
@@ -130,4 +129,4 @@ Host integration coverage lives in `backend/tests/test_card_state.py`,
 `frontend/src/state/cardState.test.tsx`, SDK surface tests and
 `frontend/e2e/card-state-lifecycle.spec.ts`. The browser test crosses Conversation,
 Workspace and Task Board, so it belongs to the host suite. Plugin-owned planning
-logic remains in `plugins/task_board`.
+logic remains in `backend/plugins/task_board.py`.

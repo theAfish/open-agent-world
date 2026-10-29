@@ -2,9 +2,9 @@
 
 想先体验成品？运行 `python examples/deployed-workspace/run.py`，浏览器会打开无需 API Key 的本地部署示例。密码为 `oaw-demo-2026`，详见[示例说明](../examples/deployed-workspace/README.md)。若想体验真正调用模型的已发布 Legion，见 [Lab Manager 部署示例](../examples/knowledge-legion-deploy/README.md)（英文）。
 
-[文档目录](README.zh-CN.md) · [English](deployment.md)
+[文档目录](README.md)
 
-需要每位用户独立的账号、会话和文件，并在登录后直接进入部署页面时，请使用基于 Linux systemd 的[多用户托管](contributing/hosting.zh-CN.md)，无需 Docker。下文介绍单个部署实例的共享密码访问方式。
+需要每位用户独立的账号、会话和文件，并在登录后直接进入部署页面时，请使用基于 Linux systemd 的[多用户托管](contributing/hosting.md)，无需 Docker。下文介绍单个部署实例的共享密码访问方式。
 
 工程师在原工作区配置模型连接、Agent、工具和 Legion 布局，然后发布应用。部署程序生成独立的数据副本，并启动只提供用户功能的服务。用户登录后直接进入固定布局；画布、连线、模型连接、插件设置和管理 API 均不向用户开放。
 
@@ -23,7 +23,7 @@ Linux / WSL2 使用 `bash scripts/setup.sh` 和 `python3 scripts/start.py`。前
 
 1. 配置模型连接、Agent、工具与资源，确认普通工作区中可以正常运行。
 2. 打开 Legion 的 **Workspace mode / 工作区模式**，布置用户需要的页面并保存布局。移出布局的卡片仍在后台运行，但不会出现在用户页面的底部栏。
-3. 点击 **发布应用**，填写应用名称。如果用户需要直接执行终端命令，勾选“允许用户执行 Sandbox 终端命令”。已有终端分区却未开放权限时，发布检查会提示修改。
+3. 点击 **发布应用**，填写应用名称，勾选需要发布的一个或多个 Legion 工作区。使用上下箭头调整切换列表顺序，第一项是登录后的默认入口。每个选中的工作区都需要先保存非空布局并通过发布检查。如果用户需要直接执行终端命令，勾选“允许用户执行 Sandbox 终端命令”。已有终端分区却未开放权限时，发布检查会提示修改。
 4. 点击 **创建发布版本**，复制生成的命令。先结束任务、停止 Sandbox，然后关闭工程配置程序；开发模式还需要停止启动它的终端进程。
 5. 在项目根目录运行复制的命令，例如：
 
@@ -32,6 +32,8 @@ python scripts/deploy.py --source 'C:\Users\YourName\AppData\Local\OpenAgentWorl
 ```
 
 请使用发布面板生成的真实目录与版本 ID。开发 profile、重定位后的存储目录和正式应用目录可能不同。Linux / macOS 使用 `python3`。
+
+工作区左上角保留 Legion 标题，点击右侧展开箭头即可切换。工程端列表包含画布上的 Legion；有未保存布局时，可以保存后切换、放弃更改或继续编辑。部署端仅列出本次发布选中的工作区，按发布时设置的顺序显示，刷新或重新登录后打开第一项。切换工作区不会开放画布或管理功能。
 
 程序会：
 
@@ -121,7 +123,7 @@ journalctl -u oaw-runtime -f
 
 部署页面直接复用 Legion Workspace、WorkspaceSection 和现有的 Conversation / Sandbox / Task Board / Text / Image 组件。分栏比例与布局固定，标签可切换，切换标签保留草稿；主题和语言也沿用原控件。只移除布局编辑、返回画布、设置、未放置卡片入口与组件内的工程配置。文本沿用原文本组件，以只读方式显示。
 
-第三方文档型卡片可用 `NodeDeploymentDefinition.from_document()` 直接复用原文档业务接口与 WorkspaceSection；含私有数据的卡片继续声明精细权限。无需单独编写 Workspace HTTP 接口。MatCreator 原有研究布局可以直接发布，未声明的其他自定义页面仍保持私有。发布面板会提前列出各页面的兼容性问题。详见[插件部署接入](plugin-deployment.zh-CN.md)。部署端通过 `/api/runtime-app/workspace` 调用原有业务处理函数，不挂载完整工程 API。
+第三方文档型卡片可用 `NodeDeploymentDefinition.from_document()` 直接复用原文档业务接口与 WorkspaceSection；含私有数据的卡片继续声明精细权限。无需单独编写 Workspace HTTP 接口。MatCreator 原有研究布局可以直接发布，未声明的其他自定义页面仍保持私有。发布面板会提前列出各页面的兼容性问题。详见[插件部署接入](plugin-deployment.md)。部署端通过 `/api/runtime-app/workspace` 调用原有业务处理函数，不挂载完整工程 API。
 
 ## 数据、凭证与执行边界
 

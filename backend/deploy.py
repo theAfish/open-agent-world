@@ -16,7 +16,7 @@ import sqlite3
 from uuid import UUID, uuid4
 
 from backend.config import Settings
-from backend.deployments import MANIFEST, PREFIX, configuration_digest
+from backend.deployments import MANIFEST, PREFIX, configuration_digest, published_workspaces
 from backend.errors import DomainError
 from backend.storage_location import (
     LOCK, _checkpoint, _copy, _fingerprint, _rebase_managed_metadata,
@@ -40,6 +40,22 @@ def validate_manifest(value):
             raise ValueError("Incomplete deployment manifest")
     UUID(value["id"])
     WorkspaceLayout.model_validate(value["layout"])
+    workspaces = published_workspaces(value)
+    if not workspaces or len(workspaces) > 100 or len({workspace["legion_id"] for workspace in workspaces}) != len(workspaces):
+        raise ValueError("Deployment requires a nonempty, unique workspace list")
+    if workspaces[0]["legion_id"] != value["legion_id"]:
+        raise ValueError("Default workspace must be first")
+    if "workspaces" in value:
+        permissions = {}
+        plugin_access = {}
+        for workspace in workspaces:
+            WorkspaceLayout.model_validate(workspace["layout"])
+            if permissions.keys() & workspace["permissions"].keys():
+                raise ValueError("Published nodes must belong to one workspace")
+            permissions.update(workspace["permissions"])
+            plugin_access.update(workspace.get("plugin_access", {}))
+        if permissions != value["permissions"] or plugin_access != value.get("plugin_access", {}):
+            raise ValueError("Workspace access must match the deployment grants")
     from backend.plugins.deployment import DeploymentAccess
     for node_id, access in value.get("plugin_access", {}).items():
         if node_id not in value["permissions"]:

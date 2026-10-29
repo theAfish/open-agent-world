@@ -1,5 +1,7 @@
 """PyWPEM runs through the OAW runtime protocol, in its own Python environment."""
-from open_agent_world.plugin_api import PackDefinition
+from open_agent_world.plugin_api import PackDefinition, PluginAsset
+from importlib.resources import files
+from .preset import definition as workbench_definition
 from typing import Literal
 from pydantic import BaseModel, Field
 from open_agent_world.plugin_api import AgentNodeBehavior, NodeTypeDefinition, PluginDescriptor
@@ -98,8 +100,8 @@ class CanvasConfig(BaseModel):
     source_node_id: str = ''
 
 class XRDPlugin:
-    descriptor = PluginDescriptor(id="research.xrd",version="0.3.0",plugin_api_version="1.35",
-        requires_plugins=("science.structure-viewer",),
+    descriptor = PluginDescriptor(id="research.xrd",version="0.3.1",plugin_api_version="1.35",
+        requires_plugins=("science.structure-viewer", "data.sqlite"),
         name="XRD / OAW_XRDfit",description="Reference-card screening and candidate-CIF whole-pattern fitting")
     def __init__(self, context=None):
         from .profile import current_data_root
@@ -118,7 +120,7 @@ class XRDPlugin:
         registration.register_relationship(RelationshipDefinition(
             id='xrd.history-store', label='XRD 运行数据库', short_label='运行记录',
             description='结构化保存运行、Jev 决策、评估、Agent 报告和结果文件；只连接一个 SQL database',
-            source_types=frozenset({'xrd.match', 'xrd.analysis'}), target_types=frozenset({'data.sqlite'})))
+            source_types=frozenset({'xrd.match', 'xrd.analysis'}), target_types=frozenset({'data.sqlite'}), templateable=True))
         for kind, label, icon in [('spectrum', 'XRD 谱画布', 'xrd-spectrum'), ('structure', 'XRD 结构画布', 'atom')]:
             registration.register_node_type(NodeTypeDefinition(id=f'xrd.{kind}-canvas', label=label, icon=icon, color='#c19875',
                 description='由检索与比对时间轴同步控制', deck_id='xrd', deck_label='XRD', deck_icon='xrd-spectrum',
@@ -175,8 +177,12 @@ class XRDPlugin:
         registration.register_relationship(RelationshipDefinition(id="xrd.input", label="XRD 输入", short_label="输入",
             description="Grant this algorithm read access to the XRD input object", source_traits=frozenset({"core.agent"}),
             target_traits=frozenset({"xrd.readable"}), capabilities=(CapabilityGrantDefinition(kind="xrd.read"),), templateable=True))
+        registration.register_asset(PluginAsset(id='workbench-cover', media_type='image/svg+xml',
+            content=files(__package__).joinpath('assets/workbench-cover.svg').read_bytes()))
+        registration.register_legion_preset(workbench_definition())
         registration.register_pack(PackDefinition(id='research.xrd.default', name='XRD analysis',
-            description='Whole-pattern diffraction fitting.', cards=tuple(registration.nodes)))
+            description='Whole-pattern diffraction fitting.', cards=tuple(registration.nodes),
+            artwork_asset='workbench-cover', accent_color='#548f86'))
 
 def create_plugin(*, context=None):
     return XRDPlugin(context)

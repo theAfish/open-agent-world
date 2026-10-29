@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,15 @@ def data_root(tmp_path: Path) -> Path:
 def client(data_root: Path) -> Iterator[TestClient]:
     application = create_app(Settings.for_data_root(data_root))
     with TestClient(application) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def codex_client(data_root: Path) -> Iterator[TestClient]:
+    """Opt in to Codex source; ordinary clients must exercise the bundled set."""
+    source = Path(__file__).resolve().parents[2] / "packs/codex"
+    settings = replace(Settings.for_data_root(data_root), plugin_directories=(source,))
+    with TestClient(create_app(settings)) as test_client:
         yield test_client
 
 

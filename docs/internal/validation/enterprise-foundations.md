@@ -1,5 +1,8 @@
 # Enterprise foundations: validation record
 
+> Historical record, not current product or deployment instructions. Verify against the current source before use.
+
+
 Date: 2026-09-28. Integrated base: `dev` at
 `096e53a08fd31aaa3f1d1f7ad6fe1ff81de18836`.
 

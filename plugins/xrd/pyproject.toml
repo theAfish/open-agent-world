@@ -1,6 +1,6 @@
 [project]
 name = "oaw-xrd"
-version = "0.3.0"
+version = "0.3.1"
 requires-python = ">=3.11"
 dependencies = ["pydantic>=2.11,<3", "httpx>=0.28,<1"]
 [project.entry-points."open_agent_world.plugins"]

@@ -195,6 +195,14 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
   const activity = useRunActivity(card.id, activeSessionId, runtimeEvents, activeRuns, history.runSummaries);
   const restoredActivity = useLiveRunHistory(activity.runs, activity.activities);
   const transcriptEntries = conversationTranscript(messages, activity.runs, restoredActivity.activities, history);
+  // A Run can contain several progress replies plus a final system notice.
+  // Attach recovery to its last visible message, not every reply in that Run.
+  const recoveryMessageIds = new Map<string, string>();
+  for (const entry of transcriptEntries) {
+    if (entry.kind === 'message' && entry.message.run_id && entry.message.sender_kind !== 'user') {
+      recoveryMessageIds.set(entry.message.run_id, entry.message.id);
+    }
+  }
   const transcriptTurns = conversationTurns(transcriptEntries, activity.runs, error ? [] : activeRuns);
   const deliveryAgents = new Map(agents.map((agent) => [agent.id, agent.name]));
   const activeGroupId = activeSession?.group_id ?? activeSession?.id;
@@ -640,7 +648,7 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
                   ? <details className="conversation-tool-message"><summary>{message.content.split("\n")[0]}</summary><pre>{message.content.split("\n").slice(1).join("\n").trim() || t("No additional details")}</pre></details>
                   : message.content ? (message.sender_kind === "agent" ? <MarkdownMessage content={message.content} /> : <p>{message.content}</p>) : null}
                 {message.attachments?.length ? <ConversationAttachments conversationId={card.id} sessionId={message.session_id} files={message.attachments} /> : null}
-                {message.run_id && ['failed', 'interrupted'].includes(history.runSummaries[message.run_id]?.status) && <div className="conversation-recovery" role="status">
+                {message.run_id && recoveryMessageIds.get(message.run_id) === message.id && ['failed', 'interrupted'].includes(history.runSummaries[message.run_id]?.status) && <div className="conversation-recovery" role="status">
                   <p>{history.runSummaries[message.run_id]?.recovery_kind === 'model_stream_interrupted'
                     ? t('The model connection ended before a complete response. {v0} tool result(s) were confirmed, but an in-flight action may still need checking. Review the current files and Structure before continuing.', {
                       v0: history.runSummaries[message.run_id]?.confirmed_tool_count ?? 0,
@@ -665,18 +673,6 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
                       setSelectedAgentId(history.runSummaries[message.run_id!]?.agent_id);
                       messageInput.current?.focus();
                     }}>{t('Review safe continuation')}</button>}
-                  {!deployed && <button type="button" className="secondary-button" onClick={() => {
-                    useWorldStore.setState({ settingsOpen: true });
-                  }}>{t('Check model settings')}</button>}
-                </div>}
-                {(message.content || message.sender_kind === 'user') && <div className="conversation-message-actions">
-                  {message.content && <IconButton icon={copiedMessageId === message.id ? Check : Copy} size="sm" quiet
-                    label={t(copiedMessageId === message.id ? 'Message copied' : 'Copy message')}
-                    onClick={() => void copyMessage(message)} />}
-                  {message.sender_kind === 'user' && !visibleOutgoing.some(item => item.message.id === message.id && item.status !== 'confirmed') && <IconButton
-                    icon={GitBranch} size="sm" quiet label={t('Branch in new chat')}
-                    disabled={busy || uploading || !!draft.trim() || attachments.length > 0 || activeRuns.length > 0}
-                    onClick={() => void restartFrom(message)} />}
                 </div>}
                 {message.sender_kind === "user" ? (() => {
                   const queued = history.deliveries.filter((delivery) => delivery.message_id === message.id && delivery.status === "queued");
@@ -695,6 +691,15 @@ export function ConversationWorkspace({ card }: { card: WorldCard }) {
                   }}>{t('Copy back to composer')}</button>
                 </div> : null}
               </div>
+              {(message.content || message.sender_kind === 'user') && <footer className="conversation-message-actions">
+                {message.content && <IconButton icon={copiedMessageId === message.id ? Check : Copy} size="sm" quiet
+                  label={t(copiedMessageId === message.id ? 'Message copied' : 'Copy message')}
+                  onClick={() => void copyMessage(message)} />}
+                {message.sender_kind === 'user' && !visibleOutgoing.some(item => item.message.id === message.id && item.status !== 'confirmed') && <IconButton
+                  icon={GitBranch} size="sm" quiet label={t('Branch in new chat')}
+                  disabled={busy || uploading || !!draft.trim() || attachments.length > 0 || activeRuns.length > 0}
+                  onClick={() => void restartFrom(message)} />}
+              </footer>}
             </article>
             );
             };

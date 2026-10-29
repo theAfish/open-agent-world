@@ -46,7 +46,7 @@ it("loads the actual local plugin entry and saves through the scoped host SDK", 
   // Source-component integration uses the real registry and availability gate.
   // Production artifact URLs are exercised by browser Pack acceptance.
   const view = registry.createViewRegistry(new Map([
-    ['openai.codex', () => import('../../../plugins/codex/frontend')],
+    ['openai.codex', () => import('../../../packs/codex/frontend')],
   ]), undefined, registry.assertFrontendAvailable);
   vi.spyOn(registry, 'pluginView').mockImplementation(view);
   vi.spyOn(worldApi, "getAgentInfo").mockResolvedValue({ session_id: "session-one", details: { source: "desktop" } });

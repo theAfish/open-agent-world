@@ -1,5 +1,8 @@
 # Agent Graph audit and implementation boundary
 
+> Historical record, not current product or deployment instructions. Verify against the current source before use.
+
+
 Date: 2026-10-13. Scope: the inspected OAW checkout and its internalized MatCreator
 Pack. The baseline is the implementation before the execution-history refactor,
 after MatCreator backend ownership moved into the Pack. Status labels describe

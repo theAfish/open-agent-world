@@ -1,5 +1,10 @@
 {% extends "base.html" %}
-{% block announce %}
-  Development documentation · follows <strong>dev</strong>.
-  Your installed release may differ.
+{% block announce %}{{ config.extra.documentation.development }}{% endblock %}
+{% block content %}
+  {% if i18n_file_locale != i18n_page_locale %}
+    {% set requested = i18n_config.languages | selectattr("locale", "equalto", i18n_page_locale) | first %}
+    {% set available = i18n_config.languages | selectattr("locale", "equalto", i18n_file_locale) | first %}
+    <p class="admonition note">{{ config.extra.documentation.fallback.replace("{requested}", requested.name).replace("{available}", available.name) }}</p>
+  {% endif %}
+  <div lang="{{ i18n_file_locale }}">{{ super() }}</div>
 {% endblock %}

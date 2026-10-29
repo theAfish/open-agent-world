@@ -62,12 +62,7 @@ cleanup/deadline supervision still applies; process sandboxing is separate.
 
 ## Regression contract
 
-Tests cover unexpected exceptions, public domain errors, invalid output,
-multimodal encoding, returned failure envelopes, parallel calls, tool-local
-cancellation, caller cancellation, cleanup errors, and both timeout scopes.
-ADK adapter tests actually invoke a failing generated function and a subsequent
-successful function before producing the final answer. Codex tests exercise its
-subprocess bridge. RunManager tests assert the Run stays running and retains its
-slot after failed-tool feedback, then reaches success only on an explicit
-provider terminal event. Tests requiring plugin bugs to fail the Run are not a
-valid regression contract and must not be reintroduced.
+When changing this boundary, check failure encoding, parallel-call isolation and
+both tool-local and caller cancellation in [the tool execution tests](../backend/tests/test_tool_execution.py).
+A failed-tool response must leave the Run active until a provider terminal event
+or an independent Run failure/cancellation condition occurs.

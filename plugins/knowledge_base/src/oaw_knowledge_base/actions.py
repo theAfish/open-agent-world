@@ -79,7 +79,7 @@ def _base(context, group_id=None):
     """The client plus one resolved group, opened lazily on first use."""
     settings = settings_of(context)
     kb = _client(context)
-    return kb, _resolve_group(kb, group_id, settings), settings
+    return kb, kb.collections.require(_uuid(group_id, "group_id")) if group_id else None, settings
 
 
 def _any_group(group_id):
@@ -94,7 +94,7 @@ def _scope(group, all_groups):
     it without a choice. ``all_groups`` opts a caller into the merged, cross-group
     view instead of changing what an omitted ``group_id`` already meant.
     """
-    return None if all_groups else group.id
+    return None if all_groups or group is None else group.id
 
 
 def _bounded(payload):
@@ -128,17 +128,19 @@ class Overview(Request):
 
 def overview(context, arguments):
     request = Overview.model_validate(arguments)
-    kb, group, settings = _base(context, request.group_id)
+    kb, settings = _client(context), settings_of(context)
+    group = kb.collections.require(_uuid(request.group_id, "group_id")) if request.group_id else None
     # An explicit group, or the resolved default: the same single-group view every
     # card had before groups existed. all_groups opts into totals for the whole card.
-    scope = _scope(group, request.all_groups)
+    scope = group.id if group is not None and not request.all_groups else None
     sources = kb.sources.list(collection_id=scope, limit=500)
     jobs = kb.jobs.list(limit=50)
     counts = kb.oaw_graph_store.counts(group_id=scope)
-    default_group_id = str(collection(kb, settings["collection_name"]).id)
-    knowledge_drafts = kb.oaw_knowledge.list(group_id=str(scope) if scope else None, limit=500)
+    default_group_id = str(group.id) if group else ""
+    project_items = kb.collections.list(limit=500)
+    projection_items = kb.oaw_projections.list(project_id=str(scope) if scope else None, limit=500)
     return _bounded({
-        "collection": {"id": str(group.id), "name": group.name},
+        "collection": {"id": str(group.id) if group else "", "name": group.name if group else settings["collection_name"]},
         "groups": [_group_json(item, default_group_id) for item in kb.collections.list(limit=500)],
         "settings": settings,
         "engines": available_engines(settings["mineru_base_url"] or None,
@@ -149,8 +151,9 @@ def overview(context, arguments):
             "sources": len(sources),
             "records": len(kb.records.list(collection_id=scope, limit=500)),
             "schemas": len(kb.schemas.list(limit=200)),
-            "knowledge_drafts": len(knowledge_drafts),
-            "published_knowledge": len([d for d in knowledge_drafts if d["status"] == "published"]),
+            "projects": len(project_items),
+            "spaces": len([s for s in kb.schemas.list(limit=500) if s.purpose in {"projection:table", "projection:graph"}]),
+            "projections": len(projection_items),
             "entities": counts["entities"],
             "relations": counts["relations"],
             "experiment_bundles": len(kb.oaw_experiments.list_bundles(
@@ -193,70 +196,19 @@ def update_settings(context, arguments):
 # ---------------------------------------------------------------- groups
 
 
-class Groups(Request):
-    operation: Literal["list", "create", "rename", "delete"] = "list"
-    group_id: str | None = None
-    name: str | None = Field(default=None, max_length=200)
-
-
 def _group_json(item, default_group_id):
     return {"id": str(item.id), "name": item.name, "source_count": item.source_count,
             "created_at": item.created_at, "is_default": str(item.id) == default_group_id}
-
-
-def groups(context, arguments):
-    """Create, rename and delete the groups sources are filed into.
-
-    A group is one MKB collection: sources, and everything derived from them
-    (records, experiment records, knowledge drafts and the graph) already filter by
-    ``collection_id`` everywhere MKB's own repositories do, so using collections as
-    groups gets that scoping for free instead of the plugin re-implementing it.
-    """
-    request = Groups.model_validate(arguments)
-    settings = settings_of(context)
-    kb = _client(context)
-    default_group_id = str(collection(kb, settings["collection_name"]).id)
-
-    if request.operation == "list":
-        return _bounded({"groups": [
-            _group_json(item, default_group_id) for item in kb.collections.list(limit=500)]})
-
-    clean_name = request.name.strip() if request.name else None
-    if request.operation == "create":
-        if not clean_name:
-            raise KnowledgeError("name is required to create a group")
-        if any(item.name == clean_name for item in kb.collections.list(limit=500)):
-            raise KnowledgeError(f"A group named '{clean_name}' already exists")
-        item = kb.collections.create(name=clean_name)
-        return _bounded({"group": _group_json(item, default_group_id)})
-
-    if not request.group_id:
-        raise KnowledgeError("group_id is required")
-    identifier = _uuid(request.group_id, "group_id")
-    if request.operation == "rename":
-        if not clean_name:
-            raise KnowledgeError("name is required to rename a group")
-        item = kb.collections.update(identifier, name=clean_name)
-        return _bounded({"group": _group_json(item, default_group_id)})
-
-    # delete
-    if len(kb.collections.list(limit=500)) <= 1:
-        raise KnowledgeError("Cannot delete the last remaining group")
-    kb.collections.delete(identifier)
-    return _bounded({"deleted": str(identifier)})
-
-
-# ---------------------------------------------------------------- sources
 
 
 class Sources(Request):
     limit: int = Field(default=50, ge=1, le=200)
     offset: int = Field(default=0, ge=0)
     group_id: str | None = None
-    all_groups: bool = False
+    all_groups: bool = True
     # Files uploaded into an experiment bundle belong to the Experiment section;
     # Literature's source list leaves them out unless asked otherwise.
-    workflow: Literal["literature", "experiment", "all"] = "literature"
+    workflow: Literal["project", "experiment", "all"] = "all"
 
 
 def _record_link(kb, artifact_id):
@@ -273,17 +225,21 @@ def _record_link(kb, artifact_id):
 
 def sources(context, arguments):
     request = Sources.model_validate(arguments)
-    kb, group, _ = _base(context, request.group_id)
+    kb = _client(context)
     # An explicit group, or the default; all_groups lists every source across every
     # group instead, each still carrying its own group for a per-group header.
-    scope = _scope(group, request.all_groups)
+    scope = _any_group(request.group_id)
     names = {str(item.id): item.name for item in kb.collections.list(limit=500)}
     tagged = kb.oaw_experiments.tagged_source_ids()
+    from .projects import project_source_ids
+    active = [kb.sources.require(identifier) for identifier in project_source_ids(kb, scope)]
+    active = [source for source in active if request.workflow == "all" or
+        (str(source.id) in tagged) == (request.workflow == "experiment")]
+    active.sort(key=lambda item: (item.created_at, str(item.id)), reverse=True)
     items = []
-    for source in kb.sources.list(collection_id=scope,
-                                  limit=request.limit, offset=request.offset):
+    for source in active[request.offset:request.offset + request.limit]:
         is_experiment = str(source.id) in tagged
-        if request.workflow == "literature" and is_experiment:
+        if request.workflow == "project" and is_experiment:
             continue
         if request.workflow == "experiment" and not is_experiment:
             continue
@@ -299,7 +255,7 @@ def sources(context, arguments):
             "media_type": source.media_type, "size": source.size,
             "created_at": source.created_at,
             "group_id": source_group_id, "group_name": names.get(source_group_id),
-            "workflow": "experiment" if is_experiment else "literature",
+            "workflow": "experiment" if is_experiment else "project",
             "markdown": None if markdown is None else {
                 "artifact_id": str(markdown.id), "size": markdown.size,
                 "engine": (markdown.metadata or {}).get("engine")},
@@ -310,40 +266,6 @@ def sources(context, arguments):
 
 
 # ---------------------------------------------------------------- ingest
-
-
-class Ingest(Request):
-    filename: str = Field(min_length=1, max_length=255)
-    content_base64: str = Field(min_length=1)
-    media_type: str = Field(default="application/octet-stream", max_length=200)
-    group_id: str | None = None
-
-
-def ingest(context, arguments):
-    request = Ingest.model_validate(arguments)
-    if "/" in request.filename or "\\" in request.filename:
-        raise KnowledgeError("filename must not contain a path separator")
-    try:
-        data = base64.b64decode(request.content_base64, validate=True)
-    except (binascii.Error, ValueError):
-        raise KnowledgeError("content_base64 is not valid base64") from None
-    if not data:
-        raise KnowledgeError("The uploaded file is empty")
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise KnowledgeError("Uploads are limited to 32 MiB")
-
-    kb, group, _ = _base(context, request.group_id)
-    source = kb.sources.add_bytes(group.id, data, filename=request.filename,
-                                  media_type=request.media_type,
-                                  metadata={"uploaded_by": _actor(context)})
-    # Storing a source no longer queues its own conversion: uploads can be batched
-    # and converted together with knowledge_process, on the caller's own schedule.
-    return _bounded({"source": {"id": str(source.id), "filename": source.filename,
-                                "size": source.size, "sha256": source.sha256},
-                     "group_id": str(group.id)})
-
-
-# ---------------------------------------------------------------- process
 
 
 class ProcessSources(Request):
@@ -454,7 +376,7 @@ def _markdown_record(kb, *, source_id=None, record_id=None):
 
 def markdown(context, arguments):
     request = Markdown.model_validate(arguments)
-    kb, _, _ = _base(context)
+    kb = _client(context)
     record, text = _markdown_record(kb, source_id=request.source_id,
                                     record_id=request.record_id)
     window = text[request.offset:request.offset + request.limit]
@@ -492,7 +414,9 @@ def search(context, arguments):
     names = {str(item.id): item.name for item in kb.collections.list(limit=500)}
     filenames: dict[str, str | None] = {}
     results = []
-    for hit in search_chunks(kb.oaw_engine, request.query, limit=request.limit, group_id=scope):
+    from .projects import project_source_ids
+    active_ids = project_source_ids(kb, scope)
+    for hit in search_chunks(kb.oaw_engine, request.query, limit=request.limit, group_id=scope, source_ids=active_ids):
         source_id = hit["source_id"]
         if source_id not in filenames:
             try:
@@ -518,13 +442,8 @@ SCHEMA_KINDS = ("literature", "experiment")
 
 
 def _schema_kind(schema):
-    """MKB's own ``purpose`` field, read back as one of OAW's two workflow kinds.
-
-    Every schema created before this existed has ``purpose="freeform"`` (MKB's own
-    default): treat anything that is not explicitly ``"experiment"`` as literature, so
-    no migration is needed for schemas that already exist.
-    """
-    return "experiment" if schema.purpose == "experiment" else "literature"
+    """Spaces and experiment record schemas have explicit, distinct purposes."""
+    return schema.purpose
 
 
 class Schemas(Request):
@@ -539,13 +458,13 @@ class Schemas(Request):
     # For "list": filters to one kind, or every schema when omitted. For "create": the
     # kind to tag the new schema with (defaults to "literature"). For "update": the kind
     # to retag it as, or leave unchanged when omitted.
-    kind: Literal["literature", "experiment"] | None = None
+    kind: Literal["experiment"] | None = None
 
 
 class SchemaRead(Request):
     operation: Literal["list", "get"] = "list"
     schema_id: str | None = None
-    kind: Literal["literature", "experiment"] | None = None
+    kind: Literal["experiment"] | None = None
 
 
 class SchemaManage(Schemas):
@@ -560,9 +479,9 @@ def _schema_json(schema):
 
 
 def schemas(context, arguments):
-    request = Schemas.model_validate(arguments)
-    if context.actor_id is not None and request.operation not in {"list", "get"}:
+    if arguments.get("operation", "list") not in {"list", "get"}:
         raise KnowledgeError("knowledge_schemas is read-only; use knowledge_schema_manage to change a schema")
+    request = SchemaRead.model_validate(arguments)
     return _schemas(context, request)
 
 
@@ -575,9 +494,9 @@ def schema_manage(context, arguments):
 
 
 def _schemas(context, request):
-    kb, _, _ = _base(context)
+    kb = _client(context)
     if request.operation == "list":
-        items = kb.schemas.list(limit=100)
+        items = [item for item in kb.schemas.list(limit=500) if item.purpose == "experiment"]
         if request.kind is not None:
             items = [s for s in items if _schema_kind(s) == request.kind]
         return _bounded({"schemas": [
@@ -587,7 +506,7 @@ def _schemas(context, request):
     if request.operation == "get":
         if not request.schema_id:
             raise KnowledgeError("schema_id is required")
-        return _bounded({"schema": _schema_json(kb.schemas.require(request.schema_id))})
+        return _bounded({"schema": _schema_json(_experiment_schema(kb, request.schema_id))})
     if request.operation == "create":
         if not (request.name and request.definition and request.system_prompt):
             raise KnowledgeError(
@@ -597,12 +516,13 @@ def _schemas(context, request):
             name=request.name, domain=request.domain, definition=request.definition,
             system_prompt=request.system_prompt, description=request.description,
             field_descriptions=request.field_descriptions,
-            purpose=request.kind or "literature")
+            purpose="experiment")
         return _bounded({"schema": _schema_json(schema)})
     if not request.schema_id:
         raise KnowledgeError("schema_id is required")
     if request.definition is not None:
         _validate_definition(request.definition)
+    _experiment_schema(kb, request.schema_id)
     schema = kb.schemas.update(
         request.schema_id, name=request.name, description=request.description,
         definition=request.definition, system_prompt=request.system_prompt,
@@ -743,8 +663,10 @@ def experiment_bundle_manage(context, arguments):
     if request.operation == "create":
         if not (request.schema_id and request.name):
             raise KnowledgeError("schema_id and name are required to create an experiment upload")
-        kb, group, _ = _base(context, request.group_id)
+        from .projects import ensure_project
+        kb = _client(context)
         schema = _experiment_schema(kb, request.schema_id)
+        group = ensure_project(kb, request.name, project_id=request.group_id)
         bundle = kb.oaw_experiments.create_bundle(
             group_id=group.id, schema_id=str(schema.id), name=request.name,
             notes=request.notes or "", created_by=_actor(context))
@@ -774,13 +696,14 @@ class ExperimentBundlePrepare(Request):
 def experiment_bundle_prepare(context, arguments):
     """Prepare an unpublished upload without exposing deletion or run-state edits."""
     request = ExperimentBundlePrepare.model_validate(arguments)
-    kb, group, _ = _base(context, request.group_id)
+    kb = _client(context)
+    group_id = _any_group(request.group_id)
     store = kb.oaw_experiments
     if request.operation == "create":
         if not (request.schema_id and request.name):
             raise KnowledgeError("schema_id and name are required to create an experiment upload")
         schema = _experiment_schema(kb, request.schema_id)
-        for bundle in store.list_bundles(group_id=group.id, schema_id=str(schema.id), limit=500):
+        for bundle in store.list_bundles(group_id=group_id, schema_id=str(schema.id), limit=500):
             if (bundle["name"] == request.name and bundle["notes"] == (request.notes or "")
                     and not store.list(bundle_id=bundle["id"], status="published", limit=1)):
                 return _bounded({"bundle": _bundle_json(kb, bundle)})
@@ -790,7 +713,7 @@ def experiment_bundle_prepare(context, arguments):
     bundle = store.require_bundle(request.bundle_id)
     if bundle["status"] == "deleted":
         raise KnowledgeError("That experiment upload was deleted")
-    if request.group_id is not None and bundle["group_id"] != str(group.id):
+    if request.group_id is not None and bundle["group_id"] != str(group_id):
         raise KnowledgeError("That experiment upload belongs to another group")
     if store.list(bundle_id=bundle["id"], status="published", limit=1):
         raise KnowledgeError("This upload has published records; its preparation cannot be changed by an agent")
@@ -839,6 +762,8 @@ def experiment_ingest(context, arguments):
                                   metadata={"uploaded_by": _actor(context),
                                             "workflow": "experiment", "bundle_id": bundle["id"]})
     kb.oaw_experiments.add_bundle_source(bundle["id"], source.id)
+    from .projects import register_project_file
+    register_project_file(kb, group_id, source)
     job = submit_markdown_job(kb, source, group_id, engine=settings["pdf_engine"],
                               mineru_base_url=settings["mineru_base_url"] or None,
                               vision_model=settings["vision_model"])
@@ -1007,92 +932,12 @@ RECORD_INSTRUCTION = (
     "what was unclear>}]}.")
 
 
-def _literature_schema(kb, schema_id):
-    schema = kb.schemas.require(schema_id)
-    if _schema_kind(schema) != "literature":
-        raise KnowledgeError('Only a schema tagged kind="literature" can hold records read from sources')
-    return schema
-
-
-class RecordExtractPrompt(Request):
-    schema_id: str
-    source_id: str
-    limit: int = Field(default=60_000, ge=500, le=MAX_MARKDOWN_CHARS)
-    offset: int = Field(default=0, ge=0)
-
-
-def record_extract_prompt(context, arguments):
-    """Everything needed to project one literature source onto a schema: the schema,
-    the instruction and the source's markdown, windowed like ``markdown``. The caller
-    produces the records and submits them with ``record_save``."""
-    request = RecordExtractPrompt.model_validate(arguments)
-    kb = _client(context)
-    schema = _literature_schema(kb, request.schema_id)
-    record, text = _markdown_record(kb, source_id=request.source_id)
-    window = text[request.offset:request.offset + request.limit]
-    return _bounded({
-        "source_id": request.source_id, "filename": (record.data or {}).get("filename"),
-        "schema_id": str(schema.id), "schema_name": schema.name, "schema_version": schema.version,
-        "system_prompt": schema.system_prompt, "definition": schema.definition,
-        "field_descriptions": schema.field_descriptions, "instruction": RECORD_INSTRUCTION,
-        "total_characters": len(text), "offset": request.offset, "markdown": window,
-        "has_more": request.offset + len(window) < len(text),
-    })
-
-
-class LiteratureRecordInput(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    name: str = Field(min_length=1, max_length=500)
-    data: dict[str, Any]
-    note: str | None = Field(default=None, max_length=4000)
-
-
-class RecordSave(Request):
-    schema_id: str
-    source_id: str
-    # Empty is allowed: a source that reports nothing for this schema still counts as read.
-    records: list[LiteratureRecordInput] = Field(max_length=500)
-    # A re-extraction replaces this source's earlier drafts for this schema; published records stay.
-    replace_drafts: bool = False
-
-
-def record_save(context, arguments):
-    """Store the records projected from one literature source as drafts, each
-    validated against the schema and linked to that source."""
-    request = RecordSave.model_validate(arguments)
-    kb = _client(context)
-    schema = _literature_schema(kb, request.schema_id)
-    source = kb.sources.get(_uuid(request.source_id, "source_id"))
-    if source is None:
-        raise KnowledgeError(f"No such source: {request.source_id}")
-    artifacts = [a for a in kb.artifacts.list(source_id=source.id, limit=10) if a.processing_type == "MARKDOWN"]
-    if not artifacts:
-        raise KnowledgeError("This source has no markdown yet; wait for its conversion job to finish")
-    group_id = str(source.collection_ids[0]) if source.collection_ids else None
-    if group_id is None:
-        raise KnowledgeError("This source belongs to no group")
-
-    if request.replace_drafts:
-        kb.oaw_experiments.delete_drafts_for_source(schema_id=str(schema.id), source_id=str(source.id))
-    saved = []
-    for item in request.records:
-        record = kb.oaw_experiments.create(
-            group_id=group_id, schema_id=str(schema.id), bundle_id=None, name=item.name,
-            data=item.data, validation=_check(schema.definition, item.data), note=item.note,
-            created_by=_actor(context))
-        kb.oaw_experiments.set_sources(record["id"], [{"source_id": str(source.id), "artifact_id": str(artifacts[0].id)}])
-        saved.append(_record_json(kb, record, sources=True))
-    return _bounded({"records": saved, "source_id": str(source.id), "schema_id": str(schema.id),
-                     "invalid": len([r for r in saved if (r["validation"] or {}).get("valid") is False])})
-
-
 class ExperimentUpdate(Request):
     record_id: str
     name: str | None = Field(default=None, max_length=500)
     data: dict[str, Any] | None = None
     note: str | None = Field(default=None, max_length=4000)
     expected_revision: int | None = None
-
 
 def experiment_update(context, arguments):
     """Edit one draft record — by hand in the form, or by an agent asked to in
@@ -1112,12 +957,10 @@ def experiment_update(context, arguments):
         validation=validation, expected_revision=request.expected_revision)
     return _bounded({"experiment": _record_json(kb, record, sources=True)})
 
-
 class ExperimentReview(Request):
     operation: Literal["publish", "unpublish", "delete"]
     record_id: str
     expected_revision: int | None = None
-
 
 def experiment_review(context, arguments):
     """Publish, unpublish or delete one record: the person's judgment on what the

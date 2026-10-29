@@ -12,6 +12,17 @@
 .publish-dialog p, .publish-dialog li { line-height: 1.65; }
 .publish-dialog .publish-checkbox { display: flex; align-items: center; gap: 8px; }
 .publish-hint { font-size: 12px; color: var(--ink-soft); }
+.publish-workspaces { min-width: 0; margin: 0; padding: 12px 0 0; border: 0; }
+.publish-workspaces legend { padding: 0; font-weight: 600; font-size: 13px; }
+.publish-workspace-list { max-height: 228px; overflow-y: auto; margin-top: 10px; border-top: 1px solid var(--line); }
+.publish-workspace-row { display: flex; align-items: center; gap: 8px; min-height: 43px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.publish-workspace-row > label { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; cursor: pointer; }
+.publish-workspace-row label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.publish-workspace-row input { flex-shrink: 0; accent-color: var(--accent); }
+.publish-workspace-row small { color: var(--ink-faint); font-size: 10px; }
+.publish-workspace-order { display: flex; gap: 3px; }
+.publish-workspace-order button { display: grid; place-items: center; width: 27px; padding: 0; border: 1px solid var(--line); background: transparent; color: var(--ink-soft); }
+.publish-workspace-order button:disabled { opacity: .3; }
 .publish-readiness { font-size: 12px; color: var(--ink-soft); border-top: 1px solid var(--line); padding-top: 10px; }
 .publish-readiness ul { margin: 6px 0 0; padding-left: 20px; overflow-wrap: anywhere; }
 .publish-next { display: grid; gap: 12px; border-top: 1px solid var(--line); padding-top: 16px; }

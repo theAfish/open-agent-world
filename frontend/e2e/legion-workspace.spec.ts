@@ -1,5 +1,53 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
+test('switches canvas workspaces and publishes their selected menu order', async ({ page, request }) => {
+  const { cards, group } = await setup(request);
+  const layout = (cardId: string) => ({ version: 2, root: { kind: 'pane', view: { card_id: cardId } } });
+  expect((await request.patch(`/api/nodes/${group.id}`, { data: { config: { workspace_layout: layout(cards[0].id) } } })).ok()).toBe(true);
+  const note = await (await request.post('/api/nodes', { data: { type: 'text', name: 'Operations guide', content: 'Operations workspace content' } })).json();
+  const grouped = await (await request.post('/api/legion-groups', { data: { name: 'Operations', node_ids: [note.id] } })).json();
+  const operations = grouped.find((card: { type: string }) => card.type === 'legion');
+  expect((await request.patch(`/api/nodes/${operations.id}`, { data: { config: { workspace_layout: layout(note.id) } } })).ok()).toBe(true);
+  await page.goto('/');
+  let workspace = await openWorkspace(page, group.id);
+  await workspace.getByRole('button', { name: 'Switch workspace' }).click();
+  await expect(page.getByRole('menuitemradio')).toHaveText(['Project studio', 'Operations']);
+  await page.screenshot({ path: '../.tmp/builder-workspace-switcher.png', fullPage: true });
+  await page.getByRole('menuitemradio', { name: 'Operations' }).click();
+  workspace = page.getByRole('dialog', { name: 'Operations workspace mode' });
+  await expect(workspace.locator('.text-editor:visible')).toHaveValue('Operations workspace content');
+  await workspace.getByRole('button', { name: 'Publish application' }).click();
+  const publish = page.getByRole('dialog', { name: 'Publish application', exact: true });
+  await publish.getByRole('checkbox', { name: 'Project studio' }).check();
+  await publish.getByRole('button', { name: 'Move Project studio up' }).click();
+  await expect(publish.getByRole('button', { name: 'Create release' })).toBeEnabled();
+  await page.screenshot({ path: '../.tmp/publish-workspace-order.png', fullPage: true });
+  const published = page.waitForResponse(response => response.url().endsWith('/api/deployments') && response.request().method() === 'POST');
+  await publish.getByRole('button', { name: 'Create release' }).click();
+  const release = await (await published).json();
+  expect(release.workspaces.map((item: { legion_id: string }) => item.legion_id)).toEqual([group.id, operations.id]);
+  await publish.getByRole('button', { name: 'Close', exact: true }).click();
+  await workspace.getByRole('button', { name: 'Switch workspace' }).click();
+  await page.getByRole('menuitemradio', { name: 'Project studio' }).click();
+  await page.reload();
+  await expect(page.getByRole('dialog', { name: 'Project studio workspace mode' })).toBeVisible();
+  const trigger = page.getByRole('button', { name: 'Switch workspace' });
+  await trigger.press('ArrowDown');
+  await page.getByRole('menuitemradio', { name: 'Project studio' }).press('End');
+  await expect(page.getByRole('menuitemradio', { name: 'Operations' })).toBeFocused();
+  await page.getByRole('menuitemradio', { name: 'Operations' }).press('Enter');
+  await expect(page.getByRole('dialog', { name: 'Operations workspace mode' })).toBeVisible();
+  await page.getByRole('dialog', { name: 'Operations workspace mode' }).getByRole('button', { name: 'Use dark theme' }).click();
+  await trigger.click();
+  await page.screenshot({ path: '../.tmp/builder-workspace-switcher-dark.png', fullPage: true, animations: 'disabled' });
+  await page.getByRole('menuitemradio', { name: 'Operations' }).press('Escape');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await page.locator('.legion-layout-stage').click({ position: { x: 500, y: 450 } });
+  await expect(page.getByRole('menu')).toHaveCount(0);
+});
+
 for (const nestedAxis of ['horizontal', 'vertical']) test(`resizing nested ${nestedAxis} workspace regions fills the stage without expanding it`, async ({ page, request }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   const { cards, group } = await setup(request);

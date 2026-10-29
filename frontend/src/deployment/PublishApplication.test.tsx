@@ -5,8 +5,9 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { PublishApplication } from './PublishApplication';
 import { useLocale } from '../i18n';
 import type { WorldCard } from '../types/world';
+import { useWorldStore } from '../state/worldStore';
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); useWorldStore.setState({ cards: [] }); vi.unstubAllGlobals(); });
 
 test('lists every incompatible pane before allowing release creation', async () => {
   useLocale.setState({ locale: 'en' });
@@ -39,8 +40,31 @@ test('publishes the saved Legion with explicit terminal permission and gives a q
   fireEvent.click(screen.getByRole('button', { name: 'Create release' }));
   await screen.findByText('Deploy this release');
   await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/deployments', expect.objectContaining({
-    method: 'POST', body: JSON.stringify({ legion_id: 'team', name: 'Customer app', allow_terminal: true }),
+    method: 'POST', body: JSON.stringify({ legion_ids: ['team'], name: 'Customer app', allow_terminal: true }),
   })));
   expect(screen.getByText(/python scripts\/deploy.py/)).toHaveTextContent("--source 'D:\\Projects\\Customer $data' --release release-123 --open");
   expect(screen.getByText(/close the engineering application/)).toBeVisible();
+});
+
+test('selects and orders workspaces, and prevents publishing an empty selection', async () => {
+  useLocale.setState({ locale: 'en' });
+  const card = { id: 'team', name: 'Team', type: 'legion', config: {} } as WorldCard;
+  const other = { ...card, id: 'notes', name: 'Notes' };
+  useWorldStore.setState({ cards: [card, other, { ...card, id: 'private', name: 'Private' }] });
+  const fetch = vi.fn(async (url: string, options?: RequestInit) => ({ ok: true, json: async () => url.endsWith('/preview')
+    ? { ready: true, panels: [], issues: [] }
+    : options?.method === 'POST' ? { id: 'release', legion_id: 'notes', name: 'Team', source_path: '/data', created_at: '2026-10-29' } : [] }));
+  vi.stubGlobal('fetch', fetch);
+  render(<PublishApplication card={card} disabled={false} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Publish application' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Notes' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Move Notes up' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create release' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Create release' }));
+  await screen.findByText('Deploy this release');
+  expect(fetch).toHaveBeenCalledWith('/api/deployments', expect.objectContaining({ body: JSON.stringify({ legion_ids: ['notes', 'team'], name: 'Team', allow_terminal: false }) }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Notes Default' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Team Default' }));
+  expect(screen.getByText('Select at least one workspace.')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Create release' })).toBeDisabled();
 });

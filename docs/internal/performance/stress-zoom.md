@@ -1,5 +1,8 @@
 # 1,000-card wheel regression (2026-09-29)
 
+> Historical record, not current product or deployment instructions. Verify against the current source before use.
+
+
 The WebGL background exposed a separate camera/input problem under the development
 panel's 1,000-card stress fixture. The largest avoidable work was in the browser
 renderer: repeated global viewport updates, synthetic Sandbox requests and forced

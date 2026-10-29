@@ -1,6 +1,7 @@
 """One documentation entry point for local development and CI (no backend needed)."""
 
 import argparse
+import json
 import os
 from pathlib import Path
 import re
@@ -45,6 +46,18 @@ def prose_lines(source):
             yield number, line
 
 
+CATALOG = json.loads((ROOT / 'docs/documentation.json').read_text(encoding='utf-8'))
+LANGUAGES = CATALOG['plugins']['i18n']['languages']
+
+
+def topic_path(path, languages=LANGUAGES):
+    for language in languages:
+        suffix = f".{language['locale']}.md"
+        if path.endswith(suffix):
+            return path[:-len(suffix)] + '.md'
+    return path
+
+
 def validate_source(path, source):
     errors = []
     headings = []
@@ -57,9 +70,9 @@ def validate_source(path, source):
             if level > previous + 1:
                 errors.append(f'{path}:{number}: heading skips a level')
             previous = level
-        if not path.endswith('.zh-CN.md'):
-            # Language switch links and exact inline identifiers are legitimate;
-            # paragraphs of Chinese prose belong in a separate translation.
+        if topic_path(path) == path:
+            # Exact identifiers and links may name another language.
+            # Only default English sources are checked for mixed Chinese prose.
             prose = re.sub(r'\[[^\]]*\]\([^)]*\.zh-CN\.md(?:#[^)]*)?\)', '', line)
             prose = re.sub(r'`+[^`]+`+', '', prose)
             if re.search(r'[\u3400-\u9fff]', prose):
@@ -75,12 +88,22 @@ def check_sources():
     published = {file.src_uri for file in files.documentation_pages() if file.inclusion.is_included()}
     nav = list(navigation_pages(config.nav))
     errors = []
-    for path in sorted(published - set(nav)):
-        errors.append(f'{path}: add this page to mkdocs.yml nav or move a maintainer record to internal/')
+    locales = [item['locale'] for item in LANGUAGES]
+    if len(locales) != len(set(locales)) or sum(bool(item.get('default')) for item in LANGUAGES) != 1:
+        errors.append('documentation.json: languages need unique locales and one default')
+    for path in sorted(published):
+        topic = topic_path(path)
+        if topic not in nav:
+            errors.append(f'{path}: register its canonical topic in docs/documentation.json')
+        if topic not in published:
+            errors.append(f'{path}: missing default-language source {topic}')
+    for path in nav:
+        if topic_path(path) != path:
+            errors.append(f'{path}: navigation must use the canonical topic without a language suffix')
     for path in sorted(set(nav) - published):
         errors.append(f'{path}: navigation target is missing, excluded, or has incorrect case')
     if len(nav) != len(set(nav)):
-        errors.append('mkdocs.yml: a page is listed more than once in nav')
+        errors.append('documentation.json: a topic is listed more than once in nav')
     for path in sorted(published):
         errors.extend(validate_source(path, (ROOT / 'docs' / path).read_text(encoding='utf-8')))
     if errors:

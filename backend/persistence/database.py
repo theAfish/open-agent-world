@@ -442,6 +442,10 @@ class Database:
                     "plugin_api_version TEXT NOT NULL DEFAULT '1.0'"
                 )
 
+            from backend.migrations.core_essentials import migrate_world
+            with self.transaction(immediate=True):
+                migrate_world(self._connection)
+
     def _migrate_conversations(self) -> None:
         # Additive migration preserves existing session IDs, messages and run scopes.
         self._connection.execute('''CREATE TABLE IF NOT EXISTS conversation_attachment_grants (

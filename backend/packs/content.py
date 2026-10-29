@@ -52,12 +52,15 @@ def content_plugin(manifest: PackManifest, files: dict[str, bytes], registry):
     recipes = read_recipes(manifest, files)
     owners = set()
     descriptors = {p.id: p for p in registry.plugins()}
+    from backend.migrations.core_essentials import legacy_pack_providers, pack_owner
+    legacy_providers = legacy_pack_providers(registry)
     for dependency in manifest.dependencies.packs:
         try:
-            owner = registry.owner_id("pack", dependency.id)
+            owner = pack_owner(registry, dependency.id)
         except ValueError as exc:
             raise ValueError(f"Install and restart OAW with required Pack {dependency.id}{dependency.version} first") from exc
-        if Version(descriptors[owner].version) not in SpecifierSet(dependency.version):
+        version = legacy_providers[dependency.id][0] if dependency.id in legacy_providers else descriptors[owner].version
+        if Version(version) not in SpecifierSet(dependency.version):
             raise ValueError(f"Restart OAW with required Pack {dependency.id}{dependency.version} first")
         owners.add(owner)
     for preset in presets:

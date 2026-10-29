@@ -215,6 +215,20 @@ def routine_guard(changed):
         require(False, f'Routine release cannot change {name}; use the full release path')
 
 
+def locked_dependencies(root):
+    """Ignore only the virtual root project's version, never resolved dependencies."""
+    path = root / 'backend/uv.lock'
+    if not path.exists():
+        return None
+    value = tomllib.loads(path.read_text(encoding='utf-8'))
+    project = tomllib.loads((root / 'backend/pyproject.toml').read_text(encoding='utf-8'))['project']
+    for package in value.get('package', []):
+        if package.get('name') == project.get('name') and package.get('source') == {'virtual': '.'}:
+            require(package.get('version') == project.get('version'), 'Root package version differs from its lockfile')
+            package.pop('version')
+    return value
+
+
 def plan(request):
     app, hosting, releases = paths(request)
     b = release_dir(request)
@@ -229,9 +243,11 @@ def plan(request):
     for name in manifest['files'].keys() - current['source_files'].keys():
         p = destination(app, name)
         require(not p.exists() or digest(p) == manifest['files'][name], f'Unmanaged application file would be overwritten: {name}')
-    for name in ('backend/uv.lock', 'backend/hosting/systemd.py'):
+    for name in ('backend/hosting/systemd.py',):
         require(current['source_files'].get(name) == manifest['files'].get(name),
                 f'{name} changed; update the host environment/service definitions explicitly first')
+    require(locked_dependencies(app) == locked_dependencies(b / 'stage'),
+            'backend/uv.lock dependencies changed; update the host environment explicitly first')
     def requirements(root):
         project = tomllib.loads((root / 'backend/pyproject.toml').read_text())['project']
         return {k: project.get(k) for k in ('dependencies', 'optional-dependencies', 'requires-python')}

@@ -21,11 +21,9 @@ upstream search/match algorithm and text candidate format in place.
 ## Build on Windows without a system installation
 
 Use a portable [MSYS2](https://www.msys2.org/) UCRT64 environment in a local
-build directory. The validated build used the official
-[`msys2-base-x86_64-20260611.tar.xz`](https://repo.msys2.org/distrib/x86_64/msys2-base-x86_64-20260611.tar.xz)
-base archive, GCC/GFortran 16.2.0, Qt 6.11.2, CMake 4.4.3, and Ninja 1.13.2.
-[`package-versions.txt`](package-versions.txt) records the complete installed
-package set for that build; it is provenance, not a package-manager lockfile.
+build directory. [`package-versions.txt`](package-versions.txt) records one
+historical toolchain for reproducibility; it is not a package-manager lockfile
+or a claim that a new build has been verified.
 
 Set `MSYSTEM=UCRT64` and `CHERE_INVOKING=1` for the portable MSYS2 shell process.
 Do not add this toolchain to the machine's persistent PATH. Inside that shell,
@@ -44,7 +42,7 @@ Keep the vendor source, build output, and installed engine outside the OAW
 checkout so that they are not included in a plugin commit.
 
 ```sh
-repo=/c/path/to/open-agent-world-library-xrd
+repo=/c/path/to/open-agent-world
 scratch=/c/path/to/qualx-build
 toolchain=/c/path/to/portable-msys64/ucrt64
 mkdir -p "$scratch"
@@ -132,20 +130,13 @@ For an allowed-element filter, append:
 - `--help` lists the three added flags, which OAW uses to check compatibility.
 - Failed pattern loading and failure to find peaks return a nonzero status.
 
-## Checks performed on the validated build
+## Verify your build
 
-The Windows build passed help/version probes, rejection of an unpaired settings
-argument, and real-spectrum searches both with and without an element filter.
-For the CQ250703-1 spectrum and the Li/Ti/P/O filter, candidate COD `7222155` was
-returned. Across those probes the recursive HKCU `Software/IC` fingerprint did
-not change, and the main database plus its three companions retained size and
-nanosecond modification time. These are integration checks, not a phase-ID
-accuracy benchmark.
-
-The locally validated executable SHA256 was
-`057d85ca7ee21a1998260586a6001958f0e20811c5d0d030809f1cd951d4eb6e`.
-Rebuilding can produce a different hash because the upstream executable embeds
-build time and compiler information.
+Check help/version output, rejection of an unpaired settings argument, and a
+real-spectrum search both with and without an element filter. Confirm the run
+does not modify HKCU `Software/IC` or the database and its three companion files.
+Record the executable hash and test inputs with your build artifacts. These
+checks establish integration behavior, not phase-identification accuracy.
 
 ## Upstream licensing information
 
@@ -160,27 +151,26 @@ upstream license:
 
 Keep the upstream license and provenance with external source/build artifacts.
 Do not relabel QualX code as OAW-licensed. Qt, GCC runtime, and other portable
-dependencies retain their respective licenses. No upstream source or compiled
-runtime is vendored in this plugin directory.
+dependencies retain their respective licenses. QualX source and compiled binaries
+are not vendored in this plugin directory.
 
 ## PyWPEM bounded cell updates
 
-Apply `pywpem-bounded-cell.patch` to the local PyWPEM source after the live-frame patch.
-It corrects the triclinic metric determinant sign and replaces unconstrained
-Newton cell steps with symmetry-preserving bounded least squares on Bragg angles.
+OAW's bundled [OAW_XRDfit](../TEMPLATE_CONTRACT.md#bundled-engine) includes bounded
+cell updates. The patch files here retain the upstream adaptation record; Pack
+users do not apply them to an external checkout. The engine uses the triclinic
+metric determinant and symmetry-preserving bounded least squares on Bragg angles.
 Each step allows at most 1% length change and 0.5 degree angle change; these are
 per-step limits, not global bounds relative to the initial CIF. Invalid metrics,
 Bragg-domain violations, failed optimization and worsening steps retain the previous
 cell. Fewer selected reflections than cell parameters leave the cell unchanged.
-The engine source hashes in each review include this implementation, invalidating
-old fit caches. This changes the post-search refinement protocol, not the LLM/BO score.
+Engine source hashes are part of each review's cache identity. These limits apply
+to post-search refinement, independently of the LLM/BO screening score.
 
 Zero-responsibility EM peaks retain their previous centers rather than generating
-0/0. Nonfinite responsibilities still fail explicitly. Run the independent metric
-and optimization tests with the scientific Python and `OAW_XRD_ROOT` set:
-`python plugins/xrd/engines/test_pywpem_bounded_cell.py -q`.
+0/0. Nonfinite responsibilities fail explicitly.
 
-Per-phase export now consumes each coincident reflection once within its own phase,
+Per-phase export consumes each coincident reflection once within its own phase,
 preventing duplicate peak centers from reusing another component's parameters.
 The adapter skips exactly zero-area exports with undefined mixing ratios and
 continues to reject invalid nonzero components or failed profile closure.

@@ -55,7 +55,7 @@ Agents access them only through currently granted document capabilities. The hos
 validates against the node's declared Pydantic model and uses one revision for the
 whole document, allowing tasks and dependencies to change atomically. Node deletion
 cleans up its document in the same database transaction. See the
-[Task Board plugin](../plugins/task_board/README.md) for the first implementation.
+[Task Board](task-board.md) for the first implementation.
 
 Plugin API 1.3 adds a host-owned `execution` field to this scope. It records batch
 status and recent attempt metadata separately from the plugin's editable document.

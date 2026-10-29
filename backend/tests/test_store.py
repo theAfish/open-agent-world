@@ -13,7 +13,7 @@ from backend.packs.marketplace import MarketplaceClient
 from backend.plugins.builtin import create_builtin_registry
 from backend.services import create_services
 from backend.tests.test_declarative_packs import project
-from backend.tests.test_marketplace import FakeMarketplace
+from backend.tests.test_marketplace import FakeMarketplace, Stream
 from backend.tests.test_pack_installation import MANIFEST, artifact, isolate_modules
 
 HEADERS = {'X-OAW-Pack-Install': '1'}
@@ -49,6 +49,29 @@ def test_store_search_detail_get_restart_and_already_installed(store):
     assert 'test.greeter' not in client.get('/api/catalog').json()['frontend_modules']
     assert client.post(URL, headers=HEADERS).status_code == 200
     assert len([r for r in fake.calls if r.url.path.endswith('/download')]) == 1
+
+
+def test_store_preserves_remote_preview_without_loading_pack_code(store):
+    client, fake = store
+    preview = {'packaging': 'paper', 'accent_color': '#aabbcc', 'count': 2}
+
+    async def transport(request):
+        response = fake(request)
+        import json
+        payload = json.loads(await response.aread())
+        if 'items' in payload:
+            for item in payload['items']:
+                item['preview'] = preview
+        else:
+            payload['preview'] = preview
+        return httpx.Response(200, headers={'Content-Type': 'application/json'},
+                              stream=Stream([json.dumps(payload).encode()]))
+
+    client.app.state.services.marketplace = MarketplaceClient('https://marketplace.test', transport=httpx.MockTransport(transport))
+    assert client.get('/api/store/packs').json()['items'][0]['preview'] == preview
+    assert client.get('/api/store/packs/test.greeter').json()['preview'] == preview
+    assert client.get('/api/store/packs/test.greeter/versions/0.1.0').json()['preview'] == preview
+    assert not any(request.url.path.endswith('/download') for request in fake.calls)
 
 
 def test_unavailable_isolated_from_local_world_and_local_file(store):

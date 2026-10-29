@@ -5,12 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from backend.api import artifacts, conversations, file_preview, job_board, node_documents, node_resources, resources, runtime
 from backend.api.dependencies import get_services
 from backend.api.knowledge_bridge import (
-    ExperimentExtractRequest, InsightExtractRequest, KnowledgeExtractRequest, RecordExtractRequest,
-    run_experiment_extract, run_insight_extract, run_knowledge_extract, run_record_extract,
+    ExperimentExtractRequest, InsightExtractRequest, ProjectSpaceRequest, ProjectionReviewRequest,
+    run_experiment_extract, run_insight_extract, run_project_space, run_projection_review, _stream,
 )
 from backend.node_documents import DocumentActionRequest, read_document, invoke_document_action
 from backend.node_resources import ResourceActionRequest, invoke_resource_action
 from backend.plugins.deployment import project_document
+from backend.deployments import published_workspaces
 
 
 def frontend_catalog(manifest, services, catalog=None):
@@ -47,6 +48,8 @@ def frontend_catalog(manifest, services, catalog=None):
 
 
 def workspace_snapshot(manifest, services):
+    workspaces = published_workspaces(manifest)
+    parents = {node_id: workspace["legion_id"] for workspace in workspaces for node_id in workspace["permissions"]}
     cards = []
     types = set()
     hidden = []
@@ -63,7 +66,7 @@ def workspace_snapshot(manifest, services):
             plugin_types.add(card.type)
             config = {key: value for key, value in card.config.items() if key in access["config_fields"]}
         cards.append({"id": card.id, "type": card.type, "name": card.name, "status": card.status,
-                      "parent_id": manifest["legion_id"], "config": config, "state_scope": card.state_scope,
+                      "parent_id": parents[node_id], "config": config, "state_scope": card.state_scope,
                       "finish": card.finish})
         sections = {"conversation": ("sessions", "conversation", "participants"),
                     "sandbox": ("files", "preview", "terminal")}.get(card.type, ())
@@ -78,8 +81,13 @@ def workspace_snapshot(manifest, services):
         if definition["id"] in plugin_types:
             node = services.plugins.node_type(definition["id"])
             definition["frontend"] = {key: value for key, value in node.frontend.items() if key in {"body", "workspace"}}
-    layout = deepcopy(manifest["layout"])
-    layout["hidden_sections"] = hidden + layout.get("hidden_sections", [])
+    legions = []
+    for workspace in workspaces:
+        layout = deepcopy(workspace["layout"])
+        layout["hidden_sections"] = [view for view in hidden if view["card_id"] in workspace["permissions"]] + layout.get("hidden_sections", [])
+        legions.append({"id": workspace["legion_id"], "name": workspace["name"] if len(workspaces) > 1 else manifest["name"], "type": "legion",
+                        "finish": services.world.get_card(workspace["legion_id"]).finish,
+                        "config": {"workspace_layout": layout}})
     # File following needs its actual connection, not an inferred relationship.
     # No hidden node or unrelated engineering edge enters the browser world.
     edges = []
@@ -91,9 +99,7 @@ def workspace_snapshot(manifest, services):
                     and edge.direction in {"forward", "bidirectional"}
                     and {"files", "preview", "conversation"}.intersection(manifest["permissions"].get(edge.target, []))):
                 edges.append({key: getattr(edge, key) for key in ("id", "source", "target", "relationship", "direction")})
-    return {"cards": cards, "edges": edges, "plugin_access": manifest.get("plugin_access", {}), "legion": {"id": manifest["legion_id"], "name": manifest["name"],
-            "type": "legion", "finish": services.world.get_card(manifest["legion_id"]).finish,
-            "config": {"workspace_layout": layout}},
+    return {"cards": cards, "edges": edges, "plugin_access": manifest.get("plugin_access", {}), "legion": legions[0], "legions": legions,
             "catalog": {"node_types": definitions, "relationships": [], "packs": [],
                         **frontend_catalog(manifest, services, catalog)}}
 
@@ -286,27 +292,28 @@ def workspace_router(manifest):
         result = await invoke_resource_action(services, node_id, action, request)
         return {key: value for key, value in result.items() if key in actions[action]}
 
-    @router.post("/knowledge/{node_id}/knowledge")
-    async def knowledge_knowledge(node_id: str, request: KnowledgeExtractRequest, services=Depends(get_services)):
-        # The bridge itself never checks capability; a release only reaches it once
-        # both halves of the pipeline it drives are published for this node.
+    @router.post("/knowledge/{node_id}/project-space")
+    async def knowledge_project_space(node_id: str, request: ProjectSpaceRequest, services=Depends(get_services)):
         actions = manifest.get("plugin_access", {}).get(node_id, {}).get("resource_actions", {})
-        if not {"knowledge_drafts", "knowledge_extract_prompt", "knowledge_save"} <= set(actions):
+        if not {"projection_prepare", "projection_prompt", "projection_save", "projection_fail"} <= set(actions):
             raise HTTPException(404, "This operation is not published")
-        return await run_knowledge_extract(node_id, request, services)
+        request = request.model_copy(update={"model": services.world.get_card(node_id).config.get("default_model", "")})
+        return _stream(lambda progress: run_project_space(node_id, request, services, progress))
 
-    @router.post("/knowledge/{node_id}/records")
-    async def knowledge_records(node_id: str, request: RecordExtractRequest, services=Depends(get_services)):
+    @router.post("/knowledge/{node_id}/review-projection")
+    async def knowledge_projection_review(node_id: str, request: ProjectionReviewRequest, services=Depends(get_services)):
         actions = manifest.get("plugin_access", {}).get(node_id, {}).get("resource_actions", {})
-        if not {"record_extract_prompt", "record_save"} <= set(actions):
+        if not {"projection_review_prompt", "projection_revise"} <= set(actions):
             raise HTTPException(404, "This operation is not published")
-        return await run_record_extract(node_id, request, services)
+        request = request.model_copy(update={"model": services.world.get_card(node_id).config.get("default_model", "")})
+        return _stream(lambda progress: run_projection_review(node_id, request, services, progress))
 
     @router.post("/knowledge/{node_id}/extract")
     async def knowledge_extract(node_id: str, request: ExperimentExtractRequest, services=Depends(get_services)):
         actions = manifest.get("plugin_access", {}).get(node_id, {}).get("resource_actions", {})
         if not {"experiment_extract_prompt", "experiment_save"} <= set(actions):
             raise HTTPException(404, "This operation is not published")
+        request = request.model_copy(update={"model": services.world.get_card(node_id).config.get("default_model", "")})
         return await run_experiment_extract(node_id, request, services)
 
     @router.post("/knowledge/{node_id}/insights")
@@ -314,6 +321,7 @@ def workspace_router(manifest):
         actions = manifest.get("plugin_access", {}).get(node_id, {}).get("resource_actions", {})
         if not {"insight_prompt", "insight_save"} <= set(actions):
             raise HTTPException(404, "This operation is not published")
+        request = request.model_copy(update={"model": services.world.get_card(node_id).config.get("default_model", "")})
         return await run_insight_extract(node_id, request, services)
 
     for route in node_documents.router.routes:

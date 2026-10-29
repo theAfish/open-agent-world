@@ -6,6 +6,9 @@ import { LibraryPack } from "./LibraryPack";
 import { useCardLibrary, type LibrarySnapshot } from "../state/cardLibrary";
 import { TEST_CATALOG } from "../state/catalog.fixture";
 import { worldApi } from "../api/client";
+import { paintPackCover } from "./pack3d/artwork";
+
+vi.mock('./pack3d/artwork', () => ({ paintPackCover: vi.fn() }));
 
 const originalRefresh = useCardLibrary.getState().refresh;
 const opened = vi.fn();
@@ -62,7 +65,7 @@ it.each(['standard', 'premium', 'paper', 'collector'] as const)("keeps a pending
   expect(browse).toHaveBeenCalledWith("tools");
 });
 
-it("retains the torn wrapper for an opened pack with new cards and falls back when artwork is missing", () => {
+it("keeps the opened flat cover and its artwork when a pack becomes unavailable", () => {
   const state = fixture();
   state.packs.tools.opened = true;
   state.packs.tools.definition.artwork_url = "/api/plugins/example/assets/cover";
@@ -71,9 +74,8 @@ it("retains the torn wrapper for an opened pack with new cards and falls back wh
   expect(container.querySelector(".is-opened")).toBeTruthy();
   expect(container.querySelector(".is-revealing")).toBeNull();
   expect(screen.getByRole("button", { name: "View cards in Tools" }).hasAttribute("disabled")).toBe(false);
-  fireEvent.error(container.querySelector("img")!);
-  expect(container.querySelector(".pack-guilloche")).toBeTruthy();
-  expect(container.querySelector(".pack-title")?.textContent).toBe("Tools");
+  expect(container.querySelector(".pack-cover")).toBeTruthy();
+  expect(paintPackCover).toHaveBeenCalledWith(expect.any(HTMLCanvasElement), expect.objectContaining({ name: "Tools", artwork: state.packs.tools.definition.artwork_url }));
   const unavailable = structuredClone(state);
   unavailable.available_pack_ids = [];
   act(() => useCardLibrary.setState({ snapshot: unavailable }));
@@ -92,6 +94,10 @@ it("reveals the saved finish after the face emerges even when parent props are s
   const saved = structuredClone(state);
   saved.packs.tools.opened = true;
   saved.collection[id].finish = "laser";
+  saved.card_definitions[id] = { ...saved.card_definitions[id], label: 'Saved photo',
+    card_face: { variant: 'image', tone: 'rose', image_url: '/saved-photo.png' } };
+  saved.card_definitions[id] = { ...saved.card_definitions[id], label: 'Saved photo',
+    card_face: { variant: 'image', tone: 'rose', image_url: '/saved-photo.png' } };
   useCardLibrary.setState({ snapshot: state, refresh: async () => {} });
   let resolve!: (value: LibrarySnapshot) => void;
   vi.spyOn(worldApi, "editCardLibrary").mockReturnValue(new Promise(done => { resolve = done; }));
@@ -102,18 +108,24 @@ it("reveals the saved finish after the face emerges even when parent props are s
   expect(container.querySelector(".card-finish-layer")).toBeNull();
   await act(async () => resolve(saved));
   expect(container.querySelector(".is-opened.is-revealing")).toBeTruthy();
+  expect(container.querySelector('.pack-reveal-card .card-face-copy strong')?.textContent).toBe('Saved photo');
+  expect(container.querySelector('.pack-reveal-card .card-face-image')?.getAttribute('src')).toBe('/saved-photo.png');
+  expect(container.querySelector('.pack-reveal-card .card-face-copy strong')?.textContent).toBe('Saved photo');
+  expect(container.querySelector('.pack-reveal-card .card-face-image')?.getAttribute('src')).toBe('/saved-photo.png');
   expect(container.querySelector(".card-finish-layer")).toBeNull();
   act(() => vi.advanceTimersByTime(720));
-  const material = container.querySelector(".pack-drawn-card .card-finish-layer");
+  const material = container.querySelector(".pack-reveal-card .card-finish-layer");
   expect(material?.getAttribute("data-finish")).toBe("laser");
   expect(material?.getAttribute("data-reveal")).toBe("true");
   rerender(element);
+  expect(container.querySelector('.pack-reveal-card .card-face')?.getAttribute('data-tone')).toBe('rose');
+  expect(container.querySelector('.pack-reveal-card .card-face')?.getAttribute('data-tone')).toBe('rose');
   expect(container.querySelector(".card-finish-layer")?.getAttribute("data-finish")).toBe("laser");
   act(() => vi.advanceTimersByTime(1380));
   expect(container.querySelector(".card-finish-layer")).toBeNull();
 });
 
-it.each(['missing', 'error'] as const)('marks a %s pack and keeps inspection available, then restores its artwork after recovery', kind => {
+it.each(['missing', 'error'] as const)('marks a %s pack with a warning while preserving its artwork and inspection, then clears it after recovery', kind => {
   const state = fixture();
   const pluginId = state.packs.tools.definition.plugin_id;
   state.packs.tools.definition.artwork_url = '/cover.png';
@@ -124,8 +136,8 @@ it.each(['missing', 'error'] as const)('marks a %s pack and keeps inspection ava
   const props = { pack: state.packs.tools, snapshot: state, versions, onOpened: opened, onBrowse: browse, onInspect: inspect };
   const { container, rerender } = render(<LibraryPack {...props} />);
   expect(container.querySelector('article')?.dataset.packIssue).toBe(kind);
-  expect(screen.getByText(kind === 'missing' ? 'MISSING' : 'ERROR')).toBeTruthy();
-  expect(container.querySelector('.pack-artwork')).toBeNull();
+  expect(screen.getByText(kind === 'missing' ? 'Pack uninstalled' : 'Environment failed').closest('.library-pack')?.getAttribute('data-pack-notice')).toBe('warning');
+  expect(paintPackCover).toHaveBeenLastCalledWith(expect.any(HTMLCanvasElement), expect.objectContaining({ artwork: '/cover.png', notice: expect.objectContaining({ kind: 'warning' }) }));
   fireEvent.click(screen.getByRole('button', { name: 'View pack Tools' }));
   expect(inspect).toHaveBeenCalledOnce();
   expect(opened).not.toHaveBeenCalled();
@@ -133,5 +145,6 @@ it.each(['missing', 'error'] as const)('marks a %s pack and keeps inspection ava
   versions[0].environment.state = 'environment_ready';
   rerender(<LibraryPack {...props} />);
   expect(container.querySelector('article')?.hasAttribute('data-pack-issue')).toBe(false);
-  expect(container.querySelector('.pack-artwork')).toBeTruthy();
+  expect(container.querySelector('article')?.hasAttribute('data-pack-notice')).toBe(false);
+  expect(paintPackCover).toHaveBeenLastCalledWith(expect.any(HTMLCanvasElement), expect.objectContaining({ artwork: '/cover.png', notice: undefined }));
 });

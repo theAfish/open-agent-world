@@ -31,60 +31,41 @@ PREFIX = "knowledge.base"
 # chosen ahead of time. Every top-level field a resource action's result may carry,
 # named once so the whole-card surface and each workspace section can share it.
 DEPLOYMENT_FIELDS = {
-    "overview": frozenset({"collection", "groups", "engines", "counts", "active_jobs"}),
-    "sources": frozenset({"sources", "offset"}),
-    "ingest": frozenset({"source", "group_id"}),
-    "process": frozenset({"jobs"}),
-    "groups": frozenset({"groups", "group", "deleted"}),
-    "markdown": frozenset({"record_id", "filename", "engine", "total_characters", "offset",
-                           "markdown", "has_more"}),
-    "search": frozenset({"query", "results"}),
-    "schemas": frozenset({"schemas", "schema"}),
-    "knowledge_drafts": frozenset({"drafts", "draft"}),
-    "knowledge_draft_manage": frozenset({"draft", "deleted"}),
-    "knowledge_source_outline": frozenset({"source_id", "filename", "total_characters", "sections"}),
-    "knowledge_lookup": frozenset({"terms", "in_draft", "published", "predicates"}),
-    "knowledge_extract_prompt": frozenset({"source_id", "draft_id", "filename", "instruction",
-                                           "suggested_predicates", "existing", "existing_predicates",
-                                           "published", "section", "heading_path", "total_characters",
-                                           "offset", "markdown", "has_more"}),
-    "knowledge_save": frozenset({"draft", "added"}),
-    # Reviewing a draft has no deployment route yet; listed so the whole-card surface
-    # stays complete, granted to no section of its own.
-    "knowledge_audit_prompt": frozenset({"draft_id", "revision", "instruction", "operations", "statistics", "draft"}),
-    "knowledge_audit_apply": frozenset({"draft", "applied", "skipped", "review"}),
-    "knowledge_graph_audit_prompt": frozenset({"draft_ids", "instruction", "operations", "statistics", "draft"}),
-    "knowledge_graph_audit_apply": frozenset({"drafts", "applied", "skipped", "graph", "status", "reasons", "message"}),
-    "knowledge_update": frozenset({"draft"}),
-    "knowledge_review": frozenset({"draft", "status", "reasons", "message", "graph"}),
-    "record_extract_prompt": frozenset({"source_id", "filename", "schema_id", "schema_name", "schema_version",
-                                        "system_prompt", "definition", "field_descriptions", "instruction",
-                                        "total_characters", "offset", "markdown", "has_more"}),
-    "record_save": frozenset({"records", "source_id", "schema_id", "invalid"}),
-    "experiment_bundles": frozenset({"bundles", "bundle"}),
-    "experiment_bundle_manage": frozenset({"bundle", "deleted", "records_removed"}),
-    "experiment_ingest": frozenset({"source", "job", "bundle_id"}),
-    "experiment_extract_prompt": frozenset({"bundle_id", "bundle_name", "notes", "group_id", "schema_id",
-                                            "schema_name", "schema_version", "system_prompt", "definition",
-                                            "field_descriptions", "instruction", "files", "total_characters",
-                                            "offset", "markdown", "has_more"}),
-    "experiment_save": frozenset({"records", "bundle_id", "invalid"}),
-    "experiments": frozenset({"experiments", "experiment"}),
-    "experiment_update": frozenset({"experiment"}),
-    "experiment_review": frozenset({"experiment", "deleted", "status", "reasons", "message"}),
-    "insights": frozenset({"insights", "insight", "schema_id", "schema_ids", "schema_name", "group_id",
-                           "statistics", "statistics_by_schema", "cross_schema"}),
-    "insight_prompt": frozenset({"schema_id", "schema_ids", "schemas", "schema_name", "schema_version",
-                                 "definition", "field_descriptions", "group_id", "kinds", "roles",
-                                 "instruction", "statistics", "statistics_by_schema", "cross_schema",
-                                 "existing", "record_count", "total_characters", "offset", "markdown",
-                                 "has_more"}),
-    "insight_save": frozenset({"insights", "schema_ids", "warnings"}),
-    "insight_update": frozenset({"insight"}),
-    "insight_review": frozenset({"insights", "deleted", "status", "reasons", "message", "graph"}),
-    "graph": frozenset({"entities", "relations", "truncated", "matched", "connections", "search_text",
-                        "semantic", "semantic_error"}),
-    "jobs": frozenset({"jobs", "job", "events"}),
+    "schema_manage": frozenset({"schema"}),
+    'overview': frozenset(['active_jobs', 'collection', 'counts', 'engines', 'groups']),
+    'sources': frozenset(['offset', 'sources']),
+    'markdown': frozenset(['engine', 'filename', 'has_more', 'markdown', 'offset', 'record_id', 'total_characters']),
+    'search': frozenset(['query', 'results']),
+    'schemas': frozenset(['schema', 'schemas']),
+    'experiment_bundles': frozenset(['bundle', 'bundles']),
+    'experiment_bundle_manage': frozenset(['bundle', 'deleted', 'records_removed']),
+    'experiment_ingest': frozenset(['bundle_id', 'job', 'source']),
+    'experiment_extract_prompt': frozenset(['bundle_id', 'bundle_name', 'definition', 'field_descriptions', 'files', 'group_id', 'has_more', 'instruction', 'markdown', 'notes', 'offset', 'schema_id', 'schema_name', 'schema_version', 'system_prompt', 'total_characters']),
+    'experiment_save': frozenset(['bundle_id', 'invalid', 'records']),
+    'experiments': frozenset(['experiment', 'experiments']),
+    'experiment_update': frozenset(['experiment']),
+    'experiment_review': frozenset(['deleted', 'experiment', 'message', 'reasons', 'status']),
+    'insights': frozenset(['cross_schema', 'group_id', 'insight', 'insights', 'schema_id', 'schema_ids', 'schema_name', 'statistics', 'statistics_by_schema']),
+    'insight_prompt': frozenset(['cross_schema', 'definition', 'existing', 'field_descriptions', 'group_id', 'has_more', 'instruction', 'kinds', 'markdown', 'offset', 'record_count', 'roles', 'schema_id', 'schema_ids', 'schema_name', 'schema_version', 'schemas', 'statistics', 'statistics_by_schema', 'total_characters']),
+    'insight_save': frozenset(['insights', 'schema_ids', 'warnings']),
+    'insight_update': frozenset(['insight']),
+    'insight_review': frozenset(['deleted', 'graph', 'insights', 'message', 'reasons', 'status']),
+    'graph': frozenset(['connections', 'entities', 'matched', 'relations', 'search_text', 'semantic', 'semantic_error', 'truncated']),
+    'jobs': frozenset(['events', 'job', 'jobs']),
+    'projects': frozenset(['offset', 'project', 'projects', 'has_more', 'next_offset']),
+    'project_manage': frozenset(['project']),
+    'project_import_preview': frozenset(['depth', 'files', 'grouping', 'projects', 'token']),
+    'project_import_commit': frozenset(['jobs', 'projects', 'reused', 'source_ids']),
+    'project_process': frozenset(['jobs']),
+    'spaces': frozenset(['space', 'spaces', 'templates']),
+    'space_manage': frozenset(['space']),
+    'projections': frozenset(['projection', 'projections', 'offset', 'has_more', 'next_offset']),
+    'projection_prepare': frozenset(['projections']),
+    'projection_prompt': frozenset(['project_id', 'project_name', 'expected_revision', 'definition', 'has_more', 'instruction', 'markdown', 'offset', 'project', 'projection_id', 'revision', 'source_fingerprint', 'sources', 'space', 'space_version', 'system_prompt', 'total_characters']),
+    'projection_save': frozenset(['projection']),
+    'projection_fail': frozenset(['projection']),
+    'projection_review_prompt': frozenset(['project_id', 'project_name', 'expected_revision', 'data', 'definition', 'has_more', 'instruction', 'markdown', 'offset', 'project', 'projection_id', 'revision', 'sources', 'space', 'system_prompt', 'total_characters']),
+    'projection_revise': frozenset(['projection']),
 }
 
 
@@ -94,51 +75,23 @@ def _surface(*names, config_fields=frozenset()):
 
 
 def _deployment():
-    """What a published release of the Lab Manager Legion can do.
-
-    ``settings`` never appears here: the collection name, PDF engine and MinerU URL
-    stay engineering-only, matching "it does not mount ... model settings". Every
-    other business action a person uses to drive the pipeline — upload, convert,
-    search, open a knowledge draft and extract into it, publish it, extract records
-    from a source, upload an experiment, publish its records and publish insights
-    over them — is exactly what a deployed release is for, so it is granted. Every
-    extraction in a release goes through the model bridge with the pre-chosen default
-    model, since a release carries no agent edges for the connected-agent path. The
-    layout can place this card as one whole pane (``surface``) or extract each
-    section into its own tab (``sections``); both are covered so either shape of a
-    saved workspace can publish. Section names match the card's own frontend's
-    WorkspaceSection ids — Sources holds upload, conversion and search; Knowledge the
-    general concept graph drafted from sources; Records the literature schemas, the
-    records read from sources with them and the insights over those records;
-    Experiments and Insights their experiment-side counterparts.
-    """
-    all_actions = tuple(DEPLOYMENT_FIELDS)
+    project_actions = ("overview", "projects", "project_manage", "project_import_preview",
+        "project_import_commit", "project_process", "sources", "markdown", "search", "jobs")
+    result_actions = ("overview", "projects", "spaces", "projections", "projection_prepare",
+        "projection_prompt", "projection_save", "projection_fail", "projection_review_prompt", "projection_revise", "markdown")
     return NodeDeploymentDefinition(
-        surface=_surface(*all_actions, config_fields={"default_model"}),
+        surface=_surface(*DEPLOYMENT_FIELDS, config_fields={"default_model"}),
         sections={
-            # Declared with no grants of its own so the pane can still be placed
-            # without failing publication; hide it in the layout editor to keep a
-            # release from showing engineering configuration at all.
             "settings": DeploymentSurface(),
-            "sources": _surface("overview", "sources", "ingest", "process", "groups", "jobs",
-                                "search", "markdown"),
-            "knowledge": _surface("overview", "sources", "knowledge_drafts", "knowledge_draft_manage",
-                                  "knowledge_source_outline", "knowledge_lookup",
-                                  "knowledge_extract_prompt", "knowledge_save", "knowledge_update",
-                                  "knowledge_review", "graph", config_fields={"default_model"}),
-            "records": _surface("overview", "sources", "schemas", "record_extract_prompt", "record_save",
-                                "experiments", "experiment_update", "experiment_review", "insights",
-                                "insight_prompt", "insight_save", "insight_update", "insight_review",
-                                "graph", config_fields={"default_model"}),
-            "schemas": _surface("schemas"),
-            "experiments": _surface("overview", "jobs", "schemas", "experiment_bundles",
-                                    "experiment_bundle_manage", "experiment_ingest",
-                                    "experiment_extract_prompt", "experiment_save", "experiments",
-                                    "experiment_update", "experiment_review",
-                                    config_fields={"default_model"}),
+            "projects": _surface(*project_actions, *result_actions, config_fields={"default_model"}),
+            "spaces": _surface("spaces", "space_manage", "projects", "projections", "markdown"),
+            "results": _surface(*result_actions, config_fields={"default_model"}),
+            "schemas": _surface("schemas", "schema_manage"),
+            "experiments": _surface("overview", "jobs", "schemas", "schema_manage", "experiment_bundles",
+                "experiment_bundle_manage", "experiment_ingest", "experiment_extract_prompt", "experiment_save",
+                "experiments", "experiment_update", "experiment_review", config_fields={"default_model"}),
             "insights": _surface("overview", "schemas", "experiments", "insights", "insight_prompt",
-                                 "insight_save", "insight_update", "insight_review", "graph",
-                                 config_fields={"default_model"}),
+                "insight_save", "insight_update", "insight_review", "graph", config_fields={"default_model"}),
         },
     )
 
@@ -202,7 +155,7 @@ async def _wait_jobs(context, capability, arguments):
 class KnowledgeBasePlugin:
     descriptor = PluginDescriptor(id=PREFIX, version="0.2.0", plugin_api_version="1.40",
         name="Knowledge base",
-        description="Embedded research knowledge base: documents to markdown, markdown to structured JSON, and a review-gated knowledge graph.")
+        description="Project materials to readable Markdown, reusable Space projections, and experiment records with evidence-linked insights.")
 
     def register(self, registration):
         registration.register_asset(PluginAsset(id="knowledge", media_type="image/svg+xml",
@@ -240,7 +193,7 @@ class KnowledgeBasePlugin:
 
         registration.register_node_type(NodeTypeDefinition(
             id=PREFIX, label="Knowledge base",
-            description="Documents, structured records and a review-gated knowledge graph",
+            description="Projects, Spaces, structured results and experiment insights",
             icon="library", icon_asset="knowledge", color="#8a6fd1",
             deck_id="knowledge", deck_label="Knowledge", deck_icon="library",
             default_name="Knowledge base", default_size=(360, 280), default_status="available",
@@ -262,13 +215,13 @@ class KnowledgeBasePlugin:
 
         for access, label, short, granted, description in (
             ("read", "Knowledge read", "read", READ_ACTIONS,
-             "Can read this knowledge base: sources, extracted markdown, schemas, knowledge drafts, records, insights and the published graph."),
+             "Can read this knowledge base: projects, original Markdown, Spaces, projections, records, insights and the published graph."),
             ("extract", "Knowledge extract", "extract", EXTRACT_ACTIONS,
-             "Can read this knowledge base, name a source's concepts into a knowledge draft a person opened, read records and insights from literature, and edit drafts when asked. Nothing is published until a person does it on the canvas."),
+             "Can read this knowledge base, run project Space projections directly over Markdown and revise their results when asked. Review is optional."),
             ("experiment", "Knowledge experiment", "experiment", EXPERIMENT_ACTIONS,
              "Can read this knowledge base, project an experiment upload into draft records and edit drafts when asked. Records stay unpublished until a person publishes them on the canvas."),
             ("research", "Knowledge research", "research", RESEARCH_ACTIONS + (artifact_import.ACTION,),
-             "Can import authorized attachments, convert documents, prepare schemas and uploads, and extract literature, experiment and insight drafts. Publication and settings remain under human control."),
+             "Can import authorized attachments, convert documents, prepare projects, Spaces, schemas and uploads, and extract project results, experiment records and insight drafts. Publication and settings remain under human control."),
         ):
             registration.register_relationship(RelationshipDefinition(
                 id=f"{PREFIX}.{access}", label=label, short_label=short, description=description,

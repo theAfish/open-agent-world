@@ -34,3 +34,19 @@ The match card exposes read-only history through native node resource actions. E
 History is scoped to the match owner, including multiphase runs executed by a separate optimizer. It lists 50 runs per page and fetches selected files on demand (30 MiB per file), with SHA256 values and original bytes. History is excluded from reusable templates. Opening a record does not restore mutable workflow settings, start computation or resume interrupted runs. Stored running records without a live local task are shown as interrupted, while the original evidence is preserved. Back up the configured XRD run root alongside the OAW profile.
 
 Repeated joint reviews are archived under `review-history/<review_started_at_ns>/` before retrying and after termination. Each attempt retains its state and fitting outputs; the current review can update without replacing the archived attempt.
+
+## Shipped workbench (0.3.1)
+
+The former `XRD 分析工作台 v1` was an author-local saved formation, not a distributed preset. The plugin now registers `research.xrd.workbench` in the XRD Pack. Open **Library → XRD analysis**, collect **XRD 分析工作台**, add it to the XRD deck, and place it to create the complete workspace.
+
+The preset contains ten cards and nine links, including a fresh SQL database for the match card's history and report grants for the analysis agents. It uses the host's current configuration defaults and layout v2. Each instance has its own IDs and empty inputs; configure the user's models, library mounts and numerical runtime before running. SQL template capture copies configuration only, never database files or rows.
+
+The SVG cover is packaged as `assets/workbench-cover.svg` and served through the plugin asset API. Both the Pack and the formation detail preview use it.
+
+For a separately installable content Pack, run from this checkout:
+
+```powershell
+backend/.venv/Scripts/python.exe scripts/export-xrd-workbench.py --output dist/xrd-workbench-v2.oawpack
+```
+
+This uses the standard inspected/checksummed OAW content Pack format. It requires the versions of core, XRD and SQLite listed in its manifest; it is not an engine installer. The built-in preset and SVG are included in the XRD Python package. A clean-profile test installs the exported Pack, restarts the recipient, and places all ten cards.

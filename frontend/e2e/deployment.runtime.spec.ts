@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('deployment reuses Legion workspace and business controls without engineering access', async ({ page }) => {
+test('deployment reuses Legion workspace and business controls without engineering access', async ({ page }, testInfo) => {
   const errors: string[] = [];
   const writes: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -9,7 +9,12 @@ test('deployment reuses Legion workspace and business controls without engineeri
   await page.getByLabel('Access password').fill('test-operator-password-93841');
   await page.getByRole('button', { name: 'Open application', exact: true }).click();
   await expect(page.locator('.legion-workspace')).toBeVisible();
-  await expect(page.locator('.legion-window-titlebar')).toContainText('Customer workspace');
+  await expect(page.locator('.legion-window-titlebar')).toContainText('Operations');
+  await expect(page.locator('.text-editor:visible')).toHaveValue('Operations workspace content');
+  await page.getByRole('button', { name: 'Switch workspace', exact: true }).click();
+  await expect(page.getByRole('menuitemradio')).toHaveText(['Operations', 'Published studio']);
+  await page.screenshot({ path: testInfo.outputPath('workspace-switcher.png'), fullPage: true, animations: 'disabled' });
+  await page.getByRole('menuitemradio', { name: 'Published studio' }).click();
   for (const name of ['Edit layout', 'Back to canvas', 'Open settings', 'Publish application']) {
     await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
   }
@@ -55,15 +60,21 @@ test('deployment reuses Legion workspace and business controls without engineeri
   expect(result.bootstrap).not.toContain('password');
   expect(writes.filter(url => /\/api\/nodes\//.test(url))).toEqual([]);
   await page.reload();
-  await expect(page.locator('.legion-window-titlebar')).toContainText('Customer workspace');
+  await expect(page.locator('.legion-window-titlebar')).toContainText('Operations');
+  await page.getByRole('button', { name: 'Switch workspace', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: 'Published studio' }).click();
   await page.getByRole('tab', { name: 'Plugin notes', exact: true }).click();
   await expect(page.getByLabel('Workspace note')).toHaveValue('Saved through the original plugin view');
   await page.getByRole('tab', { name: 'Tasks', exact: true }).click();
   await expect(page.locator('.task-row.is-done')).toContainText('Keep this draft');
-  await page.screenshot({ path: '../.tmp/deployment-desktop.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('.legion-layout-stage')).toBeVisible();
-  await page.screenshot({ path: '../.tmp/deployment-mobile.png', fullPage: true });
+  await page.getByRole('button', { name: 'Switch workspace', exact: true }).click();
+  await expect(page.getByRole('menu')).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('mobile.png'), fullPage: true, animations: 'disabled' });
+  await page.getByRole('menuitemradio', { name: 'Operations' }).click();
+  await expect(page.locator('.text-editor:visible')).toHaveValue('Operations workspace content');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.getByLabel('Access password')).toBeVisible();

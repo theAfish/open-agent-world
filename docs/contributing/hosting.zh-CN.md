@@ -1,6 +1,6 @@
 # 多用户托管：统一登录与独立工作区
 
-[中文文档目录](../README.zh-CN.md) · [工作区发布与部署](../deployment.zh-CN.md)
+[中文文档目录](../README.md) · [工作区发布与部署](../deployment.md)
 
 托管模式支持管理员创建账号、账号密码登录、标准 OIDC，以及登录后直接进入画布或发布后的 Workspace 页面。每个用户对应一个独立后端实例、数据库和文件目录。个人桌面/源码启动仍然默认免登录；原有共享密码部署仍可使用。
 
@@ -12,7 +12,7 @@ ECS 推荐 Ubuntu 24.04 LTS；需要 Linux、正在运行的 systemd 249+、Pyth
 
 将应用安装在管理员维护的 `/opt/open-agent-world`，托管数据放在独立的 `/srv/oaw-hosting`。不要把部署应用或 Python 放在 `/home`，服务的 `ProtectHome` 会屏蔽该目录。若使用 uv 管理 Python，应在安装前设置 `UV_PYTHON_INSTALL_DIR=/opt/oaw-python`；也可以使用系统 Python。设置 `UV_LINK_MODE=copy`，避免共享依赖缓存的硬链接权限相互影响。
 
-先按[源码安装说明](../getting-started.zh-CN.md)完成宿主和插件准备，然后在应用目录执行以下一次性安装步骤。`--inexact` 保留已有插件依赖；`prepare-runtime` 为所有经过管理员审核的源码 Pack 准备共享运行环境，不接触个人工作区：
+先按[源码安装说明](../getting-started.md)完成宿主和插件准备，然后在应用目录执行以下一次性安装步骤。`--inexact` 保留已有插件依赖；`prepare-runtime` 为所有经过管理员审核的源码 Pack 准备共享运行环境，不接触个人工作区：
 
 ```bash
 cd /opt/open-agent-world

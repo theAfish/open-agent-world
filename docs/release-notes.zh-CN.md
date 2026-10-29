@@ -1,10 +1,8 @@
 # 安装 Open Agent World
 
-[English](https://github.com/theAfish/open-agent-world/blob/dev/docs/release-notes.md) | **简体中文**
-
 ## 下载
 
-展开下方 **Assets**，选择对应安装包：
+展开发行页的 **Assets**，选择该发行版实际提供、适合你电脑的安装包：
 
 | 电脑 | 文件 |
 | --- | --- |
@@ -12,20 +10,22 @@
 | Apple Silicon Mac | `Open-Agent-World-<version>-macos-arm64.dmg` |
 | Intel Mac | `Open-Agent-World-<version>-macos-x86_64.dmg` |
 
-**Source code (zip / tar.gz) 是开发者使用的源码，不是安装包。** `.sha256` 文件用于可选的完整性校验。
+**Source code (zip / tar.gz) 是开发者使用的源码。** 运行应用请选择安装包。`.sha256` 文件用于校验下载完整性。
 
-## 安装与开始
+## 安装与启动
 
-1. Windows 运行 `.exe`，从开始菜单打开 **Open Agent World**；Mac 打开 `.dmg`，拖入 **Applications** 后启动。
-2. 在 **Settings → Models** 添加模型连接和凭据，选择默认模型。
-3. 跟随画布教程，在 **Pack & Card Library** 收集卡片并开始搭建工作区。
+1. Windows：运行 `.exe`，从开始菜单打开 **Open Agent World**。Mac：打开 `.dmg`，把应用拖入 **Applications**，然后启动。
+2. 使用 **Connect AI（连接 AI）**，或在 **Settings → Models（设置 → 模型）** 添加连接并选择默认模型。
+3. 选择 **Start Tutorial（开始教程）**，或按照[第一个任务](https://github.com/theAfish/open-agent-world/blob/dev/docs/user-guide/first-team.md)操作。打开 **Pack & Card Library（卡包与卡牌库）** 收集、放置卡片。
 
-安装包自带 Python 和应用依赖。模型调用需要配置模型服务；部分插件和 Sandbox 环境可能需要额外下载依赖。
+安装包包含 Python 和应用依赖。调用模型需要配置服务；部分卡包和 Sandbox 环境首次使用时还需要下载依赖。
 
-## 预览版限制
+## 平台与更新
 
-- 未签名的 Windows 预览包可能出现发布者或信誉警告。
-- macOS 预览包使用临时签名且未经 Apple 公证，可能被系统阻止打开；目前没有本地 Sandbox 运行时。
-- 未配置自动更新的版本需要手动下载安装新版本。用户数据与安装目录分开保存。
+签名、公证和自动更新取决于发行构建。遇到系统警告时，先阅读该发行版说明，核对发布者与下载来源。可以安装新版安装包进行手动更新；应用数据与安装目录分开保存。
 
-[安装说明](https://github.com/theAfish/open-agent-world/blob/dev/docs/install.zh-CN.md)
+源码支持 macOS 本地 Seatbelt 和可选 Container VM。后者需要 Apple Silicon、macOS 26+ 与 Apple Container 0.6.0+。使用 Sandbox 前，应核对该发行版实际包含和验证的运行时。
+
+链接文档跟随 **dev**。要确认某个正式版本的行为，请阅读对应 tag 的文档或该安装包内置帮助。
+
+[安装指南](https://github.com/theAfish/open-agent-world/blob/dev/docs/install.md)

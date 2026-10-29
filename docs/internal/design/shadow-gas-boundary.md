@@ -1,5 +1,8 @@
 # Activated collection gas boundary
 
+> Historical record, not current product or deployment instructions. Verify against the current source before use.
+
+
 Enable **移出成员** on an expanded Shadow Collection at http://127.0.0.1:5173/.
 The effect is a procedural WebGL 1 fragment shader, not an image asset or a fluid simulation. No new dependencies. The React/SVG collection, hit target, ports and cards remain native OAW components.
 

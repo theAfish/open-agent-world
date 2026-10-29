@@ -56,6 +56,49 @@ def test_local_wheel_runs_only_in_private_worker_and_detects_missing_files(tmp_p
     assert manager.status(declaration)["status"] == "invalid"
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows MAX_PATH regression")
+def test_private_imports_and_cache_support_long_staging_paths_and_publish(tmp_path, monkeypatch):
+    if not shutil.which("uv"):
+        pytest.skip("uv is required for the local-wheel provider integration")
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    monkeypatch.setenv("UV_NO_INDEX", "1")
+    monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uv-cache"))
+    monkeypatch.delenv("CUSTOM_TIKTOKEN_CACHE_DIR", raising=False)
+    # Reproduce LiteLLM's import-time cache selection and tiktoken's atomic
+    # write, without downloading tokenizer data or installing dependencies.
+    source = '''
+import os
+from pathlib import Path
+from uuid import uuid4
+cache = Path(os.environ.get("CUSTOM_TIKTOKEN_CACHE_DIR",
+    str(Path(__file__).parent / "litellm_core_utils/tokenizers")))
+cache.mkdir(parents=True, exist_ok=True)
+target = cache / ("9b5ad71b2ce5302211f9c61530b329a4922fc6a4")
+temporary = target.with_name(target.name + "." + str(uuid4()) + ".tmp")
+temporary.write_bytes(b"tokenizer")
+temporary.replace(target)
+from .llms.anthropic.experimental_pass_through.context_management.editors import clear_tool_uses
+'''
+    wheel = tmp_path / "litellm-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("litellm/__init__.py", source)
+        parts = "litellm/llms/anthropic/experimental_pass_through/context_management/editors".split("/")
+        for length in range(2, len(parts) + 1):
+            archive.writestr("/".join(parts[:length]) + "/__init__.py", "")
+        archive.writestr("/".join(parts) + "/clear_tool_uses.py", "value = 'private'\n")
+        archive.writestr("litellm-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: litellm\nVersion: 1.0\n")
+        archive.writestr("litellm-1.0.dist-info/WHEEL", "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
+        archive.writestr("litellm-1.0.dist-info/RECORD", "")
+    declaration = spec(requirements=(str(wheel),), verify_imports=("litellm",))
+    manager = runtime.PackEnvironmentManager(tmp_path / "profile")
+    handle = manager.prepare_python(declaration)
+    stage = manager.root / "staging" / json.loads(manager._operation_path(declaration).read_text())["stage"]
+    assert len(str(stage / "packages/litellm/litellm_core_utils/tokenizers")) + 82 > 260
+    assert manager.prepare_python(declaration) == handle
+    receipt = json.loads((handle.root / "ready.json").read_text())
+    assert receipt["verified_files"][0]["path"] == "packages/litellm/__init__.py"
+
+
 def test_failure_preserves_previous_environment_and_retry_operation_identity(tmp_path):
     manager = runtime.PackEnvironmentManager(tmp_path)
     previous = spec(verify_imports=("json",))

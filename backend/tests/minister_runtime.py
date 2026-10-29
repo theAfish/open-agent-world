@@ -6,7 +6,7 @@ from backend.agents import AgentEvent, AgentEventType, MockAgentRuntime
 from backend.agents.tools import build_scoped_tool_callables
 from backend.runs import RunStatus
 from backend.config import Settings
-from backend.plugins.loader import load_plugin_registry
+from backend.plugins.loader import load_plugin_registry, load_installed_packs
 from backend.services import create_services
 from backend.tests.plugin_support import install_test_plugin
 
@@ -131,5 +131,6 @@ class MinisterTestRuntime(MockAgentRuntime):
 
 def runtime_services(tmp_path):
     registry = load_plugin_registry()
+    load_installed_packs(registry, tmp_path, strict=True)
     install_test_plugin(registry, "test.minister", lambda registration: registration.register_runtime_provider("test.minister", MinisterTestRuntime))
     return create_services(replace(Settings.for_data_root(tmp_path), agent_runtime="test.minister"), plugins=registry)

@@ -1,6 +1,6 @@
 # Persistent card finishes
 
-Pack opening assigns a single print finish to each newly acquired collection entry. The authoritative probability table is `backend/card_finishes.py::CARD_FINISH_WEIGHTS`: normal 72%, foil 16%, rainbow 6%, starlight 4%, laser 2%. The small `weighted_choice` utility accepts one random sample, supports relative and zero weights, and validates its inputs. Pack generation previously had no seeded random stream.
+Pack opening assigns a single print finish to each newly acquired collection entry. The authoritative probability table is `backend/card_finishes.py::CARD_FINISH_WEIGHTS`: normal 72%, foil 16%, rainbow 6%, starlight 4%, laser 2%. The small `weighted_choice` utility accepts one random sample, supports relative and zero weights, and validates its inputs.
 
 ## Ownership and persistence
 
@@ -11,6 +11,8 @@ Only explicit `open_pack` creation of a new entry calls `roll_card_finish`. Reco
 Placement through `/card-library/nodes` copies the owned finish to the new `Card`. World instances persist their own finish in an additive SQLite `cards.finish` column with a `normal` default; old world cards are not recolored from today's collection. The immutable presentation field travels through API normalization, undo restoration, agent duplication, saved legion blueprints, summoning and published workspace projections. Two world instances of the same type can retain different finishes. There is no render-time randomness or finish mutation endpoint.
 
 ## Material rendering
+
+Library cards, the active deck, detail previews and pack reveals share `CardStock` / `CardFace` and `CardFinishLayer`. A reveal receives the catalog card definition and saved collection finish from the successful `open_pack` response. The pack renderer projects those DOM cards into its scene with depth masks for wrapper occlusion; it does not paint separate card textures or approximate finishes with pack materials. Browsers without WebGL position the same card components over the flat pack cover.
 
 The v1 surface engine is a layered, parameter-driven model. Material IDs do not appear in either optical kernel: a preset supplies weights to the same reflection, interference, diffraction, flake and clearcoat lobes.
 
@@ -50,7 +52,7 @@ Low-level optical descriptors retain six canonical IDs: `normal / foil / holo / 
 - **Aurora:** continuous warped thickness with broad interference colour travel.
 - **Laser / starlight:** extension presets using the same groove and flake parameters; no separate rendering branches. Shared clearcoat can remain visible outside the laser diffraction window.
 
-Storage remains independent: existing `CardFinish` IDs and reward probabilities are unchanged. `materialForFinish('rainbow')` maps to `aurora` to preserve the old flowing-film identity. Holo is a distinct laminate, selectable in the production editor; this change does not add new inventory rewards.
+`CardFinish` inventory IDs and reward probabilities are separate from material selection. `materialForFinish('rainbow')` maps to `aurora`; Holo is a distinct laminate selectable in the production editor.
 
 ### Light, view and optical evaluation
 

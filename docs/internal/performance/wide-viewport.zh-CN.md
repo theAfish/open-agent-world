@@ -1,5 +1,8 @@
 # 1000 卡最广视野性能诊断（2026-09-29）
 
+> Historical record, not current product or deployment instructions. Verify against the current source before use.
+
+
 基于 `9f3523b`，当前允许的最小缩放 `0.12`。结论：主要瓶颈是完整卡片，尤其是 Sandbox 工作区的 DOM 生命周期与浏览器渲染成本。视野边缘不断挂载/卸载重组件会放大开销；保留在视野内的重组件也继续产生命中检测、绘制和合成成本。缩放跨分块边界时，另有卡片避让计算造成长帧。
 
 本次只增加诊断脚本和报告，没有修改产品渲染行为。

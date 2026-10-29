@@ -80,6 +80,12 @@ def read_environment(root: Path | None = None, *, data_root: Path | None = None)
 def activate(root: Path) -> None:
     # Called only in the isolated worker or install-time verifier, never the host.
     import site
+    root = root.resolve()
+    # Deep dependency imports and tiktoken's atomic cache writes can exceed
+    # MAX_PATH without Windows' system-wide long-path setting.
+    if os.name == "nt" and not str(root).startswith("\\\\?\\"):
+        path = str(root)
+        root = Path("\\\\?\\UNC\\" + path[2:] if path.startswith("\\\\") else "\\\\?\\" + path)
     site.addsitedir(str(root / "packages"))
     # LiteLLM owns a bundled cache and otherwise overrides TIKTOKEN_CACHE_DIR.
     cache = str(root / "packages" / "litellm" / "litellm_core_utils" / "tokenizers")

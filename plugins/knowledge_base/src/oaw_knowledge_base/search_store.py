@@ -141,11 +141,13 @@ def _match_expression(query):
     return " OR ".join('"{}"'.format(token.replace('"', '""')) for token in tokens)
 
 
-def search(engine, query, *, limit=8, group_id=None):
+def search(engine, query, *, limit=8, group_id=None, source_ids=None):
     """Ranked chunks matching ``query``, newest-ranked first. ``[]`` for an empty query."""
     ensure_schema(engine)
     match = _match_expression(query)
     if not match:
+        return []
+    if source_ids is not None and not source_ids:
         return []
     sql = (f"SELECT text, heading_path, record_id, source_id, group_id, chunk_index, "
            f"bm25({TABLE}) AS rank FROM {TABLE} WHERE {TABLE} MATCH ?")
@@ -153,6 +155,9 @@ def search(engine, query, *, limit=8, group_id=None):
     if group_id:
         sql += " AND group_id = ?"
         params.append(str(group_id))
+    if source_ids is not None:
+        sql += " AND source_id IN (" + ",".join("?" for _ in source_ids) + ")"
+        params.extend(str(identifier) for identifier in source_ids)
     sql += " ORDER BY rank LIMIT ?"
     params.append(max(1, min(int(limit), 50)))
     with engine.connect() as connection:

@@ -137,7 +137,7 @@ test('Store offline leaves Packs Cards Deck and World usable', async ({ page, re
   await expect(library.locator('[data-pack-id="example.greeter"]')).toBeVisible();
   await expect(library.getByRole('button', { name: 'Install Pack from File...', exact: true })).toBeVisible();
   await library.getByRole('button', { name: /^Cards/ }).click();
-  await expect(library.getByRole('heading', { name: 'Card Library', exact: true })).toBeVisible();
+  await expect(library.getByRole('textbox', { name: 'Search cards', exact: true })).toBeVisible();
   await library.getByRole('button', { name: 'Close Library', exact: true }).click();
   const tray = page.getByRole('complementary', { name: 'Active card deck' });
   await tray.hover();

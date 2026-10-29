@@ -13,7 +13,7 @@
 
 Connect agents, files, and tools. Give each agent a role and a place to work together.
 
-[Download](https://github.com/theAfish/open-agent-world/releases) · [User guide](https://theafish.github.io/open-agent-world/user-guide/) · [Build plugins](https://theafish.github.io/open-agent-world/developers/) · [Documentation](https://theafish.github.io/open-agent-world/)
+[Download](https://github.com/theAfish/open-agent-world/releases) · [User guide](docs/user-guide/index.md) · [Build cards and packs](docs/developers/index.md) · [Documentation](https://theafish.github.io/open-agent-world/)
 
 </div>
 
@@ -62,10 +62,22 @@ Add skill toolboxes, isolated Sandboxes, and specialized viewers through plugins
 
 1. [Download the desktop app](https://github.com/theAfish/open-agent-world/releases) and follow the [installation guide](docs/install.md).
 2. Add your model connection in **Settings → Models**.
-3. Follow the canvas tutorial to connect your first cards, form a Legion, and arrange its workspace.
+3. Follow the canvas tutorial to connect your first cards, form a Legion, and arrange its workspace, or try [your first team](docs/user-guide/first-team.md).
 
-On Linux, run `bash scripts/setup.sh`, then `bash scripts/start.sh` from a source checkout. See [Getting started](docs/getting-started.md) for prerequisites and source installation on all platforms.
+On Linux, run `bash scripts/setup.sh`, then `bash scripts/start.sh` from a source checkout. See [Run from source](docs/getting-started.md) for prerequisites and source installation on all platforms.
 
-[First team](docs/user-guide/first-team.md) · [Plugins and packs](docs/user-guide/plugins.md) · [Plugin development](docs/developers/index.md) · [Contributing](docs/getting-started.md#development-and-verification)
+## Documentation
 
-OAW is an experimental project. No repository license file is currently included.
+| Goal | Start here |
+| --- | --- |
+| Install and complete your first task | [User Guide](docs/user-guide/index.md) |
+| Build and package a Python/React card | [Card / Pack Developer Guide](docs/developers/index.md) |
+| Look up APIs, formats and security boundaries | [Technical Reference](docs/reference/index.md) |
+| Develop, test, release or deploy the host | [Contributor / Maintainer Guide](docs/contributing/index.md) |
+
+[First team](docs/user-guide/first-team.md) · [Packs and cards](docs/user-guide/plugins.md) · [Card / Pack development](docs/developers/index.md) · [Contributing](docs/contributing/index.md)
+
+These docs follow **dev**. An installed build's **Help → Documentation** is bundled
+with that version; dev features may not be released yet.
+
+OAW is experimental. No repository license file is currently included.

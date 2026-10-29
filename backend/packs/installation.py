@@ -314,6 +314,12 @@ class PackInstallationManager:
                     raise ValueError(f"Duplicate provided Pack: {provided}")
                 providers[provided] = candidate
         if registry is not None:
+            from backend.migrations.core_essentials import legacy_pack_providers
+            legacy_providers = legacy_pack_providers(registry)
+            for pack, (version, owner, distribution) in legacy_providers.items():
+                bundled[pack] = version
+                owners[pack] = owner
+                owners[distribution] = owner
             installed = {m.owner_id for m in registry.installed_packs.values()}
             for node in registry.catalog(include_disabled=True).node_types:
                 if node.id in node_owners and node.plugin_id not in installed:
@@ -356,6 +362,8 @@ class PackInstallationManager:
                 candidate = providers.get(dependency.id)
                 source_spec = registry.pack_specs.get(owners.get(dependency.id)) if registry else None
                 distribution = candidate.id if candidate else (source_spec.distribution_id if source_spec else None)
+                if registry and dependency.id in legacy_providers:
+                    distribution = legacy_providers[dependency.id][2]
                 if dependency.distribution and distribution != dependency.distribution:
                     raise ValueError(f"Pack {dependency.id} must be provided by {dependency.distribution}")
                 version = candidate.version if candidate else bundled.get(dependency.id)

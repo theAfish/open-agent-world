@@ -207,8 +207,9 @@ test('Codex keeps its own identity and configuration when a role card is dropped
       await pack.locator('.pack-touch-area').focus(); await page.keyboard.press('Enter');
     }
     await pack.getByRole('button', { name: 'View cards in Core essentials' }).click();
-    const decks = library.getByRole('complementary', { name: 'Deck destinations' });
-    await decks.getByRole('textbox', { name: 'New deck name' }).fill('Codex roles');
+    const decks = page.getByRole('complementary', { name: 'Active card deck' });
+    await decks.getByRole('button', { name: 'Create a new card deck' }).click();
+    await decks.getByLabel('Deck name', { exact: true }).fill('Codex roles');
     await decks.getByRole('button', { name: 'Create deck', exact: true }).click();
     await library.getByLabel('Search cards', { exact: true }).fill('Minister role');
     await library.getByRole('button', { name: 'Add Minister role to deck', exact: true }).click();

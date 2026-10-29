@@ -159,19 +159,22 @@ def test_source_api_uninstall_restart_restore_preserves_saved_enabled_intent(tmp
     from fastapi.testclient import TestClient
     from backend.config import Settings
     from backend.main import create_app
-    settings = Settings.for_data_root(tmp_path)
+    # Codex is the source Pack being made optional by this migration. Keep the
+    # complete uninstall/restart/restore contract on its explicit source path.
+    settings = replace(Settings.for_data_root(tmp_path),
+                       plugin_directories=(Path(__file__).resolve().parents[2] / 'packs/codex',))
     headers = {'X-OAW-Pack-Install': '1'}
     def row(client):
-        return next(item for item in client.get('/api/packs').json()['inventory'] if item['id'] == 'oaw.barracks')
+        return next(item for item in client.get('/api/packs').json()['inventory'] if item['id'] == 'theafish.codex')
     with TestClient(create_app(settings)) as client:
-        preview = client.get('/api/packs/oaw.barracks/uninstall-plan')
+        preview = client.get('/api/packs/theafish.codex/uninstall-plan')
         assert preview.status_code == 200 and preview.json()['can_uninstall'], preview.text
-        removed = client.delete('/api/packs/oaw.barracks', headers=headers)
+        removed = client.delete('/api/packs/theafish.codex', headers=headers)
         assert removed.status_code == 200, removed.text
         assert row(client)['enrolled'] is False
     with TestClient(create_app(settings)) as client:
         assert row(client)['loaded'] is False
-        restored = client.post('/api/packs/oaw.barracks/restore', headers=headers)
+        restored = client.post('/api/packs/theafish.codex/restore', headers=headers)
         assert restored.status_code == 200, restored.text
         assert row(client)['enrolled'] is True and row(client)['loaded'] is False
     with TestClient(create_app(settings)) as client:

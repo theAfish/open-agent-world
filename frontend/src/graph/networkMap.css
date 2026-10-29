@@ -27,8 +27,13 @@
 .network-map-caption span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .network-map-scale { position:absolute; right:12px; bottom:12px; display:flex; background:var(--surface-raised,#f7f9f7); box-shadow:var(--shadow-surface); border-radius:var(--radius-control, 6px); }
 .network-map-scale button { font-size:16px; width:30px; padding:3px; }
-.network-map-key { position:absolute; bottom:18px; left:16px; right:110px; display:flex; flex-wrap:wrap; gap:8px 14px; color:var(--ink-soft,#78847e); font-size:10px; pointer-events:none; }
-.network-map-key span { display:flex; gap:5px; align-items:center; }
+.network-map-key { position:absolute; bottom:12px; left:12px; max-width:min(260px,calc(100% - 126px)); max-height:min(280px,calc(100% - 110px)); overflow:auto; overscroll-behavior:contain; color:var(--ink-soft,#78847e); background:var(--surface-raised,#f7f9f7); border-radius:var(--radius-control, 6px); box-shadow:var(--shadow-surface); font-size:11px; }
+.network-map-key summary { position:sticky; top:0; padding:7px 10px; cursor:pointer; background:var(--surface-raised,#f7f9f7); }
+.network-map-key summary small { margin-left:5px; }
+.network-map-key summary:focus-visible { outline:1px solid var(--ink-faint,#78918b); outline-offset:-2px; }
+.network-map-key ul { list-style:none; margin:0; padding:4px 10px 10px; }
+.network-map-key li { display:flex; gap:7px; align-items:baseline; padding:4px 0; }
+.network-map-key li span { min-width:0; overflow-wrap:anywhere; }
 .network-selection-box { position:absolute; z-index:2; pointer-events:none; border:1px solid #6b999a; background:#6b999a15; }
 @container network-map (max-width:600px) {
   .network-map-tools { gap:0; right:8px; left:8px; max-width:calc(100% - 16px); }
@@ -42,7 +47,6 @@
   .network-map-tools select { max-width:none; }
   .network-topics, .network-results { top:90px; max-height:calc(100% - 150px); }
   .network-map-details { top:90px; max-height:calc(100% - 150px); width:calc(100% - 24px); }
-  .network-map-key { max-height:32px; overflow:hidden; }
 }
 .network-preview-toolbar :is(button,select),.network-preview-toolbar input::file-selector-button { font:12px system-ui; color:var(--ink); background:var(--surface-solid); border:1px solid var(--line); border-radius:5px; padding:6px 9px; }
 .network-preview-toolbar label { font:12px system-ui; color:var(--ink-soft); }

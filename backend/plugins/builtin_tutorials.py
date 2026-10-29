@@ -22,8 +22,8 @@ CONVERSATION_TUTORIALS = (TutorialDefinition(
     id="getting-started", title=bilingual("A shared conversation", "共享对话"),
     summary=bilingual("Connect an Agent and use this card as your conversation space.", "连接智能体，用这张卡片进行交流。"),
     steps=(
-        TutorialStep(id="connect", title=bilingual("Connect an Agent", "连接智能体"), body=bilingual("Connect an Agent to this Conversation and choose the communication capability. The Agent needs a configured model to reply.", "将智能体连接到这张对话卡片，选择通信能力。智能体需要配置模型才能回复。")),
-        TutorialStep(id="talk", title=bilingual("Start a conversation", "开始交流"), body=bilingual("Open the card, enter your message and send it. You can keep the Conversation open beside other cards in a Legion Workspace.", "打开卡片，输入消息并发送。你也可以在 Legion 工作区中将对话与其他卡片并排打开。")),
+        TutorialStep(id="connect", title=bilingual("Connect an Agent", "连接智能体"), body=bilingual("Connect an Agent to this Conversation and choose **Participate**. The Agent needs a configured model to reply.", "将智能体连接到这张对话卡片，选择 **Participate（参与）**。智能体需要配置模型才能回复。")),
+        TutorialStep(id="talk", title=bilingual("Start a conversation", "开始交流"), body=bilingual("Open the card and check **Participants**. If the connected Agent is missing, use **Add** and **Add selected**. Select the participant or mention it with **@**, then send your message. You can keep the Conversation open beside other cards in a Legion Workspace.", "打开卡片，查看**参与者**。如果没有已连接的智能体，用**添加**和**添加所选**加入当前会话。选择参与者或用 **@** 提及它，再发送消息。你也可以在 Legion 工作区中将对话与其他卡片并排打开。")),
     ),
 ),)
 
@@ -32,7 +32,7 @@ TEXT_TUTORIALS = (TutorialDefinition(
     summary=bilingual("Write a note and connect it to an Agent when you want to share it.", "写下笔记，需要共享时再将它连接到智能体。"),
     steps=(
         TutorialStep(id="edit", title=bilingual("Write your note", "编写笔记"), body=bilingual("Open the Text card to edit its content. Give it a useful name so it is easy to find on the canvas.", "打开文本卡片编辑内容，起一个便于在画布中识别的名称。")),
-        TutorialStep(id="share", title=bilingual("Choose access", "选择访问权限"), body=bilingual("Connect the Agent to this card and choose the required read or write capability. The connection controls what the Agent can do with your text.", "将智能体连接到这张卡片，选择所需的读取或写入能力。连线决定智能体能够如何使用文本。")),
+        TutorialStep(id="share", title=bilingual("Choose access", "选择访问权限"), body=bilingual("Connect the Agent to this card and choose **Read** or **Read + edit** as needed. The connection controls what the Agent can do with your text.", "将智能体连接到这张卡片，根据需要选择 **Read（读取）** 或 **Read + edit（读取 + 编辑）**。连线决定智能体能够如何使用文本。")),
     ),
 ),)
 

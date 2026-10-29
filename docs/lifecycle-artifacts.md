@@ -2,18 +2,6 @@
 
 [Documentation](README.md)
 
-## Gap map (September 2026)
-
-Existing contracts already separate Agent lifetime from Runs and Sandbox lifetime
-from commands. Private equipment is explicit; container membership and ordinary
-connections do not transfer ownership. Node deletion has a durable, ordered journal
-and post-commit finalizers. Run attempts survive restart as interrupted attempts.
-
-The gaps are cancellation cleanup without a durable outcome, silence-based tool
-timeouts, summoning stop intent cleared on failure, and `artifacts` values that are
-only metadata. Files currently belong to Text/Image cards or mutable workspaces;
-neither is an immutable publication. File transfer is bounded to small JSON copies.
-
 ## Separate relationships
 
 | Relationship | Contract |
@@ -198,7 +186,7 @@ Closing returns focus to the originating button. Copying opens a destination
 dialog for the selected version; management and content release remain separate
 from preview and download.
 
-## Migration and verification boundaries
+## Compatibility and limitations
 
 ### Conversation attachments
 
@@ -247,36 +235,11 @@ bytes. The retained-artifact controls remain responsible for explicit release.
 Startup adds `runs.lifecycle_json` with an empty default for old records and creates
 `artifact_versions` / `artifact_references` if absent. Existing Run statuses,
 Text/Image resources, workspace files and arbitrary artifact metadata remain usable.
-There is no destructive data rewrite. Plugin API advances from 1.11 to 1.12 with
+There is no destructive data rewrite. Plugin API 1.12 provides
 additive request/context contracts. Existing compatible plugins remain supported.
-
-Tests include an actual killed backend process at publication, committed output,
-deletion and reclamation boundaries; combined summoned-Run publication and private
-workspace reclamation; large binary/bundle integrity; mutable source isolation;
-concurrent requests, transfer/deletion exclusion, permission revocation, path and
-hardlink attacks; cleanup failure/retry; quiet tools, deadlines and detached Runs.
-The Playwright flow publishes through the file view and restores retained state
-after producer deletion and browser reload. A separately enabled real Windows
-AppContainer test generates, publishes, reclaims and consumes an output.
 
 No arbitrary Python coroutine/provider session resumption, external-job reattachment,
 remote-side-effect cancellation guarantee, automatic GC, writable canonical mount,
 or concurrent-writer filesystem snapshot is promised. Native Linux/WSL isolation
 requires its separate opt-in acceptance environment; mocked runtime tests do not
 prove an OS security boundary.
-
-Verified on 2026-09-08:
-
-- Complete backend suite: **503 passed, 19 skipped**; after result-reference
-  integration, artifact/work-source/task-board/summoning regression: **41 passed,
-  1 native test skipped**.
-- Frontend suite: **190 passed**; TypeScript and Vite production build passed.
-  The existing bundle-size advisory remains.
-- `frontend/e2e/artifacts.spec.ts`: **1 passed**, with rendered screenshot review.
-- Explicit `OAW_TEST_SANDBOX_RUNTIME=windows` acceptance: **1 passed** under the
-  normal host account. The restricted test account could not create an AppContainer;
-  that preflight failure was not counted as native validation.
-- Additive old-database migration, five killed-process restart boundaries,
-  adversarial transfers and cleanup retry tests passed. `git diff --check` passed.
-- Native Linux/WSL acceptance was not run; the suite's opt-in/platform skips remain
-  separate from the successful Windows native flow.

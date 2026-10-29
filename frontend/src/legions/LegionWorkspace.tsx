@@ -23,6 +23,7 @@ import { composeWorkspace, type WorkspaceRecipe } from './workspaceRecipes';
 import type { WorkspaceLayoutMetadata } from '../workspace/workspaceLayoutMetadata';
 import { WorkspaceNavigationContext, type WorkspaceNavigation } from '../workspace/WorkspaceNavigation';
 import { useWorkspaceAccess } from '../workspace/WorkspaceAccess';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
 const CARD_MIME = 'application/x-oaw-workspace-view';
 type RegisteredSection = WorkspaceSectionRegistration & { card_id: string };
@@ -35,7 +36,9 @@ export function LegionWorkspace() {
   return card ? <WorkspaceWindow key={card.id} card={card} /> : null;
 }
 
-export function WorkspaceWindow({ card, locked = false, actions }: { card: WorldCard; locked?: boolean; actions?: ReactNode }) {
+export function WorkspaceWindow({ card, locked = false, actions, workspaces, onSwitch }: {
+  card: WorldCard; locked?: boolean; actions?: ReactNode; workspaces?: WorldCard[]; onSwitch?: (id: string) => void;
+}) {
   useLocale();
   const dialog = useRef<HTMLDialogElement>(null);
   const stage = useRef<HTMLElement>(null);
@@ -43,6 +46,9 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
   const catalog = useWorldStore(s => s.catalog);
   const updateCard = useWorldStore(s => s.updateCard);
   const close = useLegionWorkspace(s => s.close);
+  const openWorkspace = useLegionWorkspace(s => s.open);
+  const choices = workspaces ?? (locked ? [card] : cards.filter(item => item.type === 'legion'));
+  const switchWorkspace = onSwitch ?? openWorkspace;
   const access = useWorkspaceAccess();
   const members = useMemo(() => cards.filter(item => item.parent_id === card.id
     && item.type !== 'legion'
@@ -62,6 +68,7 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [closing, setClosing] = useState(false);
+  const [pendingWorkspace, setPendingWorkspace] = useState<string>();
   const [saved, setSaved] = useState(false);
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [sections, setSections] = useState(new Map<string, RegisteredSection>());
@@ -134,7 +141,7 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
   const reset = () => {
     const layout = readWorkspaceLayout(card.config.workspace_layout);
     setBaseline(layout); setDraft(layout); setBaseKey(sourceKey);
-    setError(''); setSelected(null); setClosing(false); setSaved(false);
+    setError(''); setSelected(null); setClosing(false); setPendingWorkspace(undefined); setSaved(false);
   };
   const changeLayout = (next: WorkspaceLayout) => {
     if (paneViews(next.root).length + next.hidden_sections.length > 100) {
@@ -167,7 +174,12 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
       ? [...draft.hidden_sections.filter(item => viewKey(item) !== viewKey(view)), view] : draft.hidden_sections });
     setSelected(null);
   };
-  const requestClose = () => { if (locked || busy) return; if (dirty) setClosing(true); else close(); };
+  const requestClose = () => { if (locked || busy) return; setPendingWorkspace(undefined); if (dirty) setClosing(true); else close(); };
+  const requestSwitch = (id: string) => {
+    if (busy) return;
+    if (dirty) { setPendingWorkspace(id); setClosing(true); }
+    else switchWorkspace(id);
+  };
   const save = async () => {
     if (locked || conflict || savingRef.current) return;
     savingRef.current = true;
@@ -182,6 +194,7 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
       }
       setBaseline(layout); setDraft(layout); setBaseKey(JSON.stringify(current.config.workspace_layout));
       setEditing(false); setSelected(null); setSaved(true); setClosing(false);
+      return true;
     } catch (reason) { setError(apiErrorMessage(reason)); }
     finally { savingRef.current = false; setBusy(false); }
   };
@@ -244,7 +257,9 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
     onDragEnd={() => { setDragging(false); setSelected(null); }}>
     <header className="legion-window-titlebar" data-finish={normalizeCardFinish(card.finish)}>
       <span className="legion-window-mark"><LayoutTemplate size={16} /></span>
-      <div className="legion-window-title"><strong>{card.name}</strong></div>
+      <div className="legion-window-title">{!locked || choices.length > 1
+        ? <WorkspaceSwitcher card={card} workspaces={choices} disabled={busy} onSwitch={requestSwitch} />
+        : <strong>{card.name}</strong>}</div>
       <span className="legion-window-status" role="status">{busy ? t('Saving...') : dirty ? t('Unsaved layout') : saved ? t('Layout saved') : ''}</span>
       {actions}
       {!locked && <><PublishApplication card={card} disabled={busy || dirty || editing} />
@@ -262,9 +277,10 @@ export function WorkspaceWindow({ card, locked = false, actions }: { card: World
       </>}
     </div>}
     {closing && <div className="legion-window-close-prompt" role="alert">
-      <span>{t('Save your layout or discard the changes before returning to the canvas.')}</span>
-      <button className="secondary-button" onClick={() => setClosing(false)}>{t('Keep editing')}</button>
-      <button className="secondary-button" onClick={close}>{t('Discard layout and close')}</button>
+      <span>{t(pendingWorkspace ? 'Save your layout or discard the changes before switching workspaces.' : 'Save your layout or discard the changes before returning to the canvas.')}</span>
+      <button className="secondary-button" disabled={busy} onClick={() => { setClosing(false); setPendingWorkspace(undefined); }}>{t('Keep editing')}</button>
+      {pendingWorkspace && <button className="primary-button" disabled={busy || conflict} onClick={async () => { if (await save()) switchWorkspace(pendingWorkspace); }}>{t('Save and switch')}</button>}
+      <button className="secondary-button" disabled={busy} onClick={() => pendingWorkspace ? switchWorkspace(pendingWorkspace) : close()}>{t(pendingWorkspace ? 'Discard and switch' : 'Discard layout and close')}</button>
     </div>}
     <div data-tutorial="legion-layout" className={`legion-window-main ${editing ? 'is-editing' : ''}`}>
       {editing && <aside className="legion-layout-palette" aria-label={t('Workspace cards')}>

@@ -115,6 +115,9 @@ def plan(manager, manifest, *, source='archive', source_root=None):
                 spec = manager.registry.pack_specs.get(owner.id)
                 provided[pack.id] = (owner.version, owner.id, spec.distribution_id if spec else None)
     dependencies = []
+    if manager.registry:
+        from backend.migrations.core_essentials import legacy_pack_providers
+        provided.update(legacy_pack_providers(manager.registry))
     for dependency in manifest.dependencies.packs:
         candidate = provided.get(dependency.id)
         state = 'missing' if candidate is None else 'satisfied'

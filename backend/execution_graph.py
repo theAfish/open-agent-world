@@ -182,6 +182,7 @@ def register(registration):
         traits=frozenset({'core.execution-viewer'}), templateable=True,
         state=ScopedStateSpec(supported_scopes=('session',), default_scope='session'),
         presentation=NodePresentation(states=('node', 'preview', 'inspector', 'workspace'), initial='preview', open='workspace',
+            sizes={'preview': {'width': 384, 'height': 440}},
             workspace_layout=WorkspaceLayoutMetadata(min_width=210, min_height=280, ideal_width=300, ideal_height=640)),
     ))
     registration.register_relationship(RelationshipDefinition(

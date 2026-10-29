@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.api.dependencies import get_services
 from backend.application import write_setting
@@ -21,9 +21,28 @@ MANIFEST = "deployment.json"
 
 class PublishRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    legion_id: str = Field(min_length=1, max_length=100)
+    legion_id: str | None = Field(default=None, min_length=1, max_length=100)
+    legion_ids: list[str] | None = Field(default=None, min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=100)
     allow_terminal: bool = False
+
+    @model_validator(mode="after")
+    def selected_workspaces(self):
+        if (self.legion_id is None) == (self.legion_ids is None):
+            raise ValueError("Choose one or more Legion workspaces")
+        if self.legion_ids is not None and (len(set(self.legion_ids)) != len(self.legion_ids)
+                or any(not node_id or len(node_id) > 100 for node_id in self.legion_ids)):
+            raise ValueError("Workspace IDs must be nonempty and unique")
+        return self
+
+    @property
+    def workspace_ids(self):
+        return self.legion_ids if self.legion_ids is not None else [self.legion_id]
+
+
+def published_workspaces(manifest):
+    """Existing releases contain their single workspace at the manifest root."""
+    return manifest.get("workspaces", [manifest])
 
 
 def views(node):
@@ -79,8 +98,8 @@ def panel_kind(services, card, section):
     )
 
 
-def inspect_workspace(services, request: PublishRequest):
-    legion = services.world.get_card(request.legion_id)
+def inspect_workspace(services, request: PublishRequest, legion_id: str):
+    legion = services.world.get_card(legion_id)
     if legion.type != "legion":
         raise ResourceValidationError("Choose a Legion workspace")
     layout = WorkspaceLayout.model_validate(legion.config.get("workspace_layout") or {}).model_dump(mode="json", exclude_none=True)
@@ -104,8 +123,8 @@ def inspect_workspace(services, request: PublishRequest):
     return legion, layout, panels, issues
 
 
-def release_spec(services, request: PublishRequest):
-    legion, layout, panels, issues = inspect_workspace(services, request)
+def workspace_spec(services, request: PublishRequest, legion_id: str):
+    legion, layout, panels, issues = inspect_workspace(services, request, legion_id)
     if issues:
         raise ResourceValidationError("; ".join(issue["message"] for issue in issues))
     # Explicit section contracts grant only visible access. Whole-card shared
@@ -157,9 +176,17 @@ def release_spec(services, request: PublishRequest):
         view for view in layout.get("hidden_sections", [])
         if plugin_access.get(view["card_id"], {}).get("shared_sections")
     ]
-    return {"schema_version": 1, "id": str(uuid4()), "name": request.name.strip() or legion.name,
-            "legion_id": legion.id, "created_at": datetime.now(UTC).isoformat(),
-            "layout": layout, "panels": panels, "permissions": permissions, "plugin_access": plugin_access,
+    return {"legion_id": legion.id, "name": legion.name,
+            "layout": layout, "panels": panels, "permissions": permissions, "plugin_access": plugin_access}
+
+
+def release_spec(services, request: PublishRequest):
+    workspaces = [workspace_spec(services, request, node_id) for node_id in request.workspace_ids]
+    return {**workspaces[0], "schema_version": 1, "id": str(uuid4()), "name": request.name.strip() or workspaces[0]["name"],
+            "created_at": datetime.now(UTC).isoformat(), "workspaces": workspaces,
+            "panels": [panel for workspace in workspaces for panel in workspace["panels"]],
+            "permissions": {key: value for workspace in workspaces for key, value in workspace["permissions"].items()},
+            "plugin_access": {key: value for workspace in workspaces for key, value in workspace["plugin_access"].items()},
             "runtime_settings": {"agent_runtime": services.settings.agent_runtime,
                                  "sandbox_runtime": services.settings.sandbox_runtime,
                                  "plugin_directories": [str(path) for path in services.settings.plugin_directories]},
@@ -197,8 +224,13 @@ async def publish(request: PublishRequest, services=Depends(get_services)):
 async def preview(request: PublishRequest, services=Depends(get_services)):
     """Read-only readiness report; publication revalidates under the same lock."""
     async with services._node_mutation(read_only=True):
-        try:
-            _, _, panels, issues = inspect_workspace(services, request)
-        except (DomainError, ValueError) as error:
-            return {"ready": False, "panels": [], "issues": [{"message": str(error)}]}
-        return {"ready": not issues, "panels": panels, "issues": issues}
+        workspaces = []
+        for node_id in request.workspace_ids:
+            try:
+                legion, _, panels, issues = inspect_workspace(services, request, node_id)
+                workspaces.append({"legion_id": legion.id, "name": legion.name, "panels": panels, "issues": issues})
+            except (DomainError, ValueError) as error:
+                workspaces.append({"legion_id": node_id, "panels": [], "issues": [{"message": str(error)}]})
+        issues = [{**issue, "legion_id": workspace["legion_id"]} for workspace in workspaces for issue in workspace["issues"]]
+        return {"ready": not issues, "workspaces": workspaces,
+                "panels": [panel for workspace in workspaces for panel in workspace["panels"]], "issues": issues}

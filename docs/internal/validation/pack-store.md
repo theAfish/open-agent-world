@@ -1,4 +1,7 @@
 > Historical record. The subsequent pre-release cleanup removes Pack Schema 1
+
+> Historical record, not current product or deployment instructions. Verify against the current source before use.
+
 > support and its acceptance fixture. Current contracts support Schema 2 content
 > and Schema 3 code-capable Packs only; historical hashes, compatibility claims
 > and `--host-only` build instructions below are not current requirements.

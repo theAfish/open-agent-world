@@ -45,7 +45,7 @@ def invocation(run_id):
 ])
 async def test_codex_tool_failure_is_feedback_and_following_run_recovers(tmp_path, failure):
     capabilities = FailingCapabilities(failure)
-    fixture = Path(__file__).resolve().parents[2] / "plugins/codex/tests/fake_server.py"
+    fixture = Path(__file__).resolve().parents[2] / "packs/codex/tests/fake_server.py"
     runtime = CodexRuntime(capabilities, state_directory=tmp_path / "state",
                            server_command=[sys.executable, str(fixture), str(tmp_path / "protocol.jsonl")])
     config = AgentConfig("agent1", "Codex", model="default", runtime_provider_id="openai.codex",

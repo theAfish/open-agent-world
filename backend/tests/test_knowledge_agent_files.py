@@ -1,9 +1,11 @@
 """Conversation files reach the KB through real scoped Agent tools, without a Sandbox."""
 import asyncio
+import io
 import json
 import sys
 import threading
 import time
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -65,7 +67,27 @@ def research(client):
         call=call, invoke=invoke, attach=attach, wait=wait, base=base)
 
 
-def test_research_agent_imports_pdf_reads_searches_and_saves_a_literature_draft(research):
+def test_retrying_an_older_attachment_does_not_restore_an_old_project_file(research):
+    r = research
+    project = r.call("knowledge_project_manage", operation="create", name="Measurements")["project"]
+    original = r.attach("report.txt", b"Original measurement: 10")
+    first = r.call("knowledge_import_artifact", source=r.keys["conversation"],
+        project_id=project["id"], relative_path="measurements/report.txt", **ref(original))
+    r.wait(first)
+    updated = r.attach("report.txt", b"Updated measurement: 20")
+    second = r.call("knowledge_import_artifact", source=r.keys["conversation"],
+        project_id=project["id"], relative_path="measurements/report.txt", **ref(updated))
+    r.wait(second)
+    repeated = r.call("knowledge_import_artifact", source=r.keys["conversation"],
+        project_id=project["id"], relative_path="measurements/report.txt", **ref(original))
+    assert repeated["reused"] and not repeated["current"]
+    files = r.call("knowledge_projects", project_id=project["id"])["project"]["files"]
+    assert [(f["id"], f["relative_path"]) for f in files] == [
+        (second["source"]["id"], "measurements/report.txt")]
+    assert "Original measurement" in r.call("knowledge_markdown", source_id=first["source"]["id"])["markdown"]
+
+
+def test_research_agent_imports_pdf_and_projects_original_markdown(research):
     import pymupdf
 
     r = research
@@ -91,23 +113,46 @@ def test_research_agent_imports_pdf_reads_searches_and_saves_a_literature_draft(
     origin = kb.sources.require(source_id).metadata["origin"]
     assert origin == {"collection_id": r.keys["conversation"], **ref(attachment)}
 
-    schema = r.call("knowledge_schema_manage", operation="create", name="Sintering records",
+    space = r.call("knowledge_space_manage", operation="create", name="Sintering records",
         definition={"type": "object", "properties": {"temperature_c": {"type": "number"}},
-                    "required": ["temperature_c"]}, system_prompt="Read each sample's sintering temperature.")["schema"]
-    prompt = r.call("knowledge_record_extract_prompt", source_id=source_id, schema_id=schema["id"])
+                    "required": ["temperature_c"]}, system_prompt="Read each sample's sintering temperature.")["space"]
+    project_id = imported["project_id"]
+    assert r.call("knowledge_projects", project_id=project_id)["project"]["files"][0]["id"] == source_id
+    prepared = r.call("knowledge_projection_prepare", project_ids=[project_id], space_id=space["id"])["projections"][0]
+    prompt = r.call("knowledge_projection_prompt", projection_id=prepared["id"])
     assert "1750" in prompt["markdown"]
-    saved = r.call("knowledge_record_save", source_id=source_id, schema_id=schema["id"],
-        records=[{"name": "A1", "data": {"temperature_c": 1750}}])
-    assert len(saved["records"]) == 1 and saved["records"][0]["status"] == "draft"
-    draft = r.call("knowledge_draft_open", source_ids=[source_id])["draft"]
-    assert r.call("knowledge_extract_prompt", draft_id=draft["id"], source_id=source_id)["markdown"]
-    # Opening/reading/saving drafts never grants publication or modifies the graph.
+    saved = r.call("knowledge_projection_save", projection_id=prepared["id"],
+        expected_revision=prepared["revision"], data={"temperature_c": 1750})["projection"]
+    assert saved["status"] == "completed" and saved["data"] == {"temperature_c": 1750}
+    repeated_run = r.call("knowledge_projection_prepare", project_ids=[project_id], space_id=space["id"])["projections"][0]
+    assert repeated_run["id"] == saved["id"] and repeated_run["disposition"] == "reused"
+    # Direct projections are results immediately; publishing Insights is still human-only.
     with pytest.raises(PermissionDeniedError):
-        r.call("knowledge_review", operation="publish", draft_id=draft["id"], confirm=True)
+        r.call("knowledge_insight_review", operation="publish", insight_id="ungranted", confirm=True)
     assert r.call("knowledge_overview")["counts"]["entities"] == 0
     tools = r.client.portal.call(r.provider.list_tools, r.keys["agent"])
     import_schema = next(tool.input_schema for tool in tools if tool.name == "knowledge_import_artifact")
     assert "content_base64" not in json.dumps(import_schema) and "data" not in import_schema["properties"]
+    assert "knowledge_draft_open" not in {tool.name for tool in tools}
+
+
+def test_research_agent_imports_an_archive_as_stable_projects(research):
+    r = research
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("report-a/main.md", "# Report A\nMeasured value: 3")
+        output.writestr("report-a/SI.md", "# Supporting data\nUncertainty: 0.1")
+        output.writestr("report-b/results.csv", "sample,value\nB1,4\n")
+    attached = r.attach("reports.zip", archive.getvalue())
+    preview = r.call("knowledge_import_artifact", source=r.keys["conversation"], **ref(attached))
+    assert preview["state"] == "preview" and len(preview["files"]) == 3
+    assert {item["relative_path"] for item in preview["files"]} == {
+        "reports/report-a/main.md", "reports/report-a/SI.md", "reports/report-b/results.csv"}
+    committed = r.call("knowledge_project_import_commit", token=preview["token"], grouping="depth", depth=2)
+    repeated = r.call("knowledge_project_import_commit", token=preview["token"], grouping="depth", depth=2)
+    assert repeated["reused"] and repeated["projects"] == committed["projects"]
+    projects = r.call("knowledge_projects")["projects"]
+    assert len(projects) == 2 and sorted(item["source_count"] for item in projects) == [1, 2]
 
 
 def test_research_agent_prepares_and_reads_experiment_attachments(research):
@@ -126,7 +171,7 @@ def test_research_agent_prepares_and_reads_experiment_attachments(research):
         records=[{"name": "A1", "data": {"density": 3.21}, "source_ids": [imported["source"]["id"]]}])
     record = saved["records"][0]
     assert record["status"] == "draft"
-    assert r.call("knowledge_sources")["sources"] == []  # Experiment files stay in their own workflow.
+    assert r.call("knowledge_sources")["sources"][0]["id"] == imported["source"]["id"]
 
     # A person may publish; subsequent import retries remain harmless, while a
     # different file cannot silently change the reviewed experiment's inputs.
@@ -151,6 +196,14 @@ def test_read_connection_cannot_import_write_schemas_build_index_or_forge_ingest
         ("knowledge_import_artifact", {}),
         ("knowledge_schema_manage", {"operation": "create"}),
         ("knowledge_graph_index_build", {}),
+        ("knowledge_project_manage", {"operation": "create"}),
+        ("knowledge_project_import_commit", {"token": "ungranted"}),
+        ("knowledge_project_process", {"project_ids": []}),
+        ("knowledge_space_manage", {"operation": "create"}),
+        ("knowledge_projection_prepare", {}),
+        ("knowledge_projection_save", {}),
+        ("knowledge_projection_revise", {}),
+        ("knowledge_projection_fail", {}),
     ]:
         with pytest.raises(PermissionDeniedError):
             r.call(name, **args)
@@ -165,6 +218,7 @@ def test_read_connection_cannot_import_write_schemas_build_index_or_forge_ingest
     assert response.status_code == 422 and "source access is verified" in response.text
     assert r.call("knowledge_overview")["counts"]["sources"] == 0
     assert r.call("knowledge_schemas")["schemas"] == []
+    assert r.call("knowledge_spaces")["spaces"] == []
 
 
 def test_waiting_for_conversion_releases_graph_lock_and_observes_revocation(research, monkeypatch):

@@ -47,6 +47,36 @@ const DRAFT = { id: "draft-1", group_id: "collection-1", title: "sintering.md", 
     evidence_level: 2, snippet: "Si3N4 was sintered", source_ids: ["source-1"] }],
   sources: [{ source_id: "source-1", filename: "sintering.md", extracted_at: "2026-09-23T00:00:00Z", missing: false }] };
 
+const PROJECT_FILE = { ...CONVERTED, relative_path: "sintering.md", state: "converted" };
+const PROJECT = { id: "project-1", name: "Sintering project", description: "Report and supporting data",
+  source_count: 1, converted_count: 1, state: "ready", files: [PROJECT_FILE] };
+const SPACE = { id: "space-1", name: "Process data", description: "Reported process data", version: 1,
+  kind: "table" as const, definition: { type: "object", properties: { temperature: { type: "number" } } },
+  system_prompt: "Read reported process data." };
+const RESULT = { id: "projection-1", project_id: PROJECT.id, project_name: PROJECT.name, space_id: SPACE.id,
+  space_name: SPACE.name, space_version: 1, kind: "table" as const, status: "completed" as const,
+  revision: 2, generation: 1, data: { temperature: 1750 }, source_count: 1, sources: DRAFT.sources.map(s => ({ ...s, relative_path: s.filename })),
+  updated_at: "2026-10-27T00:00:00Z", space_snapshot: SPACE };
+const PREVIEW = { token: "import-token", grouping: "files", depth: 1,
+  projects: [{ key: "new.md", name: "new", file_count: 1 }],
+  files: [{ id: "file-1", relative_path: "new.md", filename: "new.md", size: 5, project_key: "new.md" }] };
+function materialData(name: string, args: Record<string, unknown>) {
+  if (name === "projects") return args.project_id ? { project: PROJECT } : { projects: [PROJECT] };
+  if (name === "spaces") return { spaces: [SPACE] };
+  if (name === "projections") return args.operation === "get" ? { projection: RESULT } : { projections: [RESULT] };
+  if (name === "markdown") return DOCUMENT;
+  return undefined;
+}
+async function chooseProject() {
+  fireEvent.click(await screen.findByLabelText("Select Sintering project"));
+  fireEvent.change(screen.getByRole("combobox", { name: "Extraction Space" }), { target: { value: SPACE.id } });
+}
+async function openResult() {
+  fireEvent.click(screen.getByRole("tab", { name: "Results" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Sintering project.*Process data/ }));
+  await screen.findByRole("button", { name: "Edit result" });
+}
+
 const overview = (counts: Record<string, number> = {}) => ({
   collection: { id: "collection-1", name: "Knowledge base" },
   settings: { collection_name: "Knowledge base", pdf_engine: "auto", mineru_base_url: "" },
@@ -56,7 +86,7 @@ const overview = (counts: Record<string, number> = {}) => ({
   active_jobs: 0,
 });
 const EMPTY: Record<string, Record<string, unknown>> = {
-  sources: { sources: [] }, schemas: { schemas: [] }, knowledge_drafts: { drafts: [] },
+  sources: { sources: [] }, schemas: { schemas: [] }, projects: { projects: [] }, spaces: { spaces: [] }, projections: { projections: [] },
   jobs: { jobs: [] }, graph: { entities: [], relations: [], truncated: false },
 };
 
@@ -96,7 +126,7 @@ it("saves a token through its private HTTP endpoint and keeps it when Settings r
     method: "PUT", body: JSON.stringify({ value: "ui-private-token" }) }));
   expect(JSON.stringify(action.mock.calls)).not.toContain("ui-private-token");
 
-  fireEvent.click(screen.getByRole("button", { name: "Literature" }));
+  fireEvent.click(screen.getByRole("button", { name: "Materials" }));
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   await screen.findByText("Saved securely");
   expect((screen.getByLabelText("MinerU token") as HTMLInputElement).value).toBe("");
@@ -107,27 +137,25 @@ it("saves a token through its private HTTP endpoint and keeps it when Settings r
     expect.objectContaining({ method: "PUT", body: JSON.stringify({ value: null }) })));
 });
 
-it("creates a new group while another group is selected", async () => {
-  const group = { id: "group-1", name: "Existing", source_count: 0, is_default: false };
+it("imports a new project without renaming an already selected project", async () => {
   const action = open(async (name, args) => {
-    if (name === "overview") return { ...overview(), groups: [group] };
-    if (name === "groups" && args.operation === "create") return { group: { ...group, id: "group-2", name: args.name } };
-    return undefined;
+    if (name === "project_import_preview") return PREVIEW;
+    if (name === "project_import_commit") return { projects: [{ ...PROJECT, id: "project-2" }] };
+    return materialData(name, args);
   });
-  await screen.findByRole("option", { name: "Existing" });
-  expect(screen.getAllByLabelText("Group")).toHaveLength(1);
-  fireEvent.change(screen.getByLabelText("Group"), { target: { value: "group-1" } });
-  fireEvent.click(screen.getByLabelText("Manage groups"));
-  await waitFor(() => expect((screen.getByRole("button", { name: "New group" }) as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(screen.getByRole("button", { name: "New group" }));
-  fireEvent.change(screen.getByLabelText("Group name"), { target: { value: "New collection" } });
-  fireEvent.click(screen.getByRole("button", { name: "Create" }));
-  await waitFor(() => expect(action).toHaveBeenCalledWith("groups", { operation: "create", name: "New collection" }, undefined));
-  expect(action.mock.calls.some(([name, args]) => name === "groups" && args.operation === "rename")).toBe(false);
+  fireEvent.click(await screen.findByLabelText("Select Sintering project"));
+  fireEvent.change(screen.getByLabelText("Project files or archives"), { target: { files: [new File(["hello"], "new.md")] } });
+  await screen.findByText("Organize import");
+  fireEvent.change(screen.getByLabelText("Project name for new.md"), { target: { value: "New report" } });
+  fireEvent.click(screen.getByRole("button", { name: "Import and convert" }));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_commit", expect.objectContaining({
+    projects: [{ key: "new.md", name: "New report" }], auto_process: true })));
+  expect(action.mock.calls.some(([name]) => name === "project_manage")).toBe(false);
 });
 
 beforeEach(() => {
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ configured: false, source: null }) })));
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true,
+    json: async () => url.includes("/runs?") ? [] : ({ configured: false, source: null }) })));
   // The Knowledge and Insights sections draw a React Flow map, which measures itself on mount.
   vi.stubGlobal("ResizeObserver", class {
     observe() {} unobserve() {} disconnect() {}
@@ -146,518 +174,294 @@ afterEach(() => {
   useWorldStore.setState({ edges: [], cards: [], updateCard: ORIGINAL_UPDATE_CARD });
 });
 
-it("keeps a detached reader and its draft mounted while another section opens", async () => {
-  const destination = document.createElement("div");
-  document.body.append(destination);
-  const register = (section: WorkspaceSectionRegistration) => {
-    if (section.id === "sources") destination.append(section.host);
-    return () => section.host.remove();
-  };
+it("keeps a detached project reader and unsent search mounted while another section opens", async () => {
+  const destination = document.createElement("div"); document.body.append(destination);
+  const register = (section: WorkspaceSectionRegistration) => { if (section.id === "projects") destination.append(section.host); return () => section.host.remove(); };
   try {
-    open(async name => name === "sources" ? { sources: [CONVERTED] }
-      : name === "markdown" ? DOCUMENT : undefined, {
-      wrapper: children => <WorkspaceSectionProvider cardId="card-1" editing={false}
-        detachedSectionIds={new Set(["sources"])} hiddenSectionIds={new Set()} register={register}
-        onSelect={() => {}} onDragStart={() => {}} onHide={() => {}}>{children}</WorkspaceSectionProvider>,
+    open(async (name, args) => materialData(name, args), {
+      wrapper: children => <WorkspaceSectionProvider cardId="card-1" editing={false} detachedSectionIds={new Set(["projects"])}
+        hiddenSectionIds={new Set()} register={register} onSelect={() => {}} onDragStart={() => {}} onHide={() => {}}>{children}</WorkspaceSectionProvider>,
     });
-    await screen.findByText("Continue alongside this section");
-    fireEvent.click(await within(destination).findByRole("button", { name: /sintering\.md/ }));
+    fireEvent.click(await within(destination).findByRole("button", { name: /Sintering project/ }));
+    fireEvent.click(await within(destination).findByRole("button", { name: "sintering.md" }));
     await within(destination).findByRole("heading", { name: "Sintering of Si3N4" });
-    const reader = destination.querySelector(".knowledge-reader");
-    const search = within(destination).getByLabelText("Search converted documents") as HTMLInputElement;
+    const reader = destination.querySelector(".project-reader");
+    const search = within(destination).getByLabelText("Find projects") as HTMLInputElement;
     fireEvent.change(search, { target: { value: "unsent query" } });
-    fireEvent.click(screen.getByRole("button", { name: "Knowledge" }));
-    expect(await screen.findByRole("button", { name: "New draft" })).toBeTruthy();
-    expect(destination.querySelector(".knowledge-reader")).toBe(reader);
-    expect(within(destination).getByLabelText("Search converted documents")).toBe(search);
+    fireEvent.click(screen.getByRole("button", { name: "Spaces" }));
+    expect(await screen.findByRole("button", { name: "New Space" })).toBeTruthy();
+    expect(destination.querySelector(".project-reader")).toBe(reader);
+    expect(within(destination).getByLabelText("Find projects")).toBe(search);
     expect(search.value).toBe("unsent query");
-    expect(within(destination).getByRole("heading", { name: "Sintering of Si3N4" })).toBeTruthy();
-  } finally {
-    cleanup();
-    destination.remove();
-  }
+  } finally { cleanup(); destination.remove(); }
 });
 
-it("searches published entities through the collection controls and restores the full graph", async () => {
-  const entity = { id: "entity-1", type: "material", name: "Si3N4", properties: { topic: "ceramics" } };
-  const action = open(async (name, args) => name === "graph"
-    ? { entities: args.name_contains ? [] : [entity], relations: [], truncated: false } : undefined);
-  fireEvent.click(screen.getByRole("tab", { name: "Knowledge" }));
-  await screen.findByRole("button", { name: /Si3N4/ });
-  const input = screen.getByLabelText("Filter by name");
-  fireEvent.change(input, { target: { value: "missing material" } });
-  fireEvent.submit(input.closest("form")!);
-  await waitFor(() => expect(action).toHaveBeenCalledWith("graph", expect.objectContaining({ name_contains: "missing material" }), undefined));
-  await screen.findByText("No matches");
-  fireEvent.click(screen.getByRole("button", { name: "Show everything" }));
-  expect(await screen.findByRole("button", { name: /Si3N4/ })).toBeTruthy();
-  expect((input as HTMLInputElement).value).toBe("");
+it("filters project results by Space and restores the complete result set", async () => {
+  const second = { ...RESULT, id: "projection-2", project_name: "Second project", space_id: "space-2", space_name: "Other output" };
+  open(async (name, args) => name === "spaces" ? { spaces: [SPACE, { ...SPACE, id: "space-2", name: "Other output" }] }
+    : name === "projections" ? { projections: [RESULT, second] } : materialData(name, args));
+  fireEvent.click(screen.getByRole("tab", { name: "Results" }));
+  await screen.findByRole("button", { name: /Second project/ });
+  const select = screen.getByRole("combobox", { name: "Extraction Space" });
+  fireEvent.change(select, { target: { value: SPACE.id } });
+  expect(screen.queryByRole("button", { name: /Second project/ })).toBeNull();
+  expect(screen.getByRole("button", { name: /Sintering project/ })).toBeTruthy();
+  fireEvent.change(select, { target: { value: "" } });
+  expect(screen.getByRole("button", { name: /Second project/ })).toBeTruthy();
 });
 
-it("does not mount a detached section excluded by the deployment grants", async () => {
+it("does not mount detached Space or settings sections excluded by deployment grants", async () => {
   const register = vi.fn((_section: WorkspaceSectionRegistration) => () => {});
-  open(async name => name === "sources" ? { sources: [CONVERTED] } : undefined, {
-    host: { deployment: {} },
-    wrapper: children => <WorkspaceAccess.Provider value={{ deployed: true, permissions: { "card-1": ["sources"] },
+  open(async (name, args) => materialData(name, args), { host: { deployment: {} },
+    wrapper: children => <WorkspaceAccess.Provider value={{ deployed: true, permissions: { "card-1": ["projects"] },
       plugin_access: { "card-1": { config_fields: [], document_fields: [], summary_fields: [], document_actions: [], downloads: [], resource_actions: {}, execution: false } } }}>
-      <WorkspaceSectionProvider cardId="card-1" editing={false} detachedSectionIds={new Set(["schemas", "settings"])}
+      <WorkspaceSectionProvider cardId="card-1" editing={false} detachedSectionIds={new Set(["spaces", "settings"])}
         hiddenSectionIds={new Set()} register={register} onSelect={() => {}} onDragStart={() => {}} onHide={() => {}}>{children}</WorkspaceSectionProvider>
     </WorkspaceAccess.Provider>,
   });
-  await screen.findByRole("button", { name: /sintering\.md/ });
-  expect(register.mock.calls.map(([section]) => section.id)).toEqual(["sources"]);
-  expect(screen.queryByRole("button", { name: "New schema" })).toBeNull();
+  await screen.findByRole("button", { name: /Sintering project/ });
+  expect(register.mock.calls.map(([section]) => section.id)).toEqual(["projects"]);
+  expect(screen.queryByRole("button", { name: "New Space" })).toBeNull();
   expect(screen.queryByLabelText("MinerU token")).toBeNull();
   expect(fetch).not.toHaveBeenCalled();
 });
 
-it("still shows sources and groups when an older release has not published \"experiments\"", async () => {
-  // A release published before Experiments existed grants no "experiments" resource
-  // action at all; the deployment bridge answers with a 404-shaped rejection. That
-  // must not blank out every other section's data (regression: refresh() used to
-  // bundle every call into one Promise.all, so one rejection lost everything).
-  const action = open(async name => {
-    if (name === "overview") return overview({ entities: 0 });
-    if (name === "sources") return { sources: [CONVERTED] };
-    if (name === "experiments") throw new Error("This operation is not published");
-    return undefined;
-  });
-
-  const region = within(await screen.findByRole("region", { name: "Sources" }));
-  expect(await region.findByRole("button", { name: /sintering\.md/ })).toBeTruthy();
-  await waitFor(() => expect(action).toHaveBeenCalledWith("experiments", expect.anything(), undefined));
+it("keeps project data visible when experiment data is outside the release grants", async () => {
+  open(async (name, args) => {
+    if (name === "experiments") throw new Error("Resource action is not published");
+    return materialData(name, args);
+  }, { host: { deployment: {} } });
+  expect(await screen.findByRole("button", { name: /Sintering project/ })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /Sintering project/ }));
+  expect(await screen.findByRole("button", { name: "sintering.md" })).toBeTruthy();
 });
 
-it("automatically converts only the uploaded document and reads it when ready", async () => {
-  let uploaded = false;
-  let converted = false;
-  const action = open(async name => {
-    if (name === "sources") return { sources: [!uploaded ? SOURCE : converted ? CONVERTED : SOURCE] };
-    if (name === "ingest") {
-      uploaded = true;
-      return { source: { id: "source-1", filename: "sintering.md" }, group_id: "collection-1" };
-    }
-    if (name === "process") {
-      converted = true;
-      return { jobs: [{ source_id: "source-1", filename: "sintering.md",
-        job: { id: "job-1", status: "QUEUED" } }] };
-    }
-    if (name === "jobs") return { jobs: !uploaded ? [] : [{ id: "job-1", kind: "pipeline",
-      status: converted ? "COMPLETED" : "QUEUED", progress: 1, message: "markdown ready",
-      error: null, source_id: "source-1", created_at: "2026-09-23T00:00:00Z", completed_at: null }] };
-    if (name === "markdown") return DOCUMENT;
-    return undefined;
+it("imports a selected file and requests conversion only after its project preview is confirmed", async () => {
+  let imported = false;
+  const action = open(async (name, args) => {
+    if (name === "projects") return args.project_id ? { project: PROJECT } : { projects: imported ? [PROJECT] : [] };
+    if (name === "project_import_preview") return PREVIEW;
+    if (name === "project_import_commit") { imported = true; return { projects: [PROJECT] }; }
+    return materialData(name, args);
   });
-
-  expect(await screen.findByRole("button", { name: /sintering\.md.*awaiting conversion/ })).toBeTruthy();
-  fireEvent.change(screen.getByLabelText("Add documents"), {
-    target: { files: [new File(["# Sintering"], "sintering.md", { type: "text/markdown" })] } });
-  await waitFor(() => expect(action).toHaveBeenCalledWith("ingest", expect.objectContaining({
-    filename: "sintering.md", media_type: "text/markdown" }), undefined));
-
-  await waitFor(() => expect(action).toHaveBeenCalledWith(
-    "process", { source_ids: ["source-1"] }, undefined));
-  expect(action.mock.calls.filter(([name]) => name === "process")).toHaveLength(1);
-
-  fireEvent.click(await screen.findByRole("button", { name: /sintering\.md.*Ready/ }));
+  fireEvent.change(screen.getByLabelText("Project files or archives"), { target: { files: [new File(["hello"], "new.md")] } });
+  await screen.findByText("Organize import");
+  expect(action.mock.calls.some(([name]) => name === "project_import_commit")).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Import and convert" }));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_commit", expect.objectContaining({ token: PREVIEW.token, auto_process: true })));
+  fireEvent.click(await screen.findByRole("button", { name: "sintering.md" }));
   expect(await screen.findByRole("heading", { name: "Sintering of Si3N4" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Markdown" }));
-  expect(await screen.findByText("# Sintering of Si3N4")).toBeTruthy();
+  expect(action.mock.calls.some(([name]) => name === "process")).toBe(false);
 });
 
-it("uploads selected files even when resetting the file input clears its FileList", async () => {
-  const action = open(async name => name === "ingest" ? { source: { id: "source-1" } } : undefined);
-  const input = await screen.findByLabelText("Add documents") as HTMLInputElement;
-  const file = new File(["%PDF-1.4"], "sample.pdf", { type: "application/pdf" });
-  const selected: File[] = [file];
-  Object.defineProperty(input, "files", { get: () => selected });
-  Object.defineProperty(input, "value", {
-    get: () => selected.length ? "C:\\fakepath\\sample.pdf" : "",
-    set: (value: string) => { if (value === "") selected.length = 0; },
-  });
-
+it("snapshots selected files before resetting the input clears its FileList", async () => {
+  const action = open(async (name, args) => name === "project_import_preview" ? PREVIEW : materialData(name, args));
+  const input = screen.getByLabelText("Project files or archives") as HTMLInputElement;
+  let files: File[] = [new File(["first"], "first.md"), new File(["second"], "second.md")];
+  Object.defineProperty(input, "files", { configurable: true, get: () => files });
+  Object.defineProperty(input, "value", { configurable: true, set: () => { files = []; }, get: () => "" });
   fireEvent.change(input);
-
-  await waitFor(() => expect(action).toHaveBeenCalledWith("ingest", expect.objectContaining({
-    filename: "sample.pdf", media_type: "application/pdf" }), undefined));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("project_import_preview", expect.objectContaining({
+    files: [expect.objectContaining({ filename: "first.md" }), expect.objectContaining({ filename: "second.md" })] })));
 });
 
-it("keeps successful dropped files when another file cannot start conversion and offers a retry", async () => {
-  const stored: typeof SOURCE[] = [];
+it("keeps converted projects visible and retries only the project with a failed file", async () => {
+  const failed = { ...PROJECT, id: "project-2", name: "Scanned report", converted_count: 0, state: "failed",
+    files: [{ ...PROJECT_FILE, id: "source-2", state: "failed", record_id: null, error: "OCR connection unavailable" }] };
+  const action = open(async (name, args) => name === "projects"
+    ? args.project_id ? { project: args.project_id === failed.id ? failed : PROJECT } : { projects: [PROJECT, failed] }
+    : materialData(name, args));
+  fireEvent.click(await screen.findByRole("button", { name: /Scanned report/ }));
+  expect((await screen.findByRole("alert")).textContent).toContain("OCR connection unavailable");
+  fireEvent.click(screen.getByRole("button", { name: "Convert pending files" }));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("project_process", { project_ids: ["project-2"] }));
+  expect(screen.getByRole("button", { name: /Sintering project/ })).toBeTruthy();
+});
+
+it("enables a converting project file when polling reports its Markdown is ready", async () => {
+  let ready = false;
   const action = open(async (name, args) => {
-    if (name === "sources") return { sources: stored };
-    if (name === "ingest") {
-      const item = { ...SOURCE, id: String(args.filename), filename: String(args.filename) };
-      stored.push(item);
-      return { source: item };
-    }
-    if (name === "process") {
-      if ((args.source_ids as string[])[0] === "broken.pdf") throw new Error("Converter unavailable");
-      return { jobs: [] };
-    }
-    if (name === "jobs") return { jobs: stored.filter(item => item.id === "broken.pdf").map(item => ({
-      id: "failed-job", source_id: item.id, status: "FAILED", error: "Converter unavailable" })) };
-    return undefined;
+    if (name === "projects") { const project = ready ? PROJECT : { ...PROJECT, state: "converting", converted_count: 0,
+      files: [{ ...PROJECT_FILE, state: "converting", record_id: null }] };
+      return args.project_id ? { project } : { projects: [project] }; }
+    return materialData(name, args);
   });
-  await screen.findByText("Add your first document");
-  fireEvent.drop(document.querySelector(".knowledge-sources")!, { dataTransfer: { files: [
-    new File(["bad"], "broken.pdf"), new File(["# Note"], "note.md"),
-  ] } });
-  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "broken.pdf: Converter unavailable");
-  expect(screen.getByRole("button", { name: /note.md.*awaiting conversion/ })).toBeTruthy();
-  expect(action).toHaveBeenCalledWith("process", { source_ids: ["note.md"] }, undefined);
-  fireEvent.click(screen.getByRole("button", { name: "Retry broken.pdf" }));
-  await waitFor(() => expect(action.mock.calls.filter(([name, args]) => name === "process"
-    && (args.source_ids as string[])[0] === "broken.pdf")).toHaveLength(2));
+  fireEvent.click(await screen.findByRole("button", { name: /Sintering project/ }));
+  expect((await screen.findByRole("button", { name: "sintering.md" })).hasAttribute("disabled")).toBe(true);
+  ready = true;
+  await waitFor(() => expect(screen.getByRole("button", { name: "sintering.md" }).hasAttribute("disabled")).toBe(false), { timeout: 4000 });
+  fireEvent.click(screen.getByRole("button", { name: "sintering.md" }));
+  await screen.findByRole("heading", { name: "Sintering of Si3N4" });
+  expect(action).toHaveBeenCalledWith("markdown", expect.objectContaining({ source_id: SOURCE.id }));
 });
 
-it("opens a converting document once its text becomes ready without reopening the reader", async () => {
-  let converted = false;
-  const action = open(async name => {
-    if (name === "sources") return { sources: [converted ? CONVERTED : SOURCE] };
-    if (name === "jobs") return { jobs: [{ id: "job-1", source_id: "source-1", status: converted ? "COMPLETED" : "RUNNING" }] };
-    if (name === "markdown") return DOCUMENT;
-    return undefined;
-  });
-  fireEvent.click(await screen.findByRole("button", { name: /sintering.md.*Converting/ }));
-  expect(await screen.findByText("Preparing your document")).toBeTruthy();
-  expect(action.mock.calls.some(([name]) => name === "markdown")).toBe(false);
-  converted = true;
-  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-  expect(await screen.findByRole("heading", { name: "Sintering of Si3N4" })).toBeTruthy();
-});
-
-it("routes empty result views to the material and record setup actions", async () => {
+it("routes empty results to projects and empty Spaces to an editable schema", async () => {
   open(async () => undefined);
-  await screen.findByText("Add your first document");
-  fireEvent.click(screen.getByRole("tab", { name: "Records" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Add sources" }));
-  expect(await screen.findByText("Add your first document")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Experiment" }));
-  fireEvent.click(screen.getByRole("tab", { name: "Insights" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Open experiments" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Define record fields" }));
-  expect(screen.getByRole("tab", { name: "Schemas" }).getAttribute("aria-selected")).toBe("true");
+  fireEvent.click(screen.getByRole("tab", { name: "Results" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Choose projects" }));
+  expect(screen.getByRole("tab", { name: "Projects" }).getAttribute("aria-selected")).toBe("true");
+  fireEvent.click(screen.getByRole("tab", { name: "Spaces" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Structured data" }));
+  expect(await screen.findByLabelText("Output schema")).toBeTruthy();
+  expect(screen.getByLabelText("Extraction instructions")).toBeTruthy();
 });
 
-it("searches converted documents and shows attributable excerpts", async () => {
-  const action = open(async (name, args) => {
-    if (name === "sources") return { sources: [CONVERTED] };
-    if (name === "search") return { query: args.query, results: [
-      { source_id: "source-1", filename: "sintering.md", record_id: "record-1",
-        group_id: "group-1", group_name: "Knowledge base",
-        heading_path: "Sintering of Si3N4 > Method", excerpt: "Sintered at 1750 C for 2 hours." },
-    ] };
-    return undefined;
-  });
-  const region = within(await screen.findByRole("region", { name: "Sources" }));
-
-  fireEvent.change(region.getByPlaceholderText("Search converted documents…"), {
-    target: { value: "sintering temperature" } });
-  fireEvent.click(region.getByRole("button", { name: "Search" }));
-
-  await waitFor(() => expect(action).toHaveBeenCalledWith(
-    "search", expect.objectContaining({ query: "sintering temperature" }), undefined));
-  expect(await region.findByText(/sintering\.md.*Knowledge base/)).toBeTruthy();
-  expect(await region.findByText(/Sintering of Si3N4 > Method.*Sintered at 1750 C/)).toBeTruthy();
+it("searches converted project files and opens attributable source excerpts", async () => {
+  const action = open(async (name, args) => name === "search" ? { results: [{ source_id: SOURCE.id, filename: SOURCE.filename,
+    heading_path: "Methods", excerpt: "Sintering at 1750 C" }] } : materialData(name, args));
+  const input = await screen.findByLabelText("Find projects");
+  fireEvent.change(input, { target: { value: "1750" } });
+  fireEvent.click(screen.getByRole("button", { name: "Search contents" }));
+  expect(await screen.findByText("Sintering at 1750 C")).toBeTruthy();
+  expect(screen.getByText("Methods")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /sintering.md/ }));
+  expect(await screen.findByRole("heading", { name: "Sintering of Si3N4" })).toBeTruthy();
+  expect(action).toHaveBeenCalledWith("search", { query: "1750", all_groups: true });
 });
 
-it("shows a search error inline instead of crashing the workspace", async () => {
-  const action = open(async name => {
-    if (name === "sources") return { sources: [CONVERTED] };
-    if (name === "search") throw new Error("search index is not ready");
-    return undefined;
-  });
-  const region = within(await screen.findByRole("region", { name: "Sources" }));
-
-  fireEvent.change(region.getByPlaceholderText("Search converted documents…"), {
-    target: { value: "anything" } });
-  fireEvent.click(region.getByRole("button", { name: "Search" }));
-
-  expect(await region.findByText("search index is not ready")).toBeTruthy();
-  expect(action).toHaveBeenCalled();
+it("shows project search failures inline and preserves the project list", async () => {
+  open(async (name, args) => { if (name === "search") throw new Error("Search temporarily unavailable"); return materialData(name, args); });
+  fireEvent.change(await screen.findByLabelText("Find projects"), { target: { value: "Sintering" } });
+  fireEvent.click(screen.getByRole("button", { name: "Search contents" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("Search temporarily unavailable");
+  expect(screen.getByRole("button", { name: /Sintering project/ })).toBeTruthy();
 });
 
-it("opens a knowledge draft over a source and extracts it through the host bridge, never the plugin", async () => {
-  let opened = false;
-  const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({
-    draft: DRAFT, sources: [{ source_id: "source-1", filename: "sintering.md", chunks: 1, entities: 2, relations: 1, truncated: false }] }) }));
+it("runs a project Space through the host model bridge without saving model output in the UI", async () => {
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true, json: async () => ({ projections: [RESULT] }) }));
   vi.stubGlobal("fetch", fetchMock);
-  const action = open(async (name, args) => {
-    if (name === "sources") return { sources: [CONVERTED] };
-    if (name === "knowledge_drafts") return { drafts: opened ? [{ ...DRAFT, entities: [], relations: [],
-      sources: [{ ...DRAFT.sources[0], extracted_at: null }] }] : [] };
-    if (name === "knowledge_draft_manage" && args.operation === "open") {
-      opened = true;
-      return { draft: { ...DRAFT, entities: [], relations: [], sources: [{ ...DRAFT.sources[0], extracted_at: null }] } };
-    }
-    return undefined;
-  });
-
-  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
-  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
-  fireEvent.click(await region.findByRole("button", { name: "New draft" }));
-  fireEvent.click(await region.findByLabelText("Select sintering.md"));
-  fireEvent.click(region.getByRole("button", { name: "Create draft from 1 source(s)" }));
-  await waitFor(() => expect(action).toHaveBeenCalledWith("knowledge_draft_manage",
-    expect.objectContaining({ operation: "open", source_ids: ["source-1"] }), undefined));
-
-  // The new draft is selected; its one unread source is extracted with the chosen model.
-  expect((await region.findByLabelText("Model") as HTMLSelectElement).value).toBe("oaw:model:model-1");
-  fireEvent.click(region.getByRole("button", { name: "Extract 1 unread source(s)" }));
-  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-  const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-  expect(url).toBe("/api/knowledge/card-1/knowledge");
-  expect(JSON.parse(String(init.body))).toEqual({ draft_id: "draft-1", model: "oaw:model:model-1", replace: false });
-  // The card never writes the draft itself: the bridge hands the model's answer to the plugin.
-  expect(action.mock.calls.some(([name]) => name === "knowledge_save")).toBe(false);
-  expect(await region.findByText(/Read 1 source\(s\) in 1 part\(s\) · 2 concepts added/)).toBeTruthy();
+  const action = open(async (name, args) => materialData(name, args));
+  await chooseProject();
+  fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/knowledge/card-1/project-space", expect.objectContaining({ method: "POST" })));
+  expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({ project_ids: [PROJECT.id], space_id: SPACE.id, rerun: false });
+  expect(action.mock.calls.some(([name]) => name === "projection_save" || name === "knowledge_draft_manage")).toBe(false);
+  expect(screen.getByRole("tab", { name: "Results" }).getAttribute("aria-selected")).toBe("true");
 });
 
-it("resumes a draft across navigation and consumes an explicit source selection only once", async () => {
-  const other = { ...CONVERTED, id: "source-2", filename: "other.md", record_id: "record-2" };
-  const created = { ...DRAFT, id: "draft-2", title: "Other paper", entities: [], relations: [],
-    sources: [{ ...DRAFT.sources[0], source_id: other.id, filename: other.filename, extracted_at: null }] };
-  const drafts: (typeof DRAFT | typeof created)[] = [DRAFT];
-  const action = open(async (name, args) => {
-    if (name === "sources") return { sources: [CONVERTED, other] };
-    if (name === "knowledge_drafts") return { drafts: [...drafts] };
-    if (name === "knowledge_draft_manage" && args.operation === "open") { drafts.push(created); return { draft: created }; }
-    return undefined;
-  });
-  fireEvent.click(await screen.findByRole("button", { name: /Build knowledge/ }));
-  expect(await screen.findByRole("button", { name: "Review draft" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: /Create draft from/ })).toBeNull();
-  fireEvent.click(screen.getByRole("tab", { name: "Sources" }));
-  fireEvent.click(await screen.findByLabelText("Select other.md"));
-  fireEvent.click(screen.getByRole("button", { name: /Build knowledge/ }));
-  const title = await screen.findByLabelText("Title") as HTMLInputElement;
-  fireEvent.change(title, { target: { value: "Other paper" } });
-  expect((screen.getByLabelText("Select sintering.md") as HTMLInputElement).checked).toBe(false);
-  fireEvent.click(screen.getByRole("tab", { name: "Records" }));
-  fireEvent.click(screen.getByRole("tab", { name: "Knowledge" }));
-  expect(screen.getByLabelText("Title")).toBe(title);
-  expect(title.value).toBe("Other paper");
-  expect((screen.getByLabelText("Select other.md") as HTMLInputElement).checked).toBe(true);
-  await waitFor(() => expect(screen.getByRole("button", { name: "Create draft from 1 source(s)" }).hasAttribute("disabled")).toBe(false));
-  fireEvent.click(screen.getByRole("button", { name: "Create draft from 1 source(s)" }));
-  expect(await screen.findByRole("heading", { name: "Other paper" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("tab", { name: "Sources" }));
-  fireEvent.click(await screen.findByRole("button", { name: /Build knowledge/ }));
-  expect(await screen.findByRole("heading", { name: "Other paper" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: /Create draft from/ })).toBeNull();
-  fireEvent.click(screen.getByRole("tab", { name: "Sources" }));
-  fireEvent.click(await screen.findByLabelText("Select other.md"));
-  fireEvent.click(screen.getByRole("button", { name: /Build knowledge/ }));
-  expect(await screen.findByRole("heading", { name: "Other paper" })).toBeTruthy();
-  expect(action.mock.calls.filter(([name]) => name === "knowledge_draft_manage")).toEqual([
-    ["knowledge_draft_manage", { operation: "open", source_ids: ["source-2"], title: "Other paper" }, undefined],
-  ]);
+it("preserves project selection across navigation without creating or starting another result", async () => {
+  const action = open(async (name, args) => materialData(name, args));
+  await chooseProject();
+  fireEvent.click(screen.getByRole("tab", { name: "Results" }));
+  fireEvent.click(screen.getByRole("button", { name: "Experiment" }));
+  fireEvent.click(screen.getByRole("button", { name: "Materials" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Projects" }));
+  expect((screen.getByLabelText("Select Sintering project") as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole("combobox", { name: "Extraction Space" }) as HTMLSelectElement).value).toBe(SPACE.id);
+  expect(action.mock.calls.some(([name]) => ["projection_prepare", "project_manage", "projection_save"].includes(name))).toBe(false);
 });
 
-it("restores the selected draft and unfinished editing after the workspace closes", async () => {
-  let saved: Record<string, unknown> | undefined;
-  const host = { draft: { get: () => saved, set: (value: Record<string, unknown>) => { saved = value; } } };
-  const older = { ...DRAFT, id: "older", title: "Previous analysis" };
-  const handler: Action = async name => name === "knowledge_drafts" ? { drafts: [DRAFT, older] } : undefined;
-  open(handler, { host });
-  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
-  fireEvent.click(await screen.findByRole("button", { name: /Draft Previous analysis/ }));
-  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Unfinished title" } });
+it("restores the selected result and unfinished JSON revision after the workspace closes", async () => {
+  let draft: Record<string, unknown> = {};
+  const host = { draft: { get: () => draft, set: (value: Record<string, unknown>) => { draft = value; } } };
+  open(async (name, args) => materialData(name, args), { host });
+  await openResult();
+  fireEvent.click(screen.getByRole("button", { name: "Edit result" }));
+  fireEvent.change(screen.getByLabelText("Result JSON"), { target: { value: '{"temperature":1800}' } });
+  fireEvent.change(screen.getByLabelText("Revision note"), { target: { value: "Check SI correction" } });
   cleanup();
-  const action = open(handler, { host });
-  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
-  await screen.findByRole("button", { name: /Draft Previous analysis/ });
-  expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Unfinished title");
-  expect(screen.getByRole("button", { name: /Draft Previous analysis/ }).getAttribute("aria-pressed")).toBe("true");
-  expect(action.mock.calls.some(([name]) => name === "knowledge_draft_manage")).toBe(false);
+  open(async (name, args) => materialData(name, args), { host });
+  fireEvent.click(screen.getByRole("tab", { name: "Results" }));
+  expect((await screen.findByLabelText("Result JSON") as HTMLTextAreaElement).value).toBe('{"temperature":1800}');
+  expect((screen.getByLabelText("Revision note") as HTMLInputElement).value).toBe("Check SI correction");
 });
 
-it.each(["extract", "research"])("extracts a literature draft through a %s agent", async access => {
-  useWorldStore.setState({
-    cards: [{ id: "card-1", type: "knowledge.base", name: "Knowledge" },
-      { id: "librarian", type: "agent", name: "Librarian" },
-      { id: "researcher", type: "agent", name: "Researcher" }] as unknown as WorldCard[],
+it.each(["extract", "research"])("projects through a %s agent and excludes a read-only connection", async access => {
+  useWorldStore.setState({ cards: [{ id: "card-1", type: "knowledge.base", name: "Knowledge" },
+    { id: "librarian", type: "agent", name: "Librarian" }, { id: "researcher", type: "agent", name: "Researcher" }] as unknown as WorldCard[],
     edges: [{ id: "read", source: "librarian", target: "card-1", relationship: "knowledge.base.read" },
-      { id: "write", source: "researcher", target: "card-1", relationship: `knowledge.base.${access}` }] as unknown as WorldEdge[],
-  });
+      { id: "write", source: "researcher", target: "card-1", relationship: `knowledge.base.${access}` }] as unknown as WorldEdge[] });
   const runAgent = vi.fn(async () => undefined);
-  open(async name => {
-    if (name === "sources") return { sources: [CONVERTED] };
-    if (name === "knowledge_drafts") return { drafts: [{ ...DRAFT, entities: [], relations: [],
-      sources: [{ ...DRAFT.sources[0], extracted_at: null }] }] };
-    return undefined;
-  }, { host: { runAgent, getAgentInfo: vi.fn(async () => ({ status: "running" })) } });
-  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
-  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
-  fireEvent.click(await region.findByRole("button", { name: /Draft sintering\.md/ }));
-  fireEvent.click(await region.findByRole("button", { name: "Extract 1 unread source(s)" }));
+  const action = open(async (name, args) => name === "projection_prepare" ? { projections: [
+    { ...RESULT, id: "new-run", status: "running", disposition: "created" },
+    { ...RESULT, id: "existing-run", status: "running", disposition: "running" }] } : materialData(name, args), { host: { runAgent } });
+  await chooseProject(); fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
   await waitFor(() => expect(runAgent).toHaveBeenCalledTimes(1));
   const [agentId, prompt] = runAgent.mock.calls[0] as unknown as [string, string];
-  expect(agentId).toBe("researcher");
-  expect(prompt).toContain("KNOWLEDGE EXTRACTION REQUEST");
-  expect(JSON.parse(prompt.split("\n")[2])).toMatchObject({ draft_id: "draft-1", source_ids: ["source-1"] });
+  expect(agentId).toBe("researcher"); expect(prompt).toContain("new-run"); expect(prompt).not.toContain("existing-run");
+  expect(prompt).toContain("knowledge_projection_prompt"); expect(prompt).toContain("knowledge_projection_save");
+  expect(action).toHaveBeenCalledWith("projection_prepare", { project_ids: [PROJECT.id], space_id: SPACE.id, rerun: false });
 });
 
-it("keeps a failed agent extraction on its current step and makes retry available", async () => {
-  useWorldStore.setState({
-    cards: [{ id: "card-1", type: "knowledge.base", name: "Knowledge" },
-      { id: "researcher", type: "agent", name: "Researcher" }] as unknown as WorldCard[],
-    edges: [{ id: "write", source: "researcher", target: "card-1", relationship: "knowledge.base.research" }] as unknown as WorldEdge[],
-  });
-  const runAgent = vi.fn(async () => undefined);
-  open(async name => name === "knowledge_drafts" ? { drafts: [{ ...DRAFT, entities: [], relations: [],
-    sources: [{ ...DRAFT.sources[0], extracted_at: null }] }] } : undefined,
-  { host: { runAgent, getAgentInfo: vi.fn(async () => ({ status: "error", last_error: "Model connection unavailable" })) } });
-  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
-  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
-  fireEvent.click(await region.findByRole("button", { name: /Draft sintering\.md/ }));
-  fireEvent.click(region.getByRole("button", { name: "Extract 1 unread source(s)" }));
-  expect(await region.findByText("This step did not finish", {}, { timeout: 4000 })).toBeTruthy();
-  expect(region.getByRole("button", { name: "Extraction stage" }).getAttribute("aria-current")).toBe("step");
-  expect(region.getByRole("button", { name: "Publication stage" }).hasAttribute("disabled")).toBe(true);
-  fireEvent.click(region.getByRole("button", { name: "Extract 1 unread source(s)" }));
-  await waitFor(() => expect(runAgent).toHaveBeenCalledTimes(2));
+it("observes a failed agent run and releases its unfinished projection for retry", async () => {
+  useWorldStore.setState({ cards: [{ id: "card-1", type: "knowledge.base" }, { id: "researcher", type: "agent", name: "Researcher" }] as unknown as WorldCard[],
+    edges: [{ id: "write", source: "researcher", target: "card-1", relationship: "knowledge.base.research" }] as unknown as WorldEdge[] });
+  let failed = false;
+  let launched = false;
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => launched
+    ? [{ run_id: "run-1", status: "failed", created_at: new Date().toISOString(), error: "Model connection unavailable" }] : [] })));
+  const action = open(async (name, args) => {
+    const result = { ...RESULT, status: failed ? "failed" : "running", error: failed ? "Model connection unavailable" : undefined };
+    if (name === "projection_prepare") return { projections: [{ ...result, disposition: "created" }] };
+    if (name === "projection_fail") { failed = true; return { projection: { ...result, status: "failed" } }; }
+    if (name === "projections") return args.operation === "get" ? { projection: result } : { projections: [result] };
+    return materialData(name, args);
+  }, { host: { runAgent: vi.fn(async () => { launched = true; }) } });
+  await chooseProject(); fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("projection_fail", expect.objectContaining({
+    projection_id: RESULT.id, error: "Model connection unavailable" })), { timeout: 5000 });
+  fireEvent.click(await screen.findByRole("button", { name: /Sintering project.*Process data/ }));
+  expect(await screen.findByRole("button", { name: "Retry extraction" })).toBeTruthy();
 });
 
-it("reviews a knowledge draft through the host bridge and shows the applied operations", async () => {
+it("runs optional result review through the host bridge and selects its new version", async () => {
   let reviewed = false;
-  const entry = { at: "2026-09-24T00:00:00Z", actor: "user:desktop", before: { concepts: 3, relations: 2 }, after: { concepts: 2, relations: 1 },
-    operations: [{ op: "merge_concepts", keep: "Si3N4", drop: ["silicon nitride"], merged: ["silicon nitride"], into: "Si3N4", reason: "same material" },
-                 { op: "flag", message: "check the sintering edge" }],
-    skipped: [{ op: "delete_concept", name: "ghost", skipped: "no such concept in the draft" }] };
-  const fetchMock = vi.fn(async () => { reviewed = true; return { ok: true, json: async () => ({
-    draft: { ...DRAFT, revision: 2, review_log: [entry] }, applied: 2, skipped: 1, review: entry }) }; });
+  const revised = { ...RESULT, id: "projection-2", generation: 2, data: { temperature: 1800 } };
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => { reviewed = true; return { ok: true, json: async () => ({ projection: revised }) }; });
   vi.stubGlobal("fetch", fetchMock);
-  const action = open(async name => {
-    if (name === "knowledge_drafts") return { drafts: [{ ...DRAFT, ...(reviewed ? { revision: 2, review_log: [entry] } : {}) }] };
-    return undefined;
-  });
-
-  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
-  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
-  fireEvent.click(await region.findByRole("button", { name: /Draft sintering\.md/ }));
-  fireEvent.click(await region.findByRole("button", { name: "Review draft" }));
-  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-  const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-  expect(url).toBe("/api/knowledge/card-1/audit");
-  expect(JSON.parse(String(init.body))).toEqual({ draft_id: "draft-1", model: "oaw:model:model-1" });
-  // The card never applies operations itself; it shows what the bridge handed to the plugin.
-  expect(action.mock.calls.some(([name]) => name === "knowledge_audit_apply")).toBe(false);
-  expect(await region.findByText(/Review applied 2 change\(s\)/)).toBeTruthy();
-  expect(await region.findByText(/Merged silicon nitride into Si3N4/)).toBeTruthy();
-  expect(region.getByText(/Flagged: check the sintering edge/)).toBeTruthy();
-  expect(region.getByText(/Skipped delete_concept: no such concept in the draft/)).toBeTruthy();
+  open(async (name, args) => name === "projections" ? args.operation === "get"
+    ? { projection: reviewed ? revised : RESULT } : { projections: [reviewed ? revised : RESULT] } : materialData(name, args));
+  await openResult();
+  expect(screen.getByText((1750).toLocaleString())).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Review result" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/knowledge/card-1/review-projection", expect.objectContaining({ method: "POST" })));
+  expect(await screen.findByText((1800).toLocaleString())).toBeTruthy();
 });
 
-it("reviews the published graph only after the person confirms the proposed operations", async () => {
-  let applied = false;
-  const operations = [{ op: "merge_concepts", keep: "Si3N4", drop: ["silicon nitride"], reason: "same material" },
-                      { op: "flag", message: "check the sintering edge" }];
-  const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ operations, drafts: ["draft-1"], statistics: {} }) }));
+it("applies custom post-processing only after its instructions are explicitly submitted", async () => {
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true, json: async () => ({ projection: RESULT }) }));
   vi.stubGlobal("fetch", fetchMock);
-  const action = open(async (name, args, confirm) => {
-    if (name === "knowledge_drafts") return { drafts: [{ ...DRAFT, status: "published" }] };
-    if (name === "graph") return { truncated: false, relations: [],
-      entities: [{ id: "entity-1", type: "concept", name: "Si3N4", properties: { source_ids: ["source-1"], aliases: applied ? ["silicon nitride"] : [] } }] };
-    if (name === "knowledge_graph_audit_apply") {
-      if (!confirm) return { status: "confirmation_required", reasons: ["rewrites"] };
-      applied = true;
-      return { drafts: ["draft-1"], applied: 2, skipped: [], graph: { entities: 1, relations: 0 } };
-    }
-    return undefined;
-  });
-
-  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
-  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
-  fireEvent.click(await region.findByRole("button", { name: "Review graph" }));
+  open(async (name, args) => materialData(name, args));
+  await openResult();
+  fireEvent.click(screen.getByRole("button", { name: "Post-process" }));
+  expect(fetchMock).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Post-processing instructions"), { target: { value: "Normalize temperatures to Celsius" } });
+  expect(fetchMock).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Run post-processing" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-  const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-  expect(url).toBe("/api/knowledge/card-1/graph-audit");
-  expect(JSON.parse(String(init.body))).toEqual({ model: "oaw:model:model-1", all_groups: true });
-  // The proposal is shown first; nothing is applied until the person confirms.
-  expect(await region.findByText(/Merged silicon nitride into Si3N4/)).toBeTruthy();
-  expect(region.getByText(/Flagged: check the sintering edge/)).toBeTruthy();
-  expect(action.mock.calls.some(([name]) => name === "knowledge_graph_audit_apply")).toBe(false);
-
-  fireEvent.click(region.getByRole("button", { name: "Confirm and apply" }));
-  await waitFor(() => expect(action).toHaveBeenCalledWith("knowledge_graph_audit_apply",
-    expect.objectContaining({ operations, all_groups: true }), true));
-  expect(await region.findByText(/Review applied 2 operation\(s\) to 1 published draft\(s\)/)).toBeTruthy();
+  expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+    projection_id: RESULT.id, instruction: "Normalize temperatures to Celsius" });
 });
 
-it("shows streamed extraction progress and keeps the result of the final line", async () => {
-  const lines = [
-    { event: "progress", stage: "read", done: 0, total: 2, message: "Reading sintering.md · part 1/2" },
-    { event: "progress", stage: "saved", done: 1, total: 2, message: "sintering.md: 2 concepts, 1 relations so far" },
-    { event: "done", result: { draft: DRAFT, sources: [{ source_id: "source-1", filename: "sintering.md", chunks: 2, entities: 2, relations: 1, truncated: false }] } },
-  ];
-  // A body that yields one line, lets the card render, then yields the rest.
-  let release: () => void = () => undefined;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  const encoder = new TextEncoder();
-  const body = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      controller.enqueue(encoder.encode(JSON.stringify(lines[0]) + "\n"));
-      await gate;
-      controller.enqueue(encoder.encode(lines.slice(1).map(line => JSON.stringify(line)).join("\n") + "\n"));
-      controller.close();
-    },
-  });
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, body, headers: new Headers({ "content-type": "application/x-ndjson" }),
-    json: async () => ({}) })));
-  const action = open(async name => {
-    if (name === "sources") return { sources: [CONVERTED] };
-    if (name === "knowledge_drafts") return { drafts: [{ ...DRAFT, entities: [], relations: [],
-      sources: [{ ...DRAFT.sources[0], extracted_at: null }] }] };
-    return undefined;
-  });
-
-  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
-  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
-  fireEvent.click(await region.findByRole("button", { name: /Draft sintering\.md/ }));
-  fireEvent.click(await region.findByRole("button", { name: "Extract 1 unread source(s)" }));
-  const bar = await region.findByRole("progressbar", { name: /Reading sintering\.md · part 1\/2/ }) as HTMLProgressElement;
-  expect(bar.value).toBe(0); expect(bar.max).toBe(2);
-  expect(region.getByText(/0 of 2/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("tab", { name: "Sources" }));
-  fireEvent.click(screen.getByRole("tab", { name: "Knowledge" }));
-  expect(region.getByRole("progressbar", { name: /Reading sintering\.md/ })).toBe(bar);
-  expect(region.getByRole("button", { name: "Extraction stage" }).hasAttribute("disabled")).toBe(true);
-  expect(fetch).toHaveBeenCalledTimes(1);
-  release();
-  expect(await region.findByText(/Read 1 source\(s\) in 2 part\(s\) · 2 concepts added/)).toBeTruthy();
-  expect(region.queryByRole("progressbar")).toBeNull();
-  expect(action.mock.calls.some(([name]) => name === "knowledge_save")).toBe(false);
+it("shows streamed project progress and keeps it alive while another tab is open", async () => {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({ start(value) { controller = value; } });
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true, headers: new Headers({ "content-type": "application/x-ndjson" }), body }));
+  vi.stubGlobal("fetch", fetchMock);
+  open(async (name, args) => materialData(name, args));
+  await chooseProject(); fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  controller.enqueue(new TextEncoder().encode(JSON.stringify({ event: "progress", stage: "projection", done: 0, total: 1, message: "Reading supporting files" }) + "\n"));
+  await within(screen.getByRole("region", { name: "Results" })).findByText("Reading supporting files");
+  fireEvent.click(screen.getByRole("tab", { name: "Projects" }));
+  expect(within(screen.getByRole("region", { name: "Projects" })).getByText("Reading supporting files")).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab", { name: "Results" }));
+  controller.enqueue(new TextEncoder().encode(JSON.stringify({ event: "done", result: { projections: [RESULT] } }) + "\n")); controller.close();
+  await waitFor(() => expect(screen.queryAllByText("Reading supporting files")).toHaveLength(0));
+  expect(await screen.findByRole("button", { name: /Sintering project.*Process data/ })).toBeTruthy();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
-it("reads a published relation like a concept: its statement, evidence, snippet and endpoints", async () => {
-  const action = open(async name => {
-    if (name === "knowledge_drafts") return { drafts: [{ ...DRAFT, status: "published" }] };
-    if (name === "graph") return { truncated: false,
-      entities: [{ id: "e-si", type: "concept", name: "Si3N4", properties: { source_ids: ["source-1"] } },
-                 { id: "e-sin", type: "concept", name: "Sintering", properties: {} }],
-      relations: [{ id: "r-1", type: "processed_by", source_id: "e-si", target_id: "e-sin", properties: {
-        description: "Si3N4 powder is densified by pressureless sintering at 1750 °C.", evidence_level: 2,
-        snippet: "Si3N4 was sintered", source_ids: ["source-1"] } }] };
-    return undefined;
-  });
-
-  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
-  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
-  // The side list offers relations beside concepts; picking one opens its own panel.
-  fireEvent.click(await region.findByRole("tab", { name: /Relations/ }));
-  fireEvent.click(await region.findByRole("button", { name: "Si3N4 processed by Sintering" }));
-  const panel = within((await region.findByText(/evidence 2/)).closest(".knowledge-relation-detail") as HTMLElement);
-  expect(panel.getByText("Si3N4 powder is densified by pressureless sintering at 1750 °C.")).toBeTruthy();
-  expect(panel.getByText("Si3N4 was sintered")).toBeTruthy();
-  // The endpoints lead back to the concept panel, whose relation lines lead back to the edge.
-  fireEvent.click(panel.getByRole("button", { name: "Sintering" }));
-  expect(await region.findByRole("button", { name: "Show neighbours" })).toBeTruthy();
-  fireEvent.click(region.getByRole("button", { name: "Si3N4 →processed by→ Sintering" }));
-  expect(await region.findByText(/evidence 2/)).toBeTruthy();
-  expect(action.mock.calls.some(([name]) => name === "graph")).toBe(true);
+it("keeps graph relation evidence and original file provenance visible in a project result", async () => {
+  const graph = { ...RESULT, kind: "graph", data: { entities: DRAFT.entities, relations: DRAFT.relations } };
+  open(async (name, args) => name === "projections" ? args.operation === "get" ? { projection: graph } : { projections: [graph] } : materialData(name, args));
+  await openResult();
+  expect(screen.getByLabelText("Knowledge graph map")).toBeTruthy();
+  fireEvent.click(screen.getByText("Result JSON"));
+  expect(screen.getByText(/Si3N4 powder is densified by pressureless sintering/)).toBeTruthy();
+  fireEvent.click(screen.getByText("Source files"));
+  fireEvent.click(screen.getByRole("button", { name: "sintering.md" }));
+  expect(await screen.findByRole("heading", { name: "Sintering of Si3N4" })).toBeTruthy();
 });
 
 const BUNDLE = { id: "bundle-1", group_id: "collection-1", schema_id: "schema-2", name: "Batch 7", notes: "",
@@ -734,42 +538,16 @@ it.each(["experiment", "research"])("extracts records through a %s agent, then p
   expect(await region.findByText(/Record "A1" published/)).toBeTruthy();
 });
 
-it("keeps the graph empty until the person confirms publishing a knowledge draft", async () => {
-  let published = false;
-  const action = open(async (name, args, confirm) => {
-    if (name === "overview") return overview({ entities: published ? 2 : 0, knowledge_drafts: 1 });
-    if (name === "knowledge_drafts") return { drafts: [{ ...DRAFT, status: published ? "published" : "draft" }] };
-    if (name === "knowledge_review" && args.operation === "publish") {
-      if (!confirm) return { status: "confirmation_required",
-        reasons: ["Publishing writes 2 entities and 1 relations into the knowledge graph."] };
-      published = true;
-      return { draft: { ...DRAFT, status: "published", revision: 2 }, graph: { entities: 2, relations: 1 } };
-    }
-    if (name === "graph" && published) return { truncated: false, relations: [],
-      entities: [{ id: "entity-1", type: "entity", name: "Si3N4", properties: { source_ids: ["source-1"] } }] };
-    return undefined;
-  });
-
-  fireEvent.click(await screen.findByRole("tab", { name: "Knowledge" }));
-  const region = within(await screen.findByRole("region", { name: "Knowledge" }));
-  fireEvent.click(await region.findByRole("button", { name: /Draft sintering\.md/ }));
-  // The draft's elements are listed with their evidence before anyone publishes.
-  expect(await region.findByText("a ceramic")).toBeTruthy();
-  expect(region.getByText("silicon nitride")).toBeTruthy();
-  expect(region.getByText("processed by")).toBeTruthy();
-  expect(region.getByText("Si3N4 powder is densified by pressureless sintering.")).toBeTruthy();
-  expect(region.getByText("Si3N4 was sintered")).toBeTruthy();
-  fireEvent.click(region.getByRole("button", { name: "Publish" }));
-  expect(await region.findByText(/Publishing writes 2 entities/)).toBeTruthy();
-  expect(region.getByText("The graph is empty until a draft is published.")).toBeTruthy();
-  expect(action.mock.calls.filter(([name, , confirm]) => name === "knowledge_review" && confirm)).toHaveLength(0);
-
-  fireEvent.click(region.getByRole("button", { name: "Confirm and publish" }));
-  await waitFor(() => expect(action).toHaveBeenCalledWith("knowledge_review", expect.objectContaining({
-    operation: "publish", draft_id: "draft-1", expected_revision: 1 }), true));
-  expect(await region.findByText(/Published "sintering\.md": 2 concepts and 1 relations/)).toBeTruthy();
-  expect(await region.findByRole("button", { name: "Unpublish" })).toBeTruthy();
-  expect(region.getAllByRole("button", { name: /Si3N4/ }).length).toBeGreaterThan(0);
+it("shows completed graph projections immediately without requiring review or publication", async () => {
+  const graph = { ...RESULT, kind: "graph", data: { entities: DRAFT.entities, relations: DRAFT.relations } };
+  const action = open(async (name, args) => name === "projections" ? args.operation === "get" ? { projection: graph } : { projections: [graph] } : materialData(name, args));
+  await openResult();
+  expect(screen.getByLabelText("Knowledge graph map")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Review result" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+  expect(action.mock.calls.some(([name]) => ["projection_revise", "knowledge_review"].includes(name))).toBe(false);
+  fireEvent.click(screen.getByLabelText("Show history"));
+  await waitFor(() => expect(action).toHaveBeenCalledWith("projections", expect.objectContaining({ include_history: true })));
 });
 
 it("drafts insights over published records and publishes one into the experiment layer on confirmation", async () => {
@@ -834,53 +612,25 @@ it("drafts insights over published records and publishes one into the experiment
   expect(insightsSection.queryByRole("button", { name: "Publish" })).toBeNull();
 });
 
-it("surfaces a failed conversion with the step that failed", async () => {
-  const JOB = { id: "job-1", kind: "pipeline", status: "FAILED", progress: null, message: null,
-    error: "No markdown engine handles scan.bin", source_id: "source-1",
-    created_at: "2026-09-23T00:00:00Z", completed_at: null };
-  open(async name => {
-    if (name === "jobs") return { jobs: [JOB], job: JOB, events: [{ event: "step.failed",
-      step: "convert", message: "No markdown engine handles scan.bin", level: "ERROR",
-      occurred_at: "2026-09-23T00:00:00Z" }] };
-    return undefined;
-  });
-
-  fireEvent.click(await screen.findByRole("button", { name: /job-1.*FAILED/ }));
-  expect(await screen.findByText("convert")).toBeTruthy();
-  expect(screen.getAllByRole("alert").some(node => node.textContent?.includes("scan.bin"))).toBe(true);
+it("surfaces the failed file's conversion error in its project", async () => {
+  const project = { ...PROJECT, state: "failed", converted_count: 0, files: [{ ...PROJECT_FILE,
+    filename: "scan.bin", relative_path: "raw/scan.bin", state: "failed", record_id: null, error: "convert: No markdown engine handles scan.bin" }] };
+  open(async (name, args) => name === "projects" ? args.project_id ? { project } : { projects: [project] } : materialData(name, args));
+  fireEvent.click(await screen.findByRole("button", { name: /Sintering project/ }));
+  expect((await screen.findByRole("alert")).textContent).toContain("convert: No markdown engine handles scan.bin");
+  expect(screen.getByRole("button", { name: "raw/scan.bin" }).hasAttribute("disabled")).toBe(true);
 });
 
-it("reads records out of several selected sources with one schema through the host bridge", async () => {
-  const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({
-    records: [{ id: "r1" }, { id: "r2" }], invalid: 0, schema_id: "schema-1",
-    sources: [{ source_id: "source-1", records: 1, invalid: 0, truncated: false }, { source_id: "source-2", records: 1, invalid: 0, truncated: false }] }) }));
+it("projects several selected projects with one Space and preserves each project's identity", async () => {
+  const other = { ...PROJECT, id: "project-2", name: "Other report" };
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true, json: async () => ({ projections: [] }) }));
   vi.stubGlobal("fetch", fetchMock);
-  const OTHER = { ...CONVERTED, id: "source-2", filename: "other.md", record_id: "record-2" };
-  const action = open(async (name, args) => {
-    if (name === "sources") return { sources: [CONVERTED, OTHER] };
-    if (name === "schemas") return args.operation === "get"
-      ? { schema: { ...SCHEMA, definition: { type: "object", properties: { material: { type: "string" } } }, system_prompt: "x", field_descriptions: null } }
-      : { schemas: [SCHEMA, EXPERIMENT_SCHEMA] };
-    return undefined;
-  });
-  fireEvent.click(await screen.findByRole("tab", { name: "Records" }));
-  const region = within(await screen.findByRole("region", { name: "Records" }));
-
-  // Only literature schemas are offered here; the experiment one stays in its own section.
-  const picker = await region.findByLabelText("Record schema") as HTMLSelectElement;
-  expect(Array.from(picker.options).map(option => option.textContent)).toEqual(["All schemas", "Process graph"]);
-  fireEvent.change(picker, { target: { value: "schema-1" } });
-  fireEvent.click(await region.findByLabelText("Select sintering.md"));
-  fireEvent.click(region.getByLabelText("Select other.md"));
-  fireEvent.click(region.getByRole("button", { name: "Extract from 2 selected" }));
-
+  const action = open(async (name, args) => name === "projects" ? { projects: [PROJECT, other] } : materialData(name, args));
+  await chooseProject(); fireEvent.click(screen.getByLabelText("Select Other report"));
+  fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-  const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-  expect(url).toBe("/api/knowledge/card-1/records");
-  expect(JSON.parse(String(init.body))).toEqual({
-    schema_id: "schema-1", source_ids: ["source-1", "source-2"], model: "oaw:model:model-1", replace_drafts: false });
-  expect(action.mock.calls.some(([name]) => name === "record_save")).toBe(false);
-  expect(await region.findByText(/Read 2 record\(s\) from 2 source\(s\)/)).toBeTruthy();
+  expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({ project_ids: ["project-1", "project-2"], space_id: SPACE.id });
+  expect(action.mock.calls.some(([name]) => ["project_manage", "projection_save"].includes(name))).toBe(false);
 });
 
 it("lets an engineer pick a connected agent's model from the Knowledge card's Settings", async () => {
@@ -1079,40 +829,19 @@ it("shows the semantic index behind graph search and builds it on request", asyn
   expect(action).toHaveBeenCalledWith("graph_index", { operation: "build" }, undefined);
 });
 
-it("hides engineering settings and posts through the deployment bridge when deployed", async () => {
-  const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({
-    records: [{ id: "r1" }], invalid: 0, schema_id: "schema-1",
-    sources: [{ source_id: "source-1", records: 1, invalid: 0, truncated: false }] }) }));
+it("hides engineering settings and uses the deployment Space bridge without a client model override", async () => {
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true, json: async () => ({ projections: [RESULT] }) }));
   vi.stubGlobal("fetch", fetchMock);
-  open(async (name, args) => {
-    if (name === "sources") return { sources: [CONVERTED] };
-    if (name === "schemas") return args.operation === "get"
-      ? { schema: { ...SCHEMA, definition: { type: "object", properties: {} }, system_prompt: "x", field_descriptions: null } }
-      : { schemas: [SCHEMA] };
-    return undefined;
-  }, {
+  open(async (name, args) => materialData(name, args), {
     card: { config: { default_model: "oaw:model:model-1" } },
-    host: { deployment: { config_fields: ["default_model"], document_fields: [], summary_fields: [],
-      document_actions: [], downloads: [], resource_actions: {}, execution: false } },
+    host: { deployment: { config_fields: ["default_model"], document_fields: [], summary_fields: [], document_actions: [], downloads: [], resource_actions: {}, execution: false } },
   });
-
-  // The Settings section is engineering-only and never mounts once deployed.
   expect(screen.queryByRole("region", { name: "Settings" })).toBeNull();
   expect(screen.queryByLabelText("Collection name")).toBeNull();
-
-  fireEvent.click(await screen.findByRole("tab", { name: "Records" }));
-  const region = within(await screen.findByRole("region", { name: "Records" }));
-  fireEvent.change(await region.findByLabelText("Record schema"), { target: { value: "schema-1" } });
-  // No live picker either: the deployment shows the model fixed at publish time.
-  expect(region.queryByLabelText("Model")).toBeNull();
-  expect((await region.findAllByText("Model: oaw:model:model-1")).length).toBeGreaterThan(0);
-  fireEvent.click(await region.findByLabelText("Select sintering.md"));
-  fireEvent.click(region.getByRole("button", { name: "Extract from 1 selected" }));
-
+  await chooseProject();
+  expect(screen.queryByLabelText("Model")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Run Space" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-  const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-  expect(url).toBe("/api/runtime-app/workspace/knowledge/card-1/records");
-  expect(JSON.parse(String(init.body))).toEqual({
-    schema_id: "schema-1", source_ids: ["source-1"], model: "oaw:model:model-1", replace_drafts: false });
-  expect(await region.findByText(/Read 1 record\(s\) from 1 source\(s\)/)).toBeTruthy();
+  expect(fetchMock.mock.calls[0][0]).toBe("/api/runtime-app/workspace/knowledge/card-1/project-space");
+  expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ space_id: SPACE.id, project_ids: [PROJECT.id], rerun: false });
 });

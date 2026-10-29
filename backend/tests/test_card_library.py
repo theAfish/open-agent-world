@@ -34,7 +34,8 @@ def edit(store, action, **kwargs):
     return store.edit(LibraryEdit(expected_revision=store.read().revision, action=action, **kwargs))
 
 
-def test_bundled_packaging_presets_are_published(client):
+def test_bundled_and_explicit_codex_packaging_presets_are_published(codex_client):
+    client = codex_client
     packs = client.get('/api/card-library').json()['packs']
     assert packs['open-agent-world.core.default']['definition']['packaging'] == 'collector'
     assert packs['openai.codex.default']['definition']['packaging'] == 'premium'
@@ -238,6 +239,81 @@ def test_disable_uninstall_reinstall_preserves_references(tmp_path):
     edit(store, "set_plugin_enabled", id="example", enabled=True)
     assert "example.card" in store.snapshot()["available_card_ids"]
     db.close()
+
+
+def test_api_dismiss_missing_pack_persists_and_reinstall_restores_collection(tmp_path):
+    settings = Settings.for_data_root(tmp_path)
+    registry = create_builtin_registry()
+    install(registry)
+    services = create_services(settings, plugins=registry)
+    edit(services.card_library, 'open_pack', id='example.default')
+    expected = edit(services.card_library, 'update_deck', id='starter', entries=[{'id': 'example.card'}])
+    services.close()
+
+    services = create_services(settings, plugins=create_builtin_registry())
+    with TestClient(create_app(settings, services=services)) as client:
+        before = client.get('/api/card-library').json()
+        removed = client.post('/api/card-library/actions', json={
+            'action': 'dismiss_pack', 'id': 'example.default', 'expected_revision': before['revision']})
+        assert removed.status_code == 200, removed.text
+        assert removed.json()['packs']['example.default']['dismissed'] is True
+        assert removed.json()['collection'] == before['collection']
+        assert removed.json()['decks'] == before['decks']
+        assert removed.json()['available_card_ids'] == before['available_card_ids']
+        stale = client.post('/api/card-library/actions', json={
+            'action': 'dismiss_pack', 'id': 'example.default', 'expected_revision': before['revision']})
+        assert stale.status_code == 409
+        unknown = client.post('/api/card-library/actions', json={
+            'action': 'dismiss_pack', 'id': 'unknown', 'expected_revision': removed.json()['revision']})
+        assert unknown.status_code == 404
+    services.close()
+
+    db = Database(settings.database_path)
+    try:
+        missing = CardLibraryStore(db, create_builtin_registry())
+        assert missing.read().packs['example.default'].dismissed
+        install(missing.registry)
+        restored = missing.read()
+        assert not restored.packs['example.default'].dismissed
+        assert restored.collection == expected.collection
+        assert restored.decks == expected.decks
+        assert restored.packs['example.default'].opened_at == expected.packs['example.default'].opened_at
+        assert 'example.card' in missing.snapshot()['available_card_ids']
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize('enrollment', ['loaded', 'archive', 'source'])
+def test_api_dismiss_rejects_installed_and_unloaded_enrolled_packs(tmp_path, enrollment):
+    from backend.packs.spec import BackendComponent, PackSpec
+    from backend.tests.test_pack_unification import unified
+
+    settings = Settings.for_data_root(tmp_path)
+    registry = create_builtin_registry()
+    install(registry)
+    services = create_services(settings, plugins=registry)
+    services.close()
+    if enrollment != 'loaded':
+        registry = create_builtin_registry()
+    if enrollment == 'source':
+        registry.pack_specs['example'] = PackSpec(distribution_id='test.example', owner='example',
+            name='Example', version='1.0.0', packs=('example.default',), backend=BackendComponent(), source_root=tmp_path)
+        registry.pack_sources['example'] = 'development'
+    services = create_services(settings, plugins=registry)
+    if enrollment == 'archive':
+        services.pack_installations.install(unified(owner='example'))
+    with TestClient(create_app(settings, services=services)) as client:
+        state = client.get('/api/card-library').json()
+        result = client.post('/api/card-library/actions', json={
+            'action': 'dismiss_pack', 'id': 'example.default', 'expected_revision': state['revision']})
+        assert result.status_code == 409, result.text
+        assert 'Uninstall this Pack' in result.text
+        assert client.get('/api/card-library').json()['packs']['example.default']['dismissed'] is False
+        if enrollment == 'archive':
+            assert 'test.greeter-release' in services.pack_installations.selected()
+        if enrollment == 'source':
+            assert services.pack_installations.source_enrolled('test.example')
+    services.close()
 
 
 def test_migration_once_and_browser_folder_import(tmp_path):

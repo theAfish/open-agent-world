@@ -1,7 +1,5 @@
 # Download and install
 
-**English** | [简体中文](install.zh-CN.md)
-
 Open [GitHub Releases](https://github.com/theAfish/open-agent-world/releases), select a published version, and expand **Assets**. If there are no published releases yet, installers are not publicly available yet.
 
 | Your computer | Download |
@@ -16,11 +14,11 @@ Choose an installer above, rather than **Source code (zip / tar.gz)**. On a Mac,
 
 Run the installer, then launch **Open Agent World** from the Start menu. Python, application dependencies and the frontend are included; Node.js, Rust and a source checkout are unnecessary. WebView2 may download during installation if missing.
 
-The initial builds are unsigned. If Windows shows a reputation warning, check that the file came from this repository's Release before deciding whether to continue. Managed devices may require administrator assistance.
+Signing status depends on the release; check its notes. If Windows shows a reputation warning, check that the file came from this repository's Release before deciding whether to continue. Managed devices may require administrator assistance.
 
 ## macOS preview
 
-Open the DMG and drag **Open Agent World** into **Applications**, then launch it. Builds currently use ad-hoc signing and are not notarized by Apple. If macOS blocks opening, review **System Settings → Privacy & Security** for the blocked app and an **Open Anyway** option, if available and you trust this download. Do not disable system security globally. Report a damaged-app error with the release version and Mac architecture if it cannot be opened.
+Open the DMG and drag **Open Agent World** into **Applications**, then launch it. Signing and notarization depend on the release; check its notes. If macOS blocks opening, review **System Settings → Privacy & Security** for the blocked app and an **Open Anyway** option, if available and you trust this download. Do not disable system security globally. Report a damaged-app error with the release version and Mac architecture if it cannot be opened.
 
 macOS 13+ can use the built-in **Seatbelt** Sandbox. On Apple Silicon with macOS 26+, install Apple `container` 0.6.0+ and run `container system start` to enable the preferred VM Sandbox. Scientific plugin dependencies are prepared on first use and may require a download. See [Sandbox workspace](sandbox-workspace.md) for the security and resource-limit differences.
 
@@ -29,7 +27,7 @@ macOS 13+ can use the built-in **Seatbelt** Sandbox. On Apple Silicon with macOS
 Linux currently uses the source installation and opens the application in your browser. Install Git, Python 3.11 or newer, uv, and Node.js 22 or newer (including npm), then run:
 
 ```bash
-git clone https://github.com/theAfish/open-agent-world.git
+git clone --branch dev https://github.com/theAfish/open-agent-world.git
 cd open-agent-world
 bash scripts/setup.sh
 bash scripts/start.sh

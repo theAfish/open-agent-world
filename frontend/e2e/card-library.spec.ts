@@ -51,6 +51,12 @@ test("packs, collection and active decks persist and recover from plugin disable
   await expect(library.getByRole("status")).toContainText("Core essentials opened");
   await expect(pack).toHaveClass(/is-opened/);
   const collected: LibrarySnapshot = await (await request.get("/api/card-library")).json();
+  // Utility cards now belong to Core essentials and cannot be disabled alone.
+  for (const type of ['oaw.barracks', 'oaw.barracks.summoner', 'oaw.skills', 'oaw.skills.skill', 'oaw.tasks']) {
+    expect(collected.collection[type].plugin_id).toBe('open-agent-world.core');
+    expect(collected.collection[type].source_pack_ids).toContain('open-agent-world.core.default');
+  }
+  for (const id of ['oaw.barracks.default', 'oaw.skills.default', 'oaw.tasks.default']) expect(collected.packs[id]).toBeUndefined();
   const savedFinish = normalizeCardFinish(collected.collection.text?.finish);
   await expect.poll(async () => Number(await pack.locator("canvas").getAttribute("data-opening"))).toBeGreaterThan(.2);
   await page.screenshot({ path: "../.tmp/library-foil-opening.png" });
@@ -95,26 +101,27 @@ test("packs, collection and active decks persist and recover from plugin disable
   await tray.getByRole("button", { name: "Create deck", exact: true }).click();
   await expect(tray.getByRole("tab", { name: /Research kit/ })).toHaveAttribute("aria-selected", "true");
   await library.getByRole("button", { name: /^Packs/ }).click();
-  const taskPack = library.getByRole("article", { name: "Task Board", exact: true });
-  await taskPack.getByRole("button", { name: "Tear open Task Board", exact: true }).click();
-  await taskPack.getByRole("button", { name: "View cards in Task Board", exact: true }).click();
-  await library.getByLabel("Search cards", { exact: true }).fill("Task Board");
-  await library.getByRole("button", { name: "Add Task Board to deck" }).click();
+  // Preserve optional-Pack disable/re-enable and cross-window coverage on Codex.
+  const codexPack = library.getByRole("article", { name: "Codex Agent", exact: true });
+  await codexPack.getByRole("button", { name: "Tear open Codex Agent", exact: true }).click();
+  await codexPack.getByRole("button", { name: "View cards in Codex Agent", exact: true }).click();
+  await library.getByLabel("Search cards", { exact: true }).fill("Codex Agent");
+  await library.getByRole("button", { name: "Add Codex Agent to deck" }).click();
   const sourceControls = library.getByLabel("Source pack controls");
   await sourceControls.getByRole("button", { name: "Disable Pack" }).click();
   await expect(sourceControls).toContainText("Pack disabled");
   await library.getByRole("button", { name: "Close Library" }).click();
   await tray.hover();
-  await expect(tray.getByRole("button", { name: "Task Board unavailable" })).toHaveAttribute('data-unavailable', 'true');
-  await expect(tray.getByRole("button", { name: "Task Board unavailable" })).toHaveAttribute('draggable', 'false');
+  await expect(tray.getByRole("button", { name: "Codex Agent unavailable" })).toHaveAttribute('data-unavailable', 'true');
+  await expect(tray.getByRole("button", { name: "Codex Agent unavailable" })).toHaveAttribute('draggable', 'false');
   await expect(tray.getByRole("button", { name: "Place Text file", exact: true })).toHaveCount(0);
   await page.reload();
   await tray.hover();
   await expect(tray.getByRole("tab", { name: /Research kit/ })).toHaveAttribute("aria-selected", "true");
-  await expect(tray.getByRole("button", { name: "Task Board unavailable" })).toHaveAttribute('data-unavailable', 'true');
-  await expect(tray.getByRole("button", { name: "Task Board unavailable" })).toHaveAttribute('draggable', 'false');
+  await expect(tray.getByRole("button", { name: "Codex Agent unavailable" })).toHaveAttribute('data-unavailable', 'true');
+  await expect(tray.getByRole("button", { name: "Codex Agent unavailable" })).toHaveAttribute('draggable', 'false');
   await page.getByRole("button", { name: "Open Pack and Card Library" }).click();
-  await taskPack.getByRole("button", { name: "View cards in Task Board", exact: true }).click();
+  await codexPack.getByRole("button", { name: "View cards in Codex Agent", exact: true }).click();
   await sourceControls.getByRole("button", { name: "Enable Pack" }).click();
   await expect(sourceControls).toContainText("Installed · Enabled");
   await library.getByRole("button", { name: /^Store/ }).click();
@@ -126,17 +133,17 @@ test("packs, collection and active decks persist and recover from plugin disable
   await page.screenshot({ path: "../.tmp/library-cards.png" });
   await library.getByRole("button", { name: "Close Library" }).click();
   await tray.hover();
-  await expect(tray.getByRole("button", { name: "Place Task Board", exact: true })).toBeEnabled();
+  await expect(tray.getByRole("button", { name: "Place Codex Agent", exact: true })).toBeEnabled();
   // A second window receives an authoritative deck change over the event stream.
   const other = await context.newPage();
   await other.goto("/");
   await other.getByRole("complementary", { name: "Active card deck" }).hover();
-  await expect(other.getByRole("button", { name: "Place Task Board", exact: true })).toBeEnabled();
+  await expect(other.getByRole("button", { name: "Place Codex Agent", exact: true })).toBeEnabled();
   const state = await (await request.get("/api/card-library")).json();
   const response = await request.post("/api/card-library/actions", { data: { action: "update_deck", id: state.active_deck_id, entries: [], expected_revision: state.revision } });
   expect(response.ok()).toBe(true);
-  await expect(other.getByRole("button", { name: "Place Task Board", exact: true })).toHaveCount(0);
-  await expect(tray.getByRole("button", { name: "Place Task Board", exact: true })).toHaveCount(0);
+  await expect(other.getByRole("button", { name: "Place Codex Agent", exact: true })).toHaveCount(0);
+  await expect(tray.getByRole("button", { name: "Place Codex Agent", exact: true })).toHaveCount(0);
   await page.setViewportSize({ width: 640, height: 780 });
   await page.getByRole("button", { name: "Open Pack and Card Library" }).click();
   await page.screenshot({ path: "../.tmp/library-narrow.png" });

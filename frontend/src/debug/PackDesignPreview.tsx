@@ -32,13 +32,13 @@ function PreviewPack({ packaging, opened = false, database = false, inspect }: {
   const definition: PackDefinition = { id: `preview.${packaging}`, plugin_id: 'preview', name: database ? 'SQL database' : study.name,
     description: database ? '让每一个想法，都有迹可循。' : study.description, cards: [], packaging };
   const cards: PackPreviewCard[] = [
-    { id: 'explore', label: 'Explore More', icon: database ? <Database /> : study.icon, color: '#7f9c9e', finish: 'foil' },
-    { id: 'create', label: 'Create Together', icon: <Boxes />, color: '#a3ad90', finish: 'normal' },
-    { id: 'possibilities', label: 'New Possibilities', icon: <Sparkles />, color: '#b5a084', finish: 'laser' },
+    { id: 'explore', label: 'Explore More', icon: database ? <Database /> : study.icon, finish: 'foil' },
+    { id: 'create', label: 'Create Together', icon: <Boxes />, finish: 'normal' },
+    { id: 'possibilities', label: 'New Possibilities', icon: <Sparkles />, finish: 'laser' },
   ];
   return <PackSurface definition={definition} edition={phase === 'revealing' ? '发现更多可能。' : isOpen ? '拖动查看内部 · 点击重新体验' : '拖动旋转 · 点击拆开'}
     cards={cards.slice(0, database ? 1 : study.count)} count={database ? 1 : study.count} opened={isOpen} phase={phase} finishVisible={finish}
-    label={`${isOpen ? '重新体验' : '打开'}${study.zh}`} sealLabel="TEAR TO OPEN" disabled={phase !== 'idle'}
+    label={`${isOpen ? '重新体验' : '打开'}${study.zh}`} disabled={phase !== 'idle'}
     onClick={inspect ?? (() => { if (isOpen) { setOpen(false); setFinish(false); } else { setOpen(true); setPhase('revealing'); } })} />;
 }
 
