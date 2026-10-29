@@ -103,9 +103,9 @@ def business_router(manifest):
             request = CardPatch.model_validate(request.model_dump(exclude_unset=True, exclude={"parent_id"}))
         if current.type == "legion" or request.model_fields_set - {"config", "name", "expected_revision"}:
             raise HTTPException(403, "Application layout and membership are managed by the administrator")
+        validate_config(request.config or {}, services, current)
         if set(request.config or {}) - set(business_access(manifest, services, card_id)["config_fields"]):
             raise HTTPException(404, "This configuration is not published")
-        validate_config(request.config or {}, services, current)
         with business_mutation():
             result = await services.update_card(card_id, request)
         return projected_card(manifest, services, result)
