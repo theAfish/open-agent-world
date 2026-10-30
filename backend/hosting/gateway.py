@@ -116,6 +116,22 @@ class Gateway:
             profile.secret, profile.profile_id, profile.user_id, user["display_name"])))
         return headers
 
+    async def wait_for_worker(self, profile):
+        # Socket activation can take longer than a worker assertion's lifetime.
+        # Wait without authority, then mint only for the actual user request.
+        origin = "http://localhost" if unix_socket_path(profile.upstream) else profile.upstream
+        client = self.unix_clients.get(profile.profile_id, self.http)
+        probe = client.build_request("GET", origin + "/api/deployment")
+        probe.headers.pop("authorization", None)
+        probe.headers.pop("cookie", None)
+        response = await client.send(probe, stream=True)
+        try:
+            if response.status_code != 401:
+                raise httpx.HTTPStatusError("Worker authentication boundary is unavailable", request=probe, response=response)
+        finally:
+            client.cookies.clear()
+            await response.aclose()
+
     async def proxy(self, request: Request):
         if not self.check_origin(request.scope):
             return self.error(403, "origin_rejected", "Origin rejected")
@@ -142,7 +158,18 @@ class Gateway:
             r"/api/(?:runtime-app/workspace/)?sandboxes/[^/]+/(?:start|execute|python/packages)", request.url.path)
         timeout = httpx.Timeout(300, connect=10, read=3600 if sandbox_operation else 300)
         try:
-            outgoing = client.build_request(request.method, target, headers=self.upstream_headers(request, profile, user),
+            await self.wait_for_worker(profile)
+        except httpx.HTTPError:
+            return self.error(503, "workspace_unavailable", "This workspace is temporarily unavailable.", profile)
+        current_user = await self.auth.user_from_scope(request.scope)
+        if current_user is None or current_user["id"] != user["id"]:
+            return self.error(401, "authentication_required", "Sign in to continue.")
+        await self.refresh()
+        current_profile = self.profiles.get(current_user["id"])
+        if current_profile != profile:
+            return self.error(409, "instance_changed", "Reload this workspace.", current_profile or profile)
+        try:
+            outgoing = client.build_request(request.method, target, headers=self.upstream_headers(request, profile, current_user),
                                                content=request.stream(), timeout=timeout)
             # AsyncClient also applies its own upstream cookie jar. Those
             # cookies must never become worker authority or cross profiles on
@@ -197,7 +224,13 @@ class Gateway:
         # Reauthentication uses the original opaque session; logout and account
         # disable revoke it in SQLite and terminate existing connections promptly.
         try:
-            options = dict(additional_headers=self.upstream_headers(socket, profile, user),
+            await self.wait_for_worker(profile)
+            current_user = await self.auth.user_from_scope(socket.scope)
+            await self.refresh()
+            if (current_user is None or current_user["id"] != user["id"]
+                    or self.profiles.get(current_user["id"]) != profile):
+                return await socket.close(code=1008)
+            options = dict(additional_headers=self.upstream_headers(socket, profile, current_user),
                            open_timeout=10, max_size=16 * 1024 * 1024)
             connection = (unix_connect(socket_path, uri=str(target), **options) if socket_path
                           else connect(str(target), proxy=None, **options))
@@ -236,7 +269,7 @@ class Gateway:
                     for task in tasks:
                         task.cancel()
                     await asyncio.gather(*tasks, return_exceptions=True)
-        except (OSError, TimeoutError, ConnectionClosed, InvalidHandshake, WebSocketDisconnect):
+        except (OSError, TimeoutError, httpx.HTTPError, ConnectionClosed, InvalidHandshake, WebSocketDisconnect):
             pass
         finally:
             with suppress(RuntimeError, WebSocketDisconnect):

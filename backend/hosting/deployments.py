@@ -130,10 +130,19 @@ class DeploymentAdmin:
     def __init__(self, gateway, authorize):
         self.gateway, self.authorize = gateway, authorize
 
-    async def worker(self, profile, path):
+    async def worker(self, profile, path, *, request):
         gateway = self.gateway
         client = gateway.unix_clients.get(profile.profile_id, gateway.http)
         origin = "http://localhost" if unix_socket_path(profile.upstream) else profile.upstream
+        await gateway.wait_for_worker(profile)
+        current = await gateway.auth.user_from_scope(request.scope)
+        if current is None:
+            return gateway.error(401, "authentication_required", "Sign in to continue.")
+        if current["role"] != "admin":
+            return gateway.error(403, "admin_required", "Administrator access required.")
+        await gateway.refresh()
+        if current["id"] != profile.user_id or gateway.profiles.get(current["id"]) != profile:
+            return gateway.error(409, "instance_changed", "Reload the engineering workspace.")
         headers = {"Authorization": "Bearer " + mint_worker_token(profile.secret, profile.profile_id, profile.user_id),
                    "Origin": gateway.settings.public_origin}
         async with client.stream("GET", origin + path, headers=headers) as response:
@@ -159,8 +168,11 @@ class DeploymentAdmin:
         releases, release_error = [], None
         if profile and profile.mode == "builder":
             try:
+                published = await self.worker(profile, "/api/deployments", request=request)
+                if isinstance(published, JSONResponse):
+                    return published
                 releases = [{k: r[k] for k in ("id", "name", "created_at", "legion_id")}
-                            for r in await self.worker(profile, "/api/deployments")]
+                            for r in published]
             except (httpx.HTTPError, ValueError):
                 release_error = "Engineering workspace unavailable; retry after it starts."
         entries = gateway.profiles
@@ -201,7 +213,9 @@ class DeploymentAdmin:
             if previous:
                 return JSONResponse({"job_ids": previous}, status_code=202)
             # Freeze portable content now; workers never copy source profile databases.
-            template = await self.worker(source, "/api/hosting-template/" + str(edit.release_id))
+            template = await self.worker(source, "/api/hosting-template/" + str(edit.release_id), request=request)
+            if isinstance(template, JSONResponse):
+                return template
             from .templates import validate_template
             validate_template(template)
             if edit.target_profiles:

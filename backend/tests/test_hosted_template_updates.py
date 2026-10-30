@@ -292,8 +292,8 @@ def test_admin_update_requires_owned_runtime_target_and_keeps_entry_assignment(s
     store.set_role(users[0]["id"], "admin")
     target = replace(profiles[1], mode="runtime")
     settings = replace(settings, profiles=(profiles[0], target))
-    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=(
-        template if "/hosting-template/" in request.url.path else [])))
+    transport = httpx.MockTransport(lambda request: httpx.Response(401) if request.url.path == '/api/deployment'
+                                    else httpx.Response(200, json=(template if "/hosting-template/" in request.url.path else [])))
     with TestClient(create_gateway(settings, frontend, store=store, transport=transport), base_url=ORIGIN) as client:
         payload = {"request_id": str(uuid4()), "release_id": template["source_release_id"],
                    "user_ids": [users[1]["id"]], "target_profiles": {users[1]["id"]: target.profile_id}}
