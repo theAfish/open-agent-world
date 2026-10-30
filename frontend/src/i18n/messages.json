@@ -7985,5 +7985,7 @@
   "To submit this Pack, replace its local.* ID with an ID under your authorized Marketplace namespace, then check and export again.": ["To submit this Pack, replace its local.* ID with an ID under your authorized Marketplace namespace, then check and export again.", "如需投稿，请将 local.* ID 改为你获授权的 Marketplace 命名空间下的 ID，然后重新检查并导出。"],
   "Select this exported file on the website:": ["Select this exported file on the website:", "请在网站选择此导出文件："],
   "If the page does not open, copy this address into your browser:": ["If the page does not open, copy this address into your browser:", "如果页面未打开，请复制此地址到浏览器："],
-  "Card / Pack developer guide": ["Card / Pack developer guide", "卡片与卡包开发"]
+  "Card / Pack developer guide": ["Card / Pack developer guide", "卡片与卡包开发"],
+  "Connection interrupted": ["Connection interrupted", "连接暂时中断"],
+  "Your workspace remains open. Reconnecting automatically…": ["Your workspace remains open. Reconnecting automatically…", "工作区保持打开，正在自动重连…"]
 }

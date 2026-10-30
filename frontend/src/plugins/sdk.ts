@@ -22,6 +22,8 @@ export type { WorkspaceSectionProps } from "../workspace/WorkspaceSection";
 export { ApplicationSurface, WorkspacePanel, WorkspaceToolbar, WorkspaceEmptyState } from '../workspace/WorkspacePrimitives';
 export { IconButton } from '../components/IconButton';
 export { Modal } from '../components/Modal';
+export { Tooltip, Popover } from '../components/Floating';
+export type { TooltipProps, PopoverProps, FloatingPlacement } from '../components/Floating';
 export type { WorkspaceLayoutMetadata } from "../workspace/workspaceLayoutMetadata";
 export { useWorkspaceNavigation } from '../workspace/WorkspaceNavigation';
 export type { WorkspaceNavigation } from '../workspace/WorkspaceNavigation';

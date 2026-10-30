@@ -95,9 +95,19 @@ export function RuntimeConnection() {
       connection.addEventListener("error", () => { if (isCurrent()) connection.close(); });
     };
 
+    const online = () => {
+      if (socket && socket.readyState <= WebSocket.OPEN) return;
+      if (retryTimer) window.clearTimeout(retryTimer);
+      connect();
+    };
+    const offline = () => socket?.close();
+    window.addEventListener('online', online);
+    window.addEventListener('offline', offline);
     connect();
     return () => {
       active = false;
+      window.removeEventListener('online', online);
+      window.removeEventListener('offline', offline);
       flushEvents();
       stopHeartbeat();
       if (retryTimer) window.clearTimeout(retryTimer);

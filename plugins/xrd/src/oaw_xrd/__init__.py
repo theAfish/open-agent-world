@@ -100,7 +100,7 @@ class CanvasConfig(BaseModel):
     source_node_id: str = ''
 
 class XRDPlugin:
-    descriptor = PluginDescriptor(id="research.xrd",version="0.3.1",plugin_api_version="1.35",
+    descriptor = PluginDescriptor(id="research.xrd",version="0.3.1",plugin_api_version="1.41",
         requires_plugins=("science.structure-viewer", "data.sqlite"),
         name="XRD / OAW_XRDfit",description="Reference-card screening and candidate-CIF whole-pattern fitting")
     def __init__(self, context=None):

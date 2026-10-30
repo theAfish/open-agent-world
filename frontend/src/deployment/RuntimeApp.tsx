@@ -6,6 +6,7 @@ import { WorkspaceWindow } from '../legions/LegionWorkspace';
 import { WorkspaceAccess, type PluginDeploymentAccess } from '../workspace/WorkspaceAccess';
 import { useWorldStore } from '../state/worldStore';
 import { ToastStack } from '../shell/ToastStack';
+import { BackendUnavailableNotice } from '../shell/BackendUnavailableNotice';
 import type { PluginCatalog, WorldCard, WorldEdge } from '../types/world';
 import { deploymentRequest } from './api';
 import './deployment.css';
@@ -92,5 +93,6 @@ export function RuntimeApp({ name }: { name: string }) {
         .catch(reason => useWorldStore.getState().pushToast({ tone: 'error', title: reason.message }));
     }}><LogOut size={14} />{t('Sign out')}</button>} />
     <ToastStack />
+    <BackendUnavailableNotice />
   </WorkspaceAccess.Provider>;
 }

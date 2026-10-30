@@ -199,6 +199,14 @@ def create_worker_app(config: WorkerConfig | Mapping, *, frontend_directory=None
     config = config if isinstance(config, WorkerConfig) else WorkerConfig(**config)
     manifest_path = config.data_root / "deployment.json"
     if config.mode == "runtime":
+        from backend.storage_location import LOCK, file_lock
+        from .template_updates import recover_template_manifest
+        # Complete a committed template update before create_app captures the
+        # deployment manifest. Running workers hold this same process lock.
+        with file_lock(config.data_root / LOCK):
+            prepare_hosted_binding(config.data_root, profile_id=config.profile_id, user_id=config.user_id,
+                                   application_id=config.application_id)
+            recover_template_manifest(config.data_root)
         if not manifest_path.is_file():
             raise ValueError("Runtime workers require a hosted deployment manifest")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

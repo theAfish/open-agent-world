@@ -1,0 +1,11 @@
+.ui-floating {
+  position: fixed; inset: auto; margin: 0; box-sizing: border-box;
+  max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-control);
+  background: var(--surface-raised); color: var(--ink);
+  box-shadow: 0 8px 28px var(--shadow-deep);
+  font: var(--font-size-small)/var(--line-height-body) var(--font-ui);
+  text-align: left; overflow-wrap: anywhere;
+}
+.ui-tooltip { width: max-content; max-width: min(360px, calc(100vw - 16px)); padding: 9px 12px; }
+.ui-popover { width: max-content; padding: var(--space-4); }

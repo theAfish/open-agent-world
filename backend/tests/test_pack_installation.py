@@ -199,6 +199,21 @@ def test_install_upgrade_rollback_atomic_immutable_and_restart(tmp_path):
         manager.remove_version('test.greeter', '0.1.0')
 
 
+def test_pending_installation_preserves_static_presentation_without_loading_plugin(tmp_path):
+    registry = create_builtin_registry()
+    manager = PackInstallationManager(tmp_path, registry)
+    manifest = {**deepcopy(MANIFEST), 'presentation': {
+        'id': 'test.greeter', 'name': 'Office Skills', 'description': 'Work with Office files.',
+        'cards': ['test.greeter.card'], 'packaging': 'paper', 'accent_color': '#4167a8',
+    }}
+    result = manager.install(artifact(manifest))
+    version = result['versions'][0]
+    assert version['presentation']['packaging'] == 'paper'
+    assert version['presentation']['description'] == 'Work with Office files.'
+    assert version['selected'] and not version['loaded']
+    assert not registry.has_plugin('test.greeter')
+
+
 def test_duplicate_bundled_id_and_missing_pack_dependency(tmp_path):
     registry = create_builtin_registry()
     manager = PackInstallationManager(tmp_path, registry)

@@ -1,0 +1,16 @@
+.os-theme-oaw {
+  --os-size: 12px;
+  --os-padding-perpendicular: 3px;
+  --os-padding-axis: 5px;
+  --os-track-border-radius: 999px;
+  --os-handle-border-radius: 999px;
+  --os-handle-bg: var(--scrollbar-thumb);
+  --os-handle-bg-hover: var(--scrollbar-thumb-hover);
+  --os-handle-bg-active: var(--scrollbar-thumb-hover);
+  --os-handle-min-size: 32px;
+  --os-handle-interactive-area-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .os-theme-oaw, .os-theme-oaw .os-scrollbar-handle { transition: none; }
+}

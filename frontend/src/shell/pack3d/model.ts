@@ -1,4 +1,4 @@
-import { Box3, BufferGeometry, CylinderGeometry, Group, Material, Mesh, MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, NoBlending, Vector3 } from 'three';
+import { BufferGeometry, CylinderGeometry, Group, Material, Mesh, MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, NoBlending, Vector3 } from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { boxWallGeometry, paperFlapGeometry, pouchGeometry } from './geometry';
 import { createPrint } from './print';
@@ -58,19 +58,22 @@ export function createPackModel(options: PackRenderOptions, micro: ReturnType<ty
     mesh(body, new RoundedBoxGeometry(.026, 3.21, .17, 2, .012), paper, 'left-fold', new Vector3(-1.112, 0, 0));
     mesh(body, new RoundedBoxGeometry(.026, 3.21, .17, 2, .012), paper, 'right-fold', new Vector3(1.112, 0, 0));
     mesh(body, new RoundedBoxGeometry(2.23, .026, .17, 2, .012), paper, 'bottom-fold', new Vector3(0, -1.6, 0));
+    // Wrap over the mouth and hinge at the rear crease, keeping the top fold
+    // attached to the printed flap as both lift away from the card path.
+    mesh(closure, new RoundedBoxGeometry(2.25, .023, .20, 3, .011), paper, 'top-fold', new Vector3(0, 0, .094));
+    const flap = new Group(); flap.position.z = .188; closure.add(flap);
     const flapFace = materials.front.clone(); flapFace.map = print.flap; flapFace.roughnessMap = null;
-    mesh(closure, paperFlapGeometry(), [flapFace, paper], 'arched-flap');
-    closure.position.set(0, 1.61, .103);
+    mesh(flap, paperFlapGeometry(), [flapFace, paper], 'arched-flap');
+    closure.position.set(0, 1.61, -.085);
     const stampMaterial = new MeshPhysicalMaterial({ color: '#e6dec7', roughness: .72, bumpMap: micro.paper, bumpScale: .006, name: 'paper-seal' });
-    const stamp = mesh(closure, new CylinderGeometry(.16, .16, .023, 48), stampMaterial, 'embossed-seal', new Vector3(0, -.86, .033));
+    const stamp = mesh(flap, new CylinderGeometry(.16, .16, .023, 48), stampMaterial, 'embossed-seal', new Vector3(0, -.86, .033));
     stamp.rotation.x = Math.PI / 2;
     // This small emboss needs rounded edges, but not inspection-scale subdivision.
     const leaf = new Mesh(new RoundedBoxGeometry(.025, .16, .012, 1, .012), new MeshStandardMaterial({ color: '#789071', roughness: .8 }));
-    leaf.position.set(0, -.86, .052); leaf.rotation.z = -.35; closure.add(leaf);
+    leaf.position.set(0, -.86, .052); leaf.rotation.z = -.35; flap.add(leaf);
     const bladeGeometry = new RoundedBoxGeometry(.058, .10, .009, 1, .025);
-    for (const sign of [-1, 1]) { const blade = leaf.clone(); blade.geometry = bladeGeometry; blade.position.set(sign * .035, -.85, .052); blade.rotation.z = sign * -.55; closure.add(blade); }
+    for (const sign of [-1, 1]) { const blade = leaf.clone(); blade.geometry = bladeGeometry; blade.position.set(sign * .035, -.85, .052); blade.rotation.z = sign * -.55; flap.add(blade); }
   }
-  const framingBounds = new Box3().setFromObject(root);
   const originalMaterials = new Map<Mesh, Material | Material[]>(); root.traverse(object => { if (object instanceof Mesh) originalMaterials.set(object, object.material); });
   // These depth masks let the real CardStock DOM show through the pack canvas.
   // They carry no card artwork or finish; the shared card components own both.
@@ -105,7 +108,7 @@ export function createPackModel(options: PackRenderOptions, micro: ReturnType<ty
       edge.opacity = pose.opacity; edge.depthWrite = !transparent;
     });
   }
-  return { root, framingBounds, materials, pose, surface, get cards() { return cardMeshes ?? []; },
+  return { root, materials, pose, surface, get cards() { return cardMeshes ?? []; },
     dispose() {
       surface(); const geometries = new Set<BufferGeometry>(), mats = new Set<Material>();
       root.traverse(object => { if (object instanceof Mesh) { geometries.add(object.geometry); (Array.isArray(object.material) ? object.material : [object.material]).forEach(material => mats.add(material)); } });

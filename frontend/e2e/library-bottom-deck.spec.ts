@@ -32,7 +32,7 @@ test('library keeps its size while the half-open deck expands over it for draggi
     await expect(source).toHaveAttribute('data-can-drag', 'true');
     await source.scrollIntoViewIfNeeded();
     const libraryBox = (await library.boundingBox())!;
-    const collection = library.locator('.library-card-collection');
+    const collection = library.locator('.library-card-collection [data-overlayscrollbars-viewport]');
     const scrollTop = await collection.evaluate(element => element.scrollTop);
     const a = (await source.boundingBox())!;
     await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);

@@ -958,6 +958,10 @@ button:disabled { cursor: not-allowed; opacity: 0.48; }
 .backend-unavailable strong { font-size: 9px; }
 .backend-unavailable p, .backend-unavailable small { margin: 0; color: var(--ink-soft); font-size: 8px; line-height: 1.4; }
 .backend-unavailable code { font-family: "Cascadia Code", Consolas, monospace; }
+.backend-unavailable.is-hosted { top: auto; bottom: 22px; width: min(480px, calc(100vw - 40px)); color: var(--ink-soft); border-color: var(--line); background: var(--surface-solid); }
+.backend-unavailable.is-hosted strong { color: var(--ink); font-size: 12px; }
+.backend-unavailable.is-hosted p { font-size: 11px; }
+.backend-unavailable.is-hosted > button { color: var(--ink); border-color: var(--line); font-size: 11px; }
 .backend-unavailable > button { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 38%, var(--line)); border-radius: 8px; background: var(--surface-raised); font-size: 8px; cursor: pointer; }
 
 /* ADK model connection settings */

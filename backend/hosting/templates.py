@@ -35,8 +35,8 @@ def validate_template(template) -> tuple[dict, LegionBlueprint]:
     """Validate the complete import before creating any user database or files."""
     from backend.security.model_connections import CatalogEdit, ModelCatalog
     fields = {"version", "name", "source_release_id", "root_key", "created_at",
-              "root_keys", "allow_terminal", "blueprint", "model_connections"}
-    required = fields - {"model_connections", "allow_terminal", "root_keys"}
+              "root_keys", "allow_terminal", "blueprint", "model_connections", "source_nodes", "source_identity"}
+    required = fields - {"model_connections", "allow_terminal", "root_keys", "source_nodes", "source_identity"}
     if (not isinstance(template, dict) or set(template) - fields or not required <= set(template)
             or type(template.get("version")) is not int or template["version"] != 1):
         raise ValueError("Unsupported or incomplete hosted template")
@@ -51,6 +51,8 @@ def validate_template(template) -> tuple[dict, LegionBlueprint]:
     except (TypeError, ValueError, AttributeError) as error:
         raise ValueError("Invalid hosted template release metadata") from error
     blueprint = LegionBlueprint.model_validate(template["blueprint"])
+    from .template_updates import validate_source_nodes
+    validate_source_nodes(template, blueprint)
     if type(blueprint.format_version) is not int or blueprint.format_version != 1 or not 1 <= len(blueprint.nodes) <= 101:
         raise ValueError("Unsupported hosted blueprint version or size")
     nodes = {node.key: node for node in blueprint.nodes}
@@ -148,7 +150,16 @@ async def capture_template(services, release_id: str) -> dict:
                      "root_key": node_keys[groups[0].id], "root_keys": [node_keys[group.id] for group in groups],
                      "created_at": datetime.now(UTC).isoformat(),
                      "allow_terminal": any("terminal" in operations for operations in release["permissions"].values()),
-                     "blueprint": blueprint.model_dump(mode="json"), "model_connections": models}
+                     "blueprint": blueprint.model_dump(mode="json"), "model_connections": models,
+                     "source_nodes": {key: node_id for node_id, key in node_keys.items()}}
+            from backend.application import application_snapshot
+            tenant = services.settings.tenant_scope
+            value["source_identity"] = {
+                "profile_id": application_snapshot(services)["profile_id"],
+                "organization_id": tenant.organization_id if tenant else None,
+                "workspace_id": tenant.workspace_id if tenant else None,
+                "world_id": tenant.world_id if tenant else None,
+            }
             validate_template(value)
             return value
 
@@ -172,6 +183,8 @@ async def initialize_runtime(config: WorkerConfig, template_path: Path, *, servi
             record = LegionRecord(id=str(uuid4()), name=template["name"], description="Hosted application template",
                                   blueprint=blueprint, created_at=now, updated_at=now, revision=1)
             instance = await services.instantiate_legion(record.id, LegionInstantiate(), record=record)
+            from .template_updates import record_template_provenance
+            record_template_provenance(services, template, instance.node_ids)
             # Public model definitions are portable; credentials are explicitly
             # configured per worker by the operator after provisioning.
             if template.get("model_connections"):

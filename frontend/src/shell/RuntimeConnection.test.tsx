@@ -82,3 +82,18 @@ it('ignores late messages and errors from the socket replaced during reconnect',
   expect(Socket.instances).toHaveLength(2);
   view.unmount();
 });
+
+it('reconnects immediately when the browser comes online and cancels the pending retry', () => {
+  const view = render(<RuntimeConnection />);
+  act(() => window.dispatchEvent(new Event('offline')));
+  act(() => window.dispatchEvent(new Event('online')));
+  expect(Socket.instances).toHaveLength(2);
+  act(() => Socket.instances[1].dispatchEvent(new Event('open')));
+  expect(useWorldStore.getState().refreshWorld).toHaveBeenCalledOnce();
+  expect(useWorldStore.getState().socketState).toBe('live');
+  act(() => vi.advanceTimersByTime(2000));
+  expect(Socket.instances).toHaveLength(2);
+  view.unmount();
+  act(() => window.dispatchEvent(new Event('online')));
+  expect(Socket.instances).toHaveLength(2);
+});

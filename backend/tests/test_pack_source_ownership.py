@@ -71,3 +71,63 @@ def test_unrelated_source_keeps_read_only_archive_inspection_working(tmp_path):
     manager = PackInstallationManager(tmp_path / "profile", registry)
     assert manager.inspect(unified()).manifest.id == "test.greeter-release"
     assert manager.operations() == []
+
+
+@pytest.fixture
+def selected_with_source(tmp_path):
+    from backend.packs.build import build_project
+    from backend.tests.test_declarative_packs import project
+    root = project(tmp_path)
+    archive = build_project(root, tmp_path / "notes.oawpack")
+    data = tmp_path / "profile"
+    PackInstallationManager(data, create_builtin_registry()).install(archive.read_bytes())
+    return root, data
+
+
+def test_selected_archive_wins_when_matching_source_is_discovered_on_restart(selected_with_source):
+    from backend.plugins import loader
+    root, data = selected_with_source
+    project = root / "pyproject.toml"
+    project.write_text(project.read_text().replace('version="1.0.0"', 'version="2.0.0"'))
+    registry = loader.load_plugin_registry(root.parent, data_root=data, load_entry_points=False, strict=True)
+    assert registry.installed_packs["test.notes"].version == "1.0.0"
+    assert registry.pack_sources["test.notes"] == "installed"
+    assert next(plugin for plugin in registry.plugins() if plugin.id == "test.notes").version == "1.0.0"
+    assert project.is_file()
+
+
+@pytest.mark.parametrize("distribution,owner", [("test.notes", "other.notes"), ("other.notes", "test.notes")])
+def test_selected_archive_does_not_suppress_unrelated_source_identity(selected_with_source, distribution, owner):
+    from backend.plugins import loader
+    root, data = selected_with_source
+    declaration = root / "oaw.pack.toml"
+    declaration.write_text(declaration.read_text().replace('id="test.notes"', f'id="{distribution}"')
+                           + f'\n[plugin]\nowner="{owner}"\npacks=["{owner}.default"]\n')
+    registry = loader.load_plugin_registry(root.parent, data_root=data, load_entry_points=False)
+    assert registry.has_plugin(owner)
+    assert "test.notes" not in registry.installed_packs
+    assert any("bundled/development ownership" in failure["error"] for failure in registry.load_failures)
+
+
+def test_explicit_source_tooling_can_load_source_instead_of_selected_archive(selected_with_source):
+    from backend.plugins import loader
+    root, data = selected_with_source
+    registry = loader.load_plugin_registry(root.parent, data_root=data, load_entry_points=False,
+                                           load_installed=False, load_unenrolled_sources=True, strict=True)
+    assert registry.has_plugin("test.notes")
+    assert registry.pack_sources["test.notes"] == "bundled"
+    assert registry.pack_roots["test.notes"] == root
+    assert registry.installed_packs == {}
+
+
+def test_failed_selected_archive_does_not_fall_back_to_matching_source(selected_with_source, monkeypatch):
+    from backend.plugins import loader
+    root, data = selected_with_source
+    def fail_startup(*args):
+        raise ValueError("Selected archive is unavailable")
+    monkeypatch.setattr(PackInstallationManager, "startup_entrypoint", fail_startup)
+    registry = loader.load_plugin_registry(root.parent, data_root=data, load_entry_points=False)
+    assert not registry.has_plugin("test.notes")
+    assert registry.pack_sources["test.notes"] == "installed"
+    assert registry.load_failures[0]["error"] == "Selected archive is unavailable"
+    assert PackInstallationManager(data).selected()["test.notes"].version == "1.0.0"

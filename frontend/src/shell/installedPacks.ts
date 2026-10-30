@@ -60,8 +60,10 @@ export function packInventory(snapshot: LibrarySnapshot, installations?: PackIns
     if (represented.has(id)) continue;
     const item = versions.find(row => row.selected);
     if (!item) continue;
-    packs.push({ definition: { id: `installed:${id}`, plugin_id: id, name: item.name,
-      description: item.creator?.description ?? '', accent_color: item.creator?.accent_color || undefined, packaging: item.creator?.packaging, cards: [] },
+    packs.push({ definition: { ...item.presentation, id: `installed:${id}`, plugin_id: id, name: item.presentation?.name ?? item.name,
+      description: item.presentation?.description ?? item.creator?.description ?? '',
+      accent_color: item.presentation?.accent_color ?? (item.creator?.accent_color || undefined),
+      packaging: item.presentation?.packaging ?? item.creator?.packaging, cards: [] },
       owned: true, opened: false, opened_at: null });
   }
   for (const item of installations?.inventory ?? []) {

@@ -10,7 +10,7 @@ import json
 import os
 from pathlib import Path
 import secrets
-from uuid import uuid4
+from uuid import UUID, uuid4, uuid5
 
 from .accounts import AccountStore
 from .configuration import GatewaySettings, HostedProfile, default_upstream, public_origin, read_gateway_settings, write_private_json
@@ -54,7 +54,9 @@ async def provision(directory: Path, user_id: str, *, application_id="default", 
             raise ValueError("This account already has an entry workspace; never replace a user's data implicitly")
         if not AccountStore(existing.accounts_path).get_user(user_id):
             raise ValueError("Unknown user")
-        profile_id = str(uuid4())
+        resource_hook = directory / "resource-provisioner.json"
+        profile_id = str(uuid5(UUID(user_id), "hosted-profile:" + application_id)) if (
+            resource_hook.exists() or resource_hook.is_symlink()) else str(uuid4())
         profile = HostedProfile(profile_id, user_id, application_id, name, mode,
                                 upstream or default_upstream(profile_id), secrets.token_hex(32))
         # Validate routing uniqueness before creating any profile data.
@@ -68,8 +70,14 @@ async def provision(directory: Path, user_id: str, *, application_id="default", 
             raise ValueError("Runtime profiles require --template exported from a published workspace")
         if mode == "builder" and template is not None:
             raise ValueError("Use runtime mode to initialize a published template")
+        from .provisioner import prepare_resources
+        resources = prepare_resources(directory, profile)
+        if resources is None:
+            raise ValueError("Workspace resources are pending; retry after resource readiness")
         # A failed provision is left unregistered for inspection; it can never
         # receive user traffic or replace an existing runtime.
+        for filename, resource in resources.items():
+            write_private_json(config.data_root.parent / filename, resource)
         prepare_hosted_binding(config.data_root, profile_id=profile_id, user_id=user_id, application_id=application_id)
         if mode == "runtime":
             await initialize_runtime(config, Path(template))

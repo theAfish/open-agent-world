@@ -39,11 +39,47 @@ trait does not change presentation states, persisted sizes or Composer layout.
 
 Reuse native buttons with `primary-button` or `secondary-button`, native inputs
 with `oaw-input`, and labels with `field-label`. `SchemaFields`, `IconButton`,
-and the existing focus-managed `Modal` are public SDK exports. Native `title`
-provides simple control hints; always give icon-only buttons an accessible label.
+and the existing focus-managed `Modal` are public SDK exports. Use `Tooltip` for
+control hints and always give icon-only buttons an accessible label.
 Use `oaw-table` on a semantic `<table>` and `oaw-list` on a `<ul>`. Put wide tables
 inside a scrollable content region. Existing workspace tabs and splitters retain
 keyboard access; these content helpers introduce no second tab or layout engine.
+
+### Tooltips and popovers (Plugin API 1.41)
+
+Import `Tooltip` and `Popover` from `@oaw/plugin-api`. They inherit the trigger's
+theme tokens, use the browser top layer to escape clipping and Canvas transforms,
+follow moving anchors, and flip/clamp their position at the viewport edges.
+Both accept `placement="top" | "bottom" | "left" | "right"` and `className`.
+They add no trigger wrapper, preserving flex/grid layout and existing refs/handlers.
+The single trigger must be a focusable native element or a component that forwards
+DOM events and ARIA attributes. Omit native `title` to avoid duplicate hints.
+
+```tsx
+import { Tooltip, Popover } from '@oaw/plugin-api';
+
+<Tooltip content="Drop a spectrum here, or click to choose a file">
+  <button type="button" onClick={chooseFile}>Import spectrum</button>
+</Tooltip>
+
+<Popover label="Display options" trigger={<button type="button">Options</button>}>
+  {close => <><label><input type="checkbox" /> Show reference peaks</label>
+    <button type="button" onClick={close}>Done</button></>}
+</Popover>
+```
+
+`Tooltip` is for noninteractive explanations. It opens after a 350 ms pointer
+hover (`delay` can override this), opens immediately on keyboard focus, associates
+its content through `aria-describedby`, and stays open while the pointer is over
+the explanation. Escape or activating the trigger dismisses it without changing
+the trigger's action. Interactive content belongs in `Popover`.
+
+`Popover` manages its trigger's expanded state and opens a labelled nonmodal
+dialog. Focus enters its content; Escape, outside click, focus leaving, or the
+optional render callback's `close()` dismisses it. Closing from inside returns
+focus to the trigger; Tab can leave naturally. Use `Modal` for blocking dialogs.
+Declare `plugin_api_version="1.41"` and matching manifest compatibility when using
+these components. Existing card-specific content and accents remain under Pack ownership.
 
 ## A reusable content template
 

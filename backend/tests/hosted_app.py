@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import ExitStack
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -64,7 +65,8 @@ def main():
                         if time.monotonic() > deadline:
                             raise RuntimeError("Hosted test workers did not become ready")
                         time.sleep(.1)
-            app = create_gateway(read_gateway_settings(config), repository / "frontend/dist")
+            frontend = Path(os.environ.get("OAW_TEST_FRONTEND_DIST", repository / "frontend/dist"))
+            app = create_gateway(read_gateway_settings(config), frontend)
             uvicorn.run(app, host="127.0.0.1", port=5184, proxy_headers=False, access_log=False)
         finally:
             for worker in workers:

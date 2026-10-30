@@ -193,17 +193,17 @@ test("source packs organize the collection and scoped Skills lead to their usabl
   await library.getByRole("button", { name: /^Cards/ }).click();
   await expect(library.getByRole("checkbox", { name: /Show internal cards/ })).not.toBeChecked();
   expect(await library.locator(".library-source-group").count()).toBeGreaterThan(1);
-  await expect(library.locator(".library-source-group[open]")).toHaveCount(0);
-  await expect(library.locator(".library-internal-cards")).toHaveCount(0);
+  await expect(library.locator('.library-group-stack')).toHaveCount(0);
+  await expect(library.locator('[data-internal="true"]')).toHaveCount(0);
   await page.screenshot({ path: "../.tmp/library-grouped-packs.png" });
   await library.getByLabel("Source pack", { exact: true }).selectOption(`pack:${packId}`);
   await expect(library.locator(".library-source-group")).toHaveCount(1);
   await expect(library.getByRole("heading", { name: snapshot.packs[packId].definition.name, exact: true })).toBeVisible();
   const group = library.locator(".library-source-group");
-  await group.locator(":scope > summary").click();
-  await expect(group).not.toHaveAttribute("open");
+  await group.getByRole('button', { name: /^Collapse / }).click();
+  await expect(group.getByRole('button', { name: /^Expand / })).toHaveAttribute('aria-expanded', 'false');
   await library.getByLabel("Search cards", { exact: true }).fill(owner.label);
-  await expect(group).toHaveAttribute("open", "");
+  await expect(group.locator('.library-group-stack')).toHaveCount(0);
   await library.getByRole("checkbox", { name: /Show internal cards/ }).check();
   await library.getByLabel("Search cards", { exact: true }).fill(`${owner.label} · Skill`);
   await library.getByRole("button", { name: `Inspect ${owner.label} · Skill`, exact: true }).click();
@@ -225,7 +225,7 @@ test("source packs organize the collection and scoped Skills lead to their usabl
 });
 
 
-test("compact Library cards keep actions outside their single surface", async ({ page, request }) => {
+test("compact Library cards reveal an overlay action on hover, focus and selection", async ({ page, request }, info) => {
   test.setTimeout(90000);
   let snapshot: LibrarySnapshot = await (await request.get("/api/card-library")).json();
   const id = snapshot.available_pack_ids.find(id => snapshot.packs[id].definition.name === "Core essentials")!;
@@ -249,6 +249,7 @@ test("compact Library cards keep actions outside their single surface", async ({
   const card = library.locator(`[data-library-card=${JSON.stringify(printedId)}]`).locator("..");
   const inspect = card.locator(".library-card-inspect");
   const surface = card.locator(".card-stock--compact");
+  const action = card.locator(".library-card-add");
   await expect(surface).toBeVisible();
   const inspectedId = (await inspect.getAttribute("data-library-card"))!;
   const savedFinish = normalizeCardFinish(snapshot.collection[inspectedId]?.finish);
@@ -260,22 +261,37 @@ test("compact Library cards keep actions outside their single surface", async ({
       return Number.parseFloat(lengths[2] ?? "0") > 0;
     }))).toBe(true);
     const bounds = (await surface.boundingBox())!;
-    const action = (await card.locator(".library-card-add").boundingBox())!;
-    expect(action.y).toBeGreaterThan(bounds.y + bounds.height);
+    const overlay = (await action.boundingBox())!;
+    expect(overlay.x).toBeGreaterThan(bounds.x + bounds.width / 2);
+    expect(overlay.y).toBeGreaterThanOrEqual(bounds.y);
+    expect(overlay.x + overlay.width).toBeLessThanOrEqual(bounds.x + bounds.width);
+    expect(overlay.y + overlay.height).toBeLessThanOrEqual(bounds.y + bounds.height);
   };
   await page.mouse.move(0, 0);
+  await expect(action).toHaveCSS("opacity", "0");
+  await expect(action).toHaveText("");
+  expect(await card.evaluate(element => Math.abs(element.getBoundingClientRect().height - element.querySelector('.library-card-inspect')!.getBoundingClientRect().height))).toBeLessThan(1);
   await checkSurface();
-  await page.screenshot({ path: "../.tmp/library-compact-rest.png" });
+  await page.screenshot({ path: info.outputPath("library-compact-rest.png") });
   await inspect.hover();
+  await expect(action).toHaveCSS("opacity", "1");
   await checkSurface();
-  await page.screenshot({ path: "../.tmp/library-compact-hover.png" });
+  await page.screenshot({ path: info.outputPath("library-compact-hover.png") });
+  await page.mouse.move(0, 0);
+  await expect(action).toHaveCSS("opacity", "0");
+  await inspect.focus();
+  await expect(action).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Tab");
+  await expect(action).toBeFocused();
   await inspect.focus();
   await page.keyboard.press("Enter");
   await expect(card).toHaveClass(/is-selected/);
   await expect(library.locator(".library-card-preview")).toHaveAttribute("data-finish", savedFinish);
   await library.locator(".library-card-preview").hover();
-  await library.locator(".library-card-preview").screenshot({ path: "../.tmp/library-finish-detail.png" });
-  await card.locator(".library-card-add").click();
+  await library.getByLabel("Search cards", { exact: true }).focus();
+  await expect(action).toHaveCSS("opacity", "1");
+  await library.locator(".library-card-preview").screenshot({ path: info.outputPath("library-finish-detail.png") });
+  await action.click();
   await expect(card).toHaveClass(/is-in-deck/);
   await expect(surface).toHaveCSS("border-top-color", "rgb(53, 53, 53)");
   const deckSurface = page.locator(".component-palette .palette-item").first();
@@ -284,10 +300,10 @@ test("compact Library cards keep actions outside their single surface", async ({
     await page.setViewportSize(viewport);
     const dimensions = (element: Element) => { const style = getComputedStyle(element); return [style.width, style.height]; };
     expect(await surface.evaluate(dimensions)).toEqual(await deckSurface.evaluate(dimensions));
-    await page.screenshot({ path: `../.tmp/library-unified-${viewport.width}-${viewport.height}.png` });
+    await page.screenshot({ path: info.outputPath(`library-unified-${viewport.width}-${viewport.height}.png`) });
   }
   await page.setViewportSize({ width: 640, height: 780 });
-  await page.screenshot({ path: "../.tmp/library-compact-narrow.png" });
+  await page.screenshot({ path: info.outputPath("library-compact-narrow.png") });
   expect(await library.locator(".library-body").evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   await library.getByRole("button", { name: "Close Library" }).click();
   await page.getByRole("complementary", { name: "Active card deck" }).hover();

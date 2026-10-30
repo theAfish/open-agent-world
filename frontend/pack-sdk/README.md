@@ -76,3 +76,9 @@ and `composeWorkspace`. Declare Python `plugin_api_version="1.28"` when using
 these helpers. They use host theme tokens and shared React, and remain optional.
 See the [workspace design guide](../../docs/developers/workspace-design.md) for
 content templates, optional card/section sizing and one-shot layout recipes.
+
+Plugin API 1.41 adds `Tooltip` and `Popover` with host theme tokens, native top-layer
+positioning and keyboard dismissal. They preserve trigger layout, refs and event
+handlers. Use `Tooltip` for noninteractive hints and `Popover` for small interactive
+panels. Declare the matching adapter/manifest minimum; see the workspace design
+guide for examples and focus behavior.

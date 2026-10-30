@@ -23,7 +23,7 @@ export function openingPose(packaging: PackPackaging, progress: number, count: n
   const boxSwing = phase(progress, .17, .42) * 1.95 * (1 - boxSettle);
   const closurePosition: Point = packaging === 'collector'
     ? [-1.2 * (1 - Math.cos(boxSwing)), 0, .35 + open * (.50 * (1 - boxSettle) + .11 * boxSettle) + Math.sin(boxSwing) * 1.2]
-    : packaging === 'paper' ? [0, 1.61, .103 - phase(progress, .12, .28) * .20] : [open * .58, open * .7, open * .15];
+    : packaging === 'paper' ? [0, 1.61, -.085] : [open * .58, open * .7, open * .15];
   const closureRotation: Point = packaging === 'collector' ? [0, -boxSwing, -.10 * boxSettle]
     : packaging === 'paper' ? [-open * 3.25, 0, 0] : [0, 0, -open * .24];
   return {

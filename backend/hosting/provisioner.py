@@ -1,8 +1,9 @@
 """Fixed-purpose Linux deployment reconciler; never executes browser shell commands.
 
 The root timer creates private service identities and files. Template/plugin
-initialization runs as the new workspace's unprivileged UID, inside the same
-systemd restrictions as ordinary workers. Existing workers are never stopped.
+initialization runs as the workspace's unprivileged UID, inside the same
+systemd restrictions as ordinary workers. Explicit updates stop only their
+target worker; new deployments leave existing workers running.
 """
 from __future__ import annotations
 
@@ -14,6 +15,9 @@ import os
 from pathlib import Path
 import secrets
 import stat
+import re
+import sqlite3
+from contextlib import closing
 
 from .configuration import HostedProfile, default_upstream, identifier, read_gateway_settings, write_private_json
 from .deployments import DeploymentStore, MAX_TEMPLATE
@@ -63,7 +67,72 @@ def read_regular(path, limit):
         return data
 
 
-def install_profile(directory, application, profile, config, template, settings, name):
+def prepare_resources(directory: Path, profile: HostedProfile) -> dict | None:
+    """Run only the root-owned operator hook; None keeps the same job pending."""
+    import importlib
+    path = directory / "resource-provisioner.json"
+    if path.is_symlink():
+        raise ValueError("Resource provisioner configuration must not use symlinks")
+    if not path.exists():
+        return {}
+    if path.resolve(strict=True) != path.absolute():
+        raise ValueError("Resource provisioner configuration must not traverse symlinks")
+    _trusted(path)
+    value = json.loads(read_regular(path, 1024 * 1024))
+    if (not isinstance(value, dict) or set(value) != {"handler", "settings"}
+            or not isinstance(value["settings"], dict)
+            or not isinstance(value["handler"], str)
+            or not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*", value["handler"])):
+        raise ValueError("Invalid operator resource provisioner configuration")
+    module, attribute = value["handler"].split(":", 1)
+    handler = getattr(importlib.import_module(module), attribute)
+    files = handler(profile, value["settings"], directory)
+    if files is None:
+        return None
+    return validate_resource_files(files)
+
+
+def validate_resource_files(files):
+    reserved = {"worker.json", "template.json", "update-template.json", "hosting.json",
+                "deployment.json", "hosted-profile.json", "resource-provisioner.json"}
+    if not isinstance(files, dict) or len(files) > 16:
+        raise ValueError("Resource provisioner must return bounded JSON assignments")
+    for filename, value in files.items():
+        if (not isinstance(filename, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}\.json", filename)
+                or filename.lower() in reserved or not isinstance(value, dict)):
+            raise ValueError("Resource assignment must use a nonreserved JSON basename")
+    if len(json.dumps(files, allow_nan=False).encode()) > 1024 * 1024:
+        raise ValueError("Resource assignments exceed 1 MiB")
+    return files
+
+
+def profile_task_unit(directory, application, profile_id, name, operation, *, template=False):
+    if operation not in {"initialize", "update"}:
+        raise ValueError("Unsupported workspace task")
+    instance = directory / "instances" / profile_id
+    view = f"/var/lib/{name}-profile"
+    common = _common(str(application), service_user(name, profile_id), "2G", 256).replace("Restart=on-failure", "Restart=no")
+    argument = ""
+    if template:
+        filename = "template.json" if operation == "initialize" else "update-template.json"
+        argument = f" --template {view}/{filename}"
+    return f"""# OAW hosting directory: {directory}
+[Unit]
+Description={operation.capitalize()} OAW workspace
+
+[Service]
+Type=oneshot
+{common}TimeoutStartSec=180
+EnvironmentFile={instance}/worker.env
+EnvironmentFile=-{directory}/worker-common.env
+BindReadOnlyPaths={instance}:{view}
+BindPaths={instance}/data:{view}/data
+InaccessiblePaths={directory} /run/{name}
+ExecStart={application}/backend/.venv/bin/python -m backend.hosting.provisioner {operation} --config {view}/worker.json{argument}
+"""
+
+
+def install_profile(directory, application, profile, config, template, settings, name, *, resource_files=None):
     """Only NEW UUID-named instances. No modifications to another worker's tree."""
     import pwd
     instance = directory / "instances" / profile.profile_id
@@ -76,10 +145,13 @@ def install_profile(directory, application, profile, config, template, settings,
         pass
     else:
         raise ValueError("Deployment service identity already exists")
+    resource_files = validate_resource_files(resource_files or {})
     instance.mkdir(mode=0o700, parents=True)
     write_private_json(instance / "worker.json", {**asdict(config), "data_root": "data"})
     if template is not None:
         write_private_json(instance / "template.json", template)
+    for filename, value in resource_files.items():
+        write_private_json(instance / filename, value)
     (instance / "data").mkdir(mode=0o700)
     (instance / "worker.env").write_text("# Shared settings are inherited from worker-common.env.\n", encoding="utf-8")
     (instance / "worker.env").chmod(0o600)
@@ -89,7 +161,10 @@ def install_profile(directory, application, profile, config, template, settings,
     user = pwd.getpwnam(account)
     os.chown(instance, 0, user.pw_gid)
     instance.chmod(0o750)
-    for filename in ("worker.json", "template.json") if template is not None else ("worker.json",):
+    private_files = ["worker.json", *resource_files]
+    if template is not None:
+        private_files.append("template.json")
+    for filename in private_files:
         os.chown(instance / filename, 0, user.pw_gid)
         (instance / filename).chmod(0o640)
     _own(_plain_tree(instance / "data"), user.pw_uid, user.pw_gid)
@@ -97,24 +172,8 @@ def install_profile(directory, application, profile, config, template, settings,
                             directory=str(directory), application=str(application), name=name)
     worker = f"{name}-worker-{profile.profile_id}"
     bootstrap = worker + "-initialize.service"
-    view = f"/var/lib/{name}-profile"
-    common = _common(str(application), account, "2G", 256).replace("Restart=on-failure", "Restart=no")
-    init = f"""# OAW hosting directory: {directory}
-[Unit]
-Description=Initialize new OAW workspace
-
-[Service]
-Type=oneshot
-{common}TimeoutStartSec=180
-EnvironmentFile={instance}/worker.env
-EnvironmentFile=-{directory}/worker-common.env
-BindReadOnlyPaths={instance}:{view}
-BindPaths={instance}/data:{view}/data
-InaccessiblePaths={directory} /run/{name}
-ExecStart={application}/backend/.venv/bin/python -m backend.hosting.provisioner initialize --config {view}/worker.json{f' --template {view}/template.json' if template is not None else ''}
-"""
     units = {worker + suffix: rendered[worker + suffix] for suffix in (".service", ".socket")}
-    units[bootstrap] = init
+    units[bootstrap] = profile_task_unit(directory, application, profile.profile_id, name, "initialize", template=template is not None)
     for filename, content in units.items():
         path = Path("/etc/systemd/system") / filename
         # Exclusive creation; never overwrite an existing service, even after a crash.
@@ -129,6 +188,46 @@ ExecStart={application}/backend/.venv/bin/python -m backend.hosting.provisioner 
     wants = Path("/etc/systemd/system") / (name + ".target.wants")
     wants.mkdir(exist_ok=True)
     (wants / (worker + ".socket")).symlink_to(Path("/etc/systemd/system") / (worker + ".socket"))
+
+
+def update_profile(directory, application, profile, template, name, job_id):
+    """Update one existing profile inside its unchanged service boundary."""
+    import pwd
+    instance = directory / "instances" / profile.profile_id
+    if instance.is_symlink() or not instance.is_dir():
+        raise ValueError("Existing profile directory is unavailable")
+    value = json.loads(read_regular(instance / "worker.json", 1024 * 1024))
+    if value.get("data_root") != "data":
+        raise ValueError("Hosted updates require the existing private data directory")
+    value["data_root"] = instance / "data"
+    config = WorkerConfig(**value)
+    if (config.profile_id != profile.profile_id or config.user_id != profile.user_id
+            or config.application_id != profile.application_id or config.secret != profile.secret
+            or config.mode != "runtime" or profile.mode != "runtime"):
+        raise ValueError("Existing worker identity differs from its registered profile")
+    with closing(sqlite3.connect((instance / "data/database/world.sqlite3").as_uri() + "?mode=ro", uri=True)) as db:
+        if db.execute("SELECT 1 FROM runs WHERE status IN ('created','running','waiting') LIMIT 1").fetchone():
+            raise ValueError("Finish or stop active runs before updating the workspace")
+    user = pwd.getpwnam(service_user(name, profile.profile_id))
+    target = instance / "update-template.json"
+    write_private_json(target, template)
+    os.chown(target, 0, user.pw_gid)
+    target.chmod(0o640)
+    worker = f"{name}-worker-{profile.profile_id}"
+    task = f"{worker}-update-{identifier(job_id)}.service"
+    unit = Path("/etc/systemd/system") / task
+    with unit.open("x", encoding="utf-8") as stream:
+        stream.write(profile_task_unit(directory, application, profile.profile_id, name, "update", template=True))
+    unit.chmod(0o644)
+    _run("systemd-analyze", "verify", str(unit))
+    _run("systemctl", "daemon-reload")
+    _run("systemctl", "stop", worker + ".socket", worker + ".service")
+    try:
+        _run("systemctl", "start", task)
+    finally:
+        # A rejected compatible update retains the old graph/manifest. A
+        # committed handoff is recovered by ordinary worker startup.
+        _run("systemctl", "start", worker + ".socket")
 
 
 def register_profile(directory, profile, name):
@@ -175,7 +274,7 @@ def enable(directory, application, name):
 
 
 def engineering(directory, application, name, username):
-    from uuid import uuid4
+    from uuid import UUID, uuid5
     from .accounts import AccountStore
     from backend.storage_location import file_lock
     directory, application, name = check_installation(directory, application, name)
@@ -187,14 +286,19 @@ def engineering(directory, application, name, username):
         user_id = users[0]["id"]
         if any(p.user_id == user_id for p in settings.profiles):
             raise ValueError("Administrator already has a workspace")
-        profile_id = str(uuid4())
+        # A pending provider operation must see the same resource identity when
+        # an operator repeats engineering initialization after readiness.
+        profile_id = str(uuid5(UUID(user_id), name + ":engineering"))
         profile = HostedProfile(profile_id, user_id, "engineering", "Engineering workspace", "builder",
                                 default_upstream(profile_id, name), secrets.token_hex(32))
         config = WorkerConfig(profile_id, user_id, profile.application_id, profile.mode, settings.public_origin,
                               profile.secret, directory / "instances" / profile_id / "data",
                               shared_models_origin=settings.shared_models_origin,
                               shared_environment_origin=settings.shared_environment_origin)
-        install_profile(directory, application, profile, config, None, settings, name)
+        resources = prepare_resources(directory, profile)
+        if resources is None:
+            raise ValueError("Workspace resources are pending; retry after the operator confirms readiness")
+        install_profile(directory, application, profile, config, None, settings, name, resource_files=resources)
         register_profile(directory, profile, name)
         return profile.public()
 
@@ -216,16 +320,21 @@ def tick(directory: Path, application: Path, name="oaw-hosted"):
         store = DeploymentStore(control / "deployments.sqlite3")
         with store.transaction(immediate=True) as db:
             db.execute("UPDATE hosting_jobs SET status='interrupted',message=? WHERE status='preparing'",
-                       ("Deployment interrupted; operator inspection required. Existing workspaces are unchanged.",))
-            row = db.execute("SELECT * FROM hosting_jobs WHERE status='queued' ORDER BY created_at LIMIT 1").fetchone()
+                       ("Deployment interrupted; operator inspection of the instance is required before retrying.",))
+            row = db.execute("SELECT * FROM hosting_jobs WHERE status IN ('queued','waiting_resources','preparing_resources') "
+                             "ORDER BY CASE status WHEN 'queued' THEN 0 ELSE 1 END, created_at LIMIT 1").fetchone()
             if row is None:
                 return
             job = dict(row)
-            db.execute("UPDATE hosting_jobs SET status='preparing' WHERE id=?", (job["id"],))
+            phase = "preparing" if job.get("operation") == "update" else "preparing_resources"
+            db.execute("UPDATE hosting_jobs SET status=? WHERE id=?", (phase, job["id"]))
         try:
             for field in ("id", "profile_id", "requested_by", "user_id"):
                 identifier(job[field])
-            if job["profile_id"] != job["id"] or job["mode"] not in {"builder", "runtime"}:
+            operation = job.get("operation", "initialize")
+            if (operation not in {"initialize", "update"} or job["mode"] not in {"builder", "runtime"}
+                    or operation == "initialize" and job["profile_id"] != job["id"]
+                    or operation == "update" and job["mode"] != "runtime"):
                 raise ValueError("Invalid deployment identity or mode")
             if len(job["template_json"].encode()) > MAX_TEMPLATE:
                 raise ValueError("Template too large")
@@ -235,6 +344,16 @@ def tick(directory: Path, application: Path, name="oaw-hosted"):
             if not actor or not actor["enabled"] or actor["role"] != "admin" or not target or not target["enabled"] or target["role"] == "admin":
                 raise ValueError("Deployment account authorization changed")
             settings = read_gateway_settings(control / "hosting.json")
+            if operation == "update":
+                profile = next((profile for profile in settings.profiles if profile.profile_id == job["profile_id"]
+                                and profile.user_id == job["user_id"] and profile.mode == "runtime"), None)
+                if profile is None:
+                    raise ValueError("Update target is not an existing runtime owned by this account")
+                update_profile(directory, application, profile, template, name, job["id"])
+                with store.transaction(immediate=True) as db:
+                    db.execute("UPDATE hosting_jobs SET status='ready',message=? WHERE id=?",
+                               ("Workspace updated. Its identity, user data and entry assignment are unchanged.", job["id"]))
+                return
             if len(settings.profiles) >= 100:
                 raise ValueError("POC limit of 100 retained workspaces reached")
             profile = HostedProfile(job["id"], job["user_id"], "release-" + template["source_release_id"],
@@ -243,7 +362,15 @@ def tick(directory: Path, application: Path, name="oaw-hosted"):
                                   settings.public_origin, profile.secret, directory / "instances" / profile.profile_id / "data",
                                   shared_models_origin=settings.shared_models_origin,
                                   shared_environment_origin=settings.shared_environment_origin)
-            install_profile(directory, application, profile, config, template, settings, name)
+            resources = prepare_resources(directory, profile)
+            if resources is None:
+                with store.transaction(immediate=True) as db:
+                    db.execute("UPDATE hosting_jobs SET status='waiting_resources',message=? WHERE id=?",
+                               ("Waiting for workspace resources. No workspace has been initialized.", job["id"]))
+                return
+            with store.transaction(immediate=True) as db:
+                db.execute("UPDATE hosting_jobs SET status='preparing' WHERE id=?", (job["id"],))
+            install_profile(directory, application, profile, config, template, settings, name, resource_files=resources)
             register_profile(directory, profile, name)
             with store.transaction(immediate=True) as db:
                 db.execute("UPDATE hosting_jobs SET status='ready',message=? WHERE id=?",
@@ -255,7 +382,9 @@ def tick(directory: Path, application: Path, name="oaw-hosted"):
             logging.exception("Workspace deployment failed: %s", job["id"])
             with store.transaction(immediate=True) as db:
                 db.execute("UPDATE hosting_jobs SET status='failed',message=? WHERE id=?",
-                           ("Deployment failed; operator inspection required. Existing workspaces are unchanged.", job["id"]))
+                           ("Workspace update failed; operator inspection required. No replacement workspace was created."
+                            if job.get("operation") == "update" else
+                            "Deployment failed; operator inspection required. Existing workspaces are unchanged.", job["id"]))
 
 
 def main():
@@ -268,9 +397,10 @@ def main():
         job.add_argument("--name", default="oaw-hosted")
         if operation == "engineering":
             job.add_argument("--user", required=True)
-    init = commands.add_parser("initialize")
-    init.add_argument("--config", type=Path, required=True)
-    init.add_argument("--template", type=Path)
+    for operation in ("initialize", "update"):
+        init = commands.add_parser(operation)
+        init.add_argument("--config", type=Path, required=True)
+        init.add_argument("--template", type=Path, required=operation == "update")
     args = parser.parse_args()
     if args.command == "tick":
         tick(args.directory, args.application, args.name)
@@ -296,7 +426,11 @@ def main():
             if factory_name:
                 module, attribute = factory_name.split(":", 1)
                 factory = getattr(importlib.import_module(module), attribute)
-            asyncio.run(initialize_runtime(config, args.template, services_factory=factory))
+            if args.command == "update":
+                from .template_updates import update_runtime
+                asyncio.run(update_runtime(config, args.template, services_factory=factory))
+            else:
+                asyncio.run(initialize_runtime(config, args.template, services_factory=factory))
 
 
 if __name__ == "__main__":

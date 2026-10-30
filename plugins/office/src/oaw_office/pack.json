@@ -1,0 +1,8 @@
+{
+  "id": "oaw.office.default",
+  "name": "Office Skills",
+  "description": "Read, edit and create Word documents, Excel workbooks and PowerPoint presentations with your Agent. Includes a connected Office workbench.",
+  "cards": ["oaw.office.toolbox", "oaw.office.toolbox.skill"],
+  "accent_color": "#4167a8",
+  "packaging": "paper"
+}

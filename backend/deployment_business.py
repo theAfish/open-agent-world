@@ -104,6 +104,8 @@ def business_router(manifest):
         if current.type == "legion" or request.model_fields_set - {"config", "name", "expected_revision"}:
             raise HTTPException(403, "Application layout and membership are managed by the administrator")
         validate_config(request.config or {}, services, current)
+        if set(request.config or {}) - set(business_access(manifest, services, card_id)["config_fields"]):
+            raise HTTPException(404, "This configuration is not published")
         with business_mutation():
             result = await services.update_card(card_id, request)
         return projected_card(manifest, services, result)
@@ -137,9 +139,14 @@ def business_router(manifest):
             if request.path_params.get(key):
                 require(request.path_params[key], services)
 
-    @router.post("/nodes/{node_id}/transformations/{operation}")
-    async def transform(node_id: str, operation: str, request: TransformationRequest, services=Depends(get_services)):
+    def transformation_access(node_id: str, operation: str, services=Depends(get_services)):
         require(node_id, services)
+        document = services.plugins.node_type(services.world.get_card(node_id).type).document
+        if document is None or operation not in document.transformations:
+            raise HTTPException(404, "This transformation is not published")
+
+    @router.post("/nodes/{node_id}/transformations/{operation}", dependencies=[Depends(transformation_access)])
+    async def transform(node_id: str, operation: str, request: TransformationRequest, services=Depends(get_services)):
         if request.source_id:
             require(request.source_id, services)
         with business_mutation():

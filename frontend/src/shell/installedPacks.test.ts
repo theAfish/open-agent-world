@@ -26,6 +26,20 @@ it('does not synthesize an inventory pack for retained files from an uninstalled
     .map(item => item.pack.definition.id)).toEqual(['core', 'installed:local.tools']);
 });
 
+it('uses static plugin presentation before restart without exposing unloaded cards', () => {
+  const state = snapshot();
+  delete state.packs.local;
+  const inventory = packInventory(state, { restart_required: true, versions: [{ ...version,
+    selected: true, creator: null, presentation: { id: 'local.cards', name: 'Office Skills',
+      description: 'Work with Office files.', cards: ['local.word'], packaging: 'paper', accent_color: '#4167a8' },
+  }] });
+  const pending = inventory.find(item => item.pack.definition.plugin_id === 'local.tools')!;
+  expect(pending.pack.definition).toMatchObject({ name: 'Office Skills',
+    description: 'Work with Office files.', packaging: 'paper', accent_color: '#4167a8', cards: [] });
+  expect(pending.registered).toBe(false);
+  expect(state.available_pack_ids).toEqual([]);
+});
+
 it('hides dismissed historical packs without deleting their saved metadata', () => {
   const state = snapshot();
   state.packs.local.definition.source = 'bundled';

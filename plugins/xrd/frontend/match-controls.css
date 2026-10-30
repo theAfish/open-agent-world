@@ -85,9 +85,6 @@
 .xrd-input-status svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
 .xrd-input-status.is-loading svg { animation:xrd-input-spin .8s linear infinite; stroke-dasharray:42 15; color:var(--xrd-accent); }
 .xrd-input-status.is-ready path { stroke-dasharray:1; stroke-dashoffset:0; animation:xrd-input-check .45s ease-out; }
-.xrd-input-list > button[data-import-hint] { position:relative; }
-.xrd-input-list > button[data-import-hint]::after { content:attr(data-import-hint); position:absolute; bottom:calc(100% + 8px); left:0; max-width:calc(100% - 24px); width:max-content; padding:9px 12px; background:#2a2520; border:1px solid var(--xrd-accent); border-radius:7px; color:var(--xrd-title); box-shadow:0 6px 20px #0005; z-index:5; pointer-events:none; opacity:0; visibility:hidden; font-size:12px; line-height:1.5; font-weight:400; }
-.xrd-input-list > button[data-import-hint]:is(:hover,:focus-visible)::after { opacity:1; visibility:visible; }
 @keyframes xrd-input-spin { to { transform:rotate(360deg); } }
 @keyframes xrd-input-check { from { stroke-dashoffset:1; } to { stroke-dashoffset:0; } }
 @media(prefers-reduced-motion:reduce) { .xrd-input-status svg,.xrd-input-status.is-ready path { animation:none; } }

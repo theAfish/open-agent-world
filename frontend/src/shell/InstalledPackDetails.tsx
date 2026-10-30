@@ -28,7 +28,7 @@ export function InstalledPackDetails({ pack, versions, inventory, registered, fa
   const version = item?.version ?? inventory?.version ?? plugin?.descriptor.version;
   const description = item?.creator?.description || definition.description;
   const presetCount = Object.values(snapshot.preset_pack_ids ?? {}).filter(ids => ids.includes(definition.id)).length;
-  const source = inventory && inventory.source !== 'installed' ? inventory : undefined;
+  const source = !selected && inventory && inventory.source !== 'installed' ? inventory : undefined;
   const removableId = selected?.id ?? (source?.enrolled !== false ? source?.id : undefined);
   const canDismiss = registered && !plugin?.installed && !removableId && !inventory && !versions.length;
   const environmentErrors = [...new Set([...failures.map(failure => failure.error),

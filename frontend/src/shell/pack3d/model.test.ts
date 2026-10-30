@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { Mesh, MeshBasicMaterial, NoBlending, Texture } from 'three';
+import { Mesh, MeshBasicMaterial, NoBlending, Raycaster, Texture, Vector3 } from 'three';
 import { createPackModel } from './model';
 import { createMicrostructure } from './materials';
 import type { PackRenderOptions } from './types';
@@ -45,4 +45,23 @@ it.each(['standard', 'premium', 'paper', 'collector'] as const)('defers %s card 
   model.dispose(); micro.dispose(); clay.dispose();
   expect(geometryDisposed).toHaveBeenCalledTimes(1);
   expect(faceDisposed).toHaveBeenCalledTimes(1);
+});
+
+it('closes the paper mouth across its full depth and clears it again when the flap opens', () => {
+  const options: PackRenderOptions = { id: 'paper', name: 'Paper', description: '', edition: '', packaging: 'paper', color: '#78967b', count: 0, countLabel: 'CARDS',
+    opened: false, revealing: false, finishVisible: false, reducedMotion: false, view: {}, cards: [] };
+  const micro = createMicrostructure(), model = createPackModel(options, micro, () => {});
+  try {
+    for (const progress of [0, .3, .6, 1, 0]) {
+      model.pose(progress, false); model.root.updateMatrixWorld(true);
+      for (const x of [-1.08, -.64, 0, .64, 1.08]) for (const z of [-.06, 0, .06]) {
+        const hits = new Raycaster(new Vector3(x, 3, z), new Vector3(0, -1, 0)).intersectObject(model.root);
+        expect(hits.length).toBeGreaterThan(0);
+        if (progress === 0) {
+          expect(hits[0].point.y).toBeGreaterThan(1.59);
+          expect(hits[0].point.y).toBeLessThan(1.64);
+        } else expect(hits[0].point.y).toBeLessThan(-1.57);
+      }
+    }
+  } finally { model.dispose(); micro.dispose(); }
 });

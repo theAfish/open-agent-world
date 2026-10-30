@@ -35,7 +35,9 @@ it('maps the contact shadow without mirroring its ground-plane direction', () =>
 it('slides the whole paper stack through the mouth before fanning or tilting', () => {
   for (let frame = 0; frame <= 100; frame++) {
     const progress = frame / 100, motion = openingPose('paper', progress, 3);
-    const flap = orientedBox(new Vector3(0, -.455, .006), new Vector3(1.145, .464, .014), transform(motion.closurePosition, motion.closureRotation));
+    const hinge = transform(motion.closurePosition, motion.closureRotation);
+    const flap = orientedBox(new Vector3(0, -.455, .194), new Vector3(1.145, .464, .014), hinge);
+    const topFold = orientedBox(new Vector3(0, 0, .094), new Vector3(1.125, .0115, .10), hinge);
     for (const card of motion.cards) {
       const bounds = cardBounds(card);
       if (bounds.min.y <= 1.63) {
@@ -46,6 +48,7 @@ it('slides the whole paper stack through the mouth before fanning or tilting', (
       if (progress >= PACK_OPENING_PRESETS.paper.clear) expect(bounds.min.y).toBeGreaterThan(1.63);
       const stock = new OBB(new Vector3(), new Vector3(.82, 1.14, .013)).applyMatrix4(transform(card.position, card.rotation, card.scale));
       expect(stock.intersectsOBB(flap), `paper frame ${frame}, card z ${card.position[2]}`).toBe(false);
+      expect(stock.intersectsOBB(topFold), `paper top fold frame ${frame}, card z ${card.position[2]}`).toBe(false);
     }
   }
 });

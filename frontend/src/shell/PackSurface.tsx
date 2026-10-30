@@ -91,7 +91,7 @@ export function PackSurface({ definition, edition, cards, count, opened, phase =
         renderer.current?.destroy(); renderer.current = undefined;
       }, 1500);
     }, { rootMargin: '60px' });
-    visibility.observe(canvas.current);
+    visibility.observe(canvas.current.parentElement!);
     return () => { cancelled = true; visibility.disconnect(); window.clearTimeout(release); renderer.current?.destroy(); renderer.current = undefined; };
   }, []);
   useEffect(() => {

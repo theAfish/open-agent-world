@@ -8,6 +8,10 @@ Use the minimum version required by every API your Pack calls. Older feature
 levels remain compatible unless the contract explicitly states otherwise. The
 following requirements are API facts, not desktop release availability.
 
+Plugin API 1.41 provides shared frontend `Tooltip` and `Popover` components with
+theme tokens, top-layer positioning, viewport collision handling and keyboard
+dismissal. See [workspace design](../developers/workspace-design.md#tooltips-and-popovers-plugin-api-141).
+
 Plugin API 1.40 provides `CapabilityContext.read_artifact_file(capability, collection_id,
 version_id, path, max_bytes=...)` for trusted plugin handlers to consume an authorized
 Artifact Collection file or a sent Conversation attachment. The host checks the

@@ -1,4 +1,4 @@
-import { ACESFilmicToneMapping, Box3, DirectionalLight, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, OrthographicCamera,
+import { ACESFilmicToneMapping, DirectionalLight, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, OrthographicCamera,
   PCFShadowMap, PMREMGenerator, Scene, SRGBColorSpace, WebGLRenderer, type BufferGeometry, type Material, type WebGLRenderTarget } from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createMicrostructure } from './materials';
@@ -36,7 +36,6 @@ class PackRenderer {
   readonly key = new DirectionalLight('#fff3df', 2.0);
   readonly fill = new DirectionalLight('#dceeff', .65);
   readonly contact = createContactShadow();
-  readonly bounds = new Box3();
   environment!: WebGLRenderTarget;
   private frame = 0;
   private lost = false;
@@ -44,7 +43,7 @@ class PackRenderer {
   private shadowPrepared = false;
   private readonly intersections = new IntersectionObserver(entries => {
     for (const entry of entries) {
-      const slot = [...this.slots].find(item => item.canvas === entry.target);
+      const slot = [...this.slots].find(item => item.canvas.parentElement === entry.target);
       if (!slot) continue;
       slot.visible = entry.isIntersecting;
       if (slot.visible) slot.dirty = true;
@@ -132,7 +131,7 @@ class PackRenderer {
     // Prepare the uppermost unfinished visible row before lower rows. Already
     // displayed views keep round-robin service so hover/opening stays responsive.
     const waiting = slots.filter(slot => slot.visible && !slot.ready && slot.canvas.isConnected)
-      .map(slot => ({ slot, bounds: slot.canvas.getBoundingClientRect() })).filter(item => item.bounds.width && item.bounds.height)
+      .map(slot => ({ slot, bounds: slot.canvas.parentElement!.getBoundingClientRect() })).filter(item => item.bounds.width && item.bounds.height)
       .sort((a, b) => a.bounds.top - b.bounds.top || a.bounds.left - b.bounds.left);
     const row = waiting.filter(item => item.bounds.top < (waiting[0]?.bounds.top ?? 0) + 1).map(item => item.slot);
     const ordered = [...row, ...slots.slice(start), ...slots.slice(0, start)].filter((slot, index, all) => all.indexOf(slot) === index);
@@ -177,18 +176,14 @@ class PackRenderer {
         this.key.position.set(-3.5 * Math.cos(light) + 4 * Math.sin(light), 5.5, 5 * Math.cos(light) + 3.5 * Math.sin(light));
         slot.model.root.rotation.set((slot.pitch + slot.tiltY) * degrees, (slot.yaw + slot.tiltX) * degrees, 0);
         slot.model.root.updateMatrixWorld(true); this.camera.updateMatrixWorld();
-        // Frame the sealed package so moving cards and closures never move the body.
-        this.bounds.copy(slot.model.framingBounds).applyMatrix4(slot.model.root.matrixWorld).applyMatrix4(this.camera.matrixWorldInverse);
+        // The canvas extends beyond the touch area; keep the pack's scale and pivot fixed inside it.
         const frameHeight = canvas.parentElement!.clientHeight;
-        const aspect = width / frameHeight, margin = .16;
-        const viewHeight = Math.max(4.12, this.bounds.max.y - this.bounds.min.y + margin * 2,
-          (this.bounds.max.x - this.bounds.min.x + margin * 2) / aspect);
+        const aspect = width / frameHeight, viewHeight = 4.12;
         const halfWidth = viewHeight * aspect / 2;
-        const centerX = Math.max(this.bounds.max.x - halfWidth + margin, Math.min(0, this.bounds.min.x + halfWidth - margin));
-        const centerY = Math.max(this.bounds.max.y - viewHeight / 2 + margin, Math.min(0, this.bounds.min.y + viewHeight / 2 - margin));
-        this.camera.left = centerX - halfWidth; this.camera.right = centerX + halfWidth;
-        this.camera.top = viewHeight / 2 + centerY + viewHeight * (height / frameHeight - 1);
-        this.camera.bottom = -viewHeight / 2 + centerY; this.camera.updateProjectionMatrix();
+        const bottom = -viewHeight * .7;
+        this.camera.left = -halfWidth; this.camera.right = halfWidth;
+        this.camera.top = bottom + viewHeight * height / frameHeight;
+        this.camera.bottom = bottom; this.camera.updateProjectionMatrix();
         slot.model.cards.forEach(({ mesh, opacity }, index) => {
           const element = slot.cardLayer.children[index] as HTMLElement | undefined;
           if (!element?.offsetWidth || !element.offsetHeight) return;
@@ -231,7 +226,7 @@ class PackRenderer {
       yaw: defaultYaw(options), pitch: options.view.pitch ?? -3, hoverX: 0, hoverY: 0, tiltX: 0, tiltY: 0, drawnAt: performance.now(), onReady };
     this.slots.add(slot);
     const resize = new ResizeObserver(() => { slot.dirty = true; this.invalidate(); }); resize.observe(canvas);
-    this.intersections.observe(canvas);
+    this.intersections.observe(canvas.parentElement!);
     this.invalidate();
     return {
       update: next => {
@@ -251,7 +246,7 @@ class PackRenderer {
       rotate: (yaw, pitch) => { slot.yaw = yaw; slot.pitch = Math.max(-75, Math.min(75, pitch)); slot.hoverX = slot.hoverY = slot.tiltX = slot.tiltY = 0; slot.dirty = true; this.invalidate(); },
       angles: () => ({ yaw: slot.yaw, pitch: slot.pitch }),
       hover: (x, y) => { if (slot.options.reducedMotion) return; const angles = hoverAngles(x, y); if (slot.hoverX === angles.yaw && slot.hoverY === angles.pitch) return; slot.hoverX = angles.yaw; slot.hoverY = angles.pitch; slot.dirty = true; this.invalidate(); },
-      destroy: () => { resize.disconnect(); this.intersections.unobserve(canvas); slot.preparing = undefined; slot.model?.dispose(); this.slots.delete(slot); if (!this.slots.size) scheduleDispose(this); },
+      destroy: () => { resize.disconnect(); this.intersections.unobserve(canvas.parentElement!); slot.preparing = undefined; slot.model?.dispose(); this.slots.delete(slot); if (!this.slots.size) scheduleDispose(this); },
     };
   }
   dispose() {

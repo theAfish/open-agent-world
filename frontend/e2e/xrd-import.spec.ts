@@ -37,6 +37,69 @@ async function openWorkspace(page:Page,id:string){
   await expect(workspace).toBeVisible();return workspace;
 }
 
+test('XRD input tooltip follows the host theme and a scaled Canvas without changing file selection',async({page,request})=>{
+  const app=await(await request.get('/api/application')).json();
+  await request.patch('/api/application/preferences',{data:{profile_id:app.profile_id,generation:app.generation,changes:{'oaw-onboarding-v1':JSON.stringify({version:1,state:{status:'skipped'}}),'oaw.locale':'en','oaw-canvas-viewport-v1':null,'oaw-node-surfaces-v1':null}}});
+  const ids:string[]=[];
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+  try{
+    for(const [type,name,x] of [['xrd.match','Tooltip matching',300],['xrd.spectrum-canvas','Tooltip spectrum',1500]] as const){
+      const response=await request.post('/api/nodes',{data:{type,name,position:{x,y:200},config:type==='xrd.spectrum-canvas'?{source_node_id:ids[0]}:{}}});
+      expect(response.status(),await response.text()).toBe(201);ids.push((await response.json()).id);
+    }
+    expect((await request.post('/api/edges',{data:{source:ids[0],target:ids[1],relationship:'xrd.frames'}})).status()).toBe(201);
+    await page.setViewportSize({width:1440,height:1000});
+    await page.goto('/');
+    await page.getByRole('button',{name:'Fit view',exact:true}).click();
+    const workspace=await openWorkspace(page,ids[0]);
+    const camera=await page.addStyleTag({content:'/* Position the test camera for readable content captures. */'});
+    const positionCamera=async(scale:number,x=30,y=30)=>{
+      await expect.poll(()=>camera.evaluate((element,{id,scale,x,y})=>{
+        element.textContent=`.react-flow__viewport{transform:translate(0,0) scale(${scale})!important}`;
+        const host=document.querySelector(`[data-workspace-node-id="${id}"]`)!;
+        const rect=host.getBoundingClientRect();
+        element.textContent=`.react-flow__viewport{transform:translate(${x-rect.x}px,${y-rect.y}px) scale(${scale})!important}`;
+        return new Promise<number>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>{const next=host.getBoundingClientRect();resolve(Math.max(Math.abs(next.x-x),Math.abs(next.y-y)));})));
+      },{id:ids[0],scale,x,y})).toBeLessThan(2);
+    };
+    await positionCamera(1);
+    const input=workspace.getByRole('button',{name:/Tooltip spectrum/});
+    await expect(input).toBeVisible();
+    for(const theme of ['light','dark']){
+      await page.evaluate(value=>{document.documentElement.dataset.theme=value;},theme);
+      await page.mouse.move(0,0);await input.hover();
+      const tooltip=workspace.getByRole('tooltip');
+      await expect(tooltip).toBeVisible();
+      await expect(tooltip).toHaveCSS('background-color',theme==='light'?'rgb(251, 250, 247)':'rgb(57, 56, 51)');
+      await expect(tooltip).toHaveCSS('color',theme==='light'?'rgb(53, 51, 46)':'rgb(233, 230, 222)');
+      expect(await tooltip.evaluate(element=>element.matches(':popover-open'))).toBe(true);
+      await page.screenshot({path:`../.outputs/xrd-tooltip/${theme}.png`});
+      await page.keyboard.press('Escape');await expect(tooltip).toHaveCount(0);
+    }
+    await positionCamera(.65,30,60);
+    try{
+      await input.focus();
+      const tooltip=workspace.getByRole('tooltip');await expect(tooltip).toBeVisible();
+      await expect.poll(async()=>{
+        const a=(await input.boundingBox())!,b=(await tooltip.boundingBox())!;
+        return Math.abs(a.y-b.y-b.height-8);
+      }).toBeLessThan(2);
+      await positionCamera(.65,55,90);
+      await expect.poll(async()=>{
+        const a=(await input.boundingBox())!,b=(await tooltip.boundingBox())!;
+        return Math.abs(a.y-b.y-b.height-8);
+      }).toBeLessThan(2);
+      await page.screenshot({path:'../.outputs/xrd-tooltip/scaled-canvas.png'});
+      await page.keyboard.press('Escape');await expect(tooltip).toHaveCount(0);
+    }finally{await camera.evaluate(element=>element.remove());}
+    await page.getByRole('button',{name:'Fit view',exact:true}).click();
+    const chooser=page.waitForEvent('filechooser');await input.click();await chooser;
+    await expect(workspace.getByRole('tooltip')).toHaveCount(0);
+    await workspace.getByLabel('导入原始谱数据').dispatchEvent('cancel');
+    await expect(workspace).toBeVisible();expect(errors).toEqual([]);
+  }finally{if(ids.length)await request.post('/api/nodes/batch-delete',{data:{node_ids:ids}});}
+});
+
 test('XRD spectrum workflow validates imports and preserves prior data',async({page,request})=>{
   test.setTimeout(90_000);
   const app=await(await request.get('/api/application')).json();

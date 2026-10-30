@@ -146,13 +146,20 @@ def load_plugin_registry(plugin_directory: Path | None = None, *, plugin_directo
             candidates.append((entry, "installed distribution"))
         except (Exception, SystemExit) as exc:
             _failure(registry, entry.name, 'installed distribution metadata', 'discovery', exc)
+    selected_packs = enrollment.selected() if enrollment and not load_unenrolled_sources else {}
     pending = []
     for entry, origin in candidates:
         spec = source_specs.get(origin)
         if isinstance(origin, Path) and spec is None:
             continue
-        if spec is not None and enrollment and not load_unenrolled_sources and not enrollment.source_enrolled(spec.distribution_id):
-            continue
+        if spec is not None and enrollment and not load_unenrolled_sources:
+            selected_pack = selected_packs.get(spec.distribution_id)
+            # A source checkout may appear after the user selected its archive.
+            # Keep its declaration discoverable, but activate the selected release
+            # before importing or preparing a second copy of the same owner.
+            if (not enrollment.source_enrolled(spec.distribution_id)
+                    or selected_pack is not None and selected_pack.owner_id == spec.owner):
+                continue
         phase, previous_path = "environment", list(sys.path)
         try:
             if spec is not None and data_root is not None:
@@ -264,7 +271,9 @@ def load_installed_packs(registry: PluginRegistry, data_root: Path, *, strict: b
     from backend.packs.planning import manifest_spec
     for manifest in pending.values():
         # Preserve static diagnostics even for an unimportable selected release.
-        if manifest.owner_id not in registry.pack_specs:
+        source_spec = registry.pack_specs.get(manifest.owner_id)
+        if source_spec is None or (not registry.has_plugin(manifest.owner_id)
+                                   and source_spec.distribution_id == manifest.id):
             registry.pack_specs[manifest.owner_id] = manifest_spec(manifest)
             registry.pack_roots[manifest.owner_id] = manager.version_path(manifest.id, manifest.version)
             registry.pack_sources[manifest.owner_id] = "installed"

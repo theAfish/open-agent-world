@@ -72,6 +72,7 @@ export interface PackInstallations {
   versions: Array<{ id: string; name: string; version: string; selected: boolean; loaded: boolean;
     owner?: string; source?: string;
     kind?: 'plugin' | 'content'; creator?: CreatorMetadata | null;
+    presentation?: Omit<import('./world').PackDefinition, 'plugin_id' | 'source' | 'artwork_url'> | null;
     environment: { state: string; error: string | null } | null }>;
 }
 

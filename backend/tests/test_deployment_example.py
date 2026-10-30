@@ -44,7 +44,12 @@ def test_deployment_example(tmp_path):
             assert client.get(note_base + path).status_code == 404
         for path in ("/actions/replace", "/resource/delete", "/execution/start", "/transformations/replace"):
             assert client.post(note_base + path, json={"arguments": {}}).status_code == 404
+        assert client.post(note_base + "/transformations/replace", json={"source_type": "text", "expected_revision": updated.json()["revision"]}).status_code == 404
         assert client.patch(note_base, json={"config": {"internal_connection": "bad"}}).status_code == 404
+        assert client.app.state.services.world.get_card(notes["id"]).config["internal_connection"] == "PRIVATE-DEMO-CONNECTION"
+        heading = client.patch(note_base, json={"config": {"heading": "Public heading"}})
+        assert heading.status_code == 200, heading.text
+        assert heading.json()["config"] == {"heading": "Public heading"}
         assert client.get("/api/world").status_code == 404
         assert client.get("/api/settings/models").status_code == 404
         chat = next(panel["card_id"] for panel in app["panels"] if panel["kind"] == "conversation")

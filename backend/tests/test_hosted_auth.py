@@ -64,6 +64,21 @@ def test_login_rotates_existing_session_and_invalid_credentials_are_uniform(host
     assert wrong.json() == unknown.json() == disabled.json()
 
 
+def test_password_session_survives_restart_for_a_day_without_extending_expiry(hosted_auth, monkeypatch):
+    store, _, client = hosted_auth
+    started = time.time()
+    response = login(client)
+    assert "Max-Age=86400" in response.headers["set-cookie"]
+    token = client.cookies["oaw_session"]
+    restarted = HostedAuth(AccountStore(store.path), ORIGIN)
+    with TestClient(Starlette(routes=restarted.routes), base_url=ORIGIN) as browser:
+        browser.cookies.set("oaw_session", token)
+        monkeypatch.setattr(time, "time", lambda: started + 7200)
+        assert browser.get("/auth/me").json()["authenticated"] is True
+        monkeypatch.setattr(time, "time", lambda: started + 86401)
+        assert browser.get("/auth/me").json()["authenticated"] is False
+
+
 @pytest.mark.parametrize("headers", [{}, {"Origin": "https://evil.example"},
                                     [("Origin", ORIGIN), ("Origin", "https://evil.example")]])
 def test_login_and_logout_require_exact_single_origin(hosted_auth, headers):

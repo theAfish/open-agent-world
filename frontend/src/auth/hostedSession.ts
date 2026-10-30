@@ -14,10 +14,26 @@ let invalidated = false;
 let stopMonitoring: (() => void) | undefined;
 let stopRequests: AbortController | undefined;
 let restoreFetch: (() => void) | undefined;
+let verification: Promise<void> | undefined;
+let scheduleVerification: ((delay: number) => void) | undefined;
+let failedChecks = 0;
+let connectionState: 'online' | 'reconnecting' = 'online';
+const connectionListeners = new Set<() => void>();
 const logoutFlag = 'oaw-hosted-signout';
 export const currentHostedSession = () => session;
 export const isHosted = () => session?.hosted === true;
 export const hostedSessionActive = () => !invalidated && session?.authenticated === true;
+export const hostedConnectionState = () => connectionState;
+export function subscribeHostedConnection(listener: () => void) {
+  connectionListeners.add(listener);
+  return () => { connectionListeners.delete(listener); };
+}
+
+function setConnectionState(value: typeof connectionState) {
+  if (connectionState === value) return;
+  connectionState = value;
+  connectionListeners.forEach(listener => listener());
+}
 
 function sessionError() { return new DOMException('The workspace session changed. Sign in again.', 'AbortError'); }
 
@@ -150,38 +166,79 @@ export async function initializeHostedSession(): Promise<HostedSession | undefin
   }
   session = value;
   invalidated = false;
+  failedChecks = 0;
+  setConnectionState('online');
   restoreFetch = installHostedFetch();
   if (session.authenticated) monitorHostedSession();
   return session;
 }
 
-export async function verifyHostedSession() {
-  if (!session?.authenticated || invalidated) return;
-  try {
-    const response = await fetch('/auth/me', { cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.timeout(5000) });
-    if (!response.ok) throw sessionError();
-    const current = await response.json() as HostedSession;
-    if (!current.hosted || !current.authenticated || current.user?.id !== session.user?.id || current.instance?.id !== session.instance?.id) {
-      throw sessionError();
+export function verifyHostedSession(): Promise<void> {
+  if (!session?.authenticated || invalidated) return Promise.resolve();
+  if (verification) return verification;
+  const expected = session;
+  verification = (async () => {
+    try {
+      const response = await fetch('/auth/me', { cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.timeout(5000) });
+      if (invalidated || session !== expected) return;
+      if (response.status === 401) { invalidateHostedSession(); return; }
+      if (!response.ok) throw new Error('Account verification unavailable');
+      const current = await response.json() as HostedSession;
+      if (invalidated || session !== expected) return;
+      // An unavailable or malformed response does not prove that the user signed out.
+      if (current?.hosted !== true || typeof current.authenticated !== 'boolean'
+          || (current.authenticated && (!current.user?.id || !('instance' in current)))) throw new Error('Invalid account response');
+      if (!current.authenticated || current.user?.id !== expected.user?.id || current.instance?.id !== expected.instance?.id) {
+        invalidateHostedSession();
+        return;
+      }
+      failedChecks = 0;
+      setConnectionState('online');
+      if (!document.hidden) revealPrivateContent();
+    } catch {
+      if (invalidated || session !== expected) return;
+      failedChecks += 1;
+      setConnectionState('reconnecting');
+      // A page restored from history stays shielded until its account is checked.
+      // Ordinary tab switches keep the mounted workspace visible.
+      if (document.documentElement.classList.contains('hosted-session-obscured')) {
+        obscurePrivateContent('暂时无法验证登录，正在重连。工作区已保留。 / Cannot verify your session. Reconnecting; your workspace is still open.');
+      }
     }
-    if (!invalidated && !document.hidden) revealPrivateContent();
-  } catch { invalidateHostedSession(); }
+  })().finally(() => {
+    verification = undefined;
+    if (invalidated || session !== expected) return;
+    const delay = failedChecks ? Math.min(1000 * 2 ** Math.min(failedChecks - 1, 5), 30_000) * (0.8 + Math.random() * 0.4) : 15_000;
+    scheduleVerification?.(delay);
+  });
+  return verification;
 }
 
 function monitorHostedSession() {
   stopMonitoring?.();
-  const timer = setInterval(() => { void verifyHostedSession(); }, 15_000);
+  let timer: ReturnType<typeof setTimeout>;
+  scheduleVerification = (delay) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { void verifyHostedSession(); }, delay);
+  };
+  scheduleVerification(15_000);
   const hide = () => obscurePrivateContent();
-  const show = () => { hide(); void verifyHostedSession(); };
-  const visibility = () => { if (document.hidden) hide(); else show(); };
+  const show = () => { void verifyHostedSession(); };
+  const offline = () => setConnectionState('reconnecting');
+  const visibility = () => { if (!document.hidden) show(); };
   const storage = (event: StorageEvent) => { if (event.key === logoutFlag && event.newValue) invalidateHostedSession(); };
   window.addEventListener('storage', storage);
+  window.addEventListener('online', show);
+  window.addEventListener('offline', offline);
   window.addEventListener('pageshow', show);
   window.addEventListener('pagehide', hide);
   document.addEventListener('visibilitychange', visibility);
   stopMonitoring = () => {
-    clearInterval(timer);
+    clearTimeout(timer);
+    scheduleVerification = undefined;
     window.removeEventListener('storage', storage);
+    window.removeEventListener('online', show);
+    window.removeEventListener('offline', offline);
     window.removeEventListener('pageshow', show);
     window.removeEventListener('pagehide', hide);
     document.removeEventListener('visibilitychange', visibility);

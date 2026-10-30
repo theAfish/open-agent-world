@@ -8,6 +8,7 @@ import type {PluginViewProps} from './sdk';
 vi.mock('../../../plugins/xrd/frontend/CandidateStructure',()=>({StructureCanvas:()=>null}));
 Object.defineProperty(HTMLDialogElement.prototype,'showModal',{value:function(this:HTMLDialogElement){this.setAttribute('open','');}});
 Object.defineProperty(HTMLDialogElement.prototype,'close',{value:vi.fn()});
+Object.defineProperty(HTMLElement.prototype,'showPopover',{configurable:true,value:vi.fn()});
 afterEach(cleanup);
 it('only folds connected workflow source cards, keeping unrelated input cards visible',()=>{
  const cards=[{id:'m',type:'xrd.match'},{id:'p',type:'xrd.pattern'},{id:'l',type:'xrd.library'},{id:'other',type:'xrd.pattern'}] as PluginViewProps['card'][];
@@ -37,7 +38,9 @@ it('keeps cancellation local and shows loading only during import',async()=>{
  render(<InputDock props={{host} as PluginViewProps} inputs={[]} disabled={false}/>);
  const escape=vi.fn();window.addEventListener('keydown',escape);
  const button=screen.getByRole('button',{name:/实验谱/});
- expect(button.getAttribute('data-import-hint')).toContain('请拖拽谱到谱画布');
+ fireEvent.focus(button);
+ expect(screen.getByRole('tooltip').textContent).toContain('请拖拽谱到谱画布');
+ expect(button.getAttribute('aria-describedby')).toBe(screen.getByRole('tooltip').id);
  fireEvent.click(button);fireEvent.keyDown(window,{key:'Escape'});
  expect(escape).not.toHaveBeenCalled();
  fireEvent(screen.getByLabelText('导入原始谱数据'),new Event('cancel',{bubbles:true}));

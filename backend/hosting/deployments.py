@@ -7,7 +7,7 @@ import time
 from uuid import UUID, uuid5
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from starlette.responses import JSONResponse
 
 from .configuration import unix_socket_path
@@ -15,6 +15,13 @@ from .shared_models import SettingsDatabase
 from .worker import mint_worker_token
 
 MAX_TEMPLATE = 4 * 1024 * 1024
+
+
+def _request_digest(request):
+    value = request.model_dump(mode="json")
+    if not value.get("target_profiles"):
+        value.pop("target_profiles", None)
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
 class DeploymentStore(SettingsDatabase):
@@ -32,6 +39,8 @@ class DeploymentStore(SettingsDatabase):
                     user_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, changed_by TEXT NOT NULL, changed_at REAL NOT NULL
                 );
             """)
+            if "operation" not in {row["name"] for row in db.execute("PRAGMA table_info(hosting_jobs)")}:
+                db.execute("ALTER TABLE hosting_jobs ADD COLUMN operation TEXT NOT NULL DEFAULT 'initialize'")
 
     def entries(self):
         with self.locked() as db:
@@ -46,32 +55,39 @@ class DeploymentStore(SettingsDatabase):
     def jobs(self):
         with self.locked() as db:
             return [dict(row) for row in db.execute(
-                "SELECT id,user_id,profile_id,mode,name,status,message,created_at FROM hosting_jobs ORDER BY created_at DESC LIMIT 100")]
+                "SELECT id,user_id,profile_id,mode,name,status,message,created_at,operation FROM hosting_jobs ORDER BY created_at DESC LIMIT 100")]
 
     def enqueue(self, request, actor, template):
         encoded = json.dumps(template, ensure_ascii=False)
         if len(encoded.encode()) > MAX_TEMPLATE:
             raise ValueError("Template exceeds 4 MiB")
-        digest = hashlib.sha256(json.dumps(request.model_dump(mode="json"), sort_keys=True).encode()).hexdigest()
+        digest = _request_digest(request)
         with self.transaction(immediate=True) as db:
             previous = db.execute("SELECT * FROM hosting_jobs WHERE request_id=?", (str(request.request_id),)).fetchall()
             if previous:
                 if any(row["request_digest"] != digest or row["requested_by"] != actor for row in previous):
                     raise ValueError("Request ID already used for a different deployment")
                 return [row["id"] for row in previous]
-            if db.execute("SELECT COUNT(*) FROM hosting_jobs WHERE status IN ('queued','preparing')").fetchone()[0] + len(request.user_ids) > 10:
+            if db.execute("SELECT COUNT(*) FROM hosting_jobs WHERE status IN ('queued','preparing','preparing_resources','waiting_resources')").fetchone()[0] + len(request.user_ids) > 10:
                 raise ValueError("Wait for pending deployments to finish")
             ids = []
             for target in request.user_ids:
                 job_id = str(uuid5(request.request_id, str(target)))
-                db.execute("INSERT INTO hosting_jobs VALUES (?,?,?,?,?,?,?,?,?,'queued','',?)",
-                           (job_id, str(request.request_id), digest, actor, str(target), job_id,
-                            request.mode, template["name"], encoded, time.time()))
+                profile_id = str(request.target_profiles[target]) if request.target_profiles else job_id
+                if db.execute("SELECT 1 FROM hosting_jobs WHERE profile_id=? AND status IN "
+                              "('queued','preparing','preparing_resources','waiting_resources') LIMIT 1", (profile_id,)).fetchone():
+                    raise ValueError("Wait for the existing profile deployment to finish")
+                db.execute("INSERT INTO hosting_jobs "
+                           "(id,request_id,request_digest,requested_by,user_id,profile_id,mode,name,template_json,status,message,created_at,operation) "
+                           "VALUES (?,?,?,?,?,?,?,?,?,'queued','',?,?)",
+                           (job_id, str(request.request_id), digest, actor, str(target), profile_id,
+                            request.mode, template["name"], encoded, time.time(),
+                            "update" if request.target_profiles else "initialize"))
                 ids.append(job_id)
             return ids
 
     def previous(self, request, actor):
-        digest = hashlib.sha256(json.dumps(request.model_dump(mode="json"), sort_keys=True).encode()).hexdigest()
+        digest = _request_digest(request)
         with self.locked() as db:
             rows = db.execute("SELECT * FROM hosting_jobs WHERE request_id=?", (str(request.request_id),)).fetchall()
             if any(row["request_digest"] != digest or row["requested_by"] != actor for row in rows):
@@ -85,6 +101,14 @@ class DeployRequest(BaseModel):
     release_id: UUID
     user_ids: list[UUID] = Field(min_length=1, max_length=10)
     mode: str = "runtime"
+    target_profiles: dict[UUID, UUID] = Field(default_factory=dict, max_length=10)
+
+    @model_validator(mode="after")
+    def validate_update_targets(self):
+        if self.target_profiles and (self.mode != "runtime" or set(self.target_profiles) != set(self.user_ids)
+                                     or len(set(self.target_profiles.values())) != len(self.target_profiles)):
+            raise ValueError("Updates require one existing runtime profile for every target account")
+        return self
 
 
 class AssignRequest(BaseModel):
@@ -164,6 +188,12 @@ class DeploymentAdmin:
                 user = gateway.auth.store.get_user(str(target))
                 if not user or not user["enabled"] or user["role"] == "admin":
                     raise ValueError("Choose enabled user accounts; the engineering workspace remains separate")
+                if edit.target_profiles:
+                    profile = next((profile for profile in gateway.settings.profiles
+                                    if profile.profile_id == str(edit.target_profiles[target])
+                                    and profile.user_id == str(target) and profile.mode == "runtime"), None)
+                    if profile is None:
+                        raise ValueError("Update target must be an existing runtime belonging to this account")
             source = gateway.profiles.get(actor["id"])
             if source is None or source.mode != "builder":
                 raise ValueError("Assign an engineering workspace to this administrator first")
@@ -174,6 +204,10 @@ class DeploymentAdmin:
             template = await self.worker(source, "/api/hosting-template/" + str(edit.release_id))
             from .templates import validate_template
             validate_template(template)
+            if edit.target_profiles:
+                from .template_updates import validate_source_nodes
+                from backend.legions.models import LegionBlueprint
+                validate_source_nodes(template, LegionBlueprint.model_validate(template["blueprint"]), required=True)
             if template["source_release_id"] != str(edit.release_id):
                 raise ValueError("Source release mismatch")
             ids = gateway.deployments.enqueue(edit, actor["id"], template)

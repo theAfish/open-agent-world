@@ -3,11 +3,15 @@ import { useMotionPresence } from './useMotionPresence';
 import { finishLabel } from "../cards/cardFinish";
 import { t, useLocale } from "../i18n";
 import { useEffect, useRef, useState } from "react";
+import { OverlayScrollbarsComponent, type OverlayScrollbarsComponentRef } from 'overlayscrollbars-react';
+import type { PartialOptions } from 'overlayscrollbars';
+import 'overlayscrollbars/overlayscrollbars.css';
+import '../components/scrollbars.css';
 import { Archive, CalendarDays, Check, ChevronRight, Layers3, LibraryBig, Minus, Plus, Search, Store, Tag, X } from "lucide-react";
 import { useCardLibrary, type DeckEntry } from "../state/cardLibrary";
 import { useWorldStore } from "../state/worldStore";
 import { collectionDependencies, ensureCardsCollected } from "../state/cardDependencies";
-import { collectedLibraryCards, collectedLibraryLegions, compareLibraryCards, displayDeckName, libraryCardMatches, libraryCardMetadata, type LibraryCard } from "./libraryCatalog";
+import { collectedLibraryCards, collectedLibraryLegions, compareLibraryCards, libraryCardMatches, libraryCardMetadata, type LibraryCard } from "./libraryCatalog";
 import { LibraryPack } from "./LibraryPack";
 import { PackInstaller } from "./PackInstaller";
 import { InstalledPackDetails } from "./InstalledPackDetails";
@@ -18,6 +22,7 @@ import { PackStore } from "./PackStore";
 import { PackCreator } from "./PackCreator";
 import { PackOperations } from './PackOperations';
 import { LibraryCard as PhysicalLibraryCard, LibraryCardSurface } from "./LibraryCard";
+import { LibraryCardGroups } from './LibraryCardGroups';
 import "./cardLibrary.css";
 import { startPalettePointerDrag } from "../palette/pointerDrag";
 import { isHosted } from '../auth/hostedSession';
@@ -26,6 +31,10 @@ import { PackIDE } from '../factory/PackIDE';
 
 type Tab = "packs" | "cards" | "store";
 const same = (a: DeckEntry, b: DeckEntry) => a.kind === b.kind && a.id === b.id;
+const scrollOptions: PartialOptions = {
+  overflow: { x: 'hidden', y: 'scroll' },
+  scrollbars: { theme: 'os-theme-oaw', autoHide: 'leave', autoHideDelay: 700, clickScroll: 'instant' },
+};
 
 export function CardLibrary() {
   const { locale } = useLocale();
@@ -42,12 +51,13 @@ export function CardLibrary() {
   const [sourceFilter, setSourceFilter] = useState("");
   const [showInternal, setShowInternal] = useState(false);
   const [selected, setSelected] = useState<DeckEntry | null>(null);
-  const detailSidebar = useRef<HTMLDivElement>(null);
+  const detailSidebar = useRef<OverlayScrollbarsComponentRef>(null);
   useEffect(() => {
     if (library.open && selected?.kind === 'node') reportInteraction({ type: 'card-inspected', cardType: selected.id });
   }, [library.open, selected]);
   useEffect(() => {
-    if (detailSidebar.current) detailSidebar.current.scrollTop = 0;
+    const viewport = detailSidebar.current?.osInstance()?.elements().viewport;
+    if (viewport) viewport.scrollTop = 0;
   }, [selected?.kind, selected?.id]);
   const [installAction, setInstallAction] = useState<HTMLDivElement | null>(null);
   const [inspectedPack, setInspectedPack] = useState<string | null>(null);
@@ -146,6 +156,7 @@ export function CardLibrary() {
   };
   const renderCard = (item: LibraryCard) => {
     const included = deck?.entries.some(entry => same(entry, item));
+    const deckAction = t(included ? 'Remove {v0} from deck' : 'Add {v0} to deck', { v0: item.label });
     return <PhysicalLibraryCard key={`${item.kind}:${item.id}`} selected={Boolean(selected && same(selected, item))} included={Boolean(included)} color={item.definition?.color ?? "#78967b"}>
       <button className="library-card-inspect" draggable={false} data-legion-preview={item.kind === "legion" ? item.id : undefined} data-can-drag={item.available && !item.internal && !library.busy}
         onPointerDown={event => {
@@ -160,8 +171,8 @@ export function CardLibrary() {
         }} aria-label={t("Inspect {v0}", { v0: String(item.label) })} aria-description={item.description} title={item.description}><LibraryCardSurface card={item} data-deck-visual className="library-card-stock">
         {!item.available && !item.internal ? <span className="library-unavailable">{t("Unavailable")}</span> : null}</LibraryCardSurface></button>
       {item.internal && !included ? <div className="library-card-usage">{item.owners.length ? t("Use through its container") : t("Created by a world action")}</div> :
-        <button className={`library-card-add ${included ? "is-in-deck" : ""}`} disabled={library.busy || !deck || (!included && !item.available)} onClick={() => toggleCard(item)} aria-label={t(included ? 'Remove {v0} from deck' : 'Add {v0} to deck', { v0: item.label })}>
-          {included ? <Check size={14} /> : <Plus size={14} />}{included ? t("In {deck} · Remove", { deck: displayDeckName(deck!) }) : t("Add to current deck")}</button>}
+        <button className={`library-card-add ${included ? "is-in-deck" : ""}`} disabled={library.busy || !deck || (!included && !item.available)} onClick={() => toggleCard(item)} aria-label={deckAction} title={deckAction}>
+          {included ? <Check size={16} aria-hidden="true" /> : <Plus size={16} aria-hidden="true" />}</button>}
     </PhysicalLibraryCard>;
   };
 
@@ -206,7 +217,7 @@ export function CardLibrary() {
           {reveal && snapshot.packs[reveal] ? <span className="library-announcement" role="status">{t(snapshot.packs[reveal].definition.name)} {t("opened. Click its empty wrapper to view cards.")}</span> : null}
           </>}
         </> : null}
-        {tab === "cards" ? <><div className={`library-card-layout${detail ? " has-card-detail" : ""}`}><div className="library-card-collection" data-tutorial="library-cards">
+        {tab === "cards" ? <><div className={`library-card-layout${detail ? " has-card-detail" : ""}`}><OverlayScrollbarsComponent className="library-card-collection" data-tutorial="library-cards" options={scrollOptions} defer>
           <div className="library-tools"><label className="library-search"><Search size={15} /><input aria-label={t("Search cards")} value={query} onChange={event => setQuery(event.target.value)} placeholder={t("Search your cards")} /></label>
             <select aria-label={t("Source pack")} value={sourceFilter} onChange={event => setSourceFilter(event.target.value)}><option value="">{t("All packs")}</option>{sourcePack && !sources.some(source => source.id === sourceFilter) ? <option value={sourceFilter}>{t(sourcePack.definition.name)}</option> : null}{sources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}</select>
             <select aria-label={t("Card category")} value={filter} onChange={event => setFilter(event.target.value)}><option value="">{t("All categories")}</option>{categories.map(category => <option key={category} value={category}>{t(category)}</option>)}</select>
@@ -224,14 +235,9 @@ export function CardLibrary() {
               onClick={() => void library.edit({ action: "set_plugin_enabled", id: sourcePack.definition.plugin_id, enabled: !sourcePlugin.enabled })}>{sourcePlugin.enabled ? t("Disable Pack") : t("Enable Pack")}</button> : null}
           </div> : null}
           {sourceIssues.map((failure, index) => <p key={index} className="pack-action-error" role="alert">{failure.error}</p>)}
-            {groups.map(({ source, items }) => <details key={JSON.stringify([source.id, query, filter, sourceFilter, showInternal])} className="library-source-group"
-              open={Boolean(sourceFilter || query.trim() || filter || showInternal || sources.length === 1)}>
-              <summary><Archive size={18} /><h4>{source.name}</h4><span>{items.length} {t(items.length === 1 ? "card" : "cards")}</span><ChevronRight className="library-group-chevron" size={16} /></summary>
-              {items.some(item => !item.internal) ? <div className="library-card-grid">{items.filter(item => !item.internal).map(renderCard)}</div> : null}
-              {items.some(item => item.internal) ? <div className="library-internal-cards"><p>{t("Internal cards · Created through containers or world actions")}</p><div className="library-card-grid">{items.filter(item => item.internal).map(renderCard)}</div></div> : null}
-            </details>)}
+            {groups.length > 0 && <LibraryCardGroups key={JSON.stringify([query, filter, sourceFilter, showInternal])} groups={groups} renderCard={renderCard} />}
             {!filtered.length ? <div className="library-empty"><LibraryBig size={30} /><strong>{allCards.length ? t("No matching cards") : t("Your collection starts with a pack")}</strong><p>{!showInternal && internalCount ? t("{v0} matching internal cards are hidden. Show internal cards to inspect their purpose and container.", { v0: String(internalCount) }) : allCards.length ? t("Try another search, source pack or category.") : t("Visit Packs and open one to discover its cards.")}</p><button className="secondary-button" onClick={() => { if (!showInternal && internalCount) setShowInternal(true); else { setTab("packs"); setQuery(""); } }}>{!showInternal && internalCount ? t("Show internal cards") : t("Browse packs")}</button></div> : null}
-          </div><div ref={detailSidebar} className="library-card-sidebar"><aside className="library-card-detail" aria-label={t("Card details")}>{detail ? <>
+          </OverlayScrollbarsComponent><OverlayScrollbarsComponent ref={detailSidebar} className="library-card-sidebar" options={scrollOptions} defer><aside className="library-card-detail" aria-label={t("Card details")}>{detail ? <>
             <div className="library-detail-stage"><LibraryCardSurface key={`${detail.kind}:${detail.id}`} card={detail} className="library-card-preview" size="standard" quality="showcase" /></div>
             <div className="library-detail-content">
             <header className="library-detail-heading">
@@ -267,7 +273,7 @@ export function CardLibrary() {
               {detailInDeck ? <Minus size={15} aria-hidden="true" /> : <Plus size={15} aria-hidden="true" />}{detailInDeck ? t("Remove from deck") : t("Add to current deck")}</button> : null}
             {detail.kind === "legion" && !legions.find(item => item.id === detail.id)?.preset ? <button className="library-text-button" onClick={() => { if (window.confirm(t("Remove {v0} from the Legion library?", { v0: String(detail.label) }))) void deleteLegion(detail.id); }}>{t("Delete saved formation")}</button> : null}
             </footer>}
-          </> : <div className="library-detail-empty"><span className="library-detail-formation"><Layers3 size={30} aria-hidden="true" /></span><h3>{t("Explore a card")}</h3><p>{t("Select a card to inspect its purpose and origin.")}</p><p>{t("Removing a card from a deck keeps it in your collection.")}</p></div>}</aside></div></div>
+          </> : <div className="library-detail-empty"><span className="library-detail-formation"><Layers3 size={30} aria-hidden="true" /></span><h3>{t("Explore a card")}</h3><p>{t("Select a card to inspect its purpose and origin.")}</p><p>{t("Removing a card from a deck keeps it in your collection.")}</p></div>}</aside></OverlayScrollbarsComponent></div>
         </> : null}
         {tab === "store" && library.open ? <PackStore installations={installations.state} /> : null}
       </div>}

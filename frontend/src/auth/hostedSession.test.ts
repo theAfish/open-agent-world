@@ -177,6 +177,91 @@ it('detects cookie changes on account verification before revealing a resumed pa
   expect(auth.hostedSessionActive()).toBe(false);
 });
 
+it.each([
+  () => Promise.reject(new TypeError('Failed to fetch')),
+  () => Promise.reject(new DOMException('Timed out', 'TimeoutError')),
+  async () => new Response('Unavailable', { status: 503 }),
+  async () => json({}),
+])('keeps the workspace session on a transient verification failure and recovers automatically (%#)', async fail => {
+  vi.spyOn(Math, 'random').mockReturnValue(0.5);
+  let unavailable = true;
+  const { auth, request } = await start(() => unavailable ? fail() : Promise.resolve(json(account)));
+  const ended = vi.fn();
+  window.addEventListener('oaw-hosted-session-ended', ended);
+  try {
+    await auth.verifyHostedSession();
+    expect(auth.hostedSessionActive()).toBe(true);
+    expect(auth.hostedConnectionState()).toBe('reconnecting');
+    expect(ended).not.toHaveBeenCalled();
+    expect(document.getElementById('oaw-auth-shield')).toBeNull();
+    unavailable = false;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(auth.hostedConnectionState()).toBe('online');
+    await fetch('/api/world');
+    expect(new Headers(request.mock.lastCall?.[1]?.headers).get('X-OAW-Instance')).toBe('alice-profile');
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(request).toHaveBeenCalledTimes(5);
+  } finally { window.removeEventListener('oaw-hosted-session-ended', ended); }
+});
+
+it('coalesces checks and backs off repeated failures until the browser comes online', async () => {
+  vi.spyOn(Math, 'random').mockReturnValue(0.5);
+  let finish!: (response: Response) => void;
+  const { auth, request } = await start(() => new Promise(resolve => { finish = resolve; }));
+  const pending = auth.verifyHostedSession();
+  expect(auth.verifyHostedSession()).toBe(pending);
+  window.dispatchEvent(new Event('online'));
+  expect(request).toHaveBeenCalledTimes(2);
+  finish(new Response('Unavailable', { status: 503 }));
+  await pending;
+  request.mockImplementation(async () => new Response('Unavailable', { status: 503 }));
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(request).toHaveBeenCalledTimes(3);
+  await vi.advanceTimersByTimeAsync(1999);
+  expect(request).toHaveBeenCalledTimes(3);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(request).toHaveBeenCalledTimes(4);
+  request.mockImplementation(async () => json(account));
+  window.dispatchEvent(new Event('online'));
+  await auth.verifyHostedSession();
+  expect(auth.hostedConnectionState()).toBe('online');
+  expect(request).toHaveBeenCalledTimes(5);
+});
+
+it('keeps ordinary tab switches visible while checking the account in the background', async () => {
+  let finish!: (response: Response) => void;
+  const { auth } = await start(() => new Promise(resolve => { finish = resolve; }));
+  const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+  document.dispatchEvent(new Event('visibilitychange'));
+  hidden.mockReturnValue(false);
+  document.dispatchEvent(new Event('visibilitychange'));
+  expect(document.getElementById('oaw-auth-shield')).toBeNull();
+  finish(json(account));
+  await auth.verifyHostedSession();
+  expect(auth.hostedSessionActive()).toBe(true);
+});
+
+it.each([401, 200])('ends the session on confirmed expiry (%s)', async status => {
+  const { auth } = await start(async () => json({ ...account, authenticated: false, user: null, instance: null }, { status }));
+  await auth.verifyHostedSession();
+  expect(auth.hostedSessionActive()).toBe(false);
+});
+
+it('does not reveal a history-restored page from a late verification after sign out', async () => {
+  let finish!: (response: Response) => void;
+  const { auth, request } = await start(() => new Promise(resolve => { finish = resolve; }));
+  window.dispatchEvent(new Event('pagehide'));
+  const pending = auth.verifyHostedSession();
+  auth.invalidateHostedSession(false);
+  finish(json(account));
+  await pending;
+  expect(document.documentElement.classList.contains('hosted-session-obscured')).toBe(true);
+  expect(auth.hostedSessionActive()).toBe(false);
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(request).toHaveBeenCalledTimes(2);
+});
+
 it('does not read, import or write browser preferences for hosted accounts', async () => {
   localStorage.setItem('oaw-theme', 'private-local-theme');
   const { auth, request } = await start(async () => json({ mode: 'production', profile_id: 'alice-profile', generation: 'g1', version: '1', values: {} }));

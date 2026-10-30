@@ -29,7 +29,7 @@ def public_user(user: dict | None) -> dict | None:
 
 class HostedAuth:
     def __init__(self, store: AccountStore, public_origin: str, *, allow_local_http: bool = False,
-                 oidc_settings: OidcSettings | None = None, session_seconds: int = 3600, transport=None):
+                 oidc_settings: OidcSettings | None = None, session_seconds: int = 86400, transport=None):
         origin = urlsplit(public_origin)
         local_http = allow_local_http and origin.scheme == "http" and origin.hostname in {"127.0.0.1", "localhost", "::1"}
         if (not origin.netloc or origin.username or origin.password or origin.path or origin.query or origin.fragment

@@ -911,6 +911,7 @@ class PackInstallationManager:
         for row in versions:
             manifest = PackManifest.model_validate_json(row.pop('manifest'))
             row.update(name=manifest.name, owner=manifest.owner_id, source="installed", kind=manifest.kind, creator=manifest.creator.model_dump() if manifest.creator else None,
+                       presentation=manifest.presentation.model_dump(mode='json') if manifest.presentation else None,
                        installation="installed", selected=selected.get(row['id']) == manifest,
                        loaded=loaded.get(row['id']) == manifest)
         source_restart = any(self.source_enrolled(key) != self.registry.has_plugin(spec.owner)
