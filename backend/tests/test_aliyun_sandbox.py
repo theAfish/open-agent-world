@@ -316,8 +316,11 @@ async def test_failed_cleanup_retains_remote_receipt(remote, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_network_policy_applies_at_creation_and_remains_private(remote):
+@pytest.mark.parametrize('storage_addresses', [(), ('172.28.1.39',)])
+async def test_network_policy_applies_at_creation_and_remains_private(remote, storage_addresses):
+    from backend.cloud.aliyun.sandbox import PLATFORM_DNS_EGRESS
     backend, sdk, _ = remote
+    backend.settings = replace(backend.settings, storage_addresses=storage_addresses)
     await backend.create("network")
     policy = {"network_enabled": True, "command_timeout": 60}
     await backend.start_with_policy("network", execution_policy=policy)
@@ -326,12 +329,14 @@ async def test_network_policy_applies_at_creation_and_remains_private(remote):
     assert request["network"]["allow_public_traffic"] is False
     assert "169.254.0.0/16" in request["network"]["deny_out"]
     assert "100.64.0.0/10" in request["network"]["deny_out"]
-    assert "allow_out" not in request["network"]
+    storage_routes = [address + '/32' for address in storage_addresses]
+    assert request["network"]["allow_out"] == [*storage_routes, *PLATFORM_DNS_EGRESS]
     assert (await backend.get("network")).network_enabled
     await backend.execute("network", ["python3", "-c", "pass"], execution_policy=policy)
     assert len(sdk.created) == 1 and sdk.killed == ["remote-1"]
     await backend.start_with_policy("network", execution_policy={"network_enabled": False})
     assert sdk.created[-1]["allow_internet_access"] is False
+    assert sdk.created[-1]["network"].get("allow_out", []) == storage_routes
 
 
 @pytest.mark.asyncio

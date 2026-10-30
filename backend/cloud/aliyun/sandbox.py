@@ -32,7 +32,10 @@ from backend.sandbox.registry import SandboxRuntime, SandboxRuntimeRegistration,
 # Public egress does not grant access to private networks or cloud metadata.
 PRIVATE_EGRESS = ("0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
                   "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16")
-NETWORK_REASON = "Alibaba-managed public egress; private networks and cloud metadata are denied. Inbound services require authentication."
+# AgenticFS mounts attach the VM to a VPC whose DHCP resolver is otherwise
+# covered by the CGNAT deny rule. Allow only Alibaba's two platform resolvers.
+PLATFORM_DNS_EGRESS = ("100.100.2.136/32", "100.100.2.138/32")
+NETWORK_REASON = "Alibaba-managed public egress and platform DNS; other private networks and cloud metadata are denied. Inbound services require authentication."
 INSTALLATION_GUIDANCE = (
     "Commands execute in an Alibaba Agent Sandbox VM. Deployment Python dependencies and packages requested "
     "through install_python_packages are prepared automatically inside each new VM; the saved dependency recipe "
@@ -208,7 +211,8 @@ class AliyunSandboxBackend(SandboxBackend):
     def network_reason(self):
         if self.settings.storage_addresses:
             return ("Public internet follows this Sandbox's network setting. Its dedicated storage endpoint remains "
-                    "reachable even when public internet is disabled; other private networks and cloud metadata are denied.")
+                    "reachable even when public internet is disabled. Platform DNS is allowed when networking is enabled; "
+                    "other private networks and cloud metadata are denied.")
         return NETWORK_REASON
 
     async def get(self, sandbox_id):
@@ -265,14 +269,16 @@ class AliyunSandboxBackend(SandboxBackend):
         # never retried just because the HTTP response was lost.
         value.update(state="creating", request_key=uuid4().hex)
         self._write(value)
+        allowed = [address + "/32" for address in self.settings.storage_addresses]
+        if value.get("network_enabled", False):
+            allowed.extend(PLATFORM_DNS_EGRESS)
         try:
             sandbox = await self.sdk.create(template=self.settings.template, timeout=self.settings.lifetime_seconds,
                 metadata={**self.settings.metadata, "oaw.profile": self.settings.profile_id, "oaw.request": value["request_key"]},
                 volume_mounts={"/workspace": self.settings.volume} if self.settings.workspace_store == "volume" else {},
                 secure=True, allow_internet_access=value.get("network_enabled", False),
                 network={"allow_public_traffic": False, "deny_out": list(PRIVATE_EGRESS),
-                         **({"allow_out": [address + "/32" for address in self.settings.storage_addresses]}
-                            if self.settings.storage_addresses else {})},
+                         **({"allow_out": allowed} if allowed else {})},
                 **self.settings.connection)
         except AuthenticationException:
             # A rejected create has no remote effects. Do not turn an expired
