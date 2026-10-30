@@ -49,6 +49,27 @@ def test_password_reset_disable_and_logout_revoke_sessions(tmp_path):
     assert store.get_session(token) is None
 
 
+def test_role_migration_preserves_existing_user_and_role_changes_revoke_credentials(tmp_path):
+    path = tmp_path / "accounts.sqlite3"
+    store = AccountStore(path)
+    user = store.create_user("existing")
+    token = store.create_session(user["id"])
+    # A pre-administration installation has the same accounts/session schema
+    # without the subsequently added role column.
+    with sqlite3.connect(path) as db:
+        db.execute("ALTER TABLE users DROP COLUMN role")
+    migrated = AccountStore(path)
+    assert migrated.get_user(user["id"])["role"] == "user"
+    assert migrated.get_session(token)["id"] == user["id"]
+    migrated.set_role(user["id"], "admin")
+    assert migrated.get_user(user["id"])["role"] == "admin"
+    assert migrated.get_session(token) is None
+    with pytest.raises(ValueError, match="unavailable"):
+        migrated.create_session(user["id"], credential_version=user["_credential_version"])
+    with pytest.raises(ValueError, match="Role"):
+        migrated.set_role(user["id"], "operator")
+
+
 def test_identity_link_is_explicit_stable_and_cannot_move_to_another_user(tmp_path):
     store = AccountStore(tmp_path / "accounts.sqlite3")
     alice = store.create_user("alice@example.com")

@@ -26,10 +26,13 @@ _RESPONSE_HEADERS = {"cache-control", "set-cookie", "server", "x-powered-by"}
 
 
 class Gateway:
-    def __init__(self, settings: GatewaySettings, auth: HostedAuth, frontend_directory: Path, *, transport=None):
+    def __init__(self, settings: GatewaySettings, auth: HostedAuth, frontend_directory: Path, *, transport=None, settings_path=None):
         self.settings, self.auth = settings, auth
         self.frontend_directory = frontend_directory
-        self.profiles = {profile.user_id: profile for profile in settings.profiles}
+        self.settings_path, self.transport = settings_path, transport
+        self.settings_stamp = None
+        from .deployments import DeploymentStore
+        self.deployments = DeploymentStore(settings.accounts_path.parent / "deployments.sqlite3")
         self.http = httpx.AsyncClient(transport=transport, trust_env=False, follow_redirects=False,
                                      timeout=httpx.Timeout(300, connect=10), limits=httpx.Limits(max_connections=64))
         self.unix_clients = {
@@ -38,6 +41,36 @@ class Gateway:
                 trust_env=False, follow_redirects=False, timeout=httpx.Timeout(300, connect=10),
             ) for profile in settings.profiles if unix_socket_path(profile.upstream)
         }
+
+    @property
+    def profiles(self):
+        choices = self.deployments.entries()
+        entries = {}
+        for profile in self.settings.profiles:
+            if profile.user_id not in choices:
+                entries.setdefault(profile.user_id, profile)
+            elif choices[profile.user_id] == profile.profile_id:
+                entries[profile.user_id] = profile
+        return entries
+
+    async def refresh(self):
+        if self.settings_path is None:
+            return
+        stamp = self.settings_path.stat().st_mtime_ns
+        if stamp == self.settings_stamp:
+            return
+        from .configuration import read_gateway_settings
+        settings = read_gateway_settings(self.settings_path)
+        if (settings.public_origin != self.settings.public_origin or settings.accounts_path != self.settings.accounts_path
+                or settings.shared_models_origin != self.settings.shared_models_origin
+                or settings.shared_environment_origin != self.settings.shared_environment_origin):
+            raise ValueError("Restart the gateway to change hosting service configuration")
+        for profile in settings.profiles:
+            if unix_socket_path(profile.upstream) and profile.profile_id not in self.unix_clients:
+                self.unix_clients[profile.profile_id] = httpx.AsyncClient(
+                    transport=self.transport or httpx.AsyncHTTPTransport(uds=unix_socket_path(profile.upstream)),
+                    trust_env=False, follow_redirects=False, timeout=httpx.Timeout(300, connect=10))
+        self.settings, self.settings_stamp = settings, stamp
 
     async def close(self):
         await self.http.aclose()
@@ -49,11 +82,13 @@ class Gateway:
                             headers={"X-OAW-Instance": profile.profile_id} if profile else {})
 
     async def me(self, request: Request):
+        await self.refresh()
         user = await self.auth.user_from_scope(request.scope)
         profile = self.profiles.get(user["id"]) if user else None
         return JSONResponse({"hosted": True, "authenticated": user is not None,
-                             "user": {key: user[key] for key in ("id", "username", "display_name")} if user else None,
+                             "user": {key: user[key] for key in ("id", "username", "display_name", "role")} if user else None,
                              "login_methods": self.auth.login_methods,
+                             "shared_models": self.settings.shared_models_origin is not None,
                              "instance": profile.public() if profile else None})
 
     async def shell(self, request: Request):
@@ -87,6 +122,9 @@ class Gateway:
         user = await self.auth.user_from_scope(request.scope)
         if user is None:
             return self.error(401, "authentication_required", "Sign in to continue.")
+        await self.refresh()
+        if request.url.path.startswith("/api/hosting-template") and user["role"] != "admin":
+            return self.error(403, "admin_required", "Administrator access required.")
         profile = self.profiles.get(user["id"])
         if profile is None:
             return self.error(403, "workspace_unassigned", "No workspace has been assigned to this account.")
@@ -143,6 +181,7 @@ class Gateway:
         return StreamingResponse(content(), status_code=response.status_code, headers=headers)
 
     async def socket(self, socket: WebSocket):
+        await self.refresh()
         user = await self.auth.user_from_scope(socket.scope)
         profile = self.profiles.get(user["id"]) if user else None
         if not profile or not self.check_origin(socket.scope) or not self.instance_matches(socket, profile, required=True):
@@ -184,6 +223,10 @@ class Gateway:
                         await asyncio.sleep(1)
                         current = await self.auth.user_from_scope(socket.scope)
                         if current is None or current["id"] != user["id"]:
+                            return
+                        await self.refresh()
+                        selected = self.profiles.get(user["id"])
+                        if selected is None or selected.profile_id != profile.profile_id:
                             return
 
                 tasks = [asyncio.create_task(action()) for action in (from_browser, from_worker, revoked)]
@@ -227,11 +270,17 @@ class GatewayHeaders:
 
 
 def create_gateway(settings: GatewaySettings, frontend_directory: Path, *, oidc_settings=None, transport=None,
-                   auth_transport=None, store=None):
+                   auth_transport=None, store=None, settings_path=None):
     store = store or AccountStore(settings.accounts_path)
     auth = HostedAuth(store, settings.public_origin, allow_local_http=settings.allow_local_http,
                       oidc_settings=oidc_settings, transport=auth_transport)
-    gateway = Gateway(settings, auth, Path(frontend_directory), transport=transport)
+    gateway = Gateway(settings, auth, Path(frontend_directory), transport=transport, settings_path=settings_path)
+    from .shared_models import SharedModelAdmin
+    admin = SharedModelAdmin(gateway)
+    from .deployments import DeploymentAdmin
+    deployments = DeploymentAdmin(gateway, admin.authorize)
+    from .shared_environment import SharedEnvironmentAdmin
+    environment = SharedEnvironmentAdmin(gateway, admin.authorize)
 
     @asynccontextmanager
     async def lifespan(_):
@@ -248,7 +297,16 @@ def create_gateway(settings: GatewaySettings, frontend_directory: Path, *, oidc_
     from starlette.routing import Mount
     routes = [Route("/health/live", health), Route("/auth/me", gateway.me)]
     routes.extend(route for route in auth.routes if route.path != "/auth/me")
-    routes.extend([Route("/", gateway.shell), Route("/auth/login", gateway.shell),
+    routes.extend([Route("/hosting/admin/models", admin.models, methods=["GET", "PUT"]),
+                   Route("/hosting/admin/environment", environment.settings, methods=["GET", "PUT"]),
+                   Route("/hosting/internal/environment/{profile_id}", environment.worker_environment),
+                   Route("/hosting/admin/deployments", deployments.catalog, methods=["GET"]),
+                   Route("/hosting/admin/deployments", deployments.deploy, methods=["POST"]),
+                   Route("/hosting/admin/entry", deployments.assign, methods=["PUT"]),
+                   Route("/hosting/admin/models/discover", admin.discover, methods=["POST"]),
+                   Route("/hosting/admin/status", admin.status),
+                   Route("/hosting/internal/models/{profile_id}", admin.worker_catalog),
+                   Route("/admin", gateway.shell), Route("/", gateway.shell), Route("/auth/login", gateway.shell),
                    Mount("/assets", StaticFiles(directory=Path(frontend_directory) / "assets", check_dir=False)),
                    WebSocketRoute("/ws/{path:path}", gateway.socket),
                    Route("/{path:path}", gateway.proxy, methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])])

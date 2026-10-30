@@ -31,6 +31,14 @@ class AgentCapabilityProvider(Protocol):
         """Profile data root for host-managed, rebuildable Pack environments."""
         ...
 
+    def subprocess_environment(self) -> dict[str, str]:
+        """Fresh host-approved environment for trusted runtime subprocesses.
+
+        Plugins may narrow it and add their own explicit worker settings.
+        Hosted workers omit deployment credentials; this is not OS isolation.
+        """
+        ...
+
     async def publish_execution(self, agent_id: str, run_id: str, snapshot: Mapping[str, Any]) -> None:
         """Publish a bounded ExecutionSnapshot for this runtime's current Run."""
         ...

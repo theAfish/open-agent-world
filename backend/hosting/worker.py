@@ -144,6 +144,8 @@ class WorkerConfig:
     data_root: Path
     agent_runtime: str | None = "google.adk"
     sandbox_runtime: str | None = None
+    shared_models_origin: str | None = None
+    shared_environment_origin: str | None = None
 
     def __post_init__(self):
         hosted_scope(self.user_id, self.application_id, self.profile_id)
@@ -157,6 +159,12 @@ class WorkerConfig:
             raise ValueError("Provide a remote Sandbox through services_factory; native host runtimes are disabled")
         if self.agent_runtime == "openai.codex":
             raise ValueError("Local Codex is not available in hosted workers")
+        if self.shared_models_origin is not None:
+            from .configuration import public_origin
+            public_origin(self.shared_models_origin, allow_local_http=True)
+        if self.shared_environment_origin is not None:
+            from .configuration import public_origin
+            public_origin(self.shared_environment_origin, allow_local_http=True)
         object.__setattr__(self, "data_root", Path(self.data_root).resolve())
 
 
@@ -171,10 +179,11 @@ def create_worker_services(settings):
     from backend.services import create_services
     from backend.hosting.policy import unsafe_host_configuration
     registry = load_plugin_registry(data_root=settings.data_root, plugin_directories=(),
-                                    load_installed=False, load_unenrolled_sources=True)
-    services = create_services(settings, plugins=registry)
+                                    load_installed=False, load_entry_points=False, load_unenrolled_sources=True)
     if any(plugin.id == "openai.codex" for plugin in registry.plugins()):
-        registry.set_enabled("openai.codex", False)
+        registry.mark_unavailable("openai.codex", "hosting_policy",
+            ValueError("Local Codex execution is not available in hosted workspaces"), source="hosting_policy")
+    services = create_services(settings, plugins=registry)
     # A private source profile may contain a local-only card. Fail closed rather
     # than restore its lifecycle using credentials available in the service.
     if any(unsafe_host_configuration({"type": card.type, "config": card.config})
@@ -190,6 +199,14 @@ def create_worker_app(config: WorkerConfig | Mapping, *, frontend_directory=None
     config = config if isinstance(config, WorkerConfig) else WorkerConfig(**config)
     manifest_path = config.data_root / "deployment.json"
     if config.mode == "runtime":
+        from backend.storage_location import LOCK, file_lock
+        from .template_updates import recover_template_manifest
+        # Complete a committed template update before create_app captures the
+        # deployment manifest. Running workers hold this same process lock.
+        with file_lock(config.data_root / LOCK):
+            prepare_hosted_binding(config.data_root, profile_id=config.profile_id, user_id=config.user_id,
+                                   application_id=config.application_id)
+            recover_template_manifest(config.data_root)
         if not manifest_path.is_file():
             raise ValueError("Runtime workers require a hosted deployment manifest")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -199,13 +216,41 @@ def create_worker_app(config: WorkerConfig | Mapping, *, frontend_directory=None
         raise ValueError("Builder workers cannot serve deployment profiles")
     tenant = hosted_scope(config.user_id, config.application_id, config.profile_id)
     settings = replace(Settings.for_data_root(config.data_root), tenant_scope=tenant,
-                       agent_runtime=config.agent_runtime, sandbox_runtime=None, marketplace_url=None)
+                       agent_runtime=config.agent_runtime, sandbox_runtime=None, marketplace_url=None,
+                       inherit_runtime_environment=False)
     access = HostedProfileAccess(
         WorkerIdentityProvider(config.secret, config.profile_id, config.user_id),
         VerifiedIdentity(ISSUER, config.user_id), tenant, config.public_origin,
         profile_id=config.profile_id, user_id=config.user_id, application_id=config.application_id,
     )
-    app = create_app(settings, profile_access=access, frontend_directory=frontend_directory,
-                     services_factory=services_factory or create_worker_services)
-    app.add_middleware(HostedPolicyMiddleware)
+    def composed_services(settings):
+        services = (services_factory or create_worker_services)(settings)
+        if config.shared_models_origin is not None:
+            from .shared_models import SharedModelSource
+            services.llm_settings.model_source = SharedModelSource(config)
+        if config.shared_environment_origin is not None:
+            from .shared_environment import SharedEnvironmentSource
+            services.execution_environment_source = SharedEnvironmentSource(config)
+        return services
+
+    app = create_app(settings, profile_access=access, frontend_directory=None,
+                     services_factory=composed_services)
+    if config.mode == "builder":
+        from fastapi import Depends, HTTPException
+        from backend.api.dependencies import get_services
+
+        @app.get("/api/hosting-template/{release_id}")
+        async def hosted_template(release_id: UUID, services=Depends(get_services)):
+            from .templates import capture_template
+            try:
+                return await capture_template(services, str(release_id))
+            except ValueError as error:
+                raise HTTPException(409, str(error)) from None
+
+    # Mount static fallback after the hosted API, otherwise it shadows template
+    # export in real installations that serve a built frontend.
+    if frontend_directory is not None:
+        from starlette.staticfiles import StaticFiles
+        app.mount("/", StaticFiles(directory=frontend_directory, html=True), name="frontend")
+    app.add_middleware(HostedPolicyMiddleware, managed_models=config.shared_models_origin is not None)
     return app

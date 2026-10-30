@@ -95,6 +95,9 @@ class LlmSettingsStore:
         self.database = database
         self.settings_key = settings_key
         self.key_path = data_root / "secrets" / "settings.key"
+        # Explicit hosted composition can supply a read-only model catalog.
+        # Other credentials and personal installations retain this local store.
+        self.model_source = None
 
     def read(self) -> LlmConnectionSettings:
         with self.database.locked() as connection:
