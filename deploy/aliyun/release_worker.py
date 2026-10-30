@@ -3,38 +3,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import replace
 import importlib
 import json
 import os
 from pathlib import Path
 import sys
-
-
-def refresh_manifest(old, new):
-    """Upgrade trusted Pack contracts only on already published card surfaces."""
-    if old['layout'] != new['layout']:
-        raise ValueError('Workspace layout changed; an explicit workspace migration is required')
-    panels = lambda value: [{k: v for k, v in p.items() if k != 'sections'} for p in value['panels']]
-    if panels(old) != panels(new) or set(old['permissions']) != set(new['permissions']):
-        raise ValueError('Published card scope changed')
-    previous, current = old.get('plugin_access', {}), new.get('plugin_access', {})
-    if set(previous) != set(current):
-        raise ValueError('Published Pack card scope changed')
-    for node, grants in old['permissions'].items():
-        if node not in previous and grants != new['permissions'][node]:
-            raise ValueError('Core public permissions changed')
-    result = {**old, **{k: new[k] for k in ('panels', 'permissions', 'plugin_access', 'plugin_versions', 'runtime_nodes') if k in new}}
-    if 'workspaces' in old:
-        current_workspaces = new.get('workspaces', [])
-        if [w['legion_id'] for w in old['workspaces']] != [w['legion_id'] for w in current_workspaces]:
-            raise ValueError('Published workspace scope or order changed')
-        result['workspaces'] = [refresh_manifest(previous, current)[0]
-                                for previous, current in zip(old['workspaces'], current_workspaces)]
-    # Keep release identity, source lineage, runtime settings and saved layout.
-    changes = [node for node in previous if previous[node] != current[node]
-               or old['permissions'][node] != new['permissions'][node]]
-    return result, changes
 
 
 def prepare(source, previous, scratch):
@@ -83,11 +56,8 @@ def prepare(source, previous, scratch):
 
 
 async def migrate(config_path):
-    from backend.config import Settings
-    from backend.deploy import validate_manifest
-    from backend.deployments import PublishRequest, release_spec, published_workspaces
-    from backend.hosting.configuration import write_private_json
-    from backend.hosting.worker import WorkerConfig, hosted_scope, create_worker_services
+    from backend.hosting.upgrades import migrate_profile
+    from backend.hosting.worker import WorkerConfig, create_worker_services
     value = json.loads(config_path.read_text())
     value['data_root'] = config_path.parent / value['data_root']
     config = WorkerConfig(**value)
@@ -95,33 +65,7 @@ async def migrate(config_path):
     if name := os.environ.get('OAW_HOSTED_SERVICES_FACTORY'):
         module, function = name.split(':', 1)
         factory = getattr(importlib.import_module(module), function)
-    settings = replace(Settings.for_data_root(config.data_root), agent_runtime=config.agent_runtime,
-        sandbox_runtime=None, inherit_runtime_environment=False,
-        tenant_scope=hosted_scope(config.user_id, config.application_id, config.profile_id))
-    services = factory(settings)
-    try:
-        before = {card.id: card.status for card in services.world.list_cards()}
-        await services.startup()
-        failures = [f for f in services.plugins.load_failures if f['phase'] != 'hosting_policy']
-        if failures:
-            raise ValueError(f'Pack startup failed: {failures}')
-        newly_failed = [card.id for card in services.world.list_cards()
-                        if card.status == 'error' and before.get(card.id) != 'error']
-        if newly_failed:
-            raise ValueError(f'Card startup/migration failed: {newly_failed}')
-        changed = []
-        if config.mode == 'runtime':
-            target = config.data_root / 'deployment.json'
-            old = json.loads(target.read_text())
-            new = release_spec(services, PublishRequest(legion_ids=[w['legion_id'] for w in published_workspaces(old)], name=old['name'],
-                allow_terminal=any('terminal' in p for p in old['permissions'].values())))
-            result, changed = refresh_manifest(old, new)
-            validate_manifest(result)
-            write_private_json(target, result)
-        return {'profile': config.profile_id, 'ready': True, 'changed_contracts': changed}
-    finally:
-        await services.shutdown()
-        services.close()
+    return await migrate_profile(config, services_factory=factory)
 
 
 def entry_profiles(profiles, choices):

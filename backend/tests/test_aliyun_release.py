@@ -1,4 +1,5 @@
 """Operator workflow tests: real Git/files/SQLite, with no cloud side effects."""
+import asyncio
 from contextlib import nullcontext
 from copy import deepcopy
 import importlib.util
@@ -9,6 +10,7 @@ import sqlite3
 import subprocess
 import tarfile
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
@@ -74,6 +76,7 @@ def test_archive_rejects_duplicate_members(tmp_path):
 
 
 def test_manifest_updates_pack_contract_without_replacing_saved_identity():
+    from backend.hosting.upgrades import refresh_manifest
     old = {'id': 'saved-release', 'layout': {'root': 'saved'}, 'panels': [{'card_id': 'kb', 'sections': ['old']}],
            'permissions': {'kb': ['read'], 'conversation': ['chat']}, 'plugin_access': {'kb': {'actions': ['read']}},
            'plugin_versions': {'kb': '1'}, 'runtime_settings': {'agent_runtime': 'configured'}}
@@ -81,17 +84,18 @@ def test_manifest_updates_pack_contract_without_replacing_saved_identity():
     new.update(id='fresh-release', plugin_versions={'kb': '2'}, runtime_settings={})
     new['plugin_access']['kb']['actions'].append('graph')
     new['panels'][0]['sections'].append('graph')
-    result, changed = worker.refresh_manifest(old, new)
+    result, changed = refresh_manifest(old, new)
     assert result['id'] == old['id'] and result['runtime_settings'] == old['runtime_settings']
     assert result['plugin_access'] == new['plugin_access'] and changed == ['kb']
     for key, value in [('layout', {}), ('permissions', {'kb': ['read'], 'conversation': ['terminal']}),
                        ('plugin_access', {'kb': {}, 'other': {}})]:
         altered = {**new, key: value}
         with pytest.raises(ValueError):
-            worker.refresh_manifest(old, altered)
+            refresh_manifest(old, altered)
 
 
 def test_multiple_workspace_upgrade_preserves_each_layout_and_scope():
+    from backend.hosting.upgrades import refresh_manifest
     workspaces = [{'legion_id': node, 'name': node, 'layout': {'root': node},
         'panels': [{'card_id': node, 'sections': ['read']}], 'permissions': {node: ['read']},
         'plugin_access': {node: {'actions': ['read']}}} for node in ('one', 'two')]
@@ -102,17 +106,44 @@ def test_multiple_workspace_upgrade_preserves_each_layout_and_scope():
     new = deepcopy(old)
     new['plugin_versions']['pack'] = '2'
     new['workspaces'][1]['plugin_access']['two']['actions'].append('search')
-    result, _ = worker.refresh_manifest(old, new)
+    result, _ = refresh_manifest(old, new)
     assert result['id'] == 'stable' and result['workspaces'][1]['layout'] == old['workspaces'][1]['layout']
     assert result['workspaces'][1]['plugin_access']['two']['actions'] == ['read', 'search']
     altered = deepcopy(new)
     altered['workspaces'].reverse()
     with pytest.raises(ValueError, match='workspace scope or order'):
-        worker.refresh_manifest(old, altered)
+        refresh_manifest(old, altered)
     altered = deepcopy(new)
     altered['workspaces'][1]['layout'] = {}
     with pytest.raises(ValueError, match='layout changed'):
-        worker.refresh_manifest(old, altered)
+        refresh_manifest(old, altered)
+
+
+@pytest.mark.parametrize('configured_factory', [False, True])
+def test_worker_migration_preserves_cli_config_factory_and_report(tmp_path, monkeypatch, configured_factory):
+    from backend.hosting import upgrades
+    from backend.hosting.worker import create_worker_services
+    config_path = tmp_path / 'worker.json'
+    profile_id = str(uuid4())
+    config_path.write_text(json.dumps({'profile_id': profile_id, 'user_id': str(uuid4()),
+        'application_id': 'existing-application', 'mode': 'runtime', 'public_origin': 'https://oaw.example',
+        'secret': 'ab' * 32, 'data_root': 'data', 'agent_runtime': 'google.adk'}))
+    factory = object()
+    if configured_factory:
+        from backend.cloud.aliyun import hosted
+        monkeypatch.setenv('OAW_HOSTED_SERVICES_FACTORY', 'backend.cloud.aliyun.hosted:create_hosted_services')
+        monkeypatch.setattr(hosted, 'create_hosted_services', factory)
+    else:
+        monkeypatch.delenv('OAW_HOSTED_SERVICES_FACTORY', raising=False)
+    report = {'profile': profile_id, 'ready': True, 'changed_contracts': ['knowledge-card']}
+    async def migrate_profile(config, *, services_factory):
+        assert config.data_root == (tmp_path / 'data').resolve()
+        assert config.profile_id == profile_id and config.application_id == 'existing-application'
+        assert config.agent_runtime == 'google.adk'
+        assert services_factory is (factory if configured_factory else create_worker_services)
+        return report
+    monkeypatch.setattr(upgrades, 'migrate_profile', migrate_profile)
+    assert asyncio.run(worker.migrate(config_path)) is report
 
 
 @pytest.fixture
