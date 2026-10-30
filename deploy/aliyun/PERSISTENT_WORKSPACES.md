@@ -6,7 +6,9 @@
 
 将 Sandbox 的 `/workspace` 从 ECS 快照改为 AgenticFS 卷。计算 VM 可以销毁、重建，文件继续保留，不再受 ECS 快照的 32 MiB 总量限制。已有单次上传、预览、下载的 API 限制仍适用。
 
-每个 OAW profile 对应独立的 AgenticSpace、Access Point、RAM 角色/策略和 `oaw-<profile UUID>` Volume。用户继续使用原来的文件浏览器和 Sandbox 卡片，无需另配界面。管理员批量准备云资源；此轮没有实现新账号登录时自动创建云资源。重新发布并部署应用可能生成新的 profile UUID，需要按新的登录映射准备资源，不能复用旧入口的分配文件。
+每个 OAW profile 对应独立的 AgenticSpace、Access Point 和 `oaw-<profile UUID>` Volume。现有四个入口保留各自受限的 RAM 角色；无人值守开通使用运营方预先批准的共享存储角色，由 Sandbox 按本次挂载进一步收窄 STS 权限。用户继续使用原来的文件浏览器和 Sandbox 卡片。
+
+配置下述 hook 后，管理员部署新工作区时会自动准备云资源，验证跨 VM 重建后的文件持久化，再初始化并开放 worker。账号登录本身不会创建云资源。管理员也可显式更新原工作区，兼容更新保留 profile、卷、文档和对话；新建应用仍使用新 profile 和独立卷。旧工作区没有来源映射时拒绝原位模板更新，不按卡片名字猜测映射。
 
 这一步只迁移 Sandbox 文件。账号数据库、OAW 卡片/知识库数据、模型配置、Pack 和 worker 状态仍在 ECS；并非整个服务已脱离 ECS，也未部署 AgentCore 代码包。
 
@@ -20,6 +22,52 @@
 - `scripts/aliyun_workspace_probe.py`：通过真实 OAW 文件协议验证写入、VM 销毁、后端重建、读取、路径越界拒绝与清理。不会安装 hosted 配置，也不会自动将任何卷标记为已验收。
 
 个人部署入口没有改动。
+
+## 无人值守开通
+
+通用队列、Linux 服务安装和兼容更新位于 `backend/hosting`；阿里资源适配位于 `backend/cloud/aliyun/provisioning.py`。运营方在 hosting 根目录写入 root 所有、权限 `0600` 的 `resource-provisioner.json`，不放进网关可写的 `control` 目录：
+
+```json
+{
+  "handler": "backend.cloud.aliyun.provisioning:prepare_profile",
+  "settings": {
+    "region": "cn-hangzhou",
+    "zone": "cn-hangzhou-k",
+    "filesystem": "<AgenticFS filesystem ID>",
+    "vpc": "<VPC ID>",
+    "vswitch": "<vSwitch ID>",
+    "security_group": "<security group ID>",
+    "team": "<Sandbox Team ID>",
+    "account_id": "<Alibaba account ID>",
+    "quota_bytes": 10737418240,
+    "quota_files": 10000,
+    "template": "<verified template ID>",
+    "storage_cidr": "172.28.0.0/16",
+    "credential_type": "ecs_ram_role",
+    "role_name": "OawHostedProvisioner",
+    "storage_role": "acs:ram::<Alibaba account ID>:role/oawhostedstorage"
+  }
+}
+```
+
+安装 backend 的 `hosting`、`aliyun`、`aliyun-operator` extras。管理进程通过 ECS 实例角色和 IMDSv2 获取可刷新的临时凭据，网关和 worker 仍禁止访问云元数据。`worker-common.env` 只保留 Sandbox 连接所需的 API Key，不写管理 AccessKey。
+
+运营方预先配置两个角色：存储角色信任 FC，只允许挂载和写入目标文件系统；ECS 角色允许该文件系统的 `nas:CreateAgenticSpace`、`nas:DescribeAgenticSpaces`、接入点的 Create/List/Describe、当前 Team 的 Sandbox Create/List/GetVolume，以及仅对该存储角色的 `ram:PassRole`。接入点管理 API 当前只支持 `Resource: "*"`；无需给 ECS 角色 RAM 策略或角色管理权限。不同环境分别配置角色。
+
+云端创建先写持久预留记录。响应丢失时仅查询并核对同一资源，未查明前保持等待；不会重发不确定的创建请求。资源就绪之前不创建本地用户目录、系统账号或 worker。记录位于 hosting 根目录的 `resource-provisioning/aliyun/<profile UUID>`，仅 root 可访问。不要删除仍有不确定云操作的记录后重新部署。
+
+## 预装科学环境
+
+`scripts/aliyun_science_template.py` 使用官方二代镜像的构建期启动命令与就绪命令，安装公共依赖、执行真实导入及计算、绘图检查，再生成模板快照，不需要 ACR。构建命令和快照不含模型密钥、用户文件或部署凭据。
+
+```console
+python -m scripts.aliyun_science_template build --config <private-operator-config.json> --receipt <private-template-receipt.json> --name oaw-science-<unique-version>
+python -m scripts.aliyun_science_template status --config <private-operator-config.json> --receipt <private-template-receipt.json>
+```
+
+仅在模板 ready 且独立 VM 验收通过后配置为默认模板。2026-10-30 的模板已在两台新 VM 中断网验证 NumPy、SciPy、ASE、pymatgen、Matplotlib、mp-api、emmet-core 的导入和简单运算，无运行时下载。额外依赖仍沿用 OAW 的 `install_python_packages` 和保存的依赖配方；此模板不代表所有 Pack 私有运行时均已支持。
+
+现有绑定包含模板身份。替换默认模板时须先停止并确认旧 VM 已释放，再由运营方更新可信分配文件和绑定；保留原逻辑 Sandbox ID、卷和依赖配方，不直接删除绑定来绕过检查。
 
 ## 2026-10-26 单卷实测
 
