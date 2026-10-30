@@ -116,16 +116,25 @@ async def _verify_volume(remote, directory):
         receipt = json.loads(_read_private(path))
         if receipt['configuration'] != backend._configuration():
             raise ValueError('Persistence verification belongs to a different cloud assignment')
-        if not backend.path.exists():
+        if not backend.path.exists() and receipt['phase'] != 'binding':
             raise ValueError('Persistence verification lost its durable Sandbox binding')
     else:
         if backend.path.exists():
             raise ValueError('Unexpected pre-existing persistence verification binding')
         token = uuid4().hex
         receipt = {'configuration': backend._configuration(), 'marker': 'oaw-storage-check-' + token + '.txt',
-                   'content': 'persistent-file-' + token, 'phase': 'writing'}
-        # The local binding must exist before any cloud VM can be requested.
-        await backend.create(sandbox_id)
+                   'content': 'persistent-file-' + token, 'phase': 'binding'}
+        # Reserve local initialization before writing its binding. Neither step
+        # can create a VM, so this phase can be resumed after a process crash.
+        write(path, receipt)
+    if receipt['phase'] == 'binding':
+        if backend.path.exists():
+            binding = backend._read(sandbox_id)
+            if binding.get('remote_id') or binding.get('request_key') or binding.get('command') or binding.get('state') != 'stopped':
+                raise ValueError('Unexpected cloud work during local probe initialization')
+        else:
+            await backend.create(sandbox_id)
+        receipt['phase'] = 'writing'
         write(path, receipt)
     if receipt['phase'] == 'passed':
         return True

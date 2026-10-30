@@ -306,9 +306,10 @@ def test_private_environment_reader_rejects_nonprivate_metadata(tmp_path, monkey
         provisioning._api_key(tmp_path)
 
 
-def test_own_marker_probe_resumes_lost_write_without_repeating_it(tmp_path, monkeypatch, portable_private_files):
+@pytest.mark.parametrize('failure', ['binding', 'write'])
+def test_own_marker_probe_resumes_local_crash_or_lost_write_without_repeating_it(tmp_path, monkeypatch, portable_private_files, failure):
     files, writes, vms = {}, [], []
-    lose_write = [True]
+    lose_write, lose_binding = [failure == 'write'], [failure == 'binding']
     class Backend:
         def __init__(self, directory, remote):
             self.path, self.settings = directory / 'aliyun-sandbox.json', remote
@@ -317,9 +318,11 @@ def test_own_marker_probe_resumes_lost_write_without_repeating_it(tmp_path, monk
         def _read(self, sandbox):
             return json.loads(self.path.read_text())
         async def create(self, sandbox):
-            operator.write(self.path, {'remote_id': None})
+            operator.write(self.path, {'remote_id': None, 'state': 'stopped'})
+            if lose_binding.pop() if lose_binding else False:
+                raise RuntimeError('Process interrupted after local binding creation')
         async def terminate(self, sandbox):
-            operator.write(self.path, {'remote_id': None})
+            operator.write(self.path, {'remote_id': None, 'state': 'stopped'})
         async def file_operation(self, sandbox, operation, **options):
             if self._read(sandbox)['remote_id'] is None:
                 vms.append('vm-' + str(len(vms)))
@@ -344,7 +347,7 @@ def test_own_marker_probe_resumes_lost_write_without_repeating_it(tmp_path, monk
             return {}
     monkeypatch.setattr(provisioning, 'AliyunSandboxBackend', Backend)
     remote = provisioning.AliyunSandboxSettings('cn-hangzhou', 'private', 'template', 'oaw-volume', str(uuid4()))
-    with pytest.raises(SandboxStateError):
+    with pytest.raises(RuntimeError if failure == 'binding' else SandboxStateError):
         asyncio.run(provisioning._verify_volume(remote, tmp_path))
     assert asyncio.run(provisioning._verify_volume(remote, tmp_path)) is True
     result = json.loads((tmp_path / 'verification.json').read_text())
