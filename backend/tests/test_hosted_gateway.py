@@ -318,8 +318,10 @@ def test_worker_probe_timeout_does_not_submit_user_mutation(tmp_path):
     assert [(request.method, request.url.path) for request in calls] == [('GET', '/api/deployment')]
 
 
-@pytest.mark.parametrize('protocol', ['http', 'websocket'])
-@pytest.mark.parametrize('change', ['logout', 'disable', 'entry', 'worker_configuration'])
+@pytest.mark.parametrize(('protocol', 'change'), [
+    (protocol, change) for protocol in ('http', 'websocket')
+    for change in ('logout', 'disable', 'entry', 'worker_configuration')
+] + [('http', 'role')])
 def test_access_changed_during_probe_never_signs_or_forwards(tmp_path, monkeypatch, protocol, change):
     from dataclasses import asdict
     from backend.hosting.configuration import write_private_json
@@ -331,6 +333,8 @@ def test_access_changed_during_probe_never_signs_or_forwards(tmp_path, monkeypat
     def save(current):
         write_private_json(path, {'version': 1, 'public_origin': ORIGIN, 'profiles': [asdict(profile) for profile in current]})
     save(settings.profiles)
+    if change == 'role':
+        store.set_role(users[0]['id'], 'admin')
     token = store.create_session(users[0]['id'])
     calls = []
     def probe(request):
@@ -341,6 +345,11 @@ def test_access_changed_during_probe_never_signs_or_forwards(tmp_path, monkeypat
             store.set_enabled(users[0]['id'], False)
         elif change == 'entry':
             DeploymentStore(tmp_path / 'deployments.sqlite3').assign(users[0]['id'], extra.profile_id, 'operator')
+        elif change == 'role':
+            # Preserve this session to isolate the role guard from normal
+            # operator promotion/demotion, which also revokes sessions.
+            with store._db() as db:
+                db.execute("UPDATE users SET role='user' WHERE id=?", (users[0]['id'],))
         else:
             save((replace(profiles[0], secret='cd' * 32), profiles[1], extra))
         return httpx.Response(401)
@@ -352,8 +361,11 @@ def test_access_changed_during_probe_never_signs_or_forwards(tmp_path, monkeypat
     with TestClient(gateway, base_url=ORIGIN) as client:
         client.cookies.set('oaw_session', token)
         if protocol == 'http':
-            response = client.post('/api/nodes', json={}, headers={'Origin': ORIGIN, 'X-OAW-Instance': profiles[0].profile_id})
-            assert response.status_code == (401 if change in {'logout', 'disable'} else 409)
+            if change == 'role':
+                response = client.get('/api/hosting-template/' + str(uuid4()))
+            else:
+                response = client.post('/api/nodes', json={}, headers={'Origin': ORIGIN, 'X-OAW-Instance': profiles[0].profile_id})
+            assert response.status_code == (403 if change == 'role' else 401 if change in {'logout', 'disable'} else 409)
         else:
             with pytest.raises(WebSocketDisconnect):
                 with client.websocket_connect('wss://oaw.example/ws/events?instance=' + profiles[0].profile_id,

@@ -164,6 +164,8 @@ class Gateway:
         current_user = await self.auth.user_from_scope(request.scope)
         if current_user is None or current_user["id"] != user["id"]:
             return self.error(401, "authentication_required", "Sign in to continue.")
+        if request.url.path.startswith("/api/hosting-template") and current_user["role"] != "admin":
+            return self.error(403, "admin_required", "Administrator access required.")
         await self.refresh()
         current_profile = self.profiles.get(current_user["id"])
         if current_profile != profile:
