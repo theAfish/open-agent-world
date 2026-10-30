@@ -22,6 +22,7 @@ it('creates a new independent deployment without silently switching a user, and 
   render(<HostedDeployments session={session} />);
   expect(screen.getByRole('link', { name: 'Open engineering canvas' }).getAttribute('href')).toBe('/');
   await screen.findByLabelText('alice');
+  fireEvent.change(screen.getByLabelText('Deployment action'), { target: { value: 'initialize' } });
   fireEvent.change(screen.getByLabelText('Published version'), { target: { value: 'release-a' } });
   fireEvent.click(screen.getByLabelText('alice'));
   fireEvent.click(screen.getByRole('button', { name: 'Create private workspaces' }));
@@ -33,4 +34,22 @@ it('creates a new independent deployment without silently switching a user, and 
   fireEvent.click(screen.getByRole('button', { name: 'Set entry' }));
   await waitFor(() => expect(entry).toBe('new'));
   await screen.findByText(/entry has changed/);
+});
+
+it('updates an explicitly chosen existing runtime and never falls back to creating a workspace', async () => {
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method === 'POST') return Response.json({ error: { message: 'Incompatible template structure' } }, { status: 409 });
+    return Response.json({ ...initial, users: [{ ...initial.users[0], entry_id: 'new' }] });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<HostedDeployments session={session} />);
+  await screen.findByLabelText('alice');
+  fireEvent.change(screen.getByLabelText('Published version'), { target: { value: 'release-a' } });
+  fireEvent.click(screen.getByLabelText('alice'));
+  fireEvent.click(screen.getByRole('button', { name: 'Update selected workspaces' }));
+  await screen.findByText(/Incompatible template structure/);
+  const writes = fetcher.mock.calls.filter(([, init]) => init?.method === 'POST');
+  expect(writes).toHaveLength(1);
+  expect(JSON.parse(String(writes[0][1]?.body))).toEqual({ request_id: expect.any(String),
+    release_id: 'release-a', user_ids: ['alice'], mode: 'runtime', target_profiles: { alice: 'new' } });
 });
