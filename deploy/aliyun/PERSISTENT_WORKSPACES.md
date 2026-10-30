@@ -69,6 +69,8 @@ python -m scripts.aliyun_science_template status --config <private-operator-conf
 
 现有绑定包含模板身份。替换默认模板时须先停止并确认旧 VM 已释放，再由运营方更新可信分配文件和绑定；保留原逻辑 Sandbox ID、卷和依赖配方，不直接删除绑定来绕过检查。
 
+新工作区的默认模板由 `resource-provisioner.json` 的 `settings.template` 选择。已有可信分配文件会覆盖共享环境中的回退值；不要同时修改旧版、尚无分配文件的工作区使用的 `worker-common.env` 模板回退值，否则它们的既有绑定会因模板身份不匹配而拒绝启动。
+
 ## 2026-10-26 单卷实测
 
 使用既有独立测试 Volume `oaw-poc-workspace`，没有挂载线上用户数据。
