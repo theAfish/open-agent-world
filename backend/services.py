@@ -19,6 +19,7 @@ from backend.spatial import Rectangle
 if TYPE_CHECKING:
     from backend.skill_runtime import RunSkillScript
     from backend.canvas_control import CanvasControl, CanvasScope
+    from backend.security.environment_source import ExecutionEnvironmentSource
 
 from backend.agents import (
     AgentNotFoundError,
@@ -574,6 +575,7 @@ class ApplicationServices:
     plugin_bootstrap: Any = None
     pack_installations: Any = None
     marketplace: Any = None
+    execution_environment_source: ExecutionEnvironmentSource | None = field(default=None, repr=False)
     _node_mutation_lock: asyncio.Lock = field(
         default_factory=asyncio.Lock, init=False, repr=False
     )

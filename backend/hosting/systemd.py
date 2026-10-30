@@ -122,6 +122,7 @@ PartOf={name}.target
 [Service]
 {_common(application, user, '2G', 256)}Sockets={worker}.socket
 EnvironmentFile={instance}/worker.env
+EnvironmentFile=-{directory}/worker-common.env
 BindReadOnlyPaths={instance}:{view}
 BindPaths={instance}/data:{view}/data
 InaccessiblePaths={directory} /run/{name}

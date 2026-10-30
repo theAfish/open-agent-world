@@ -35,8 +35,8 @@ def validate_template(template) -> tuple[dict, LegionBlueprint]:
     """Validate the complete import before creating any user database or files."""
     from backend.security.model_connections import CatalogEdit, ModelCatalog
     fields = {"version", "name", "source_release_id", "root_key", "created_at",
-              "root_keys", "allow_terminal", "blueprint", "model_connections"}
-    required = fields - {"model_connections", "allow_terminal", "root_keys"}
+              "root_keys", "allow_terminal", "blueprint", "model_connections", "source_nodes", "source_identity"}
+    required = fields - {"model_connections", "allow_terminal", "root_keys", "source_nodes", "source_identity"}
     if (not isinstance(template, dict) or set(template) - fields or not required <= set(template)
             or type(template.get("version")) is not int or template["version"] != 1):
         raise ValueError("Unsupported or incomplete hosted template")
@@ -51,6 +51,8 @@ def validate_template(template) -> tuple[dict, LegionBlueprint]:
     except (TypeError, ValueError, AttributeError) as error:
         raise ValueError("Invalid hosted template release metadata") from error
     blueprint = LegionBlueprint.model_validate(template["blueprint"])
+    from .template_updates import validate_source_nodes
+    validate_source_nodes(template, blueprint)
     if type(blueprint.format_version) is not int or blueprint.format_version != 1 or not 1 <= len(blueprint.nodes) <= 101:
         raise ValueError("Unsupported hosted blueprint version or size")
     nodes = {node.key: node for node in blueprint.nodes}
@@ -90,7 +92,6 @@ async def export_template(source: Path, release_id: str, target: Path) -> dict:
     which current document fields are intended as reusable initial content.
     """
     from backend.services import create_services
-    from backend.security.model_connections import ModelConnectionStore
     source, target = source.resolve(), target.resolve()
     if target.exists():
         raise ValueError("Template destination already exists")
@@ -100,24 +101,45 @@ async def export_template(source: Path, release_id: str, target: Path) -> dict:
         settings = replace(Settings.for_data_root(source), agent_runtime=None, sandbox_runtime=None)
         services = create_services(settings)
         try:
+            value = await capture_template(services, release_id)
+            write_private_json(target, value)
+            return value
+        finally:
+            services.close()
+
+async def capture_template(services, release_id: str) -> dict:
+    """Capture a published engineering profile through its existing mutation gate."""
+    from backend.security.model_connections import ModelConnectionStore
+    async with services._portable_state_gate.capture():
+        async with services._node_mutation():
             with services.database.locked() as db:
                 row = db.execute("SELECT value_json FROM application_settings WHERE key=?", (PREFIX + release_id,)).fetchone()
                 if not row:
-                    raise ValueError("Publish the workspace before exporting a hosted template")
+                    raise ValueError("Publish the workspace before deploying it")
                 release = json.loads(row[0])
                 if release["configuration_digest"] != configuration_digest(db):
-                    raise ValueError("Configuration changed; publish a new release before exporting")
+                    raise ValueError("Configuration changed; publish a new release before deploying")
                 if db.execute("SELECT 1 FROM runs WHERE status IN ('created','running','waiting') LIMIT 1").fetchone():
                     raise ValueError("Finish or stop active runs before exporting")
             groups = [services.world.get_card(workspace["legion_id"]) for workspace in published_workspaces(release)]
             nodes = list({node.id: node for group in groups for node in [group, *services.world.owned_descendants(group.id)]}.values())
             ids = {node.id for node in nodes}
             if any((edge.source in ids) != (edge.target in ids) for edge in services.world.list_edges()):
-                raise ValueError("Hosted templates require a self-contained Legion; include external dependencies in the Legion")
-            request = LegionCapture(name=release["name"], node_ids=[node.id for node in nodes])
-            async with services._portable_state_gate.capture():
-                async with services._node_mutation():
-                    blueprint, node_keys = await services._capture_subgraph_locked(request)
+                raise ValueError("Include external dependencies inside the published Legion before deploying")
+            blueprint, node_keys = await services._capture_subgraph_locked(
+                LegionCapture(name=release["name"], node_ids=[node.id for node in nodes]))
+            captured = {node.key: node for node in blueprint.nodes}
+            for source_node in nodes:
+                if source_node.type == "sandbox":
+                    # Publishing an administrator's configured application is
+                    # different from acquiring a portable Legion. Keep its
+                    # approved execution policy, but never host paths/bindings.
+                    captured[node_keys[source_node.id]].config.update({
+                        key: source_node.config[key] for key in (
+                            "network_enabled", "memory_bytes",
+                            "active_process_limit", "command_timeout",
+                        ) if key in source_node.config
+                    })
             for node in blueprint.nodes:
                 node.initial_shared_state = None
             models = ModelConnectionStore(services.llm_settings).read().model_dump(mode="json")
@@ -128,15 +150,21 @@ async def export_template(source: Path, release_id: str, target: Path) -> dict:
                      "root_key": node_keys[groups[0].id], "root_keys": [node_keys[group.id] for group in groups],
                      "created_at": datetime.now(UTC).isoformat(),
                      "allow_terminal": any("terminal" in operations for operations in release["permissions"].values()),
-                     "blueprint": blueprint.model_dump(mode="json"), "model_connections": models}
+                     "blueprint": blueprint.model_dump(mode="json"), "model_connections": models,
+                     "source_nodes": {key: node_id for node_id, key in node_keys.items()}}
+            from backend.application import application_snapshot
+            tenant = services.settings.tenant_scope
+            value["source_identity"] = {
+                "profile_id": application_snapshot(services)["profile_id"],
+                "organization_id": tenant.organization_id if tenant else None,
+                "workspace_id": tenant.workspace_id if tenant else None,
+                "world_id": tenant.world_id if tenant else None,
+            }
             validate_template(value)
-            write_private_json(target, value)
             return value
-        finally:
-            services.close()
 
 
-async def initialize_runtime(config: WorkerConfig, template_path: Path) -> dict:
+async def initialize_runtime(config: WorkerConfig, template_path: Path, *, services_factory=None) -> dict:
     """Instantiate into a NEW profile; restarting never copies or resets user data."""
     if template_path.stat().st_size > 64 * 1024 * 1024:
         raise ValueError("Hosted template exceeds 64 MiB")
@@ -147,13 +175,16 @@ async def initialize_runtime(config: WorkerConfig, template_path: Path) -> dict:
             raise ValueError("Profile already contains data; provisioning never overwrites an existing profile")
         prepare_hosted_binding(root, profile_id=config.profile_id, user_id=config.user_id, application_id=config.application_id)
         settings = replace(Settings.for_data_root(root), agent_runtime=config.agent_runtime, sandbox_runtime=None,
-                           tenant_scope=hosted_scope(config.user_id, config.application_id, config.profile_id))
-        services = create_worker_services(settings)
+                           tenant_scope=hosted_scope(config.user_id, config.application_id, config.profile_id),
+                           inherit_runtime_environment=False)
+        services = (services_factory or create_worker_services)(settings)
         try:
             now = datetime.now(UTC)
             record = LegionRecord(id=str(uuid4()), name=template["name"], description="Hosted application template",
                                   blueprint=blueprint, created_at=now, updated_at=now, revision=1)
             instance = await services.instantiate_legion(record.id, LegionInstantiate(), record=record)
+            from .template_updates import record_template_provenance
+            record_template_provenance(services, template, instance.node_ids)
             # Public model definitions are portable; credentials are explicitly
             # configured per worker by the operator after provisioning.
             if template.get("model_connections"):
@@ -172,7 +203,8 @@ async def initialize_runtime(config: WorkerConfig, template_path: Path) -> dict:
             manifest["runtime_settings"] = {"agent_runtime": config.agent_runtime, "sandbox_runtime": None, "plugin_directories": []}
             from backend.deploy import validate_manifest
             validate_manifest(manifest)
-            write_private_json(root / "deployment.json", manifest)
+            if config.mode == "runtime":
+                write_private_json(root / "deployment.json", manifest)
             return manifest
         finally:
             services.close()

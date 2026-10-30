@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import replace
+from types import SimpleNamespace
 from uuid import uuid4
 
 import httpx
@@ -9,7 +10,7 @@ from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from backend.hosting.accounts import AccountStore
-from backend.hosting.configuration import GatewaySettings, HostedProfile
+from backend.hosting.configuration import GatewaySettings, HostedProfile, default_upstream
 from backend.hosting.gateway import create_gateway
 from backend.hosting.worker import WorkerConfig, WorkerIdentityProvider, create_worker_app
 
@@ -53,6 +54,7 @@ async def test_gateway_routes_two_users_to_real_isolated_workers_and_strips_clie
         await stack.enter_async_context(gateway.app.router.lifespan_context(gateway.app))
         client = await stack.enter_async_context(httpx.AsyncClient(transport=httpx.ASGITransport(app=gateway), base_url=ORIGIN))
         assert (await client.get("/api/world")).status_code == 401
+        assert not calls
         alice_token = store.create_session(users[0]["id"])
         client.cookies.set("oaw_session", alice_token)
         info = await client.get("/auth/me")
@@ -96,7 +98,8 @@ async def test_gateway_routes_two_users_to_real_isolated_workers_and_strips_clie
 
 def test_gateway_auth_shell_assets_and_security_headers(tmp_path):
     store, users, profiles, frontend, settings = fixture_data(tmp_path, password=PASSWORD)
-    gateway = create_gateway(settings, frontend, store=store, transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"ok": True})))
+    gateway = create_gateway(settings, frontend, store=store, transport=httpx.MockTransport(
+        lambda request: httpx.Response(401) if request.url.path == '/api/deployment' else httpx.Response(200, json={"ok": True})))
     with TestClient(gateway, base_url=ORIGIN) as client:
         assert client.get("/auth/login").text == "<html>Hosted login shell</html>"
         assert client.get("/").status_code == 200
@@ -124,6 +127,8 @@ def test_gateway_streams_mock_body_filters_worker_cookies_and_keeps_authority(tm
 
     def upstream(request):
         calls.append(request)
+        if request.url.path == '/api/deployment':
+            return httpx.Response(401)
         return httpx.Response(200, content=b"private body", headers={"Set-Cookie": "worker=secret",
             "Cache-Control": "public", "Server": "worker-secret", "Connection": "X-Private", "X-Private": "hide",
             "Location": profiles[0].upstream + "/next", "Content-Type": "text/plain",
@@ -152,7 +157,8 @@ def test_worker_cookie_jar_never_crosses_same_host_upstreams(tmp_path):
 
     def upstream(request):
         calls.append(request)
-        return httpx.Response(200, json={"ok": True}, headers={"Set-Cookie": "worker-session=alice-secret; Path=/"})
+        return httpx.Response(401 if request.url.path == '/api/deployment' else 200,
+                              json={"ok": True}, headers={"Set-Cookie": "worker-session=alice-secret; Path=/"})
 
     gateway = create_gateway(settings, frontend, store=store, transport=httpx.MockTransport(upstream))
     with TestClient(gateway, base_url=ORIGIN) as client:
@@ -161,7 +167,7 @@ def test_worker_cookie_jar_never_crosses_same_host_upstreams(tmp_path):
             response = client.get("/api/world")
             assert response.status_code == 200
             assert "set-cookie" not in response.headers
-        assert [request.url.port for request in calls] == [8000, 8001]
+        assert [request.url.port for request in calls] == [8000, 8000, 8001, 8001]
         assert all("cookie" not in request.headers for request in calls)
 
 
@@ -171,6 +177,8 @@ def test_sandbox_cold_start_keeps_response_channel_open_without_replaying_timeou
 
     def upstream(request):
         calls.append(request)
+        if request.url.path == '/api/deployment':
+            return httpx.Response(401)
         if request.url.path.endswith('/execute'):
             raise httpx.ReadTimeout('response deadline', request=request)
         return httpx.Response(200, json={'ok': True})
@@ -188,9 +196,42 @@ def test_sandbox_cold_start_keeps_response_channel_open_without_replaying_timeou
                     assert response.status_code == 504
                     assert response.json()['error']['code'] == 'workspace_operation_timeout'
                     assert 'may still be running' in response.json()['error']['message']
-        assert len(calls) == 6  # A response timeout never retries a mutation.
+        assert len([request for request in calls if request.method == 'POST']) == 6  # No mutation retries.
         client.get('/api/world')
         assert calls[-1].extensions['timeout']['read'] == 300
+
+
+@pytest.mark.parametrize('unix_socket', [False, True])
+def test_worker_cold_start_finishes_before_signing_and_never_replays_mutation(tmp_path, monkeypatch, unix_socket):
+    store, users, profiles, frontend, settings = fixture_data(tmp_path)
+    clock = [1_000_000.0]
+    monkeypatch.setattr('backend.hosting.worker.time', SimpleNamespace(time=lambda: clock[0]))
+    profile = profiles[0]
+    if unix_socket:
+        profile = replace(profile, upstream=default_upstream(profile.profile_id))
+        settings = replace(settings, profiles=(profile, profiles[1]))
+    identity = WorkerIdentityProvider(profile.secret, profile.profile_id, profile.user_id)
+    calls = []
+
+    async def upstream(request):
+        if not calls:
+            clock[0] += 59  # Socket activation delays the first request beyond the assertion's 30-second lifetime.
+        calls.append(request)
+        authenticated = await identity.authenticate({'headers': request.headers.raw})
+        if authenticated is None:
+            return httpx.Response(401)
+        return httpx.Response(201, json={'created_once': True})
+
+    gateway = create_gateway(settings, frontend, store=store, transport=httpx.MockTransport(upstream))
+    with TestClient(gateway, base_url=ORIGIN) as client:
+        client.cookies.set('oaw_session', store.create_session(users[0]['id']))
+        response = client.post('/api/nodes', json={'type': 'text'}, headers={
+            'Origin': ORIGIN, 'X-OAW-Instance': profile.profile_id, 'Authorization': 'Bearer browser-forgery'})
+        assert response.status_code == 201, response.text
+    assert [(request.method, request.url.path) for request in calls] == [
+        ('GET', '/api/deployment'), ('POST', '/api/nodes')]
+    assert 'authorization' not in calls[0].headers and 'cookie' not in calls[0].headers
+    assert calls[1].content == b'{"type":"text"}'
 
 
 class FakeWorkerSocket:
@@ -207,6 +248,132 @@ class FakeWorkerSocket:
         return await self.queue.get()
 
 
+def test_websocket_cold_start_finishes_before_signing(tmp_path, monkeypatch):
+    store, users, profiles, frontend, settings = fixture_data(tmp_path)
+    profile = profiles[0]
+    clock = [1_000_000.0]
+    monkeypatch.setattr('backend.hosting.worker.time', SimpleNamespace(time=lambda: clock[0]))
+    identity = WorkerIdentityProvider(profile.secret, profile.profile_id, profile.user_id)
+    calls = []
+
+    def probe(request):
+        calls.append((request.method, request.url.path))
+        assert 'authorization' not in request.headers and 'cookie' not in request.headers
+        clock[0] += 59
+        return httpx.Response(401)
+
+    @asynccontextmanager
+    async def connect(url, **kwargs):
+        calls.append(('WS', url))
+        forwarded = httpx.Headers(kwargs['additional_headers'])
+        assert await identity.authenticate({'headers': forwarded.raw}) is not None
+        yield FakeWorkerSocket()
+
+    monkeypatch.setattr('websockets.asyncio.client.connect', connect)
+    gateway = create_gateway(settings, frontend, store=store, transport=httpx.MockTransport(probe))
+    with TestClient(gateway, base_url=ORIGIN) as client:
+        client.cookies.set('oaw_session', store.create_session(users[0]['id']))
+        with client.websocket_connect('wss://oaw.example/ws/events?instance=' + profile.profile_id,
+                                      headers={'Origin': ORIGIN}) as socket:
+            socket.send_text('hello')
+            assert socket.receive_text() == 'hello'
+    assert calls[0] == ('GET', '/api/deployment') and calls[1][0] == 'WS' and len(calls) == 2
+
+
+@pytest.mark.parametrize('status', [200, 403, 503])
+def test_unexpected_worker_probe_never_signs_or_forwards_http_or_websocket(tmp_path, monkeypatch, status):
+    store, users, profiles, frontend, settings = fixture_data(tmp_path)
+    calls = []
+    def probe(request):
+        calls.append(request)
+        return httpx.Response(status)
+    def forbidden(*args, **kwargs):
+        pytest.fail('An unexpected authentication boundary must not receive a signed request')
+    monkeypatch.setattr('backend.hosting.gateway.mint_worker_token', forbidden)
+    monkeypatch.setattr('websockets.asyncio.client.connect', forbidden)
+    gateway = create_gateway(settings, frontend, store=store, transport=httpx.MockTransport(probe))
+    with TestClient(gateway, base_url=ORIGIN) as client:
+        client.cookies.set('oaw_session', store.create_session(users[0]['id']))
+        response = client.post('/api/nodes', json={}, headers={'Origin': ORIGIN, 'X-OAW-Instance': profiles[0].profile_id})
+        assert response.status_code == 503
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect('wss://oaw.example/ws/events?instance=' + profiles[0].profile_id,
+                                          headers={'Origin': ORIGIN}):
+                pytest.fail('An unavailable worker connected')
+    assert [(request.method, request.url.path) for request in calls] == [('GET', '/api/deployment')] * 2
+    assert all('authorization' not in request.headers and 'cookie' not in request.headers for request in calls)
+
+
+def test_worker_probe_timeout_does_not_submit_user_mutation(tmp_path):
+    store, users, profiles, frontend, settings = fixture_data(tmp_path)
+    calls = []
+    def timeout(request):
+        calls.append(request)
+        raise httpx.ReadTimeout('worker startup deadline', request=request)
+    gateway = create_gateway(settings, frontend, store=store, transport=httpx.MockTransport(timeout))
+    with TestClient(gateway, base_url=ORIGIN) as client:
+        client.cookies.set('oaw_session', store.create_session(users[0]['id']))
+        response = client.post('/api/nodes', json={}, headers={'Origin': ORIGIN, 'X-OAW-Instance': profiles[0].profile_id})
+        assert response.status_code == 503
+    assert [(request.method, request.url.path) for request in calls] == [('GET', '/api/deployment')]
+
+
+@pytest.mark.parametrize(('protocol', 'change'), [
+    (protocol, change) for protocol in ('http', 'websocket')
+    for change in ('logout', 'disable', 'entry', 'worker_configuration')
+] + [('http', 'role')])
+def test_access_changed_during_probe_never_signs_or_forwards(tmp_path, monkeypatch, protocol, change):
+    from dataclasses import asdict
+    from backend.hosting.configuration import write_private_json
+    from backend.hosting.deployments import DeploymentStore
+    store, users, profiles, frontend, settings = fixture_data(tmp_path)
+    extra = replace(profiles[0], profile_id=str(uuid4()), upstream='http://worker-new', secret='ab' * 32)
+    settings = replace(settings, profiles=(*profiles, extra))
+    path = tmp_path / 'hosting.json'
+    def save(current):
+        write_private_json(path, {'version': 1, 'public_origin': ORIGIN, 'profiles': [asdict(profile) for profile in current]})
+    save(settings.profiles)
+    if change == 'role':
+        store.set_role(users[0]['id'], 'admin')
+    token = store.create_session(users[0]['id'])
+    calls = []
+    def probe(request):
+        calls.append(request)
+        if change == 'logout':
+            store.revoke_session(token)
+        elif change == 'disable':
+            store.set_enabled(users[0]['id'], False)
+        elif change == 'entry':
+            DeploymentStore(tmp_path / 'deployments.sqlite3').assign(users[0]['id'], extra.profile_id, 'operator')
+        elif change == 'role':
+            # Preserve this session to isolate the role guard from normal
+            # operator promotion/demotion, which also revokes sessions.
+            with store._db() as db:
+                db.execute("UPDATE users SET role='user' WHERE id=?", (users[0]['id'],))
+        else:
+            save((replace(profiles[0], secret='cd' * 32), profiles[1], extra))
+        return httpx.Response(401)
+    def forbidden(*args, **kwargs):
+        pytest.fail('Changed access must not receive a signed request')
+    monkeypatch.setattr('backend.hosting.gateway.mint_worker_token', forbidden)
+    monkeypatch.setattr('websockets.asyncio.client.connect', forbidden)
+    gateway = create_gateway(settings, frontend, store=store, transport=httpx.MockTransport(probe), settings_path=path)
+    with TestClient(gateway, base_url=ORIGIN) as client:
+        client.cookies.set('oaw_session', token)
+        if protocol == 'http':
+            if change == 'role':
+                response = client.get('/api/hosting-template/' + str(uuid4()))
+            else:
+                response = client.post('/api/nodes', json={}, headers={'Origin': ORIGIN, 'X-OAW-Instance': profiles[0].profile_id})
+            assert response.status_code == (403 if change == 'role' else 401 if change in {'logout', 'disable'} else 409)
+        else:
+            with pytest.raises(WebSocketDisconnect):
+                with client.websocket_connect('wss://oaw.example/ws/events?instance=' + profiles[0].profile_id,
+                                              headers={'Origin': ORIGIN}):
+                    pytest.fail('Changed access connected')
+    assert [(request.method, request.url.path) for request in calls] == [('GET', '/api/deployment')]
+
+
 @pytest.mark.parametrize("revocation", ["logout", "disable"])
 def test_live_websocket_checks_revocation_and_never_forwards_browser_cookie(tmp_path, monkeypatch, revocation):
     store, users, profiles, frontend, settings = fixture_data(tmp_path)
@@ -218,7 +385,7 @@ def test_live_websocket_checks_revocation_and_never_forwards_browser_cookie(tmp_
         yield FakeWorkerSocket()
 
     monkeypatch.setattr("websockets.asyncio.client.connect", connect)
-    gateway = create_gateway(settings, frontend, store=store)
+    gateway = create_gateway(settings, frontend, store=store, transport=httpx.MockTransport(lambda request: httpx.Response(401)))
     token = store.create_session(users[0]["id"])
     with TestClient(gateway, base_url=ORIGIN) as client:
         headers = {"Origin": ORIGIN, "Cookie": "oaw_session=" + token, "Authorization": "Bearer browser-forgery",
@@ -257,7 +424,11 @@ def test_websocket_denies_invalid_session_origin_instance_and_upstream_handshake
         yield  # pragma: no cover
 
     monkeypatch.setattr("websockets.asyncio.client.connect", connect)
-    gateway = create_gateway(settings, frontend, store=store)
+    probes = []
+    def probe(request):
+        probes.append(request)
+        return httpx.Response(401)
+    gateway = create_gateway(settings, frontend, store=store, transport=httpx.MockTransport(probe))
     token = store.create_session(users[0]["id"])
     with TestClient(gateway, base_url=ORIGIN) as client:
         url = "wss://oaw.example/ws/events"
@@ -269,17 +440,19 @@ def test_websocket_denies_invalid_session_origin_instance_and_upstream_handshake
                 with client.websocket_connect(target, headers=headers):
                     pytest.fail("Rejected socket connected")
         assert not calls
+        assert not probes  # Invalid owners, origins and instance hints cannot wake a worker.
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(url + "?instance=" + profiles[0].profile_id, headers=valid_headers):
                 pytest.fail("Rejected upstream connected")
         assert len(calls) == 1
+        assert len(probes) == 1
 
 
 def test_registry_rejects_ambiguous_routes_and_hides_credentials(tmp_path):
     _, _, profiles, _, settings = fixture_data(tmp_path)
     assert "secret" not in profiles[0].public()
     assert profiles[0].secret not in repr(profiles[0])
-    for field in ("user_id", "profile_id", "upstream", "secret"):
+    for field in ("profile_id", "upstream", "secret"):
         duplicate = replace(profiles[1], **{field: getattr(profiles[0], field)})
         with pytest.raises(ValueError, match="unique"):
             GatewaySettings(ORIGIN, settings.accounts_path, (profiles[0], duplicate))

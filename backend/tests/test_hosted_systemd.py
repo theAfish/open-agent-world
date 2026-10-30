@@ -124,6 +124,8 @@ async def test_real_unix_http_and_websocket_transports_keep_users_separate(tmp_p
 
         async def request(request):
             identity = await verifier.authenticate(request.scope)
+            if identity is None:
+                return JSONResponse({'error': 'authentication_required'}, status_code=401)
             assert identity and identity.subject == profile.user_id
             assert "cookie" not in request.headers
             return JSONResponse({"profile": profile.profile_id})
@@ -140,7 +142,8 @@ async def test_real_unix_http_and_websocket_transports_keep_users_separate(tmp_p
             except Exception:
                 pass
 
-        return Starlette(routes=[Route('/api/world', request), WebSocketRoute('/ws/events', websocket)])
+        return Starlette(routes=[Route('/api/world', request), Route('/api/deployment', request),
+                                 WebSocketRoute('/ws/events', websocket)])
 
     # /tmp keeps socket addresses below Linux's 108-byte sockaddr_un limit.
     with tempfile.TemporaryDirectory(prefix="oaw-uds-") as sockets:

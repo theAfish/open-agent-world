@@ -10,7 +10,7 @@ import json
 import os
 from pathlib import Path
 import secrets
-from uuid import uuid4
+from uuid import UUID, uuid4, uuid5
 
 from .accounts import AccountStore
 from .configuration import GatewaySettings, HostedProfile, default_upstream, public_origin, read_gateway_settings, write_private_json
@@ -54,19 +54,30 @@ async def provision(directory: Path, user_id: str, *, application_id="default", 
             raise ValueError("This account already has an entry workspace; never replace a user's data implicitly")
         if not AccountStore(existing.accounts_path).get_user(user_id):
             raise ValueError("Unknown user")
-        profile_id = str(uuid4())
+        resource_hook = directory / "resource-provisioner.json"
+        profile_id = str(uuid5(UUID(user_id), "hosted-profile:" + application_id)) if (
+            resource_hook.exists() or resource_hook.is_symlink()) else str(uuid4())
         profile = HostedProfile(profile_id, user_id, application_id, name, mode,
                                 upstream or default_upstream(profile_id), secrets.token_hex(32))
         # Validate routing uniqueness before creating any profile data.
-        GatewaySettings(existing.public_origin, existing.accounts_path, (*existing.profiles, profile), existing.allow_local_http)
+        GatewaySettings(existing.public_origin, existing.accounts_path, (*existing.profiles, profile), existing.allow_local_http,
+                        existing.shared_models_origin, existing.shared_environment_origin)
         config = WorkerConfig(profile_id, user_id, application_id, mode, existing.public_origin, profile.secret,
-                              directory / "instances" / profile_id / "data", agent_runtime)
+                              directory / "instances" / profile_id / "data", agent_runtime,
+                              shared_models_origin=existing.shared_models_origin,
+                              shared_environment_origin=existing.shared_environment_origin)
         if mode == "runtime" and template is None:
             raise ValueError("Runtime profiles require --template exported from a published workspace")
         if mode == "builder" and template is not None:
             raise ValueError("Use runtime mode to initialize a published template")
+        from .provisioner import prepare_resources
+        resources = prepare_resources(directory, profile)
+        if resources is None:
+            raise ValueError("Workspace resources are pending; retry after resource readiness")
         # A failed provision is left unregistered for inspection; it can never
         # receive user traffic or replace an existing runtime.
+        for filename, resource in resources.items():
+            write_private_json(config.data_root.parent / filename, resource)
         prepare_hosted_binding(config.data_root, profile_id=profile_id, user_id=user_id, application_id=application_id)
         if mode == "runtime":
             await initialize_runtime(config, Path(template))
@@ -81,6 +92,38 @@ async def provision(directory: Path, user_id: str, *, application_id="default", 
         return profile
 
 
+def enable_shared_models(directory: Path, origin: str):
+    enable_shared_settings(directory, origin, "shared_models_origin")
+
+
+def enable_shared_environment(directory: Path, origin: str):
+    enable_shared_settings(directory, origin, "shared_environment_origin")
+
+
+def enable_shared_settings(directory: Path, origin: str, key: str):
+    """Offline operator action; existing workspace/model data remains untouched."""
+    if key not in {"shared_models_origin", "shared_environment_origin"}:
+        raise ValueError("Unsupported shared service")
+    from backend.storage_location import file_lock
+    public_origin(origin, allow_local_http=True)
+    config = directory / "control/hosting.json"
+    with file_lock(directory / "control/provision.lock"):
+        settings = read_gateway_settings(config)
+        documents = []
+        for profile in settings.profiles:
+            path = directory / "instances" / profile.profile_id / "worker.json"
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if value["profile_id"] != profile.profile_id or value["user_id"] != profile.user_id:
+                raise ValueError("Worker identity differs from its registered profile")
+            value[key] = origin
+            documents.append((path, value))
+        for path, value in documents:
+            write_private_json(path, value)
+        value = json.loads(config.read_text(encoding="utf-8"))
+        value[key] = origin
+        write_private_json(config, value)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -88,7 +131,11 @@ def main(argv=None):
     init.add_argument("--directory", type=Path, required=True)
     init.add_argument("--origin", required=True)
     init.add_argument("--allow-local-http", action="store_true")
-    for name in ("user-add", "user-list", "user-disable", "user-enable", "password", "identity-link", "profile-add"):
+    for name in ("shared-models-enable", "shared-environment-enable"):
+        shared = commands.add_parser(name)
+        shared.add_argument("--directory", type=Path, required=True)
+        shared.add_argument("--origin", required=True, help="Gateway origin reachable by workers (loopback HTTP or HTTPS)")
+    for name in ("user-add", "user-list", "user-role", "user-disable", "user-enable", "password", "identity-link", "profile-add"):
         command = commands.add_parser(name)
         command.add_argument("--directory", type=Path, required=True)
         if name != "user-list":
@@ -96,6 +143,9 @@ def main(argv=None):
         if name == "user-add":
             command.add_argument("--display-name")
             command.add_argument("--oidc-only", action="store_true")
+            command.add_argument("--role", choices=["user", "admin"], default="user")
+        elif name == "user-role":
+            command.add_argument("--role", choices=["user", "admin"], required=True)
         elif name == "identity-link":
             command.add_argument("--issuer", required=True)
             command.add_argument("--subject", required=True)
@@ -142,6 +192,14 @@ def main(argv=None):
     if args.command == "init":
         print(initialize(args.directory.resolve(), args.origin, args.allow_local_http))
         return
+    if args.command == "shared-models-enable":
+        enable_shared_models(args.directory.resolve(), args.origin)
+        print("Shared models enabled. Regenerate/install service units, then start the gateway and workers.")
+        return
+    if args.command == "shared-environment-enable":
+        enable_shared_environment(args.directory.resolve(), args.origin)
+        print("Shared environment enabled. Regenerate/install service units, then start the gateway and workers.")
+        return
     if args.command == "template-export":
         from .templates import export_template
         value = asyncio.run(export_template(args.source, args.release, args.output))
@@ -161,7 +219,7 @@ def main(argv=None):
             if oidc_path.is_file():
                 from .oidc import OidcSettings
                 oidc = OidcSettings(**json.loads(oidc_path.read_text(encoding="utf-8")))
-            app = create_gateway(read_gateway_settings(config), args.frontend, oidc_settings=oidc)
+            app = create_gateway(read_gateway_settings(config), args.frontend, oidc_settings=oidc, settings_path=config)
         else:
             from .worker import create_worker_app
             value = json.loads(args.config.read_text(encoding="utf-8"))
@@ -180,15 +238,17 @@ def main(argv=None):
     settings = read_gateway_settings(directory / "control/hosting.json")
     store = AccountStore(settings.accounts_path)
     if args.command == "user-add":
-        user = store.create_user(args.user, args.display_name, None if args.oidc_only else _password())
+        user = store.create_user(args.user, args.display_name, None if args.oidc_only else _password(), role=args.role)
         print(f"Created {user['username']}: {user['id']}")
     elif args.command == "user-list":
         for user in store.list_users():
-            print(f"{user['id']}  {user['username']}  {'enabled' if user['enabled'] else 'disabled'}")
+            print(f"{user['id']}  {user['username']}  {user['role']}  {'enabled' if user['enabled'] else 'disabled'}")
     else:
         user = _user(store, args.user)
         if args.command == "password":
             store.set_password(user["id"], _password())
+        elif args.command == "user-role":
+            store.set_role(user["id"], args.role)
         elif args.command in {"user-enable", "user-disable"}:
             store.set_enabled(user["id"], args.command == "user-enable")
         elif args.command == "identity-link":

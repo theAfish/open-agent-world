@@ -43,6 +43,8 @@ class Settings:
     )
     # One profile owns one scope, not several users in a shared database.
     tenant_scope: TenantScope = LOCAL_TENANT
+    # Operator-selected process policy; never sourced from a card or model.
+    inherit_runtime_environment: bool = True
 
     @classmethod
     def from_environment(cls) -> "Settings":

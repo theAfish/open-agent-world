@@ -40,6 +40,10 @@ def test_provision_independent_builder_profiles_and_private_systemd_services(tmp
         assert other.profile_id not in worker and "control/hosting" not in worker
         assert f"User={service_user('oaw-hosted', p.profile_id)}" in worker
         assert "SocketMode=0600" in units[f"oaw-hosted-worker-{p.profile_id}.socket"]
+        # Later/new users read one operator-owned shared environment too.
+        shared = "EnvironmentFile=-/srv/oaw-hosting/worker-common.env"
+        assert shared in worker and worker.index(shared) > worker.index(f"instances/{p.profile_id}/worker.env")
+        assert "BindReadOnlyPaths=/srv/oaw-hosting/worker-common.env" not in worker
     assert service_user('oaw-hosted', a.profile_id) != service_user('oaw-hosted', b.profile_id)
     assert "--port 8080" in units["oaw-hosted-gateway.service"]
     assert a.secret not in json.dumps(units)
