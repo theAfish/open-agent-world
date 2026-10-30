@@ -2,6 +2,7 @@ import asyncio
 from dataclasses import asdict, replace
 import json
 from uuid import uuid4
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -23,12 +24,22 @@ def template(tmp_path):
     return asyncio.run(export_template(source, data["release"]["id"], tmp_path / "portable.json"))
 
 
-def test_admin_deployments_are_durable_idempotent_and_do_not_reassign_existing_profiles(tmp_path, template):
+def test_admin_deployments_are_durable_idempotent_and_do_not_reassign_existing_profiles(tmp_path, template, monkeypatch):
     store, users, profiles, frontend, settings = fixture_data(tmp_path)
     store.set_role(users[0]["id"], "admin")
-    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=template if "/hosting-template/" in r.url.path
-                                                            else [{"id": template["source_release_id"], "name": "App",
-                                                                   "legion_id": "legion", "created_at": template["created_at"]}]))
+    from backend.hosting.worker import WorkerIdentityProvider
+    identity = WorkerIdentityProvider(profiles[0].secret, profiles[0].profile_id, profiles[0].user_id)
+    clock, calls = [1_000_000.0], []
+    monkeypatch.setattr('backend.hosting.worker.time', SimpleNamespace(time=lambda: clock[0]))
+    async def source(request):
+        if not calls:
+            clock[0] += 59
+        calls.append(request)
+        if await identity.authenticate({'headers': request.headers.raw}) is None:
+            return httpx.Response(401)
+        return httpx.Response(200, json=template if '/hosting-template/' in request.url.path else [
+            {'id': template['source_release_id'], 'name': 'App', 'legion_id': 'legion', 'created_at': template['created_at']}])
+    transport = httpx.MockTransport(source)
     with TestClient(create_gateway(settings, frontend, store=store, transport=transport), base_url=ORIGIN) as client:
         payload = {"request_id": str(uuid4()), "release_id": template["source_release_id"], "user_ids": [users[1]["id"]], "mode": "runtime"}
         client.cookies.set("oaw_session", store.create_session(users[1]["id"]))
@@ -38,8 +49,11 @@ def test_admin_deployments_are_durable_idempotent_and_do_not_reassign_existing_p
         client.cookies.set("oaw_session", store.create_session(users[0]["id"]))
         assert client.post("/hosting/admin/deployments", json=payload).status_code == 403
         assert client.post("/hosting/admin/deployments", json=payload, headers={"Origin": "https://evil.example"}).status_code == 403
+        assert not calls  # Authentication and origin rejection cannot wake the engineering worker.
         first = client.post("/hosting/admin/deployments", json=payload, headers={"Origin": ORIGIN})
         assert first.status_code == 202, first.text
+        assert calls[0].url.path == '/api/deployment' and 'authorization' not in calls[0].headers
+        assert calls[1].url.path == '/api/hosting-template/' + template['source_release_id']
         repeat = client.post("/hosting/admin/deployments", json=payload, headers={"Origin": ORIGIN})
         assert repeat.json() == first.json()
         assert len(client.get("/hosting/admin/deployments").json()["jobs"]) == 1
@@ -62,6 +76,8 @@ def test_live_assignment_preserves_routes_rejects_foreign_profile_and_invalidate
     calls = []
     def worker(request):
         calls.append(request)
+        if request.url.path == '/api/deployment':
+            return httpx.Response(401)
         return httpx.Response(200, json=[] if request.url.path == "/api/deployments" else {"host": request.url.host})
     with TestClient(create_gateway(settings, frontend, store=store, transport=httpx.MockTransport(worker), settings_path=path), base_url=ORIGIN) as client:
         client.cookies.set("oaw_session", store.create_session(users[1]["id"]))
@@ -80,6 +96,40 @@ def test_live_assignment_preserves_routes_rejects_foreign_profile_and_invalidate
         client.cookies.set("oaw_session", store.create_session(users[0]["id"]))
         assert client.put("/hosting/admin/entry", json={"user_id": users[1]["id"], "profile_id": profiles[1].profile_id}, headers={"Origin": ORIGIN}).status_code == 200
         assert len(client.get("/hosting/admin/deployments").json()["profiles"]) == 3
+
+
+@pytest.mark.parametrize('operation', ['catalog', 'deploy'])
+@pytest.mark.parametrize('change', ['logout', 'role', 'source'])
+def test_engineering_access_changed_during_startup_never_reads_source_or_enqueues(tmp_path, monkeypatch, operation, change):
+    store, users, profiles, frontend, settings = fixture_data(tmp_path)
+    store.set_role(users[0]['id'], 'admin')
+    extra = replace(profiles[0], profile_id=str(uuid4()), upstream='http://engineering-new', secret='ab' * 32)
+    settings = replace(settings, profiles=(*profiles, extra))
+    token = store.create_session(users[0]['id'])
+    deployments = DeploymentStore(tmp_path / 'deployments.sqlite3')
+    calls = []
+    def probe(request):
+        calls.append(request)
+        if change == 'logout':
+            store.revoke_session(token)
+        elif change == 'role':
+            store.set_role(users[0]['id'], 'user')
+        else:
+            deployments.assign(users[0]['id'], extra.profile_id, 'operator')
+        return httpx.Response(401)
+    monkeypatch.setattr('backend.hosting.deployments.mint_worker_token',
+                        lambda *args, **kwargs: pytest.fail('Changed engineering access must not be signed'))
+    gateway = create_gateway(settings, frontend, store=store, transport=httpx.MockTransport(probe))
+    with TestClient(gateway, base_url=ORIGIN) as client:
+        client.cookies.set('oaw_session', token)
+        if operation == 'catalog':
+            response = client.get('/hosting/admin/deployments')
+        else:
+            response = client.post('/hosting/admin/deployments', headers={'Origin': ORIGIN}, json={
+                'request_id': str(uuid4()), 'release_id': str(uuid4()), 'user_ids': [users[1]['id']], 'mode': 'runtime'})
+        assert response.status_code == (409 if change == 'source' else 401)
+    assert [(request.method, request.url.path) for request in calls] == [('GET', '/api/deployment')]
+    assert deployments.jobs() == []
 
 
 def test_deployment_timer_contains_only_operator_fixed_paths():
