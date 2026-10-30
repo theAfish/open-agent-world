@@ -91,7 +91,8 @@ class Cloud:
             params = m.Params(action=action, version='2026-08-20', protocol='HTTPS',
                 pathname=pathname, method=method, auth_type='AK', style='ROA',
                 req_body_type='json', body_type='json')
-            request = m.OpenApiRequest(body=values) if method == 'POST' else m.OpenApiRequest(query=values)
+            request = (m.OpenApiRequest(body=values) if method == 'POST' else m.OpenApiRequest(
+                query={k: str(v).lower() if isinstance(v, bool) else str(v) for k, v in values.items()}))
         else:
             params = m.Params(action=action, version={'nas': '2017-06-26', 'ram': '2015-05-01'}[service],
                 protocol='HTTPS', pathname='/', method='POST', auth_type='AK', style='RPC',
@@ -177,6 +178,13 @@ def reconcile_step(config, cloud, name, request, steps):
             return None
         _require(all(item.get(key) == request[key] for key in ('FileSystemId', 'AgenticSpaceId', 'VpcId'))
                  and item.get('VSwitchId') == request['VswId'] and item.get('EnabledRam') is True, 'Access Point')
+        # AgenticFS ListAccessPoints omits ARN in the live API. Describe the
+        # unique ID rather than manufacturing an authorization ARN ourselves.
+        detail = cloud.call('nas', 'DescribeAccessPoint', {'FileSystemId': config['filesystem'],
+            'AccessPointId': item['AccessPointId']})['AccessPoint']
+        _require(detail.get('AccessPointId') == item['AccessPointId']
+                 and detail.get('DomainName') == item.get('DomainName'), 'Access Point detail')
+        item = {**item, 'ARN': detail.get('ARN')}
         if config.get('account_id'):
             _require(item.get('ARN') == f'acs:nas:{config["region"]}:{config["account_id"]}:accesspoint/{item["AccessPointId"]}', 'Access Point ARN')
         if str(item.get('Status', '')).lower() != 'active':

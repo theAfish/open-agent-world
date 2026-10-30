@@ -52,7 +52,8 @@ class ControlCloud:
             self.points.append(item)
             response = {'AccessPoint': {'AccessPointId': 'ap-own'}}
         elif action == 'ListAccessPoints':
-            response = {'AccessPoints': self.points}
+            # The real AgenticFS list response omits ARN; only Describe returns it.
+            response = {'AccessPoints': [{k: v for k, v in p.items() if k != 'ARN'} for p in self.points]}
         elif action == 'DescribeAccessPoint':
             response = {'AccessPoint': self.points[0]}
         elif action == 'CreateRole':
@@ -153,7 +154,7 @@ def test_preapproved_storage_role_never_uses_ram_administration(tmp_path):
     cloud, profile = ControlCloud(settings()), str(uuid4())
     operator.provision(cloud.config, profile, cloud, tmp_path, reconcile=True)
     assert set(name for name, _ in cloud.calls) <= {'CreateAgenticSpace', 'DescribeAgenticSpaces', 'CreateAccessPoint',
-        'ListAccessPoints', 'CreateVolume', 'ListVolumes', 'GetVolume'}
+        'ListAccessPoints', 'DescribeAccessPoint', 'CreateVolume', 'ListVolumes', 'GetVolume'}
     assert cloud.volumes[0]['mountConfig']['role'] == cloud.config['storage_role']
 
 
@@ -185,9 +186,9 @@ def test_control_adapter_maps_volume_reads_to_get_query_parameters():
     cloud = operator.Cloud.__new__(operator.Cloud)
     cloud.models = SimpleNamespace(Params=SimpleNamespace, OpenApiRequest=SimpleNamespace)
     cloud.clients, cloud.runtime = {'sandbox': SimpleNamespace(call_api=call)}, object()
-    cloud.call('sandbox', 'ListVolumes', {'teamID': 'own-team', 'volumeName': 'own-volume'})
+    cloud.call('sandbox', 'ListVolumes', {'teamID': 'own-team', 'volumeName': 'own-volume', 'maxResults': 100})
     cloud.call('sandbox', 'GetVolume', {'teamID': 'own-team', 'volumeID': 'volume/id'})
-    assert calls[0][0].method == 'GET' and calls[0][1].query == {'teamID': 'own-team', 'volumeName': 'own-volume'}
+    assert calls[0][0].method == 'GET' and calls[0][1].query == {'teamID': 'own-team', 'volumeName': 'own-volume', 'maxResults': '100'}
     assert calls[1][0].pathname.endswith('/volumes/volume%2Fid') and calls[1][1].query == {'teamID': 'own-team'}
 
 
