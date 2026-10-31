@@ -5,7 +5,7 @@ test('loads seven preview-only instruments with custom silhouettes and working i
   await page.setViewportSize({width:1720,height:1100});
   const profile = await (await request.get('/api/application')).json();
   expect((await request.patch('/api/application/preferences',{data:{profile_id:profile.profile_id,generation:profile.generation,changes:{
-    'oaw-onboarding-v1':JSON.stringify({version:1,state:{status:'skipped'}}), 'oaw.locale':'en',
+    'oaw-onboarding-v1':JSON.stringify({version:1,state:{status:'skipped'}}), 'oaw.locale':'en', 'oaw-theme':'light',
     'oaw-canvas-viewport-v1':null,'oaw-node-surfaces-v1':null,
   }}})).ok()).toBe(true);
   const errors:string[]=[]; page.on('pageerror',e=>errors.push(e.message));
@@ -105,6 +105,18 @@ test('loads seven preview-only instruments with custom silhouettes and working i
     await expect(counter).toHaveAttribute('data-surface-level','preview');
     await expect(clock.getByRole('button',{name:'Choose city: New York',exact:true})).toBeVisible();
     await page.screenshot({path:info.outputPath('time-pack.png'),fullPage:true});
+    await page.getByRole('button',{name:'Use dark theme',exact:true}).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme','dark');
+    for(const kind of Object.keys(ids).filter(kind=>kind!=='digital')) {
+      await expect(surface(kind)).toHaveCSS('background-color','rgb(24, 36, 50)');
+      await expect(surface(kind).locator('.time-piece')).toHaveCSS('color','rgb(220, 232, 246)');
+    }
+    await page.screenshot({path:info.outputPath('time-pack-dark.png'),fullPage:true});
+    await clock.getByRole('button',{name:'Choose city: New York',exact:true}).click();
+    await expect(cityPicker).toHaveCSS('background-color','rgb(29, 44, 63)');
+    await page.screenshot({path:info.outputPath('time-cities-dark.png'),fullPage:true});
+    await page.keyboard.press('Escape');
+    await expect(cityPicker).toHaveCount(0);
     for(const kind of ['digital','clock','pomodoro','countdown','counter']) {
       const label=kind==='counter'?'Edit count':kind==='digital'||kind==='clock'?'Edit time':'Edit duration';
       await surface(kind).getByRole('button',{name:label,exact:true}).click();
@@ -116,6 +128,14 @@ test('loads seven preview-only instruments with custom silhouettes and working i
       expect(inner!.y).toBeGreaterThanOrEqual(outer!.y);
       expect(inner!.y+inner!.height).toBeLessThanOrEqual(outer!.y+outer!.height);
     }
+    await counter.getByLabel('Set count',{exact:true}).fill('37');
+    await page.screenshot({path:info.outputPath('time-editors-dark.png'),fullPage:true});
+    const draft=(await counter.getByLabel('Set count',{exact:true}).elementHandle())!;
+    await page.getByRole('button',{name:'Use light theme',exact:true}).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme','light');
+    await expect(counter).toHaveCSS('background-color','rgb(247, 249, 252)');
+    expect(await draft.evaluate(input=>input.isConnected)).toBe(true);
+    await expect(counter.getByLabel('Set count',{exact:true})).toHaveValue('37');
     await page.screenshot({path:info.outputPath('time-editors.png'),fullPage:true});
     for(const kind of ['digital','clock','pomodoro','countdown','counter']) await surface(kind).getByRole('button',{name:'Cancel editing'}).click();
     // A drag starts on the curved rim, away from every rectangular box edge.

@@ -12,6 +12,9 @@ transport controls and compact default dimensions keep the instruments light:
 countdown 264×148, stopwatch 264×164, Pomodoro 224×224 and counter 256×132.
 Pomodoro's progress ring and the countdown bar use recessed tracks with a blue
 light core, soft glow and a highlighted rim. The glow brightens while running.
+All instruments follow the application's light/dark theme. Dark mode uses deep
+blue-gray surfaces, pale readouts and blue illumination; city pickers, inline
+editors and native date controls follow the same palette without reloading data.
 Existing manually resized instances retain their saved dimensions.
 The host's management menu appears on hover/focus, just outside the upper-right arc of round cards,
 and retains rename and delete. It contains no instrument settings.

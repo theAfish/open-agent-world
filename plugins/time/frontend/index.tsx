@@ -100,9 +100,9 @@ export function Timepiece({ card, host }: PluginViewProps) {
         {kind === 'pomodoro' && <svg className="time-progress-ring" viewBox="0 0 300 300" aria-hidden="true">
           <defs>
             <radialGradient id={`${progressId}-groove`} gradientUnits="userSpaceOnUse" cx="150" cy="150" r="134">
-              <stop offset=".925" stopColor="#fdfefe"/><stop offset=".94" stopColor="#bfcfe3"/>
-              <stop offset=".955" stopColor="#d5e2f1"/><stop offset=".97" stopColor="#d5e2f1"/>
-              <stop offset=".985" stopColor="#bfcfe3"/><stop offset="1" stopColor="#fdfefe"/>
+              <stop offset=".925" stopColor="var(--time-groove-lip)"/><stop offset=".94" stopColor="var(--time-groove-wall)"/>
+              <stop offset=".955" stopColor="var(--time-groove-bed)"/><stop offset=".97" stopColor="var(--time-groove-bed)"/>
+              <stop offset=".985" stopColor="var(--time-groove-wall)"/><stop offset="1" stopColor="var(--time-groove-lip)"/>
             </radialGradient>
           </defs>
           <circle className="time-progress-groove" cx="150" cy="150" r="129" stroke={`url(#${progressId}-groove)`}/>
