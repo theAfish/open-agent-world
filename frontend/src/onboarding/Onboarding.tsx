@@ -20,7 +20,7 @@ import { BlueprintChooser } from './BlueprintChooser';
 import { installTutorialInteractionGuard } from './interactionGuard';
 import { Spotlight, type SpotlightHandle } from './Spotlight';
 import { relationshipPath } from '../edges/geometry';
-import { nodeCornerRadius } from '../edges/nodeGeometry';
+import { nodeBoundaryShape, nodeCornerRadius } from '../edges/nodeGeometry';
 import type { CanvasNode } from '../cards/types';
 import { GuideTravel } from './guideTravel';
 import { placeGuide, vacantPosition } from './placement';
@@ -155,6 +155,7 @@ export function Onboarding() {
     const rect = (node: typeof a) => ({ ...node.internals.positionAbsolute,
       width: node.measured?.width ?? Number(node.style?.width ?? 96),
       height: node.measured?.height ?? Number(node.style?.height ?? 96),
+      shape: nodeBoundaryShape(node, useWorldStore.getState().catalog),
     });
     const v = flow.getViewport();
     return { ...relationshipPath(rect(a), rect(b), nodeCornerRadius(a), nodeCornerRadius(b)),

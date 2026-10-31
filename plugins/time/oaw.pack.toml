@@ -1,0 +1,23 @@
+schema_version = 3
+
+[distribution]
+id = "tools.time"
+name = "Time & Count"
+
+[compatibility]
+plugin_api = "1.41"
+oaw = ">=0.1.0,<1"
+
+[plugin]
+owner = "tools.time"
+packs = ["tools.time.default"]
+node_types = ["tools.time.digital", "tools.time.clock", "tools.time.calendar", "tools.time.countdown", "tools.time.stopwatch", "tools.time.pomodoro", "tools.time.counter"]
+
+[components.backend]
+project = "pyproject.toml"
+mode = "host-adapter"
+
+[components.frontend]
+entry = "frontend/index.tsx"
+project = "frontend/package.json"
+mode = "pack-build"

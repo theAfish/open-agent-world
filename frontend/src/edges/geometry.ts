@@ -7,6 +7,7 @@ export interface NodeRect extends Point {
   width: number;
   height: number;
   outline?: Point[];
+  shape?: 'ellipse';
 }
 
 export interface BoundaryAnchor extends Point {
@@ -77,6 +78,14 @@ export function roundedRectAnchor(
       result={x:centerX+dx*distance,y:centerY+dy*distance,normalX:ey/norm,normalY:-ex/norm};
     }
     if(result)return result;
+  }
+
+  if (rect.shape === 'ellipse') {
+    const distance = 1 / Math.hypot(dx / halfWidth, dy / halfHeight);
+    const x = dx * distance, y = dy * distance;
+    const nx = x / (halfWidth * halfWidth), ny = y / (halfHeight * halfHeight);
+    const normalLength = Math.hypot(nx, ny);
+    return { x: centerX + x, y: centerY + y, normalX: nx / normalLength, normalY: ny / normalLength };
   }
 
   let inside = 0;

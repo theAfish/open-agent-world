@@ -41,6 +41,16 @@ describe("relationship edge geometry", () => {
     expect(Math.hypot(anchor.normalX, anchor.normalY)).toBeCloseTo(1, 6);
   });
 
+  it.each([[300,300],[420,240]])('anchors custom elliptical instruments on their actual %s × %s outline', (width,height) => {
+    const ellipse = {x:100,y:80,width,height,shape:'ellipse' as const};
+    const anchor = roundedRectAnchor(ellipse,{x:800,y:600});
+    const dx = anchor.x - (100+width/2), dy=anchor.y-(80+height/2);
+    expect((dx/(width/2))**2+(dy/(height/2))**2).toBeCloseTo(1,8);
+    expect(anchor.normalX/anchor.normalY).toBeCloseTo((dx/(width/2)**2)/(dy/(height/2)**2),8);
+    const path=relationshipPath(ellipse,{x:700,y:500,width:180,height:200});
+    expect(((path.source.x-100-width/2)/(width/2))**2+((path.source.y-80-height/2)/(height/2))**2).toBeCloseTo(1,8);
+  });
+
   it("places both arrows equally clear of their endpoint dots", () => {
     const geometry = relationshipPath(rect, { x: 450, y: 100, width: 180, height: 120 });
 

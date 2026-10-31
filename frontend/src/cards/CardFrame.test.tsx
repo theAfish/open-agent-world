@@ -12,8 +12,38 @@ import { CardContent, WorldCardNode } from './CardFrame';
 
 vi.mock('./AgentCard', () => ({ AgentCardBody: () => <div>Agent settings</div> }));
 vi.mock('./NodeWorkspace', () => ({ WorkspaceSurface: () => <div>Agent workspace</div> }));
+vi.mock('../plugins/PluginSurface', () => ({ PluginSurface: ({children,card}: {children?: React.ReactNode;card:WorldCard}) => card.type === 'test.instrument' ? <div>Instrument preview</div> : children }));
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); useEquipmentPanel.setState({ openIds: [] }); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); delete (HTMLElement.prototype as Partial<HTMLElement>).showPopover; useEquipmentPanel.setState({ openIds: [] }); });
+
+it('renders a preview-only content instrument without card print or title bars and retains rename/delete and handles', () => {
+  Object.defineProperty(HTMLElement.prototype,'showPopover',{configurable:true,value:vi.fn()});
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  const card: WorldCard = {id:'instrument',type:'test.instrument',name:'Counter',status:'available',config:{},
+    position:{x:0,y:0},size:{width:360,height:192},expanded:false};
+  const definition = {...TEST_CATALOG.node_types[0], id:card.type, label:'Counter', traits:['ui.content-surface.v1','ui.ellipse.v1'],
+    frontend:{preview:'instrument'}, presentation:{states:['preview' as const],initial:'preview' as const,open:'preview' as const}};
+  const catalog = {...TEST_CATALOG,node_types:[...TEST_CATALOG.node_types,definition]};
+  useWorldStore.setState({cards:[card],edges:[],events:[],catalog});
+  useNodeSurfaceStore.getState().syncCards([card],catalog);
+  useNodeSurfaceStore.setState({surfaceLevels:{[card.id]:'preview'},connectingNodeId:undefined,dragging:false});
+  const props = {id:card.id,data:{card},selected:false,dragging:false} as ComponentProps<typeof WorldCardNode>;
+  const {container} = render(<ReactFlowProvider><WorldCardNode {...props}/></ReactFlowProvider>);
+  expect(container.querySelector('.world-card')?.getAttribute('data-content-surface')).toBe('true');
+  expect(container.querySelector('.world-card')?.getAttribute('data-card-shape')).toBe('ellipse');
+  expect((container.querySelector('.world-card') as HTMLElement).style.borderRadius).toBe('50%');
+  expect(container.querySelector('.node-surface-header, .world-card-print, .card-finish-layer')).toBeNull();
+  expect(screen.getByText('Instrument preview')).toBeTruthy();
+  fireEvent.click(screen.getByLabelText('Card details'));
+  expect(screen.getByRole('button',{name:'Remove Counter'})).toBeTruthy();
+  expect(container.querySelectorAll('.semantic-handle')).toHaveLength(4);
+  const panel = screen.getByRole('dialog',{name:'Card details'});
+  fireEvent.pointerDown(panel);
+  expect(screen.getByRole('dialog',{name:'Card details'})).toBe(panel);
+  // A canvas/background press need not move focus to dismiss the menu.
+  fireEvent.pointerDown(document.body);
+  expect(screen.queryByRole('dialog',{name:'Card details'})).toBeNull();
+});
 
 it('lets a card opt out of expanded title/footer bars while retaining its collectible face and actions', () => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
