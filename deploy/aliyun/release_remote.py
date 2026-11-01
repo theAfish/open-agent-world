@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tarfile
@@ -22,7 +23,8 @@ import traceback
 from uuid import UUID, uuid4
 
 UNITS = Path('/etc/systemd/system')
-MAINTENANCE = Path('/opt/oaw-maintenance')
+OPERATOR = Path('/opt/oaw-release-operator')
+TARGET_KEYS = ('app', 'hosting', 'releases', 'service')
 
 def require(condition, message):
     if not condition:
@@ -36,6 +38,68 @@ def digest(path):
 
 def read(path):
     return json.loads(Path(path).read_text(encoding='utf-8'))
+
+
+def trusted_metadata(metadata, *, directory=False, private=False):
+    require(metadata.st_uid == 0 and not metadata.st_mode & 0o022,
+            'Deployment operator files must be root-owned and not writable by other users')
+    require(stat.S_ISDIR(metadata.st_mode) if directory else stat.S_ISREG(metadata.st_mode),
+            'Deployment operator paths must be real directories or regular files')
+    if not directory:
+        require(metadata.st_nlink == 1, 'Deployment operator files cannot be hard links')
+    if private:
+        require(not metadata.st_mode & 0o077, 'Deployment trust policy must be private to root')
+
+
+def trusted_file(path, *, private=False):
+    path = Path(path)
+    require(path.is_absolute() and path.resolve(strict=True) == path,
+            'Deployment operator paths cannot traverse links')
+    trusted_metadata(path.lstat(), private=private)
+    for parent in path.parents:
+        trusted_metadata(parent.lstat(), directory=True)
+    return path
+
+
+def trusted_operator():
+    path = OPERATOR / 'release_remote.py'
+    require(Path(__file__).absolute() == path,
+            'Use the independently installed deployment operator')
+    return trusted_file(path)
+
+
+def trusted_worker():
+    return trusted_file(OPERATOR / 'release_worker.py')
+
+
+def authorize(request, *, archive_sha256=None, source_commit=None):
+    """Approval is operator-owned state, never a claim in a downloaded bundle."""
+    require(request.get('purpose', 'trusted_manual') == 'trusted_manual',
+            'Only trusted_manual deployment is supported; untrusted Preview is not implemented')
+    policy = read(trusted_file(OPERATOR / 'trusted-artifacts.json', private=True))
+    require(isinstance(policy, dict) and type(policy.get('version')) is int and policy['version'] == 1
+            and policy.get('purpose') == 'trusted_manual', 'Invalid deployment trust policy')
+    target = policy.get('target')
+    require(isinstance(target, dict) and set(target) == set(TARGET_KEYS)
+            and all(request.get(key) == target[key] for key in TARGET_KEYS),
+            'Deployment target is not approved by the operator policy')
+    approved = policy.get('approved_artifacts')
+    require(isinstance(approved, list) and all(isinstance(item, dict)
+            and set(item) == {'archive_sha256', 'source_commit'}
+            and isinstance(item['archive_sha256'], str) and re.fullmatch(r'[a-f0-9]{64}', item['archive_sha256'])
+            and isinstance(item['source_commit'], str) and re.fullmatch(r'[a-f0-9]{40}', item['source_commit'])
+            for item in approved), 'Invalid deployment artifact approvals')
+    if archive_sha256 is None:
+        require(source_commit is None, 'Artifact approval requires its archive digest')
+        return None
+    require(isinstance(archive_sha256, str) and re.fullmatch(r'[a-f0-9]{64}', archive_sha256),
+            'Invalid deployment archive digest')
+    matches = {item['source_commit'] for item in approved if item['archive_sha256'] == archive_sha256}
+    require(len(matches) == 1, 'Deployment artifact has not been approved by the operator')
+    commit = matches.pop()
+    require(source_commit is None or source_commit == commit,
+            'Deployment artifact commit differs from the operator approval')
+    return {'archive_sha256': archive_sha256, 'source_commit': commit}
 
 
 def write(path, value):
@@ -78,6 +142,8 @@ def paths(request):
         result.append(p)
     require(not any(a.is_relative_to(b) for a in result for b in result if a != b)
             and len(set(result)) == 3, 'Application, data and releases must be separate directories')
+    require(not any(p.is_relative_to(OPERATOR) or OPERATOR.is_relative_to(p) for p in result),
+            'Deployment operator must be outside application, hosting and release directories')
     require(re.fullmatch(r'[a-z][a-z0-9-]{0,23}', request['service']), 'Invalid service name')
     return result
 
@@ -106,7 +172,72 @@ def verify_files(root, files):
                 f'File integrity check failed: {name}')
 
 
-def extract_bundle(archive, output):
+def payload_files(manifest):
+    require(isinstance(manifest, dict) and type(manifest.get('version')) is int
+            and manifest['version'] in {1, 2}
+            and isinstance(manifest.get('source_commit'), str)
+            and re.fullmatch(r'[a-f0-9]{40}', manifest['source_commit']), 'Invalid release manifest')
+    files = manifest.get('files')
+    require(isinstance(files, dict) and 0 < len(files) <= 20000, 'Invalid release inventory')
+    require(all(isinstance(name, str) for name in files), 'Invalid release member name')
+    require(type(manifest.get('routine', False)) is bool, 'Invalid routine release flag')
+    if manifest['version'] == 1:
+        require(isinstance(manifest.get('baseline_receipt'), str)
+                and re.fullmatch(r'[a-f0-9]{64}', manifest['baseline_receipt']), 'Invalid release baseline')
+        operators = manifest.get('operator_files')
+        require(isinstance(operators, dict)
+                and set(operators) == {'operator/release_remote.py', 'operator/release_worker.py'},
+                'Unexpected release operator files')
+        require(not (files.keys() & operators.keys()), 'Operator/source inventories overlap')
+    else:
+        require(manifest.get('kind') == 'oaw-build'
+                and isinstance(manifest.get('comparison_commit'), str)
+                and re.fullmatch(r'[a-f0-9]{40}', manifest['comparison_commit'])
+                and type(manifest.get('routine')) is bool
+                and not set(manifest).intersection({'target', 'baseline_receipt', 'baseline_commit', 'operator_files'}),
+                'Invalid portable build manifest')
+        operators = {}
+        require(not any(PurePosixPath(name).parts[:1] == ('operator',) for name in files),
+                'Portable builds cannot contain operator files')
+    expected = {**files, **operators}
+    for name, expected_digest in expected.items():
+        require(isinstance(name, str), 'Invalid release member name')
+        relative(name)
+        require(name != 'release-manifest.json' and isinstance(expected_digest, str)
+                and re.fullmatch(r'[a-f0-9]{64}', expected_digest), 'Invalid release member digest')
+    return expected
+
+
+def verify_payload(root, manifest):
+    verify_files(root, payload_files(manifest))
+
+
+def baseline(request, manifest):
+    if manifest['version'] == 1:
+        return manifest.get('baseline_commit'), manifest['baseline_receipt']
+    require(isinstance(request.get('baseline_commit'), str)
+            and re.fullmatch(r'[a-f0-9]{40}', request['baseline_commit'])
+            and isinstance(request.get('baseline_receipt'), str)
+            and re.fullmatch(r'[a-f0-9]{64}', request['baseline_receipt']),
+            'Portable build deployment requires a pinned installation baseline')
+    return request['baseline_commit'], request['baseline_receipt']
+
+
+def approved_release(request, manifest):
+    authorize(request)
+    pinned = read(release_dir(request) / 'request.json')
+    require(all(request.get(key) == pinned.get(key) for key in (*TARGET_KEYS, 'release')),
+            'Release target differs from its staged request')
+    authorize(pinned, archive_sha256=pinned['archive_sha256'], source_commit=manifest['source_commit'])
+    require(pinned.get('source_commit', manifest['source_commit']) == manifest['source_commit'],
+            'Release source differs from its staged request')
+    if 'manifest_sha256' in pinned:
+        require(digest(release_dir(request) / 'stage/release-manifest.json') == pinned['manifest_sha256'],
+                'Staged release manifest changed')
+    return pinned
+
+
+def extract_bundle(archive, output, *, source_commit=None, request=None):
     require(not output.exists(), 'Staging directory already exists')
     with tarfile.open(archive, 'r:gz') as tar:
         members = tar.getmembers()
@@ -117,16 +248,21 @@ def extract_bundle(archive, output):
         for member in members:
             relative(member.name)
             require(member.isfile() and member.size <= 1024**3, 'Archive contains a link or special file')
+        require('release-manifest.json' in names
+                and tar.getmember('release-manifest.json').size <= 8 * 1024**2, 'Invalid release manifest size')
         manifest = json.load(tar.extractfile('release-manifest.json'))
-        require(manifest.get('version') == 1 and re.fullmatch(r'[a-f0-9]{40}', manifest['source_commit'])
-                and re.fullmatch(r'[a-f0-9]{64}', manifest['baseline_receipt']), 'Invalid release manifest')
-        require(set(manifest['operator_files']) == {'operator/release_remote.py', 'operator/release_worker.py'},
-                'Unexpected release operator files')
-        expected = {**manifest['files'], **manifest['operator_files']}
-        require(not (manifest['files'].keys() & manifest['operator_files'].keys()), 'Operator/source inventories overlap')
+        expected = payload_files(manifest)
+        require(source_commit is None or manifest['source_commit'] == source_commit,
+                'Archive source differs from its operator approval')
+        if request is not None:
+            baseline(request, manifest)
         require(set(names) == {*expected, 'release-manifest.json'}, 'Archive differs from declared inventory')
+        for name, expected_digest in expected.items():
+            with tar.extractfile(name) as stream:
+                require(hashlib.file_digest(stream, 'sha256').hexdigest() == expected_digest,
+                        f'File integrity check failed: {name}')
         tar.extractall(output, filter='data')
-    verify_files(output, expected)
+    verify_payload(output, manifest)
     return manifest
 
 
@@ -233,10 +369,15 @@ def plan(request):
     app, hosting, releases = paths(request)
     b = release_dir(request)
     manifest = read(b / 'stage/release-manifest.json')
+    payload_files(manifest)
+    pinned = approved_release(request, manifest)
+    baseline_commit, baseline_receipt = baseline(pinned, manifest)
     current, fingerprint = receipt(app)
-    require(fingerprint == manifest['baseline_receipt'], 'Installed version changed; prepare a new release')
+    require(fingerprint == baseline_receipt
+            and (baseline_commit is None or baseline_commit == current['source_commit']),
+            'Installed version changed; prepare a new release')
     verify_files(app, current['source_files'])
-    verify_files(b / 'stage', {**manifest['files'], **manifest['operator_files']})
+    verify_payload(b / 'stage', manifest)
     if manifest.get('routine'):
         routine_guard({n for n in current['source_files'].keys() | manifest['files'].keys()
                        if current['source_files'].get(n) != manifest['files'].get(n)})
@@ -272,7 +413,7 @@ def worker_unit(original, app, helper, service):
         if line == '[Service]':
             result.extend([line, 'Type=oneshot', 'TimeoutStartSec=300'])
         elif line.startswith('ExecStart='):
-            result.append(f'ExecStart={app}/backend/.venv/bin/python {helper} migrate --source {app} --config /var/lib/{service}-profile/worker.json')
+            result.append(f'ExecStart={app}/backend/.venv/bin/python -I {helper} migrate --source {app} --config /var/lib/{service}-profile/worker.json')
         elif line.startswith('Restart='):
             result.append('Restart=no')
         else:
@@ -348,7 +489,11 @@ def transaction(request, *, rollback=False):
     app, hosting, releases = paths(request)
     b = release_dir(request)
     helpers = []
-    helper = MAINTENANCE / (request['release'] + '-worker.py')
+    helper = trusted_worker()
+    manifest = read(b / 'stage/release-manifest.json')
+    payload_files(manifest)
+    pinned = approved_release(request, manifest)
+    _, baseline_receipt = baseline(pinned, manifest)
     changed = stopped = False
     with lock(releases, wait=True):
         try:
@@ -357,7 +502,7 @@ def transaction(request, *, rollback=False):
                 manifest = read(b / 'stage/release-manifest.json')
                 interrupted = read(b / 'state.json')['phase'] in {'stopped', 'backed-up', 'installing', 'migrating',
                                                                'verifying', 'rolling-back', 'recovery-required'}
-                require(current.get('release_id') == request['release'] or (interrupted and fingerprint == manifest['baseline_receipt']),
+                require(current.get('release_id') == request['release'] or (interrupted and fingerprint == baseline_receipt),
                         'Only the currently installed release can be rolled back')
                 idle(hosting)
                 stopped = True
@@ -390,10 +535,6 @@ def transaction(request, *, rollback=False):
             for name in old['source_files'].keys() - manifest['files'].keys():
                 if not name.startswith('frontend/dist/assets/'):
                     destination(app, name).unlink(missing_ok=True)
-            helper.parent.mkdir(mode=0o755, exist_ok=True)
-            helper.parent.chmod(0o755)
-            shutil.copyfile(b / 'stage/operator/release_worker.py', helper)
-            helper.chmod(0o644)
             units = UNITS
             for identifier, _ in ([] if manifest.get('routine') else profiles(hosting)):
                 original = (units / f"{request['service']}-worker-{identifier}.service").read_text()
@@ -416,7 +557,7 @@ def transaction(request, *, rollback=False):
             verify_files(app, manifest['files'])
             resume(request, gateway=False)
             save(b, 'verifying')
-            run(str(app / 'backend/.venv/bin/python'), str(helper), 'verify', '--source', str(app), '--hosting', str(hosting),
+            run(str(app / 'backend/.venv/bin/python'), '-I', str(helper), 'verify', '--source', str(app), '--hosting', str(hosting),
                 *(['--entries-only'] if manifest.get('routine') else []),
                 log=b / 'verification.log', timeout=3600)
             new = {'source_commit': manifest['source_commit'], 'source_files': manifest['files'],
@@ -453,11 +594,12 @@ def transaction(request, *, rollback=False):
                 (UNITS / name).unlink(missing_ok=True)
             if helpers:
                 run('systemctl', 'daemon-reload')
-            helper.unlink(missing_ok=True)
 
 
 def dispatch(request):
+    trusted_operator()
     app, hosting, releases = paths(request)
+    authorize(request)
     action = request['action']
     if action == 'status' and not request.get('release'):
         value, fingerprint = receipt(app)
@@ -465,14 +607,18 @@ def dispatch(request):
                 'profiles': len(list(profiles(hosting)))}
     b = release_dir(request)
     if action == 'init':
+        approval = authorize(request, archive_sha256=request['archive_sha256'], source_commit=request.get('source_commit'))
         releases.mkdir(mode=0o700, parents=True, exist_ok=True)
         if not b.exists():
             b.mkdir(mode=0o700)
-            write(b / 'request.json', request)
+            write(b / 'request.json', {**request, **approval, 'purpose': 'trusted_manual'})
             return save(b, 'uploading', release=request['release'])
     pinned = read(b / 'request.json')
     require(all(request[k] == pinned[k] for k in ('app', 'hosting', 'releases', 'service', 'release')),
             'Release target differs from its staged request')
+    for key in ('purpose', 'source_commit', 'baseline_commit', 'baseline_receipt'):
+        require(key not in request or key not in pinned or request[key] == pinned[key],
+                'Release request differs from its staged approval or baseline')
     if action == 'init':
         require(request['archive_sha256'] == pinned['archive_sha256'], 'Release ID belongs to another archive')
         return read(b / 'state.json')
@@ -480,21 +626,24 @@ def dispatch(request):
         require(read(b / 'state.json')['phase'] == 'uploading', 'Release is not awaiting an upload')
         require(request['archive_sha256'] == pinned['archive_sha256'], 'Release upload differs from its pinned archive')
         require(digest(b / 'bundle.tar.gz') == request['archive_sha256'], 'Uploaded archive checksum differs')
+        approval = authorize(pinned, archive_sha256=pinned['archive_sha256'], source_commit=pinned.get('source_commit'))
         if not (b / 'stage').exists():
             temporary = b / ('unpack-' + uuid4().hex)
-            extract_bundle(b / 'bundle.tar.gz', temporary)
+            extract_bundle(b / 'bundle.tar.gz', temporary, source_commit=approval['source_commit'], request=pinned)
             temporary.replace(b / 'stage')
+        pinned['manifest_sha256'] = digest(b / 'stage/release-manifest.json')
+        write(b / 'request.json', pinned)
         result = plan(request)
         return save(b, 'staged', plan=result)
     if action == 'check':
         with lock(releases):
             require(read(b / 'state.json')['phase'] in {'staged', 'ready'}, 'Release is not ready for checks')
             result = plan(request)
-            helper = b / 'stage/operator/release_worker.py'
+            helper = trusted_worker()
             env = os.environ.copy()
             os.environ['PATH'] = '/opt/oaw-tools/bin:' + env.get('PATH', '')
             try:
-                run(str(app / 'backend/.venv/bin/python'), str(helper), 'prepare', '--source', str(b / 'stage'),
+                run(str(app / 'backend/.venv/bin/python'), '-I', str(helper), 'prepare', '--source', str(b / 'stage'),
                     '--previous', str(app), '--scratch', str(b / 'dependencies'), log=b / 'prepare.log', timeout=3600)
             finally:
                 os.environ['PATH'] = env.get('PATH', '')
@@ -521,7 +670,11 @@ def unit_state(unit):
 
 
 def start_job(request):
+    operator = trusted_operator()
     b = release_dir(request)
+    manifest = read(b / 'stage/release-manifest.json')
+    payload_files(manifest)
+    approved_release(request, manifest)
     action = request['action']
     unit = 'oaw-release-' + request['release']
     active = unit_state(unit + '.service')
@@ -540,7 +693,7 @@ def start_job(request):
     # The caller still owns the submission lock. Waiting for oneshot startup here
     # deadlocks with transaction(), which must acquire that lock before proceeding.
     run('systemd-run', '--no-block', '--unit=' + unit, '--collect', '--property=Type=oneshot', '--property=UMask=0077',
-        '--property=TimeoutStartSec=infinity', sys.executable, str(b / 'stage/operator/release_remote.py'),
+        '--property=TimeoutStartSec=infinity', sys.executable, '-I', str(operator),
         str(b / 'transaction.json'))
     return {'phase': 'queued', 'release': request['release']}
 
